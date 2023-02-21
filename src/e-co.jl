@@ -16,6 +16,7 @@ using Mmap
 using TensorOperations
 using Printf
 using Parameters
+using ArgParse
 using ..MyIO
 using ..FciDump
 using ..DIIS
@@ -553,29 +554,41 @@ function calc_cc!(T1, T2, dc = false)
   return Eh
 end
 
+function parse_commandline()
+  s = ArgParseSettings()
+  @add_arg_table s begin
+    "--scratch", "-s"
+      help = "scratch directory"
+      default = "e-cojlscr"
+    "--verbosity", "-v"
+      help = "verbosity"
+      arg_type = Int
+      default = 2
+    "arg1"
+      help = "input file (currently fcidump file)"
+      default = "FCIDUMP"
+  end
+  args = parse_args(s)
+  EC.scr = args["scratch"]
+  EC.verbosity = args["verbosity"]
+  fcidump_file = args["arg1"]
+  return fcidump_file
+end
+
 function main()
   t1 = time_ns()
+  fcidump = parse_commandline()
   # create scratch directory
   mkpath(EC.scr)
   EC.scr = mktempdir(EC.scr)
   # read fcidump intergrals
-  fcidump = "FCIDUMP"
   EC.fd = read_fcidump(fcidump)
   t1 = print_time(t1,"read fcidump",1)
   println(size(EC.fd.int2))
   norb = headvar(EC.fd, "NORB")
   nelec = headvar(EC.fd, "NELEC")
-  # int2t = int2[:,:,tridx]
-  # println(tridx)
-  # EC.verbosity = 4
   # EC.shifts = 0.0
   # EC.shiftp = 0.0
-
-  # EC.use_kext = false
-  # EC.calc_d_vvvv = !EC.use_kext
-  # EC.calc_d_vvvo = !EC.use_kext 
-  # EC.calc_d_vvov = !EC.use_kext 
-  # EC.calc_d_vovo = !EC.use_kext
 
   EC.o, EC.v = get_occvirt(norb, nelec)
 
