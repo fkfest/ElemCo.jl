@@ -1,6 +1,6 @@
 # e-Co.jl
 
-Julia implementation of various electron-structure methods (main focus on coupled cluster) 
+Julia implementation of various electron-correlation methods (main focus on coupled cluster) 
 using fcidump/npy interface.  
 
 ## Getting started

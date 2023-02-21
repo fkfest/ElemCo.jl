@@ -9,25 +9,25 @@ module FciDump
 #using LinearAlgebra
 using NPZ
 using Mmap
+using Parameters
 
 export FDump, read_fcidump, headvar
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
 
-struct FDump
-  int2::Array{Float64}
-  int2aa::Array{Float64}
-  int2bb::Array{Float64}
-  int2ab::Array{Float64}
-  int1::Array{Float64}
-  int1a::Array{Float64}
-  int1b::Array{Float64}
-  int0::Float64
-  head::Dict
+@with_kw mutable struct FDump
+  int2::Array{Float64} = []
+  int2aa::Array{Float64} = []
+  int2bb::Array{Float64} = []
+  int2ab::Array{Float64} = []
+  int1::Array{Float64} = []
+  int1a::Array{Float64} = []
+  int1b::Array{Float64} = []
+  int0::Float64 = 0.0
+  head::Dict = Dict()
 end
 
-FDump() = FDump([],[],[],[],[],[],[],0.0,Dict())
 """spin-free fcidump"""
 FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict) = FDump(int2,[],[],[],int1,[],[],int0,head)
 """spin-polarized fcidump"""
@@ -38,23 +38,22 @@ read ascii file (possibly with integrals in npy files)
 """
 function read_fcidump(fcidump::String)
   fdf = open(fcidump)
-  head = read_header(fdf)
-  simtra = (headvar(head, "ST") > 0)
+  fd = FDump()
+  fd.head = read_header(fdf)
+  simtra = (headvar(fd, "ST") > 0)
   if simtra
     println("Non-Hermitian")
   end
-  int2, int1, int2aa, int2bb, int2ab, int1a, int1b = [[] for i in 1:7]
-  int0 = 0.0
-  if isnothing(headvar(head, "NPY2")) && isnothing(headvar(head, "NPYAA"))
+  if isnothing(headvar(fd, "NPY2")) && isnothing(headvar(fd, "NPYAA"))
     # read integrals from fcidump file
-    int2,int2aa,int2bb,int2ab,int1,int1a,int1b,int0 = read_integrals(fdf,head)
+    read_integrals!(fd,fdf)
     close(fdf)
   else
     close(fdf)
     # read integrals from npy files
-    int2,int2aa,int2bb,int2ab,int1,int1a,int1b,int0 = read_integrals(head)
+    read_integrals!(fd)
   end
-  FDump(int2,int2aa,int2bb,int2ab,int1,int1a,int1b,int0,head)
+  return fd
 end
 
 """read header of fcidump file"""
@@ -123,47 +122,112 @@ end
 
 
 """read integrals from npy files"""
-function read_integrals(head::Dict)
+function read_integrals!(fd::FDump)
   println("Read npy files")
-  int2, int1, int2aa, int2bb, int2ab, int1a, int1b = [[] for i in 1:7]
-  if headvar(head, "IUHF") <= 0
-    int2 = mmap_integrals(head, "NPY2")
-    int1 = mmap_integrals(head, "NPY1")
+  if headvar(fd, "IUHF") <= 0
+    fd.int2 = mmap_integrals(fd, "NPY2")
+    fd.int1 = mmap_integrals(fd, "NPY1")
   else
-    int2aa = mmap_integrals(head, "NPYAA")
-    int2bb = mmap_integrals(head, "NPYBB")
-    int2ab = mmap_integrals(head, "NPYAB")
-    int1a = mmap_integrals(head, "NPYA")
-    int1b = mmap_integrals(head, "NPYB")
+    fd.int2aa = mmap_integrals(fd, "NPYAA")
+    fd.int2bb = mmap_integrals(fd, "NPYBB")
+    fd.int2ab = mmap_integrals(fd, "NPYAB")
+    fd.int1a = mmap_integrals(fd, "NPYA")
+    fd.int1b = mmap_integrals(fd, "NPYB")
   end
-  if isnothing(headvar(head, "ENUC"))
+  if isnothing(headvar(fd, "ENUC"))
     error("ENUC option not found in fcidump")
   end
-  int0 = float(headvar(head, "ENUC"))
+  fd.int0 = headvar(fd, "ENUC")
+end
 
-  return int2,int2aa,int2bb,int2ab,int1,int1a,int1b,int0
+"""for not ab: particle symmetry is assumed """
+function set_int2!(int2::AbstractArray,i1,i2,i3,i4,integ,simtra,ab)
+  int2[i1,i2,i3,i4] = integ
+  if !ab
+      int2[i3,i4,i1,i2] = integ
+  end
+  if !simtra
+    int2[i1,i2,i4,i3] = integ
+    int2[i2,i1,i3,i4] = integ
+    int2[i2,i1,i4,i3] = integ
+    if !ab
+      int2[i3,i4,i2,i1] = integ
+      int2[i4,i3,i1,i2] = integ
+      int2[i4,i3,i2,i1] = integ
+    end
+  end
+end
+
+function set_int1!(int1, i1, i2, integ, simtra)
+  int1[i1,i2] = integ
+  if !simtra
+    int1[i2,i1] = integ
+  end
 end
 
 """read integrals from fcidump file"""
-function read_integrals(fdfile, head::Dict)
-  norb = headvar(head, "NORB")
-  uhf = (headvar(head, "IUHF") > 0)
-  int2, int1, int2aa, int2bb, int2ab, int1a, int1b = [[] for i in 1:7]
+function read_integrals!(fd::FDump, fdfile)
+  norb = headvar(fd, "NORB")
+  uhf = (headvar(fd, "IUHF") > 0)
+  simtra = (headvar(fd, "ST") > 0)
   if uhf
     print("UHF")
-    int1a = zeros(norb,norb)
-    int1b = zeros(norb,norb)
-    int2aa = zeros(norb,norb,norb,norb)
-    int2bb = np.zeros([norb,norb,norb,norb])
-    int2ab = np.zeros([norb,norb,norb,norb])
+    fd.int1a = zeros(norb,norb)
+    fd.int1b = zeros(norb,norb)
+    fd.int2aa = zeros(norb,norb,norb,norb)
+    fd.int2bb = zeros(norb,norb,norb,norb)
+    fd.int2ab = zeros(norb,norb,norb,norb)
   else
-    int1 = zeros(norb,norb)
-    int2 = zeros(norb,norb,norb,norb)
+    fd.int1 = zeros(norb,norb)
+    fd.int2 = zeros(norb,norb,norb,norb)
   end
-
-  #TODO
-
-  return int2,int2aa,int2bb,int2ab,int1,int1a,int1b,int0
+  spincase = 0 # aa, bb, ab, a, b
+  for linestr in eachline(fdfile)
+    line = split(linestr)
+    if length(line) != 5
+      # println("Last line: ",linestr)
+      break
+    end
+    integ = parse(Float64,line[1])
+    i1 = parse(Int,line[2])
+    i2 = parse(Int,line[3])
+    i3 = parse(Int,line[4])
+    i4 = parse(Int,line[5])
+    if i1 > norb || i2 > norb || i3 > norb || i4 > norb
+      error("Index larger than norb: "*linestr)
+    end
+    if i4 > 0
+      if spincase == 0
+        if uhf
+          set_int2!(fd.int2aa,i1,i2,i3,i4,integ,simtra,false)
+        else
+          set_int2!(fd.int2,i1,i2,i3,i4,integ,simtra,false)
+        end
+      elseif spincase == 1
+        set_int2!(fd.int2bb,i1,i2,i3,i4,integ,simtra,false)
+      elseif spincase == 2
+        set_int2!(fd.int2ab,i1,i2,i3,i4,integ,simtra,true)
+      else
+          error("Unexpected 2-el integrals for spin-case "*string(spincase))
+      end
+    elseif i2 > 0
+      if !uhf 
+        set_int1!(fd.int1,i1,i2,integ,simtra)
+      elseif spincase == 3
+        set_int1!(fd.int1a,i1,i2,integ,simtra)
+      elseif spincase == 4
+        set_int1!(fd.int1b,i1,i2,integ,simtra)
+      else
+        error("Unexpected 1-el integrals for spin-case "*string(spincase))
+      end
+    elseif i1 <= 0
+      if uhf && spincase < 5
+        spincase += 1
+      else
+        fd.int0 = integ
+      end
+    end
+  end
 end
 
 """check header for the key, return value if a list, 
@@ -186,8 +250,8 @@ function headvar(fd::FDump, key::String )
 end
 
 """mmap integral file (from head[key])"""
-function mmap_integrals(head::Dict, key::String)
-  file = headvar(head, key)
+function mmap_integrals(fd::FDump, key::String)
+  file = headvar(fd, key)
   if isnothing(file)
     error(key*" option not found in fcidump")
   end
