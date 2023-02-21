@@ -7,7 +7,7 @@ using fcidump/npy interface.
 
 Requirements: julia (>1.8)
 
-Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, MKL(optional)
+Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, ArgParse, Parameters, MKL(optional)
 
 ## Usage
 
