@@ -51,7 +51,7 @@ function read_fcidump(fcidump::String)
   else
     close(fdf)
     # read integrals from npy files
-    read_integrals!(fd)
+    read_integrals!(fd,dirname(fcidump))
   end
   return fd
 end
@@ -122,17 +122,17 @@ end
 
 
 """read integrals from npy files"""
-function read_integrals!(fd::FDump)
+function read_integrals!(fd::FDump, dir::AbstractString)
   println("Read npy files")
   if headvar(fd, "IUHF") <= 0
-    fd.int2 = mmap_integrals(fd, "NPY2")
-    fd.int1 = mmap_integrals(fd, "NPY1")
+    fd.int2 = mmap_integrals(fd, dir, "NPY2")
+    fd.int1 = mmap_integrals(fd, dir, "NPY1")
   else
-    fd.int2aa = mmap_integrals(fd, "NPYAA")
-    fd.int2bb = mmap_integrals(fd, "NPYBB")
-    fd.int2ab = mmap_integrals(fd, "NPYAB")
-    fd.int1a = mmap_integrals(fd, "NPYA")
-    fd.int1b = mmap_integrals(fd, "NPYB")
+    fd.int2aa = mmap_integrals(fd, dir, "NPYAA")
+    fd.int2bb = mmap_integrals(fd, dir, "NPYBB")
+    fd.int2ab = mmap_integrals(fd, dir, "NPYAB")
+    fd.int1a = mmap_integrals(fd, dir, "NPYA")
+    fd.int1b = mmap_integrals(fd, dir, "NPYB")
   end
   if isnothing(headvar(fd, "ENUC"))
     error("ENUC option not found in fcidump")
@@ -166,7 +166,7 @@ function set_int1!(int1, i1, i2, integ, simtra)
 end
 
 """read integrals from fcidump file"""
-function read_integrals!(fd::FDump, fdfile)
+function read_integrals!(fd::FDump, fdfile::IOStream)
   norb = headvar(fd, "NORB")
   uhf = (headvar(fd, "IUHF") > 0)
   simtra = (headvar(fd, "ST") > 0)
@@ -250,10 +250,13 @@ function headvar(fd::FDump, key::String )
 end
 
 """mmap integral file (from head[key])"""
-function mmap_integrals(fd::FDump, key::String)
+function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
   file = headvar(fd, key)
   if isnothing(file)
     error(key*" option not found in fcidump")
+  end
+  if !isabspath(file)
+    file = joinpath(dir,file)
   end
   return npzread(file)
 end
