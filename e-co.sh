@@ -26,5 +26,5 @@ elif [[ "$UNAME" -eq "Darwin" ]]; then
 fi
 #echo $BASE
 
-$JULIA $JULIA_OPTIONS $BASE/$MAIN $@
+$JULIA $JULIA_OPTIONS $BASE/$MAIN "$@"
 

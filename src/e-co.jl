@@ -75,6 +75,72 @@ function print_time(t1, info, verb)
   return t2
 end
 
+const ExcLevels = "SDTQP"
+
+@enum ExcType NoExc FullExc PertExc
+"""
+Description of the electron-correlation method
+"""
+struct ECMethod
+  unrestricted::Bool
+  """theory level: MP, CC, DC"""
+  theory::String
+  """ excitation level for each class (exclevel[1] for singles etc.)"""
+  exclevel::Array{ExcType}
+
+  function ECMethod(mname::AbstractString)
+    if isempty(mname)
+      error("Empty method name!")
+    end
+    unrestricted = false
+    theory = ""
+    exclevel = [NoExc for i in 1:length(ExcLevels)]
+    ipos = 1
+    if uppercase(mname[ipos:ipos+2]) == "EOM"
+      error("EOM methods not implemented!")
+      ipos += 3
+      if mname[ipos] == '-'
+        ipos += 1
+      end
+    end
+    if uppercase(mname[ipos]) == 'U'
+      unrestricted = true
+      ipos += 1
+    end
+    if uppercase(mname[ipos:ipos+1]) == "CC"
+      theory = "CC"
+      ipos += 2
+    elseif uppercase(mname[ipos:ipos+1]) == "DC"
+      theory = "DC"
+      ipos += 2
+    elseif uppercase(mname[ipos:ipos+1]) == "MP"
+      theory = "MP"
+      ipos += 2
+    else
+      error("Theory not recognized in "*mname*": "*uppercase(mname[ipos:ipos+1]))
+    end
+    # loop over remaining letters to get excitation levels
+    # currently case-insensitive, can change later...
+    for char in uppercase(mname[ipos:end])
+      if char == '2'
+        if exclevel[1] == NoExc
+          exclevel[1] = PertExc
+        end
+        exclevel[2] = PertExc
+      else 
+        #TODO:add parenthesis etc...
+        iexc = findfirst(char,ExcLevels)
+        if isnothing(iexc)
+          error("Excitation level not recognized")
+        end
+        exclevel[iexc] = FullExc
+      end
+    end
+    new(unrestricted,theory,exclevel)
+  end
+end
+
+
 function gen_fock(occs)
   # calc fock matrix 
   if headvar(EC.fd, "IUHF") != 0
@@ -557,8 +623,13 @@ end
 function parse_commandline()
   s = ArgParseSettings()
   @add_arg_table s begin
+    "--method", "-m"
+      help = "method or list of methods to calculate"
+      arg_type = String
+      default = "dcsd"
     "--scratch", "-s"
       help = "scratch directory"
+      arg_type = String
       default = "e-cojlscr"
     "--verbosity", "-v"
       help = "verbosity"
@@ -572,12 +643,14 @@ function parse_commandline()
   EC.scr = args["scratch"]
   EC.verbosity = args["verbosity"]
   fcidump_file = args["arg1"]
-  return fcidump_file
+  method = args["method"]
+  return fcidump_file, method
 end
 
 function main()
   t1 = time_ns()
-  fcidump = parse_commandline()
+  fcidump, method_string = parse_commandline()
+  method_names = split(method_string)
   # create scratch directory
   mkpath(EC.scr)
   EC.scr = mktempdir(EC.scr)
@@ -604,19 +677,39 @@ function main()
   EHF = sum(EC.ϵo) + sum(diag(EC.fd.int1)[EC.o]) + EC.fd.int0
   println("HF energy: ",EHF)
 
-  # calculate MP2
-  EMp2, T2 = calc_MP2()
-  println("MP2 correlation energy: ",EMp2)
-  println("MP2 total energy: ",EMp2+EHF)
-  t1 = print_time(t1,"MP2",1)
+  for mname in method_names
+    println()
+    println("Next method: ",mname)
+    ecmethod = ECMethod(mname)
+    if ecmethod.unrestricted
+      error("unrestricted not implemented yet...")
+    end
+    # at the moment we always calculate MP2 first
+    # calculate MP2
+    EMp2, T2 = calc_MP2()
+    println("MP2 correlation energy: ",EMp2)
+    println("MP2 total energy: ",EMp2+EHF)
+    t1 = print_time(t1,"MP2",1)
 
-  T1 = zeros(size(EC.v,1),size(EC.o,1))
-  dc = true
-  ECC = calc_cc!(T1, T2, dc)
-  mname = method_name(T1,dc)
-  println(mname*" correlation energy: ",ECC)
-  println(mname*" total energy: ",ECC+EHF)
-  t1 = print_time(t1,"CC",1)
+    if ecmethod.theory == "MP"
+      continue
+    end
+    dc = false
+    if ecmethod.theory == "DC"
+      dc = true
+    end
+    T1 = nothing
+    if ecmethod.exclevel[1] == FullExc
+      T1 = zeros(size(EC.v,1),size(EC.o,1))
+    end
+    if ecmethod.exclevel[3] != NoExc
+      error("no triples implemented yet...")
+    end
+    ECC = calc_cc!(T1, T2, dc)
+    println(mname*" correlation energy: ",ECC)
+    println(mname*" total energy: ",ECC+EHF)
+    t1 = print_time(t1,"CC",1)
+  end
 end
 
 main()
