@@ -1,6 +1,7 @@
 #!/usr/bin/env julia
 
 include("myio.jl")
+include("mnpy.jl")
 include("dump.jl")
 include("diis.jl")
 
@@ -11,7 +12,6 @@ Electron-Correlation methods
 module eCo
 
 using LinearAlgebra
-using NPZ
 using Mmap
 using TensorOperations
 using Printf
@@ -714,4 +714,4 @@ end
 
 main()
 
-end
+end #module

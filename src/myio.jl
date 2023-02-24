@@ -4,6 +4,7 @@
 
 """
 module MyIO
+using Mmap
 
 export miosave, mioload, miommap
 
@@ -108,4 +109,4 @@ function miommap(fname::String)
   return mmap(io, Array{T}, Tuple(dims))
 end
 
-end
+end #module

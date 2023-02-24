@@ -6,10 +6,10 @@ Individual arrays of integrals can also be in *.npy format
 """
 module FciDump
 
-#using LinearAlgebra
-using NPZ
-using Mmap
+# using LinearAlgebra
+# using NPZ
 using Parameters
+using ..MNPY
 
 export FDump, read_fcidump, headvar
 
@@ -258,6 +258,7 @@ function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
   if !isabspath(file)
     file = joinpath(dir,file)
   end
-  return npzread(file)
+  # return npzread(file)
+  return mnpymmap(file)
 end
-end
+end #module
