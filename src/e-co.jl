@@ -5,6 +5,9 @@ include("mnpy.jl")
 include("dump.jl")
 include("diis.jl")
 
+include("msystem.jl")
+include("integrals.jl")
+
 """
 Electron-Correlation methods 
 
@@ -711,7 +714,8 @@ function main()
     t1 = print_time(t1,"CC",1)
   end
 end
-
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+  main()
+end
 
 end #module
