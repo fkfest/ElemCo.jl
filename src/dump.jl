@@ -16,6 +16,11 @@ export FDump, read_fcidump, headvar
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
 
+"""
+molecular integrals 
+
+the 2-e integrals are stored in the physcal notation: int2[pqrs] = <pq|rs>
+"""
 @with_kw mutable struct FDump
   int2::Array{Float64} = []
   int2aa::Array{Float64} = []
@@ -140,20 +145,22 @@ function read_integrals!(fd::FDump, dir::AbstractString)
   fd.int0 = headvar(fd, "ENUC")
 end
 
-"""for not ab: particle symmetry is assumed """
+"""for not ab: particle symmetry is assumed.
+   Integrals are stored in physcal notation.
+"""
 function set_int2!(int2::AbstractArray,i1,i2,i3,i4,integ,simtra,ab)
-  int2[i1,i2,i3,i4] = integ
+  int2[i1,i3,i2,i4] = integ
   if !ab
-      int2[i3,i4,i1,i2] = integ
+      int2[i3,i1,i4,i2] = integ
   end
   if !simtra
-    int2[i1,i2,i4,i3] = integ
-    int2[i2,i1,i3,i4] = integ
-    int2[i2,i1,i4,i3] = integ
+    int2[i1,i4,i2,i3] = integ
+    int2[i2,i3,i1,i4] = integ
+    int2[i2,i4,i1,i3] = integ
     if !ab
-      int2[i3,i4,i2,i1] = integ
-      int2[i4,i3,i1,i2] = integ
-      int2[i4,i3,i2,i1] = integ
+      int2[i4,i1,i3,i2] = integ
+      int2[i3,i2,i4,i1] = integ
+      int2[i4,i2,i3,i1] = integ
     end
   end
 end
