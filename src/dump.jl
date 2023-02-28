@@ -11,7 +11,7 @@ module FciDump
 using Parameters
 using ..MNPY
 
-export FDump, read_fcidump, headvar
+export FDump, read_fcidump, headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -31,12 +31,40 @@ the 2-e integrals are stored in the physcal notation: int2[pqrs] = <pq|rs>
   int1b::Array{Float64} = []
   int0::Float64 = 0.0
   head::Dict = Dict()
+  # a convinience variable, has to coincide with `head["IUHF"][1] > 0``
+  uhf::Bool = false
 end
 
 """spin-free fcidump"""
 FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict) = FDump(int2,[],[],[],int1,[],[],int0,head)
 """spin-polarized fcidump"""
 FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1a::Array{Float64},int1b::Array{Float64},int0::Float64,head::Dict) = FDump([],int2aa,int2bb,int2ab,[],int1a,int1b,int0,head)
+
+@enum SpinCase SCα SCβ SCαβ
+
+"""return 1-e⁻ integrals """
+function integ1(fd::FDump,spincase::SpinCase = SCα)
+  if !fd.uhf
+    return fd.int1
+  elseif spincase == SCα
+    return fd.int1a
+  else
+    return fd.int1b
+  end
+end
+
+"""return 2-e⁻ integrals """
+function integ2(fd::FDump,spincase::SpinCase = SCα)
+  if !fd.uhf
+    return fd.int2
+  elseif spincase == SCα
+    return fd.int2aa
+  elseif spincase == SCβ
+    return fd.int2bb
+  else
+    return fd.int2ab
+  end
+end
 
 """
 read ascii file (possibly with integrals in npy files)
@@ -45,6 +73,7 @@ function read_fcidump(fcidump::String)
   fdf = open(fcidump)
   fd = FDump()
   fd.head = read_header(fdf)
+  fd.uhf = (headvar(fd, "IUHF") > 0)
   simtra = (headvar(fd, "ST") > 0)
   if simtra
     println("Non-Hermitian")
@@ -129,7 +158,7 @@ end
 """read integrals from npy files"""
 function read_integrals!(fd::FDump, dir::AbstractString)
   println("Read npy files")
-  if headvar(fd, "IUHF") <= 0
+  if !fd.uhf
     fd.int2 = mmap_integrals(fd, dir, "NPY2")
     fd.int1 = mmap_integrals(fd, dir, "NPY1")
   else
@@ -175,9 +204,8 @@ end
 """read integrals from fcidump file"""
 function read_integrals!(fd::FDump, fdfile::IOStream)
   norb = headvar(fd, "NORB")
-  uhf = (headvar(fd, "IUHF") > 0)
   simtra = (headvar(fd, "ST") > 0)
-  if uhf
+  if fd.uhf
     print("UHF")
     fd.int1a = zeros(norb,norb)
     fd.int1b = zeros(norb,norb)
@@ -205,7 +233,7 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     end
     if i4 > 0
       if spincase == 0
-        if uhf
+        if fd.uhf
           set_int2!(fd.int2aa,i1,i2,i3,i4,integ,simtra,false)
         else
           set_int2!(fd.int2,i1,i2,i3,i4,integ,simtra,false)
@@ -218,7 +246,7 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
           error("Unexpected 2-el integrals for spin-case "*string(spincase))
       end
     elseif i2 > 0
-      if !uhf 
+      if !fd.uhf 
         set_int1!(fd.int1,i1,i2,integ,simtra)
       elseif spincase == 3
         set_int1!(fd.int1a,i1,i2,integ,simtra)
@@ -228,7 +256,7 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
         error("Unexpected 1-el integrals for spin-case "*string(spincase))
       end
     elseif i1 <= 0
-      if uhf && spincase < 5
+      if fd.uhf && spincase < 5
         spincase += 1
       else
         fd.int0 = integ
@@ -268,4 +296,5 @@ function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
   # return npzread(file)
   return mnpymmap(file)
 end
+
 end #module
