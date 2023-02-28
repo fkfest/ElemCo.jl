@@ -217,7 +217,7 @@ function calc_dressed_ints(T1)
   t1 = time_ns()
   # first make half-transformed integrals
   if EC.calc_d_vvvv
-    # (ab|\hat c d)
+    # <a\hat c|bd>
     hd_vvvv = EC.fd.int2[EC.v,EC.v,EC.v,EC.v]
     vovv = EC.fd.int2[EC.v,EC.o,EC.v,EC.v]
     @tensoropt hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T1[c,k]
@@ -226,14 +226,14 @@ function calc_dressed_ints(T1)
     hd_vvvv = nothing
     t1 = print_time(t1,"dress hd_vvvv",3)
   end
-  # (ij|k \hat l)
+  # <ik|j \hat l>
   hd_oooo = EC.fd.int2[EC.o,EC.o,EC.o,EC.o]
   oovo = EC.fd.int2[EC.o,EC.o,EC.v,EC.o]
   @tensoropt hd_oooo[j,i,l,k] += oovo[i,j,d,l] * T1[d,k]
   oovo = nothing
   t1 = print_time(t1,"dress hd_oooo",3)
   if EC.calc_d_vvoo
-    # (aj|\hat c \hat l)
+    # <a\hat c|j \hat l>
     hd_vvoo = EC.fd.int2[EC.v,EC.v,EC.o,EC.o]
     voov = EC.fd.int2[EC.v,EC.o,EC.o,EC.v]
     vooo = EC.fd.int2[EC.v,EC.o,EC.o,EC.o]
@@ -250,7 +250,7 @@ function calc_dressed_ints(T1)
     hd_vvoo = nothing
     t1 = print_time(t1,"dress hd_vvoo",3)
   end
-  # (\hat a \hat j |kl)
+  # <\hat a k| \hat j l)
   hd_vooo = EC.fd.int2[EC.v,EC.o,EC.o,EC.o]
   vovo = EC.fd.int2[EC.v,EC.o,EC.v,EC.o]
   @tensoropt begin
@@ -259,13 +259,13 @@ function calc_dressed_ints(T1)
   end
   t1 = print_time(t1,"dress hd_vooo",3)
   # some of the fully dressing moved here...
-  # (kd\hat|ij)
+  # <ki\hat|dj>
   d_oovo = EC.fd.int2[EC.o,EC.o,EC.v,EC.o]
   oovv = EC.fd.int2[EC.o,EC.o,EC.v,EC.v]
   @tensoropt d_oovo[k,i,d,j] += oovv[k,i,d,b] * T1[b,j]
   ecsave("d_oovo",d_oovo)
   t1 = print_time(t1,"dress d_oovo",3)
-  # (aj\hat|kd)
+  # <ak\hat|jd>
   d_voov = EC.fd.int2[EC.v,EC.o,EC.o,EC.v]
   vovv = EC.fd.int2[EC.v,EC.o,EC.v,EC.v]
   @tensoropt begin
@@ -275,13 +275,13 @@ function calc_dressed_ints(T1)
   ecsave("d_voov",d_voov)
   t1 = print_time(t1,"dress d_voov",3)
   # finish half-dressing
-  # (ab|k \hat l)
+  # <ak|b \hat l>
   hd_vovo = EC.fd.int2[EC.v,EC.o,EC.v,EC.o]
   @tensoropt hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T1[d,l]
   vovv = nothing
   t1 = print_time(t1,"dress hd_vovo",3)
   if EC.calc_d_vvvo
-    # (ab | \hat c \hat l)
+    # <a\hat c|b \hat l>
     hd_vvvo = EC.fd.int2[EC.v,EC.v,EC.v,EC.o]
     vvvv = EC.fd.int2[EC.v,EC.v,EC.v,EC.v]
     @tensoropt begin
@@ -296,7 +296,7 @@ function calc_dressed_ints(T1)
 
   # fully dressed
   if EC.calc_d_vovv
-    # (ab\hat|kd)
+    # <ak\hat|bd>
     d_vovv = EC.fd.int2[EC.v,EC.o,EC.v,EC.v]
     @tensoropt d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
     ecsave("d_vovv",d_vovv)
@@ -304,7 +304,7 @@ function calc_dressed_ints(T1)
   end
   oovv = nothing
   if EC.calc_d_vvvv
-    # (ab\hat|cd)
+    # <ab\hat|cd>
     d_vvvv = ecload("hd_vvvv")
     if !EC.calc_d_vovv
       error("for calc_d_vvvv calc_d_vovv has to be True")
@@ -315,26 +315,26 @@ function calc_dressed_ints(T1)
     d_vvvv = nothing
     t1 = print_time(t1,"dress d_vvvv",3)
   end
-  # (ab\hat|kl)
+  # <ak\hat|bl>
   d_vovo = hd_vovo
   @tensoropt d_vovo[a,k,b,l] -= d_oovo[i,k,b,l] * T1[a,i]
   ecsave("d_vovo",d_vovo)
   d_vovo = nothing
   t1 = print_time(t1,"dress d_vovo",3)
-  # (aj\hat|kl)
+  # <aj\hat|kl>
   d_vooo = hd_vooo
   @tensoropt d_vooo[a,k,j,l] += d_voov[a,k,j,d] * T1[d,l]
   ecsave("d_vooo",d_vooo)
   t1 = print_time(t1,"dress d_vooo",3)
   if EC.calc_d_vvvo
-    # (ab\hat|cl)
+    # <ab\hat|cl>
     d_vvvo = ecload("hd_vvvo")
     @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i]
     ecsave("d_vvvo",d_vvvo)
     d_vvvo = nothing
     t1 = print_time(t1,"dress d_vvvo",3)
   end
-  # (ij\hat|kl)
+  # <ij\hat|kl>
   d_oooo = hd_oooo
   @tensoropt d_oooo[i,k,j,l] += d_oovo[i,k,b,l] * T1[b,j]
   ecsave("d_oooo",d_oooo)
@@ -343,7 +343,7 @@ function calc_dressed_ints(T1)
     if !EC.calc_d_vvvo
       error("for calc_d_vvoo calc_d_vvvo has to be True")
     end
-    # (aj\hat|cl)
+    # <ac\hat|jl>
     d_vvoo = ecload("hd_vvoo")
     hd_vvvo = ecload("hd_vvvo")
     @tensoropt begin
@@ -450,7 +450,7 @@ function calc_ccsd_resid(T1,T2,dc)
   end
   t1 = print_time(t1,"singles residual",2)
 
-  # (ai|bj)
+  # <ab|ij>
   if EC.use_kext
     R2 = zeros((length(EC.v),length(EC.v),length(EC.o),length(EC.o)))
   else
@@ -459,25 +459,25 @@ function calc_ccsd_resid(T1,T2,dc)
     end
     R2 = ecload("d_vvoo")
   end
-  t1 = print_time(t1,"(ai|bj)",2)
+  t1 = print_time(t1,"<ab|ij>",2)
   klcd = EC.fd.int2[EC.o,EC.o,EC.v,EC.v]
-  t1 = print_time(t1,"(kc|ld)",2)
+  t1 = print_time(t1,"<kl|cd>",2)
   int2 = ecload("d_oooo")
   if !dc
-    # I_kilj = (ki|lj)+(kc|ld)T^ij_cd
+    # I_klij = <kl|ij>+<kl|cd>T^ij_cd
     @tensoropt int2[k,l,i,j] += klcd[k,l,c,d] * T2[c,d,i,j]
   end
-  # I_kilj T^kl_ab
+  # I_klij T^kl_ab
   @tensoropt R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
-  t1 = print_time(t1,"I_kilj T^kl_ab",2)
-  # (kc|ld)\tilde T^ki_ca \tilde T^lj_db
+  t1 = print_time(t1,"I_klij T^kl_ab",2)
+  # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
   @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2t[c,a,k,i] * T2t[d,b,l,j]
-  t1 = print_time(t1,"(kc|ld) tT^ki_ca tT^lj_db",2)
+  t1 = print_time(t1,"<kl|cd> tT^ki_ca tT^lj_db",2)
   if EC.use_kext
     if EC.triangular_kext
       trioo = [CartesianIndex(i,j) for j in 1:length(EC.o) for i in 1:j]
       D2 = calc_D2(T1, T2)[:,:,trioo]
-      # (pr|qs) D^ij_rs
+      # <pq|rs> D^ij_rs
       @tensoropt R2pqx[p,r,x] := EC.fd.int2[p,r,q,s] * D2[q,s,x]
       D2 = nothing
       norb = size(EC.fd.int2,1)
@@ -491,7 +491,7 @@ function calc_ccsd_resid(T1,T2,dc)
       Rpqoo = nothing
     else
       D2 = calc_D2(T1, T2)
-      # (pr|qs) D^ij_rs
+      # <pq|rs> D^ij_rs
       @tensoropt R2pq[p,r,i,j] := EC.fd.int2[p,r,q,s] * D2[q,s,i,j]
       D2 = nothing
     end
@@ -513,19 +513,19 @@ function calc_ccsd_resid(T1,T2,dc)
       error("for not use_kext calc_d_vvvv has to be True")
     end
     int2 = ecload("d_vvvv")
-    # (ac|bd) T^ij_cd
+    # <ab|cd> T^ij_cd
     @tensoropt R2[a,b,i,j] += int2[a,b,c,d] * T2[c,d,i,j]
-    t1 = print_time(t1,"(ac|bd) T^ij_cd",2)
+    t1 = print_time(t1,"<ab|cd> T^ij_cd",2)
   end
   if !dc
-    # (kc|ld) T^kj_ad T^il_cb
+    # <kl|cd> T^kj_ad T^il_cb
     @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2[a,d,k,j] * T2[c,b,i,l]
-    t1 = print_time(t1,"(kc|ld) T^kj_ad T^il_cb",2)
+    t1 = print_time(t1,"<kl|cd> T^kj_ad T^il_cb",2)
   end
 
   fac = dc ? 0.5 : 1.0
-  # x_ad = f_ad - (kc|ld) \tilde T^kl_ca
-  # x_ki = f_ki + (kc|ld) \tilde T^il_cd
+  # x_ad = f_ad - <kl|cd> \tilde T^kl_ca
+  # x_ki = f_ki + <kl|cd> \tilde T^il_cd
   xad = dfock[EC.v,EC.v]
   xki = dfock[EC.o,EC.o]
   @tensoropt begin
@@ -543,22 +543,22 @@ function calc_ccsd_resid(T1,T2,dc)
   end
   t1 = print_time(t1,"x_ad T^ij_db -x_ki T^kj_ab",2)
   int2 = ecload("d_voov")
-  # (ai|kc) \tilde T^kj_cb
+  # <ak|ic> \tilde T^kj_cb
   @tensoropt R2r[a,b,i,j] += int2[a,k,i,c] * T2t[c,b,k,j]
-  t1 = print_time(t1,"(ai|kc) tT^kj_cb",2)
+  t1 = print_time(t1,"<ak|ic> tT^kj_cb",2)
   if !dc
-    # -(kc|ld) T^ki_da (T^lj_cb - T^lj_bc)
+    # -<kl|cd> T^ki_da (T^lj_cb - T^lj_bc)
     T2t -= T2
     @tensoropt R2r[a,b,i,j] -= klcd[k,l,c,d] * T2[d,a,k,i] * T2t[c,b,l,j]
-    t1 = print_time(t1,"-(kc|ld) T^ki_da (T^lj_cb - T^lj_bc)",2)
+    t1 = print_time(t1,"-<kl|cd> T^ki_da (T^lj_cb - T^lj_bc)",2)
   end
   int2 = ecload("d_vovo")
   @tensoropt begin
-    # -(ki|ac) T^kj_cb
+    # -<ka|ic> T^kj_cb
     R2r[a,b,i,j] -= int2[a,k,c,i] * T2[c,b,k,j]
-    # -(ki|bc) T^kj_ac
+    # -<kb|ic> T^kj_ac
     R2r[a,b,i,j] -= int2[b,k,c,i] * T2[a,c,k,j]
-    t1 = print_time(t1,"-(ki|ac) T^kj_cb -(ki|bc) T^kj_ac",2)
+    t1 = print_time(t1,"-<ka|ic> T^kj_cb -<kb|ic> T^kj_ac",2)
 
     R2[a,b,i,j] += R2r[a,b,i,j] + R2r[b,a,j,i]
   end
