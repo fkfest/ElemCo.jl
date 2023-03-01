@@ -155,44 +155,88 @@ function isalphaspin(sp1::Char,sp2::Char)
   elseif isletter(sp2)
     return islowercase(sp2)
   else
-    error("Cannot guess spincase for $sp1 $sp2 . Use integ1 or integ2(::FDump, spincase) instead!")
+    error("Cannot guess spincase for $sp1 $sp2 . Specify the spincase explicitly!")
   end
 end
 
-""" return subset of 1e⁻ integrals according to spaces """
-function ints1(spaces::String)
-  sc =
-  if isalphaspin(spaces[1],spaces[2])
-    sc = SCα
-  else
-    sc = SCβ
+""" return subset of 1e⁻ integrals according to spaces. The spincase can explicitly
+    been given, or will be deduced from upper/lower case of spaces specification. 
+"""
+function ints1(spaces::String, spincase = nothing)
+  sc = spincase
+  if isnothing(sc)
+    if isalphaspin(spaces[1],spaces[2])
+      sc = SCα
+    else
+      sc = SCβ
+    end
   end
   return integ1(EC.fd, sc)[EC.space[spaces[1]],EC.space[spaces[2]]]
 end
 
-""" return subset of 2e⁻ integrals according to spaces """
-function ints2(spaces::String)
-  sc =
-  second_el_alpha = isalphaspin(spaces[2],spaces[4])
-  if isalphaspin(spaces[1],spaces[3])
-    if second_el_alpha
-      sc = SCα
-    else
-      sc = SCαβ
-    end
+""" generate set of CartesianIndex for addressing the lhs and 
+    a bitmask for the rhs for transforming a triangular index from ':' 
+    to two original indices in spaces sp1 and sp2.
+    If `reverse`: the cartesian indices are reversed 
+"""
+function triinds(sp1::AbstractArray{Int}, sp2::AbstractArray{Int}, reverseCartInd = false)
+  norb = length(SP(':'))
+  # triangular index (TODO: save in EC or FDump)
+  tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+  mask = falses(norb,norb)
+  mask[sp1,sp2] .= true
+  trimask = falses(norb,norb)
+  trimask[tripp] .= true
+  ci=CartesianIndices((length(sp1),length(sp2)))
+  if reverseCartInd
+    return CartesianIndex.(reverse.(Tuple.(ci[trimask[sp1,sp2]]))), mask[tripp]
   else
-    !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
-    sc = SCβ
+    return ci[trimask[sp1,sp2]], mask[tripp]
   end
-  return integ2(EC.fd, sc)[EC.space[spaces[1]],EC.space[spaces[2]],EC.space[spaces[3]],EC.space[spaces[4]]]
 end
 
-function gen_fock(occs)
-  # calc fock matrix 
-  if headvar(EC.fd, "IUHF") != 0
-    error("UHF-type integrals not implemented yet!")
+""" return subset of 2e⁻ integrals according to spaces. The spincase can explicitly
+    been given, or will be deduced from upper/lower case of spaces specification.
+    if the last two indices are stored as triangular and detri - make them full,
+    otherwise return as a triangular cut.
+"""
+function ints2(spaces::String, spincase = nothing, detri = true)
+  sc = spincase
+  if isnothing(sc)
+    second_el_alpha = isalphaspin(spaces[2],spaces[4])
+    if isalphaspin(spaces[1],spaces[3])
+      if second_el_alpha
+        sc = SCα
+      else
+        sc = SCαβ
+      end
+    else
+      !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
+      sc = SCβ
+    end
   end
-  @tensoropt fock[p,q] := integ1(EC.fd)[p,q] + 2.0*integ2(EC.fd)[:,occs,:,occs][p,i,q,i] - integ2(EC.fd)[:,occs,occs,:][p,i,i,q]
+  allint = integ2(EC.fd, sc)
+  if ndims(allint) == 4
+    return allint[EC.space[spaces[1]],EC.space[spaces[2]],EC.space[spaces[3]],EC.space[spaces[4]]]
+  elseif detri
+    # last two indices as a triangular index, desymmetrize
+    @assert ndims(allint) == 3
+    out = Array{Float64}(undef,length(EC.space[spaces[1]]),length(EC.space[spaces[2]]),length(EC.space[spaces[3]]),length(EC.space[spaces[4]]))
+    cio, maski = triinds(EC.space[spaces[3]],EC.space[spaces[4]])
+    out[:,:,cio] = allint[EC.space[spaces[1]],EC.space[spaces[2]],maski]
+    cio, maski = triinds(EC.space[spaces[4]],EC.space[spaces[3]],true)
+    out[:,:,cio] = permutedims(allint[EC.space[spaces[2]],EC.space[spaces[1]],maski],(2,1,3))
+    return out
+  else
+    cio, maski = triinds(EC.space[spaces[3]],EC.space[spaces[4]])
+    return allint[EC.space[spaces[1]],EC.space[spaces[2]],maski]
+  end
+end
+
+function gen_fock(spincase::SpinCase)
+  # calc fock matrix 
+  # display(ints2(":o:o",spincase))
+  @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] + 2.0*ints2(":o:o",spincase)[p,i,q,i] - ints2(":oo:",spincase)[p,i,i,q]
   return fock
 end
 
@@ -399,7 +443,7 @@ function calc_dressed_ints(T1)
   end
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd))
-  dinter = integ1(EC.fd)[:,SP('v')]
+  dinter = ints1(":v")
   @tensoropt d_int1[:,SP('o')][p,j] += dinter[p,b] * T1[b,j]
   dinter = d_int1[SP('o'),:]
   @tensoropt d_int1[SP('v'),:][b,p] -= dinter[j,p] * T1[b,j]
@@ -451,9 +495,11 @@ end
 calc D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
 
 return as D[pqij] 
+
+if `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
 """
-function calc_D2(T1, T2)
-    norb = size(integ2(EC.fd),1)
+function calc_D2(T1, T2, scalepp = false)
+    norb = length(SP(':'))
     nocc = length(SP('o'))
     D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
     @tensoropt begin
@@ -462,6 +508,8 @@ function calc_D2(T1, T2)
       D2[SP('v'),SP('o'),:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
       D2[SP('o'),SP('o'),:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k]
     end
+    diagindx = [CartesianIndex(i,i) for i in 1:norb]
+    D2[diagindx,:,:] *= 0.5
     return D2
 end
 
@@ -517,26 +565,38 @@ function calc_ccsd_resid(T1,T2,dc)
   @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2t[c,a,k,i] * T2t[d,b,l,j]
   t1 = print_time(t1,"<kl|cd> tT^ki_ca tT^lj_db",2)
   if EC.use_kext
-    if EC.triangular_kext
-      trioo = [CartesianIndex(i,j) for j in 1:length(SP('o')) for i in 1:j]
-      D2 = calc_D2(T1, T2)[:,:,trioo]
-      # <pq|rs> D^ij_rs
-      @tensoropt R2pqx[p,r,x] := integ2(EC.fd)[p,r,q,s] * D2[q,s,x]
-      D2 = nothing
-      norb = size(EC.fd.int2,1)
-      nocc = length(SP('o'))
-      Rpqoo = Array{Float64}(undef,norb,norb,nocc,nocc)
-      Rpqoo[:,:,trioo] = R2pqx
-      trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
-      @tensor Rpqoo[:,:,trioor][p,q,x] = R2pqx[q,p,x]
-      R2pqx = nothing
-      @tensor R2pq[a,b,i,j] := Rpqoo[a,b,i,j]
-      Rpqoo = nothing
+    int2 = integ2(EC.fd)
+    if ndims(int2) == 4
+      if EC.triangular_kext
+        trioo = [CartesianIndex(i,j) for j in 1:length(SP('o')) for i in 1:j]
+        D2 = calc_D2(T1, T2)[:,:,trioo]
+        # <pq|rs> D^ij_rs
+        @tensoropt R2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
+        D2 = nothing
+        norb = length(SP(':'))
+        nocc = length(SP('o'))
+        Rpqoo = Array{Float64}(undef,norb,norb,nocc,nocc)
+        Rpqoo[:,:,trioo] = R2pqx
+        trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
+        @tensor Rpqoo[:,:,trioor][p,q,x] = R2pqx[q,p,x]
+        R2pqx = nothing
+        @tensor R2pq[a,b,i,j] := Rpqoo[a,b,i,j]
+        Rpqoo = nothing
+      else
+        D2 = calc_D2(T1, T2)
+        # <pq|rs> D^ij_rs
+        @tensoropt R2pq[p,r,i,j] := int2[p,r,q,s] * D2[q,s,i,j]
+        D2 = nothing
+      end
     else
-      D2 = calc_D2(T1, T2)
+      # last two indices of integrals are stored as upper triangular 
+      tripp = [CartesianIndex(i,j) for j in 1:length(SP(':')) for i in 1:j]
+      D2 = calc_D2(T1, T2, true)[tripp,:,:]
       # <pq|rs> D^ij_rs
-      @tensoropt R2pq[p,r,i,j] := integ2(EC.fd)[p,r,q,s] * D2[q,s,i,j]
+      @tensoropt rR2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
       D2 = nothing
+      # symmetrize R
+      @tensoropt R2pq[p,r,i,j] := rR2pq[p,r,i,j] + rR2pq[r,p,j,i]
     end
     R2 += R2pq[SP('v'),SP('v'),:,:]
     @tensoropt begin
@@ -712,8 +772,8 @@ function main()
   EC.space['o'], EC.space['v'] = get_occvirt(norb, nelec)
   EC.space[':'] = 1:headvar(EC.fd,"NORB")
 
-  # calculate fock matrix
-  EC.fock = gen_fock(SP('o'))
+  # calculate fock matrix 
+  EC.fock = gen_fock(SCα)
   ϵ = diag(EC.fock)
   EC.ϵo = ϵ[SP('o')]
   EC.ϵv = ϵ[SP('v')]

@@ -31,6 +31,8 @@ the 2-e integrals are stored in the physcal notation: int2[pqrs] = <pq|rs>
   int1b::Array{Float64} = []
   int0::Float64 = 0.0
   head::Dict = Dict()
+  # use an upper triangular index for last two indices of 2e⁻ integrals 
+  triang::Bool = true
   # a convinience variable, has to coincide with `head["IUHF"][1] > 0``
   uhf::Bool = false
 end
@@ -174,22 +176,70 @@ function read_integrals!(fd::FDump, dir::AbstractString)
   fd.int0 = headvar(fd, "ENUC")
 end
 
+# return upper triangular index from two indices i1 <= i2
+function uppertriangular(i1,i2)
+  return i1+i2*(i2-1)÷2
+end
+
 """for not ab: particle symmetry is assumed.
    Integrals are stored in physcal notation.
+   if triang: the last two indices are stored as a single upper triangular index
 """
-function set_int2!(int2::AbstractArray,i1,i2,i3,i4,integ,simtra,ab)
-  int2[i1,i3,i2,i4] = integ
-  if !ab
-      int2[i3,i1,i4,i2] = integ
-  end
-  if !simtra
-    int2[i1,i4,i2,i3] = integ
-    int2[i2,i3,i1,i4] = integ
-    int2[i2,i4,i1,i3] = integ
+function set_int2!(int2::AbstractArray,i1,i2,i3,i4,integ,triang,simtra,ab)
+  if triang
+    @assert !ab
+    if i2 == i4
+      i24 = uppertriangular(i2,i4)
+      int2[i1,i3,i24] = integ
+      int2[i3,i1,i24] = integ
+    elseif i2 < i4 
+      int2[i1,i3,uppertriangular(i2,i4)] = integ
+    else
+      int2[i3,i1,uppertriangular(i4,i2)] = integ
+    end
+    if !simtra
+      if i2 == i3
+        i23 = uppertriangular(i2,i3)
+        int2[i1,i4,i23] = integ
+        int2[i4,i1,i23] = integ
+      elseif i2 < i3
+        int2[i1,i4,uppertriangular(i2,i3)] = integ
+      else
+        int2[i4,i1,uppertriangular(i3,i2)] = integ
+      end
+      if i1 == i4
+        i14 = uppertriangular(i1,i4)
+        int2[i2,i3,i14] = integ
+        int2[i3,i2,i14] = integ
+      elseif i1 < i4
+        int2[i2,i3,uppertriangular(i1,i4)] = integ
+      else
+        int2[i3,i2,uppertriangular(i4,i1)] = integ
+      end
+      if i1 == i3
+        i13 = uppertriangular(i1,i3)
+        int2[i2,i4,i13] = integ
+        int2[i4,i2,i13] = integ
+      elseif i1 < i3
+        int2[i2,i4,uppertriangular(i1,i3)] = integ
+      else
+        int2[i4,i2,uppertriangular(i3,i1)] = integ
+      end
+    end
+  else
+    int2[i1,i3,i2,i4] = integ
     if !ab
-      int2[i4,i1,i3,i2] = integ
-      int2[i3,i2,i4,i1] = integ
-      int2[i4,i2,i3,i1] = integ
+      int2[i3,i1,i4,i2] = integ
+    end
+    if !simtra
+      int2[i1,i4,i2,i3] = integ
+      int2[i2,i3,i1,i4] = integ
+      int2[i2,i4,i1,i3] = integ
+      if !ab
+        int2[i4,i1,i3,i2] = integ
+        int2[i3,i2,i4,i1] = integ
+        int2[i4,i2,i3,i1] = integ
+      end
     end
   end
 end
@@ -209,12 +259,21 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     print("UHF")
     fd.int1a = zeros(norb,norb)
     fd.int1b = zeros(norb,norb)
-    fd.int2aa = zeros(norb,norb,norb,norb)
-    fd.int2bb = zeros(norb,norb,norb,norb)
+    if fd.triang
+      fd.int2aa = zeros(norb,norb,norb*(norb+1)÷2)
+      fd.int2bb = zeros(norb,norb,norb*(norb+1)÷2)
+    else
+      fd.int2aa = zeros(norb,norb,norb,norb)
+      fd.int2bb = zeros(norb,norb,norb,norb)
+    end
     fd.int2ab = zeros(norb,norb,norb,norb)
   else
     fd.int1 = zeros(norb,norb)
-    fd.int2 = zeros(norb,norb,norb,norb)
+    if fd.triang
+      fd.int2 = zeros(norb,norb,norb*(norb+1)÷2)
+    else
+      fd.int2 = zeros(norb,norb,norb,norb)
+    end
   end
   spincase = 0 # aa, bb, ab, a, b
   for linestr in eachline(fdfile)
@@ -234,14 +293,14 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     if i4 > 0
       if spincase == 0
         if fd.uhf
-          set_int2!(fd.int2aa,i1,i2,i3,i4,integ,simtra,false)
+          set_int2!(fd.int2aa,i1,i2,i3,i4,integ,fd.triang,simtra,false)
         else
-          set_int2!(fd.int2,i1,i2,i3,i4,integ,simtra,false)
+          set_int2!(fd.int2,i1,i2,i3,i4,integ,fd.triang,simtra,false)
         end
       elseif spincase == 1
-        set_int2!(fd.int2bb,i1,i2,i3,i4,integ,simtra,false)
+        set_int2!(fd.int2bb,i1,i2,i3,i4,integ,fd.triang,simtra,false)
       elseif spincase == 2
-        set_int2!(fd.int2ab,i1,i2,i3,i4,integ,simtra,true)
+        set_int2!(fd.int2ab,i1,i2,i3,i4,integ,false,simtra,true)
       else
           error("Unexpected 2-el integrals for spin-case "*string(spincase))
       end
