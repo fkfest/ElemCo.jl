@@ -15,6 +15,12 @@ Electron-Correlation methods
 module eCo
 
 using LinearAlgebra
+try
+  using MKL
+catch
+  println("MKL package not found, using OpenBLAS.")
+end
+#BLAS.set_num_threads(1)
 using Mmap
 using TensorOperations
 using Printf
