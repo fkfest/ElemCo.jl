@@ -33,7 +33,7 @@ the 2-e integrals are stored in the physcal notation: int2[pqrs] = <pq|rs>
   head::Dict = Dict()
   # use an upper triangular index for last two indices of 2e⁻ integrals 
   triang::Bool = true
-  # a convinience variable, has to coincide with `head["IUHF"][1] > 0``
+  # a convinience variable, has to coincide with `head["IUHF"][1] > 0`
   uhf::Bool = false
 end
 

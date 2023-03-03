@@ -60,14 +60,68 @@ function ecmmap(fname::String)
   return miommap(joinpath(EC.scr, fname*".bin"))
 end
 
-function get_occvirt(norb, nelec, occs = nothing)
-  if isnothing(occs)
-    occs = [1:nelec÷2;]
+"""
+parse a string specifying some list of orbitals, e.g., 
+`-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
+or use ':' and ';' instead of '-' and '+', respectively
+"""
+function parse_orbstring(orbs::String)
+  # make it in julia syntax
+  orbs1 = replace(orbs,"-"=>":")
+  orbs1 = replace(orbs1,"+"=>";")
+  orbs1 = replace(orbs1," "=>"")
+  # println(orbs1)
+  occursin(r"^[0-9:;]+$",orbs1) || error("Use only `0123456789:;+-` characters in the orbstring: $orbs")
+  if first(orbs1) == ':'
+    orbs1 = "1"*orbs1
   end
-  virts = [ i for i in 1:norb if i ∉ occs ]
-  println("Occupied orbitals:", occs)
-  # println("Virtual orbitals:", virts)
-  return occs, virts
+  orblist=Vector{Int}()
+  for range in filter(!isempty,split(orbs1,';'))
+    firstlast = filter(!isempty,split(range,':'))
+    if length(firstlast) == 1
+      # add the orbital
+      orblist=push!(orblist,parse(Int,firstlast[1]))
+    else
+      length(firstlast) == 2 || error("Someting wrong in range $range in orbstring $orbs")
+      firstorb = parse(Int,firstlast[1])
+      lastorb = parse(Int,firstlast[2])
+      # add the range
+      orblist=vcat(orblist,[firstorb:lastorb]...)
+    end
+  end
+  allunique(orblist) || error("Repeated orbitals found in orbstring $orbs")
+  return orblist
+end
+
+"""
+use a +/- string to specify the occupation. If occbs=="-", the occupation from occas is used (closed-shell).
+if both are "-", the occupation is deduced from nelec.
+"""
+function get_occvirt(occas::String, occbs::String, norb, nelec)
+  if occas != "-"
+    occa = parse_orbstring(occas)
+    if occbs == "-"
+      # copy occa to occb
+      occb = deepcopy(occa)
+    else
+      occb = parse_orbstring(occbs)
+    end
+    if length(occa)+length(occb) != nelec
+      error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec)")
+    end
+  else 
+    occa = [1:nelec÷2;]
+    occb = [1:(nelec+1)÷2;]
+  end
+  virta = [ i for i in 1:norb if i ∉ occa ]
+  virtb = [ i for i in 1:norb if i ∉ occb ]
+  if occa == occb
+    println("Occupied orbitals:", occa)
+  else
+    println("Occupied α orbitals:", occa)
+    println("Occupied β orbitals:", occb)
+  end
+  return occa, virta, occb, virtb
 end
 
 function print_time(t1, info, verb)
@@ -741,6 +795,14 @@ function parse_commandline()
       help = "verbosity"
       arg_type = Int
       default = 2
+    "--occa"
+      help = "occupied α orbitals (in '1-3+5' format)"
+      arg_type = String
+      default = "-"
+    "--occb"
+      help = "occupied β orbitals (in '1-3+6' format)"
+      arg_type = String
+      default = "-"
     "arg1"
       help = "input file (currently fcidump file)"
       default = "FCIDUMP"
@@ -750,12 +812,14 @@ function parse_commandline()
   EC.verbosity = args["verbosity"]
   fcidump_file = args["arg1"]
   method = args["method"]
-  return fcidump_file, method
+  occa = args["occa"]
+  occb = args["occb"]
+  return fcidump_file, method, occa, occb
 end
 
 function main()
   t1 = time_ns()
-  fcidump, method_string = parse_commandline()
+  fcidump, method_string, occa, occb = parse_commandline()
   method_names = split(method_string)
   # create scratch directory
   mkpath(EC.scr)
@@ -769,9 +833,12 @@ function main()
   # EC.shifts = 0.0
   # EC.shiftp = 0.0
 
-  EC.space['o'], EC.space['v'] = get_occvirt(norb, nelec)
+  EC.space['o'], EC.space['v'], EC.space['O'], EC.space['V'] = get_occvirt(occa, occb, norb, nelec)
   EC.space[':'] = 1:headvar(EC.fd,"NORB")
 
+  closed_shell = (EC.space['o'] == EC.space['O'] && !EC.fd.uhf)
+  
+  closed_shell || error("Open-shell methods not implemented yet")
   # calculate fock matrix 
   EC.fock = gen_fock(SCα)
   ϵ = diag(EC.fock)
@@ -801,10 +868,7 @@ function main()
     if ecmethod.theory == "MP"
       continue
     end
-    dc = false
-    if ecmethod.theory == "DC"
-      dc = true
-    end
+    dc = (ecmethod.theory == "DC")
     T1 = nothing
     if ecmethod.exclevel[1] == FullExc
       T1 = zeros(size(SP('v'),1),size(SP('o'),1))
