@@ -39,11 +39,15 @@ using ..DIIS
   shiftp::Float64 = 0.2
   verbosity::Int = 2
   fd::FDump = FDump()
+  ignore_error::Bool = false
   # subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general
   space::Dict{Char,Any} = Dict{Char,Any}()
   fock::Array{Float64} = Float64[]
+  fockb::Array{Float64} = Float64[]
   ϵo::Array{Float64} = Float64[]
   ϵv::Array{Float64} = Float64[]
+  ϵob::Array{Float64} = Float64[]
+  ϵvb::Array{Float64} = Float64[]
   use_kext::Bool = true
   calc_d_vvvv::Bool = false
   calc_d_vvvo::Bool = false
@@ -112,8 +116,8 @@ function get_occvirt(occas::String, occbs::String, norb, nelec)
     else
       occb = parse_orbstring(occbs)
     end
-    if length(occa)+length(occb) != nelec
-      error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec)")
+    if length(occa)+length(occb) != nelec && !EC.ignore_error
+      error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error (-f) to ignore.")
     end
   else 
     occa = [1:nelec÷2;]
@@ -293,43 +297,118 @@ function ints2(spaces::String, spincase = nothing, detri = true)
   end
 end
 
-function gen_fock(spincase::SpinCase)
-  # calc fock matrix 
-  # display(ints2(":o:o",spincase))
-  @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] + 2.0*ints2(":o:o",spincase)[p,i,q,i] - ints2(":oo:",spincase)[p,i,i,q]
-  return fock
+""" calc closed-shell fock matrix """
+function gen_fock()
+  @tensoropt fock[p,q] := integ1(EC.fd,SCα)[p,q] + 2.0*ints2(":o:o",SCα)[p,i,q,i] - ints2(":oo:",SCα)[p,i,i,q]
+  ϵ = diag(fock)
+  ϵo = ϵ[SP('o')]
+  ϵv = ϵ[SP('v')]
+  println("Occupied orbital energies: ",ϵo)
+  return fock, ϵo, ϵv
 end
 
-function update_singles(R1, use_shift = true)
+""" calc uhf fock matrix """
+function gen_fock(spincase::SpinCase)
+  @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] 
+  if spincase == SCα
+    @tensoropt fock[p,q] += ints2(":O:O",SCαβ)[p,i,q,i]
+    spo='o'
+    spv='v'
+    spin = "α"
+  else
+    @tensoropt fock[p,q] += ints2("o:o:",SCαβ)[i,p,i,q]
+    spo='O'
+    spv='V'
+    spin = "β"
+  end
+  @tensoropt begin
+    fock[p,q] += ints2(":"*spo*":"*spo,spincase)[p,i,q,i]
+    fock[p,q] -= ints2(":"*spo*spo*":",spincase)[p,i,i,q]
+  end
+  ϵ = diag(fock)
+  ϵo = ϵ[SP(spo)]
+  ϵv = ϵ[SP(spv)]
+  println("Occupied $spin orbital energies: ",ϵo)
+  return fock, ϵo, ϵv
+end
+
+function update_singles(R1, ϵo, ϵv, shift)
   ΔT1 = deepcopy(R1)
-  shift = use_shift ? EC.shifts : 0.0
   for I ∈ CartesianIndices(ΔT1)
     a,i = Tuple(I)
-    ΔT1[I] /= -(EC.ϵv[a] - EC.ϵo[i] + shift)
+    ΔT1[I] /= -(ϵv[a] - ϵo[i] + shift)
   end
   return ΔT1
 end
 
-function update_doubles(R2, use_shift = true)
+function update_singles(R1; spincase::SpinCase=SCα, use_shift=true)
+  shift = use_shift ? EC.shifts : 0.0
+  if spincase == SCα
+    return update_singles(R1, EC.ϵo, EC.ϵv, shift)
+  else
+    return update_singles(R1, EC.ϵob, EC.ϵvb, shift)
+  end
+end
+
+function update_doubles(R2, ϵo1, ϵv1, ϵo2, ϵv2, shift, antisymmetrize=false)
   ΔT2 = deepcopy(R2)
-  shift = use_shift ? EC.shiftp : 0.0
+  if antisymmetrize
+    ΔT2 -= permutedims(R2,(1,2,4,3))
+  end
   for I ∈ CartesianIndices(ΔT2)
     a,b,i,j = Tuple(I)
-    ΔT2[I] /= -(EC.ϵv[a] + EC.ϵv[b] - EC.ϵo[i] - EC.ϵo[j] + shift)
+    ΔT2[I] /= -(ϵv1[a] + ϵv2[b] - ϵo1[i] - ϵo2[j] + shift)
   end
   return ΔT2
 end
 
-function calc_singles_energy(T1)
+function update_doubles(R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
+  shift = use_shift ? EC.shiftp : 0.0
+  if spincase == SCα
+    return update_doubles(R2, EC.ϵo, EC.ϵv, EC.ϵo, EC.ϵv, shift, antisymmetrize)
+  elseif spincase == SCβ
+    return update_doubles(R2, EC.ϵob, EC.ϵvb, EC.ϵob, EC.ϵvb, shift, antisymmetrize)
+  else
+    return update_doubles(R2, EC.ϵo, EC.ϵv, EC.ϵob, EC.ϵvb, shift, antisymmetrize)
+  end
+end
+
+function calc_singles_energy(T1; fock_only=false)
+  ET1 = 0.0
+  if !fock_only
+    @tensoropt ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2("oovv")[i,j,a,b])
+  end
+  @tensoropt ET1 += scalar(2.0*T1[a,i] * EC.fock[SP('o'),SP('v')][i,a])
+  return ET1
+end
+
+function calc_singles_energy(T1a, T1b; fock_only=false)
+  ET1 = 0.0
+  if !fock_only
+    @tensoropt begin
+      ET1 += 0.5*scalar((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2("oovv")[i,j,a,b])
+      ET1 += 0.5*scalar((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2("OOVV")[i,j,a,b])
+      ET1 += scalar(T1a[a,i]*T1b[b,j]*ints2("oOvV")[i,j,a,b])
+    end
+  end
   @tensoropt begin
-    ET1 = scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2("oovv")[i,j,a,b])
-    ET1 += scalar(2.0*T1[a,i] * EC.fock[SP('o'),SP('v')][i,a])
+    ET1 += scalar(T1a[a,i] * EC.fock[SP('o'),SP('v')][i,a])
+    ET1 += scalar(T1b[a,i] * EC.fockb[SP('O'),SP('V')][i,a])
   end
   return ET1
 end
 
 function calc_doubles_energy(T2)
   @tensoropt ET2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j]) * ints2("oovv")[i,j,a,b])
+  return ET2
+end
+
+function calc_doubles_energy(T2a, T2b, T2ab)
+  @tensoropt begin
+    ET2 = 0.5*scalar(T2a[a,b,i,j] * ints2("oovv")[i,j,a,b])
+    ET2 += 0.5*scalar(T2b[a,b,i,j] * ints2("OOVV")[i,j,a,b])
+    ET2 += scalar(T2ab[a,b,i,j] * ints2("oOvV")[i,j,a,b])
+  end
   return ET2
 end
 
@@ -530,11 +609,27 @@ function calc_dressed_ints(T1)
   t1 = print_time(t1,"dress fock",3)
 end
 
+""" Calculate closed-shell MP2 energy and amplitudes. 
+    Return (EMp2, T2) """
 function calc_MP2()
-  # calc MP2 energy and amplitudes, return (EMp2, T2)
-  T2 = update_doubles(ints2("vvoo"), false)
+  T2 = update_doubles(ints2("vvoo"), use_shift=false)
   EMp2 = calc_doubles_energy(T2)
   return EMp2, T2
+end
+
+""" Calculate unrestricted MP2 energy and amplitudes. 
+    Return (EMp2, T2a, T2b, T2ab)"""
+function calc_UMP2(addsingles=true)
+  T2a = update_doubles(ints2("vvoo"), spincase=SCα, antisymmetrize = true, use_shift=false)
+  T2b = update_doubles(ints2("VVOO"), spincase=SCβ, antisymmetrize = true, use_shift=false)
+  T2ab = update_doubles(ints2("vVoO"), spincase=SCαβ, use_shift=false)
+  EMp2 = calc_doubles_energy(T2a,T2b,T2ab)
+  if addsingles
+    T1a = update_singles(EC.fock[SP('v'),SP('o')], spincase=SCα, use_shift=false)
+    T1b = update_singles(EC.fockb[SP('V'),SP('O')], spincase=SCβ, use_shift=false)
+    EMp2 += calc_singles_energy(T1a, T1b, fock_only = true)
+  end
+  return EMp2, T2a, T2b, T2ab
 end
 
 function method_name(T1, dc = false)
@@ -809,6 +904,9 @@ function parse_commandline()
       help = "occupied β orbitals (in '1-3+6' format)"
       arg_type = String
       default = "-"
+    "--force", "-f"
+      help = "supress some of the error messages (ignore_error)"
+      action = :store_true
     "arg1"
       help = "input file (currently fcidump file)"
       default = "FCIDUMP"
@@ -816,6 +914,7 @@ function parse_commandline()
   args = parse_args(s)
   EC.scr = args["scratch"]
   EC.verbosity = args["verbosity"]
+  EC.ignore_error = args["force"]
   fcidump_file = args["arg1"]
   method = args["method"]
   occa = args["occa"]
@@ -843,37 +942,59 @@ function main()
   EC.space[':'] = 1:headvar(EC.fd,"NORB")
 
   closed_shell = (EC.space['o'] == EC.space['O'] && !EC.fd.uhf)
-  
-  closed_shell || error("Open-shell methods not implemented yet")
+  # closed_shell = false
+
+  addname=""
+  if !closed_shell
+    addname = "U"
+  end
+
   # calculate fock matrix 
-  EC.fock = gen_fock(SCα)
-  ϵ = diag(EC.fock)
-  EC.ϵo = ϵ[SP('o')]
-  EC.ϵv = ϵ[SP('v')]
-  println("Occupied orbital energies: ",EC.ϵo)
+  if closed_shell
+    EC.fock,EC.ϵo,EC.ϵv = gen_fock()
+    EC.fockb = EC.fock
+    EC.ϵob = EC.ϵo
+    EC.ϵvb = EC.ϵv
+  else
+    EC.fock,EC.ϵo,EC.ϵv = gen_fock(SCα)
+    EC.fockb,EC.ϵob,EC.ϵvb = gen_fock(SCβ)
+  end
   t1 = print_time(t1,"fock matrix",1)
 
   # calculate HF energy
-  EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP('o')]) + EC.fd.int0
-  println("HF energy: ",EHF)
+  if closed_shell
+    EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP('o')]) + EC.fd.int0
+  else
+    EHF = 0.5*(sum(EC.ϵo)+sum(EC.ϵob) + sum(diag(integ1(EC.fd, SCα))[SP('o')]) + sum(diag(integ1(EC.fd, SCβ))[SP('O')])) + EC.fd.int0
+  end
+  println(addname*"HF energy: ",EHF)
 
   for mname in method_names
     println()
     println("Next method: ",mname)
     ecmethod = ECMethod(mname)
     if ecmethod.unrestricted
-      error("unrestricted not implemented yet...")
+      add2name = "U"
+      closed_shell_method = false
+    else
+      add2name = addname
+      closed_shell_method = closed_shell
     end
     # at the moment we always calculate MP2 first
     # calculate MP2
-    EMp2, T2 = calc_MP2()
-    println("MP2 correlation energy: ",EMp2)
-    println("MP2 total energy: ",EMp2+EHF)
+    if closed_shell_method
+      EMp2, T2 = calc_MP2()
+    else
+      EMp2, T2a, T2b, T2ab = calc_UMP2()
+    end
+    println(add2name*"MP2 correlation energy: ",EMp2)
+    println(add2name*"MP2 total energy: ",EMp2+EHF)
     t1 = print_time(t1,"MP2",1)
 
     if ecmethod.theory == "MP"
       continue
     end
+    closed_shell || error("Open-shell methods not implemented yet")
     dc = (ecmethod.theory == "DC")
     T1 = nothing
     if ecmethod.exclevel[1] == FullExc
@@ -883,8 +1004,8 @@ function main()
       error("no triples implemented yet...")
     end
     ECC = calc_cc!(T1, T2, dc)
-    println(mname*" correlation energy: ",ECC)
-    println(mname*" total energy: ",ECC+EHF)
+    println("$mname correlation energy: ",ECC)
+    println("$mname total energy: ",ECC+EHF)
     t1 = print_time(t1,"CC",1)
   end
 end
