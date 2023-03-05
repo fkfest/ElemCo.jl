@@ -31,7 +31,7 @@ function saveres(diis::Diis,vecs,ipos)
   miosave(diis.resfiles[ipos],vecs...)
 end
 function loadvecs(file)
-  return mioload(file)
+  return mioload(file, array_of_arrays = true)
 end
 function loadamps(diis::Diis,ipos)
   return loadvecs(diis.ampfiles[ipos])

@@ -434,11 +434,29 @@ function calc_singles_norm(T1)
   return NormT1
 end
 
+function calc_singles_norm(T1a, T1b)
+  @tensor begin
+    NormT1 = scalar(T1a[a,i]*T1a[a,i])
+    NormT1 += scalar(T1b[a,i]*T1b[a,i])
+  end
+  return NormT1
+end
+
 function calc_doubles_norm(T2)
-  @tensor NormT2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j])
+  @tensoropt NormT2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j])
   return NormT2
 end
 
+function calc_doubles_norm(T2a, T2b, T2ab)
+  @tensoropt begin
+    NormT2 = 0.25*scalar(T2a[a,b,i,j]*T2a[a,b,i,j])
+    NormT2 += 0.25*scalar(T2b[a,b,i,j]*T2b[a,b,i,j])
+    NormT2 += scalar(T2ab[a,b,i,j]*T2ab[a,b,i,j])
+  end
+  return NormT2
+end
+
+"""dress integrals with singles"""
 function calc_dressed_ints(T1)
   t1 = time_ns()
   # first make half-transformed integrals
@@ -609,6 +627,31 @@ function calc_dressed_ints(T1)
   t1 = print_time(t1,"dress fock",3)
 end
 
+"""save non-dressed integrals in files instead of dressed integrals"""
+function pseudo_dressed_ints()
+  t1 = time_ns()
+  ecsave("d_oovo",ints2("oovo"))
+  ecsave("d_voov",ints2("voov"))
+  if EC.calc_d_vovv
+    ecsave("d_vovv",ints2("vovv"))
+  end
+  if EC.calc_d_vvvv
+    ecsave("d_vvvv",ints2("vvvv"))
+  end
+  ecsave("d_vovo",ints2("vovo"))
+  ecsave("d_vooo",ints2("vooo"))
+  if EC.calc_d_vvvo
+    ecsave("d_vvvo",ints2("vvvo"))
+  end
+  ecsave("d_oooo",ints2("oooo"))
+  if EC.calc_d_vvoo
+    ecsave("d_vvoo",ints2("vvoo"))
+  end
+  ecsave("dint1",integ1(EC.fd))
+  ecsave("dfock",EC.fock)
+  t1 = print_time(t1,"pseudo-dressing",3)
+end
+
 """ Calculate closed-shell MP2 energy and amplitudes. 
     Return (EMp2, T2) """
 function calc_MP2()
@@ -656,12 +699,21 @@ if `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
 function calc_D2(T1, T2, scalepp = false)
     norb = length(SP(':'))
     nocc = length(SP('o'))
-    D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
+    if !isnothing(T1)
+      D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
+    else
+      D2 = zeros(norb,norb,nocc,nocc)
+    end
     @tensoropt begin
-      D2[SP('v'),SP('v'),:,:][a,b,i,j] = T2[a,b,i,j] + T1[a,i] * T1[b,j]
-      D2[SP('o'),SP('v'),:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
-      D2[SP('v'),SP('o'),:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
+      D2[SP('v'),SP('v'),:,:][a,b,i,j] = T2[a,b,i,j] 
       D2[SP('o'),SP('o'),:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k]
+    end
+    if !isnothing(T1)
+      @tensoropt begin
+        D2[SP('v'),SP('v'),:,:][a,b,i,j] += T1[a,i] * T1[b,j]
+        D2[SP('o'),SP('v'),:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
+        D2[SP('v'),SP('o'),:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
+      end
     end
     diagindx = [CartesianIndex(i,i) for i in 1:norb]
     D2[diagindx,:,:] *= 0.5
@@ -673,28 +725,36 @@ Calculate CCSD or DCSD residual.
 """
 function calc_ccsd_resid(T1,T2,dc)
   t1 = time_ns()
-  calc_dressed_ints(T1)
-  t1 = print_time(t1,"dressing",2)
+  if !isnothing(T1)
+    calc_dressed_ints(T1)
+    t1 = print_time(t1,"dressing",2)
+  else
+    pseudo_dressed_ints()
+  end
   @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   dfock = ecload("dfock")
-  if EC.use_kext
-    dint1 = ecload("dint1")
-    R1 = dint1[SP('v'),SP('o')]
-  else
-    R1 = dfock[SP('v'),SP('o')]
-    if !EC.calc_d_vovv
-      error("for not use_kext calc_d_vovv has to be True")
+  if !isnothing(T1)
+    if EC.use_kext
+      dint1 = ecload("dint1")
+      R1 = dint1[SP('v'),SP('o')]
+    else
+      R1 = dfock[SP('v'),SP('o')]
+      if !EC.calc_d_vovv
+        error("for not use_kext calc_d_vovv has to be True")
+      end
+      int2 = ecload("d_vovv")
+      @tensoropt R1[a,i] += int2[a,k,b,c] * T2t[c,b,k,i]
     end
-    int2 = ecload("d_vovv")
-    @tensoropt R1[a,i] += int2[a,k,b,c] * T2t[c,b,k,i]
+    int2 = ecload("d_oovo")
+    fov = dfock[SP('o'),SP('v')]
+    @tensoropt begin
+      R1[a,i] += T2t[a,b,i,j] * fov[j,b]
+      R1[a,i] -= int2[k,j,c,i] * T2t[c,a,k,j]
+    end
+    t1 = print_time(t1,"singles residual",2)
+  else
+    R1 = nothing
   end
-  int2 = ecload("d_oovo")
-  fov = dfock[SP('o'),SP('v')]
-  @tensoropt begin
-    R1[a,i] += T2t[a,b,i,j] * fov[j,b]
-    R1[a,i] -= int2[k,j,c,i] * T2t[c,a,k,j]
-  end
-  t1 = print_time(t1,"singles residual",2)
 
   # <ab|ij>
   if EC.use_kext
@@ -754,14 +814,16 @@ function calc_ccsd_resid(T1,T2,dc)
       @tensoropt R2pq[p,r,i,j] := rR2pq[p,r,i,j] + rR2pq[r,p,j,i]
     end
     R2 += R2pq[SP('v'),SP('v'),:,:]
-    @tensoropt begin
-      R2[a,b,i,j] -= R2pq[SP('o'),SP('v'),:,:][k,b,i,j] * T1[a,k]
-      R2[a,b,i,j] -= R2pq[SP('v'),SP('o'),:,:][a,k,i,j] * T1[b,k]
-      R2[a,b,i,j] += R2pq[SP('o'),SP('o'),:,:][k,l,i,j] * T1[a,k] * T1[b,l]
-    # singles residual contributions
-      R1[a,i] +=  2.0 * R2pq[SP('v'),SP('o'),:,:][a,k,i,k] - R2pq[SP('v'),SP('o'),:,:][a,k,k,i]
-      x1[k,i] := 2.0 * R2pq[SP('o'),SP('o'),:,:][k,l,i,l] - R2pq[SP('o'),SP('o'),:,:][k,l,l,i]
-      R1[a,i] -= x1[k,i] * T1[a,k]
+    if !isnothing(T1)
+      @tensoropt begin
+        R2[a,b,i,j] -= R2pq[SP('o'),SP('v'),:,:][k,b,i,j] * T1[a,k]
+        R2[a,b,i,j] -= R2pq[SP('v'),SP('o'),:,:][a,k,i,j] * T1[b,k]
+        R2[a,b,i,j] += R2pq[SP('o'),SP('o'),:,:][k,l,i,j] * T1[a,k] * T1[b,l]
+        # singles residual contributions
+        R1[a,i] +=  2.0 * R2pq[SP('v'),SP('o'),:,:][a,k,i,k] - R2pq[SP('v'),SP('o'),:,:][a,k,k,i]
+        x1[k,i] := 2.0 * R2pq[SP('o'),SP('o'),:,:][k,l,i,l] - R2pq[SP('o'),SP('o'),:,:][k,l,l,i]
+        R1[a,i] -= x1[k,i] * T1[a,k]
+      end
     end
     x1 = nothing
     R2pq = nothing
@@ -845,8 +907,7 @@ function calc_cc!(T1, T2, dc = false)
   for it in 1:EC.maxit
     t1 = time_ns()
     if isnothing(T1)
-      # R2 = calc_ccd_resid(T2,dc)
-      R2 = T2 #FIX
+      R1, R2 = calc_ccsd_resid(T1,T2,dc)
     else
       R1, R2 = calc_ccsd_resid(T1,T2,dc)
       NormT1 = calc_singles_norm(T1)
@@ -858,7 +919,7 @@ function calc_cc!(T1, T2, dc = false)
     Eh = calc_hylleraas(T1,T2,R1,R2)
     T2 += update_doubles(R2)
     if isnothing(T1)
-      T2 = perform(diis,[T2],[R2])
+      T2, = perform(diis,[T2],[R2])
       En = 0.0
     else
       T1 += update_singles(R1)
@@ -935,14 +996,11 @@ function main()
   println(size(EC.fd.int2))
   norb = headvar(EC.fd, "NORB")
   nelec = headvar(EC.fd, "NELEC")
-  # EC.shifts = 0.0
-  # EC.shiftp = 0.0
 
   EC.space['o'], EC.space['v'], EC.space['O'], EC.space['V'] = get_occvirt(occa, occb, norb, nelec)
   EC.space[':'] = 1:headvar(EC.fd,"NORB")
 
   closed_shell = (EC.space['o'] == EC.space['O'] && !EC.fd.uhf)
-  # closed_shell = false
 
   addname=""
   if !closed_shell

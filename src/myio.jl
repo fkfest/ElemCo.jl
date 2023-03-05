@@ -60,9 +60,10 @@ end
 load arrays from a file `fname`
 
 return an array of arrays.
-If there is only one array - return array itself.
+If there is only one array - return array itself
+(unless `array_of_arrays == true`).
 """
-function mioload(fname::String)
+function mioload(fname::String; array_of_arrays = false)
   io = open(fname)
   # type of numbers
   itype = read(io, Int)
@@ -85,7 +86,7 @@ function mioload(fname::String)
     read!(io, arrs[ia])
   end
   close(io)
-  return (narray == 1) ? arrs[1] : arrs
+  return (narray == 1 && !array_of_arrays) ? arrs[1] : arrs
 end
 
 function miommap(fname::String)
