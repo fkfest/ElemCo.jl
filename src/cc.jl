@@ -599,13 +599,7 @@ function calc_cc!(EC::ECInfo, T1, T2, dc = false)
   t0 = time_ns()
   for it in 1:EC.maxit
     t1 = time_ns()
-    if isnothing(T1)
-      R1, R2 = calc_ccsd_resid(EC,T1,T2,dc)
-    else
-      R1, R2 = calc_ccsd_resid(EC,T1,T2,dc)
-      NormT1 = calc_singles_norm(T1)
-      NormR1 = calc_singles_norm(R1)
-    end
+    R1, R2 = calc_ccsd_resid(EC,T1,T2,dc)
     t1 = print_time(EC,t1,"residual",2)
     NormT2 = calc_doubles_norm(T2)
     NormR2 = calc_doubles_norm(R2)
@@ -615,6 +609,8 @@ function calc_cc!(EC::ECInfo, T1, T2, dc = false)
       T2, = perform(diis,[T2],[R2])
       En = 0.0
     else
+      NormT1 = calc_singles_norm(T1)
+      NormR1 = calc_singles_norm(R1)
       T1 += update_singles(EC,R1)
       T1,T2 = perform(diis,[T1,T2],[R1,R2])
       En = calc_singles_energy(EC, T1)
