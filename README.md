@@ -1,4 +1,4 @@
-# e-Co.jl
+# e-Co.jl <img style="float: right;" src="e-coil.png"> <br/><br/>
 
 Julia implementation of various electron-correlation methods (main focus on coupled cluster) 
 using fcidump/npy interface.  
