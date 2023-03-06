@@ -65,6 +65,9 @@ function parse_commandline(EC::ECInfo)
     "arg1"
       help = "input file (currently fcidump file)"
       default = "FCIDUMP"
+    "--test", "-t"
+      action = :store_true
+
   end
   args = parse_args(s)
   EC.scr = args["scratch"]
@@ -74,13 +77,18 @@ function parse_commandline(EC::ECInfo)
   method = args["method"]
   occa = args["occa"]
   occb = args["occb"]
-  return fcidump_file, method, occa, occb
+  test = args["test"]
+  return fcidump_file, method, occa, occb, test
 end
 
 function main()
   t1 = time_ns()
   EC = ECInfo()
-  fcidump, method_string, occa, occb = parse_commandline(EC)
+  fcidump, method_string, occa, occb, test = parse_commandline(EC)
+  if test
+    include("../test/hf.jl")
+    exit(0)
+  end
   method_names = split(method_string)
   # create scratch directory
   mkpath(EC.scr)
