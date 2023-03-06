@@ -3,7 +3,7 @@ using Test
 
 @testset "HF Test" begin
 EC = ECInfo()
-EC.fd = read_fcidump("be.fcidump")
+EC.fd = read_fcidump("test/be.fcidump")
 # create scratch directory
 mkpath(EC.scr)
 EC.scr = mktempdir(EC.scr)
