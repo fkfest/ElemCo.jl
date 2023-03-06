@@ -422,8 +422,10 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
       D2[SP('v'),SP('o'),:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
     end
   end
-  diagindx = [CartesianIndex(i,i) for i in 1:norb]
-  D2[diagindx,:,:] *= 0.5
+  if scalepp
+    diagindx = [CartesianIndex(i,i) for i in 1:norb]
+    D2[diagindx,:,:] *= 0.5
+  end
   return D2
 end
 
