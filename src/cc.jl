@@ -108,7 +108,7 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
     ET2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j]) * int2[i,j,a,b])
   end
   if !isnothing(T1)
-    dfock = load(EC,"dfock")
+    dfock = load(EC,"dfock"*'o')
     fov = dfock[SP('o'),SP('v')] + EC.fock[SP('o'),SP('v')] # undressed part should be with factor two
     @tensoropt ET1 = scalar((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
     # ET1 = scalar(2.0*(EC.fock[SP('o'),SP('v')][i,a] + R1[a,i])*T1[a,i])
@@ -145,156 +145,160 @@ function calc_doubles_norm(T2a, T2b, T2ab)
   return NormT2
 end
 
-"""dress integrals with singles"""
-function calc_dressed_ints(EC::ECInfo, T1)
+""" dress integrals with singles. 
+    The singles and orbspaces for first and second electron are T1,o1,v1 and T12,o2,v2, respectively."""
+function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
   t1 = time_ns()
   SP(sp::Char) = EC.space[sp]
+  mixed = (o1 != o2)
   # first make half-transformed integrals
   if EC.calc_d_vvvv
     # <a\hat c|bd>
-    hd_vvvv = ints2(EC,"vvvv")
-    vovv = ints2(EC,"vovv")
-    @tensoropt hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T1[c,k]
+    hd_vvvv = ints2(EC,v1*v2*v1*v2)
+    vovv = ints2(EC,v1*o2*v1*v2)
+    @tensoropt hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T12[c,k]
     vovv = nothing
-    save(EC,"hd_vvvv",hd_vvvv)
+    save(EC,"hd_"*v1*v2*v1*v2,hd_vvvv)
     hd_vvvv = nothing
-    t1 = print_time(EC,t1,"dress hd_vvvv",3)
+    t1 = print_time(EC,t1,"dress hd_"*v1*v2*v1*v2,3)
   end
   # <ik|j \hat l>
-  hd_oooo = ints2(EC,"oooo")
-  oovo = ints2(EC,"oovo")
-  @tensoropt hd_oooo[j,i,l,k] += oovo[i,j,d,l] * T1[d,k]
+  hd_oooo = ints2(EC,o1*o2*o1*o2)
+  oovo = ints2(EC,o1*o2*v1*o2)
+  @tensoropt hd_oooo[j,i,l,k] += oovo[i,j,d,l] * T12[d,k]
   oovo = nothing
-  t1 = print_time(EC,t1,"dress hd_oooo",3)
+  t1 = print_time(EC,t1,"dress hd_"*o1*o2*o1*o2,3)
+  if mixed
+  end
   if EC.calc_d_vvoo
     # <a\hat c|j \hat l>
-    hd_vvoo = ints2(EC,"vvoo")
-    voov = ints2(EC,"voov")
-    vooo = ints2(EC,"vooo")
+    hd_vvoo = ints2(EC,v1*v2*o1*o2)
+    voov = ints2(EC,v1*o2*o1*v2)
+    vooo = ints2(EC,v1*o2*o1*o2)
     @tensoropt begin
-      vooo[a,k,j,l] += voov[a,k,j,d] * T1[d,l]
+      vooo[a,k,j,l] += voov[a,k,j,d] * T12[d,l]
       voov = nothing
-      hd_vvoo[a,c,j,l] -= vooo[a,k,j,l] * T1[c,k]
+      hd_vvoo[a,c,j,l] -= vooo[a,k,j,l] * T12[c,k]
       vooo = nothing
     end
-    vvov = ints2(EC,"vvov")
-    @tensoropt hd_vvoo[a,c,j,l] += vvov[a,c,j,d] * T1[d,l]
+    vvov = ints2(EC,v1*v2*o1*v2)
+    @tensoropt hd_vvoo[a,c,j,l] += vvov[a,c,j,d] * T12[d,l]
     vvov = nothing
-    save(EC,"hd_vvoo",hd_vvoo)
+    save(EC,"hd_"*v1*v2*o1*o2,hd_vvoo)
     hd_vvoo = nothing
-    t1 = print_time(EC,t1,"dress hd_vvoo",3)
+    t1 = print_time(EC,t1,"dress hd_"*v1*v2*o1*o2,3)
   end
   # <\hat a k| \hat j l)
-  hd_vooo = ints2(EC,"vooo")
-  vovo = ints2(EC,"vovo")
+  hd_vooo = ints2(EC,v1*o2*o1*o2)
+  vovo = ints2(EC,v1*o2*v1*o2)
   @tensoropt begin
-    hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
+    hd_vooo[a,k,j,l] -= hd_oooo[i,k,j,l] * T1[a,i]
     hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
   end
-  t1 = print_time(EC,t1,"dress hd_vooo",3)
+  t1 = print_time(EC,t1,"dress hd_"*v1*o2*o1*o2,3)
   # some of the fully dressing moved here...
   # <ki\hat|dj>
-  d_oovo = ints2(EC,"oovo")
-  oovv = ints2(EC,"oovv")
-  @tensoropt d_oovo[k,i,d,j] += oovv[k,i,d,b] * T1[b,j]
-  save(EC,"d_oovo",d_oovo)
-  t1 = print_time(EC,t1,"dress d_oovo",3)
+  d_oovo = ints2(EC,o1*o2*v1*o2)
+  oovv = ints2(EC,o1*o2*v1*v2)
+  @tensoropt d_oovo[k,i,d,j] += oovv[k,i,d,b] * T12[b,j]
+  save(EC,"d_"*o1*o2*v1*o2,d_oovo)
+  t1 = print_time(EC,t1,"dress d_"*o1*o2*v1*o2,3)
   # <ak\hat|jd>
-  d_voov = ints2(EC,"voov")
-  vovv = ints2(EC,"vovv")
+  d_voov = ints2(EC,v1*o2*o1*v2)
+  vovv = ints2(EC,v1*o2*v1*v2)
   @tensoropt begin
-    d_voov[a,k,j,d] -= d_oovo[k,i,d,j] * T1[a,i]
+    d_voov[a,k,j,d] -= d_oovo[k,i,d,j] * T1[a,i] #todo
     d_voov[a,k,j,d] += vovv[a,k,b,d] * T1[b,j]
   end
-  save(EC,"d_voov",d_voov)
-  t1 = print_time(EC,t1,"dress d_voov",3)
+  save(EC,"d_"*v1*o2*o1*v2,d_voov)
+  t1 = print_time(EC,t1,"dress d_"*v1*o2*o1*v2,3)
   # finish half-dressing
   # <ak|b \hat l>
-  hd_vovo = ints2(EC,"vovo")
-  @tensoropt hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T1[d,l]
+  hd_vovo = ints2(EC,v1*o2*v1*o2)
+  @tensoropt hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
   vovv = nothing
-  t1 = print_time(EC,t1,"dress hd_vovo",3)
+  t1 = print_time(EC,t1,"dress hd_"*v1*o2*v1*o2,3)
   if EC.calc_d_vvvo
     # <a\hat c|b \hat l>
-    hd_vvvo = ints2(EC,"vvvo")
-    vvvv = ints2(EC,"vvvv")
+    hd_vvvo = ints2(EC,v1*v2*v1*o2)
+    vvvv = ints2(EC,v1*v2*v1*v2)
     @tensoropt begin
-      hd_vvvo[a,c,b,l] -= hd_vovo[a,k,b,l] * T1[c,k]
-      hd_vvvo[a,c,b,l] += vvvv[a,c,b,d] * T1[d,l]
+      hd_vvvo[a,c,b,l] -= hd_vovo[a,k,b,l] * T12[c,k]
+      hd_vvvo[a,c,b,l] += vvvv[a,c,b,d] * T12[d,l]
     end
     vvvv = nothing
-    save(EC,"hd_vvvo",hd_vvvo)
+    save(EC,"hd_"*v1*v2*v1*o2,hd_vvvo)
     hd_vvvo = nothing
-    t1 = print_time(EC,t1,"dress hd_vvvo",3)
+    t1 = print_time(EC,t1,"dress hd_"*v1*v2*v1*o2,3)
   end
 
   # fully dressed
   if EC.calc_d_vovv
     # <ak\hat|bd>
-    d_vovv = ints2(EC,"vovv")
+    d_vovv = ints2(EC,v1*o2*v1*v2)
     @tensoropt d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
-    save(EC,"d_vovv",d_vovv)
-    t1 = print_time(EC,t1,"dress d_vovv",3)
+    save(EC,"d_"*v1*o2*v1*v2,d_vovv)
+    t1 = print_time(EC,t1,"dress d_"*v1*o2*v1*v2,3)
   end
   oovv = nothing
   if EC.calc_d_vvvv
     # <ab\hat|cd>
-    d_vvvv = load(EC,"hd_vvvv")
+    d_vvvv = load(EC,"hd_"*v1*v2*v1*v2)
     if !EC.calc_d_vovv
       error("for calc_d_vvvv calc_d_vovv has to be True")
     end
-    @tensoropt d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i]
+    @tensoropt d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i] #todo
     d_vovv = nothing
-    save(EC,"d_vvvv",d_vvvv)
+    save(EC,"d_"*v1*v2*v1*v2,d_vvvv)
     d_vvvv = nothing
-    t1 = print_time(EC,t1,"dress d_vvvv",3)
+    t1 = print_time(EC,t1,"dress d_"*v1*v2*v1*v2,3)
   end
   # <ak\hat|bl>
   d_vovo = hd_vovo
   @tensoropt d_vovo[a,k,b,l] -= d_oovo[i,k,b,l] * T1[a,i]
-  save(EC,"d_vovo",d_vovo)
+  save(EC,"d_"*v1*o2*v1*o2,d_vovo)
   d_vovo = nothing
-  t1 = print_time(EC,t1,"dress d_vovo",3)
+  t1 = print_time(EC,t1,"dress d_"*v1*o2*v1*o2,3)
   # <aj\hat|kl>
   d_vooo = hd_vooo
-  @tensoropt d_vooo[a,k,j,l] += d_voov[a,k,j,d] * T1[d,l]
-  save(EC,"d_vooo",d_vooo)
-  t1 = print_time(EC,t1,"dress d_vooo",3)
+  @tensoropt d_vooo[a,k,j,l] += d_voov[a,k,j,d] * T12[d,l]
+  save(EC,"d_"*v1*o2*o1*o2,d_vooo)
+  t1 = print_time(EC,t1,"dress d_"*v1*o2*o1*o2,3)
   if EC.calc_d_vvvo
     # <ab\hat|cl>
-    d_vvvo = load(EC,"hd_vvvo")
-    @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i]
-    save(EC,"d_vvvo",d_vvvo)
+    d_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
+    @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i] #todo
+    save(EC,"d_"*v1*v2*v1*o2,d_vvvo)
     d_vvvo = nothing
-    t1 = print_time(EC,t1,"dress d_vvvo",3)
+    t1 = print_time(EC,t1,"dress d_"*v1*v2*v1*o2,3)
   end
   # <ij\hat|kl>
   d_oooo = hd_oooo
   @tensoropt d_oooo[i,k,j,l] += d_oovo[i,k,b,l] * T1[b,j]
-  save(EC,"d_oooo",d_oooo)
-  t1 = print_time(EC,t1,"dress d_oooo",3)
+  save(EC,"d_"*o1*o2*o1*o2,d_oooo)
+  t1 = print_time(EC,t1,"dress d_"*o1*o2*o1*o2,3)
   if EC.calc_d_vvoo
     if !EC.calc_d_vvvo
       error("for calc_d_vvoo calc_d_vvvo has to be True")
     end
     # <ac\hat|jl>
-    d_vvoo = load(EC,"hd_vvoo")
-    hd_vvvo = load(EC,"hd_vvvo")
+    d_vvoo = load(EC,"hd_"*v1*v2*o1*o2)
+    hd_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
     @tensoropt begin
       d_vvoo[a,c,j,l] += hd_vvvo[a,c,b,l] * T1[b,j]
       hd_vvvo = nothing
-      d_vvoo[a,c,j,l] -= d_vooo[c,i,l,j] * T1[a,i]
+      d_vvoo[a,c,j,l] -= d_vooo[c,i,l,j] * T1[a,i] #todo
     end
-    save(EC,"d_vvoo",d_vvoo)
-    t1 = print_time(EC,t1,"dress d_vvoo",3)
+    save(EC,"d_"*v1*v2*o1*o2,d_vvoo)
+    t1 = print_time(EC,t1,"dress d_"*v1*v2*o1*o2,3)
   end
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd))
-  dinter = ints1(EC,":v")
-  @tensoropt d_int1[:,SP('o')][p,j] += dinter[p,b] * T1[b,j]
-  dinter = d_int1[SP('o'),:]
-  @tensoropt d_int1[SP('v'),:][b,p] -= dinter[j,p] * T1[b,j]
-  save(EC,"dint1",d_int1)
+  dinter = ints1(EC,":"*v1)
+  @tensoropt d_int1[:,SP(o1)][p,j] += dinter[p,b] * T1[b,j]
+  dinter = d_int1[SP(o1),:]
+  @tensoropt d_int1[SP(v1),:][b,p] -= dinter[j,p] * T1[b,j]
+  save(EC,"dint1"*o1,d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
 
   # calc dressed fock
@@ -303,18 +307,29 @@ function calc_dressed_ints(EC::ECInfo, T1)
     foo[i,j] := 2.0*d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
     fvo[a,i] := 2.0*d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
     fov[i,a] := 2.0*d_oovo[i,k,a,k] - d_oovo[k,i,a,k]
-    d_vovo = load(EC,"d_vovo")
+    d_vovo = load(EC,"d_"*v1*o2*v1*o2)
     fvv[a,b] := 2.0*d_vovo[a,k,b,k]
     d_vovo = nothing
     fvv[a,b] -= d_voov[a,k,k,b]
   end
-  dfock[SP('o'),SP('o')] += foo
-  dfock[SP('v'),SP('o')] += fvo
-  dfock[SP('o'),SP('v')] += fov
-  dfock[SP('v'),SP('v')] += fvv
+  dfock[SP(o1),SP(o1)] += foo
+  dfock[SP(v1),SP(o1)] += fvo
+  dfock[SP(o1),SP(v1)] += fov
+  dfock[SP(v1),SP(v1)] += fvv
 
-  save(EC,"dfock",dfock)
+  save(EC,"dfock"*o1,dfock)
   t1 = print_time(EC,t1,"dress fock",3)
+end
+
+"""dress integrals with singles"""
+function calc_dressed_ints(EC::ECInfo, T1a, T1b=nothing)
+  if isnothing(T1b)
+    calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
+  else
+    calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
+    calc_dressed_ints(EC,T1b,T1b,'O','V','O','V')
+    calc_dressed_ints(EC,T1a,T1b,'o','v','O','V')
+  end
 end
 
 """save non-dressed integrals in files instead of dressed integrals"""
@@ -337,8 +352,8 @@ function pseudo_dressed_ints(EC::ECInfo)
   if EC.calc_d_vvoo
     save(EC,"d_vvoo",ints2(EC,"vvoo"))
   end
-  save(EC,"dint1",integ1(EC.fd))
-  save(EC,"dfock",EC.fock)
+  save(EC,"dint1"*'o',integ1(EC.fd))
+  save(EC,"dfock"*'o',EC.fock)
   t1 = print_time(EC,t1,"pseudo-dressing",3)
 end
 
@@ -425,10 +440,10 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     pseudo_dressed_ints(EC)
   end
   @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
-  dfock = load(EC,"dfock")
+  dfock = load(EC,"dfock"*'o')
   if !isnothing(T1)
     if EC.use_kext
-      dint1 = load(EC,"dint1")
+      dint1 = load(EC,"dint1"*'o')
       R1 = dint1[SP('v'),SP('o')]
     else
       R1 = dfock[SP('v'),SP('o')]
