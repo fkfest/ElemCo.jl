@@ -78,17 +78,19 @@ function parse_commandline(EC::ECInfo)
   occa = args["occa"]
   occb = args["occb"]
   test = args["test"]
-  return fcidump_file, method, occa, occb, test
+  if test
+    include("../test/h2o.jl")
+    include("../test/h2o_st1.jl")
+    include("../test/h2o_cation.jl")
+    exit(0)
+  end
+  return fcidump_file, method, occa, occb
 end
 
 function main()
   t1 = time_ns()
   EC = ECInfo()
-  fcidump, method_string, occa, occb, test = parse_commandline(EC)
-  if test
-    include("../test/hf.jl")
-    exit(0)
-  end
+  fcidump, method_string, occa, occb = parse_commandline(EC)
   method_names = split(method_string)
   # create scratch directory
   mkpath(EC.scr)
