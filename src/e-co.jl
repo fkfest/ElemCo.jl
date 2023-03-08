@@ -92,12 +92,13 @@ function main()
   norb = headvar(EC.fd, "NORB")
   nelec = headvar(EC.fd, "NELEC")
 
-  EC.space['o'], EC.space['v'], EC.space['O'], EC.space['V'] = get_occvirt(EC, occa, occb, norb, nelec)
-  EC.space[':'] = 1:headvar(EC.fd,"NORB")
+  SP = EC.space
 
-  SP(sp::Char) = EC.space[sp]
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
+  SP[':'] = 1:headvar(EC.fd,"NORB")
 
-  closed_shell = (EC.space['o'] == EC.space['O'] && !EC.fd.uhf)
+
+  closed_shell = (SP['o'] == SP['O'] && !EC.fd.uhf)
 
   addname=""
   if !closed_shell
@@ -118,9 +119,9 @@ function main()
 
   # calculate HF energy
   if closed_shell
-    EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP('o')]) + EC.fd.int0
+    EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
   else
-    EHF = 0.5*(sum(EC.ϵo)+sum(EC.ϵob) + sum(diag(integ1(EC.fd, SCα))[SP('o')]) + sum(diag(integ1(EC.fd, SCβ))[SP('O')])) + EC.fd.int0
+    EHF = 0.5*(sum(EC.ϵo)+sum(EC.ϵob) + sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']])) + EC.fd.int0
   end
   println(addname*"HF energy: ",EHF)
 
@@ -153,7 +154,7 @@ function main()
     dc = (ecmethod.theory == "DC")
     T1 = nothing
     if ecmethod.exclevel[1] == FullExc
-      T1 = zeros(size(SP('v'),1),size(SP('o'),1))
+      T1 = zeros(size(SP['v'],1),size(SP['o'],1))
     end
     if ecmethod.exclevel[3] != NoExc
       error("no triples implemented yet...")

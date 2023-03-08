@@ -60,17 +60,17 @@ function update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=
 end
 
 function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
-  SP(sp::Char) = EC.space[sp]
+  SP = EC.space
   ET1 = 0.0
   if !fock_only
     @tensoropt ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b])
   end
-  @tensoropt ET1 += scalar(2.0*T1[a,i] * EC.fock[SP('o'),SP('v')][i,a])
+  @tensoropt ET1 += scalar(2.0*T1[a,i] * EC.fock[SP['o'],SP['v']][i,a])
   return ET1
 end
 
 function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
-  SP(sp::Char) = EC.space[sp]
+  SP = EC.space
   ET1 = 0.0
   if !fock_only
     @tensoropt begin
@@ -80,8 +80,8 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
     end
   end
   @tensoropt begin
-    ET1 += scalar(T1a[a,i] * EC.fock[SP('o'),SP('v')][i,a])
-    ET1 += scalar(T1b[a,i] * EC.fockb[SP('O'),SP('V')][i,a])
+    ET1 += scalar(T1a[a,i] * EC.fock[SP['o'],SP['v']][i,a])
+    ET1 += scalar(T1b[a,i] * EC.fockb[SP['O'],SP['V']][i,a])
   end
   return ET1
 end
@@ -101,7 +101,7 @@ function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
 end
 
 function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
-  SP(sp::Char) = EC.space[sp]
+  SP = EC.space
   int2 = ints2(EC,"oovv")
   @tensoropt begin
     int2[i,j,a,b] += R2[a,b,i,j]
@@ -109,9 +109,9 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
   end
   if !isnothing(T1)
     dfock = load(EC,"dfock"*'o')
-    fov = dfock[SP('o'),SP('v')] + EC.fock[SP('o'),SP('v')] # undressed part should be with factor two
+    fov = dfock[SP['o'],SP['v']] + EC.fock[SP['o'],SP['v']] # undressed part should be with factor two
     @tensoropt ET1 = scalar((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
-    # ET1 = scalar(2.0*(EC.fock[SP('o'),SP('v')][i,a] + R1[a,i])*T1[a,i])
+    # ET1 = scalar(2.0*(EC.fock[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
     # ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*int2[i,j,a,b])
     ET2 += ET1
   end
@@ -149,7 +149,7 @@ end
     The singles and orbspaces for first and second electron are T1,o1,v1 and T12,o2,v2, respectively."""
 function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
   t1 = time_ns()
-  SP(sp::Char) = EC.space[sp]
+  SP = EC.space
   mixed = (o1 != o2)
   # first make half-transformed integrals
   if EC.calc_d_vvvv
@@ -295,9 +295,9 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd))
   dinter = ints1(EC,":"*v1)
-  @tensoropt d_int1[:,SP(o1)][p,j] += dinter[p,b] * T1[b,j]
-  dinter = d_int1[SP(o1),:]
-  @tensoropt d_int1[SP(v1),:][b,p] -= dinter[j,p] * T1[b,j]
+  @tensoropt d_int1[:,SP[o1]][p,j] += dinter[p,b] * T1[b,j]
+  dinter = d_int1[SP[o1],:]
+  @tensoropt d_int1[SP[v1],:][b,p] -= dinter[j,p] * T1[b,j]
   save(EC,"dint1"*o1,d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
 
@@ -312,10 +312,10 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     d_vovo = nothing
     fvv[a,b] -= d_voov[a,k,k,b]
   end
-  dfock[SP(o1),SP(o1)] += foo
-  dfock[SP(v1),SP(o1)] += fvo
-  dfock[SP(o1),SP(v1)] += fov
-  dfock[SP(v1),SP(v1)] += fvv
+  dfock[SP[o1],SP[o1]] += foo
+  dfock[SP[v1],SP[o1]] += fvo
+  dfock[SP[o1],SP[v1]] += fov
+  dfock[SP[v1],SP[v1]] += fvv
 
   save(EC,"dfock"*o1,dfock)
   t1 = print_time(EC,t1,"dress fock",3)
@@ -368,14 +368,14 @@ end
 """ Calculate unrestricted MP2 energy and amplitudes. 
     Return (EMp2, T2a, T2b, T2ab)"""
 function calc_UMP2(EC::ECInfo, addsingles=true)
-  SP(sp::Char) = EC.space[sp]
+  SP = EC.space
   T2a = update_doubles(EC,ints2(EC,"vvoo"), spincase=SCα, antisymmetrize = true, use_shift=false)
   T2b = update_doubles(EC,ints2(EC,"VVOO"), spincase=SCβ, antisymmetrize = true, use_shift=false)
   T2ab = update_doubles(EC,ints2(EC,"vVoO"), spincase=SCαβ, use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2a,T2b,T2ab)
   if addsingles
-    T1a = update_singles(EC,EC.fock[SP('v'),SP('o')], spincase=SCα, use_shift=false)
-    T1b = update_singles(EC,EC.fockb[SP('V'),SP('O')], spincase=SCβ, use_shift=false)
+    T1a = update_singles(EC,EC.fock[SP['v'],SP['o']], spincase=SCα, use_shift=false)
+    T1b = update_singles(EC,EC.fockb[SP['V'],SP['O']], spincase=SCβ, use_shift=false)
     EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only = true)
   end
   return EMp2, T2a, T2b, T2ab
@@ -403,23 +403,23 @@ return as D[pqij]
 if `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
 """
 function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
-  SP(sp::Char) = EC.space[sp]
-  norb = length(SP(':'))
-  nocc = length(SP('o'))
+  SP = EC.space
+  norb = length(SP[':'])
+  nocc = length(SP['o'])
   if !isnothing(T1)
     D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
   else
     D2 = zeros(norb,norb,nocc,nocc)
   end
   @tensoropt begin
-    D2[SP('v'),SP('v'),:,:][a,b,i,j] = T2[a,b,i,j] 
-    D2[SP('o'),SP('o'),:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k]
+    D2[SP['v'],SP['v'],:,:][a,b,i,j] = T2[a,b,i,j] 
+    D2[SP['o'],SP['o'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k]
   end
   if !isnothing(T1)
     @tensoropt begin
-      D2[SP('v'),SP('v'),:,:][a,b,i,j] += T1[a,i] * T1[b,j]
-      D2[SP('o'),SP('v'),:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
-      D2[SP('v'),SP('o'),:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
+      D2[SP['v'],SP['v'],:,:][a,b,i,j] += T1[a,i] * T1[b,j]
+      D2[SP['o'],SP['v'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
+      D2[SP['v'],SP['o'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
     end
   end
   if scalepp
@@ -434,7 +434,7 @@ Calculate CCSD or DCSD residual.
 """
 function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   t1 = time_ns()
-  SP(sp::Char) = EC.space[sp]
+  SP = EC.space
   if !isnothing(T1)
     calc_dressed_ints(EC,T1)
     t1 = print_time(EC,t1,"dressing",2)
@@ -446,9 +446,9 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   if !isnothing(T1)
     if EC.use_kext
       dint1 = load(EC,"dint1"*'o')
-      R1 = dint1[SP('v'),SP('o')]
+      R1 = dint1[SP['v'],SP['o']]
     else
-      R1 = dfock[SP('v'),SP('o')]
+      R1 = dfock[SP['v'],SP['o']]
       if !EC.calc_d_vovv
         error("for not use_kext calc_d_vovv has to be True")
       end
@@ -456,7 +456,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
       @tensoropt R1[a,i] += int2[a,k,b,c] * T2t[c,b,k,i]
     end
     int2 = load(EC,"d_oovo")
-    fov = dfock[SP('o'),SP('v')]
+    fov = dfock[SP['o'],SP['v']]
     @tensoropt begin
       R1[a,i] += T2t[a,b,i,j] * fov[j,b]
       R1[a,i] -= int2[k,j,c,i] * T2t[c,a,k,j]
@@ -468,7 +468,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
 
   # <ab|ij>
   if EC.use_kext
-    R2 = zeros((length(SP('v')),length(SP('v')),length(SP('o')),length(SP('o'))))
+    R2 = zeros((length(SP['v']),length(SP['v']),length(SP['o']),length(SP['o'])))
   else
     if !EC.calc_d_vvoo
       error("for not use_kext calc_d_vvoo has to be True")
@@ -493,13 +493,13 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     int2 = integ2(EC.fd)
     if ndims(int2) == 4
       if EC.triangular_kext
-        trioo = [CartesianIndex(i,j) for j in 1:length(SP('o')) for i in 1:j]
+        trioo = [CartesianIndex(i,j) for j in 1:length(SP['o']) for i in 1:j]
         D2 = calc_D2(EC, T1, T2)[:,:,trioo]
         # <pq|rs> D^ij_rs
         @tensoropt R2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
         D2 = nothing
-        norb = length(SP(':'))
-        nocc = length(SP('o'))
+        norb = length(SP[':'])
+        nocc = length(SP['o'])
         Rpqoo = Array{Float64}(undef,norb,norb,nocc,nocc)
         Rpqoo[:,:,trioo] = R2pqx
         trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
@@ -515,7 +515,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
       end
     else
       # last two indices of integrals are stored as upper triangular 
-      tripp = [CartesianIndex(i,j) for j in 1:length(SP(':')) for i in 1:j]
+      tripp = [CartesianIndex(i,j) for j in 1:length(SP[':']) for i in 1:j]
       D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
       # <pq|rs> D^ij_rs
       @tensoropt rR2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
@@ -523,15 +523,15 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
       # symmetrize R
       @tensoropt R2pq[p,r,i,j] := rR2pq[p,r,i,j] + rR2pq[r,p,j,i]
     end
-    R2 += R2pq[SP('v'),SP('v'),:,:]
+    R2 += R2pq[SP['v'],SP['v'],:,:]
     if !isnothing(T1)
       @tensoropt begin
-        R2[a,b,i,j] -= R2pq[SP('o'),SP('v'),:,:][k,b,i,j] * T1[a,k]
-        R2[a,b,i,j] -= R2pq[SP('v'),SP('o'),:,:][a,k,i,j] * T1[b,k]
-        R2[a,b,i,j] += R2pq[SP('o'),SP('o'),:,:][k,l,i,j] * T1[a,k] * T1[b,l]
+        R2[a,b,i,j] -= R2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
+        R2[a,b,i,j] -= R2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
+        R2[a,b,i,j] += R2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k] * T1[b,l]
         # singles residual contributions
-        R1[a,i] +=  2.0 * R2pq[SP('v'),SP('o'),:,:][a,k,i,k] - R2pq[SP('v'),SP('o'),:,:][a,k,k,i]
-        x1[k,i] := 2.0 * R2pq[SP('o'),SP('o'),:,:][k,l,i,l] - R2pq[SP('o'),SP('o'),:,:][k,l,l,i]
+        R1[a,i] +=  2.0 * R2pq[SP['v'],SP['o'],:,:][a,k,i,k] - R2pq[SP['v'],SP['o'],:,:][a,k,k,i]
+        x1[k,i] := 2.0 * R2pq[SP['o'],SP['o'],:,:][k,l,i,l] - R2pq[SP['o'],SP['o'],:,:][k,l,l,i]
         R1[a,i] -= x1[k,i] * T1[a,k]
       end
     end
@@ -556,8 +556,8 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   fac = dc ? 0.5 : 1.0
   # x_ad = f_ad - <kl|cd> \tilde T^kl_ca
   # x_ki = f_ki + <kl|cd> \tilde T^il_cd
-  xad = dfock[SP('v'),SP('v')]
-  xki = dfock[SP('o'),SP('o')]
+  xad = dfock[SP['v'],SP['v']]
+  xki = dfock[SP['o'],SP['o']]
   @tensoropt begin
     xad[a,d] -= fac * klcd[k,l,c,d] * T2t[c,a,k,l]
     xki[k,i] += fac * klcd[k,l,c,d] * T2t[c,d,i,l]
