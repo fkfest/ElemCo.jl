@@ -362,6 +362,8 @@ end
 function calc_MP2(EC::ECInfo)
   T2 = update_doubles(EC,ints2(EC,"vvoo"), use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2)
+  T1 = update_singles(EC.fock[EC.space['v'],EC.space['o']],EC.ϵo,EC.ϵv,0.0)
+  EMp2 += calc_singles_energy(EC,T1,fock_only=true)
   return EMp2, T2
 end
 
