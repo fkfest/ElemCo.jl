@@ -1,12 +1,12 @@
 """ coupled-cluster methods """
 module CoupledCluster
 
-using LinearAlgebra
 try
   using MKL
 catch
-  println("MKL package not found, using OpenBLAS.")
+  #println("MKL package not found, using OpenBLAS.")
 end
+using LinearAlgebra
 #BLAS.set_num_threads(1)
 using TensorOperations
 using Printf
