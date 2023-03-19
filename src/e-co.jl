@@ -13,6 +13,7 @@ include("cc.jl")
 
 include("msystem.jl")
 include("integrals.jl")
+include("dfhf.jl")
 
 """
 Electron-Correlation methods 
