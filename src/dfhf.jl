@@ -36,6 +36,7 @@ end
 
 function dfhf(ms::MSys, EC::ECInfo)
   diis = Diis(EC.scr)
+  thren = sqrt(EC.thr)*0.1
   # TODO: use element-specific basis!
   aobasis = lowercase(ms.atoms[1].basis["ao"].name)
   jkfit = lowercase(ms.atoms[1].basis["jkfit"].name)
@@ -52,7 +53,9 @@ function dfhf(ms::MSys, EC::ECInfo)
   PQ = nothing
   SP = EC.space
   previousEHF = 0.0
-  for it=1:50
+  println("Iter     Energy      DE          Res         Time")
+  t0 = time_ns()
+  for it=1:EC.maxit
     fock = dffock(EC,cMO,CPQ,hsmall,bao,bfit)
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
@@ -60,16 +63,19 @@ function dfhf(ms::MSys, EC::ECInfo)
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
-    fmo = cMO'*fock*cMO
+    den2 = cMO2*cMO2'
+    sdf = sao*den2*fock 
+    Δfock = sdf - sdf'
+    var = sum(abs2,Δfock)
+    tt = (time_ns() - t0)/10^9
+    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    if abs(ΔE) < thren && var < EC.thr
+      break
+    end
+    fock, = perform(diis,[fock],[Δfock])
     # use Hermitian to ensure real eigenvalues and normalized orbitals
     ϵ,cMO = eigen(Hermitian(fock),Hermitian(sao))
     # display(ϵ)
-    Δfock = fmo - diagm(ϵ)
-    # cMO, = perform(diis,[cMO],[Δfock])
-    @printf "%3i %12.8f %12.8f %10.2e \n" it EHF ΔE sum(abs2,Δfock)
-    if abs(ΔE) < EC.thr
-      break
-    end
   end
 end
 
