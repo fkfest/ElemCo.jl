@@ -106,7 +106,7 @@ geometry and basis set for each element name in the geometry
 mutable struct MSys
   atoms::AbstractArray{ACenter,1}
   function MSys(xyz::AbstractString, basis::Dict)
-    xyz_lines = split(xyz,"\n")
+    xyz_lines = strip.(split(xyz,"\n"))
     if length(xyz_lines) == 0
       error("Empty geometry im MSys")
     elseif length(xyz_lines) == 1
@@ -124,6 +124,8 @@ mutable struct MSys
           bohr = true
         elseif line == "angstrom"
           bohr = false
+        elseif line == ""
+          # skip
         else
           error("Unsupported xyz line $line")
         end
