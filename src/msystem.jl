@@ -71,6 +71,14 @@ function a2b(vals,skip)
     return vals*ANGSTROM2BOHR
   end
 end
+""" transform from bohr to angstrom """
+function b2a(vals,skip)
+  if skip
+    return vals
+  else
+    return vals*BOHR2ANGSTROM
+  end
+end
 
 """
   Create ACenter from a line `<Atom> x y z`. If !bohr: coords are in angstrom
@@ -132,13 +140,13 @@ function Base.show(io::IO, val::MSys)
 end
 
 """ generate xyz string with element without numbers """
-function genxyz(ac::ACenter, bohr=true)
+function genxyz(ac::ACenter; bohr=true)
   name = rstrip(ac.name,['0','1','2','3','4','5','6','7','8','9'])
-  return string(name," ",ac.coord[1]," ",ac.coord[2]," ",ac.coord[3])
+  return string(name," ",b2a(ac.coord[1],bohr)," ",b2a(ac.coord[2],bohr)," ",b2a(ac.coord[3],bohr))
 end
 """ generate xyz string with elements without numbers """
-function genxyz(ms::MSys, bohr=true)
-  return join([genxyz(at,bohr) for at in ms.atoms],"\n")
+function genxyz(ms::MSys; bohr=true)
+  return join([genxyz(at,bohr=bohr) for at in ms.atoms],"\n")
 end
 
 
