@@ -8,32 +8,39 @@ using ..TensorTools
 
 export dfhf
 
-""" integral direct df-hf 
-    CPQ: cholesky decomposed (P|Q) object"""
-function dffock(EC,cMO,CPQ,hsmall,bao,bfit)
-  Ppq = permutedims(ERI_2e3c(bao,bfit),[3,1,2])
+""" integral direct df-hf """ 
+function dffock(EC,cMO,bao,bfit)
+  pqP = ERI_2e3c(bao,bfit)
+  PL = load(EC,"PL")
+  hsmall = load(EC,"hsmall")
   # println(size(Ppq))
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
   occ1O = setdiff(EC.space['O'],occ2)
   CMO2 = cMO[:,occ2]
-  @tensoropt Ppj[P,p,j] := Ppq[P,p,q] * CMO2[q,j]
-
-  cPpj = reshape(CPQ \ reshape(Ppj,size(Ppj,1),:),size(Ppj))
-  @tensoropt cP[P] := cPpj[P,p,j] * CMO2[p,j]
-  @tensoropt fock[p,q] := hsmall[p,q] - cPpj[P,p,j]*Ppj[P,q,j]
+  @tensoropt begin 
+    pjP[p,j,P] := pqP[p,q,P] * CMO2[q,j]
+    cpjL[p,j,L] := pjP[p,j,P] * PL[P,L]
+    cL[L] := cpjL[p,j,L] * CMO2[p,j]
+    fock[p,q] := hsmall[p,q] - cpjL[p,j,L]*cpjL[q,j,L]
+  end
   if length(occ1o) > 0
     CMO1o = cMO[:,occ1o]
-    @tensoropt Ppj[P,p,j] := Ppq[P,p,q] * CMO1o[q,j]
-    cPpj = reshape(CPQ \ reshape(Ppj,size(Ppj,1),:),size(Ppj))
-    @tensoropt cP[P] += 0.5*cPpj[P,p,j] * CMO1o[p,j]
-    @tensoropt fock[p,q] -= cPpj[P,p,j]*Ppj[P,q,j]
+    @tensoropt begin
+      pjP[p,j,P] := Ppq[p,q,P] * CMO1o[q,j]
+      cpjL[p,j,L] := pjP[p,j,P] * PL[P,L]
+      cL[L] += 0.5*cpjL[p,j,L] * CMO1o[p,j]
+      fock[p,q] -= cpjL[p,j,L]*cpjL[q,j,L]
+    end
   end
   if length(occ1O) > 0
     # CMO1O = cMO[:,occ1O]
     error("beta single occ not there yet")
   end
-  @tensoropt fock[p,q] += 2.0*cP[P]*Ppq[P,p,q]
+  @tensoropt begin
+    cP[P] := cL[L] * PL[P,L]
+    fock[p,q] += 2.0*cP[P]*pqP[p,q,P]
+  end
   return fock
 end
 
@@ -43,7 +50,7 @@ function dffock(EC,cMO)
   occ1o = setdiff(EC.space['o'],occ2)
   occ1O = setdiff(EC.space['O'],occ2)
   CMO2 = cMO[:,occ2]
-  pqL = load(EC,"pqL")
+  pqL = load(EC,"munuL")
   hsmall = load(EC,"hsmall")
   @tensoropt pjL[p,j,L] := pqL[p,q,L] * CMO2[q,j]
 
@@ -63,12 +70,17 @@ function dffock(EC,cMO)
   return fock
 end
 
-function generate_integrals(ms::MSys, EC::ECInfo)
+function generate_basis(ms::MSys)
   # TODO: use element-specific basis!
   aobasis = lowercase(ms.atoms[1].basis["ao"].name)
   jkfit = lowercase(ms.atoms[1].basis["jkfit"].name)
   bao = BasisSet(aobasis,genxyz(ms,bohr=false))
   bfit = BasisSet(jkfit,genxyz(ms,bohr=false))
+  return bao,bfit
+end
+
+function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
+  bao,bfit = generate_basis(ms)
   save(EC,"sao",overlap(bao))
   save(EC,"hsmall",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
@@ -84,16 +96,23 @@ function generate_integrals(ms::MSys, EC::ECInfo)
   M = CPQ \ Lp
   CPQ = nothing
   Lp = nothing
-  pqP = ERI_2e3c(bao,bfit)
-  @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
-  save(EC,"pqL",pqL)
+  if save3idx
+    pqP = ERI_2e3c(bao,bfit)
+    @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
+    save(EC,"munuL",pqL)
+  else
+    save(EC,"PL",M)
+  end
   return ECInts.nuclear_repulsion(bao)
 end
 
-function dfhf(ms::MSys, EC::ECInfo)
+function dfhf(ms::MSys, EC::ECInfo; direct = false)
   diis = Diis(EC.scr)
   thren = sqrt(EC.thr)*0.1
-  Enuc = generate_integrals(ms, EC)
+  Enuc = generate_integrals(ms, EC; save3idx=!direct)
+  if direct
+    bao,bfit = generate_basis(ms)
+  end
   hsmall = load(EC,"hsmall")
   sao = load(EC,"sao")
   ϵ,cMO = eigen(Hermitian(hsmall),Hermitian(sao))
@@ -103,7 +122,11 @@ function dfhf(ms::MSys, EC::ECInfo)
   println("Iter     Energy      DE          Res         Time")
   t0 = time_ns()
   for it=1:EC.maxit
-    fock = dffock(EC,cMO)
+    if direct
+      fock = dffock(EC,cMO,bao,bfit)
+    else
+      fock = dffock(EC,cMO)
+    end
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
     @tensoropt efhsmall = scalar(cMO2[p,i]*fhsmall[p,q]*cMO2[q,i])
