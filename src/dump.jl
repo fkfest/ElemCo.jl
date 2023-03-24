@@ -105,7 +105,7 @@ function read_header(fdfile)
     if length(line) == 0
       continue
     end
-    if line == "/"
+    if line == "/" || line == "&END"
       # end of header
       break
     end
@@ -280,7 +280,8 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     line = split(linestr)
     if length(line) != 5
       # println("Last line: ",linestr)
-      break
+      # skip lines (in the case there is something left from header)...
+      continue
     end
     integ = parse(Float64,line[1])
     i1 = parse(Int,line[2])
