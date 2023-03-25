@@ -58,6 +58,8 @@ atomic center
 mutable struct ACenter
   """name (as defined in input)"""
   name::String
+  """nuclear charge (can be changed...)"""
+  nuccharge::Float64
   """coordinates in bohr"""
   coord::AbstractArray{Float64,1}
   """various basis sets (ao,mp2fit,jkfit)"""
@@ -69,8 +71,6 @@ Base.show(io::IO, val::ACenter) = print(io, val.name, " ", val.coord[1], " ", va
 function element_name(name::AbstractString)
   return rstrip(name,['0','1','2','3','4','5','6','7','8','9'])
 end
-
-nuclear_charge_of_center(val::ACenter) = nuclear_charge_of_center(element_name(val.name))  
 
 """ transform from angstrom to bohr """
 function a2b(vals,skip)
@@ -102,11 +102,12 @@ function try2create_acenter(line::AbstractString, basis::Dict, bohr = true)
     zcoord = tryparse(Float64,coords[4])
     if !isnothing(xcoord) && !isnothing(ycoord) && !isnothing(zcoord)
       basis = genbasis4element(basis,coords[1])
-      return ACenter(coords[1],a2b([xcoord,ycoord,zcoord],bohr),basis), true
+      charge = nuclear_charge_of_center(element_name(coords[1]))
+      return ACenter(coords[1],charge,a2b([xcoord,ycoord,zcoord],bohr),basis), true
     end
   end
   # not a center
-  return ACenter("",[],Dict{String,Basis}()), false
+  return ACenter("",0.0,[],Dict{String,Basis}()), false
 end
 
 """
@@ -171,10 +172,10 @@ function nuclear_repulsion(ms::MSys)
   enuc = 0.0
   for i=2:length(ms.atoms)
     at1 = ms.atoms[i]
-    z1 = nuclear_charge_of_center(at1)
+    z1 = at1.nuccharge
     for j=1:i-1
       at2 = ms.atoms[j]
-      z2 = nuclear_charge_of_center(at2)
+      z2 = at2.nuccharge
       enuc += z1*z2/bond_length(at1,at2)
     end
   end
