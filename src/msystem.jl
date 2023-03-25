@@ -4,10 +4,13 @@ info about molecular system (geometry)
 macros to specify geometry and basis sets
 """
 module MSystem
-export MSys, Basis, ACenter, genxyz
+export MSys, Basis, ACenter, genxyz, nuclear_repulsion, bond_length
+
+include("elements.jl")
 
 const BOHR2ANGSTROM = 0.52917721
 const ANGSTROM2BOHR = 1/BOHR2ANGSTROM
+
 """
 basisset
 """
@@ -62,6 +65,12 @@ mutable struct ACenter
 end
 
 Base.show(io::IO, val::ACenter) = print(io, val.name, " ", val.coord[1], " ", val.coord[2], " ", val.coord[3]) 
+  
+function element_name(name::AbstractString)
+  return rstrip(name,['0','1','2','3','4','5','6','7','8','9'])
+end
+
+nuclear_charge_of_center(val::ACenter) = nuclear_charge_of_center(element_name(val.name))  
 
 """ transform from angstrom to bohr """
 function a2b(vals,skip)
@@ -143,15 +152,34 @@ end
 
 """ generate xyz string with element without numbers """
 function genxyz(ac::ACenter; bohr=true)
-  name = rstrip(ac.name,['0','1','2','3','4','5','6','7','8','9'])
+  name = element_name(ac.name)
   return string(name," ",b2a(ac.coord[1],bohr)," ",b2a(ac.coord[2],bohr)," ",b2a(ac.coord[3],bohr))
 end
-""" generate xyz string with elements without numbers """
+""" generate xyz string with elements without numbers
+    if bohr: return in coordinates in bohr
+"""
 function genxyz(ms::MSys; bohr=true)
   return join([genxyz(at,bohr=bohr) for at in ms.atoms],"\n")
 end
 
+function bond_length(cen1::ACenter, cen2::ACenter)
+  return sqrt(sum(abs2,(cen1.coord-cen2.coord)))
+end
 
+""" nuclear repulsion """
+function nuclear_repulsion(ms::MSys)
+  enuc = 0.0
+  for i=2:length(ms.atoms)
+    at1 = ms.atoms[i]
+    z1 = nuclear_charge_of_center(at1)
+    for j=1:i-1
+      at2 = ms.atoms[j]
+      z2 = nuclear_charge_of_center(at2)
+      enuc += z1*z2/bond_length(at1,at2)
+    end
+  end
+  return enuc
+end
 
 
 

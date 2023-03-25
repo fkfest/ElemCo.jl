@@ -1,8 +1,8 @@
 module DFHF
 using LinearAlgebra, TensorOperations, Printf
 using ..ECInfos
-using ..MSystem
 using ..ECInts
+using ..MSystem
 using ..DIIS
 using ..TensorTools
 
@@ -103,7 +103,7 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   else
     save(EC,"PL",M)
   end
-  return ECInts.nuclear_repulsion(bao)
+  return nuclear_repulsion(ms)
 end
 
 function dfhf(ms::MSys, EC::ECInfo; direct = false)

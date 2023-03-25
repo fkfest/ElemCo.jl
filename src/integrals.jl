@@ -1,5 +1,5 @@
 module ECInts
-export BasisSet, overlap, kinetic, nuclear, ERI_2e4c, ERI_2e3c, ERI_2e2c, nuclear_repulsion
+export BasisSet, overlap, kinetic, nuclear, ERI_2e4c, ERI_2e3c, ERI_2e2c
 try
   using GaussianBasis
   using Molecules
@@ -10,14 +10,5 @@ catch
 end
 
 # TODO use GaussianBasis.read_basisset("cc-pvtz",atoms[2]) to specify non-default basis
-
-function nuclear_repulsion(gb) 
-  try
-    return Molecules.nuclear_repulsion(gb.atoms)
-  catch
-    return 0.0
-  end
-end
-  
 
 end #module
