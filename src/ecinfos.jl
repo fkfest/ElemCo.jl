@@ -70,7 +70,7 @@ end
 use a +/- string to specify the occupation. If occbs=="-", the occupation from occas is used (closed-shell).
 if both are "-", the occupation is deduced from nelec.
 """
-function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec)
+function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec, ms2=0)
   if occas != "-"
     occa = parse_orbstring(occas)
     if occbs == "-"
@@ -83,8 +83,8 @@ function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec)
       error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error (-f) to ignore.")
     end
   else 
-    occa = [1:nelec÷2;]
-    occb = [1:(nelec+1)÷2;]
+    occa = [1:(nelec+ms2)÷2;]
+    occb = [1:(nelec-ms2)÷2;]
   end
   virta = [ i for i in 1:norb if i ∉ occa ]
   virtb = [ i for i in 1:norb if i ∉ occb ]
