@@ -6,7 +6,7 @@ using ..MSystem
 using ..DIIS
 using ..TensorTools
 
-export dfhf
+export dfhf, GuessType, GUESS_HCORE, GUESS_SAD
 
 """ integral direct df-hf """ 
 function dffock(EC,cMO,bao,bfit)
@@ -106,17 +106,60 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   return nuclear_repulsion(ms)
 end
 
-function dfhf(ms::MSys, EC::ECInfo; direct = false)
+@enum GuessType GUESS_HCORE GUESS_SAD GUESS_GWH GUESS_ORB
+
+function guess_hcore(EC::ECInfo)
+  hsmall = load(EC,"hsmall")
+  sao = load(EC,"sao")
+  ϵ,cMO = eigen(Hermitian(hsmall),Hermitian(sao))
+  return cMO
+end
+
+function guess_sad(ms::MSys, EC::ECInfo)
+  # minao = "ano-rcc-mb"
+  minao = "ano-r0"
+  # minao = "sto-6g"
+  bminao = BasisSet(minao,genxyz(ms,bohr=false))
+  bao,bfit = generate_basis(ms)
+  smin2ao = overlap(bminao,bao)
+  eldist = electron_distribution(ms)
+  saoinv = invchol(Hermitian(load(EC,"sao")))
+  # display(eldist)
+  denao = saoinv * smin2ao' * diagm(eldist) * smin2ao * saoinv
+  # dc = nc
+  n,cMO = eigen(Hermitian(-denao))
+  # display(n)
+  return cMO
+end
+
+function guess_gwh(ms::MSys, EC::ECInfo)
+  error("not implemented yet")
+end
+
+function guess_orb(ms::MSys, EC::ECInfo, guess::GuessType)
+  if guess == GUESS_HCORE
+    return guess_hcore(EC)
+  elseif guess == GUESS_SAD
+    return guess_sad(ms,EC)
+  elseif guess == GUESS_GWH
+    return guess_gwh(ms,EC)
+  elseif guess == GUESS_ORB
+    return load(EC,"cMO")
+  else
+    error("unknown guess type")
+  end
+end
+
+function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   diis = Diis(EC.scr)
   thren = sqrt(EC.thr)*0.1
   Enuc = generate_integrals(ms, EC; save3idx=!direct)
   if direct
     bao,bfit = generate_basis(ms)
   end
+  cMO = guess_orb(ms,EC,guess)
   hsmall = load(EC,"hsmall")
   sao = load(EC,"sao")
-  ϵ,cMO = eigen(Hermitian(hsmall),Hermitian(sao))
-  # display(ϵ)
   SP = EC.space
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")

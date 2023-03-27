@@ -4,9 +4,10 @@ info about molecular system (geometry)
 macros to specify geometry and basis sets
 """
 module MSystem
-export MSys, Basis, ACenter, genxyz, nuclear_repulsion, bond_length
+export MSys, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec
 
 include("elements.jl")
+include("minbas.jl")
 
 const BOHR2ANGSTROM = 0.52917721
 const ANGSTROM2BOHR = 1/BOHR2ANGSTROM
@@ -72,6 +73,11 @@ function element_name(name::AbstractString)
   return rstrip(name,['0','1','2','3','4','5','6','7','8','9'])
 end
 
+""" all caps """
+function element_NAME(name::AbstractString)
+  return uppercase(element_name(name))
+end
+
 """ transform from angstrom to bohr """
 function a2b(vals,skip)
   if skip
@@ -102,7 +108,7 @@ function try2create_acenter(line::AbstractString, basis::Dict, bohr = true)
     zcoord = tryparse(Float64,coords[4])
     if !isnothing(xcoord) && !isnothing(ycoord) && !isnothing(zcoord)
       basis = genbasis4element(basis,coords[1])
-      charge = nuclear_charge_of_center(element_name(coords[1]))
+      charge = nuclear_charge_of_center(element_NAME(coords[1]))
       return ACenter(coords[1],charge,a2b([xcoord,ycoord,zcoord],bohr),basis), true
     end
   end
@@ -182,6 +188,49 @@ function nuclear_repulsion(ms::MSys)
   return enuc
 end
 
+function guess_nelec(ms::MSys)
+  nelec = 0
+  for at in ms.atoms
+    nelec += nuclear_charge_of_center(element_NAME(at.name))
+  end
+  return nelec
+end
 
+function guess_nalpha(ms::MSys)
+  nelec = guess_nelec(ms)
+  if nelec % 2 == 0
+    return nelec ÷ 2
+  else
+    return (nelec+1) ÷ 2
+  end
+end
+
+function guess_nbeta(ms::MSys)
+  nelec = guess_nelec(ms)
+  if nelec % 2 == 0
+    return nelec ÷ 2
+  else
+    return (nelec-1) ÷ 2
+  end
+end
+
+function guess_nocc(ms::MSys)
+  nalpha = guess_nalpha(ms)
+  nbeta = guess_nbeta(ms)
+  return nalpha, nbeta
+end
+
+
+""" 
+  return the averaged number of electrons in the orbitals in the minimal basis set
+"""
+function electron_distribution(ms::MSys)
+  eldist = Float64[]
+  for at in ms.atoms
+    elnam = element_NAME(at.name)
+    eldist = vcat(eldist,electron_distribution(elnam,nshell4l_minbas(elnam)))
+  end
+  return eldist
+end
 
 end #module
