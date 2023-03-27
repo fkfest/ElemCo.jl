@@ -2,11 +2,12 @@
     e.g., access to integrals, load/save intermediates... 
 """
 module TensorTools
+using LinearAlgebra
 using ..ECInfos
 using ..FciDump
 using ..MyIO
 
-export save, load, mmap, ints1, ints2
+export save, load, mmap, ints1, ints2, invchol
 
 function save(EC::ECInfo, fname::String,a::Array)
   miosave(joinpath(EC.scr, fname*".bin"), a)
@@ -104,6 +105,23 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
     cio, maski = triinds(EC,EC.space[spaces[3]],EC.space[spaces[4]])
     return allint[EC.space[spaces[1]],EC.space[spaces[2]],maski]
   end
+end
+
+""" return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
+    
+    A^-1 = A^-1 L (A^-1 L)† = M M†
+    with A = L L†
+    and  LL† M = L
+"""
+function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
+  CA = cholesky(A, RowMaximum(), check = false, tol = tol)
+  if verbose && CA.rank < size(A,1)
+    redund = size(A,1) - CA.rank
+    println("$redund vectors removed using Cholesky decomposition")
+  end
+  Lp=CA.L[invperm(CA.p),1:CA.rank]
+  M = CA \ Lp
+  return M * M'
 end
 
 end #module
