@@ -26,3 +26,22 @@ Various options are available (use `-h` option for a list of `e-co.jl` options):
 
 Default scratch dir is `./ecojlscr` and default fcidump file is `FCIDUMP`.
 
+```
+Electron coil
+A poem by Bing
+
+In the heart of an atom lies a tiny core
+Where protons and neutrons are tightly bound
+But around this nucleus, there's so much more
+A cloud of electrons that swirls around
+
+They don't orbit in circles like planets do
+But jump and spin in quantum states
+They can be here and there and everywhere too
+And sometimes they even change their mates
+
+This is the electron coil, the turmoil of the shell
+The source of light and heat and power
+The force that makes the atoms repel or gel
+The spark that ignites the cosmic flower
+```
