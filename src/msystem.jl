@@ -224,11 +224,15 @@ end
 """ 
   return the averaged number of electrons in the orbitals in the minimal basis set
 """
-function electron_distribution(ms::MSys)
+function electron_distribution(ms::MSys, minbas::AbstractString)
   eldist = Float64[]
   for at in ms.atoms
     elnam = element_NAME(at.name)
-    eldist = vcat(eldist,electron_distribution(elnam,nshell4l_minbas(elnam)))
+    nnum = nuclear_charge_of_center(elnam)
+    if nnum == 0
+      continue
+    end
+    eldist = vcat(eldist,electron_distribution(elnam,nshell4l_minbas(nnum,uppercase(minbas))))
   end
   return eldist
 end

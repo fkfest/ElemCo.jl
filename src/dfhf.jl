@@ -122,7 +122,7 @@ function guess_sad(ms::MSys, EC::ECInfo)
   bminao = BasisSet(minao,genxyz(ms,bohr=false))
   bao,bfit = generate_basis(ms)
   smin2ao = overlap(bminao,bao)
-  eldist = electron_distribution(ms)
+  eldist = electron_distribution(ms,minao)
   saoinv = invchol(Hermitian(load(EC,"sao")))
   # display(eldist)
   denao = saoinv * smin2ao' * diagm(eldist) * smin2ao * saoinv

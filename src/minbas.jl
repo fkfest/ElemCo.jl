@@ -1,107 +1,55 @@
-""" Number of shells for each angular momentum in the minimal basis set (ANO-MB). """
+
+
+""" ANO-R0 minimal basis set. """
+const NSHELL4L_ANO_R0 = [ 
+  fill([1], 2)...,      # H, HE 
+  fill([2,1], 8)...,    # LI, BE, B, C, N, O, NE 
+  fill([3,1], 2)...,    # NA, MG
+  fill([3,2], 6)...,    # AL, SI, P, S, CL, AR
+  fill([4,2], 2)...,    # K, CA
+  fill([4,2,1], 10)..., # SC, TI, V, CR, MN, FE, CO, NI, CU, ZN
+  fill([4,3,1], 6)...,  # GA, GE, AS, SE, BR, KR
+  fill([5,3,1], 2)...,  # RB, SR
+  fill([5,3,2], 10)..., # Y, ZR, NB, MO, TC, RU, RH, PD, AG, CD
+  fill([5,4,2], 6)...,  # IN, SN, SB, TE, I, XE
+  fill([6,4,2], 2)...,  # CS, BA
+  [6,4,3],              # LA
+  [6,4,3,1],            # CE
+  fill([6,4,2,1], 5)...,# PR, ND, PM, SM, EU 
+  [6,4,3,1],            # GD
+  fill([6,4,2,1], 6)...,# TB, DY, HO, ER, TM, YB
+  fill([6,4,3,1], 10)..., # LU, HF, TA, W, RE, OS, IR, PT, AU, HG
+  fill([6,5,3,1], 6)... # TL, PB, BI, PO, AT, RN 
+]
+
+""" ANO-RCC-MB minimal basis set. """
+const NSHELL4L_ANO_RCC_MB = [ 
+  fill([1], 2)...,      # H, HE
+  fill([2,1], 8)...,    # LI, BE, B, C, N, O, F, NE
+  fill([3,2], 8)...,    # NA, MG, AL, SI, P, S, CL, AR
+  fill([4,3], 2)...,    # K, CA
+  fill([4,3,1], 16)..., # SC, TI, V, CR, MN, FE, CO, NI, CU, ZN, GA, GE, AS, SE, BR, KR
+  fill([5,4,1], 2)...,  # RB, SR
+  fill([5,4,2], 16)..., # Y, ZR, NB, MO, TC, RU, RH, PD, AG, CD, IN, SN, SB, TE, I, XE
+  fill([6,5,2], 2)...,  # CS, BA
+  fill([6,5,3,1], 30)..., # LA, CE, PR, ND, PM, SM, EU, GD, TB, DY, HO, ER, TM, YB, LU, HF, TA, W, RE, OS, IR, PT, AU, HG, TL, PB, BI, PO, AT, RN 
+  fill([7,6,3,1], 2)...,# FR, RA 
+  fill([7,6,4,2], 8)... # AC, TH, PA, U, NP, PU, AM, CM 
+]
+
+""" Number of shells for each angular momentum in the minimal basis set """
 const NSHELL4L_MINBAS = Dict(
-  "H"  => [1],
-  "HE" => [1],
-  "LI" => [2,1],
-  "BE" => [2,1],
-  "B"  => [2,1],
-  "C"  => [2,1],
-  "N"  => [2,1],
-  "O"  => [2,1],
-  "F"  => [2,1],
-  "NE" => [2,1],
-  "NA" => [3,2],
-  "MG" => [3,2],
-  "AL" => [3,2],
-  "SI" => [3,2],
-  "P"  => [3,2],
-  "S"  => [3,2],
-  "CL" => [3,2],
-  "AR" => [3,2],
-  "K"  => [4,3],
-  "CA" => [4,3],
-  "SC" => [4,3,1],
-  "TI" => [4,3,1],
-  "V"  => [4,3,1],
-  "CR" => [4,3,1],
-  "MN" => [4,3,1],
-  "FE" => [4,3,1],
-  "CO" => [4,3,1],
-  "NI" => [4,3,1],
-  "CU" => [4,3,1],
-  "ZN" => [4,3,1],
-  "GA" => [4,3,1],
-  "GE" => [4,3,1],
-  "AS" => [4,3,1],
-  "SE" => [4,3,1],
-  "BR" => [4,3,1],
-  "KR" => [4,3,1],
-  "RB" => [5,4,1],
-  "SR" => [5,4,1],
-  "Y"  => [5,4,2],
-  "ZR" => [5,4,2],
-  "NB" => [5,4,2],
-  "MO" => [5,4,2],
-  "TC" => [5,4,2],
-  "RU" => [5,4,2],
-  "RH" => [5,4,2],
-  "PD" => [5,4,2],
-  "AG" => [5,4,2],
-  "CD" => [5,4,2],
-  "IN" => [5,4,2],
-  "SN" => [5,4,2],
-  "SB" => [5,4,2],
-  "TE" => [5,4,2],
-  "I"  => [5,4,2],
-  "XE" => [5,4,2],
-  "CS" => [6,5,2],
-  "BA" => [6,5,2],
-  "LA" => [6,5,3,1],
-  "CE" => [6,5,3,1],
-  "PR" => [6,5,3,1],
-  "ND" => [6,5,3,1],
-  "PM" => [6,5,3,1],
-  "SM" => [6,5,3,1],
-  "EU" => [6,5,3,1],
-  "GD" => [6,5,3,1],
-  "TB" => [6,5,3,1],
-  "DY" => [6,5,3,1],
-  "HO" => [6,5,3,1],
-  "ER" => [6,5,3,1],
-  "TM" => [6,5,3,1],
-  "YB" => [6,5,3,1],
-  "LU" => [6,5,3,1],
-  "HF" => [6,5,3,1],
-  "TA" => [6,5,3,1],
-  "W"  => [6,5,3,1],
-  "RE" => [6,5,3,1],
-  "OS" => [6,5,3,1],
-  "IR" => [6,5,3,1],
-  "PT" => [6,5,3,1],
-  "AU" => [6,5,3,1],
-  "HG" => [6,5,3,1],
-  "TL" => [6,5,3,1],
-  "PB" => [6,5,3,1],
-  "BI" => [6,5,3,1],
-  "PO" => [6,5,3,1],
-  "AT" => [6,5,3,1],
-  "RN" => [6,5,3,1],
-  "FR" => [7,6,3,1],
-  "RA" => [7,6,3,1],
-  "AC" => [7,6,4,2],
-  "TH" => [7,6,4,2],
-  "PA" => [7,6,4,2],
-  "U"  => [7,6,4,2],
-  "NP" => [7,6,4,2],
-  "PU" => [7,6,4,2],
-  "AM" => [7,6,4,2],
-  "CM" => [7,6,4,2]
+  "ANO-RCC-MB" => NSHELL4L_ANO_RCC_MB,
+  "ANO-R0"     => NSHELL4L_ANO_R0
 )
 
-function nshell4l_minbas(atom::String)
-  if haskey(NSHELL4L_MINBAS, atom)
-    return NSHELL4L_MINBAS[atom]
+""" 
+  Return the number of shells for each angular momentum in the minimal basis set. 
+"""
+function nshell4l_minbas(nnum, basis::String)
+  if haskey(NSHELL4L_MINBAS, basis)
+    return NSHELL4L_MINBAS[basis][nnum]
   else
-    error("Minbas dimenstions not available for atom $atom")
+    error("Minbas dimenstions not available for basis $basis")
   end
 end
