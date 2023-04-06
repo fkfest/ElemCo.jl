@@ -102,10 +102,11 @@ function main()
   println(size(EC.fd.int2))
   norb = headvar(EC.fd, "NORB")
   nelec = headvar(EC.fd, "NELEC")
+  ms2 = headvar(EC.fd, "MS2")
 
   SP = EC.space
 
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, ms2)
   SP[':'] = 1:headvar(EC.fd,"NORB")
 
 

@@ -80,7 +80,7 @@ function read_fcidump(fcidump::String)
   if simtra
     println("Non-Hermitian")
   end
-  if isnothing(headvar(fd, "NPY2")) && isnothing(headvar(fd, "NPYAA"))
+  if isnothing(headvar(fd, "NPY2")) && isnothing(headvar(fd, "NPY2AA"))
     # read integrals from fcidump file
     read_integrals!(fd,fdf)
     close(fdf)
@@ -105,7 +105,7 @@ function read_header(fdfile)
     if length(line) == 0
       continue
     end
-    if line == "/"
+    if line == "/" || line == "&END"
       # end of header
       break
     end
@@ -127,7 +127,8 @@ function read_header(fdfile)
             # store the previous array
             head[variable_name] = elements
           end
-          variable_name = prev_el
+          # case-insensitive variable names in the header
+          variable_name = uppercase(prev_el)
           elements = []
           prev_el = ""
         else
@@ -164,11 +165,11 @@ function read_integrals!(fd::FDump, dir::AbstractString)
     fd.int2 = mmap_integrals(fd, dir, "NPY2")
     fd.int1 = mmap_integrals(fd, dir, "NPY1")
   else
-    fd.int2aa = mmap_integrals(fd, dir, "NPYAA")
-    fd.int2bb = mmap_integrals(fd, dir, "NPYBB")
-    fd.int2ab = mmap_integrals(fd, dir, "NPYAB")
-    fd.int1a = mmap_integrals(fd, dir, "NPYA")
-    fd.int1b = mmap_integrals(fd, dir, "NPYB")
+    fd.int2aa = mmap_integrals(fd, dir, "NPY2AA")
+    fd.int2bb = mmap_integrals(fd, dir, "NPY2BB")
+    fd.int2ab = mmap_integrals(fd, dir, "NPY2AB")
+    fd.int1a = mmap_integrals(fd, dir, "NPY1A")
+    fd.int1b = mmap_integrals(fd, dir, "NPY1B")
   end
   if isnothing(headvar(fd, "ENUC"))
     error("ENUC option not found in fcidump")
@@ -280,7 +281,8 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     line = split(linestr)
     if length(line) != 5
       # println("Last line: ",linestr)
-      break
+      # skip lines (in the case there is something left from header)...
+      continue
     end
     integ = parse(Float64,line[1])
     i1 = parse(Int,line[2])
