@@ -4,7 +4,8 @@ info about molecular system (geometry)
 macros to specify geometry and basis sets
 """
 module MSystem
-export MSys, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec
+using ..ECInts
+export MSys, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
 
 include("elements.jl")
 include("minbas.jl")
@@ -220,6 +221,12 @@ function guess_nocc(ms::MSys)
   return nalpha, nbeta
 end
 
+function guess_norb(ms::MSys)
+    # TODO: use element-specific basis!
+  aobasis = lowercase(ms.atoms[1].basis["ao"].name)
+  bao = BasisSet(aobasis,genxyz(ms,bohr=false))
+  return bao.nbas 
+end
 
 """ 
   return the averaged number of electrons in the orbitals in the minimal basis set

@@ -158,6 +158,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     bao,bfit = generate_basis(ms)
   end
   cMO = guess_orb(ms,EC,guess)
+  ϵ = zeros(size(cMO,1))
   hsmall = load(EC,"hsmall")
   sao = load(EC,"sao")
   SP = EC.space
@@ -190,6 +191,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     ϵ,cMO = eigen(Hermitian(fock),Hermitian(sao))
     # display(ϵ)
   end
+  return ϵ, cMO
 end
 
 

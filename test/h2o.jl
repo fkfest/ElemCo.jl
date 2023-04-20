@@ -1,5 +1,5 @@
-using ..eCo
-using Test
+#using ..eCo
+#using Test
 
 @testset "H2O Closed-Shell Test" begin
 epsilon    =   1.e-6
@@ -9,7 +9,7 @@ ECCSD_test =  -0.311496831457
 EDCSD_test =  -0.328754956597
 
 EC = ECInfo()
-EC.fd = read_fcidump("test/H2O.FCIDUMP")
+EC.fd = read_fcidump(joinpath(@__DIR__,"H2O.FCIDUMP"))
 # create scratch directory
 mkpath(EC.scr)
 EC.scr = mktempdir(EC.scr)

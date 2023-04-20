@@ -11,7 +11,7 @@ module FciDump
 using Parameters
 using ..MNPY
 
-export FDump, read_fcidump, headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2
+export FDump, read_fcidump, headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
