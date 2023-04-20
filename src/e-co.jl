@@ -11,8 +11,8 @@ include("tensortools.jl")
 include("fock.jl")
 include("cc.jl")
 
-include("msystem.jl")
 include("integrals.jl")
+include("msystem.jl")
 include("dfhf.jl")
 
 """
@@ -80,10 +80,8 @@ function parse_commandline(EC::ECInfo)
   occb = args["occb"]
   test = args["test"]
   if test
-    include("../test/h2o.jl")
-    include("../test/h2o_st1.jl")
-    include("../test/h2o_cation.jl")
-    exit(0)
+    include(joinpath(@__DIR__,"..","test","runtests.jl"))
+    fcidump_file = ""
   end
   return fcidump_file, method, occa, occb
 end
@@ -92,6 +90,10 @@ function main()
   t1 = time_ns()
   EC = ECInfo()
   fcidump, method_string, occa, occb = parse_commandline(EC)
+  if fcidump == ""
+    println("No input file given.")
+    return
+  end
   method_names = split(method_string)
   # create scratch directory
   mkpath(EC.scr)
