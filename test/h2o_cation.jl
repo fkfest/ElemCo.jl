@@ -59,7 +59,7 @@ EMp2, T2a, T2b, T2ab = calc_UMP2(EC)
 # if ecmethod.exclevel[1] == FullExc
 #     T1 = zeros(size(SP('v'),1),size(SP('o'),1))
 # end
-# ECCSD = calc_cc!(EC, T1, T2, dc)
+# ECCSD, T1, T2 = calc_cc(EC, T1, T2, dc)
 # @test abs(ECCSD-ECCSD_test) < epsilon
 
 # #calculate DCSD
@@ -70,7 +70,7 @@ EMp2, T2a, T2b, T2ab = calc_UMP2(EC)
 #     T1 = zeros(size(SP('v'),1),size(SP('o'),1))
 # end
 # EMp2, T2 = calc_MP2(EC)
-# EDCSD = calc_cc!(EC, T1, T2, dc)
+# EDCSD, T1, T2 = calc_cc(EC, T1, T2, dc)
 # @test abs(EDCSD-EDCSD_test) < epsilon
 
 end

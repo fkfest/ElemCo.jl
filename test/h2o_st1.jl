@@ -59,22 +59,22 @@ EMp2,T2 = calc_MP2(EC)
 #calculate CCSD
 ecmethod = ECMethod("ccsd")
 dc = (ecmethod.theory == "DC")
-T1 = nothing
+T1 = zeros(0)
 if ecmethod.exclevel[1] == FullExc
     T1 = zeros(size(SP('v'),1),size(SP('o'),1))
 end
-ECCSD = calc_cc!(EC, T1, T2, dc)
+ECCSD, T1, T2 = calc_cc(EC, T1, T2, dc)
 @test abs(ECCSD-ECCSD_test) < epsilon
 
 #calculate DCSD
 ecmethod = ECMethod("dcsd")
 dc = (ecmethod.theory == "DC")
-T1 = nothing
+T1 = zeros(0)
 if ecmethod.exclevel[1] == FullExc
     T1 = zeros(size(SP('v'),1),size(SP('o'),1))
 end
 EMp2, T2 = calc_MP2(EC)
-EDCSD = calc_cc!(EC, T1, T2, dc)
+EDCSD, T1, T2 = calc_cc(EC, T1, T2, dc)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
 end

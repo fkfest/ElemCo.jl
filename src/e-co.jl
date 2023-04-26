@@ -166,16 +166,25 @@ function main()
     end
     closed_shell || error("Open-shell methods not implemented yet")
     dc = (ecmethod.theory == "DC")
-    T1 = nothing
     if ecmethod.exclevel[1] == FullExc
       T1 = zeros(size(SP['v'],1),size(SP['o'],1))
+    else
+      T1 = zeros(0)
     end
-    if ecmethod.exclevel[3] != NoExc
-      error("no triples implemented yet...")
+    if ecmethod.exclevel[3] == FullExc
+      error("no iterative triples implemented yet...")
     end
-    ECC = calc_cc!(EC, T1, T2, dc)
-    println("$mname correlation energy: ",ECC)
-    println("$mname total energy: ",ECC+EHF)
+    ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
+    main_name = method_name(T1,dc)
+    println("$main_name correlation energy: ",ECC)
+    println("$main_name total energy: ",ECC+EHF)
+    if ecmethod.exclevel[3] == PertExc
+      ET3, ET3b = calc_pertT(EC, T1, T2)
+      println()
+      println("$main_name[T] total energy: ",ECC+ET3b+EHF)
+      println("$main_name(T) correlation energy: ",ECC+ET3)
+      println("$main_name(T) total energy: ",ECC+ET3+EHF)
+    end
     t1 = print_time(EC, t1,"CC",1)
   end
 end
