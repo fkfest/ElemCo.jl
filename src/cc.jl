@@ -16,7 +16,7 @@ using ..TensorTools
 using ..FciDump
 using ..DIIS
 
-export calc_MP2, calc_UMP2, calc_cc!
+export calc_MP2, calc_UMP2, method_name, calc_cc, calc_pertT
 
 function update_singles(R1, ϵo, ϵv, shift)
   ΔT1 = deepcopy(R1)
@@ -107,7 +107,7 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
     int2[i,j,a,b] += R2[a,b,i,j]
     ET2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j]) * int2[i,j,a,b])
   end
-  if !isnothing(T1)
+  if length(T1) > 0
     dfock = load(EC,"dfock"*'o')
     fov = dfock[SP['o'],SP['v']] + EC.fock[SP['o'],SP['v']] # undressed part should be with factor two
     @tensoropt ET1 = scalar((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
@@ -322,8 +322,8 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
 end
 
 """dress integrals with singles"""
-function calc_dressed_ints(EC::ECInfo, T1a, T1b=nothing)
-  if isnothing(T1b)
+function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
+  if length(T1b) == 0
     calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
   else
     calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
@@ -389,7 +389,7 @@ function method_name(T1, dc = false)
   else
     name = "CC"
   end
-  if isnothing(T1)
+  if length(T1) == 0
     name *= "D"
   else
     name *= "SD"
@@ -408,7 +408,7 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
   SP = EC.space
   norb = length(SP[':'])
   nocc = length(SP['o'])
-  if !isnothing(T1)
+  if length(T1) > 0
     D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
   else
     D2 = zeros(norb,norb,nocc,nocc)
@@ -417,7 +417,7 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
     D2[SP['v'],SP['v'],:,:][a,b,i,j] = T2[a,b,i,j] 
     D2[SP['o'],SP['o'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k]
   end
-  if !isnothing(T1)
+  if length(T1) > 0
     @tensoropt begin
       D2[SP['v'],SP['v'],:,:][a,b,i,j] += T1[a,i] * T1[b,j]
       D2[SP['o'],SP['v'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
@@ -437,7 +437,7 @@ Calculate CCSD or DCSD residual.
 function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   t1 = time_ns()
   SP = EC.space
-  if !isnothing(T1)
+  if length(T1) > 0
     calc_dressed_ints(EC,T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
@@ -445,7 +445,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   end
   @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   dfock = load(EC,"dfock"*'o')
-  if !isnothing(T1)
+  if length(T1) > 0
     if EC.use_kext
       dint1 = load(EC,"dint1"*'o')
       R1 = dint1[SP['v'],SP['o']]
@@ -465,7 +465,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     end
     t1 = print_time(EC,t1,"singles residual",2)
   else
-    R1 = nothing
+    R1 = Float64[]
   end
 
   # <ab|ij>
@@ -526,7 +526,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
       @tensoropt R2pq[p,r,i,j] := rR2pq[p,r,i,j] + rR2pq[r,p,j,i]
     end
     R2 += R2pq[SP['v'],SP['v'],:,:]
-    if !isnothing(T1)
+    if length(T1) > 0
       @tensoropt begin
         R2[a,b,i,j] -= R2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
         R2[a,b,i,j] -= R2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
@@ -598,14 +598,78 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
 
   return R1,R2
 end
+"""
+Calculate (T) correction for CCSD
+"""
+function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
+  # <ab|ck>
+  abck = ints2(EC,"vvvo")
+  # <ia|jk>
+  iajk = ints2(EC,"ovoo")
+  # <ij|ab>
+  ijab = ints2(EC,"oovv")
+  nocc = length(EC.space['o'])
+  nvir = length(EC.space['v'])
+  ϵo = EC.ϵo
+  ϵv = EC.ϵv
+  Enb3 = 0.0
+  IntX = zeros(nvir,nocc)
+  for k = 1:nocc 
+    for j = 1:k
+      prefac = (j == k) ? 1.0 : 2.0
+      for i = 1:j
+        fac = prefac 
+        if i == j 
+          if j == k
+            continue
+          end 
+          fac = 1.0
+        end
+        @tensoropt begin
+          Kijk[a,b,c] := T2[:,:,i,j][a,d] * abck[:,:,:,k][d,c,b]
+          Kijk[a,b,c] += T2[:,:,j,i][b,d] * abck[:,:,:,k][d,c,a]
+          Kijk[a,b,c] += T2[:,:,i,k][a,d] * abck[:,:,:,j][d,b,c]
+          Kijk[a,b,c] += T2[:,:,k,i][c,d] * abck[:,:,:,j][d,b,a]
+          Kijk[a,b,c] += T2[:,:,j,k][b,d] * abck[:,:,:,i][d,a,c]
+          Kijk[a,b,c] += T2[:,:,k,j][c,d] * abck[:,:,:,i][d,a,b]
+
+          Kijk[a,b,c] -= T2[:,:,:,i][b,a,l] * iajk[:,:,j,k][l,c]
+          Kijk[a,b,c] -= T2[:,:,:,j][a,b,l] * iajk[:,:,i,k][l,c]
+          Kijk[a,b,c] -= T2[:,:,:,i][c,a,l] * iajk[:,:,k,j][l,b]
+          Kijk[a,b,c] -= T2[:,:,:,k][a,c,l] * iajk[:,:,i,j][l,b]
+          Kijk[a,b,c] -= T2[:,:,:,j][c,b,l] * iajk[:,:,k,i][l,a]
+          Kijk[a,b,c] -= T2[:,:,:,k][b,c,l] * iajk[:,:,j,i][l,a]
+          
+          X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
+        end
+        for abc ∈ CartesianIndices(X)
+          a,b,c = Tuple(abc)
+          X[abc] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
+        end
+
+        @tensoropt Enb3 += fac * scalar(Kijk[a,b,c] * X[a,b,c])
+      
+        # julia 1.9 r1: cannot use @tensoropt begin/end here, since 
+        # IntX[:,j] overwrites IntX[:,i] if j == i
+        @tensoropt IntX[:,i][a] += fac * X[a,b,c] * ijab[j,k,:,:][b,c]
+        @tensoropt IntX[:,j][b] += fac * X[a,b,c] * ijab[i,k,:,:][a,c]
+        @tensoropt IntX[:,k][c] += fac * X[a,b,c] * ijab[i,j,:,:][a,b]
+      end 
+    end
+  end
+  # singles contribution
+  @tensoropt En3 = scalar(T1[a,i] * IntX[a,i])
+  En3 += Enb3
+  return En3, Enb3
+end
 
 """
 Calculate coupled cluster amplitudes.
 
-If T1 is `nothing` on input, no singles will be calculated.
+If length(T1) is 0 on input, no singles will be calculated.
 If dc: calculate distinguishable cluster.
 """
-function calc_cc!(EC::ECInfo, T1, T2, dc = false)
+function calc_cc(EC::ECInfo, T1, T2, dc = false)
   println(method_name(T1,dc))
   diis = Diis(EC.scr)
 
@@ -613,7 +677,7 @@ function calc_cc!(EC::ECInfo, T1, T2, dc = false)
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
-  R1 = nothing
+  R1 = Float64[]
   Eh = 0.0
   t0 = time_ns()
   for it in 1:EC.maxit
@@ -624,7 +688,7 @@ function calc_cc!(EC::ECInfo, T1, T2, dc = false)
     NormR2 = calc_doubles_norm(R2)
     Eh = calc_hylleraas(EC,T1,T2,R1,R2)
     T2 += update_doubles(EC,R2)
-    if isnothing(T1)
+    if length(T1) == 0
       T2, = perform(diis,[T2],[R2])
       En = 0.0
     else
@@ -647,7 +711,8 @@ function calc_cc!(EC::ECInfo, T1, T2, dc = false)
   println()
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
   println()
-  return Eh
+
+  return Eh,T1,T2
 end
 
 end #module

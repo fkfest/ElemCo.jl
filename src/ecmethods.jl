@@ -49,6 +49,7 @@ struct ECMethod
     end
     # loop over remaining letters to get excitation levels
     # currently case-insensitive, can change later...
+    next_level = FullExc
     for char in uppercase(mname[ipos:end])
       if char == '2'
         if exclevel[1] == NoExc
@@ -56,12 +57,17 @@ struct ECMethod
         end
         exclevel[2] = PertExc
       else 
-        #TODO:add parenthesis etc...
-        iexc = findfirst(char,ExcLevels)
-        if isnothing(iexc)
-          error("Excitation level not recognized")
+        if char == '('
+          next_level = PertExc
+        elseif char == ')'
+          next_level = FullExc
+        else
+          iexc = findfirst(char,ExcLevels)
+          if isnothing(iexc)
+            error("Excitation level $char not recognized")
+          end
+          exclevel[iexc] = next_level
         end
-        exclevel[iexc] = FullExc
       end
     end
     new(unrestricted,theory,exclevel)
