@@ -6,7 +6,7 @@
 module MyIO
 using Mmap
 
-export miosave, mioload, miommap
+export miosave, mioload, miommap, mionewmmap, mioclosemmap
 
 const Types = [
   Bool,
@@ -89,6 +89,26 @@ function mioload(fname::String; array_of_arrays = false)
   return (narray == 1 && !array_of_arrays) ? arrs[1] : arrs
 end
 
+# create a memory map, return file and mmap
+function mionewmmap(fname::String, Type, dims::Tuple{Vararg{Int}})
+  io = open(fname, "w+")
+  # store type of numbers
+  write(io, JuliaT2Int[Type])
+  # number of arrays in the file (1 for mmaps)
+  write(io, 1)
+  # store dimensions of the arrays
+  write(io, length(dims))
+  for dim in dims
+    write(io, dim)
+  end
+  return io, mmap(io, Array{Type,length(dims)}, dims)
+end
+
+function mioclosemmap(io::IO, array::AbstractArray)
+  Mmap.sync!(array)
+  close(io)
+end
+
 function miommap(fname::String)
   io = open(fname)
   # type of numbers
@@ -107,7 +127,7 @@ function miommap(fname::String)
   for idim in 1:ndim
     append!(dims, read(io, Int))
   end
-  return mmap(io, Array{T}, Tuple(dims))
+  return io, mmap(io, Array{T,ndim}, Tuple(dims))
 end
 
 end #module

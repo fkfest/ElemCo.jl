@@ -7,9 +7,9 @@ using ..ECInfos
 using ..FciDump
 using ..MyIO
 
-export save, load, mmap, ints1, ints2, invchol
+export save, load, mmap, newmmap, closemmap, ints1, ints2, invchol
 
-function save(EC::ECInfo, fname::String,a::Array)
+function save(EC::ECInfo, fname::String, a::AbstractArray)
   miosave(joinpath(EC.scr, fname*".bin"), a)
 end
 
@@ -17,6 +17,18 @@ function load(EC::ECInfo, fname::String)
   return mioload(joinpath(EC.scr, fname*".bin"))
 end
 
+# create a new mmap file for writing (overwrites existing file)
+# returns a pointer to the file and the mmaped array
+function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}})
+  return mionewmmap(joinpath(EC.scr, fname*".bin"), Type, dims)
+end
+
+function closemmap(EC::ECInfo, file, array)
+  mioclosemmap(file, array)
+end
+
+# mmap an existing file for reading
+# returns a pointer to the file and the mmaped array
 function mmap(EC::ECInfo, fname::String)
   return miommap(joinpath(EC.scr, fname*".bin"))
 end

@@ -614,6 +614,9 @@ function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
   ϵv = EC.ϵv
   Enb3 = 0.0
   IntX = zeros(nvir,nocc)
+  if save_t3
+    t3file, T3 = newmmap(EC,"amps3",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
+  end
   for k = 1:nocc 
     for j = 1:k
       prefac = (j == k) ? 1.0 : 2.0
@@ -639,9 +642,16 @@ function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
           Kijk[a,b,c] -= T2[:,:,:,k][a,c,l] * iajk[:,:,i,j][l,b]
           Kijk[a,b,c] -= T2[:,:,:,j][c,b,l] * iajk[:,:,k,i][l,a]
           Kijk[a,b,c] -= T2[:,:,:,k][b,c,l] * iajk[:,:,j,i][l,a]
-          
-          X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
         end
+        if save_t3
+          ijk = uppertriangular(i,j,k)
+          T3[:,:,:,ijk] = Kijk
+          for abc ∈ CartesianIndices(Kijk)
+            a,b,c = Tuple(abc)
+            T3[abc,ijk] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
+          end
+        end
+        @tensoropt  X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
         for abc ∈ CartesianIndices(X)
           a,b,c = Tuple(abc)
           X[abc] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
@@ -656,6 +666,9 @@ function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
         @tensoropt IntX[:,k][c] += fac * X[a,b,c] * ijab[i,j,:,:][a,b]
       end 
     end
+  end
+  if save_t3
+    closemmap(EC,t3file,T3)
   end
   # singles contribution
   @tensoropt En3 = scalar(T1[a,i] * IntX[a,i])
@@ -713,6 +726,17 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   println()
 
   return Eh,T1,T2
+end
+
+""" calculate CCSDT and DC-CCSDT amplitudes (TODO: combine with calc_cc) """
+function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
+  nocc = length(EC.space['o'])
+  t3file, T3 = mmap(EC, "amps3")
+  trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
+  for ijk in axes(T3,4)
+    println(trippp[ijk],sum(T3[:,:,:,ijk]))
+  end
+  close(t3file)
 end
 
 end #module
