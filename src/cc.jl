@@ -728,9 +728,20 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   return Eh,T1,T2
 end
 
-""" calculate CCSDT and DC-CCSDT amplitudes (TODO: combine with calc_cc) """
-function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
+
+#Charlotte start
+""" calculate DCSDT"""
+function calc_ccsdt(EC::ECInfo, T1, T2, dc = true)
+  
+  naux2 = calc_triples_decomposition(EC)
+  calc_triples_residuals(EC, T1, T2, naux2)
+  
+end
+
+
+function calc_triples_decomposition(EC::ECInfo, dc = true)
   nocc = length(EC.space['o'])
+  nvirt = length(EC.space['v'])
   t3file, T3 = mmap(EC, "amps3")
   trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
   for ijk in axes(T3,4)
@@ -739,13 +750,9 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
   close(t3file)
 
 
-
-  #Charlotte start
-
   pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
   n = size(pqrs,1)
   B, S, Bt = svd(reshape(pqrs, (n^2,n^2)))
-  display(S)
 
   naux1 = 0
   for s in S
@@ -755,12 +762,9 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
       break
     end
   end
-  #println(naux)
-  #display(S[1:naux])
   
   #get integral decomposition
   pqP = B[:,1:naux1].*sqrt.(S[1:naux1]')
-  #display(pqP)
   
   #B_comparison = pqP * pqP'
   #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
@@ -769,12 +773,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
   #println(typeof(T3))
   #display(T3)
 
-  nvirt = length(EC.space['v'])
-  
-  #println(nvirt)
-
   Triples_Amplitudes = Base.zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
-  #Triples_Amplitudes[a,i,b,j,c,k] = zeros(TriplesAmplitudes{nvirt,nocc,nvirt,nocc,nvirt,nocc})
   #typeof(trippp)
 
   for ijk in axes(T3,4)
@@ -810,27 +809,43 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
 
   U, S2, Ut = svd(reshape(Triples_Amplitudes, (nocc * nvirt, nocc*nocc*nvirt*nvirt)))
 
+  naux2_threshold = 2*10^-3
   naux2 = 0
   for s in S2
-    if s > 2*10^-3
+    if s > naux2_threshold
       naux2 += 1
     else
       break
     end
   end
 
-  println(naux2)
-  display(S2[1:naux2])
+  #println(naux2)
+  #display(S2[1:naux2])
 
   UaiX = U[:,1:naux2]
-  display(UaiX)
+  #display(UaiX)
 
   #B_comparison = pqP * pqP'
   #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
   #println(bool)
 
-  #Charlotte end
+  return naux2
 
+  
 end
+
+
+
+function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
+
+  R3decomp = zeros(length(naux2),length(naux2),length(naux2))
+
+  @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
+
+  return R3decomp
+  
+end
+
+#Charlotte end
 
 end #module
