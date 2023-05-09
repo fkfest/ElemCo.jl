@@ -737,6 +737,100 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
     println(trippp[ijk],sum(T3[:,:,:,ijk]))
   end
   close(t3file)
+
+
+
+  #Charlotte start
+
+  pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
+  n = size(pqrs,1)
+  B, S, Bt = svd(reshape(pqrs, (n^2,n^2)))
+  display(S)
+
+  naux1 = 0
+  for s in S
+    if s > EC.choltol
+      naux1 += 1
+    else
+      break
+    end
+  end
+  #println(naux)
+  #display(S[1:naux])
+  
+  #get integral decomposition
+  pqP = B[:,1:naux1].*sqrt.(S[1:naux1]')
+  #display(pqP)
+  
+  #B_comparison = pqP * pqP'
+  #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
+  #println(bool)
+
+  #println(typeof(T3))
+  #display(T3)
+
+  nvirt = length(EC.space['v'])
+  
+  #println(nvirt)
+
+  Triples_Amplitudes = Base.zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
+  #Triples_Amplitudes[a,i,b,j,c,k] = zeros(TriplesAmplitudes{nvirt,nocc,nvirt,nocc,nvirt,nocc})
+  #typeof(trippp)
+
+  for ijk in axes(T3,4)
+    i,j,k = Tuple(trippp[ijk])                                            #trippp is giving the indices according to the joint index ijk as a tuple
+    Triples_Amplitudes[:,i,:,j,:,k] = T3[:,:,:,ijk]
+    Triples_Amplitudes[:,j,:,i,:,k] = permutedims(T3[:,:,:,ijk],(2,1,3))
+    Triples_Amplitudes[:,i,:,k,:,j] = permutedims(T3[:,:,:,ijk],(1,3,2))
+    Triples_Amplitudes[:,k,:,j,:,i] = permutedims(T3[:,:,:,ijk],(3,2,1))
+    Triples_Amplitudes[:,j,:,k,:,i] = permutedims(T3[:,:,:,ijk],(2,3,1))
+    Triples_Amplitudes[:,k,:,i,:,j] = permutedims(T3[:,:,:,ijk],(3,1,2))
+  end
+  
+  #display(Triples_Amplitudes_matrix)
+
+  
+  #for i in 1 : nocc
+  # for j in 1 : nocc
+  #  for k in 1 : nocc
+  #  Triples_Amplitudes[:,i,:,j,:,k] += T3[:,:,:,i]
+  #  Triples_Amplitudes[:,j,:,i,:,k] += T3[:,:,:,i]
+  #  Triples_Amplitudes[:,j,:,k,:,i] += T3[:,:,:,i]
+    #Triples_Amplitudes[:,k,:,j,:,i] += T3[:,:,:,i]
+    #Triples_Amplitudes[:,k,:,i,:,j] += T3[:,:,:,i]
+    #Triples_Amplitudes[:,j,:,k,:,i] += T3[:,:,:,i]
+    #Triples_Amplitudes[:,j,:,i,:,k] = permutedims(T3[:,:,:,ijk],(2,1,3,4))
+    #Triples_Amplitudes[:,i,:,k,:,j] = permutedims(T3[:,:,:,ijk],(1,3,2,4))
+    #Triples_Amplitudes[:,k,:,j,:,i] = permutedims(T3[:,:,:,ijk],(3,2,1,4))
+    #Triples_Amplitudes[:,j,:,k,:,i] = permutedims(T3[:,:,:,ijk],(2,3,1,4))
+    #Triples_Amplitudes[:,k,:,i,:,j] = permutedims(T3[:,:,:,ijk],(3,1,2,4))
+  #  end
+  # end
+  #end
+
+  U, S2, Ut = svd(reshape(Triples_Amplitudes, (nocc * nvirt, nocc*nocc*nvirt*nvirt)))
+
+  naux2 = 0
+  for s in S2
+    if s > 2*10^-3
+      naux2 += 1
+    else
+      break
+    end
+  end
+
+  println(naux2)
+  display(S2[1:naux2])
+
+  UaiX = U[:,1:naux2]
+  display(UaiX)
+
+  #B_comparison = pqP * pqP'
+  #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
+  #println(bool)
+
+  #Charlotte end
+
 end
 
 end #module
