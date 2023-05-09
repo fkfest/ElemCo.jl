@@ -728,24 +728,98 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   return Eh,T1,T2
 end
 
+"""
+generate end-of-block indices for auxiliary basis
+"""
+function get_endauxblks(naux, blocksize = 100)
+  nauxblks = naux ÷ blocksize
+  if nauxblks == 0 || naux - nauxblks*blocksize > 0.5*blocksize
+    nauxblks += 1
+  end
+  endauxblks = [ (i == nauxblks) ? naux : i*blocksize for i in 1:nauxblks ]
+  return endauxblks
+end
+
+"""
+calculate dressed integrals for 3-index integrals
+"""
+function calc_dressed_3idx(EC,T1)
+  pqPfile, pqP = mmap(EC, "pqP")
+  println(size(pqP))
+  SP = EC.space
+  nP = size(pqP,3)
+  nocc = length(SP['o'])
+  nvirt = length(SP['v'])
+  # create mmaps for dressed integrals
+  ovPfile, ovP = newmmap(EC,"d_ovP",Float64,(nocc,nvirt,nP))
+  voPfile, voP = newmmap(EC,"d_voP",Float64,(nvirt,nocc,nP))
+  ooPfile, ooP = newmmap(EC,"d_ooP",Float64,(nocc,nocc,nP))
+  vvPfile, vvP = newmmap(EC,"d_vvP",Float64,(nvirt,nvirt,nP))
+
+  PBlks = get_endauxblks(nP)
+  sP = 1 # start index of each block
+  for eP in PBlks # end index of each block
+    P = sP:eP
+    ovP[:,:,P] = pqP[SP['o'],SP['v'],P]
+    vvP[:,:,P] = pqP[SP['v'],SP['v'],P]
+    @tensoropt vvP[:,:,P][a,b,P] -= T1[a,i] * ovP[:,:,P][i,b,P]
+    voP[:,:,P] = pqP[SP['v'],SP['o'],P]
+    @tensoropt voP[:,:,P][a,i,P] += T1[b,i] * vvP[:,:,P][a,b,P]
+    ooP[:,:,P] = pqP[SP['o'],SP['o'],P]
+    @tensoropt voP[:,:,P][a,i,P] -= T1[a,j] * ooP[:,:,P][j,i,P]
+    @tensoropt ooP[:,:,P][i,j,P] += T1[b,j] * ovP[:,:,P][i,b,P]
+    sP = eP + 1
+  end
+  closemmap(EC,ovPfile,ovP)
+  closemmap(EC,voPfile,voP)
+  closemmap(EC,ooPfile,ooP)
+  closemmap(EC,vvPfile,vvP)
+  close(pqPfile)
+end
+
+"""
+  compare to 4-idx dressed integrals
+"""
+function test_dressed_ints(EC,T1)
+  calc_dressed_ints(EC,T1)
+  ooPfile, ooP = mmap(EC,"d_ooP")
+  vvPfile, vvP = mmap(EC,"d_vvP")
+  @tensoropt abij[a,b,i,j] := vvP[a,b,P] * ooP[i,j,P]
+  close(vvPfile)
+  if isapprox(permutedims(abij,(1,3,2,4)), load(EC,"d_vovo"), atol = 1e-6)
+    println("dressed integrals (ab|ij) ok")
+  else
+    println("dressed integrals (ab|ij) not ok")
+  end
+  voPfile, voP = mmap(EC,"d_voP")
+  @tensoropt aijk[a,i,j,k] := voP[a,i,P] * ooP[j,k,P]
+  if isapprox(permutedims(aijk,(1,3,2,4)), load(EC,"d_vooo"), atol = 1e-4)
+    println("dressed integrals (ai|jk) ok")
+  else
+    println("dressed integrals (ai|jk) not ok")
+  end
+  ovPfile, ovP = mmap(EC,"d_ovP")
+  @tensoropt aijb[a,i,j,b] := voP[a,i,P] * ovP[j,b,P]
+  if isapprox(permutedims(aijb,(1,3,2,4)), load(EC,"d_voov"), atol = 1e-6)
+    println("dressed integrals (ai|jb) ok")
+  else
+    println("dressed integrals (ai|jb) not ok")
+  end
+  close(ovPfile)
+  close(voPfile)
+  close(ooPfile)
+end
+
 """ calculate CCSDT and DC-CCSDT amplitudes (TODO: combine with calc_cc) """
 function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
   nocc = length(EC.space['o'])
-  t3file, T3 = mmap(EC, "amps3")
-  trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
-  for ijk in axes(T3,4)
-    println(trippp[ijk],sum(T3[:,:,:,ijk]))
-  end
-  close(t3file)
-
-
 
   #Charlotte start
 
   pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
   n = size(pqrs,1)
   B, S, Bt = svd(reshape(pqrs, (n^2,n^2)))
-  display(S)
+  # display(S)
 
   naux1 = 0
   for s in S
@@ -755,16 +829,22 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
       break
     end
   end
-  #println(naux)
+  println(naux1)
   #display(S[1:naux])
   
   #get integral decomposition
   pqP = B[:,1:naux1].*sqrt.(S[1:naux1]')
   #display(pqP)
-  
   #B_comparison = pqP * pqP'
   #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
   #println(bool)
+  save(EC, "pqP", reshape(pqP, (n,n,naux1)))
+  pqP = nothing
+
+  #get dressed integrals
+  calc_dressed_3idx(EC,T1)
+  # test_dressed_ints(EC,T1) #DEBUG
+
 
   #println(typeof(T3))
   #display(T3)
@@ -777,6 +857,8 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
   #Triples_Amplitudes[a,i,b,j,c,k] = zeros(TriplesAmplitudes{nvirt,nocc,nvirt,nocc,nvirt,nocc})
   #typeof(trippp)
 
+  t3file, T3 = mmap(EC, "amps3")
+  trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
   for ijk in axes(T3,4)
     i,j,k = Tuple(trippp[ijk])                                            #trippp is giving the indices according to the joint index ijk as a tuple
     Triples_Amplitudes[:,i,:,j,:,k] = T3[:,:,:,ijk]
@@ -786,6 +868,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
     Triples_Amplitudes[:,j,:,k,:,i] = permutedims(T3[:,:,:,ijk],(2,3,1))
     Triples_Amplitudes[:,k,:,i,:,j] = permutedims(T3[:,:,:,ijk],(3,1,2))
   end
+  close(t3file)
   
   #display(Triples_Amplitudes_matrix)
 
@@ -823,7 +906,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
   display(S2[1:naux2])
 
   UaiX = U[:,1:naux2]
-  display(UaiX)
+  # display(UaiX)
 
   #B_comparison = pqP * pqP'
   #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
