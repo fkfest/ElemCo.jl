@@ -728,33 +728,6 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   return Eh,T1,T2
 end
 
-
-
-
-
-
-
-
-
-
-
-#Charlotte start
-""" calculate DCSDT"""
-function calc_ccsdt(EC::ECInfo, T1, T2, dc = true)
-  
-  naux2 = calc_triples_decomposition(EC)
-  #get dressed integrals
-  calc_dressed_3idx(EC,T1)
-  # test_dressed_ints(EC,T1) #DEBUG
-
-  T3_XYZ = Base.zeros(naux2,naux2,naux2)
-  save(EC,"T3_XYZ",T3_XYZ)
-
-  calc_triples_residuals(EC, T1, T2, naux2)
-  
-end
-
-
 """
 generate end-of-block indices for auxiliary basis
 """
@@ -837,15 +810,60 @@ function test_dressed_ints(EC,T1)
   close(ooPfile)
 end
 
-function calc_triples_decomposition(EC::ECInfo, dc = true)
-  nocc = length(EC.space['o'])
-  nvirt = length(EC.space['v'])
-  t3file, T3 = mmap(EC, "amps3")
-  trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
-  for ijk in axes(T3,4)
-    println(trippp[ijk],sum(T3[:,:,:,ijk]))
+"""
+  Update decomposed triples amplitudes.
+"""
+function update_triples(R3, shift)
+  ΔT3 = deepcopy(R3)
+  ϵX = load(EC,"epsilonX")
+  for I ∈ CartesianIndices(ΔT3)
+    X,Y,Z = Tuple(I)
+    ΔT3[I] /= -(ϵX[X] + ϵX[Y] + ϵX[Z] + shift)
   end
-  close(t3file)
+  return ΔT3
+end
+
+function add_to_singles_and_doubles_residuals(EC, R1, R2)
+  SP = EC.space
+  ooPfile, ooP = mmap(EC,"d_ooP")
+  ovPfile, ovP = mmap(EC,"d_ovP")
+  Txyz = load(EC,"T3_XYZ")
+  
+  U = load(EC,"U_aiX2")
+
+  @tensoropt Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
+  @tensoropt A[P,X] := Boo[i,i,X,P] 
+  @tensoropt BBU[Z,d,j] := (ovP[j,c,P] * ovP[k,d,P]) * U[c,k,Z]
+
+  @tensoropt R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
+  @tensoropt R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,i,j] ))
+
+  BBU = nothing
+
+  @tensoropt Bov[i,a,P,X] := ooP[j,i,P] * U[a,j,X]
+  vvPfile, vvP = mmap(EC,"d_vvP")
+  @tensoropt Bvo[i,a,P,X] := vvP[a,b,P] * U[b,i,X]
+  close(vvPfile)
+  vvP = nothing
+  dfock = load(EC,"dfock"*'o')
+  fov = dfock[SP['o'],SP['v']]
+  # R2[abij] = RR2[abij] + RR2[baji]  
+  @tensoropt RR2[a,b,i,j] += U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
+  @tensoropt RR2[a,b,i,j] += 2.0*U[b,j,Y] * ((Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Txyz[X,Y,Z] * A[P,X]))
+  @tensoropt RR2[a,b,i,j] -= (Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Boo[k,j,P,Y] * (Txyz[X,Y,Z] * U[b,k,X]))
+  @tensoropt RR2[a,b,i,j] -= U[b,j,Z] * (Txyz[X,Y,Z] * (Bvo[a,k,P,X] * Boo[k,i,P,Y] - U[a,k,Y] * (Bov[i,c,P,X] * ovP[k,c,P])))
+  @tensoropt R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
+  close(ovPfile)
+  close(ooPfile)
+
+  return R1,R2
+end
+
+""" calculate CCSDT and DC-CCSDT amplitudes (TODO: combine with calc_cc) """
+function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
+  nocc = length(EC.space['o'])
+
+  #Charlotte start
 
   pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
   n = size(pqrs,1)
@@ -860,8 +878,7 @@ function calc_triples_decomposition(EC::ECInfo, dc = true)
       break
     end
   end
-  
-  #println(naux1)
+  println(naux1)
   #display(S[1:naux])
   
   #get integral decomposition
@@ -871,13 +888,22 @@ function calc_triples_decomposition(EC::ECInfo, dc = true)
   #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
   #println(bool)
   save(EC, "pqP", reshape(pqP, (n,n,naux1)))
-  pqP = nothing                                            #Warum pqP = nothing???
+  pqP = nothing
+
+  #get dressed integrals
+  calc_dressed_3idx(EC,T1)
+  # test_dressed_ints(EC,T1) #DEBUG
 
 
   #println(typeof(T3))
   #display(T3)
 
+  nvirt = length(EC.space['v'])
+  
+  #println(nvirt)
+
   Triples_Amplitudes = Base.zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
+  #Triples_Amplitudes[a,i,b,j,c,k] = zeros(TriplesAmplitudes{nvirt,nocc,nvirt,nocc,nvirt,nocc})
   #typeof(trippp)
 
   t3file, T3 = mmap(EC, "amps3")
@@ -916,96 +942,27 @@ function calc_triples_decomposition(EC::ECInfo, dc = true)
 
   U, S2, Ut = svd(reshape(Triples_Amplitudes, (nocc * nvirt, nocc*nocc*nvirt*nvirt)))
 
-  naux2_threshold = 1*10^-3
   naux2 = 0
   for s in S2
-    if s > naux2_threshold
+    if s > 2*10^-3
       naux2 += 1
     else
       break
     end
   end
 
-  #println(naux2)
-  #display(S2[1:naux2])
-
-  UaiX = reshape(U[:,1:naux2], (nvirt,nocc,naux2))
-  
-  #display(UaiX)
-
-  save(EC,"U_aiX",UaiX)
-
-  @tensoropt begin
-     T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX[a,i,X]) * UaiX[b,j,Y]) * UaiX[c,k,Z])
-
-  end
-
-  #display(T3_decomp_starting_guess)
-
-  @tensoropt begin
-    T3_decomp_check[a,i,b,j,c,k] := T3_decomp_starting_guess[X,Y,Z] * UaiX[a,i,X] * UaiX[b,j,Y] * UaiX[c,k,Z]
-  end
-
-  display(Triples_Amplitudes[:,:,:,:,:,1])
-  println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-  display(T3_decomp_check[:,:,:,:,:,1])
-
-  println(size(T3_decomp_check))
-  println(typeof(T3_decomp_check))
-  println(size(Triples_Amplitudes))
-  println(typeof(Triples_Amplitudes))
-
-
-  bool = T3_decomp_check ≈ Triples_Amplitudes
-  println("True or False?")
-  println(bool)
-
-  return naux2
-
-  
-end
-
-
-
-function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
-
   println(naux2)
-  R3decomp = Base.zeros(naux2,naux2,naux2) #nicht nötig, oder?
+  display(S2[1:naux2])
 
-  #display(R3decomp)
+  UaiX = U[:,1:naux2]
+  # display(UaiX)
 
-  UaiX = load(EC,"U_aiX")
+  #B_comparison = pqP * pqP'
+  #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
+  #println(bool)
 
-  #display(UaiX)
+  #Charlotte end
 
-  T3_XYZ = load(EC, "T3_XYZ")
-
-  #display(T3_XYZ)
-  
-  ovPfile, ovP = mmap(EC,"d_ovP")
-  voPfile, voP = mmap(EC,"d_voP")
-  ooPfile, ooP = mmap(EC,"d_ooP")
-  vvPfile, vvP = mmap(EC,"d_vvP")
-
-  @tensoropt begin
-     #R3decomp[X,Y,Z] := 
-
-  end
-  #display(R3decomp)
-
-  #@tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
-
-  return R3decomp
-
-  close(ovPfile)
-  close(voPfile)
-  close(ooPfile)
-  
 end
-
-
-#Erklärung für save Funktion: save(EC, NamedesFiles,dasgespeichertwerdensoll, zuspeichernder Tensor)
-
-#Charlotte end
 
 end #module
