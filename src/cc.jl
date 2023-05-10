@@ -728,6 +728,33 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   return Eh,T1,T2
 end
 
+
+
+
+
+
+
+
+
+
+
+#Charlotte start
+""" calculate DCSDT"""
+function calc_ccsdt(EC::ECInfo, T1, T2, dc = true)
+  
+  naux2 = calc_triples_decomposition(EC)
+  #get dressed integrals
+  calc_dressed_3idx(EC,T1)
+  # test_dressed_ints(EC,T1) #DEBUG
+
+  T3_XYZ = Base.zeros(naux2,naux2,naux2)
+  save(EC,"T3_XYZ",T3_XYZ)
+
+  calc_triples_residuals(EC, T1, T2, naux2)
+  
+end
+
+
 """
 generate end-of-block indices for auxiliary basis
 """
@@ -810,9 +837,6 @@ function test_dressed_ints(EC,T1)
   close(ooPfile)
 end
 
-"""
-  Update decomposed triples amplitudes.
-"""
 function update_triples(R3, shift)
   ΔT3 = deepcopy(R3)
   ϵX = load(EC,"epsilonX")
@@ -859,11 +883,16 @@ function add_to_singles_and_doubles_residuals(EC, R1, R2)
   return R1,R2
 end
 
-""" calculate CCSDT and DC-CCSDT amplitudes (TODO: combine with calc_cc) """
-function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
-  nocc = length(EC.space['o'])
 
-  #Charlotte start
+function calc_triples_decomposition(EC::ECInfo, dc = true)
+  nocc = length(EC.space['o'])
+  nvirt = length(EC.space['v'])
+  t3file, T3 = mmap(EC, "amps3")
+  trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
+  for ijk in axes(T3,4)
+    println(trippp[ijk],sum(T3[:,:,:,ijk]))
+  end
+  close(t3file)
 
   pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
   n = size(pqrs,1)
@@ -878,7 +907,8 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
       break
     end
   end
-  println(naux1)
+  
+  #println(naux1)
   #display(S[1:naux])
   
   #get integral decomposition
@@ -888,22 +918,13 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
   #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
   #println(bool)
   save(EC, "pqP", reshape(pqP, (n,n,naux1)))
-  pqP = nothing
-
-  #get dressed integrals
-  calc_dressed_3idx(EC,T1)
-  # test_dressed_ints(EC,T1) #DEBUG
+  pqP = nothing                                            #Warum pqP = nothing???
 
 
   #println(typeof(T3))
   #display(T3)
 
-  nvirt = length(EC.space['v'])
-  
-  #println(nvirt)
-
   Triples_Amplitudes = Base.zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
-  #Triples_Amplitudes[a,i,b,j,c,k] = zeros(TriplesAmplitudes{nvirt,nocc,nvirt,nocc,nvirt,nocc})
   #typeof(trippp)
 
   t3file, T3 = mmap(EC, "amps3")
@@ -942,27 +963,173 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = false)
 
   U, S2, Ut = svd(reshape(Triples_Amplitudes, (nocc * nvirt, nocc*nocc*nvirt*nvirt)))
 
+  naux2_threshold = 1*10^-3
   naux2 = 0
   for s in S2
-    if s > 2*10^-3
+    if s > naux2_threshold
       naux2 += 1
     else
       break
     end
   end
 
-  println(naux2)
-  display(S2[1:naux2])
+  #println(naux2)
+  #display(S2[1:naux2])
 
-  UaiX = U[:,1:naux2]
-  # display(UaiX)
+  UaiX = reshape(U[:,1:naux2], (nvirt,nocc,naux2))
+  
+  rescaledU = deepcopy(UaiX)
+  
+  for a in 1:nvirt
+    for i in 1:nocc
+      rescaledU[a,i,:] *= EC.ϵv[a] - EC.ϵo[i]
+    end
+  end
 
-  #B_comparison = pqP * pqP'
-  #bool = B_comparison ≈ reshape(pqrs, (n^2,n^2))
+  @tensoropt begin
+    Intermediate1[X,Y] := UaiX[a,i,X] * rescaledU[a,i,Y]
+  end
+
+  Intermediate2 = eigen(Intermediate1)
+  save(EC, "epsilonX", Intermediate2.values)
+
+  @tensoropt begin
+    UaiX2[a,i,Y] := Intermediate2.vectors[X,Y] * UaiX[a,i,X]
+  end
+
+  #display(UaiX2)
+  #UaiX2 Test:
+
+  rescaledU2 = deepcopy(UaiX2)
+  for a in 1:nvirt
+    for i in 1:nocc
+      rescaledU2[a,i,:] *= (EC.ϵv[a] - EC.ϵo[i])
+    end
+  end
+
+  @tensoropt begin
+    TestIntermediate1[X,Y] := UaiX2[a,i,X] * rescaledU2[a,i,Y]
+  end
+
+  #display(TestIntermediate1)
+  
+  testvector1 = diag(TestIntermediate1)
+  testbool = Intermediate2.values ≈ testvector1
+  print(testbool)
+
+  save(EC,"U_aiX2",UaiX2)
+
+  @tensoropt begin
+    T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX2[a,i,X]) * UaiX2[b,j,Y]) * UaiX2[c,k,Z])
+  end
+
+  save(EC,"T3_XYZ",T3_decomp_starting_guess)
+
+  #display(T3_decomp_starting_guess)
+
+  #@tensoropt begin
+  #  T3_decomp_check[a,i,b,j,c,k] := T3_decomp_starting_guess[X,Y,Z] * UaiX[a,i,X] * UaiX[b,j,Y] * UaiX[c,k,Z]
+  #end
+
+  #display(Triples_Amplitudes[:,:,:,:,:,1])
+  #println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+  #display(T3_decomp_check[:,:,:,:,:,1])
+
+  #println(size(T3_decomp_check))
+  #println(typeof(T3_decomp_check))
+  #println(size(Triples_Amplitudes))
+  #println(typeof(Triples_Amplitudes))
+
+
+  #bool = T3_decomp_check ≈ Triples_Amplitudes
+  #println("True or False?")
   #println(bool)
 
-  #Charlotte end
+  return naux2
 
+  
 end
+
+
+
+function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
+
+  #println(naux2)
+  #R3decomp = Base.zeros(naux2,naux2,naux2) #nicht nötig, oder?
+  #display(R3decomp)
+
+  #load UaiX2
+  UaiX2 = load(EC,"U_aiX2")
+  #display(UaiX2)
+
+  #load decomposed amplitudes
+  T3_XYZ = load(EC, "T3_XYZ")
+  #display(T3_XYZ)
+
+  #load df coeff
+  ovPfile, ovP = mmap(EC,"d_ovP")
+  voPfile, voP = mmap(EC,"d_voP")
+  ooPfile, ooP = mmap(EC,"d_ooP")
+  vvPfile, vvP = mmap(EC,"d_vvP")
+
+  #load dressed fock matrices
+  SP = EC.space
+  dfock = load(EC,"dfock"*'o')    
+  foo = dfock[SP['o'],SP['o']]
+  fov = dfock[SP['o'],SP['v']]
+  fvo = dfock[SP['v'],SP['o']]
+  fvv = dfock[SP['v'],SP['v']]
+  
+
+  
+  @tensoropt TaiX[a,i,X] := UaiX2[b,j,X] * T2[a,b,i,j]
+  @tensoropt S[a,i,X] := UaiX2[b,j,X] * T2[b,a,i,j]
+  @tensoropt TStrich[a,i,X] := 2* TaiX[a,i,X] - S[a,i,X]
+  @tensoropt BovQX[i,a,Q,X] := ooP[j,i,Q] * UaiX2[a,j,X]
+  @tensoropt BvoQX[a,i,Q,X] := vvP[a,b,Q] * UaiX2[b,i,X]
+  @tensoropt BooQX[i,j,Q,X] := ovP[i,a,Q] * UaiX2[a,j,X]
+  @tensoropt A[Q,X] := ovP[i,a,Q] * UaiX2[a,i,X]
+  
+  @tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * (UaiX2[e,k,Y'] * (T3_XYZ[X',Y',Z'] * (UaiX2[c,m,X'] * UaiX2[c,k,Z])))
+  
+  @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UaiX2[c,k,Z])
+  @tensoropt Thetavirt[b,d,Z] -= fov[l,d] * TaiX[b,l,Z]
+  @tensoropt Thetavirt[b,d,Z] += UaiX2[c,k,Z] * (T2[c,b,l,m] * (ooP[l,k,Q] * ovP[m,d,Q]))
+  @tensoropt Thetavirt[b,d,Z] += vvP[b,d,Q] * (ovP[l,e,Q] * TStrich[e,l,Z])
+  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (vvP[b,e,Q] * TaiX[e,l,Z])
+  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (T2[b,e,l,k] * (UaiX2[c,k,Z] * vvP[c,e,Q]))
+  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (UaiX2[b,l,Z'] * (T3_XYZ[X',Z,Z'] * A[Q,X']))
+  @tensoropt Thetavirt[b,d,Z] += 0.5* ovP[l,d,Q] * (UaiX2[b,l,Z'] * IntermediateTheta[Q,Z',Z])
+  @tensoropt Thetavirt[b,d,Z] += 0.5* T3_XYZ[X',Y',Z] * (UaiX2[b,m,Y'] * (ovP[l,d,Q] * BooQX[m,l,Q,X']))
+  
+  @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UaiX2[c,k,Z])
+  @tensoropt Thetaocc[l,j,Z] += ooP[l,j,Q] * (ovP[m,d,Q] * TStrich[d,m,Z])
+  @tensoropt Thetaocc[l,j,Z] -= ooP[m,j,Q] * (ovP[l,d,Q] * TaiX[d,m,Z])
+  @tensoropt Thetaocc[l,j,Z] -= UaiX2[c,k,Z] * (T2[c,d,m,j] * (ovP[l,d,Q] * ooP[m,k,Q]))
+  @tensoropt Thetaocc[l,j,Z] += UaiX2[c,k,Z] * (T2[d,e,k,j]* (ovP[l,e,Q] * vvP[c,d,Q]))
+  @tensoropt Thetaocc[l,j,Z] += ovP[l,d,Q] * (UaiX2[d,j,Z']* (T3_XYZ[X',Z,Z'] * A[Q,X']))
+  @tensoropt Thetaocc[l,j,Z] -= 0.5 * ovP[l,d,Q] * (UaiX2[d,j,Z'] * IntermediateTheta[Q,Z',Z])
+  @tensoropt Thetaocc[l,j,Z] -= 0.5 * T3_XYZ[X',Z,Z'] * (BooQX[l,m,Q,X'] * BooQX[m,j,Q,Z'])
+
+
+  @tensoropt Term1[X,Y,Z] := (TaiX[b,l,X] * Thetaocc[l,j,Z] - Thetavirt[b,d,Z] * TaiX[d,j,X]) * UaiX2[b,j,Y]
+  #@tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z]
+  
+  #display(R3decomp)
+
+  #@tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
+
+
+  close(ovPfile)
+  close(voPfile)
+  close(ooPfile)
+  close(vvPfile)
+  
+end
+
+
+#Erklärung für save Funktion: save(EC, NamedesFiles,dasgespeichertwerdensoll, zuspeichernder Tensor)
+
+#Charlotte end
 
 end #module
