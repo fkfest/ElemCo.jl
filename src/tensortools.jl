@@ -87,8 +87,7 @@ end
     otherwise return as a triangular cut.
 """
 function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
-  sc = spincase
-  if isnothing(sc)
+  if isnothing(spincase)
     second_el_alpha = isalphaspin(spaces[2],spaces[4])
     if isalphaspin(spaces[1],spaces[3])
       if second_el_alpha
@@ -100,6 +99,8 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
       !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
       sc = SCβ
     end
+  else 
+    sc = spincase
   end
   allint = integ2(EC.fd, sc)
   if ndims(allint) == 4
