@@ -731,30 +731,64 @@ end
 
 
 
-
-
-
-
-
-
-
 #Charlotte start
-""" calculate DCSDT"""
+""" calculate DC-CCSDT"""
 function calc_ccsdt(EC::ECInfo, T1, T2, dc = true)
-  
   naux2 = calc_triples_decomposition(EC)
-  #get dressed integrals
-  calc_dressed_3idx(EC,T1)
-  # test_dressed_ints(EC,T1) #DEBUG
 
-  calc_triples_residuals(EC, T1, T2, naux2)
+  println("DC-CCSDT")
+  diis = Diis(EC.scr)
+
+  println("Iter     SqNorm      Energy      DE          Res         Time")
+  NormR1 = 0.0
+  NormT1 = 0.0
+  NormT2 = 0.0
+  NormT3 = 0.0
+  R1 = Float64[]
+  En = 0.0
+  t0 = time_ns()
+  for it in 1:EC.maxit
+    t1 = time_ns()
+    #get dressed integrals
+    calc_dressed_3idx(EC,T1)
+    # test_dressed_ints(EC,T1) #DEBUG
+    t1 = print_time(EC,t1,"dressed 3-idx integrals",2)
+    R1, R2 = calc_ccsd_resid(EC,T1,T2,false)
+    t1 = print_time(EC,t1,"ccsd residual",2)
+    R1, R2 = add_to_singles_and_doubles_residuals(EC,R1,R2)
+    t1 = print_time(EC,t1,"R1(T3) and R2(T3)",2)
+    calc_triples_residuals(EC, T1, T2, naux2)
+    t1 = print_time(EC,t1,"R3",2)
+    NormT1 = calc_singles_norm(T1)
+    NormT2 = calc_doubles_norm(T2)
+    T3 = load(EC,"T3_XYZ")
+    NormT3 = calc_triples_norm(T3)
+    NormR1 = calc_singles_norm(R1)
+    NormR2 = calc_doubles_norm(R2)
+    R3 = load(EC,"R3_decomp")
+    NormR3 = calc_triples_norm(R3)
+    Eh = calc_hylleraas(EC,T1,T2,R1,R2)
+    T1 += update_singles(EC,R1)
+    T2 += update_doubles(EC,R2)
+    T3 += update_triples(EC,R3)
+    T1,T2,T3 = perform(diis,[T1,T2,T3],[R1,R2,R3])
+    save(EC,"T3_XYZ",T3)
+    En = calc_singles_energy(EC, T1)
+    En += calc_doubles_energy(EC,T2)
+    ΔE = En - Eh
+    NormR = NormR1 + NormR2 + NormR3
+    NormT = 1.0 + NormT1 + NormT2 + NormT3
+    tt = (time_ns() - t0)/10^9
+    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    if NormR < EC.thr
+      break
+    end
+  end
+  println()
+  @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f Sq.Norm of T3: %12.8f \n" NormT1 NormT2 NormT3
+  println()
   
-  R1,R2 = add_to_singles_and_doubles_residuals(EC)
-  #test 
-  # @tensoropt ETb3 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j])
-  # println("ETb3: ",ETb3)
-  # @tensoropt ETT1 = 2.0*scalar(T1[a,i] * R1[a,i])
-  # println("ETT1: ",ETT1)
+  return En,T1,T2
 end
 
 
@@ -840,17 +874,23 @@ function test_dressed_ints(EC,T1)
   close(ooPfile)
 end
 
-function update_triples(R3, shift)
+function update_triples(EC,R3, use_shift = true)
+  shift = use_shift ? EC.shiftp : 0.0
   ΔT3 = deepcopy(R3)
   ϵX = load(EC,"epsilonX")
   for I ∈ CartesianIndices(ΔT3)
     X,Y,Z = Tuple(I)
-    ΔT3[I] /= -(ϵX[X] + ϵX[Y] + ϵX[Z] + shift)
+    ΔT3[I] /= (ϵX[X] + ϵX[Y] + ϵX[Z] + shift)
   end
   return ΔT3
 end
 
-function add_to_singles_and_doubles_residuals(EC)
+function calc_triples_norm(T3)
+  @tensoropt NormT3 = scalar(T3[X,Y,Z] * T3[X,Y,Z])
+  return NormT3
+end
+
+function add_to_singles_and_doubles_residuals(EC,R1,R2)
   SP = EC.space
   ooPfile, ooP = mmap(EC,"d_ooP")
   ovPfile, ovP = mmap(EC,"d_ovP")
@@ -863,7 +903,7 @@ function add_to_singles_and_doubles_residuals(EC)
   @tensoropt A[P,X] := Boo[i,i,P,X] 
   @tensoropt BBU[Z,d,j] := (ovP[j,c,P] * ovP[k,d,P]) * U[c,k,Z]
 
-  @tensoropt R1[a,i] := U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
+  @tensoropt R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
   @tensoropt R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,d,j] ))
 
   BBU = nothing
@@ -880,13 +920,20 @@ function add_to_singles_and_doubles_residuals(EC)
   @tensoropt RR2[a,b,i,j] := 2.0*U[b,j,Y] * ((Bvo[a,i,P,Z] - Bov[i,a,P,Z])*(Txyz[X,Y,Z] * A[P,X]))
   @tensoropt RR2[a,b,i,j] += (Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Boo[k,j,P,Y] * (Txyz[X,Y,Z] * U[b,k,X]))
   @tensoropt RR2[a,b,i,j] -= U[b,j,Z] * (Txyz[X,Y,Z] * (Bvo[a,k,P,X] * Boo[k,i,P,Y] - U[a,k,Y] * (Bov[i,c,P,X] * ovP[k,c,P])))
-  @tensoropt R2[a,b,i,j] := RR2[a,b,i,j] + RR2[b,a,j,i]
+  @tensoropt R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
   close(ovPfile)
   close(ooPfile)
 
   return R1,R2
 end
 
+# test R1(T3) and R2(T3)
+function test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2) 
+  @tensoropt ETb3 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j])
+  println("ETb3: ",ETb3)
+  @tensoropt ETT1 = 2.0*scalar(T1[a,i] * R1[a,i])
+  println("ETT1: ",ETT1)
+ end
 
 function calc_triples_decomposition(EC::ECInfo, dc = true)
   nocc = length(EC.space['o'])
@@ -968,7 +1015,7 @@ function calc_triples_decomposition(EC::ECInfo, dc = true)
 
   U, S2, Ut = svd(reshape(Triples_Amplitudes, (nocc * nvirt, nocc*nocc*nvirt*nvirt)))
 
-  naux2_threshold = 1*10^-5
+  naux2_threshold = 1*10^-3
   naux2 = 0
   for s in S2
     if s > naux2_threshold
@@ -1077,6 +1124,8 @@ end
 
 function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
 
+
+  t1 = time_ns()
   #println(naux2)
   #R3decomp = Base.zeros(naux2,naux2,naux2) #nicht nötig, oder?
   #display(R3decomp)
@@ -1100,7 +1149,6 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
   dfock = load(EC,"dfock"*'o')    
   dfoo = dfock[SP['o'],SP['o']]
   dfov = dfock[SP['o'],SP['v']]
-  dfvo = dfock[SP['v'],SP['o']]
   dfvv = dfock[SP['v'],SP['v']]
   
 
@@ -1110,42 +1158,52 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
   @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UaiX2[c,k,Z]) #virt1
   @tensoropt Thetavirt[b,d,Z] += UaiX2[c,k,Z] * (T2[c,b,l,m] * (ooP[l,k,Q] * ovP[m,d,Q])) #virt3
   @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (T2[b,e,l,k] * (UaiX2[c,k,Z] * vvP[c,e,Q])) #virt6
+  t1 = print_time(EC,t1,"1 Theta terms in R3(T3)",2)
   
   @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UaiX2[c,k,Z]) #occ1
   @tensoropt Thetaocc[l,j,Z] -= UaiX2[c,k,Z] * (T2[c,d,m,j] * (ovP[l,d,Q] * ooP[m,k,Q])) #occ4
   @tensoropt Thetaocc[l,j,Z] += UaiX2[c,k,Z] * (T2[d,e,k,j]* (ovP[l,e,Q] * vvP[c,d,Q])) #occ5
+  t1 = print_time(EC,t1,"2 Theta terms in R3(T3)",2)
 
   @tensoropt BooQX[i,j,Q,X] := ovP[i,a,Q] * UaiX2[a,j,X]
   @tensoropt Thetavirt[b,d,Z] += 0.5* T3_XYZ[X',Y',Z] * (UaiX2[b,m,Y'] * (ovP[l,d,Q] * BooQX[m,l,Q,X'])) #virt9
   @tensoropt Thetaocc[l,j,Z] -= 0.5 * T3_XYZ[X',Z,Z'] * (BooQX[l,m,Q,X'] * BooQX[m,j,Q,Z']) #occ8
   BooQX = nothing
+  t1 = print_time(EC,t1,"3 Theta terms in R3(T3)",2)
 
   @tensoropt A[Q,X] := ovP[i,a,Q] * UaiX2[a,i,X]
   @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (UaiX2[b,l,Z'] * (T3_XYZ[X',Z,Z'] * A[Q,X'])) #virt7
   @tensoropt Thetaocc[l,j,Z] += ovP[l,d,Q] * (UaiX2[d,j,Z']* (T3_XYZ[X',Z,Z'] * A[Q,X']))   #occ6
   A = nothing
+  t1 = print_time(EC,t1,"4 Theta terms in R3(T3)",2)
 
   @tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * (UaiX2[e,k,Y'] * (T3_XYZ[X',Y',Z'] * (UaiX2[c,m,X'] * UaiX2[c,k,Z])))
   @tensoropt Thetavirt[b,d,Z] += 0.5* ovP[l,d,Q] * (UaiX2[b,l,Z'] * IntermediateTheta[Q,Z',Z]) #virt8
   @tensoropt Thetaocc[l,j,Z] -= 0.5 * ovP[l,d,Q] * (UaiX2[d,j,Z'] * IntermediateTheta[Q,Z',Z]) #occ7
   IntermediateTheta = nothing
+  t1 = print_time(EC,t1,"5 Theta terms in R3(T3)",2)
 
   @tensoropt TaiX[a,i,X] := UaiX2[b,j,X] * T2[a,b,i,j]
   @tensoropt TStrich[a,i,X] := 2* TaiX[a,i,X] - UaiX2[b,j,X] * T2[b,a,i,j] 
   @tensoropt Thetavirt[b,d,Z] += vvP[b,d,Q] * (ovP[l,e,Q] * TStrich[e,l,Z]) #virt4
   @tensoropt Thetaocc[l,j,Z] += ooP[l,j,Q] * (ovP[m,d,Q] * TStrich[d,m,Z]) #occ2
   TStrich = nothing
+  t1 = print_time(EC,t1,"6 Theta terms in R3(T3)",2)
+
   @tensoropt Thetavirt[b,d,Z] -= dfov[l,d] * TaiX[b,l,Z] #virt2
   @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (vvP[b,e,Q] * TaiX[e,l,Z]) #virt5
   @tensoropt Thetaocc[l,j,Z] -= ooP[m,j,Q] * (ovP[l,d,Q] * TaiX[d,m,Z]) #occ3
+  t1 = print_time(EC,t1,"7 Theta terms in R3(T3)",2)
   
   @tensoropt Term1[X,Y,Z] := (TaiX[b,l,X] * Thetaocc[l,j,Z] - Thetavirt[b,d,Z] * TaiX[d,j,X]) * UaiX2[b,j,Y]
   Thetaocc = nothing
   Thetavirt = nothing
   TaiX = nothing
+  t1 = print_time(EC,t1,"Theta terms in R3(T3)",2)
 
   @tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z] + Term1[Y,X,Z] + Term1[X,Z,Y] + Term1[Z,Y,X] + Term1[Z,X,Y] + Term1[Y,Z,X]
   Term1 = nothing
+  t1 = print_time(EC,t1,"Symmetrization of Theta terms in R3(T3)",2)
 
 
   @tensor TTilde[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
@@ -1154,6 +1212,7 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
   @tensoropt Term2[X,Y,Z] := T3_XYZ[X',Y,Z] * (UaiX2[a,l,X] * ( (dfoo[l,i] + 0.5 * (Intermediate1Term2[l,d,m,e]) * TTilde[d,e,i,m]) * UaiX2[a,i,X'])) #1
   @tensoropt Term2[X,Y,Z] -= T3_XYZ[X',Y,Z] * (UaiX2[a,i,X] *( (dfvv[a,d] - 0.5 * (Intermediate1Term2[l,d,m,e]) * TTilde[a,e,l,m]) * UaiX2[d,i,X'])) #2
   Intermediate1Term2 = nothing
+  t1 = print_time(EC,t1,"1 Chi terms in R3(T3)",2)
   @tensoropt Term2[X,Y,Z] += (UaiX2[a,i,X] * ((ooP[l,i,P] * vvP[a,d,P]) * UaiX2[d,l,X'])) * (T3_XYZ[X',Y',Z] * (UaiX2[b,j,Y] * UaiX2[b,j,Y'])) #3
   @tensoropt Term2[X,Y,Z] -= 2* (T3_XYZ[X',Y,Z] *((voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m]) * UaiX2[a,i,X]) * (ovP[l,d,P] * UaiX2[d,l,X'])) #4
   @tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',Z'] * (((UaiX2[c,k,Z] * UaiX2[c,m,Z']) * ooP[m,k,P]) * (UaiX2[b,j,Y] * (ooP[l,j,P] * UaiX2[b,l,Y']))) #5
@@ -1161,16 +1220,21 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
   @tensoropt Intermediate3Term2[X',Y,Z,P] :=  T3_XYZ[X',Y',Z] * (Intermediate2Term2[Y,Y',P])
   @tensoropt Term2[X,Y,Z] -= (T3_XYZ[X,Y',Z'] * Intermediate2Term2[Y,Y',P]) * (UaiX2[e,k,Z'] * (UaiX2[c,k,Z] * vvP[c,e,P])) #6
   Intermediate2Term2 = nothing
+  t1 = print_time(EC,t1,"2 Chi terms in R3(T3)",2)
   @tensoropt Term2[X,Y,Z] += (ooP[l,i,P] * (UaiX2[a,i,X'] * UaiX2[a,l,X])) * (Intermediate3Term2[X',Y,Z,P] + Intermediate3Term2[X',Z,Y,P]) #7
   #(T3_XYZ[X',Y',Z] * (UaiX2[b,j,Y] * (vvP[b,d,P] * UaiX2[d,j,Y'])) + T3_XYZ[X',Y,Z'] * (UaiX2[b,j,Z] * (vvP[b,d,P] * UaiX2[d,j,Z'])
   Intermediate3Term2 = nothing
+  t1 = print_time(EC,t1,"3 Chi terms in R3(T3)",2)
   @tensoropt Intermediate4Term2[l,d,a,i] := ovP[l,d,P] * (voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m])
   @tensoropt Term2[X,Y,Z] += UaiX2[c,k,Z] * ((T3_XYZ[X',Y',Y] * UaiX2[c,l,X']) * (UaiX2[d,k,Y'] * (UaiX2[a,i,X] * Intermediate4Term2[l,d,a,i]))) #8
   @tensoropt Term2[X,Y,Z] += UaiX2[b,j,Y] * ((T3_XYZ[X',Y',Z] * UaiX2[b,l,X']) * (UaiX2[d,j,Y'] * (UaiX2[a,i,X] * Intermediate4Term2[l,d,a,i]))) #9
   Intermediate4Term2 = nothing
 
+  t1 = print_time(EC,t1,"4 Chi terms in R3(T3)",2)
+
   @tensoropt R3decomp[X,Y,Z] += Term2[X,Y,Z] + Term2[Y,X,Z] + Term2[Z,Y,X]
   Term2 = nothing
+  t1 = print_time(EC,t1,"Symmetrization of Chi terms in R3(T3)",2)
 
   #display(R3decomp)
 
