@@ -966,9 +966,9 @@ function calc_triples_decomposition(EC::ECInfo, dc = true)
 
   #display(TestIntermediate1)
   
-  testvector1 = diag(TestIntermediate1)
-  testbool = Intermediate2.values ≈ testvector1
-  print(testbool)
+  #testvector1 = diag(TestIntermediate1)
+  #testbool = Intermediate2.values ≈ testvector1
+  #print(testbool)
 
   save(EC,"U_aiX2",UaiX2)
 
@@ -1028,55 +1028,88 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
   #load dressed fock matrices
   SP = EC.space
   dfock = load(EC,"dfock"*'o')    
-  foo = dfock[SP['o'],SP['o']]
-  fov = dfock[SP['o'],SP['v']]
-  fvo = dfock[SP['v'],SP['o']]
-  fvv = dfock[SP['v'],SP['v']]
+  dfoo = dfock[SP['o'],SP['o']]
+  dfov = dfock[SP['o'],SP['v']]
+  dfvo = dfock[SP['v'],SP['o']]
+  dfvv = dfock[SP['v'],SP['v']]
   
 
+  #@tensoropt BovQX[i,a,Q,X] := ooP[j,i,Q] * UaiX2[a,j,X]
+  #@tensoropt BvoQX[a,i,Q,X] := vvP[a,b,Q] * UaiX2[b,i,X]
+
+  @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UaiX2[c,k,Z]) #virt1
+  @tensoropt Thetavirt[b,d,Z] += UaiX2[c,k,Z] * (T2[c,b,l,m] * (ooP[l,k,Q] * ovP[m,d,Q])) #virt3
+  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (T2[b,e,l,k] * (UaiX2[c,k,Z] * vvP[c,e,Q])) #virt6
   
-  @tensoropt TaiX[a,i,X] := UaiX2[b,j,X] * T2[a,b,i,j]
-  @tensoropt S[a,i,X] := UaiX2[b,j,X] * T2[b,a,i,j]
-  @tensoropt TStrich[a,i,X] := 2* TaiX[a,i,X] - S[a,i,X]
-  @tensoropt BovQX[i,a,Q,X] := ooP[j,i,Q] * UaiX2[a,j,X]
-  @tensoropt BvoQX[a,i,Q,X] := vvP[a,b,Q] * UaiX2[b,i,X]
+  @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UaiX2[c,k,Z]) #occ1
+  @tensoropt Thetaocc[l,j,Z] -= UaiX2[c,k,Z] * (T2[c,d,m,j] * (ovP[l,d,Q] * ooP[m,k,Q])) #occ4
+  @tensoropt Thetaocc[l,j,Z] += UaiX2[c,k,Z] * (T2[d,e,k,j]* (ovP[l,e,Q] * vvP[c,d,Q])) #occ5
+
   @tensoropt BooQX[i,j,Q,X] := ovP[i,a,Q] * UaiX2[a,j,X]
+  @tensoropt Thetavirt[b,d,Z] += 0.5* T3_XYZ[X',Y',Z] * (UaiX2[b,m,Y'] * (ovP[l,d,Q] * BooQX[m,l,Q,X'])) #virt9
+  @tensoropt Thetaocc[l,j,Z] -= 0.5 * T3_XYZ[X',Z,Z'] * (BooQX[l,m,Q,X'] * BooQX[m,j,Q,Z']) #occ8
+  BooQX = nothing
+
   @tensoropt A[Q,X] := ovP[i,a,Q] * UaiX2[a,i,X]
-  
+  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (UaiX2[b,l,Z'] * (T3_XYZ[X',Z,Z'] * A[Q,X'])) #virt7
+  @tensoropt Thetaocc[l,j,Z] += ovP[l,d,Q] * (UaiX2[d,j,Z']* (T3_XYZ[X',Z,Z'] * A[Q,X']))   #occ6
+  A = nothing
+
   @tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * (UaiX2[e,k,Y'] * (T3_XYZ[X',Y',Z'] * (UaiX2[c,m,X'] * UaiX2[c,k,Z])))
-  
-  @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UaiX2[c,k,Z])
-  @tensoropt Thetavirt[b,d,Z] -= fov[l,d] * TaiX[b,l,Z]
-  @tensoropt Thetavirt[b,d,Z] += UaiX2[c,k,Z] * (T2[c,b,l,m] * (ooP[l,k,Q] * ovP[m,d,Q]))
-  @tensoropt Thetavirt[b,d,Z] += vvP[b,d,Q] * (ovP[l,e,Q] * TStrich[e,l,Z])
-  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (vvP[b,e,Q] * TaiX[e,l,Z])
-  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (T2[b,e,l,k] * (UaiX2[c,k,Z] * vvP[c,e,Q]))
-  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (UaiX2[b,l,Z'] * (T3_XYZ[X',Z,Z'] * A[Q,X']))
-  @tensoropt Thetavirt[b,d,Z] += 0.5* ovP[l,d,Q] * (UaiX2[b,l,Z'] * IntermediateTheta[Q,Z',Z])
-  @tensoropt Thetavirt[b,d,Z] += 0.5* T3_XYZ[X',Y',Z] * (UaiX2[b,m,Y'] * (ovP[l,d,Q] * BooQX[m,l,Q,X']))
-  
-  @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UaiX2[c,k,Z])
-  @tensoropt Thetaocc[l,j,Z] += ooP[l,j,Q] * (ovP[m,d,Q] * TStrich[d,m,Z])
-  @tensoropt Thetaocc[l,j,Z] -= ooP[m,j,Q] * (ovP[l,d,Q] * TaiX[d,m,Z])
-  @tensoropt Thetaocc[l,j,Z] -= UaiX2[c,k,Z] * (T2[c,d,m,j] * (ovP[l,d,Q] * ooP[m,k,Q]))
-  @tensoropt Thetaocc[l,j,Z] += UaiX2[c,k,Z] * (T2[d,e,k,j]* (ovP[l,e,Q] * vvP[c,d,Q]))
-  @tensoropt Thetaocc[l,j,Z] += ovP[l,d,Q] * (UaiX2[d,j,Z']* (T3_XYZ[X',Z,Z'] * A[Q,X']))
-  @tensoropt Thetaocc[l,j,Z] -= 0.5 * ovP[l,d,Q] * (UaiX2[d,j,Z'] * IntermediateTheta[Q,Z',Z])
-  @tensoropt Thetaocc[l,j,Z] -= 0.5 * T3_XYZ[X',Z,Z'] * (BooQX[l,m,Q,X'] * BooQX[m,j,Q,Z'])
+  @tensoropt Thetavirt[b,d,Z] += 0.5* ovP[l,d,Q] * (UaiX2[b,l,Z'] * IntermediateTheta[Q,Z',Z]) #virt8
+  @tensoropt Thetaocc[l,j,Z] -= 0.5 * ovP[l,d,Q] * (UaiX2[d,j,Z'] * IntermediateTheta[Q,Z',Z]) #occ7
+  IntermediateTheta = nothing
 
-
+  @tensoropt TaiX[a,i,X] := UaiX2[b,j,X] * T2[a,b,i,j]
+  @tensoropt TStrich[a,i,X] := 2* TaiX[a,i,X] - UaiX2[b,j,X] * T2[b,a,i,j] 
+  @tensoropt Thetavirt[b,d,Z] += vvP[b,d,Q] * (ovP[l,e,Q] * TStrich[e,l,Z]) #virt4
+  @tensoropt Thetaocc[l,j,Z] += ooP[l,j,Q] * (ovP[m,d,Q] * TStrich[d,m,Z]) #occ2
+  TStrich = nothing
+  @tensoropt Thetavirt[b,d,Z] -= dfov[l,d] * TaiX[b,l,Z] #virt2
+  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (vvP[b,e,Q] * TaiX[e,l,Z]) #virt5
+  @tensoropt Thetaocc[l,j,Z] -= ooP[m,j,Q] * (ovP[l,d,Q] * TaiX[d,m,Z]) #occ3
+  
   @tensoropt Term1[X,Y,Z] := (TaiX[b,l,X] * Thetaocc[l,j,Z] - Thetavirt[b,d,Z] * TaiX[d,j,X]) * UaiX2[b,j,Y]
-  #@tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z]
-  
+  Thetaocc = nothing
+  Thetavirt = nothing
+  TaiX = nothing
+
+  @tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z] + Term1[Y,X,Z] + Term1[X,Z,Y] + Term1[Z,Y,X] + Term1[Z,X,Y] + Term1[Y,Z,X]
+  Term1 = nothing
+
+
+  @tensor TTilde[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
+
+  @tensoropt Intermediate1Term2[l,d,m,e] := ovP[l,d,P] * ovP[m,e,P]
+  @tensoropt Term2[X,Y,Z] := T3_XYZ[X',Y,Z] * (UaiX2[a,l,X] * ( (dfoo[l,i] + 0.5 * (Intermediate1Term2[l,d,m,e]) * TTilde[d,e,i,m]) * UaiX2[a,i,X'])) #1
+  @tensoropt Term2[X,Y,Z] -= T3_XYZ[X',Y,Z] * (UaiX2[a,i,X] *( (dfvv[a,d] - 0.5 * (Intermediate1Term2[l,d,m,e]) * TTilde[a,e,l,m]) * UaiX2[d,i,X'])) #2
+  Intermediate1Term2 = nothing
+  @tensoropt Term2[X,Y,Z] += (UaiX2[a,i,X] * ((ooP[l,i,P] * vvP[a,d,P]) * UaiX2[d,l,X'])) * (T3_XYZ[X',Y',Z] * (UaiX2[b,j,Y] * UaiX2[b,j,Y'])) #3
+  @tensoropt Term2[X,Y,Z] -= 2* (T3_XYZ[X',Y,Z] *((voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m]) * UaiX2[a,i,X]) * (ovP[l,d,P] * UaiX2[d,l,X'])) #4
+  @tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',Z'] * (((UaiX2[c,k,Z] * UaiX2[c,m,Z']) * ooP[m,k,P]) * (UaiX2[b,j,Y] * (ooP[l,j,P] * UaiX2[b,l,Y']))) #5
+  @tensoropt Intermediate2Term2[Y,Y',P] :=  UaiX2[b,j,Y] * (vvP[b,d,P] * UaiX2[d,j,Y'])
+  @tensoropt Intermediate3Term2[X',Y,Z,P] :=  T3_XYZ[X',Y',Z] * (Intermediate2Term2[Y,Y',P])
+  @tensoropt Term2[X,Y,Z] -= (T3_XYZ[X,Y',Z'] * Intermediate2Term2[Y,Y',P]) * (UaiX2[e,k,Z'] * (UaiX2[c,k,Z] * vvP[c,e,P])) #6
+  Intermediate2Term2 = nothing
+  @tensoropt Term2[X,Y,Z] += (ooP[l,i,P] * (UaiX2[a,i,X'] * UaiX2[a,l,X])) * (Intermediate3Term2[X',Y,Z,P] + Intermediate3Term2[X',Z,Y,P]) #7
+  #(T3_XYZ[X',Y',Z] * (UaiX2[b,j,Y] * (vvP[b,d,P] * UaiX2[d,j,Y'])) + T3_XYZ[X',Y,Z'] * (UaiX2[b,j,Z] * (vvP[b,d,P] * UaiX2[d,j,Z'])
+  Intermediate3Term2 = nothing
+  @tensoropt Intermediate4Term2[l,d,a,i] := ovP[l,d,P] * (voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m])
+  @tensoropt Term2[X,Y,Z] += UaiX2[c,k,Z] * ((T3_XYZ[X',Y',Y] * UaiX2[c,l,X']) * (UaiX2[d,k,Y'] * (UaiX2[a,i,X] * Intermediate4Term2[l,d,a,i]))) #8
+  @tensoropt Term2[X,Y,Z] += UaiX2[b,j,Y] * ((T3_XYZ[X',Y',Z] * UaiX2[b,l,X']) * (UaiX2[d,j,Y'] * (UaiX2[a,i,X] * Intermediate4Term2[l,d,a,i]))) #9
+  Intermediate4Term2 = nothing
+
+  @tensoropt R3decomp[X,Y,Z] += Term2[X,Y,Z] + Term2[Y,X,Z] + Term2[Z,Y,X]
+  Term2 = nothing
+
   #display(R3decomp)
-
-  #@tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
-
 
   close(ovPfile)
   close(voPfile)
   close(ooPfile)
   close(vvPfile)
+
+  save(EC,"R3_decomp",R3decomp)
   
 end
 
