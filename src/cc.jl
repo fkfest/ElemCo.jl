@@ -780,7 +780,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, dc = true)
     NormT = 1.0 + NormT1 + NormT2 + NormT3
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
-    if NormR < EC.thr
+    if NormR < 1*10^-15 #EC.thr
       break
     end
   end
@@ -1015,7 +1015,7 @@ function calc_triples_decomposition(EC::ECInfo, dc = true)
 
   U, S2, Ut = svd(reshape(Triples_Amplitudes, (nocc * nvirt, nocc*nocc*nvirt*nvirt)))
 
-  naux2_threshold = 1*10^-3
+  naux2_threshold = 1*10^-5
   naux2 = 0
   for s in S2
     if s > naux2_threshold
@@ -1025,8 +1025,9 @@ function calc_triples_decomposition(EC::ECInfo, dc = true)
     end
   end
 
-  #println(naux2)
-  #display(S2[1:naux2])
+  display(S2[1:naux2])
+  println(naux2)
+  display(S2[1:naux2])
 
   UaiX = reshape(U[:,1:naux2], (nvirt,nocc,naux2))
   
@@ -1209,8 +1210,8 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
   @tensor TTilde[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
 
   @tensoropt Intermediate1Term2[l,d,m,e] := ovP[l,d,P] * ovP[m,e,P]
-  @tensoropt Term2[X,Y,Z] := T3_XYZ[X',Y,Z] * (UaiX2[a,l,X] * ( (dfoo[l,i] + 0.5 * (Intermediate1Term2[l,d,m,e]) * TTilde[d,e,i,m]) * UaiX2[a,i,X'])) #1
-  @tensoropt Term2[X,Y,Z] -= T3_XYZ[X',Y,Z] * (UaiX2[a,i,X] *( (dfvv[a,d] - 0.5 * (Intermediate1Term2[l,d,m,e]) * TTilde[a,e,l,m]) * UaiX2[d,i,X'])) #2
+  @tensoropt Term2[X,Y,Z] := T3_XYZ[X',Y,Z] * (UaiX2[a,l,X'] * ( (dfoo[l,i] + 0.5 * Intermediate1Term2[l,d,m,e] * TTilde[d,e,i,m]) * UaiX2[a,i,X])) #1
+  @tensoropt Term2[X,Y,Z] -= T3_XYZ[X',Y,Z] * (UaiX2[a,i,X] *( (dfvv[a,d] - 0.5 * Intermediate1Term2[l,d,m,e] * TTilde[a,e,l,m]) * UaiX2[d,i,X'])) #2
   Intermediate1Term2 = nothing
   t1 = print_time(EC,t1,"1 Chi terms in R3(T3)",2)
   @tensoropt Term2[X,Y,Z] += (UaiX2[a,i,X] * ((ooP[l,i,P] * vvP[a,d,P]) * UaiX2[d,l,X'])) * (T3_XYZ[X',Y',Z] * (UaiX2[b,j,Y] * UaiX2[b,j,Y'])) #3
@@ -1221,7 +1222,7 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, naux2, dc = true)
   @tensoropt Term2[X,Y,Z] -= (T3_XYZ[X,Y',Z'] * Intermediate2Term2[Y,Y',P]) * (UaiX2[e,k,Z'] * (UaiX2[c,k,Z] * vvP[c,e,P])) #6
   Intermediate2Term2 = nothing
   t1 = print_time(EC,t1,"2 Chi terms in R3(T3)",2)
-  @tensoropt Term2[X,Y,Z] += (ooP[l,i,P] * (UaiX2[a,i,X'] * UaiX2[a,l,X])) * (Intermediate3Term2[X',Y,Z,P] + Intermediate3Term2[X',Z,Y,P]) #7
+  @tensoropt Term2[X,Y,Z] += (ooP[l,i,P] * (UaiX2[a,i,X] * UaiX2[a,l,X'])) * (Intermediate3Term2[X',Y,Z,P] + Intermediate3Term2[X',Z,Y,P]) #7
   #(T3_XYZ[X',Y',Z] * (UaiX2[b,j,Y] * (vvP[b,d,P] * UaiX2[d,j,Y'])) + T3_XYZ[X',Y,Z'] * (UaiX2[b,j,Z] * (vvP[b,d,P] * UaiX2[d,j,Z'])
   Intermediate3Term2 = nothing
   t1 = print_time(EC,t1,"3 Chi terms in R3(T3)",2)
