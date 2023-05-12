@@ -63,6 +63,14 @@ function parse_commandline(EC::ECInfo)
     "--force", "-f"
       help = "supress some of the error messages (ignore_error)"
       action = :store_true
+    "--choltol", "-c"
+      help = "cholesky threshold"
+      arg_type = Float64
+      default = 1.e-6
+    "--amptol", "-a"
+      help = "amplitude threshold"
+      arg_type = Float64
+      default = 1.e-3
     "arg1"
       help = "input file (currently fcidump file)"
       default = "FCIDUMP"
@@ -74,6 +82,8 @@ function parse_commandline(EC::ECInfo)
   EC.scr = args["scratch"]
   EC.verbosity = args["verbosity"]
   EC.ignore_error = args["force"]
+  EC.choltol = args["choltol"]
+  EC.ampsvdtol = args["amptol"]
   fcidump_file = args["arg1"]
   method = args["method"]
   occa = args["occa"]
@@ -179,14 +189,22 @@ function main()
     println("$main_name correlation energy: ",ECC)
     println("$main_name total energy: ",ECC+EHF)
     if ecmethod.exclevel[3] != NoExc
-      do_full_t3 = (ecmethod.exclevel[3] == FullExc)
+      do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
       ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = do_full_t3)
       println()
       println("$main_name[T] total energy: ",ECC+ET3b+EHF)
       println("$main_name(T) correlation energy: ",ECC+ET3)
       println("$main_name(T) total energy: ",ECC+ET3+EHF)
       if do_full_t3
-        CoupledCluster.calc_ccsdt(EC, T1, T2, dc)
+        cc3 = (ecmethod.exclevel[3] == PertExcIter)
+        ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, cc3)
+        if cc3
+          main_name = "CC3"
+        else
+          main_name = "DC-CCSDT"
+        end
+        println("$main_name correlation energy: ",ECC)
+        println("$main_name total energy: ",ECC+EHF)
       end 
     end
     t1 = print_time(EC, t1,"CC",1)
