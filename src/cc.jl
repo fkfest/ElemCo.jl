@@ -9,6 +9,8 @@ end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
 using TensorOperations
+# using TSVD
+using IterativeSolvers
 using Printf
 using ..Utils
 using ..ECInfos
@@ -907,7 +909,6 @@ function add_to_singles_and_doubles_residuals(EC,R1,R2)
   @tensoropt Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
   @tensoropt A[P,X] := Boo[i,i,P,X] 
   @tensoropt BBU[Z,d,j] := (ovP[j,c,P] * ovP[k,d,P]) * U[c,k,Z]
-
   @tensoropt R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
   @tensoropt R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,d,j] ))
 
@@ -1011,9 +1012,45 @@ function test_UaiX(EC::ECInfo, UaiX)
 end
 
 """
+  decompose A as U^iX_a * S * Vt
+  return U^iX_a for S > tol
+"""
+function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
+  U, S, Vt = svd(Amat)
+  naux = 0
+  for s in S
+    if s > tol
+      naux += 1
+    else
+      break
+    end
+  end
+  # display(S[1:naux])
+  # println(naux)
+  return reshape(U[:,1:naux], (nvirt,nocc,naux))
+end
+
+"""
+  iteratively decompose A as U^iX_a * S * Vt
+  return U^iX_a for first naux S
+"""
+function iter_svd_decompose(Amat, nvirt, nocc, naux)
+  # U, S2, Vt = tsvd(Amat, naux )
+  # UaiX = reshape(U[:,1:naux], (nvirt,nocc,naux))
+  # U = nothing
+  # S2 = nothing
+  # Vt = nothing
+  S2, L = svdl(Amat, nsv = naux )
+  # display(S2[1:naux])
+  return reshape(L.P[:,1:naux], (nvirt,nocc,naux))
+  # display(UaiX)
+end
+
+"""
   decompose T^ijk_abs as U^iX_a * U^jY_b * U^kZ_c * T_XYZ
 """
 function calc_triples_decomposition(EC::ECInfo)
+  use_svd = true 
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])
 
@@ -1030,25 +1067,14 @@ function calc_triples_decomposition(EC::ECInfo)
     Triples_Amplitudes[:,k,:,i,:,j] = permutedims(T3[:,:,:,ijk],(3,1,2))
   end
   close(t3file)
-  
-  U, S2, Ut = svd(reshape(Triples_Amplitudes, (nocc * nvirt, nocc*nocc*nvirt*nvirt)))
-
-  naux2_threshold = EC.ampsvdtol
-  naux2 = 0
-  for s in S2
-    if s > naux2_threshold
-      naux2 += 1
-    else
-      break
-    end
+  if use_svd
+    UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, EC.ampsvdtol)
+  else
+    naux = nvirt * 2 
+    UaiX = iter_svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, naux)
   end
-  # println(naux2)
-  # display(S2[1:naux2])
 
-  UaiX = reshape(U[:,1:naux2], (nvirt,nocc,naux2))
-  U = nothing
-  S2 = nothing
-  Ut = nothing
+
  
   # diagonalize ϵv - ϵo transformed with UaiX (for update)
   rescaledU = deepcopy(UaiX)
@@ -1062,7 +1088,7 @@ function calc_triples_decomposition(EC::ECInfo)
     Intermediate1[X,Y] := UaiX[a,i,X] * rescaledU[a,i,Y]
   end
 
-  Intermediate2 = eigen(Intermediate1)
+  Intermediate2 = eigen(Symmetric(Intermediate1))
   save(EC, "epsilonX", Intermediate2.values)
 
   @tensoropt begin
