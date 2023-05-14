@@ -7,6 +7,7 @@ EHF_test   = -75.6457645933
 EMP2_test  =  -0.287815830908
 ECCSD_T_test =  -0.329259440500
 EDCSD_test =  -0.328754956597
+EDC_CCSDT_test = -0.330054209137
 
 EC = ECInfo()
 EC.fd = read_fcidump(joinpath(@__DIR__,"H2O.FCIDUMP"))
@@ -52,17 +53,6 @@ end
 EMp2, T2 = calc_MP2(EC)
 @test abs(EMp2-EMP2_test) < epsilon
 
-#calculate CCSD
-ecmethod = ECMethod("ccsd(t)")
-dc = (ecmethod.theory == "DC")
-T1 = zeros(0)
-if ecmethod.exclevel[1] == FullExc
-    T1 = zeros(size(SP('v'),1),size(SP('o'),1))
-end
-ECCSD, T1, T2 = calc_cc(EC, T1, T2, dc)
-ET3, ET3b = calc_pertT(EC, T1, T2)
-@test abs(ECCSD+ET3-ECCSD_T_test) < epsilon
-
 #calculate DCSD
 ecmethod = ECMethod("dcsd")
 dc = (ecmethod.theory == "DC")
@@ -73,5 +63,23 @@ end
 EMp2, T2 = calc_MP2(EC)
 EDCSD, T1, T2 = calc_cc(EC, T1, T2, dc)
 @test abs(EDCSD-EDCSD_test) < epsilon
+
+#calculate CCSD
+ecmethod = ECMethod("ccsd(t)")
+dc = (ecmethod.theory == "DC")
+T1 = zeros(0)
+if ecmethod.exclevel[1] == FullExc
+    T1 = zeros(size(SP('v'),1),size(SP('o'),1))
+end
+ECCSD, T1, T2 = calc_cc(EC, T1, T2, dc)
+ET3, ET3b = calc_pertT(EC, T1, T2, save_t3 = true)
+@test abs(ECCSD+ET3-ECCSD_T_test) < epsilon
+
+#calculate DC-CCSDT
+EC.choltol = 1.e-4
+EC.ampsvdtol = 1.e-2
+EDC_CCSDT, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2)
+println(EDC_CCSDT)
+@test abs(EDC_CCSDT-EDC_CCSDT_test) < epsilon
 
 end
