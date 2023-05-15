@@ -739,10 +739,15 @@ end
 
 #Charlotte start
 """ calculate DC-CCSDT"""
-function calc_ccsdt(EC::ECInfo, T1, T2, cc3 = false)
+function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
   calc_integrals_decomposition(EC)
-  calc_triples_decomposition(EC)
-
+  if useT3
+    calc_triples_decomposition(EC)
+  else
+    # calc_dressed_3idx(EC,zeros(size(T1)))
+    calc_dressed_3idx(EC,T1)
+    calc_triples_decomposition_without_triples(EC,T2)
+  end
   if cc3
     println("CC3")
   else
@@ -935,11 +940,31 @@ function calc_integrals_decomposition(EC::ECInfo)
 end
 
 """
+  eigen decompose symmetric doubles T2[ai,bj] matrix: 
+  T^ij_ab = U^iX_a * S_XY * U^jY_b δ_XY
+  return U^iX_a for S > tol
+"""
+function eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
+  Sval, U = eigen(Symmetric(-T2mat))
+  naux = 0
+  for s in Sval
+    if -s < tol
+      break
+    end
+    naux += 1
+  end
+  # display(Sval[1:naux])
+  # println(naux)
+  return reshape(U[:,1:naux], (nvirt,nocc,naux))
+end
+
+"""
   decompose A as U^iX_a * S * Vt
   return U^iX_a for S > tol
 """
 function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
-  U, S, Vt = svd(Amat)
+  U, S, = svd(Amat)
+  # display(S)
   naux = 0
   for s in S
     if s > tol
@@ -949,7 +974,7 @@ function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
     end
   end
   # display(S[1:naux])
-  # println(naux)
+  println("SVD-basis size: ",naux)
   return reshape(U[:,1:naux], (nvirt,nocc,naux))
 end
 
@@ -969,10 +994,58 @@ function iter_svd_decompose(Amat, nvirt, nocc, naux)
   # display(UaiX)
 end
 
+""" 
+  diagonalize ϵv - ϵo transformed with UaiX (for update)
+  return eigenvalues and rotated UaiX
+"""
+function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
+  SP = EC.space
+  nocc = length(SP['o'])
+  nvirt = length(SP['v'])
+  UaiX2 = deepcopy(UaiX)
+  for a in 1:nvirt
+    for i in 1:nocc
+      UaiX2[a,i,:] *= EC.ϵv[a] - EC.ϵo[i]
+    end
+  end
+
+  @tensoropt Fdiff[X,Y] := UaiX[a,i,X] * UaiX2[a,i,Y]
+  diagFdiff = eigen(Symmetric(Fdiff))
+
+  @tensoropt UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
+  return diagFdiff.values, UaiX2
+end
+
+"""
+  decompose T^ijk_abc as U^iX_a * U^jY_b * U^kZ_c * T_XYZ
+  compute T^i_aXY and decompose D^ij_ab = (T^i_aXY T^j_bXY) to get U^iX_a
+"""
+function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
+  println("T^ijk_abc-free-decomposition")
+  nocc = length(EC.space['o'])
+  nvirt = length(EC.space['v'])
+
+  # first approx for U^iX_a from doubles decomposition
+  tol2 = EC.ampsvdtol*0.01
+  UaiX = svd_decompose(reshape(permutedims(T2,(1,3,2,4)), (nocc*nvirt, nocc*nvirt)), nvirt, nocc, tol2)
+  ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
+  D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX) 
+  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.ampsvdtol^2)
+  # UaiX = eigen_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.ampsvdtol^2)
+  ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
+  save(EC, "epsilonX", ϵX)
+  #display(UaiX)
+  naux = length(ϵX)
+  save(EC,"UvoX",UaiX)
+  # TODO: calc starting guess for T3_XYZ from T2 and UvoX
+  save(EC,"T3_XYZ",zeros(naux,naux,naux))
+end
+
 """
   decompose T^ijk_abs as U^iX_a * U^jY_b * U^kZ_c * T_XYZ
 """
 function calc_triples_decomposition(EC::ECInfo)
+  println("T^ijk_abc-decomposition")
   use_svd = true 
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])
@@ -996,33 +1069,13 @@ function calc_triples_decomposition(EC::ECInfo)
     naux = nvirt * 2 
     UaiX = iter_svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, naux)
   end
-
-
- 
-  # diagonalize ϵv - ϵo transformed with UaiX (for update)
-  rescaledU = deepcopy(UaiX)
-  for a in 1:nvirt
-    for i in 1:nocc
-      rescaledU[a,i,:] *= EC.ϵv[a] - EC.ϵo[i]
-    end
-  end
+  ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
+  save(EC, "epsilonX", ϵX)
+  #display(UaiX)
+  save(EC,"UvoX",UaiX)
 
   @tensoropt begin
-    Intermediate1[X,Y] := UaiX[a,i,X] * rescaledU[a,i,Y]
-  end
-
-  Intermediate2 = eigen(Symmetric(Intermediate1))
-  save(EC, "epsilonX", Intermediate2.values)
-
-  @tensoropt begin
-    UaiX2[a,i,Y] := Intermediate2.vectors[X,Y] * UaiX[a,i,X]
-  end
-  UaiX = nothing
-  #display(UaiX2)
-  save(EC,"UvoX",UaiX2)
-
-  @tensoropt begin
-    T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX2[a,i,X]) * UaiX2[b,j,Y]) * UaiX2[c,k,Z])
+    T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX[a,i,X]) * UaiX[b,j,Y]) * UaiX[c,k,Z])
   end
   save(EC,"T3_XYZ",T3_decomp_starting_guess)
   #display(T3_decomp_starting_guess)
@@ -1033,6 +1086,67 @@ function calc_triples_decomposition(EC::ECInfo)
   # test_calc_pertT_from_T3(EC,T3_decomp_check)
 end
 
+"""
+  calculate D^ij_ab = T^i_aXY T^j_bXY using half-decomposed perturbative triple amplitudes 
+  T^i_aXY from T2 (and UvoX)
+"""
+function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
+  voPfile, voP = mmap(EC,"d_voP")
+  ooPfile, ooP = mmap(EC,"d_ooP")
+  vvPfile, vvP = mmap(EC,"d_vvP")
+
+  @tensoropt TXai[X,a,i] := UvoX[b,j,X] * T2[a,b,i,j]
+  @tensoropt dU[P,X] := voP[c,k,P] * UvoX[c,k,X]
+
+  @tensoropt RR[X,Y,a,i] := ((TXai[X,c,j] * vvP[b,c,P]) * UvoX[b,j,Y]) * voP[a,i,P]
+  @tensoropt RR[X,Y,a,i] -= ((TXai[X,b,l] * ooP[l,j,P]) * UvoX[b,j,Y]) * voP[a,i,P]
+  @tensoropt ddUv[a,d,X] := vvP[a,d,P] * dU[P,X]
+  @tensoropt ddUo[l,j,X] := ooP[l,j,P] * dU[P,X]
+  @tensoropt RR[X,Y,a,i] += ddUv[a,d,X] * TXai[Y,d,i]
+  @tensoropt RR[X,Y,a,i] -= ddUo[l,i,X] * TXai[Y,a,l]
+  TXai = nothing
+  dU = nothing
+  @tensoropt ddUU[X,Y,d,l] := ddUv[a,d,X] * UvoX[a,l,Y]
+  @tensoropt ddUU[X,Y,d,l] -= ddUo[l,i,X] * UvoX[d,i,Y]
+  @tensoropt RR[X,Y,a,i] += ddUU[X,Y,d,l] * T2[a,d,i,l]
+  ddUU = nothing
+  @tensoropt R[X,Y,a,i] := RR[X,Y,a,i] + RR[Y,X,a,i]
+  RR = nothing
+  close(voPfile)
+  close(ooPfile)
+  close(vvPfile)
+  for I ∈ CartesianIndices(R)
+    X,Y,a,i = Tuple(I)
+    R[I] /= -(ϵX[X] + ϵX[Y] + EC.ϵv[a] - EC.ϵo[i])
+  end
+  nocc = length(EC.space['o'])
+  naux = length(ϵX)
+  # @tensoropt T3_decomp_check[a,i,b,j,c,k] := R[X,Y,a,i] * UvoX[c,k,X] * UvoX[b,j,Y]
+  # for i = 1:nocc
+  #   T3_decomp_check[:,i,:,i,:,i] .= 0.0
+  # end
+  # test_calc_pertT_from_T3(EC,T3_decomp_check)
+  @tensoropt D2[a,i,b,j] := R[X,Y,a,i] * R[X,Y,b,j]
+  # remove T^iii contributions from D2
+  UU = zeros(naux,naux,nocc)
+  for i = 1:nocc
+    @tensoropt UU[:,:,i][X,Y] = UvoX[:,i,:][a,X] * UvoX[:,i,:][a,Y]
+  end
+  TUU4i = zeros(naux,naux,size(UvoX,1))
+  ΔD2 = zeros(size(D2,1),size(D2,3))
+  for i = 1:nocc
+    @tensoropt TUU4i[X',Y',a] = (R[:,:,:,i][X,Y,a] * UU[:,:,i][X,X']) * UU[:,:,i][Y,Y']
+    for j = 1:nocc
+      @tensoropt ΔD2[a,b] = TUU4i[X,Y,a] * R[:,:,:,j][X,Y,b]
+      @tensoropt D2[:,i,:,j][a,b] -= ΔD2[a,b]
+      if i != j
+        @tensoropt D2[:,j,:,i][b,a] -= ΔD2[a,b]
+      end
+    end
+  end
+  # display(D2)
+  return D2
+end
 
 function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   t1 = time_ns()

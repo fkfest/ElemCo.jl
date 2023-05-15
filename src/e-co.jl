@@ -73,6 +73,9 @@ function parse_commandline(EC::ECInfo)
       help = "amplitude threshold"
       arg_type = Float64
       default = 1.e-3
+    "--save_t3"
+      help = "save (T) for decomposition"
+      action = :store_true
     "arg1"
       help = "input file (currently fcidump file)"
       default = "FCIDUMP"
@@ -86,6 +89,7 @@ function parse_commandline(EC::ECInfo)
   EC.ignore_error = args["force"]
   EC.choltol = args["choltol"]
   EC.ampsvdtol = args["amptol"]
+  EC.calc_t3_for_decomposition = args["save_t3"]
   fcidump_file = args["arg1"]
   method = args["method"]
   occa = args["occa"]
@@ -205,14 +209,15 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println("$main_name total energy: ",ECC+EHF)
     if ecmethod.exclevel[3] != NoExc
       do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
-      ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = do_full_t3)
+      save_pert_t3 = do_full_t3 && EC.calc_t3_for_decomposition
+      ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
       println()
       println("$main_name[T] total energy: ",ECC+ET3b+EHF)
       println("$main_name(T) correlation energy: ",ECC+ET3)
       println("$main_name(T) total energy: ",ECC+ET3+EHF)
       if do_full_t3
         cc3 = (ecmethod.exclevel[3] == PertExcIter)
-        ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, cc3)
+        ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, EC.calc_t3_for_decomposition, cc3)
         if cc3
           main_name = "CC3"
         else

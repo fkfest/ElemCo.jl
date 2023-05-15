@@ -7,7 +7,8 @@ EHF_test   = -75.6457645933
 EMP2_test  =  -0.287815830908
 ECCSD_T_test =  -0.329259440500
 EDCSD_test =  -0.328754956597
-EDC_CCSDT_test = -0.330054209137
+EDC_CCSDT_useT3_test = -0.330054209137
+EDC_CCSDT_test = -0.33024914396392
 
 EC = ECInfo()
 EC.fd = read_fcidump(joinpath(@__DIR__,"H2O.FCIDUMP"))
@@ -78,8 +79,9 @@ ET3, ET3b = calc_pertT(EC, T1, T2, save_t3 = true)
 #calculate DC-CCSDT
 EC.choltol = 1.e-4
 EC.ampsvdtol = 1.e-2
+EDC_CCSDT, = CoupledCluster.calc_ccsdt(EC, T1, T2, true)
+@test abs(EDC_CCSDT-EDC_CCSDT_useT3_test) < epsilon
 EDC_CCSDT, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2)
-println(EDC_CCSDT)
 @test abs(EDC_CCSDT-EDC_CCSDT_test) < epsilon
 
 end

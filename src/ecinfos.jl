@@ -34,6 +34,7 @@ export ECInfo, parse_orbstring, get_occvirt
   calc_d_vovv::Bool = false
   calc_d_vvoo::Bool = false
   triangular_kext = true
+  calc_t3_for_decomposition::Bool = false
 end
 
 """
