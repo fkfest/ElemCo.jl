@@ -192,7 +192,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   hd_vooo = ints2(EC,v1*o2*o1*o2)
   vovo = ints2(EC,v1*o2*v1*o2)
   @tensoropt begin
-    hd_vooo[a,k,j,l] -= hd_oooo[i,k,j,l] * T1[a,i]
+    hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
     hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
   end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*o1*o2,3)
