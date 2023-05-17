@@ -12,9 +12,12 @@ export ECInfo, parse_orbstring, get_occvirt
   maxit::Int = 50
   shifts::Float64 = 0.15
   shiftp::Float64 = 0.2
+  shiftt::Float64 = 0.2
   verbosity::Int = 2
   # cholesky threshold
-  choltol::Float64 = 1.e-8
+  choltol::Float64 = 1.e-6
+  # amplitude decomposition threshold
+  ampsvdtol::Float64 = 1.e-3
   fd::FDump = FDump()
   ignore_error::Bool = false
   # subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general
@@ -31,6 +34,7 @@ export ECInfo, parse_orbstring, get_occvirt
   calc_d_vovv::Bool = false
   calc_d_vvoo::Bool = false
   triangular_kext = true
+  calc_t3_for_decomposition::Bool = false
 end
 
 """
