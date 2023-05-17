@@ -6,7 +6,7 @@ using ..MSystem
 using ..DIIS
 using ..TensorTools
 
-export dfhf, GuessType, GUESS_HCORE, GUESS_SAD
+export dfhf, generate_integrals, guess_orb, GuessType, GUESS_HCORE, GUESS_SAD
 
 """ integral direct df-hf """ 
 function dffock(EC,cMO,bao,bfit)
