@@ -1,9 +1,9 @@
 module DfDump
 using LinearAlgebra, TensorOperations
-using ..ECInfos
-using ..ECInts
-using ..MSystem
-using ..FciDump
+using ..ElemCo.ECInfos
+using ..ElemCo.ECInts
+using ..ElemCo.MSystem
+using ..ElemCo.FciDump
 
 export dfdump
 

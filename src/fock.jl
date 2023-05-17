@@ -8,9 +8,9 @@ end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
 using TensorOperations
-using ..ECInfos
-using ..TensorTools
-using ..FciDump
+using ..ElemCo.ECInfos
+using ..ElemCo.TensorTools
+using ..ElemCo.FciDump
 
 export gen_fock
 

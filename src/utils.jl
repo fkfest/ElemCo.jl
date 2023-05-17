@@ -1,7 +1,7 @@
 """ various utilities """
 module Utils
 using Printf
-using ..ECInfos
+using ..ElemCo.ECInfos
 
 export print_time
 

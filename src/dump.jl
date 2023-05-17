@@ -9,7 +9,7 @@ module FciDump
 # using LinearAlgebra
 # using NPZ
 using Parameters
-using ..MNPY
+using ..ElemCo.MNPY
 
 export FDump, read_fcidump, headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
 

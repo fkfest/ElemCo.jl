@@ -10,11 +10,11 @@ using LinearAlgebra
 #BLAS.set_num_threads(1)
 using TensorOperations
 using Printf
-using ..Utils
-using ..ECInfos
-using ..TensorTools
-using ..FciDump
-using ..DIIS
+using ..ElemCo.Utils
+using ..ElemCo.ECInfos
+using ..ElemCo.TensorTools
+using ..ElemCo.FciDump
+using ..ElemCo.DIIS
 
 export calc_MP2, calc_UMP2, method_name, calc_cc, calc_pertT
 

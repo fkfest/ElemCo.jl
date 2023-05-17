@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # run julia script
-# options for julia can be provided by ,e.g., elco.sh @j "-p 10" [other options for the script]
+# options for julia can be provided by ,e.g., ElemCo.sh @j "-p 10" [other options for the script]
 #
 
-MAIN="src/e-co.jl"
+MAIN="src/ElemCo.jl"
 JULIA="julia"
 JULIA_OPTIONS=
 

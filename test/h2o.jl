@@ -1,6 +1,3 @@
-#using ..eCo
-#using Test
-
 @testset "H2O Closed-Shell Test" begin
 epsilon    =   1.e-6
 EHF_test   = -75.6457645933

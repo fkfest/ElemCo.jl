@@ -4,7 +4,7 @@ info about molecular system (geometry)
 macros to specify geometry and basis sets
 """
 module MSystem
-using ..ECInts
+using ..ElemCo.ECInts
 export MSys, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
 
 include("elements.jl")
