@@ -5,6 +5,8 @@ version = "1.0.0-DEV"
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+GaussianBasis = "9bb1a3dc-0d1c-467e-84f5-0c4ef701360a"
+IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MKL = "33e6dc65-8f57-5167-99aa-e5a354878fb2"
 Mmap = "a63ad114-7e13-5084-954f-fe012c677804"

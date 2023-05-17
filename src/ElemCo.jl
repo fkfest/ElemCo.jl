@@ -39,6 +39,8 @@ using .CoupledCluster
 using .FciDump
 
 
+export ECdriver
+
 function parse_commandline(EC::ECInfo)
   s = ArgParseSettings()
   @add_arg_table! s begin
@@ -65,6 +67,17 @@ function parse_commandline(EC::ECInfo)
     "--force", "-f"
       help = "supress some of the error messages (ignore_error)"
       action = :store_true
+    "--choltol", "-c"
+      help = "cholesky threshold"
+      arg_type = Float64
+      default = 1.e-6
+    "--amptol", "-a"
+      help = "amplitude threshold"
+      arg_type = Float64
+      default = 1.e-3
+    "--save_t3"
+      help = "save (T) for decomposition"
+      action = :store_true
     "arg1"
       help = "input file (currently fcidump file)"
       default = "FCIDUMP"
@@ -76,6 +89,9 @@ function parse_commandline(EC::ECInfo)
   EC.scr = args["scratch"]
   EC.verbosity = args["verbosity"]
   EC.ignore_error = args["force"]
+  EC.choltol = args["choltol"]
+  EC.ampsvdtol = args["amptol"]
+  EC.calc_t3_for_decomposition = args["save_t3"]
   fcidump_file = args["arg1"]
   method = args["method"]
   occa = args["occa"]
@@ -88,15 +104,8 @@ function parse_commandline(EC::ECInfo)
   return fcidump_file, method, occa, occb
 end
 
-function main()
+function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
   t1 = time_ns()
-  EC = ECInfo()
-  fcidump, method_string, occa, occb = parse_commandline(EC)
-  if fcidump == ""
-    println("No input file given.")
-    return
-  end
-  method_names = split(method_string)
   # create scratch directory
   mkpath(EC.scr)
   EC.scr = mktempdir(EC.scr)
@@ -111,17 +120,22 @@ function main()
   SP = EC.space
 
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, ms2)
-  SP[':'] = 1:headvar(EC.fd,"NORB")
+  SP[':'] = 1:norb
+end
 
-
+function is_closed_shell(EC::ECInfo)
+  SP = EC.space
   closed_shell = (SP['o'] == SP['O'] && !EC.fd.uhf)
-
   addname=""
   if !closed_shell
     addname = "U"
   end
+  return closed_shell, addname
+end
 
-  # calculate fock matrix 
+""" calculate fock matrix """
+function calc_fock_matrix(EC::ECInfo, closed_shell)
+  t1 = time_ns()
   if closed_shell
     EC.fock,EC.ϵo,EC.ϵv = gen_fock(EC)
     EC.fockb = EC.fock
@@ -132,15 +146,30 @@ function main()
     EC.fockb,EC.ϵob,EC.ϵvb = gen_fock(EC,SCβ)
   end
   t1 = print_time(EC,t1,"fock matrix",1)
+end
 
-  # calculate HF energy
+""" calculate HF energy """
+function calc_HF_energy(EC::ECInfo, closed_shell)
+  SP = EC.space
   if closed_shell
     EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
   else
     EHF = 0.5*(sum(EC.ϵo)+sum(EC.ϵob) + sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']])) + EC.fd.int0
   end
+  return EHF
+end
+
+function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
+  t1 = time_ns()
+  method_names = split(methods)
+  setup_scratch_and_fcidump(EC,fcidump,occa,occb)
+  closed_shell, addname = is_closed_shell(EC)
+
+  calc_fock_matrix(EC, closed_shell)
+  EHF = calc_HF_energy(EC, closed_shell)
   println(addname*"HF energy: ",EHF)
 
+  SP = EC.space
   for mname in method_names
     println()
     println("Next method: ",mname)
@@ -173,22 +202,45 @@ function main()
     else
       T1 = zeros(0)
     end
-    if ecmethod.exclevel[3] == FullExc
-      error("no iterative triples implemented yet...")
+    if ecmethod.exclevel[4] != NoExc
+      error("no quadruples implemented yet...")
     end
     ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
     main_name = method_name(T1,dc)
     println("$main_name correlation energy: ",ECC)
     println("$main_name total energy: ",ECC+EHF)
-    if ecmethod.exclevel[3] == PertExc
-      ET3, ET3b = calc_pertT(EC, T1, T2)
+    if ecmethod.exclevel[3] != NoExc
+      do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
+      save_pert_t3 = do_full_t3 && EC.calc_t3_for_decomposition
+      ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
       println()
       println("$main_name[T] total energy: ",ECC+ET3b+EHF)
       println("$main_name(T) correlation energy: ",ECC+ET3)
       println("$main_name(T) total energy: ",ECC+ET3+EHF)
+      if do_full_t3
+        cc3 = (ecmethod.exclevel[3] == PertExcIter)
+        ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, EC.calc_t3_for_decomposition, cc3)
+        if cc3
+          main_name = "CC3"
+        else
+          main_name = "DC-CCSDT"
+        end
+        println("$main_name correlation energy: ",ECC)
+        println("$main_name total energy: ",ECC+EHF)
+      end 
     end
     t1 = print_time(EC, t1,"CC",1)
   end
+end
+
+function main()
+  EC = ECInfo()
+  fcidump, method_string, occa, occb = parse_commandline(EC)
+  if fcidump == ""
+    println("No input file given.")
+    return
+  end
+  ECdriver(EC, method_string, fcidump=fcidump, occa=occa, occb=occb)
 end
 if abspath(PROGRAM_FILE) == @__FILE__
   main()

@@ -181,6 +181,10 @@ end
 function uppertriangular(i1,i2)
   return i1+i2*(i2-1)÷2
 end
+# return upper triangular index from three indices i1 <= i2 <= i3
+function uppertriangular(i1,i2,i3)
+  return i1+i2*(i2-1)÷2+(i3+1)*i3*(i3-1)÷6
+end
 
 """for not ab: particle symmetry is assumed.
    Integrals are stored in physcal notation.

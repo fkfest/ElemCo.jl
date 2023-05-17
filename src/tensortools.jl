@@ -7,9 +7,9 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MyIO
 
-export save, load, mmap, ints1, ints2, invchol
+export save, load, mmap, newmmap, closemmap, ints1, ints2, invchol
 
-function save(EC::ECInfo, fname::String,a::Array)
+function save(EC::ECInfo, fname::String, a::AbstractArray)
   miosave(joinpath(EC.scr, fname*".bin"), a)
 end
 
@@ -17,6 +17,18 @@ function load(EC::ECInfo, fname::String)
   return mioload(joinpath(EC.scr, fname*".bin"))
 end
 
+# create a new mmap file for writing (overwrites existing file)
+# returns a pointer to the file and the mmaped array
+function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}})
+  return mionewmmap(joinpath(EC.scr, fname*".bin"), Type, dims)
+end
+
+function closemmap(EC::ECInfo, file, array)
+  mioclosemmap(file, array)
+end
+
+# mmap an existing file for reading
+# returns a pointer to the file and the mmaped array
 function mmap(EC::ECInfo, fname::String)
   return miommap(joinpath(EC.scr, fname*".bin"))
 end
@@ -75,8 +87,7 @@ end
     otherwise return as a triangular cut.
 """
 function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
-  sc = spincase
-  if isnothing(sc)
+  if isnothing(spincase)
     second_el_alpha = isalphaspin(spaces[2],spaces[4])
     if isalphaspin(spaces[1],spaces[3])
       if second_el_alpha
@@ -88,6 +99,8 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
       !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
       sc = SCβ
     end
+  else 
+    sc = spincase
   end
   allint = integ2(EC.fd, sc)
   if ndims(allint) == 4
