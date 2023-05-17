@@ -2,13 +2,13 @@ using Test
 
 using LinearAlgebra
 
-using ElemCo.Utils
-using ElemCo.ECInfos
-using ElemCo.ECMethods
-using ElemCo.TensorTools
-using ElemCo.Focks
-using ElemCo.CoupledCluster
-using ElemCo.FciDump
+using .ElemCo.Utils
+using .ElemCo.ECInfos
+using .ElemCo.ECMethods
+using .ElemCo.TensorTools
+using .ElemCo.Focks
+using .ElemCo.CoupledCluster
+using .ElemCo.FciDump
 
 @testset verbose = true "FCIDUMP Calculations" begin
 
