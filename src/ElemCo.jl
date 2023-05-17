@@ -170,9 +170,6 @@ function main()
     dc = (ecmethod.theory == "DC")
     if ecmethod.exclevel[1] == FullExc
       T1 = zeros(size(SP['v'],1),size(SP['o'],1))
-      if EC.use_kext == false
-        error("CCSD should not be used without Kext.")
-      end
     else
       T1 = zeros(0)
     end
