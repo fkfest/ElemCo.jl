@@ -27,11 +27,11 @@ const Types = [
 
 const JuliaT2Int = Dict{DataType, Int}()
 
-function __init__()
+# function __init__()
   for (i,t) in enumerate(Types)
     JuliaT2Int[t] = i
   end
-end
+# end
 
 """ 
 save arrays in a file `fname`

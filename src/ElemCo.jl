@@ -1,9 +1,16 @@
 #!/usr/bin/env julia
 
+"""
+ELEctronic Methods of COrrelation 
+"""
+
+module ElemCo
+
 include("myio.jl")
 include("mnpy.jl")
 include("dump.jl")
 include("diis.jl")
+
 include("ecinfos.jl")
 include("utils.jl")
 include("ecmethods.jl")
@@ -15,12 +22,6 @@ include("integrals.jl")
 include("msystem.jl")
 include("dfhf.jl")
 
-"""
-Electron-Correlation methods 
-
-"""
-module eCo
-
 try
   using MKL
 catch
@@ -29,17 +30,18 @@ end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
 using ArgParse
-using ..Utils
-using ..ECInfos
-using ..ECMethods
-using ..TensorTools
-using ..Focks
-using ..CoupledCluster
-using ..FciDump
+using .Utils
+using .ECInfos
+using .ECMethods
+using .TensorTools
+using .Focks
+using .CoupledCluster
+using .FciDump
+
 
 function parse_commandline(EC::ECInfo)
   s = ArgParseSettings()
-  @add_arg_table s begin
+  @add_arg_table! s begin
     "--method", "-m"
       help = "method or list of methods to calculate"
       arg_type = String
@@ -47,7 +49,7 @@ function parse_commandline(EC::ECInfo)
     "--scratch", "-s"
       help = "scratch directory"
       arg_type = String
-      default = "e-cojlscr"
+      default = "elemcojlscr"
     "--verbosity", "-v"
       help = "verbosity"
       arg_type = Int

@@ -3,9 +3,9 @@
 """
 module TensorTools
 using LinearAlgebra
-using ..ECInfos
-using ..FciDump
-using ..MyIO
+using ..ElemCo.ECInfos
+using ..ElemCo.FciDump
+using ..ElemCo.MyIO
 
 export save, load, mmap, ints1, ints2, invchol
 

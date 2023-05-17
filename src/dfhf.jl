@@ -1,10 +1,10 @@
 module DFHF
 using LinearAlgebra, TensorOperations, Printf
-using ..ECInfos
-using ..ECInts
-using ..MSystem
-using ..DIIS
-using ..TensorTools
+using ..ElemCo.ECInfos
+using ..ElemCo.ECInts
+using ..ElemCo.MSystem
+using ..ElemCo.DIIS
+using ..ElemCo.TensorTools
 
 export dfhf, GuessType, GUESS_HCORE, GUESS_SAD
 

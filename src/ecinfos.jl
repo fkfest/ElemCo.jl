@@ -1,13 +1,13 @@
 """ various global infos """
 module ECInfos
 using Parameters
-using ..FciDump
+using ..ElemCo.FciDump
 
 export ECInfo, parse_orbstring, get_occvirt
 
 @with_kw mutable struct ECInfo
   # path to scratch directory
-  scr::String = "e-cojlscr"
+  scr::String = "elemcojlscr"
   thr::Float64 = 1.e-10
   maxit::Int = 50
   shifts::Float64 = 0.15

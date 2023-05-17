@@ -3,7 +3,7 @@
 module DIIS
 using LinearAlgebra
 using Parameters
-using ..MyIO
+using ..ElemCo.MyIO
 
 export Diis, perform
 
