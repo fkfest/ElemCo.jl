@@ -7,7 +7,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MyIO
 
-export save, load, mmap, newmmap, closemmap, ints1, ints2, invchol
+export save, load, mmap, newmmap, closemmap, ints1, ints2, invchol, invchol2
 
 function save(EC::ECInfo, fname::String, a::AbstractArray)
   miosave(joinpath(EC.scr, fname*".bin"), a)
@@ -121,10 +121,26 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
 end
 
 """ return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
-    
+    (first version, which is faster but less stable)
     A^-1 = A^-1 L (A^-1 L)† = M M†
     with A = L L†
-    and  LL† M = L
+    by solving the equation LL† M = L
+"""
+function invchol_old(A::AbstractMatrix; tol = 1e-8, verbose = false)
+  CA = cholesky(A, RowMaximum(), check = false, tol = tol)
+  if verbose && CA.rank < size(A,1)
+    redund = size(A,1) - CA.rank
+    println("$redund vectors removed using Cholesky decomposition")
+  end
+  Lp=CA.L[invperm(CA.p),1:CA.rank]
+  M = CA \ Lp
+  return M * M'
+end
+""" return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
+    (alternative version, which is slower but more stable)
+    A^-1 = A^-1 L (A^-1 L)† = M M†
+    with A = L L†
+    by solving the equation L† M L† = L†
 """
 function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   CA = cholesky(A, RowMaximum(), check = false, tol = tol)
@@ -133,7 +149,7 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
     println("$redund vectors removed using Cholesky decomposition")
   end
   Lp=CA.L[invperm(CA.p),1:CA.rank]
-  M = CA \ Lp
+  M = (CA.L[:,1:CA.rank] \ (CA.L[:,1:CA.rank]' \ Lp'))'
   return M * M'
 end
 
