@@ -121,26 +121,9 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
 end
 
 """ return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
-    (first version, which is faster but less stable)
     A^-1 = A^-1 L (A^-1 L)† = M M†
     with A = L L†
-    by solving the equation LL† M = L
-"""
-function invchol_old(A::AbstractMatrix; tol = 1e-8, verbose = false)
-  CA = cholesky(A, RowMaximum(), check = false, tol = tol)
-  if verbose && CA.rank < size(A,1)
-    redund = size(A,1) - CA.rank
-    println("$redund vectors removed using Cholesky decomposition")
-  end
-  Lp=CA.L[invperm(CA.p),1:CA.rank]
-  M = CA \ Lp
-  return M * M'
-end
-""" return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
-    (alternative version, which is slower but more stable)
-    A^-1 = A^-1 L (A^-1 L)† = M M†
-    with A = L L†
-    by solving the equation L† M L† = L†
+    by least-square solving the equation L† M = I (using QR decomposition) 
 """
 function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   CA = cholesky(A, RowMaximum(), check = false, tol = tol)
@@ -149,7 +132,7 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
     println("$redund vectors removed using Cholesky decomposition")
   end
   Lp=CA.L[invperm(CA.p),1:CA.rank]
-  M = (CA.L[:,1:CA.rank] \ (CA.L[:,1:CA.rank]' \ Lp'))'
+  M = Lp' \ Matrix(I,CA.rank,CA.rank)
   return M * M'
 end
 

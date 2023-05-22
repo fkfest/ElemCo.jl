@@ -91,11 +91,9 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   end
   # (P|Q)^-1 = (P|Q)^-1 L ((P|Q)^-1 L)† = M M†
   # (P|Q) = L L†
-  # LL† M = L
+  # L† M = I (least-square fit using QR) 
   Lp=CPQ.L[invperm(CPQ.p),1:CPQ.rank]
-  # M = CPQ \ Lp # this is faster but less stable 
-  # this is slower but more stable
-  M = (CPQ.L[:,1:CPQ.rank] \ (CPQ.L[:,1:CPQ.rank]' \ Lp'))'
+  M = Lp' \ Matrix(I,CPQ.rank,CPQ.rank)
   CPQ = nothing
   Lp = nothing
   if save3idx
