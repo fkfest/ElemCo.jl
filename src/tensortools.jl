@@ -7,7 +7,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MyIO
 
-export save, load, mmap, newmmap, closemmap, ints1, ints2, invchol, invchol2
+export save, load, mmap, newmmap, closemmap, ints1, ints2, invchol
 
 function save(EC::ECInfo, fname::String, a::AbstractArray)
   miosave(joinpath(EC.scr, fname*".bin"), a)
@@ -123,16 +123,20 @@ end
 """ return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
     A^-1 = A^-1 L (A^-1 L)† = M M†
     with A = L L†
-    by least-square solving the equation L† M = I (using QR decomposition) 
+    by solving the equation L† M = I (for low-rank: using QR decomposition) 
 """
 function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   CA = cholesky(A, RowMaximum(), check = false, tol = tol)
-  if verbose && CA.rank < size(A,1)
-    redund = size(A,1) - CA.rank
-    println("$redund vectors removed using Cholesky decomposition")
+  if CA.rank < size(A,1)
+    if verbose
+      redund = size(A,1) - CA.rank
+      println("$redund vectors removed using Cholesky decomposition")
+    end
+    Umat = CA.U[1:CA.rank,:]
+  else
+    Umat = CA.U
   end
-  Lp=CA.L[invperm(CA.p),1:CA.rank]
-  M = Lp' \ Matrix(I,CA.rank,CA.rank)
+  M = (Umat \ Matrix(I,CA.rank,CA.rank))[invperm(CA.p),:]
   return M * M'
 end
 
