@@ -85,19 +85,19 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   save(EC,"hsmall",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
   CPQ=cholesky(PQ, RowMaximum(), check = false, tol = EC.choltol)
+  # (P|Q)^-1 = (P|Q)^-1 L ((P|Q)^-1 L)† = M M†
+  # (P|Q) = L L†
+  # L† M = I (for low-rank: least-square fit using QR) 
   if CPQ.rank < size(PQ,1)
     redund = size(PQ,1) - CPQ.rank
     println("$redund DF vectors removed using Cholesky decomposition")
+    Umat = CPQ.U[1:CPQ.rank,:]
+  else
+    Umat = CPQ.U
   end
-  # (P|Q)^-1 = (P|Q)^-1 L ((P|Q)^-1 L)† = M M†
-  # (P|Q) = L L†
-  # LL† M = L
-  Lp=CPQ.L[invperm(CPQ.p),1:CPQ.rank]
-  # M = CPQ \ Lp # this is faster but less stable 
-  # this is slower but more stable
-  M = (CPQ.L[:,1:CPQ.rank] \ (CPQ.L[:,1:CPQ.rank]' \ Lp'))'
+  M = (Umat \ Matrix(I,CPQ.rank,CPQ.rank))[invperm(CPQ.p),:]
   CPQ = nothing
-  Lp = nothing
+  Umat = nothing
   if save3idx
     pqP = ERI_2e3c(bao,bfit)
     @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
