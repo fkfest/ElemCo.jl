@@ -93,7 +93,9 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   # (P|Q) = L L†
   # LL† M = L
   Lp=CPQ.L[invperm(CPQ.p),1:CPQ.rank]
-  M = CPQ \ Lp
+  # M = CPQ \ Lp # this is faster but less stable 
+  # this is slower but more stable
+  M = (CPQ.L[:,1:CPQ.rank] \ (CPQ.L[:,1:CPQ.rank]' \ Lp'))'
   CPQ = nothing
   Lp = nothing
   if save3idx
