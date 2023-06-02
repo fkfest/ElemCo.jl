@@ -23,12 +23,7 @@ EHF, EMP2, ECCSD, ET3 = ElemCo.ECdriver(EC, "ccsd(t)"; fcidump)
 
 EHF, EMP2, EDCSD = ElemCo.ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
-"""
-for DC-CCSDT that would not test useT3 and furthermore,
-the temp folder in scratch directory can not be deleted by the garbage collector...
-even though the content of the folder gets deleted...
-problem with scratch is in pkg mode and file mode
-"""
+
 EHF, EMP2, EDC_CCSDT = ElemCo.ECdriver(EC, "dc-ccsdt"; fcidump)
 @test abs(EDC_CCSDT-EDC_CCSDT_test) < epsilon
 # EC.fd = read_fcidump(joinpath(@__DIR__,"H2O.FCIDUMP"))
