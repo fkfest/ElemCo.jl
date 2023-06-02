@@ -13,16 +13,16 @@ EDCSD_test =  -0.328754956597
 EDC_CCSDT_useT3_test = -0.330054209137
 EDC_CCSDT_test = -0.33024914396392
 
-EC = ECInfo()
+EC = ECInfo(choltol = 1.e-4, ampsvdtol = 1.e-2)
 fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
 
-# EHF, EMP2, ECCSD, ET3 = ElemCo.ECdriver(EC, "ccsd(t)"; fcidump)
-# @test abs(EHF-EHF_test) < epsilon
-# @test abs(EMP2-EMP2_test) < epsilon
-# @test abs(ECCSD+ET3-ECCSD_T_test) < epsilon
+EHF, EMP2, ECCSD, ET3 = ElemCo.ECdriver(EC, "ccsd(t)"; fcidump)
+@test abs(EHF-EHF_test) < epsilon
+@test abs(EMP2-EMP2_test) < epsilon
+@test abs(ECCSD+ET3-ECCSD_T_test) < epsilon
 
-# EHF, EMP2, EDCSD = ElemCo.ECdriver(EC, "dcsd"; fcidump)
-# @test abs(EDCSD-EDCSD_test) < epsilon
+EHF, EMP2, EDCSD = ElemCo.ECdriver(EC, "dcsd"; fcidump)
+@test abs(EDCSD-EDCSD_test) < epsilon
 """
 for DC-CCSDT that would not test useT3 and furthermore,
 the temp folder in scratch directory can not be deleted by the garbage collector...
