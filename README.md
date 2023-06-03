@@ -25,7 +25,7 @@ Various options are available (use `-h` option for a list of `ElemCo.jl` options
 ```
 
 Default scratch dir path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`. 
-On all other other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none of these are found, the path `/tmp` is used. 
+On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none of these are found, the path `/tmp` is used. 
 Default scratch folder name is `elemcojlscr`. Default fcidump file is `FCIDUMP`.
 
 ```
