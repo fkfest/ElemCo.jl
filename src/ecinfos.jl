@@ -17,7 +17,7 @@ export ECInfo, parse_orbstring, get_occvirt
   # cholesky threshold
   choltol::Float64 = 1.e-6
   # amplitude decomposition threshold
-  ampsvdtol::Float64 = 1.e-4
+  ampsvdtol::Float64 = 1.e-3
   fd::FDump = FDump()
   ignore_error::Bool = false
   # subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general
