@@ -3,15 +3,16 @@ using Test
 using LinearAlgebra
 
 try
-EC = ECInfo()
-catch 
-using ElemCo.Utils
-using ElemCo.ECInfos
-using ElemCo.ECMethods
-using ElemCo.TensorTools
-using ElemCo.Focks
-using ElemCo.CoupledCluster
-using ElemCo.FciDump
+  EC = ECInfo()
+catch
+  import ElemCo: ECdriver
+  using ElemCo.Utils
+  using ElemCo.ECInfos
+  using ElemCo.ECMethods
+  using ElemCo.TensorTools
+  using ElemCo.Focks
+  using ElemCo.CoupledCluster
+  using ElemCo.FciDump
 end
 
 @testset verbose = true "FCIDUMP Calculations" begin

@@ -230,6 +230,13 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       end 
     end
     t1 = print_time(EC, t1,"CC",1)
+    if length(method_names) == 1
+      if ecmethod.exclevel[3] != NoExc
+        return EHF, EMp2, ECC, ET3
+      else
+        return EHF, EMp2, ECC
+      end
+    end
   end
 end
 
