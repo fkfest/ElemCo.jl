@@ -184,9 +184,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     # at the moment we always calculate MP2 first
     # calculate MP2
     if closed_shell_method
-      global EMp2, T2 = calc_MP2(EC)
+      EMp2, T2 = calc_MP2(EC)
     else
-      global EMp2, T2a, T2b, T2ab = calc_UMP2(EC)
+      EMp2, T2a, T2b, T2ab = calc_UMP2(EC)
     end
     println(add2name*"MP2 correlation energy: ",EMp2)
     println(add2name*"MP2 total energy: ",EMp2+EHF)
@@ -205,14 +205,14 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     if ecmethod.exclevel[4] != NoExc
       error("no quadruples implemented yet...")
     end
-    global ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
+    ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
     main_name = method_name(T1,dc)
     println("$main_name correlation energy: ",ECC)
     println("$main_name total energy: ",ECC+EHF)
     if ecmethod.exclevel[3] != NoExc
       do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
       save_pert_t3 = do_full_t3 && EC.calc_t3_for_decomposition
-      global ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
+      ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
       println()
       println("$main_name[T] total energy: ",ECC+ET3b+EHF)
       println("$main_name(T) correlation energy: ",ECC+ET3)
@@ -230,8 +230,14 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       end 
     end
     t1 = print_time(EC, t1,"CC",1)
+    if length(method_names) == 1
+      if ecmethod.exclevel[3] != NoExc
+        return EHF, EMp2, ECC, ET3
+      else
+        return EHF, EMp2, ECC
+      end
+    end
   end
-  return EHF, EMp2, ECC, ET3
 end
 
 function main()
