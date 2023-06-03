@@ -1,8 +1,8 @@
-if isfile(abspath(PROGRAM_FILE))
-  using .ElemCo
-else
-  using ElemCo
-end
+# if isfile(abspath(PROGRAM_FILE))
+#   using .ElemCo
+# else
+#   using ElemCo
+# end
 
 @testset "H2O Closed-Shell Test" begin
 epsilon    =   1.e-6
@@ -16,20 +16,20 @@ EDC_CCSDT_test = -0.33024914396392
 fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
 
 EC = ECInfo()
-EHF, EMP2, ECCSD, ET3 = ElemCo.ECdriver(EC, "ccsd(t)"; fcidump)
+EHF, EMP2, ECCSD, ET3 = ECdriver(EC, "ccsd(t)"; fcidump)
 @test abs(EHF-EHF_test) < epsilon
 @test abs(EMP2-EMP2_test) < epsilon
 @test abs(ECCSD+ET3-ECCSD_T_test) < epsilon
 
-EHF, EMP2, EDCSD = ElemCo.ECdriver(EC, "dcsd"; fcidump)
+EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
 EC = ECInfo(choltol = 1.e-4, ampsvdtol = 1.e-2)
-EHF, EMP2, EDC_CCSDT = ElemCo.ECdriver(EC, "dc-ccsdt"; fcidump)
+EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump)
 @test abs(EDC_CCSDT-EDC_CCSDT_test) < epsilon
 
 EC = ECInfo(choltol = 1.e-4, ampsvdtol = 1.e-2, calc_t3_for_decomposition = true)
-EHF, EMP2, EDC_CCSDT = ElemCo.ECdriver(EC, "dc-ccsdt"; fcidump)
+EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump)
 @test abs(EDC_CCSDT-EDC_CCSDT_useT3_test) < epsilon
 
 end
