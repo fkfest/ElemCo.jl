@@ -8,12 +8,12 @@ EDCSD_test =  -0.082498102641
 fcidump = joinpath(@__DIR__,"H2O_ST1.FCIDUMP")
 
 EC = ECInfo()
-EHF, EMP2, ECCSD = ElemCo.ECdriver(EC, "ccsd"; fcidump)
+EHF, EMP2, ECCSD = ECdriver(EC, "ccsd"; fcidump)
 @test abs(EHF-EHF_test) < epsilon
 @test abs(EMP2-EMP2_test) < epsilon
 @test abs(ECCSD-ECCSD_test) < epsilon
 
-EHF, EMP2, EDCSD = ElemCo.ECdriver(EC, "dcsd"; fcidump)
+EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
 end

@@ -7,7 +7,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MyIO
 
-export save, load, mmap, newmmap, closemmap, ints1, ints2, invchol
+export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol
 
 function save(EC::ECInfo, fname::String, a::AbstractArray)
   miosave(joinpath(EC.scr, fname*".bin"), a)
@@ -120,12 +120,13 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
   end
 end
 
-""" return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
+""" return NON-SYMMETRIC (pseudo)sqrt-inverse of a hermitian matrix using cholesky decomposition 
     A^-1 = A^-1 L (A^-1 L)† = M M†
     with A = L L†
     by solving the equation L† M = I (for low-rank: using QR decomposition) 
+    returns M
 """
-function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
+function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   CA = cholesky(A, RowMaximum(), check = false, tol = tol)
   if CA.rank < size(A,1)
     if verbose
@@ -136,8 +137,18 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   else
     Umat = CA.U
   end
-  M = (Umat \ Matrix(I,CA.rank,CA.rank))[invperm(CA.p),:]
+  return (Umat \ Matrix(I,CA.rank,CA.rank))[invperm(CA.p),:]
+end
+
+""" return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
+    A^-1 = A^-1 L (A^-1 L)† = M M†
+    with A = L L†
+    by solving the equation L† M = I (for low-rank: using QR decomposition) 
+"""
+function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
+  M = sqrtinvchol(A, tol = tol, verbose = verbose)
   return M * M'
 end
+
 
 end #module
