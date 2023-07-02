@@ -90,7 +90,7 @@ function parse_commandline(EC::ECInfo)
   EC.scr = args["scratch"]
   EC.verbosity = args["verbosity"]
   EC.ignore_error = args["force"]
-  EC.options.chol.thr = args["choltol"]
+  EC.options.cholesky.thr = args["choltol"]
   EC.options.cc.ampsvdtol = args["amptol"]
   EC.options.cc.calc_t3_for_decomposition = args["save_t3"]
   fcidump_file = args["arg1"]

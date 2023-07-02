@@ -13,8 +13,6 @@ include("options.jl")
   # options
   options::Options = Options()
 
-  # cholesky threshold
-  choltol::Float64 = 1.e-6
   fd::FDump = FDump()
   ignore_error::Bool = false
   # subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general

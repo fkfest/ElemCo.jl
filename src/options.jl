@@ -37,5 +37,5 @@ end
   # coupled-cluster options
   cc::CcOptions = CcOptions()
   # cholesky options
-  chol::CholeskyOptions = CholeskyOptions()
+  cholesky::CholeskyOptions = CholeskyOptions()
 end

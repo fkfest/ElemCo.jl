@@ -924,7 +924,7 @@ function calc_integrals_decomposition(EC::ECInfo)
 
   naux1 = 0
   for s in S
-    if s > EC.options.chol.thr
+    if s > EC.options.cholesky.thr
       naux1 += 1
     else
       break

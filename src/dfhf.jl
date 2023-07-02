@@ -84,7 +84,7 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   save(EC,"sao",overlap(bao))
   save(EC,"hsmall",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.chol.thr, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
   if save3idx
     pqP = ERI_2e3c(bao,bfit)
     @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
