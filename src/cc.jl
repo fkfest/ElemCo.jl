@@ -34,7 +34,7 @@ function update_singles(R1, ϵo, ϵv, shift)
 end
 
 function update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
-  shift = use_shift ? EC.shifts : 0.0
+  shift = use_shift ? EC.options.cc.shifts : 0.0
   if spincase == SCα
     return update_singles(R1, EC.ϵo, EC.ϵv, shift)
   else
@@ -55,7 +55,7 @@ function update_doubles(R2, ϵo1, ϵv1, ϵo2, ϵv2, shift, antisymmetrize=false)
 end
 
 function update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
-  shift = use_shift ? EC.shiftp : 0.0
+  shift = use_shift ? EC.options.cc.shiftp : 0.0
   if spincase == SCα
     return update_doubles(R2, EC.ϵo, EC.ϵv, EC.ϵo, EC.ϵv, shift, antisymmetrize)
   elseif spincase == SCβ
@@ -158,7 +158,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   SP = EC.space
   mixed = (o1 != o2)
   # first make half-transformed integrals
-  if EC.calc_d_vvvv
+  if EC.options.cc.calc_d_vvvv
     # <a\hat c|bd>
     hd_vvvv = ints2(EC,v1*v2*v1*v2)
     vovv = ints2(EC,v1*o2*v1*v2)
@@ -176,7 +176,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   t1 = print_time(EC,t1,"dress hd_"*o1*o2*o1*o2,3)
   if mixed
   end
-  if EC.calc_d_vvoo
+  if EC.options.cc.calc_d_vvoo
     # <a\hat c|j \hat l>
     hd_vvoo = ints2(EC,v1*v2*o1*o2)
     voov = ints2(EC,v1*o2*o1*v2)
@@ -224,7 +224,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   @tensoropt hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
   vovv = nothing
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*v1*o2,3)
-  if EC.calc_d_vvvo
+  if EC.options.cc.calc_d_vvvo
     # <a\hat c|b \hat l>
     hd_vvvo = ints2(EC,v1*v2*v1*o2)
     vvvv = ints2(EC,v1*v2*v1*v2)
@@ -239,7 +239,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
 
   # fully dressed
-  if EC.calc_d_vovv
+  if EC.options.cc.calc_d_vovv
     # <ak\hat|bd>
     d_vovv = ints2(EC,v1*o2*v1*v2)
     @tensoropt d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
@@ -247,10 +247,10 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     t1 = print_time(EC,t1,"dress d_"*v1*o2*v1*v2,3)
   end
   oovv = nothing
-  if EC.calc_d_vvvv
+  if EC.options.cc.calc_d_vvvv
     # <ab\hat|cd>
     d_vvvv = load(EC,"hd_"*v1*v2*v1*v2)
-    if !EC.calc_d_vovv
+    if !EC.options.cc.calc_d_vovv
       error("for calc_d_vvvv calc_d_vovv has to be True")
     end
     @tensoropt d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i] #todo
@@ -270,7 +270,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   @tensoropt d_vooo[a,k,j,l] += d_voov[a,k,j,d] * T12[d,l]
   save(EC,"d_"*v1*o2*o1*o2,d_vooo)
   t1 = print_time(EC,t1,"dress d_"*v1*o2*o1*o2,3)
-  if EC.calc_d_vvvo
+  if EC.options.cc.calc_d_vvvo
     # <ab\hat|cl>
     d_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
     @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i] #todo
@@ -283,8 +283,8 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   @tensoropt d_oooo[i,k,j,l] += d_oovo[i,k,b,l] * T1[b,j]
   save(EC,"d_"*o1*o2*o1*o2,d_oooo)
   t1 = print_time(EC,t1,"dress d_"*o1*o2*o1*o2,3)
-  if EC.calc_d_vvoo
-    if !EC.calc_d_vvvo
+  if EC.options.cc.calc_d_vvoo
+    if !EC.options.cc.calc_d_vvvo
       error("for calc_d_vvoo calc_d_vvvo has to be True")
     end
     # <ac\hat|jl>
@@ -343,19 +343,19 @@ function pseudo_dressed_ints(EC::ECInfo)
   t1 = time_ns()
   save(EC,"d_oovo",ints2(EC,"oovo"))
   save(EC,"d_voov",ints2(EC,"voov"))
-  if EC.calc_d_vovv
+  if EC.options.cc.calc_d_vovv
     save(EC,"d_vovv",ints2(EC,"vovv"))
   end
-  if EC.calc_d_vvvv
+  if EC.options.cc.calc_d_vvvv
     save(EC,"d_vvvv",ints2(EC,"vvvv"))
   end
   save(EC,"d_vovo",ints2(EC,"vovo"))
   save(EC,"d_vooo",ints2(EC,"vooo"))
-  if EC.calc_d_vvvo
+  if EC.options.cc.calc_d_vvvo
     save(EC,"d_vvvo",ints2(EC,"vvvo"))
   end
   save(EC,"d_oooo",ints2(EC,"oooo"))
-  if EC.calc_d_vvoo
+  if EC.options.cc.calc_d_vvoo
     save(EC,"d_vvoo",ints2(EC,"vvoo"))
   end
   save(EC,"dint1"*'o',integ1(EC.fd))
@@ -452,12 +452,12 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   dfock = load(EC,"dfock"*'o')
   if length(T1) > 0
-    if EC.use_kext
+    if EC.options.cc.use_kext
       dint1 = load(EC,"dint1"*'o')
       R1 = dint1[SP['v'],SP['o']]
     else
       R1 = dfock[SP['v'],SP['o']]
-      if !EC.calc_d_vovv
+      if !EC.options.cc.calc_d_vovv
         error("for not use_kext calc_d_vovv has to be True")
       end
       int2 = load(EC,"d_vovv")
@@ -475,10 +475,10 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   end
 
   # <ab|ij>
-  if EC.use_kext
+  if EC.options.cc.use_kext
     R2 = zeros((length(SP['v']),length(SP['v']),length(SP['o']),length(SP['o'])))
   else
-    if !EC.calc_d_vvoo
+    if !EC.options.cc.calc_d_vvoo
       error("for not use_kext calc_d_vvoo has to be True")
     end
     R2 = load(EC,"d_vvoo")
@@ -497,10 +497,10 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
   @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2t[c,a,k,i] * T2t[d,b,l,j]
   t1 = print_time(EC,t1,"<kl|cd> tT^ki_ca tT^lj_db",2)
-  if EC.use_kext
+  if EC.options.cc.use_kext
     int2 = integ2(EC.fd)
     if ndims(int2) == 4
-      if EC.triangular_kext
+      if EC.options.cc.triangular_kext
         trioo = [CartesianIndex(i,j) for j in 1:length(SP['o']) for i in 1:j]
         D2 = calc_D2(EC, T1, T2)[:,:,trioo]
         # <pq|rs> D^ij_rs
@@ -547,7 +547,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     R2pq = nothing
     t1 = print_time(EC,t1,"kext",2)
   else
-    if !EC.calc_d_vvvv
+    if !EC.options.cc.calc_d_vvvv
       error("for not use_kext calc_d_vvvv has to be True")
     end
     int2 = load(EC,"d_vvvv")
@@ -699,7 +699,7 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   R1 = Float64[]
   Eh = 0.0
   t0 = time_ns()
-  for it in 1:EC.maxit
+  for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     R1, R2 = calc_ccsd_resid(EC,T1,T2,dc)
     t1 = print_time(EC,t1,"residual",2)
@@ -723,7 +723,7 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
     NormT = 1.0 + NormT1 + NormT2
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
-    if NormR < EC.thr
+    if NormR < EC.options.cc.thr
       break
     end
   end
@@ -763,7 +763,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
   R1 = Float64[]
   Eh = 0.0
   t0 = time_ns()
-  for it in 1:EC.maxit
+  for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     #get dressed integrals
     calc_dressed_3idx(EC,T1)
@@ -796,7 +796,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
     NormT = 1.0 + NormT1 + NormT2 + NormT3
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
-    if NormR < EC.thr
+    if NormR < EC.options.cc.thr
       break
     end
   end
@@ -858,7 +858,7 @@ function calc_dressed_3idx(EC,T1)
 end
 
 function update_triples(EC,R3, use_shift = true)
-  shift = use_shift ? EC.shiftt : 0.0
+  shift = use_shift ? EC.options.cc.shiftt : 0.0
   ΔT3 = deepcopy(R3)
   ϵX = load(EC,"epsilonX")
   for I ∈ CartesianIndices(ΔT3)
@@ -924,7 +924,7 @@ function calc_integrals_decomposition(EC::ECInfo)
 
   naux1 = 0
   for s in S
-    if s > EC.choltol
+    if s > EC.options.cholesky.thr
       naux1 += 1
     else
       break
@@ -1026,12 +1026,12 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   nvirt = length(EC.space['v'])
 
   # first approx for U^iX_a from doubles decomposition
-  tol2 = EC.ampsvdtol*0.01
+  tol2 = EC.options.cc.ampsvdtol*0.01
   UaiX = svd_decompose(reshape(permutedims(T2,(1,3,2,4)), (nocc*nvirt, nocc*nvirt)), nvirt, nocc, tol2)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX) 
-  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.ampsvdtol^2)
-  # UaiX = eigen_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.ampsvdtol^2)
+  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
+  # UaiX = eigen_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save(EC, "epsilonX", ϵX)
   #display(UaiX)
@@ -1064,7 +1064,7 @@ function calc_triples_decomposition(EC::ECInfo)
   end
   close(t3file)
   if use_svd
-    UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, EC.ampsvdtol)
+    UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol)
   else
     naux = nvirt * 2 
     UaiX = iter_svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, naux)
