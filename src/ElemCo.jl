@@ -21,6 +21,7 @@ include("cc.jl")
 include("integrals.jl")
 include("msystem.jl")
 include("dfhf.jl")
+include("dfdump.jl")
 
 try
   using MKL

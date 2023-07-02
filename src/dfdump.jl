@@ -4,6 +4,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
 using ..ElemCo.FciDump
+using ..ElemCo.TensorTools
 
 export dfdump
 
@@ -16,42 +17,38 @@ function generate_basis(ms::MSys)
   return bao,bfit
 end
 
-function generate_integrals(ms::MSys, EC::ECInfo, cMO)
+function generate_integrals(ms::MSys, EC::ECInfo, fdump::FDump, cMO)
+  @assert !fdump.uhf # TODO: uhf
   bao,bfit = generate_basis(ms)
   hAO = kinetic(bao) + nuclear(bao)
-  hMO = cMO' * hAO * cMO
+  fdump.int1 = cMO' * hAO * cMO
 
   PQ = ERI_2e2c(bfit)
-  CPQ=cholesky(PQ, RowMaximum(), check = false, tol = EC.choltol)
-  if CPQ.rank < size(PQ,1)
-    redund = size(PQ,1) - CPQ.rank
-    println("$redund DF vectors removed using Cholesky decomposition")
-  end
-  # (P|Q)^-1 = (P|Q)^-1 L ((P|Q)^-1 L)† = M M†
-  # (P|Q) = L L†
-  # LL† M = L
-  Lp=CPQ.L[invperm(CPQ.p),1:CPQ.rank]
-  M = CPQ \ Lp
-  CPQ = nothing
-  Lp = nothing
+  M = sqrtinvchol(PQ, tol = EC.choltol, verbose = true)
   μνP = ERI_2e3c(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
   μνP = nothing
   M = nothing
   @tensoropt pqL[p,q,L] := cMO[μ,p] * μνL[μ,ν,L] * cMO[ν,q]
   μνL = nothing
+  @assert fdump.triang # store only upper triangle
   # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
-  prqs = zeros(size(cMO,1),size(cMO,1),(size(cMO,1)+1)*size(cMO,1)÷2)
+  fdump.int2 = zeros(size(cMO,1),size(cMO,1),(size(cMO,1)+1)*size(cMO,1)÷2)
   for s = 1:size(pqL,1), q = 1:s # only upper triangle
     I = uppertriangular(q,s)
-    @tensoropt prqs[:,:,I][p,r] = pqL[:,q,:][p,L] * pqL[:,s,:][r,L]
+    @tensoropt fdump.int2[:,:,I][p,r] = pqL[:,q,:][p,L] * pqL[:,s,:][r,L]
   end
-  Enuc = nuclear_repulsion(ms)
+  fdump.int0 = nuclear_repulsion(ms)
 end
 
-""" generate fcidump using df integrals """
-function dfdump(ms::MSys, EC::ECInfo, cMO)
-
+""" generate fcidump using df integrals and store in dumpfile """
+function dfdump(ms::MSys, EC::ECInfo, cMO, dumpfile = "FCIDUMP")
+  println("generating fcidump $dumpfile")
+  nelec = guess_nelec(ms)
+  fdump = FDump(size(cMO,2), nelec)
+  generate_integrals(ms, EC, fdump, cMO)
+  println("writing fcidump $dumpfile")
+  write_fcidump(fdump, dumpfile, -1.0)  
 end
 
 end
