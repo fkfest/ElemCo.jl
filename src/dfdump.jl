@@ -24,7 +24,7 @@ function generate_integrals(ms::MSys, EC::ECInfo, fdump::FDump, cMO)
   fdump.int1 = cMO' * hAO * cMO
 
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.choltol, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.chol.thr, verbose = true)
   μνP = ERI_2e3c(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
   μνP = nothing

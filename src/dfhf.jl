@@ -84,7 +84,7 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   save(EC,"sao",overlap(bao))
   save(EC,"hsmall",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.choltol, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.chol.thr, verbose = true)
   if save3idx
     pqP = ERI_2e3c(bao,bfit)
     @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
@@ -142,7 +142,7 @@ end
 function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   println("DF-HF")
   diis = Diis(EC.scr)
-  thren = sqrt(EC.thr)*0.1
+  thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = generate_integrals(ms, EC; save3idx=!direct)
   if direct
     bao,bfit = generate_basis(ms)
@@ -156,7 +156,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
   t0 = time_ns()
-  for it=1:EC.maxit
+  for it=1:EC.options.scf.maxit
     if direct
       fock = dffock(EC,cMO,bao,bfit)
     else
@@ -174,7 +174,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     var = sum(abs2,Δfock)
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
-    if abs(ΔE) < thren && var < EC.thr
+    if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
     fock, = perform(diis,[fock],[Δfock])

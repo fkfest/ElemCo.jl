@@ -18,11 +18,13 @@ EHF, EMP2, ECCSD, ET3 = ECdriver(EC, "ccsd(t)"; fcidump)
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
-EC = ECInfo(choltol = 1.e-4, ampsvdtol = 1.e-2)
+EC = ECInfo()
+EC.options.chol.thr = 1.e-4
+EC.options.cc.ampsvdtol = 1.e-2
 EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump)
 @test abs(EDC_CCSDT-EDC_CCSDT_test) < epsilon
 
-EC = ECInfo(choltol = 1.e-4, ampsvdtol = 1.e-2, calc_t3_for_decomposition = true)
+EC.options.cc.calc_t3_for_decomposition = true
 EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump)
 @test abs(EDC_CCSDT-EDC_CCSDT_useT3_test) < epsilon
 
