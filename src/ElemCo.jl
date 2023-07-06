@@ -41,6 +41,10 @@ using .Focks
 using .CoupledCluster
 using .FciDump
 
+using .MSystem
+using .DFHF
+using .DFMCSCF
+
 
 export ECdriver
 
@@ -105,6 +109,34 @@ function parse_commandline(EC::ECInfo)
     fcidump_file = ""
   end
   return fcidump_file, method, occa, occb
+end
+
+function run_mcscf()
+  xyz="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+
+  basis = Dict("ao"=>"cc-pVDZ",
+             "jkfit"=>"cc-pvtz-jkfit",
+             "mp2fit"=>"cc-pvdz-rifit")
+
+  ms = MSys(xyz,basis)
+
+  nelec = guess_nelec(ms)
+  norb = guess_norb(ms)
+  occa = "-"*string(nelec÷2)
+  occb = "-"
+  EC = ECInfo()
+  mkpath(EC.scr)
+  EC.scr = mktempdir(EC.scr)
+  SP = EC.space
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
+  SP[':'] = 1:norb
+
+  ϵ,cMO = dfhf(ms,EC,direct=true)
+  ϵ,cMO = dfmcscf(ms,EC,direct=true)
 end
 
 function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )

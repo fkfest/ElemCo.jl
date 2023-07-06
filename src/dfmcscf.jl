@@ -1,11 +1,11 @@
 module DFMCSCF
 using LinearAlgebra, TensorOperations, Printf
-using ..ECInfos
-using ..ECInts
-using ..MSystem
-using ..DIIS
-using ..TensorTools
-using ..DFHF
+using ..ElemCo.ECInfos
+using ..ElemCo.ECInts
+using ..ElemCo.MSystem
+using ..ElemCo.DIIS
+using ..ElemCo.TensorTools
+using ..ElemCo.DFHF
 
 export dfmcscf
 
@@ -19,7 +19,7 @@ in which E_pq,rs = E_pq E_rs - δ_qr E_ps = a†_p a†_r a_s a_q
 return as a tuple: D1, D2
 
 """
-function denMatCreate(EC::ECinfo)
+function denMatCreate(EC::ECInfo)
     SP = EC.space
     nact = length(SP['o'])- length(SP['O']) # to be modified
     D1 = 1.0 *Matrix(I, nact, nact)
@@ -52,9 +52,9 @@ function dffockCAS(EC,cMO,D1)
     @tensoropt fockClosed[p,q] += 2.0*L[L]*pqL[p,q,L]
 
     fock =  deepcopy(fockClosed)
-    @tesnoropt puL[p,u,L] := pqL[p,q,L] * CMOa[q,u]
+    @tensoropt puL[p,u,L] := pqL[p,q,L] * CMOa[q,u]
     save(EC,"muaL",puL)
-    @tesnoropt puLD[p,t,L] := puL[p,u,L] * D1[t,u]
+    @tensoropt puLD[p,t,L] := puL[p,u,L] * D1[t,u]
     @tensoropt fock[p,q] += puLD[p,t,L] * puL[q,t,L]
     @tensoropt LD[L] = puLD[r,t,L] * cMOa[r,t]
     @tensoropt fock[p,q] -= 0.5 * LD[L] * pqL[p,q,L]
@@ -172,13 +172,13 @@ function calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
 end
 
 
-function dfmcscf(ms::MySys, EC::ECInfo; direct = false, guess = GUESS_SAD)
+function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     Enuc = generate_integrals(ms, EC; save3idx=!direct)
     cMO = guess_orb(ms,EC,guess)
-    D1, D2 = denMatCreate(EC::ECinfo)
+    D1, D2 = denMatCreate(EC)
     occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
     occ1o = setdiff(EC.space['o'],occ2)
-    occv = setdiff(1:size(A,1), EC.space['o']) # to be modified
+    occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
 
     
 
