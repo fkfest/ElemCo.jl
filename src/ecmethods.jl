@@ -1,11 +1,11 @@
 """ Specify ecmethods """
 module ECMethods
 
-export ECMethod, ExcType, NoExc, FullExc, PertExc
+export ECMethod, ExcType, NoExc, FullExc, PertExc, PertExcIter
 
 const ExcLevels = "SDTQP"
 
-@enum ExcType NoExc FullExc PertExc
+@enum ExcType NoExc FullExc PertExc PertExcIter
 """
 Description of the electron-correlation method
 """
@@ -35,15 +35,23 @@ struct ECMethod
       unrestricted = true
       ipos += 1
     end
+    # if pure PT: all excitation levels are perturbative, otherwise only the highest
+    pure_PT = false
     if uppercase(mname[ipos:ipos+1]) == "CC"
       theory = "CC"
       ipos += 2
     elseif uppercase(mname[ipos:ipos+1]) == "DC"
-      theory = "DC"
-      ipos += 2
+      if length(mname)-ipos >= 4 && uppercase(mname[ipos:ipos+4]) == "DC-CC"
+        theory = "DC-CC"
+        ipos += 5
+      else
+        theory = "DC"
+        ipos += 2
+      end
     elseif uppercase(mname[ipos:ipos+1]) == "MP"
       theory = "MP"
       ipos += 2
+      pure_PT = true
     else
       error("Theory not recognized in "*mname*": "*uppercase(mname[ipos:ipos+1]))
     end
@@ -51,12 +59,22 @@ struct ECMethod
     # currently case-insensitive, can change later...
     next_level = FullExc
     for char in uppercase(mname[ipos:end])
-      if char == '2'
-        if exclevel[1] == NoExc
-          exclevel[1] = PertExc
+      if isnumeric(char)
+        # perturbation theory
+        level = parse(Int,char)
+        if pure_PT
+          lower_level = PertExc
+          exclevel[level] = PertExc
+        else
+          lower_level = FullExc
+          exclevel[level] = PertExcIter
         end
-        exclevel[2] = PertExc
-      else 
+        for i in 1:level-1
+          if exclevel[i] == NoExc
+            exclevel[i] = lower_level
+          end
+        end
+      else  
         if char == '('
           next_level = PertExc
         elseif char == ')'

@@ -9,12 +9,16 @@ module FciDump
 # using LinearAlgebra
 # using NPZ
 using Parameters
-using ..MNPY
+using Printf
+using ..ElemCo.MNPY
 
-export FDump, read_fcidump, headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
+export FDump, read_fcidump, write_fcidump, headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
+
+"""prefered order of keys in fcidump header (optional keys are not included)"""
+const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
 
 """
 molecular integrals 
@@ -41,6 +45,25 @@ end
 FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict) = FDump(int2,[],[],[],int1,[],[],int0,head)
 """spin-polarized fcidump"""
 FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1a::Array{Float64},int1b::Array{Float64},int0::Float64,head::Dict) = FDump([],int2aa,int2bb,int2ab,[],int1a,int1b,int0,head)
+
+"""create a new FDump object"""
+function FDump(norb,nelec;ms2=0,isym=1,orbsym=[],uhf=false,simtra=false,triang=true)
+  fd = FDump()
+  fd.head["NORB"] = [norb]
+  fd.head["NELEC"] = [nelec]
+  fd.head["MS2"] = [ms2]
+  fd.head["ISYM"] = [isym]
+  if isempty(orbsym)
+    fd.head["ORBSYM"] = ones(Int,norb)
+  else
+    fd.head["ORBSYM"] = orbsym
+  end
+  fd.head["IUHF"] = uhf ? [1] : [0]
+  fd.head["ST"] = simtra ? [1] : [0]
+  fd.triang = triang
+  fd.uhf = uhf
+  return fd
+end
 
 @enum SpinCase SCα SCβ SCαβ
 
@@ -180,6 +203,10 @@ end
 # return upper triangular index from two indices i1 <= i2
 function uppertriangular(i1,i2)
   return i1+i2*(i2-1)÷2
+end
+# return upper triangular index from three indices i1 <= i2 <= i3
+function uppertriangular(i1,i2,i3)
+  return i1+i2*(i2-1)÷2+(i3+1)*i3*(i3-1)÷6
 end
 
 """for not ab: particle symmetry is assumed.
@@ -356,6 +383,175 @@ function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
   end
   # return npzread(file)
   return mnpymmap(file)
+end
+
+function write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
+  fdf = open(fcidump,"w")
+  write_header(fd,fdf)
+  write_integrals(fd,fdf,tol)
+  close(fdf)
+end
+
+function write_header(fd::FDump, fdf)
+  println(fdf, "&FCI")
+  for key in FDUMP_KEYS
+    val = headvar(fd, key)
+    if !isnothing(val)
+      println(fdf, " ", key, "=", join(val, ","), ",")
+    end
+  end
+  for (key,val) in fd.head
+    if key in FDUMP_KEYS
+      continue
+    end
+    if key in FDUMP_OPTIONAL && val[1] == 0
+      continue
+    end
+    println(fdf, " ", key, "=", join(val, ","), ",")
+  end
+  println(fdf, "/")
+end
+
+function print_int_value(fdf, integ, i1, i2, i3, i4)
+  @printf(fdf, "%23.15e %3i %3i %3i %3i\n", integ, i1, i2, i3, i4)
+end
+
+function write_integrals(fd::FDump, fdf, tol)
+  simtra = (headvar(fd, "ST") > 0)
+  if !fd.uhf
+    write_integrals2(fd.int2, fdf, tol, fd.triang, simtra)
+    write_integrals1(fd.int1, fdf, tol, simtra)
+  else
+    write_integrals2(fd.int2aa, fdf, tol, fd.triang, simtra)
+    print_int_value(fdf,0.0,0,0,0,0)
+    write_integrals2(fd.int2bb, fdf, tol, fd.triang, simtra)
+    print_int_value(fdf,0.0,0,0,0,0)
+    write_integrals2ab(fd.int2ab, fdf, tol, simtra)
+    print_int_value(fdf,0.0,0,0,0,0)
+    write_integrals1(fd.int1a, fdf, tol, simtra)
+    print_int_value(fdf,0.0,0,0,0,0)
+    write_integrals1(fd.int1b, fdf, tol, simtra)
+    print_int_value(fdf,0.0,0,0,0,0)
+  end
+  print_int_value(fdf,fd.int0,0,0,0,0)
+end
+
+function write_integrals2(int2, fdf, tol, triang, simtra)
+  norb = size(int2,1)
+  if triang
+    inds = (p,q,r,s) -> CartesianIndex(p,q,uppertriangular(r,s))
+    indslow = (p,q,r,s) -> CartesianIndex(q,p,uppertriangular(s,r))
+  else
+    inds = (p,q,r,s) -> CartesianIndex(p,q,r,s)
+    indslow = (p,q,r,s) -> CartesianIndex(p,q,r,s)
+  end
+  if simtra
+    for p = 1:norb
+      for q = 1:norb
+        for r = 1:p-1
+          # lower triangle (q>s)
+          for s = 1:q-1
+            val = int2[indslow(p,r,q,s)]
+            if abs(val) > tol
+              print_int_value(fdf,val,p,q,r,s)
+            end
+          end
+          # upper triangle (q<=s)
+          for s = q:norb
+            val = int2[inds(p,r,q,s)]
+            if abs(val) > tol
+              print_int_value(fdf,val,p,q,r,s)
+            end
+          end
+        end
+        # r==p case
+        r = p
+        for s = 1:q
+          val = int2[indslow(p,r,q,s)]
+          if abs(val) > tol
+            print_int_value(fdf,val,p,q,r,s)
+          end
+        end
+      end
+    end
+  else
+    # normal case
+    for p in 1:norb
+      for q in 1:p
+        for r in 1:p
+          for s in 1:r
+            if r*(r-1)/2+s <= p*(p-1)/2+q
+              if s < q 
+                # lower triangle
+                val = int2[indslow(p,r,q,s)]
+              else
+                # upper triangle
+                val = int2[inds(p,r,q,s)]
+              end
+              if abs(val) > tol
+                print_int_value(fdf,val,p,q,r,s)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+function write_integrals2ab(int2, fdf, tol, simtra)
+  norb = size(int2,1)
+  if simtra
+    for p = 1:norb
+      for q = 1:norb
+        for r = 1:norb
+          for s = 1:norb
+            val = int2[p,r,q,s]
+            if abs(val) > tol
+              print_int_value(fdf,val,p,q,r,s)
+            end
+          end
+        end
+      end
+    end
+  else
+    # normal αβ case
+    for p in 1:norb
+      for q in 1:p
+        for r in 1:norb
+          for s in 1:r
+            val = int2[p,r,q,s]
+            if abs(val) > tol
+              print_int_value(fdf,val,p,q,r,s)
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+function write_integrals1(int1, fdf, tol, simtra)
+  norb = size(int1,1)
+  if simtra
+    for p = 1:norb
+      for q = 1:norb
+        val = int1[p,q]
+        if abs(val) > tol
+          print_int_value(fdf,val,p,q,0,0)
+        end
+      end
+    end
+  else
+    # normal case
+    for p = 1:norb
+      for q = 1:p
+        val = int1[p,q]
+        if abs(val) > tol
+          print_int_value(fdf,val,p,q,0,0)
+        end
+      end
+    end
+  end
 end
 
 end #module

@@ -3,13 +3,13 @@
 """
 module TensorTools
 using LinearAlgebra
-using ..ECInfos
-using ..FciDump
-using ..MyIO
+using ..ElemCo.ECInfos
+using ..ElemCo.FciDump
+using ..ElemCo.MyIO
 
-export save, load, mmap, ints1, ints2, invchol
+export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol
 
-function save(EC::ECInfo, fname::String,a::Array)
+function save(EC::ECInfo, fname::String, a::AbstractArray)
   miosave(joinpath(EC.scr, fname*".bin"), a)
 end
 
@@ -17,6 +17,18 @@ function load(EC::ECInfo, fname::String)
   return mioload(joinpath(EC.scr, fname*".bin"))
 end
 
+# create a new mmap file for writing (overwrites existing file)
+# returns a pointer to the file and the mmaped array
+function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}})
+  return mionewmmap(joinpath(EC.scr, fname*".bin"), Type, dims)
+end
+
+function closemmap(EC::ECInfo, file, array)
+  mioclosemmap(file, array)
+end
+
+# mmap an existing file for reading
+# returns a pointer to the file and the mmaped array
 function mmap(EC::ECInfo, fname::String)
   return miommap(joinpath(EC.scr, fname*".bin"))
 end
@@ -75,8 +87,7 @@ end
     otherwise return as a triangular cut.
 """
 function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
-  sc = spincase
-  if isnothing(sc)
+  if isnothing(spincase)
     second_el_alpha = isalphaspin(spaces[2],spaces[4])
     if isalphaspin(spaces[1],spaces[3])
       if second_el_alpha
@@ -88,6 +99,8 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
       !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
       sc = SCβ
     end
+  else 
+    sc = spincase
   end
   allint = integ2(EC.fd, sc)
   if ndims(allint) == 4
@@ -107,21 +120,35 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
   end
 end
 
-""" return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
-    
+""" return NON-SYMMETRIC (pseudo)sqrt-inverse of a hermitian matrix using cholesky decomposition 
     A^-1 = A^-1 L (A^-1 L)† = M M†
     with A = L L†
-    and  LL† M = L
+    by solving the equation L† M = I (for low-rank: using QR decomposition) 
+    returns M
+"""
+function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
+  CA = cholesky(A, RowMaximum(), check = false, tol = tol)
+  if CA.rank < size(A,1)
+    if verbose
+      redund = size(A,1) - CA.rank
+      println("$redund vectors removed using Cholesky decomposition")
+    end
+    Umat = CA.U[1:CA.rank,:]
+  else
+    Umat = CA.U
+  end
+  return (Umat \ Matrix(I,CA.rank,CA.rank))[invperm(CA.p),:]
+end
+
+""" return (pseudo)inverse of a hermitian matrix using cholesky decomposition 
+    A^-1 = A^-1 L (A^-1 L)† = M M†
+    with A = L L†
+    by solving the equation L† M = I (for low-rank: using QR decomposition) 
 """
 function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
-  CA = cholesky(A, RowMaximum(), check = false, tol = tol)
-  if verbose && CA.rank < size(A,1)
-    redund = size(A,1) - CA.rank
-    println("$redund vectors removed using Cholesky decomposition")
-  end
-  Lp=CA.L[invperm(CA.p),1:CA.rank]
-  M = CA \ Lp
+  M = sqrtinvchol(A, tol = tol, verbose = verbose)
   return M * M'
 end
+
 
 end #module

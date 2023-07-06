@@ -1,4 +1,4 @@
-# e-Co.jl <img style="float: right;" src="e-coil.png"> <br/><br/>
+# ElemCo.jl <img style="float: right;" src="e-coil.png"> <br/><br/>
 
 Julia implementation of various electron-correlation methods (main focus on coupled cluster) 
 using fcidump/npy interface.  
@@ -7,24 +7,26 @@ using fcidump/npy interface.
 
 Requirements: julia (>1.8)
 
-Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, ArgParse, Parameters, MKL(optional)
+Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, ArgParse, Parameters, IterativeSolvers, MKL(optional)
 
 ## Usage
 
 ```
 cd <working dir>
-ln -s <path_to_e-cojl>/e-co.sh .
+ln -s <path_to_ElemCo>/ElemCo.sh .
 ```
 
-`julia` has to be in the PATH (or modify `e-co.sh`).
+`julia` has to be in the PATH (or modify `ElemCo.sh`).
 
-Various options are available (use `-h` option for a list of `e-co.jl` options):
+Various options are available (use `-h` option for a list of `ElemCo.jl` options):
 
 ```
-./e-co.sh [@j "<options to send to julia>"] [-s <scratch dir>] [-m <method name>] [<fcidump file>]
+./ElemCo.sh [@j "<options to send to julia>"] [-s <scratch dir>] [-m <method name>] [<fcidump file>]
 ```
 
-Default scratch dir is `./ecojlscr` and default fcidump file is `FCIDUMP`.
+Default scratch dir path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`. 
+On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none of these are found, the path `/tmp` is used. 
+Default scratch folder name is `elemcojlscr`. Default fcidump file is `FCIDUMP`.
 
 ```
 Electron coil

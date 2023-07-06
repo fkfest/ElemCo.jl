@@ -1,20 +1,18 @@
 """ various global infos """
 module ECInfos
 using Parameters
-using ..FciDump
+using ..ElemCo.FciDump
 
 export ECInfo, parse_orbstring, get_occvirt
 
+include("options.jl")
 @with_kw mutable struct ECInfo
   # path to scratch directory
-  scr::String = "e-cojlscr"
-  thr::Float64 = 1.e-10
-  maxit::Int = 50
-  shifts::Float64 = 0.15
-  shiftp::Float64 = 0.2
+  scr::String = joinpath(tempdir(),"elemcojlscr")
   verbosity::Int = 2
-  # cholesky threshold
-  choltol::Float64 = 1.e-8
+  # options
+  options::Options = Options()
+
   fd::FDump = FDump()
   ignore_error::Bool = false
   # subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general
@@ -25,12 +23,6 @@ export ECInfo, parse_orbstring, get_occvirt
   ϵv::Array{Float64} = Float64[]
   ϵob::Array{Float64} = Float64[]
   ϵvb::Array{Float64} = Float64[]
-  use_kext::Bool = true
-  calc_d_vvvv::Bool = false
-  calc_d_vvvo::Bool = false
-  calc_d_vovv::Bool = false
-  calc_d_vvoo::Bool = false
-  triangular_kext = true
 end
 
 """

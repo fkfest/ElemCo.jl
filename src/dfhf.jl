@@ -1,10 +1,10 @@
 module DFHF
 using LinearAlgebra, TensorOperations, Printf
-using ..ECInfos
-using ..ECInts
-using ..MSystem
-using ..DIIS
-using ..TensorTools
+using ..ElemCo.ECInfos
+using ..ElemCo.ECInts
+using ..ElemCo.MSystem
+using ..ElemCo.DIIS
+using ..ElemCo.TensorTools
 
 export dfhf, generate_integrals, guess_orb, GuessType, GUESS_HCORE, GUESS_SAD
 
@@ -84,18 +84,7 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   save(EC,"sao",overlap(bao))
   save(EC,"hsmall",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
-  CPQ=cholesky(PQ, RowMaximum(), check = false, tol = EC.choltol)
-  if CPQ.rank < size(PQ,1)
-    redund = size(PQ,1) - CPQ.rank
-    println("$redund DF vectors removed using Cholesky decomposition")
-  end
-  # (P|Q)^-1 = (P|Q)^-1 L ((P|Q)^-1 L)† = M M†
-  # (P|Q) = L L†
-  # LL† M = L
-  Lp=CPQ.L[invperm(CPQ.p),1:CPQ.rank]
-  M = CPQ \ Lp
-  CPQ = nothing
-  Lp = nothing
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
   if save3idx
     pqP = ERI_2e3c(bao,bfit)
     @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
@@ -151,8 +140,9 @@ function guess_orb(ms::MSys, EC::ECInfo, guess::GuessType)
 end
 
 function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
+  println("DF-HF")
   diis = Diis(EC.scr)
-  thren = sqrt(EC.thr)*0.1
+  thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = generate_integrals(ms, EC; save3idx=!direct)
   if direct
     bao,bfit = generate_basis(ms)
@@ -162,10 +152,11 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   hsmall = load(EC,"hsmall")
   sao = load(EC,"sao")
   SP = EC.space
+  EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
   t0 = time_ns()
-  for it=1:EC.maxit
+  for it=1:EC.options.scf.maxit
     if direct
       fock = dffock(EC,cMO,bao,bfit)
     else
@@ -183,7 +174,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     var = sum(abs2,Δfock)
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
-    if abs(ΔE) < thren && var < EC.thr
+    if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
     fock, = perform(diis,[fock],[Δfock])
@@ -191,6 +182,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     ϵ,cMO = eigen(Hermitian(fock),Hermitian(sao))
     # display(ϵ)
   end
+  println("DF-HF energy: ", EHF)
   return ϵ, cMO
 end
 
