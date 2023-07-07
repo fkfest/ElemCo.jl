@@ -124,10 +124,10 @@ function run_mcscf()
 
   ms = MSys(xyz,basis)
 
-  nelec = guess_nelec(ms)
+  nelec = guess_nelec(ms)+1
   norb = guess_norb(ms)
-  occa = "-"*string(nelec÷2)
-  occb = "-"
+  occa = "-"*string((nelec+1)÷2)
+  occb = "-"*string(nelec÷2)
   EC = ECInfo()
   mkpath(EC.scr)
   EC.scr = mktempdir(EC.scr)
@@ -135,8 +135,8 @@ function run_mcscf()
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
   SP[':'] = 1:norb
 
-  ϵ,cMO = dfhf(ms,EC,direct=true)
-  ϵ,cMO = dfmcscf(ms,EC,direct=true)
+  #ϵ,cMO = dfhf(ms,EC,direct=true)
+  ϵ,cMO = dfmcscf(ms,EC,direct=false)
 end
 
 function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )

@@ -53,10 +53,11 @@ function dffockCAS(EC,cMO,D1)
 
     fock =  deepcopy(fockClosed)
     @tensoropt puL[p,u,L] := pqL[p,q,L] * CMOa[q,u]
+
     save(EC,"muaL",puL)
     @tensoropt puLD[p,t,L] := puL[p,u,L] * D1[t,u]
     @tensoropt fock[p,q] += puLD[p,t,L] * puL[q,t,L]
-    @tensoropt LD[L] = puLD[r,t,L] * cMOa[r,t]
+    @tensoropt LD[L] := puLD[r,t,L] * CMOa[r,t]
     @tensoropt fock[p,q] -= 0.5 * LD[L] * pqL[p,q,L]
 
     return fock, fockClosed
@@ -78,10 +79,13 @@ function dfACAS(EC,cMO,D1,D2,fock,fockClosed)
     puL = load(EC,"muaL")
     #fock = dffockCAS(EC,cMO,D1)
     @tensoropt Apj[p,j] := 2 * (fock[μ,ν] * CMO2[ν,j]) * cMO[μ,p]
-
+    
     @tensoropt Apu[p,u] := ((fockClosed[μ,ν] * CMOa[ν,v]) * cMO[μ,p]) * D1[v,u]
+    #@tensoropt intermediate[p,u] := (((puL[ν,v,L] * CMOa[ν,w]) * D2[t,u,v,w]) * puL[μ,t,L]) * cMO[μ,p]
+    # here the length of u might equal 0, in that case the using of '@tensoropt ...+=...' should be careful 
+    #Apu += intermediate
     @tensoropt Apu[p,u] += (((puL[ν,v,L] * CMOa[ν,w]) * D2[t,u,v,w]) * puL[μ,t,L]) * cMO[μ,p]
-    # Apa = zeros((size(cMO,2),size(cMO,2)-size(CMO2,2)-size(CMOa,2)))
+
     A = zeros((size(cMO,2),size(cMO,2)))
     A[:,occ2] = Apj[:,:]
     A[:,occ1o] = Apu[:,:] # to be modified
@@ -94,7 +98,7 @@ first index r refer to open orbitals reordered in [occ1o;occv]
 second index k refers to occupied orbitals reordered in [occ2;occ1o]
 
 """
-function calc_g(A)
+function calc_g(A, EC)
     occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
     occ1o = setdiff(EC.space['o'],occ2)
     @tensoropt g[r,s] := A[r,s] - A[s,r]
@@ -120,13 +124,13 @@ function calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
 
     # Gij
     μjL = load(EC,"mudL")
-    @tensoropt pjL[p,j,L] = μjL[μ,j,L] * cMO[μ,p] # to transfer the first index from atomic basis to molecular basis
+    @tensoropt pjL[p,j,L] := μjL[μ,j,L] * cMO[μ,p] # to transfer the first index from atomic basis to molecular basis
     @tensoropt Gij[r,s,i,j] := 8 * pjL[r,i,L] * pjL[s,j,L]
     @tensoropt Gij[r,s,i,j] -= 2 * pjL[s,i,L] * pjL[r,j,L]
 
     μνL = load(EC,"munuL")
     ijL = pjL[occ2,:,:]
-    @tensoropt pqL[p,q,L] = μνL[μ,ν,L] * cMO[μ,p] * cMO[ν,q]
+    @tensoropt pqL[p,q,L] := μνL[μ,ν,L] * cMO[μ,p] * cMO[ν,q]
     @tensoropt Gij[r,s,i,j] -= 2 * ijL[i,j,L] * pqL[r,s,L]
 
     Iij = 1.0 * Matrix(I, length(occ2), length(occ2))
@@ -134,15 +138,19 @@ function calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
 
     # Gtj
     μuL = load(EC,"muaL")
-    @tensoropt puL[p,u,L] = μuL[μ,u,L] * cMO[μ,p] #transfer from atomic basis to molecular basis
+    @tensoropt puL[p,u,L] := μuL[μ,u,L] * cMO[μ,p] #transfer from atomic basis to molecular basis
+    @tensoropt testStuff[r,s,v,j] := puL[r,v,L] * pjL[s,j,L]
+
+
     @tensoropt multiplier[r,s,v,j] := 4 * puL[r,v,L] * pjL[s,j,L]
+
     @tensoropt multiplier[r,s,v,j] -= puL[s,v,L] * pjL[r,j,L]
     tjL = pjL[occ1o,:,:]
     @tensoropt multiplier[r,s,v,j] -= pqL[r,s,L] * tjL[v,j,L]
     @tensoropt Gtj[r,s,t,j] := multiplier[r,s,v,j] * D1[t,v]
     
     # Gjt 
-    @tensoropt Gjt[r,s,j,t] := Gtj[r,s,t,j] # can we skip this step?
+    @tensoropt Gjt[r,s,j,t] := Gtj[s,r,t,j] # can we skip this step?
     
     # Gtu 
     @tensoropt Gtu[r,s,t,u] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s] * D1[t,u]
@@ -167,63 +175,128 @@ function calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
     h_rk_sl = h[[occ1o;occv],[occ2;occ1o],[occ1o;occv],[occ2;occ1o]]
     d = size(h_rk_sl,1) * size(h_rk_sl,2)
     h_rk_sl = reshape(h_rk_sl, d, d)
+
     save(EC,"h_rk_sl",h_rk_sl)
     return h_rk_sl
 end
+
+function calc_realE(EC, fockClosed, D1, D2, cMO)
+    occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
+    occ1o = setdiff(EC.space['o'],occ2)
+    hsmall = load(EC,"hsmall")
+
+    # Ec
+    E = tr(hsmall[occ2,occ2]) + tr(fockClosed[occ2,occ2])
+
+    # FcD
+    E += sum(fockClosed[occ1o,occ1o] .* D1)
+
+    pqL = load(EC,"munuL")
+    CMOa = cMO[:,occ1o] 
+    @tensoropt tuL[t,u,L] := pqL[p,q,L] * CMOa[p,t] * CMOa[q,u]
+    @tensoropt tuvw[t,u,v,w] := tuL[t,u,L] * tuL[v,w,L]
+
+    E += 0.5 * sum(D2 .* tuvw)
+
+    return E
+end
+
+
 
 
 function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     Enuc = generate_integrals(ms, EC; save3idx=!direct)
     cMO = guess_orb(ms,EC,guess)
     D1, D2 = denMatCreate(EC)
+    fock, fockClosed = dffockCAS(EC,cMO,D1)
+    E0 = calc_realE(EC, fockClosed, D1, D2, cMO)
     occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
     occ1o = setdiff(EC.space['o'],occ2)
     occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
-
-    
-
+    if size(occ1o,1) == 0
+        error("NO ACTIVE ORBITALS, PLEASE USE DFHF")
+    end
+    iteration_times = 1
+    g = [1]
     # calc g
-    fock, fockClosed = dffockCAS(EC,cMO,D1)
-    A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
-    g = calc_g(A)
+    while sum(g.^2) > 1e-6 && iteration_times < 200
+        println("Iter ", iteration_times)
 
-    # calc h
-    h = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
-    
-    
-    λ = 1.1
+        fock, fockClosed = dffockCAS(EC,cMO,D1)
 
-    # building working matrix W
-    W = zeros(size(h,1)+1, size(h,1)+1) # workng matrix
-    W[1, 2:size(h,1)+1] = g[:]
-    W[2:size(h,1)+1, 1] = g[:]
-    W[2:size(h,1),2:size(h,1)] = h[:,:]./λ
+        A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
+        g = calc_g(A, EC)
 
-    # diagnolize W
-    vals, vecs = eigen(W)
-    x = zeros(size(h,1))
-    x = vecs[2:size(h,1)+1, 1] .* (1/λ/vecs[1, 1])
-    
-    # build U matrix (approximately unitary because of the anti-hermitian property of the R)
-    N = size(cMO,1)
-    R = zeros(N,N)
+        # calc h
+        h = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
+        
+        λ = 10.0
+        maxit = 100
+        x = zeros(size(h,1))
 
-    # build R_sub1 and R_sub2
-    R_sub1 = reshape(x, size(cMO,1), size(x,1)/size(cMO,1))
-    R_sub1[occ1o,occ1o] = zeros(size(occ1o,1), size(occ1o,1))
-    R_sub2 = -1.0 .* transpose(R_sub1)
+        for it=1:maxit
+            println("  it ", it)
+            println("    λ is ", λ)
+            # building working matrix W
+            W = zeros(size(h,1)+1, size(h,1)+1) # workng matrix
+            W[1, 2:size(h,1)+1] = g[:]
+            W[2:size(h,1)+1, 1] = g[:]
+            W[2:size(h,1)+1,2:size(h,1)+1] = h[:,:]./λ
 
-    R[[occ1o;occv],[occ2;occ1o]] = R_sub1[:,:]
-    R[[occ2;occ1o],[occ1o;occv]] = R_sub2[:,:]
+            #display("difference to judge the hermitian of W")
+            #display(sum((W-permutedims(W,[2,1])).^2))
+
+            # diagnolize W
+            vals, vecs = eigen(W)
+            x = vecs[2:size(h,1)+1, 1] .* (1/λ/vecs[1, 1])
+            #display(vals[1:5])
+            #display(vecs[:,1:5])
+            println("    square of the norm of x is ", sum(x.^2))
+
+            # norm is the square root of sum(x.^2) 0.3-0.7
+            if sum(x.^2)> 0.5
+                λ *= 1.1
+            elseif sum(x.^2)< 0.1
+                λ /= 1.1
+            else
+                break
+            end
+        end
+        
+        # build U matrix (approximately unitary because of the anti-hermitian property of the R)
+        N = size(cMO,1)
+        R = zeros(N,N)
+
+        # build R_sub1 and R_sub2
+        R_sub1 = reshape(x, N-size(occ2,1), size(occ1o,1)+size(occ2,1))
+        R_sub1[occ1o,occ1o] = zeros(size(occ1o,1), size(occ1o,1))
+        R_sub2 = -1.0 .* transpose(R_sub1)
+
+        R[[occ1o;occv],[occ2;occ1o]] = R_sub1[:,:]
+        R[[occ2;occ1o],[occ1o;occv]] = R_sub2[:,:]
+
+        #display("difference to judge the anti-hermitian of R")
+        #display(sum((R+permutedims(R,[2,1])).^2))
+
+        #display(R)
+
+        U = 1.0 * Matrix(I,N,N) + R
+        U = U + 1/2 .* R*R + 1/6 .* R*R*R
+
+        println("the difference between U and a real unitary matrix is ", sum((U'*U-I).^2))
+        cMO = cMO*U
+        iteration_times += 1
+
+        println("the norm of g is ", norm(g))
+
+        E = calc_realE(EC, fockClosed, D1, D2, cMO)
+        println("the real energy is ", E)
 
 
-    U = 1.0 * Matrix(I,N,N) + R
-    U = U + 1/2 .* *(R,R)
+        E = E0 + sum(g .* x) + 0.5*(transpose(x) * h * x)
+        println("the second order energy is ", E)
 
-    
-    cMO = *(cMO,U)
-
-    display(cMO)
+    end
 
 
 end
