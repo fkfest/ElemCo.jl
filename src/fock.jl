@@ -12,7 +12,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
 
-export gen_fock
+export gen_fock, gen_ufock
 
 """ calc closed-shell fock matrix """
 function gen_fock(EC::ECInfo)
@@ -49,5 +49,46 @@ function gen_fock(EC::ECInfo, spincase::SpinCase)
   return fock, ϵo, ϵv
 end
 
+""" calc fock matrix for non-fcidump orbitals """
+function gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
+  occ2 = EC.space['o']
+  @assert EC.space['o'] == EC.space['O'] # closed-shell
+  CMOl2 = CMOl[:,occ2]
+  CMOr2 = CMOr[:,occ2]
+  @tensoropt begin 
+    fock[p,q] := integ1(EC.fd,SCα)[p,q] 
+    fock[p,q] += 2.0*ints2(EC,"::::",SCα)[p,r,q,s] * (CMOl2[r,i]*CMOr2[s,i])
+    fock[p,q] -= ints2(EC,"::::",SCα)[p,r,s,q] * CMOl2[r,i]*CMOr2[s,i]
+  end
+  return fock
+end
+""" calc UHF fock matrix for non-fcidump orbitals """
+function gen_fock(EC::ECInfo, spincase::SpinCase, CMOl::AbstractArray, CMOr::AbstractArray,
+                  CMOlOS::AbstractArray, CMOrOS::AbstractArray)
+  if spincase == SCα
+    CMOlOSo = CMOlOS[:,EC.space['O']]
+    CMOrOSo = CMOrOS[:,EC.space['O']]
+    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[p,r,q,s]*(CMOlOSo[r,i]*CMOrOSo[s,i])
+    spo = 'o'
+  else
+    CMOlOSo = CMOlOS[:,EC.space['o']]
+    CMOrOSo = CMOrOS[:,EC.space['o']]
+    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[r,p,s,q]*(CMOlOSo[r,i]*CMOrOSo[s,i])
+    spo = 'O'
+  end
+  occ = EC.space[spo]
+  CMOlo = CMOl[:,occ]
+  CMOro = CMOr[:,occ]
+  @tensoropt begin 
+    fock[p,q] += integ1(EC.fd,spincase)[p,q] 
+    fock[p,q] += ints2(EC,"::::",spincase)[p,r,q,s] * (CMOlo[r,i]*CMOro[s,i])
+    fock[p,q] -= ints2(EC,"::::",spincase)[p,r,s,q] * CMOlo[r,i]*CMOro[s,i]
+  end
+  return fock
+end
+
+function gen_ufock(EC::ECInfo, cMOl::AbstractArray, cMOr::AbstractArray)
+  return [gen_fock(EC,SCα, cMOl[1],cMOr[1], cMOl[2],cMOr[2]), gen_fock(EC,SCβ, cMOl[2],cMOr[2], cMOl[1],cMOr[1])]
+end
 
 end #module

@@ -18,6 +18,8 @@ include("tensortools.jl")
 include("fock.jl")
 include("cc.jl")
 
+include("bohf.jl")
+
 include("integrals.jl")
 include("msystem.jl")
 include("dfhf.jl")
@@ -40,7 +42,7 @@ using .CoupledCluster
 using .FciDump
 
 
-export ECdriver
+export ECdriver, setup_scratch_and_fcidump
 
 function parse_commandline(EC::ECInfo)
   s = ArgParseSettings()
@@ -110,9 +112,11 @@ function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
   # create scratch directory
   mkpath(EC.scr)
   EC.scr = mktempdir(EC.scr)
-  # read fcidump intergrals
-  EC.fd = read_fcidump(fcidump)
-  t1 = print_time(EC,t1,"read fcidump",1)
+  if fcidump != ""
+    # read fcidump intergrals
+    EC.fd = read_fcidump(fcidump)
+    t1 = print_time(EC,t1,"read fcidump",1)
+  end
   println(size(EC.fd.int2))
   norb = headvar(EC.fd, "NORB")
   nelec = headvar(EC.fd, "NELEC")

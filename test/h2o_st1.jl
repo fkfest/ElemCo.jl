@@ -4,6 +4,7 @@ EHF_test   = -76.298014304953
 EMP2_test  =  -0.069545740864
 ECCSD_test =  -0.082041632192
 EDCSD_test =  -0.082498102641
+EBODCSD_test =  -0.0852347071335213
 
 fcidump = joinpath(@__DIR__,"H2O_ST1.FCIDUMP")
 
@@ -15,5 +16,14 @@ EHF, EMP2, ECCSD = ECdriver(EC, "ccsd"; fcidump)
 
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
+
+using ElemCo.BOHF
+#setup_scratch_and_fcidump(EC, fcidump)
+EBOHF, ϵ,CMOl,CMOr = bohf(EC)
+transform_fcidump(EC.fd, CMOl, CMOr)
+EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
+@test abs(EBOHF-EHF) < epsilon
+@test abs(EDCSD-EBODCSD_test) < epsilon
+
 
 end

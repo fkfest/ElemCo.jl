@@ -151,6 +151,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   ϵ = zeros(size(cMO,1))
   hsmall = load(EC,"hsmall")
   sao = load(EC,"sao")
+  # display(sao)
   SP = EC.space
   EHF = 0.0
   previousEHF = 0.0
