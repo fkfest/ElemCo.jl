@@ -8,11 +8,13 @@ module FciDump
 
 # using LinearAlgebra
 # using NPZ
+using TensorOperations
 using Parameters
 using Printf
 using ..ElemCo.MNPY
 
-export FDump, read_fcidump, write_fcidump, headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
+export FDump, read_fcidump, write_fcidump, transform_fcidump
+export headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -207,6 +209,19 @@ end
 # return upper triangular index from three indices i1 <= i2 <= i3
 function uppertriangular(i1,i2,i3)
   return i1+i2*(i2-1)÷2+(i3+1)*i3*(i3-1)÷6
+end
+
+""" return range for the upper triangular index (i1 <= i2) for a given i2 """
+function uppertriangular_range(i2)
+  return (i2*(i2-1)÷2+1):(i2*(i2+1)÷2)
+end
+""" return index of diagonal of upper triangular index (i1 <= i2) for a given i2 """
+function uppertriangular_diagonal(i2)
+  return (i2*(i2+1)÷2)
+end
+""" return range for the upper triangular index without diagonal (i1 < i2) for a given i2 """
+function strict_uppertriangular_range(i2)
+  return (i2*(i2-1)÷2+1):(i2*(i2+1)÷2-1)
 end
 
 """for not ab: particle symmetry is assumed.
@@ -552,6 +567,98 @@ function write_integrals1(int1, fdf, tol, simtra)
       end
     end
   end
+end
+
+""" transform integrals to new basis using Tl and Tr transformation matrices. 
+    For UHF fcidump, Tl and Tr are arrays of matrices for α and β spin."""
+function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray) 
+  if length(Tl) == 2 && typeof(Tl[1]) <: AbstractArray
+    genuhfdump = true
+  else
+    genuhfdump = false
+    @assert !fd.uhf # from uhf fcidump can generate only uhf fcidump
+  end
+  if fd.uhf
+    fd.int2aa = transform_int2(fd.int2aa, Tl[1], Tl[1], Tr[1], Tr[1], fd.triang, fd.triang)
+    fd.int2bb = transform_int2(fd.int2bb, Tl[2], Tl[2], Tr[2], Tr[2], fd.triang, fd.triang)
+    fd.int2ab = transform_int2(fd.int2ab, Tl[1], Tl[2], Tr[1], Tr[2], false, false)
+    fd.int1a = transform_int1(fd.int1a, Tl[1], Tr[1])
+    fd.int1b = transform_int1(fd.int1b, Tl[2], Tr[2])
+  elseif genuhfdump
+    # change fcidump from rhf to uhf format
+    fd.int2aa = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1], fd.triang, fd.triang)
+    fd.int2bb = transform_int2(fd.int2, Tl[2], Tl[2], Tr[2], Tr[2], fd.triang, fd.triang)
+    fd.int2ab = transform_int2(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2], fd.triang, false)
+    fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
+    fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
+    fd.int2 = []
+    fd.int1 = []
+    fd.head["IUHF"] = [1]
+    fd.uhf = true
+  else
+    fd.int2 = transform_int2(fd.int2, Tl, Tl, Tr, Tr, fd.triang, fd.triang)
+    fd.int1 = transform_int1(fd.int1, Tl, Tr)
+  end
+end
+
+"""transform 2-e integrals to new basis 
+   <pq|rs> = <p'q'|r's'> * Tl[p',p] * Tl2[q',q] * Tr[r',r] * Tr2[s',s]
+   if triang: the last two indices are stored as a single upper triangular index
+"""
+function transform_int2(int2::AbstractArray, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray, triang_in, triang_out)
+  norb = size(int2,1)
+  if triang_in && triang_out
+    int2t = zeros(norb,norb,norb*(norb+1)÷2)
+    int_3i = zeros(norb,norb,norb)
+    for s = 1:norb
+      rs = strict_uppertriangular_range(s)
+      rrange = 1:s-1
+      if length(rs) > 0
+        @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
+      end
+      # contribution from the diagonal <p'q'|s's'> 
+      ss = uppertriangular_diagonal(s)
+      @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
+      for s1 = 1:norb
+        rs1 = uppertriangular_range(s1)
+        rrange = 1:s1
+        Tr2ss1 = Tr2[s,s1]
+        @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,rrange][p,q,r] * Tr2ss1
+        @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,s1][q,p] * Tr2[s,rrange][r]
+      end
+    end
+  elseif triang_in && ! triang_out
+    int2t = zeros(norb,norb,norb,norb)
+    int_3i = zeros(norb,norb,norb)
+    int_3i2 = zeros(norb,norb,norb)
+    for s = 1:norb
+      rs = strict_uppertriangular_range(s)
+      rrange = 1:s-1
+      if length(rs) > 0
+        @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
+        @tensoropt int_3i2[p,q,r] = int2[:,:,rs][p',q',r'] * Tl2[p',p] * Tl[q',q] * Tr2[rrange,:][r',r]
+      end
+      # contribution from the diagonal <p'q'|s's'> 
+      ss = uppertriangular_diagonal(s)
+      @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
+      @tensoropt int_3i2[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl2[p',p] * Tl[q',q] * Tr2[s,:][r]
+
+      @tensoropt int2t[p,q,r,s'] += int_3i[p,q,r] * Tr2[s,:][s']
+      @tensoropt int2t[p,q,r,s'] += int_3i2[q,p,s'] * Tr[s,:][r]
+    end
+  elseif !triang_in && triang_out
+    error("Can't transform from non-triangular to triangular")
+  else
+    @tensoropt int2t[p,q,r,s] := int2[p',q',r',s']*Tl[p',p]*Tl2[q',q]*Tr[r',r]*Tr2[s',s]
+  end
+  return int2t
+end
+
+""" transform 1-el. integrals """
+function transform_int1(int1::AbstractArray, Tl::AbstractArray,  Tr::AbstractArray)
+  @tensoropt int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
+  return int1t
 end
 
 end #module
