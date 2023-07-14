@@ -124,6 +124,35 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
   return ET2
 end
 
+function calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
+  SP = EC.space
+  int2 = ints2(EC,o1*o2*v1*v2)
+  if o1 == o2
+    fac = 0.5
+  else
+    fac = 1.0
+  end
+  @tensoropt begin
+    int2[i,j,a,b] += fac*R2[a,b,i,j]
+    ET2 = fac*scalar(T2[a,b,i,j] * int2[i,j,a,b])
+  end
+  if length(T1) > 0
+    dfock = load(EC,"dfock"*o1)
+    dfov = dfock[SP[o1],SP[v1]] + fov # undressed part should be with factor two
+    @tensoropt ET1 = scalar((0.5*dfov[i,a] + R1[a,i])*T1[a,i])
+    ET2 += ET1
+  end
+  return ET2
+end
+
+function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
+  SP = EC.space
+  Eh = calc_hylleraas4spincase(EC, 'o','v','o','v', T1a, T2a, R1a, R2a, EC.fock[SP['o'],SP['v']])
+  Eh += calc_hylleraas4spincase(EC, 'O','V','O','V', T1b, T2b, R1b, R2b, EC.fockb[SP['O'],SP['V']])
+  Eh += calc_hylleraas4spincase(EC, 'o','v','O','V', Float64[], T2ab, Float64[], R2ab, Float64[])
+  return Eh
+end
+
 function calc_singles_norm(T1)
   @tensor NormT1 = 2.0*scalar(T1[a,i]*T1[a,i])
   return NormT1
@@ -155,7 +184,6 @@ end
     The singles and orbspaces for first and second electron are T1,o1,v1 and T12,o2,v2, respectively."""
 function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
   t1 = time_ns()
-  SP = EC.space
   mixed = (o1 != o2)
   # first make half-transformed integrals
   if EC.options.cc.calc_d_vvvv
@@ -170,12 +198,10 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
   # <ik|j \hat l>
   hd_oooo = ints2(EC,o1*o2*o1*o2)
-  oovo = ints2(EC,o1*o2*v1*o2)
-  @tensoropt hd_oooo[j,i,l,k] += oovo[i,j,d,l] * T12[d,k]
-  oovo = nothing
+  ooov = ints2(EC,o1*o2*o1*v2)
+  @tensoropt hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
+  ooov = nothing
   t1 = print_time(EC,t1,"dress hd_"*o1*o2*o1*o2,3)
-  if mixed
-  end
   if EC.options.cc.calc_d_vvoo
     # <a\hat c|j \hat l>
     hd_vvoo = ints2(EC,v1*v2*o1*o2)
@@ -198,10 +224,20 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   hd_vooo = ints2(EC,v1*o2*o1*o2)
   vovo = ints2(EC,v1*o2*v1*o2)
   @tensoropt begin
-    hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
+    hd_vooo[a,k,j,l] -= hd_oooo[i,k,j,l] * T1[a,i]
     hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
   end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*o1*o2,3)
+  if mixed
+    # <k\hat a | l\hat j )
+    hd_ovoo = ints2(EC,o1*v2*o1*o2)
+    ovov = ints2(EC,o1*v2*o1*v2)
+    @tensoropt begin
+      hd_ovoo[k,a,l,j] -= hd_oooo[k,i,l,j] * T12[a,i]
+      hd_ovoo[k,a,l,j] += ovov[k,a,l,b] * T12[b,j]
+    end
+    t1 = print_time(EC,t1,"dress hd_"*o1*v2*o1*o2,3)
+  end
   # some of the fully dressing moved here...
   # <ki\hat|dj>
   d_oovo = ints2(EC,o1*o2*v1*o2)
@@ -210,19 +246,49 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   save(EC,"d_"*o1*o2*v1*o2,d_oovo)
   t1 = print_time(EC,t1,"dress d_"*o1*o2*v1*o2,3)
   # <ak\hat|jd>
-  d_voov = ints2(EC,v1*o2*o1*v2)
   vovv = ints2(EC,v1*o2*v1*v2)
-  @tensoropt begin
-    d_voov[a,k,j,d] -= d_oovo[k,i,d,j] * T1[a,i] #todo
-    d_voov[a,k,j,d] += vovv[a,k,b,d] * T1[b,j]
+  d_voov = ints2(EC,v1*o2*o1*v2)
+  if mixed
+    # <oo|ov>
+    oOvV = ints2(EC,o1*o2*v1*v2)
+    d_ooov = ints2(EC,o1*o2*o1*v2)
+    @tensoropt d_ooov[k,l,j,d] += oOvV[k,l,b,d] * T1[b,j]
+    oOvV = nothing
+    save(EC,"d_"*o1*o2*o1*v2,d_ooov)
+    t1 = print_time(EC,t1,"dress d_"*o1*o2*o1*v2,3)
+    @tensoropt begin
+      d_voov[a,i,j,d] -= d_ooov[k,i,j,d] * T1[a,k]
+      d_voov[a,i,j,d] += vovv[a,i,b,d] * T1[b,j]
+    end
+    save(EC,"d_"*v1*o2*o1*v2,d_voov)
+  else
+    @tensoropt begin
+      d_voov[a,k,j,d] -= d_oovo[k,i,d,j] * T1[a,i]
+      d_voov[a,k,j,d] += vovv[a,k,b,d] * T1[b,j]
+    end
+    save(EC,"d_"*v1*o2*o1*v2,d_voov)
   end
-  save(EC,"d_"*v1*o2*o1*v2,d_voov)
   t1 = print_time(EC,t1,"dress d_"*v1*o2*o1*v2,3)
   # finish half-dressing
   # <ak|b \hat l>
   hd_vovo = ints2(EC,v1*o2*v1*o2)
   @tensoropt hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
   vovv = nothing
+  if mixed
+    # <k\hat a|dj>
+    ovvv = ints2(EC,o1*v2*v1*v2)
+    d_ovvo = ints2(EC,o1*v2*v1*o2)
+    @tensoropt begin
+      d_ovvo[i,A,b,J] -= d_oovo[i,K,b,J] * T12[A,K]
+      d_ovvo[i,A,b,J] += ovvv[i,A,b,C] * T12[C,J]
+    end
+    save(EC,"d_"*o1*v2*v1*o2,d_ovvo)
+    t1 = print_time(EC,t1,"dress d_"*o1*v2*v1*o2,3)
+
+    hd_ovov = ints2(EC,o1*v2*o1*v2)
+    @tensoropt hd_ovov[k,a,l,b] += ovvv[k,a,d,b] * T1[d,l]
+    ovvv = nothing
+  end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*v1*o2,3)
   if EC.options.cc.calc_d_vvvo
     # <a\hat c|b \hat l>
@@ -232,9 +298,18 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
       hd_vvvo[a,c,b,l] -= hd_vovo[a,k,b,l] * T12[c,k]
       hd_vvvo[a,c,b,l] += vvvv[a,c,b,d] * T12[d,l]
     end
-    vvvv = nothing
     save(EC,"hd_"*v1*v2*v1*o2,hd_vvvo)
     hd_vvvo = nothing
+    if mixed
+      hd_vvov = ints2(EC,v1*v2*o1*v2)
+      @tensoropt begin
+        hd_vvov[a,c,l,b] -= hd_ovov[k,c,l,b] * T1[a,k]
+        hd_vvov[a,c,l,b] += vvvv[a,c,d,b] * T1[d,l]
+      end
+      save(EC,"hd_"*v1*v2*o1*v2,hd_vvov)
+      hd_vvov = nothing
+    end
+    vvvv = nothing
     t1 = print_time(EC,t1,"dress hd_"*v1*v2*v1*o2,3)
   end
 
@@ -245,6 +320,13 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     @tensoropt d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
     save(EC,"d_"*v1*o2*v1*v2,d_vovv)
     t1 = print_time(EC,t1,"dress d_"*v1*o2*v1*v2,3)
+    if mixed
+      d_vovv = nothing
+      d_ovvv = ints2(EC,o1*v2*v1*v2)
+      @tensoropt d_ovvv[i,b,a,c] -= oovv[i,j,a,c] * T12[b,j]
+      save(EC,"d_"*o1*v2*v1*v2,d_ovvv)
+      t1 = print_time(EC,t1,"dress d_"*o1*v2*v1*v2,3)
+    end
   end
   oovv = nothing
   if EC.options.cc.calc_d_vvvv
@@ -253,8 +335,13 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     if !EC.options.cc.calc_d_vovv
       error("for calc_d_vvvv calc_d_vovv has to be True")
     end
-    @tensoropt d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i] #todo
-    d_vovv = nothing
+    if !mixed
+      @tensoropt d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i]
+      d_vovv = nothing
+    else
+      @tensoropt d_vvvv[a,c,b,d] -= d_ovvv[i,c,b,d] * T1[a,i]
+      d_ovvv = nothing
+    end
     save(EC,"d_"*v1*v2*v1*v2,d_vvvv)
     d_vvvv = nothing
     t1 = print_time(EC,t1,"dress d_"*v1*v2*v1*v2,3)
@@ -263,19 +350,43 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   d_vovo = hd_vovo
   @tensoropt d_vovo[a,k,b,l] -= d_oovo[i,k,b,l] * T1[a,i]
   save(EC,"d_"*v1*o2*v1*o2,d_vovo)
+  hd_vovo = nothing
   d_vovo = nothing
+  if mixed
+    d_ovov = hd_ovov
+    @tensoropt d_ovov[k,a,l,b] -= d_ooov[k,i,l,b] * T12[a,i]
+    save(EC,"d_"*o1*v2*o1*v2,d_ovov)
+    hd_ovov = nothing
+    d_ovov = nothing
+  end
   t1 = print_time(EC,t1,"dress d_"*v1*o2*v1*o2,3)
   # <aj\hat|kl>
   d_vooo = hd_vooo
   @tensoropt d_vooo[a,k,j,l] += d_voov[a,k,j,d] * T12[d,l]
   save(EC,"d_"*v1*o2*o1*o2,d_vooo)
+  if mixed
+    d_ovoo = hd_ovoo
+    @tensoropt d_ovoo[k,a,l,j] += d_ovvo[k,a,d,j] * T1[d,l]
+    save(EC,"d_"*o1*v2*o1*o2,d_ovoo)
+  end
   t1 = print_time(EC,t1,"dress d_"*v1*o2*o1*o2,3)
   if EC.options.cc.calc_d_vvvo
     # <ab\hat|cl>
-    d_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
-    @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i] #todo
-    save(EC,"d_"*v1*v2*v1*o2,d_vvvo)
-    d_vvvo = nothing
+    if !mixed
+      d_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
+      @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i]
+      save(EC,"d_"*v1*v2*v1*o2,d_vvvo)
+      d_vvvo = nothing
+    else
+      d_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
+      @tensoropt d_vvvo[c,a,b,l] -= d_ovvo[i,a,b,l] * T1[c,i]
+      save(EC,"d_"*v1*v2*v1*o2,d_vvvo)
+      d_vvvo = nothing
+      d_vvov = load(EC,"hd_"*v1*v2*o1*v2)
+      @tensoropt d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T1[c,i]
+      save(EC,"d_"*v1*v2*o1*v2,d_vvov)
+      d_vvov = nothing
+    end
     t1 = print_time(EC,t1,"dress d_"*v1*v2*v1*o2,3)
   end
   # <ij\hat|kl>
@@ -290,34 +401,90 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     # <ac\hat|jl>
     d_vvoo = load(EC,"hd_"*v1*v2*o1*o2)
     hd_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
-    @tensoropt begin
-      d_vvoo[a,c,j,l] += hd_vvvo[a,c,b,l] * T1[b,j]
-      hd_vvvo = nothing
-      d_vvoo[a,c,j,l] -= d_vooo[c,i,l,j] * T1[a,i] #todo
+    @tensoropt d_vvoo[a,c,j,l] += hd_vvvo[a,c,b,l] * T1[b,j]
+    hd_vvvo = nothing
+    if !mixed
+      @tensoropt d_vvoo[a,c,j,l] -= d_vooo[c,i,l,j] * T1[a,i] 
+    else
+      @tensoropt d_vvoo[a,c,j,l] -= d_ovoo[i,c,j,l] * T1[a,i] 
     end
     save(EC,"d_"*v1*v2*o1*o2,d_vvoo)
+    d_vvoo = nothing
     t1 = print_time(EC,t1,"dress d_"*v1*v2*o1*o2,3)
   end
+end
+
+""" dress the fock matrix (closed-shell) """
+function dress_fock_closedshell(EC::ECInfo, T1)
+  t1 = time_ns()
+  SP = EC.space
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd))
+  # display(d_int1[SP['v'],SP['o']])
+  dinter = ints1(EC,":v")
+  @tensoropt d_int1[:,SP['o']][p,j] += dinter[p,b] * T1[b,j]
+  dinter = d_int1[SP['o'],:]
+  @tensoropt d_int1[SP['v'],:][b,p] -= dinter[j,p] * T1[b,j]
+  # display(d_int1[SP['v'],SP['o']])
+  save(EC,"dint1o",d_int1)
+  t1 = print_time(EC,t1,"dress int1",3)
+
+  # calc dressed fock
+  dfock = d_int1
+  d_oooo = load(EC,"d_oooo")
+  d_vooo = load(EC,"d_vooo")
+  d_oovo = load(EC,"d_oovo")
+  @tensoropt begin
+    foo[i,j] := 2.0*d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
+    fvo[a,i] := 2.0*d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
+    fov[i,a] := 2.0*d_oovo[i,k,a,k] - d_oovo[k,i,a,k]
+  end
+  d_vovo = load(EC,"d_vovo")
+  @tensoropt fvv[a,b] := 2.0*d_vovo[a,k,b,k]
+  d_vovo = nothing
+  d_voov = load(EC,"d_voov")
+  @tensoropt fvv[a,b] -= d_voov[a,k,k,b]
+  dfock[SP['o'],SP['o']] += foo
+  dfock[SP['v'],SP['o']] += fvo
+  dfock[SP['o'],SP['v']] += fov
+  dfock[SP['v'],SP['v']] += fvv
+
+  save(EC,"dfocko",dfock)
+  t1 = print_time(EC,t1,"dress fock",3)
+end
+""" dress the fock matrix (same-spin part) """
+function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
+  t1 = time_ns()
+  SP = EC.space
+  if isuppercase(o1)
+    spin = SCβ
+  else
+    spin = SCα
+  end
+  # dress 1-el part
+  d_int1 = deepcopy(integ1(EC.fd,spin))
   dinter = ints1(EC,":"*v1)
   @tensoropt d_int1[:,SP[o1]][p,j] += dinter[p,b] * T1[b,j]
   dinter = d_int1[SP[o1],:]
   @tensoropt d_int1[SP[v1],:][b,p] -= dinter[j,p] * T1[b,j]
   save(EC,"dint1"*o1,d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
-
   # calc dressed fock
   dfock = d_int1
+  d_oooo = load(EC,"d_"*o1*o1*o1*o1)
+  d_vooo = load(EC,"d_"*v1*o1*o1*o1)
+  d_oovo = load(EC,"d_"*o1*o1*v1*o1)
   @tensoropt begin
-    foo[i,j] := 2.0*d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
-    fvo[a,i] := 2.0*d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
-    fov[i,a] := 2.0*d_oovo[i,k,a,k] - d_oovo[k,i,a,k]
-    d_vovo = load(EC,"d_"*v1*o2*v1*o2)
-    fvv[a,b] := 2.0*d_vovo[a,k,b,k]
-    d_vovo = nothing
-    fvv[a,b] -= d_voov[a,k,k,b]
+    foo[i,j] := d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
+    fvo[a,i] := d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
+    fov[i,a] := d_oovo[i,k,a,k] - d_oovo[k,i,a,k] 
   end
+  d_vovo = load(EC,"d_"*v1*o1*v1*o1)
+  @tensoropt fvv[a,b] := d_vovo[a,k,b,k]
+  d_vovo = nothing
+  d_voov = load(EC,"d_"*v1*o1*o1*v1)
+  @tensoropt fvv[a,b] -= d_voov[a,k,k,b]
+  d_voov = nothing
   dfock[SP[o1],SP[o1]] += foo
   dfock[SP[v1],SP[o1]] += fvo
   dfock[SP[o1],SP[v1]] += fov
@@ -327,19 +494,68 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   t1 = print_time(EC,t1,"dress fock",3)
 end
 
+""" dress the fock matrix (opposite-spin part) """
+function dress_fock_oppositespin(EC::ECInfo)
+  t1 = time_ns()
+  SP = EC.space
+  d_oooo = load(EC,"d_oOoO")
+  @tensoropt begin
+    foo[i,j] := d_oooo[i,k,j,k]
+    fOO[i,j] := d_oooo[k,i,k,j]
+  end
+  d_oooo = nothing
+  d_vooo = load(EC,"d_vOoO")
+  @tensoropt fvo[a,i] := d_vooo[a,k,i,k]
+  d_vooo = nothing
+  d_ovoo = load(EC,"d_oVoO")
+  @tensoropt fVO[a,i] := d_ovoo[k,a,k,i]
+  d_ovoo = nothing
+  d_oovo = load(EC,"d_oOvO")
+  @tensoropt fov[i,a] := d_oovo[i,k,a,k]
+  d_oovo = nothing
+  d_ooov = load(EC,"d_oOoV")
+  @tensoropt fOV[i,a] := d_ooov[k,i,k,a]
+  d_ooov = nothing
+  d_vovo = load(EC,"d_vOvO")
+  @tensoropt fvv[a,b] := d_vovo[a,k,b,k]
+  d_vovo = nothing
+  d_ovov = load(EC,"d_oVoV")
+  @tensoropt fVV[a,b] := d_ovov[k,a,k,b]
+  d_ovov = nothing
+
+  dfocka = load(EC,"dfocko")
+  dfocka[SP['o'],SP['o']] += foo
+  dfocka[SP['o'],SP['v']] += fov
+  dfocka[SP['v'],SP['o']] += fvo
+  dfocka[SP['v'],SP['v']] += fvv
+  save(EC,"dfocko",dfocka)
+
+  dfockb = load(EC,"dfockO")
+  dfockb[SP['O'],SP['O']] += fOO
+  dfockb[SP['O'],SP['V']] += fOV
+  dfockb[SP['V'],SP['O']] += fVO
+  dfockb[SP['V'],SP['V']] += fVV
+  save(EC,"dfock"*'O',dfockb)
+end
+
 """dress integrals with singles"""
-function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
+function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[]) #todo add closed-shell bool
   if length(T1b) == 0
     calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
+    dress_fock_closedshell(EC,T1a)
   else
     calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
     calc_dressed_ints(EC,T1b,T1b,'O','V','O','V')
     calc_dressed_ints(EC,T1a,T1b,'o','v','O','V')
+    dress_fock_samespin(EC,T1a,'o','v')
+    dress_fock_samespin(EC,T1b,'O','V')
+    dress_fock_oppositespin(EC)
   end
 end
 
 """save non-dressed integrals in files instead of dressed integrals"""
-function pseudo_dressed_ints(EC::ECInfo)
+function pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
+  #TODO write like in itf with chars as arguments, so three calls for three spin cases...
   t1 = time_ns()
   save(EC,"d_oovo",ints2(EC,"oovo"))
   save(EC,"d_voov",ints2(EC,"voov"))
@@ -360,7 +576,35 @@ function pseudo_dressed_ints(EC::ECInfo)
   end
   save(EC,"dint1"*'o',integ1(EC.fd))
   save(EC,"dfock"*'o',EC.fock)
+  save(EC,"dfock"*'O',EC.fockb)
   t1 = print_time(EC,t1,"pseudo-dressing",3)
+  if unrestricted
+    save(EC,"d_OOVO",ints2(EC,"OOVO"))
+    save(EC,"d_VVOO",ints2(EC,"VVOO"))
+    save(EC,"d_VVVV",ints2(EC,"VVVV"))
+    save(EC,"d_OOOO",ints2(EC,"OOOO"))
+    save(EC,"d_VOOO",ints2(EC,"VOOO"))
+    save(EC,"d_VOOV",ints2(EC,"VOOV"))
+    save(EC,"d_VOVO",ints2(EC,"VOVO"))
+    save(EC,"d_VOVV",ints2(EC,"VOVV"))
+
+    save(EC,"d_oOvO",ints2(EC,"oOvO"))
+    save(EC,"d_oOoV",ints2(EC,"oOoV"))
+    save(EC,"d_vVoO",ints2(EC,"vVoO"))
+    save(EC,"d_vVvV",ints2(EC,"vVvV"))
+    save(EC,"d_oOoO",ints2(EC,"oOoO"))
+    # save(EC,"d_voov",ints2(EC,"voov"))
+    save(EC,"d_oVvO",ints2(EC,"oVvO"))
+    save(EC,"d_vOoV",ints2(EC,"vOoV"))
+    #vovo
+    save(EC,"d_vOvO",ints2(EC,"vOvO"))
+    save(EC,"d_oVoV",ints2(EC,"oVoV"))
+    save(EC,"d_vOoO",ints2(EC,"vOoO"))
+    save(EC,"d_oVoO",ints2(EC,"oVoO"))
+    save(EC,"d_vOvV",ints2(EC,"vOvV"))
+    save(EC,"d_oVvV",ints2(EC,"oVvV"))
+    save(EC,"dint1"*'O',integ1(EC.fd))
+  end
 end
 
 """ Calculate closed-shell MP2 energy and amplitudes. 
@@ -416,6 +660,7 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
   nocc = length(SP['o'])
   if length(T1) > 0
     D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
+    # D2 = zeros(norb,norb,nocc,nocc)
   else
     D2 = zeros(norb,norb,nocc,nocc)
   end
@@ -435,6 +680,83 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
     D2[diagindx,:,:] *= 0.5
   end
   return D2
+end
+
+function calc_D2a(EC::ECInfo, T1a, T2a)
+  SP = EC.space
+  norb = length(SP[':'])
+  nocc = length(SP['o'])
+  if length(T1a) > 0
+    D2a = Array{Float64}(undef,norb,norb,nocc,nocc)
+    # D2a = zeros(norb,norb,nocc,nocc)
+  else
+    D2a = zeros(norb,norb,nocc,nocc)
+  end
+  @tensoropt begin
+    D2a[SP['v'],SP['v'],:,:][a,b,i,j] = T2a[a,b,i,j] 
+    D2a[SP['o'],SP['o'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k] - Matrix(I,nocc,nocc)[k,j] * Matrix(I,nocc,nocc)[l,i]
+  end
+  if length(T1a) > 0
+    @tensoropt begin
+      D2a[SP['v'],SP['v'],:,:][a,b,i,j] += T1a[a,i] * T1a[b,j] - T1a[b,i] * T1a[a,j]
+      D2a[SP['o'],SP['v'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1a[a,k] - Matrix(I,nocc,nocc)[k,j] * T1a[a,i]
+      D2a[SP['v'],SP['o'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1a[a,k] - Matrix(I,nocc,nocc)[k,j] * T1a[a,i]
+    end
+  end
+  return D2a
+end
+
+function calc_D2b(EC::ECInfo, T1b, T2b)
+  SP = EC.space
+  norb = length(SP[':'])
+  nocc = length(SP['O'])
+  if length(T1b) > 0
+    D2b = Array{Float64}(undef,norb,norb,nocc,nocc)
+    # D2b = zeros(norb,norb,nocc,nocc)
+  else
+    D2b = zeros(norb,norb,nocc,nocc)
+  end
+  @tensoropt begin
+    D2b[SP['V'],SP['V'],:,:][a,b,i,j] = T2b[a,b,i,j] 
+    D2b[SP['O'],SP['O'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k] - Matrix(I,nocc,nocc)[k,j] * Matrix(I,nocc,nocc)[l,i]
+  end
+  if length(T1b) > 0
+    @tensoropt begin
+      D2b[SP['V'],SP['V'],:,:][a,b,i,j] += T1b[a,i] * T1b[b,j] - T1b[b,i] * T1b[a,j]
+      D2b[SP['O'],SP['V'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1b[a,k] - Matrix(I,nocc,nocc)[k,j] * T1b[a,i]
+      D2b[SP['V'],SP['O'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1b[a,k] - Matrix(I,nocc,nocc)[k,j] * T1b[a,i]
+    end
+  end
+  return D2b
+end
+
+function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
+  SP = EC.space
+  norb = length(SP[':'])
+  nocca = length(SP['o'])
+  noccb = length(SP['O'])
+  if length(T1a) > 0
+    D2ab = Array{Float64}(undef,norb,norb,nocca,noccb)
+    # D2ab = zeros(norb,norb,nocca,noccb)
+  else
+    D2ab = zeros(norb,norb,nocca,noccb)
+  end
+  @tensoropt begin
+    D2ab[SP['v'],SP['V'],:,:][a,B,i,J] = T2ab[a,B,i,J] 
+    D2ab[SP['o'],SP['O'],:,:][i,k,j,l] = Matrix(I,nocca,nocca)[i,j] * Matrix(I,noccb,noccb)[l,k]
+  end
+  if length(T1a) > 0
+    @tensoropt begin
+      D2ab[SP['v'],SP['V'],:,:][a,b,i,j] += T1a[a,i] * T1b[b,j]
+      D2ab[SP['o'],SP['V'],:,:][j,a,i,k] = Matrix(I,nocca,nocca)[i,j] * T1b[a,k]
+      D2ab[SP['v'],SP['O'],:,:][a,j,k,i] = Matrix(I,noccb,noccb)[i,j] * T1a[a,k]
+    end
+  end
+  if scalepp
+    diagindx = [CartesianIndex(i,i) for i in 1:norb]
+    D2ab[diagindx,:,:] *= 0.5
+  end
+  return D2ab
 end
 
 """
@@ -683,6 +1005,370 @@ function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
 end
 
 """
+Calculate UCCSD or UDCSD residual.
+"""
+function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
+  t1 = time_ns()
+  SP = EC.space
+  linearized::Bool = false
+  if length(T1a) > 0
+    calc_dressed_ints(EC,T1a,T1b)
+    t1 = print_time(EC,t1,"dressing",2)
+  else
+    pseudo_dressed_ints(EC,true)
+  end
+
+  if length(T1a) > 0
+    R1a = Float64[]
+  else
+    R1a = nothing
+  end
+  if length(T1b) > 0
+    R1b = Float64[]
+  else
+    R1b = nothing
+  end
+
+
+  dfock = load(EC,"dfock"*'o')
+  dfockb = load(EC,"dfock"*'O')
+  fij = dfock[SP['o'],SP['o']]
+  fab = dfock[SP['v'],SP['v']]
+  fIJ = dfockb[SP['O'],SP['O']]
+  fAB = dfockb[SP['V'],SP['V']]
+
+  if length(T1a) > 0
+    if EC.options.cc.use_kext
+      dint1a = load(EC,"dint1"*'o')
+      R1a = dint1a[SP['v'],SP['o']]
+      dint1b = load(EC,"dint1"*'O')
+      R1b = dint1b[SP['V'],SP['O']]
+    else
+      fai = dfock[SP['v'],SP['o']]
+      d_vovv = load(EC,"d_vovv")
+      fAI = dfockb[SP['V'],SP['O']]
+      d_VOVV = load(EC,"d_VOVV")
+      d_vOvV = load(EC,"d_vOvV")
+      d_oVvV = load(EC,"d_oVvV")
+      @tensoropt begin
+        R1a[a,i] :=  fai[a,i]
+        R1b[a,i] :=  fAI[a,i]
+        R1a[a,i] += d_vovv[a,k,b,d] * T2a[b,d,i,k]
+        R1b[A,I] += d_VOVV[A,K,B,D] * T2b[B,D,I,K]
+        R1a[a,i] += d_vOvV[a,K,b,D] * T2ab[b,D,i,K]
+        R1b[A,I] += d_oVvV[k,A,d,B] * T2ab[d,B,k,I]
+      end
+    end
+    fia = dfock[SP['o'],SP['v']]
+    d_oovo = load(EC,"d_oovo")
+    d_OOVO = load(EC,"d_OOVO")
+    fIA = dfockb[SP['O'],SP['V']]
+    d_oOoV = load(EC,"d_oOoV")
+    d_oOvO = load(EC,"d_oOvO")
+    @tensoropt begin
+      R1a[a,i] += fia[j,b] * T2a[a,b,i,j]
+      R1b[A,I] += fIA[J,B] * T2b[A,B,I,J]
+
+      R1a[a,i] -= d_oovo[k,j,d,i] * T2a[a,d,j,k]
+      R1b[A,I] -= d_OOVO[K,J,D,I] * T2b[A,D,J,K]
+
+      R1a[a,i] += fIA[J,B] * T2ab[a,B,i,J]
+      R1b[A,I] += fia[j,b] * T2ab[b,A,j,I]
+
+      R1a[a,i] -= d_oOoV[j,K,i,D] * T2ab[a,D,j,K]
+      R1b[A,I] -= d_oOvO[k,J,d,I] * T2ab[d,A,k,J]
+    end
+  end
+
+
+  if !linearized
+    oovv = ints2(EC,"oovv")
+    OOVV = ints2(EC,"OOVV")
+    oOvV = ints2(EC,"oOvV")
+    dcfac = dc ? 0.5 : 1.0
+    @tensoropt begin
+      xij[i,j] := fij[i,j]
+      xIJ[i,j] := fIJ[i,j]
+      xab[i,j] := fab[i,j]
+      xAB[i,j] := fAB[i,j]
+      xij[i,j] += dcfac * oovv[i,k,b,d] * T2a[b,d,j,k]
+      xab[a,b] -= dcfac * oovv[i,k,b,d] * T2a[a,d,i,k]
+      xIJ[I,J] += dcfac * OOVV[I,K,B,D] * T2b[B,D,J,K]
+      xAB[A,B] -= dcfac * OOVV[I,K,B,D] * T2b[A,D,I,K]
+      xij[i,j] += dcfac * oOvV[i,K,b,D] * T2ab[b,D,j,K]
+      xab[a,b] -= dcfac * oOvV[i,K,b,D] * T2ab[a,D,i,K]
+      xIJ[I,J] += dcfac * oOvV[k,I,d,B] * T2ab[d,B,k,J]
+      xAB[A,B] -= dcfac * oOvV[k,I,d,B] * T2ab[d,A,k,I]
+    end
+  end
+
+  #driver terms
+  if EC.options.cc.use_kext
+    R2a = zeros((length(SP['v']),length(SP['v']),length(SP['o']),length(SP['o'])))
+    R2b = zeros((length(SP['V']),length(SP['V']),length(SP['O']),length(SP['O'])))
+    R2ab = zeros((length(SP['v']),length(SP['V']),length(SP['o']),length(SP['O'])))
+  else
+    d_vvoo = load(EC,"d_vvoo")
+    d_VVOO = load(EC,"d_VVOO")
+    R2a = load(EC,"d_vvoo")
+    @tensoropt R2a[a,b,i,j] -= d_vvoo[b,a,i,j]
+    R2b = load(EC,"d_VVOO")
+    @tensoropt R2b[A,B,I,J] -= d_VVOO[B,A,I,J]
+    R2ab = load(EC,"d_vVoO")
+  end
+  
+  if linearized
+  #fock terms
+    @tensoropt R2a[a,b,i,j] -= fij[k,i] * T2a[a,b,k,j]
+    @tensoropt R2a[a,b,j,i] += fij[k,i] * T2a[a,b,k,j]
+    @tensoropt R2a[a,b,i,j] += fab[a,c] * T2a[c,b,i,j]
+    @tensoropt R2a[b,a,i,j] -= fab[a,c] * T2a[c,b,i,j]
+
+    @tensoropt R2b[A,B,I,J] -= fIJ[K,I] * T2b[A,B,K,J]
+    @tensoropt R2b[A,B,J,I] += fIJ[K,I] * T2b[A,B,K,J]
+    @tensoropt R2b[A,B,I,J] += fAB[A,C] * T2b[C,B,I,J]
+    @tensoropt R2b[B,A,I,J] -= fAB[A,C] * T2b[C,B,I,J]
+  
+    @tensoropt R2ab[a,B,i,J] -= fij[k,i] * T2ab[a,B,k,J]
+    @tensoropt R2ab[a,B,i,J] -= fIJ[K,J] * T2ab[a,B,i,K]
+    @tensoropt R2ab[a,B,i,J] += fab[a,c] * T2ab[c,B,i,J]
+    @tensoropt R2ab[a,B,i,J] += fAB[B,C] * T2ab[a,C,i,J]
+  end
+  
+  #ladder terms
+  if EC.options.cc.use_kext
+    if(EC.fd.uhf)
+      int2a = integ2(EC.fd,SCα::SpinCase)
+      int2b = integ2(EC.fd,SCβ::SpinCase)
+      int2ab = integ2(EC.fd,SCαβ::SpinCase)
+      tripp = [CartesianIndex(i,j) for j in 1:length(SP[':']) for i in 1:j]
+      D2a = calc_D2a(EC, T1a, T2a)[tripp,:,:]
+      D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
+      D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
+      @tensoropt rR2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
+      @tensoropt rR2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
+      @tensoropt R2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
+      D2a = nothing
+      D2b = nothing
+      D2ab = nothing
+      # symmetrize R
+      @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
+      @tensoropt R2pqb[p,r,i,j] := rR2pqb[p,r,i,j] + rR2pqb[r,p,j,i]
+      rR2pqa = nothing
+      rR2pqb = nothing
+      # end
+      R2a += R2pqa[SP['v'],SP['v'],:,:]
+      R2b += R2pqb[SP['V'],SP['V'],:,:]
+      R2ab += R2pqab[SP['v'],SP['V'],:,:]
+    else
+      int2 = integ2(EC.fd)
+      # last two indices of integrals are stored as upper triangular 
+      tripp = [CartesianIndex(i,j) for j in 1:length(SP[':']) for i in 1:j]
+      D2a = calc_D2a(EC, T1a, T2a)[tripp,:,:]
+      D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
+      D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true)
+      D2ab = D2ab_full[tripp,:,:] 
+      D2abT = permutedims(D2ab_full,(2,1,4,3))[tripp,:,:]
+      D2ab_full = nothing
+      @tensoropt rR2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
+      @tensoropt rR2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
+      @tensoropt R2pqab[p,r,i,j] := int2[p,r,x] * D2ab[x,i,j]
+      @tensoropt R2pqab[p,r,i,j] += int2[r,p,x] * D2abT[x,j,i]
+      D2a = nothing
+      D2b = nothing
+      D2ab = nothing
+      D2abT = nothing
+      # symmetrize R
+      @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
+      @tensoropt R2pqb[p,r,i,j] := rR2pqb[p,r,i,j] + rR2pqb[r,p,j,i]
+      rR2pqa = nothing
+      rR2pqb = nothing
+      # end
+      R2a += R2pqa[SP['v'],SP['v'],:,:]
+      R2b += R2pqb[SP['V'],SP['V'],:,:]
+      R2ab += R2pqab[SP['v'],SP['V'],:,:]
+    end
+    if length(T1a) > 0
+      @tensoropt begin
+        R2a[a,b,i,j] -= R2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
+        R2a[a,b,i,j] -= R2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
+        R2a[a,b,i,j] += R2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
+        # singles residual contributions
+        R1a[a,i] +=  R2pqa[SP['v'],SP['o'],:,:][a,k,i,k] 
+        x1a[k,i] :=  R2pqa[SP['o'],SP['o'],:,:][k,l,i,l]
+        R1a[a,i] -= x1a[k,i] * T1a[a,k]
+        R2b[a,b,i,j] -= R2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
+        R2b[a,b,i,j] -= R2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+        R2b[a,b,i,j] += R2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
+        # singles residual contributions
+        R1b[a,i] += R2pqb[SP['V'],SP['O'],:,:][a,k,i,k]
+        x1b[k,i] := R2pqb[SP['O'],SP['O'],:,:][k,l,i,l]
+        R1b[a,i] -= x1b[k,i] * T1b[a,k]
+        R2ab[a,b,i,j] -= R2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
+        R2ab[a,b,i,j] -= R2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+        R2ab[a,b,i,j] += R2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
+        R1a[a,i] += R2pqab[SP['v'],SP['O'],:,:][a,k,i,k] 
+        x1a1[k,i] := R2pqab[SP['o'],SP['O'],:,:][k,l,i,l]
+        R1a[a,i] -= x1a1[k,i] * T1a[a,k]
+        R1b[a,i] += R2pqab[SP['o'],SP['V'],:,:][k,a,k,i] 
+        x1b1[k,i] := R2pqab[SP['o'],SP['O'],:,:][l,k,l,i]
+        R1b[a,i] -= x1b1[k,i] * T1b[a,k]
+      end
+    end
+    (R2pqa, R2pqb, R2pqab) = (nothing, nothing, nothing)
+    (x1a, x1b, x1ab) = (nothing, nothing, nothing)
+  else
+    d_vvvv = load(EC,"d_vvvv")
+    d_VVVV = load(EC,"d_VVVV")
+    d_vVvV = load(EC,"d_vVvV")
+    @tensoropt R2a[a,b,i,j] += d_vvvv[a,b,c,d] * T2a[c,d,i,j]
+    @tensoropt R2b[A,B,I,J] += d_VVVV[A,B,C,D] * T2b[C,D,I,J]
+    @tensoropt R2ab[a,B,i,J] += d_vVvV[a,B,c,D] * T2ab[c,D,i,J]
+  end
+
+  if linearized
+    d_oooo = load(EC,"d_oooo")
+    d_OOOO = load(EC,"d_OOOO")
+    d_oOoO = load(EC,"d_oOoO")
+    @tensoropt R2a[a,b,i,j] += d_oooo[k,l,i,j] * T2a[a,b,k,l]
+    @tensoropt R2b[A,B,I,J] += d_OOOO[K,L,I,J] * T2b[A,B,K,L]
+    @tensoropt R2ab[a,B,i,J] += d_oOoO[k,L,i,J] * T2ab[a,B,k,L]
+  else
+    x_klij = load(EC,"d_oooo")
+    x_KLIJ = load(EC,"d_OOOO")
+    x_kLiJ = load(EC,"d_oOoO")
+    if !dc
+      @tensoropt begin
+        x_klij[k,l,i,j] += 0.5 * oovv[k,l,c,d] *  T2a[c,d,i,j]
+        x_KLIJ[K,L,I,J] += 0.5 * OOVV[K,L,C,D] *  T2b[C,D,I,J]
+        x_kLiJ[k,L,i,J] +=       oOvV[k,L,c,D] * T2ab[c,D,i,J]
+      end
+    end
+    @tensoropt begin
+        R2a[a,b,i,j] += x_klij[k,l,i,j] *  T2a[a,b,k,l]
+        R2b[A,B,I,J] += x_KLIJ[K,L,I,J] *  T2b[A,B,K,L]
+      R2ab[a,B,i,J] += x_kLiJ[k,L,i,J] * T2ab[a,B,k,L]
+    end
+  end
+
+  #ph-ab-ladder
+  d_vOvO = load(EC,"d_vOvO")
+  d_oVoV = load(EC,"d_oVoV")
+  @tensoropt R2ab[a,B,i,J] -= d_vOvO[a,K,c,J] * T2ab[c,B,i,K]
+  @tensoropt R2ab[a,B,i,J] -= d_oVoV[k,B,i,C] * T2ab[a,C,k,J]
+  if !linearized && !dc
+    @tensoropt begin
+      x_DBik[D,B,i,k] := oOvV[k,L,c,D] * T2ab[c,B,i,L]
+      R2ab[a,B,i,J] += x_DBik[D,B,i,k] * T2ab[a,D,k,J]
+    end
+  end
+
+  #ring terms
+  d_voov = load(EC,"d_voov")
+  d_vOoV = load(EC,"d_vOoV")
+  d_VOOV = load(EC,"d_VOOV")
+  d_oVvO = load(EC,"d_oVvO")
+  d_voov = load(EC,"d_voov")
+  d_VOOV = load(EC,"d_VOOV")
+  d_oVvO = load(EC,"d_oVvO")
+  d_vOoV = load(EC,"d_vOoV")
+  d_vovo = load(EC,"d_vovo")
+  d_VOVO = load(EC,"d_VOVO")
+  d_VOVO = load(EC,"d_VOVO")
+  d_vovo = load(EC,"d_vovo")
+  @tensoropt begin
+    R2a[a,b,i,j] += d_voov[b,k,j,c] * T2a[a,c,i,k]
+    R2a[b,a,i,j] -= d_voov[b,k,j,c] * T2a[a,c,i,k]
+    R2a[a,b,j,i] -= d_voov[b,k,j,c] * T2a[a,c,i,k]
+    R2a[b,a,j,i] += d_voov[b,k,j,c] * T2a[a,c,i,k]
+    R2a[a,b,i,j] += d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
+    R2a[b,a,i,j] -= d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
+    R2a[a,b,j,i] -= d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
+    R2a[b,a,j,i] += d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
+    
+    R2b[A,B,I,J] += d_VOOV[B,K,J,C] * T2b[A,C,I,K]
+    R2b[B,A,I,J] -= d_VOOV[B,K,J,C] * T2b[A,C,I,K]
+    R2b[A,B,J,I] -= d_VOOV[B,K,J,C] * T2b[A,C,I,K]
+    R2b[B,A,J,I] += d_VOOV[B,K,J,C] * T2b[A,C,I,K]
+    R2b[A,B,I,J] += d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
+    R2b[B,A,I,J] -= d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
+    R2b[A,B,J,I] -= d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
+    R2b[B,A,J,I] += d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
+    
+    R2ab[a,B,i,J] += d_voov[a,k,i,c] * T2ab[c,B,k,J]
+    R2ab[a,B,i,J] += d_VOOV[B,K,J,C] * T2ab[a,C,i,K]
+    R2ab[a,B,i,J] += d_oVvO[k,B,c,J] * T2a[a,c,i,k]
+    R2ab[a,B,i,J] += d_vOoV[a,K,i,C] * T2b[B,C,J,K]
+
+  #triangular ring terms
+    R2a[a,b,i,j] -= d_vovo[b,k,c,j] * T2a[a,c,i,k]
+    R2a[b,a,i,j] += d_vovo[b,k,c,j] * T2a[a,c,i,k]
+    R2a[a,b,j,i] += d_vovo[b,k,c,j] * T2a[a,c,i,k]
+    R2a[b,a,j,i] -= d_vovo[b,k,c,j] * T2a[a,c,i,k]
+
+    R2b[A,B,I,J] -= d_VOVO[B,K,C,J] * T2b[A,C,I,K]
+    R2b[B,A,I,J] += d_VOVO[B,K,C,J] * T2b[A,C,I,K]
+    R2b[A,B,J,I] += d_VOVO[B,K,C,J] * T2b[A,C,I,K]
+    R2b[B,A,J,I] -= d_VOVO[B,K,C,J] * T2b[A,C,I,K]
+    
+    R2ab[a,B,i,J] -= d_VOVO[B,K,C,J] * T2ab[a,C,i,K]
+    R2ab[a,B,i,J] -= d_vovo[a,k,c,i] * T2ab[c,B,k,J]
+  end
+
+  if !linearized
+      #ring
+      @tensoropt x_ADIL[A,D,I,L] := 0.5 *   OOVV[K,L,C,D] *  T2b[A,C,I,K]
+      !dc && @tensoropt x_ADIL[A,D,I,L] -= 0.5 *   OOVV[K,L,D,C] *  T2b[A,C,I,K]
+      @tensoropt R2ab[b,A,j,I] += 2.0 * x_ADIL[A,D,I,L] * T2ab[b,D,j,L]
+      @tensoropt x_vVoO[a,D,i,L] :=   OOVV[K,L,C,D] * T2ab[a,C,i,K]
+      !dc && @tensoropt x_vVoO[a,D,i,L] -=   OOVV[K,L,D,C] * T2ab[a,C,i,K]
+    @tensoropt begin      
+      R2a[a,b,i,j]    += x_vVoO[a,D,i,L] * T2ab[b,D,j,L]
+      R2a[a,b,j,i]    -= x_vVoO[a,D,i,L] * T2ab[b,D,j,L]
+      x_dAlI[d,A,l,I] :=   oovv[k,l,c,d] * T2ab[c,A,k,I]
+    end
+    !dc && @tensoropt x_dAlI[d,A,l,I] -= oovv[k,l,d,c] * T2ab[c,A,k,I]
+    @tensoropt begin
+         R2b[A,B,I,J] += x_dAlI[d,A,l,I] * T2ab[d,B,l,J]
+         R2b[A,B,J,I] -= x_dAlI[d,A,l,I] * T2ab[d,B,l,J] 
+      x_vVoO[a,D,i,L] :=   oOvV[k,L,c,D] * T2a[a,c,i,k]
+        R2ab[a,B,i,J] += x_vVoO[a,D,i,L] * T2b[B,D,J,L]
+      #ring + crossed ring
+      x_ADIL[A,D,I,L] +=   oOvV[k,L,c,D] * T2ab[c,A,k,I]
+      R2b[A,B,I,J]    += x_ADIL[A,D,I,L] *  T2b[B,D,J,L]
+      R2b[A,B,J,I]    -= x_ADIL[A,D,I,L] *  T2b[B,D,J,L]
+      R2b[B,A,I,J]    -= x_ADIL[A,D,I,L] *  T2b[B,D,J,L]
+      R2b[B,A,J,I]    += x_ADIL[A,D,I,L] *  T2b[B,D,J,L]
+      #crossed ring
+      R2a[a,b,i,j]  -= xij[k,i] *  T2a[a,b,k,j]
+      R2a[a,b,i,j]  -= xij[k,j] *  T2a[a,b,i,k]
+      R2a[a,b,i,j]  += xab[a,c] *  T2a[c,b,i,j]
+      R2a[a,b,i,j]  += xab[b,c] *  T2a[a,c,i,j]
+      R2b[A,B,I,J]  -= xIJ[K,I] *  T2b[A,B,K,J]
+      R2b[A,B,I,J]  -= xIJ[K,J] *  T2b[A,B,I,K]
+      R2b[A,B,I,J]  += xAB[A,C] *  T2b[C,B,I,J]
+      R2b[A,B,I,J]  += xAB[B,C] *  T2b[A,C,I,J]
+      R2ab[a,B,i,J] -= xij[k,i] * T2ab[a,B,k,J]
+      R2ab[a,B,i,J] -= xIJ[K,J] * T2ab[a,B,i,K]
+      R2ab[a,B,i,J] += xab[a,c] * T2ab[c,B,i,J]
+      R2ab[a,B,i,J] += xAB[B,C] * T2ab[a,C,i,J]
+      x_adil[a,d,i,l] := 0.5 * oovv[k,l,c,d] *  T2a[a,c,i,k]
+    end
+      !dc && @tensoropt x_adil[a,d,i,l] -= 0.5 * oovv[k,l,d,c] * T2a[a,c,i,k]
+    @tensoropt begin
+      R2ab[a,B,i,J]   +=     x_adil[a,d,i,l] * T2ab[d,B,l,J]
+      x_adil[a,d,i,l] +=       oOvV[l,K,d,C] * T2ab[a,C,i,K]
+      R2ab[a,B,i,J]   +=     x_adil[a,d,i,l] * T2ab[d,B,l,J]
+      R2a[a,b,i,j]    +=     x_adil[a,d,i,l] *  T2a[b,d,j,l]
+      R2a[a,b,j,i]    -=     x_adil[a,d,i,l] *  T2a[b,d,j,l]
+      R2a[b,a,i,j]    -=     x_adil[a,d,i,l] *  T2a[b,d,j,l]
+      R2a[b,a,j,i]    +=     x_adil[a,d,i,l] *  T2a[b,d,j,l]
+    end
+  end
+  return R1a, R1b, R2a, R2b, R2ab
+end
+
+"""
 Calculate coupled cluster amplitudes.
 
 If length(T1) is 0 on input, no singles will be calculated.
@@ -715,9 +1401,11 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
       NormR1 = calc_singles_norm(R1)
       T1 += update_singles(EC,R1)
       T1,T2 = perform(diis,[T1,T2],[R1,R2])
-      En = calc_singles_energy(EC, T1)
+      En1 = calc_singles_energy(EC, T1)
+      En = En1
     end
-    En += calc_doubles_energy(EC,T2)
+    En2 = calc_doubles_energy(EC,T2)
+    En += En2
     ΔE = En - Eh  
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
@@ -734,8 +1422,63 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   return Eh,T1,T2
 end
 
+"""
+Calculate unrestricted coupled cluster amplitudes.
 
+If length(T1a) && length(T1b) are 0 on input, no singles will be calculated.
+If dc: calculate distinguishable cluster.
+"""
+function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
+  println(method_name(T1a,dc))
+  diis = Diis(EC.scr)
 
+  println("Iter     SqNorm      Energy      DE          Res         Time")
+  NormR1 = 0.0
+  NormT1 = 0.0
+  NormT2 = 0.0
+  R1a = Float64[]
+  R1b = Float64[]
+  nosing = (length(T1a) == 0) && (length(T1b) == 0)  
+  Eh = 0.0
+  t0 = time_ns()
+  for it in 1:EC.options.cc.maxit
+    t1 = time_ns()
+    R1a, R1b, R2a, R2b, R2ab = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
+    t1 = print_time(EC,t1,"residual",2)
+    NormT2 = calc_doubles_norm(T2a,T2b,T2ab)
+    NormR2 = calc_doubles_norm(R2a,R2b,R2ab)
+    Eh = calc_hylleraas(EC,T1a,T1b,T2a,T2b,T2ab,R1a,R1b,R2a,R2b,R2ab)
+    T2a += update_doubles(EC,R2a)
+    T2b += update_doubles(EC,R2b;spincase=SCβ)
+    T2ab += update_doubles(EC,R2ab;spincase=SCαβ)
+    if nosing
+      T2a,T2b,T2ab = perform(diis,[T2a,T2b,T2ab],[R2a,R2b,2.0*R2ab])
+      En = 0.0
+    else
+      NormT1 = calc_singles_norm(T1a, T1b)
+      NormR1 = calc_singles_norm(R1a, R1b)
+      T1a += update_singles(EC,R1a;spincase=SCα)
+      T1b += update_singles(EC,R1b;spincase=SCβ)
+      T1a,T1b,T2a,T2b,T2ab = perform(diis,[T1a,T1b,T2a,T2b,T2ab],[R1a,R1b,R2a,R2b,2.0*R2ab])
+      En1 = calc_singles_energy(EC, T1a, T1b)
+      En = En1
+    end
+    En2 = calc_doubles_energy(EC,T2a,T2b,T2ab)
+    En += En2
+    ΔE = En - Eh  
+    NormR = NormR1 + NormR2
+    NormT = 1.0 + NormT1 + NormT2
+    tt = (time_ns() - t0)/10^9
+    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    if NormR < EC.options.cc.thr
+      break
+    end
+  end
+  println()
+  @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
+  println()
+  return Eh, T1a, T1b, T2a, T2b, T2ab
+end
 
 #Charlotte start
 """ calculate DC-CCSDT"""

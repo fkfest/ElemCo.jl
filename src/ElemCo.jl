@@ -107,6 +107,20 @@ function parse_commandline(EC::ECInfo)
   return fcidump_file, method, occa, occb
 end
 
+function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", use_kext::Bool=true, occa="-", occb="-")
+  EC = ECInfo()
+  fcidump = joinpath(@__DIR__,"..","test",dumpfile)
+  EC.options.cc.maxit = 100
+  EC.options.cc.thr = 1.e-12
+  EC.options.cc.use_kext = use_kext
+  EC.options.cc.calc_d_vvvv = !use_kext
+  EC.options.cc.calc_d_vvvo = !use_kext
+  EC.options.cc.calc_d_vovv = !use_kext
+  EC.options.cc.calc_d_vvoo = !use_kext
+  EHF, EMP2, ECCSD = ECdriver(EC,method; fcidump, occa, occb)
+  return ECCSD
+end
+
 function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
   t1 = time_ns()
   # create scratch directory
@@ -200,40 +214,62 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     if ecmethod.theory == "MP"
       continue
     end
-    closed_shell || error("Open-shell methods not implemented yet")
+
     dc = (ecmethod.theory == "DC")
-    if ecmethod.exclevel[1] == FullExc
-      T1 = zeros(size(SP['v'],1),size(SP['o'],1))
-    else
-      T1 = zeros(0)
-    end
+
     if ecmethod.exclevel[4] != NoExc
       error("no quadruples implemented yet...")
     end
-    ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
-    main_name = method_name(T1,dc)
-    println("$main_name correlation energy: ",ECC)
-    println("$main_name total energy: ",ECC+EHF)
-    if ecmethod.exclevel[3] != NoExc
-      do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
-      save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-      ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
-      println()
-      println("$main_name[T] total energy: ",ECC+ET3b+EHF)
-      println("$main_name(T) correlation energy: ",ECC+ET3)
-      println("$main_name(T) total energy: ",ECC+ET3+EHF)
-      if do_full_t3
-        cc3 = (ecmethod.exclevel[3] == PertExcIter)
-        ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, EC.options.cc.calc_t3_for_decomposition, cc3)
-        if cc3
-          main_name = "CC3"
-        else
-          main_name = "DC-CCSDT"
+
+    if closed_shell_method
+      if ecmethod.exclevel[1] == FullExc
+        T1 = zeros(size(SP['v'],1),size(SP['o'],1))
+      else
+        T1 = zeros(0)
+      end
+      ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
+    else
+      if ecmethod.exclevel[1] == FullExc
+        T1a = zeros(size(SP['v'],1),size(SP['o'],1))
+        T1b = zeros(size(SP['V'],1),size(SP['O'],1))
+        if(!EC.options.cc.use_kext)
+          error("open-shell CCSD only implemented with kext")
         end
-        println("$main_name correlation energy: ",ECC)
-        println("$main_name total energy: ",ECC+EHF)
-      end 
+      else
+        T1a = zeros(0)
+        T1b = zeros(0)
+      end
+      ECC, T1a, T1b, T2a, T2b, T2ab = calc_cc(EC,T1a,T1b,T2a,T2b,T2ab,dc)
     end
+
+    if closed_shell_method
+      main_name = method_name(T1,dc)
+      if ecmethod.exclevel[3] != NoExc
+        do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
+        save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
+        ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
+        println()
+        println("$main_name[T] total energy: ",ECC+ET3b+EHF)
+        println("$main_name(T) correlation energy: ",ECC+ET3)
+        println("$main_name(T) total energy: ",ECC+ET3+EHF)
+        if do_full_t3
+          cc3 = (ecmethod.exclevel[3] == PertExcIter)
+          ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, EC.options.cc.calc_t3_for_decomposition, cc3)
+          if cc3
+            main_name = "CC3"
+          else
+            main_name = "DC-CCSDT"
+          end
+          println("$main_name correlation energy: ",ECC)
+          println("$main_name total energy: ",ECC+EHF)
+        end 
+      end
+    else
+      main_name = method_name(T1a,dc)
+    end
+
+    println(add2name*"$main_name correlation energy: ",ECC)
+    println(add2name*"$main_name total energy: ",ECC+EHF)
     t1 = print_time(EC, t1,"CC",1)
     if length(method_names) == 1
       if ecmethod.exclevel[3] != NoExc

@@ -16,7 +16,7 @@ mutable struct Diis
   next::Int
   nDim::Int
   bmat::Array{Float64}
-  function Diis(scr_::String, maxdiis_::Int = 6)
+  function Diis(scr_::String; maxdiis_::Int = 6)
     ampfiles = [ joinpath(scr_, "amp"*string(i)*".bin") for i in 1:maxdiis_ ]
     resfiles = [ joinpath(scr_, "res"*string(i)*".bin") for i in 1:maxdiis_ ]
     new(scr_,maxdiis_,10.0,ampfiles,resfiles,1,0,zeros(maxdiis_+1,maxdiis_+1))
