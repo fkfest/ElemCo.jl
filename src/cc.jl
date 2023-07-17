@@ -1011,6 +1011,18 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   t1 = time_ns()
   SP = EC.space
   linearized::Bool = false
+  twodetcc::Bool = false
+  if( uppercase(EC.currentMethod[1:2]) == "TD" )
+    # TD-CC assumes open-shell singlet reference morba and norbb occupied
+    twodetcc = true
+    @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "TD-CCSD needs two open-shell alpha beta orbitals"
+    morb = setdiff(SP['o'],SP['O'])
+    norb = setdiff(SP['O'],SP['o'])
+    morba = findfirst(isequal(morb[1]),SP['o'])
+    norbb = findfirst(isequal(norb[1]),SP['O'])
+    morbb = findfirst(isequal(morb[1]),SP['V'])
+    norba = findfirst(isequal(norb[1]),SP['v'])
+  end
   if length(T1a) > 0
     calc_dressed_ints(EC,T1a,T1b)
     t1 = print_time(EC,t1,"dressing",2)
@@ -1364,6 +1376,11 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       R2a[b,a,i,j]    -=     x_adil[a,d,i,l] *  T2a[b,d,j,l]
       R2a[b,a,j,i]    +=     x_adil[a,d,i,l] *  T2a[b,d,j,l]
     end
+  end
+  if twodetcc
+    println("W: ", R2ab[norba,morbb,morba,norbb])
+    W = R2ab[norba,morbb,morba,norbb]
+    R2ab[norba,morbb,morba,norbb] = 0.0
   end
   return R1a, R1b, R2a, R2b, R2ab
 end
