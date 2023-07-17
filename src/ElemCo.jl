@@ -193,6 +193,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println()
     println("Next method: ",mname)
     ecmethod = ECMethod(mname)
+    EC.currentMethod = ecmethod.theory
     if ecmethod.unrestricted
       add2name = "U"
       closed_shell_method = false

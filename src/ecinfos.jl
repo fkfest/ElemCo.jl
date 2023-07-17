@@ -23,6 +23,7 @@ include("options.jl")
   ϵv::Array{Float64} = Float64[]
   ϵob::Array{Float64} = Float64[]
   ϵvb::Array{Float64} = Float64[]
+  currentMethod::String = ""
 end
 
 """
