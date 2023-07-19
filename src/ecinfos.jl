@@ -7,21 +7,32 @@ export ECInfo, parse_orbstring, get_occvirt
 
 include("options.jl")
 @with_kw mutable struct ECInfo
-  # path to scratch directory
+  """ path to scratch directory """
   scr::String = joinpath(tempdir(),"elemcojlscr")
+  """ output file """
+  out = ""
+  """ verbosity level """
   verbosity::Int = 2
-  # options
+  """ options """
   options::Options = Options()
 
+  """ fcidump """
   fd::FDump = FDump()
+  """ ignore various errors """
   ignore_error::Bool = false
-  # subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general
+  """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general """
   space::Dict{Char,Any} = Dict{Char,Any}()
+  """ fock matrix (for UHF: α) """
   fock::Array{Float64} = Float64[]
+  """ fock matrix (β) """
   fockb::Array{Float64} = Float64[]
+  """ occupied orbital energies (for UHF: α) """
   ϵo::Array{Float64} = Float64[]
+  """ virtual orbital energies (for UHF: α) """
   ϵv::Array{Float64} = Float64[]
+  """ occupied orbital energies (β) """
   ϵob::Array{Float64} = Float64[]
+  """ virtual orbital energies (β) """
   ϵvb::Array{Float64} = Float64[]
 end
 

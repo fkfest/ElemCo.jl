@@ -59,6 +59,10 @@ function parse_commandline(EC::ECInfo)
       help = "verbosity"
       arg_type = Int
       default = 2
+    "--output", "-o"
+      help = "output file"
+      arg_type = String
+      default = ""
     "--occa"
       help = "occupied α orbitals (in '1-3+5' format)"
       arg_type = String
@@ -91,6 +95,7 @@ function parse_commandline(EC::ECInfo)
   args = parse_args(s)
   EC.scr = args["scratch"]
   EC.verbosity = args["verbosity"]
+  EC.out = args["output"]
   EC.ignore_error = args["force"]
   EC.options.cholesky.thr = args["choltol"]
   EC.options.cc.ampsvdtol = args["amptol"]
@@ -187,6 +192,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   calc_fock_matrix(EC, closed_shell)
   EHF = calc_HF_energy(EC, closed_shell)
   println(addname*"HF energy: ",EHF)
+  flush(stdout)
 
   SP = EC.space
   for mname in method_names
@@ -210,6 +216,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println(add2name*"MP2 correlation energy: ",EMp2)
     println(add2name*"MP2 total energy: ",EMp2+EHF)
     t1 = print_time(EC,t1,"MP2",1)
+    flush(stdout)
 
     if ecmethod.theory == "MP"
       continue
@@ -267,6 +274,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     else
       main_name = method_name(T1a,dc)
     end
+    flush(stdout)
 
     println(add2name*"$main_name correlation energy: ",ECC)
     println(add2name*"$main_name total energy: ",ECC+EHF)
@@ -288,7 +296,14 @@ function main()
     println("No input file given.")
     return
   end
-  ECdriver(EC, method_string, fcidump=fcidump, occa=occa, occb=occb)
+  if EC.out != ""
+    output = EC.out
+  else
+    output = nothing
+  end
+  redirect_stdio(stdout=output) do
+    ECdriver(EC, method_string, fcidump=fcidump, occa=occa, occb=occb)
+  end
 end
 if abspath(PROGRAM_FILE) == @__FILE__
   main()
