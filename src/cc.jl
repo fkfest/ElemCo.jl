@@ -1411,6 +1411,7 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
     NormT = 1.0 + NormT1 + NormT2
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    flush(stdout)
     if NormR < EC.options.cc.thr
       break
     end
@@ -1418,6 +1419,7 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
   println()
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
   println()
+  flush(stdout)
 
   return Eh,T1,T2
 end
@@ -1470,6 +1472,7 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     NormT = 1.0 + NormT1 + NormT2
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    flush(stdout)
     if NormR < EC.options.cc.thr
       break
     end
@@ -1477,6 +1480,7 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   println()
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
   println()
+  flush(stdout)
   return Eh, T1a, T1b, T2a, T2b, T2ab
 end
 
@@ -1539,6 +1543,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
     NormT = 1.0 + NormT1 + NormT2 + NormT3
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    flush(stdout)
     if NormR < EC.options.cc.thr
       break
     end
@@ -1546,6 +1551,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
   println()
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f Sq.Norm of T3: %12.8f \n" NormT1 NormT2 NormT3
   println()
+  flush(stdout)
   
   return Eh,T1,T2
 end
