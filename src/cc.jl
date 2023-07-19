@@ -1388,21 +1388,23 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     # println("W: ", R2ab[norba,morbb,morba,norbb])
     W = R2ab[norba,morbb,morba,norbb]
     R2ab[norba,morbb,morba,norbb] = 0.0
-    M1a = calc_M1a(occcore,virtuals,EC.space,'v','o',T1b, T2ab, activeorbs)
-    M1b = calc_M1b(occcore,virtuals,EC.space,'V','O',T1a, T2ab, activeorbs)
-    M2a = calc_M2a(occcore,virtuals,EC.space,'v','o',T1a,T1b,T2b,T2ab, activeorbs)
+    M1a = calc_M1a(occcore,virtuals,T1b, T2ab, activeorbs)
+    M1b = calc_M1b(occcore,virtuals,T1a, T2ab, activeorbs)
+    M2a = calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab, activeorbs)
+    M2ab = calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab, activeorbs)
     @tensoropt R1a[a,i] += M1a[a,i] * W
     @tensoropt R1b[a,i] += M1b[a,i] * W
     @tensoropt R2a[a,b,i,j] += M2a[a,b,i,j] * W
+    @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
   end
   return R1a, R1b, R2a, R2b, R2ab
 end
 
-function calc_M1a(occcore,virtuals,SP::Dict{Char,Any},v1::Char,o1::Char,T1, T2, activeorbs)
+function calc_M1a(occcore,virtuals,T1, T2, activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M1 = zeros(length(SP[v1]),length(SP[o1]))
+  M1 = zeros(Float64,size(T1))
   @tensoropt M1[norba,occcorea][i] += T2[norba,morbb,morba,occcoreb][i]
   @tensoropt M1[virtualsa,morba][a] -= T2[norba,virtualsb,morba,norbb][a]
   @tensoropt M1[virtualsa,occcorea][a,i] += T2[norba,morbb,morba,occcoreb][i] * T1[virtualsb,norbb][a]
@@ -1410,11 +1412,11 @@ function calc_M1a(occcore,virtuals,SP::Dict{Char,Any},v1::Char,o1::Char,T1, T2, 
   return M1
 end
 
-function calc_M1b(occcore,virtuals,SP::Dict{Char,Any},v1::Char,o1::Char,T1, T2, activeorbs)
+function calc_M1b(occcore,virtuals,T1, T2, activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M1 = zeros(length(SP[v1]),length(SP[o1]))
+  M1 = zeros(Float64,size(T1))
   @tensoropt M1[morbb,occcoreb][i] += T2[norba,morbb,occcorea,norbb][i]
   @tensoropt M1[virtualsb,norbb][a] -= T2[virtualsa,morbb,morba,norbb][a]
   @tensoropt M1[virtualsb,occcoreb][a,i] += T2[norba,morbb,occcorea,norbb][i] * T1[virtualsa,morba][a]
@@ -1422,14 +1424,14 @@ function calc_M1b(occcore,virtuals,SP::Dict{Char,Any},v1::Char,o1::Char,T1, T2, 
   return M1
 end
 
-function calc_M2a(occcore,virtuals,SP::Dict{Char,Any},v1::Char,o1::Char,T1a,T1b,T2b,T2ab,activeorbs)
+function calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab,activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
   @tensoropt T1[a,i] := T1a[a,i] - T1b[a,i]
   @tensoropt T2t[a,b,i,j] := T2b[a,b,i,j] + T1b[a,i] * T1b[b,j]
 
-  M2 = zeros(length(SP[v1]),length(SP[v1]),length(SP[o1]),length(SP[o1]))
+  M2 = zeros(Float64,size(T2b))
   @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsa,occcorea][a,j]
   @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += T2ab[norba,morbb,morba,occcoreb][j] * T1[virtualsa,occcorea][a,i]
   @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
@@ -1468,7 +1470,16 @@ end
 function calc_M2b()
 end
 
-function calc_M2ab()
+function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
+  morba, norbb, morbb, norba = activeorbs
+  occcorea, occcoreb = occcore
+  virtualsa, virtualsb = virtuals
+  @tensoropt T1[a,i] := T1a[a,i] - T1b[a,i]
+  @tensoropt T2t[a,b,i,j] := T2b[a,b,i,j] + T1b[a,i] * T1b[b,j]
+
+  M2 = zeros(Float64,size(T2ab))
+  @tensoropt M2[norba,virtualsa,occcorea,occcoreb][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsb,occcoreb][a,j]
+  return M2
 end
 
 """
