@@ -1385,7 +1385,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     filter!(x -> x != norba, virtualsa)
     filter!(x -> x != morbb, virtualsb)
     virtuals = (virtualsa, virtualsb)
-    # println("W: ", R2ab[norba,morbb,morba,norbb])
+    println("W: ", R2ab[norba,morbb,morba,norbb])
     W = R2ab[norba,morbb,morba,norbb]
     R2ab[norba,morbb,morba,norbb] = 0.0
     M1a = calc_M1a(occcore,virtuals,T1b, T2ab, activeorbs)
