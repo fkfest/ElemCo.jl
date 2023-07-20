@@ -1477,39 +1477,40 @@ function calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab,activeorbs)
   @tensoropt T1[a,i] := T1a[a,i] - T1b[a,i]
   @tensoropt T2t[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
 
+  P12 = (2,1,4,3)
   M2 = zeros(Float64,size(T2a))
-  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsa,occcorea][a,j]
-  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += T2ab[norba,morbb,morba,occcoreb][j] * T1[virtualsa,occcorea][a,i]
-  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
-  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += T2ab[norba,virtualsb,morba,occcoreb][a,j] * T1b[morbb,occcoreb][i]
+  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1[virtualsa,occcorea][a,j]
+  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T1[virtualsa,occcorea][a,i]
+  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
+  @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,j] * T1b[morbb,occcoreb][i]
 
-  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
-  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= T2ab[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
-  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
-  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b]
+  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
+  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
+  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
+  @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b]
 
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
 
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
 
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
 
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
 
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
 
-  @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i]
+  @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i]
   return M2
 end
 
