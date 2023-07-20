@@ -12,7 +12,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
 
-export gen_fock, gen_ufock
+export gen_fock, gen_ufock, gen_density_matrix
 
 """ calc closed-shell fock matrix """
 function gen_fock(EC::ECInfo)
@@ -49,41 +49,51 @@ function gen_fock(EC::ECInfo, spincase::SpinCase)
   return fock, ϵo, ϵv
 end
 
+""" generate D_{μν}=C^l_{μi} C^r_{νi} with i defined by occvec
+    Only real part of D is kept.
+""" 
+function gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occvec)
+  CMOlo = CMOl[:,occvec]
+  CMOro = CMOr[:,occvec]
+  @tensoropt den[r,s] := CMOlo[r,i]*CMOro[s,i]
+  denr = real.(den)
+  if sum(abs2,den) - sum(abs2,denr) > EC.options.scf.imagtol
+    println("Large imaginary part in density matrix neglected!")
+    println("Difference between squared norms:",sum(abs2,den)-sum(abs2,denr))
+  end
+  return denr
+end
+
 """ calc fock matrix for non-fcidump orbitals """
 function gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
-  occ2 = EC.space['o']
   @assert EC.space['o'] == EC.space['O'] # closed-shell
-  CMOl2 = CMOl[:,occ2]
-  CMOr2 = CMOr[:,occ2]
+  occ2 = EC.space['o']
+  den = gen_density_matrix(EC, CMOl, CMOr, occ2)
   @tensoropt begin 
     fock[p,q] := integ1(EC.fd,SCα)[p,q] 
-    fock[p,q] += 2.0*ints2(EC,"::::",SCα)[p,r,q,s] * (CMOl2[r,i]*CMOr2[s,i])
-    fock[p,q] -= ints2(EC,"::::",SCα)[p,r,s,q] * CMOl2[r,i]*CMOr2[s,i]
+    fock[p,q] += 2.0*ints2(EC,"::::",SCα)[p,r,q,s] * den[r,s]
+    fock[p,q] -= ints2(EC,"::::",SCα)[p,r,s,q] * den[r,s]
   end
   return fock
 end
+
 """ calc UHF fock matrix for non-fcidump orbitals """
 function gen_fock(EC::ECInfo, spincase::SpinCase, CMOl::AbstractArray, CMOr::AbstractArray,
                   CMOlOS::AbstractArray, CMOrOS::AbstractArray)
   if spincase == SCα
-    CMOlOSo = CMOlOS[:,EC.space['O']]
-    CMOrOSo = CMOrOS[:,EC.space['O']]
-    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[p,r,q,s]*(CMOlOSo[r,i]*CMOrOSo[s,i])
+    denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['O'])
+    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[p,r,q,s]*denOS[r,s]
     spo = 'o'
   else
-    CMOlOSo = CMOlOS[:,EC.space['o']]
-    CMOrOSo = CMOrOS[:,EC.space['o']]
-    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[r,p,s,q]*(CMOlOSo[r,i]*CMOrOSo[s,i])
+    denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['o'])
+    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[r,p,s,q]*denOS[r,s]
     spo = 'O'
   end
-  occ = EC.space[spo]
-  CMOlo = CMOl[:,occ]
-  CMOro = CMOr[:,occ]
-  @tensoropt begin 
-    fock[p,q] += integ1(EC.fd,spincase)[p,q] 
-    fock[p,q] += ints2(EC,"::::",spincase)[p,r,q,s] * (CMOlo[r,i]*CMOro[s,i])
-    fock[p,q] -= ints2(EC,"::::",spincase)[p,r,s,q] * CMOlo[r,i]*CMOro[s,i]
-  end
+  den =  gen_density_matrix(EC, CMOl, CMOr, EC.space[spo])
+  ints = ints2(EC,"::::",spincase)
+  @tensoropt fock[p,q] += ints[p,r,q,s] * den[r,s] 
+  @tensoropt fock[p,q] -= ints[p,r,s,q] * den[r,s]
+  @tensoropt fock[p,q] += integ1(EC.fd,spincase)[p,q] 
   return fock
 end
 
