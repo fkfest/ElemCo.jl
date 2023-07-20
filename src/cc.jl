@@ -1534,7 +1534,7 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
   @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2tab[virtualsa,virtualsb,morba,norbb][b,a] * T1a[norba,occcorea][i]
 
   @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsb,occcoreb][b,j]
-  @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsa,morba,norbb][a] * T1b[occcoreb,morbb][i] * T1[virtualsb,occcoreb][b,j]
+  @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsa,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsb,occcoreb][b,j]
 
   @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,morbb,occcorea,norbb][i] * T1a[virtualsa,morba][a] * T1[virtualsb,occcoreb][b,j]
   @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[virtualsa,morbb,morba,norbb][a] * T1a[norba,occcorea][i] * T1[virtualsb,occcoreb][b,j]
