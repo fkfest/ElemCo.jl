@@ -6,6 +6,8 @@
   thr::Float64 = 1.e-10
   """ maximum number of iterations """
   maxit::Int = 50
+  """ tolerance for imaginary part of MO coefs (for biorthogonal) """
+  imagtol::Float64 = 1.e-8
 end
 
 """ Coupled-Cluster options """
