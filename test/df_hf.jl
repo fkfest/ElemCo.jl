@@ -4,9 +4,13 @@ EHF_test   = -76.02253606201079
 EMP2_test  =  -0.20694998731941067
 EDCSD_test =  -0.22117576578925288
 
-using ElemCo.MSystem
-using ElemCo.DFHF
-using ElemCo.DfDump
+try
+  using ElemCo.MSystem
+  using ElemCo.DFHF
+  using ElemCo.DfDump
+catch
+  #using .MSystem
+end
 
 xyz="bohr
      O      0.000000000    0.000000000   -0.130186067

@@ -17,7 +17,11 @@ EHF, EMP2, ECCSD = ECdriver(EC, "ccsd"; fcidump)
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
-using ElemCo.BOHF
+try
+  using ElemCo.BOHF
+catch
+  #using .BOHF
+end
 #setup_scratch_and_fcidump(EC, fcidump)
 EBOHF, ϵ,CMOl,CMOr = bohf(EC)
 transform_fcidump(EC.fd, CMOl, CMOr)

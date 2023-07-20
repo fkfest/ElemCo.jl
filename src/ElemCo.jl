@@ -40,6 +40,10 @@ using .TensorTools
 using .Focks
 using .CoupledCluster
 using .FciDump
+using .MSystem
+using .BOHF
+using .DFHF
+using .DfDump
 
 
 export ECdriver, setup_scratch_and_fcidump
