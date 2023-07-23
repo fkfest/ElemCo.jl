@@ -41,13 +41,28 @@ parse a string specifying some list of orbitals, e.g.,
 `-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
 or use ':' and ';' instead of '-' and '+', respectively
 """
-function parse_orbstring(orbs::String)
+function parse_orbstring(orbs::String, orbsym::Vector{Any})
   # make it in julia syntax
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
   orbs1 = replace(orbs1," "=>"")
+  symoffset = Dict{Int,Int}()
+  if prod(orbsym) > 1 && occursin(".",orbs1)
+    syms = [1,2,3,4]
+    symlist = Dict{Int,Int}()
+    for sym in syms
+      symlist[sym] = count(isequal(sym),orbsym)
+    end
+    symoffset[1] = 0
+    symoffset[2] = symlist[1]
+    symoffset[3] = symlist[1] + symlist[2]
+    symoffset[4] = symlist[1] + symlist[2] + symlist[3]
+    symlist, syms = nothing, nothing
+  elseif prod(orbsym) == 1 && occursin(".",orbs1)
+    error("FCIDUMP without sym but orbital occupations with sym.")
+  end
   # println(orbs1)
-  occursin(r"^[0-9:;]+$",orbs1) || error("Use only `0123456789:;+-` characters in the orbstring: $orbs")
+  occursin(r"^[0-9:;.]+$",orbs1) || error("Use only `0123456789:;+-.` characters in the orbstring: $orbs")
   if first(orbs1) == ':'
     orbs1 = "1"*orbs1
   end
@@ -56,11 +71,11 @@ function parse_orbstring(orbs::String)
     firstlast = filter(!isempty,split(range,':'))
     if length(firstlast) == 1
       # add the orbital
-      orblist=push!(orblist,parse(Int,firstlast[1]))
+      orblist=push!(orblist,symorb2orb(firstlast[1],symoffset))
     else
       length(firstlast) == 2 || error("Someting wrong in range $range in orbstring $orbs")
-      firstorb = parse(Int,firstlast[1])
-      lastorb = parse(Int,firstlast[2])
+      firstorb = symorb2orb(firstlast[1],symoffset)
+      lastorb = symorb2orb(firstlast[2],symoffset)
       # add the range
       orblist=vcat(orblist,[firstorb:lastorb]...)
     end
@@ -70,17 +85,32 @@ function parse_orbstring(orbs::String)
 end
 
 """
+convert a symorb (like 1.3 [orb.sym]) to an orbital number.
+If no sym given, just return the orbital number converted to Int.
+"""
+function symorb2orb(symorb::SubString, symoffset::Dict{Int,Int})
+  if occursin(".",symorb)
+    orb, sym = filter(!isempty,split(symorb,'.'))
+    orb = parse(Int,orb)
+    orb += symoffset[parse(Int,sym)]
+    return orb
+  else
+    return parse(Int,symorb)
+  end
+end
+
+"""
 use a +/- string to specify the occupation. If occbs=="-", the occupation from occas is used (closed-shell).
 if both are "-", the occupation is deduced from nelec.
 """
-function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec, ms2=0)
+function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec, orbsym::Vector{Any}, ms2=0)
   if occas != "-"
-    occa = parse_orbstring(occas)
+    occa = parse_orbstring(occas, orbsym)
     if occbs == "-"
       # copy occa to occb
       occb = deepcopy(occa)
     else
-      occb = parse_orbstring(occbs)
+      occb = parse_orbstring(occbs, orbsym)
     end
     if length(occa)+length(occb) != nelec && !EC.ignore_error
       error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error (-f) to ignore.")

@@ -144,10 +144,11 @@ function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
   norb = headvar(EC.fd, "NORB")
   nelec = headvar(EC.fd, "NELEC")
   ms2 = headvar(EC.fd, "MS2")
+  orbsym = headvar(EC.fd, "ORBSYM")
 
   SP = EC.space
 
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, ms2)
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, orbsym, ms2)
   SP[':'] = 1:norb
 end
 
