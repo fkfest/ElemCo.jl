@@ -149,6 +149,8 @@ function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
 
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, ms2)
   SP[':'] = 1:norb
+  EC.nocc = length(SP['o'])
+  EC.noccb = length(SP['O'])
 end
 
 function is_closed_shell(EC::ECInfo)

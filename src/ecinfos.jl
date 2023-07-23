@@ -22,6 +22,10 @@ include("options.jl")
   ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general """
   space::Dict{Char,Any} = Dict{Char,Any}()
+  """ number of occupied orbitals (for UHF: α) """
+  nocc::Int = 0
+  """ number of occupied orbitals (β) """
+  noccb::Int = 0
   """ fock matrix (for UHF: α) """
   fock::Array{Float64} = Float64[]
   """ fock matrix (β) """
