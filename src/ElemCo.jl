@@ -6,13 +6,16 @@ ELEctronic Methods of COrrelation
 
 module ElemCo
 
+include("abstractEC.jl")
+include("utils.jl")
 include("myio.jl")
 include("mnpy.jl")
 include("dump.jl")
+include("integrals.jl")
+include("msystem.jl")
 include("diis.jl")
 
 include("ecinfos.jl")
-include("utils.jl")
 include("ecmethods.jl")
 include("tensortools.jl")
 include("fock.jl")
@@ -20,8 +23,6 @@ include("cc.jl")
 
 include("bohf.jl")
 
-include("integrals.jl")
-include("msystem.jl")
 include("dfhf.jl")
 include("dfdump.jl")
 
@@ -46,7 +47,7 @@ using .DFHF
 using .DfDump
 
 
-export ECdriver, setup_scratch_and_fcidump
+export ECdriver
 
 function parse_commandline(EC::ECInfo)
   s = ArgParseSettings()
@@ -130,29 +131,6 @@ function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", use_kext::Bo
   return ECCSD
 end
 
-function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
-  t1 = time_ns()
-  # create scratch directory
-  mkpath(EC.scr)
-  EC.scr = mktempdir(EC.scr)
-  if fcidump != ""
-    # read fcidump intergrals
-    EC.fd = read_fcidump(fcidump)
-    t1 = print_time(EC,t1,"read fcidump",1)
-  end
-  println(size(EC.fd.int2))
-  norb = headvar(EC.fd, "NORB")
-  nelec = headvar(EC.fd, "NELEC")
-  ms2 = headvar(EC.fd, "MS2")
-
-  SP = EC.space
-
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, ms2)
-  SP[':'] = 1:norb
-  EC.nocc = length(SP['o'])
-  EC.noccb = length(SP['O'])
-end
-
 function is_closed_shell(EC::ECInfo)
   SP = EC.space
   closed_shell = (SP['o'] == SP['O'] && !EC.fd.uhf)
@@ -192,7 +170,7 @@ end
 function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()
   method_names = split(methods)
-  setup_scratch_and_fcidump(EC,fcidump,occa,occb)
+  setup(EC;fcidump,occa,occb)
   closed_shell, addname = is_closed_shell(EC)
 
   calc_fock_matrix(EC, closed_shell)

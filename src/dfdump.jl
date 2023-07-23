@@ -17,9 +17,9 @@ function generate_basis(ms::MSys)
   return bao,bfit
 end
 
-function generate_integrals(ms::MSys, EC::ECInfo, fdump::FDump, cMO)
+function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
   @assert !fdump.uhf # TODO: uhf
-  bao,bfit = generate_basis(ms)
+  bao,bfit = generate_basis(EC.ms)
   hAO = kinetic(bao) + nuclear(bao)
   fdump.int1 = cMO' * hAO * cMO
 
@@ -38,15 +38,15 @@ function generate_integrals(ms::MSys, EC::ECInfo, fdump::FDump, cMO)
     I = uppertriangular(q,s)
     @tensoropt fdump.int2[:,:,I][p,r] = pqL[:,q,:][p,L] * pqL[:,s,:][r,L]
   end
-  fdump.int0 = nuclear_repulsion(ms)
+  fdump.int0 = nuclear_repulsion(EC.ms)
 end
 
 """ generate fcidump using df integrals and store in dumpfile """
-function dfdump(ms::MSys, EC::ECInfo, cMO, dumpfile = "FCIDUMP")
+function dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
   println("generating fcidump $dumpfile")
-  nelec = guess_nelec(ms)
+  nelec = guess_nelec(EC.ms)
   fdump = FDump(size(cMO,2), nelec)
-  generate_integrals(ms, EC, fdump, cMO)
+  generate_integrals(EC, fdump, cMO)
   println("writing fcidump $dumpfile")
   write_fcidump(fdump, dumpfile, -1.0)  
 end

@@ -13,7 +13,7 @@ using Parameters
 using Printf
 using ..ElemCo.MNPY
 
-export FDump, read_fcidump, write_fcidump, transform_fcidump
+export FDump, fd_exists, read_fcidump, write_fcidump, transform_fcidump
 export headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
 
 # optional variables which won't be written if =0
@@ -65,6 +65,11 @@ function FDump(norb,nelec;ms2=0,isym=1,orbsym=[],uhf=false,simtra=false,triang=t
   fd.triang = triang
   fd.uhf = uhf
   return fd
+end
+
+"""return true if the object is a non-empty FDump"""
+function fd_exists(fd::FDump)
+  return !isempty(fd.head)
 end
 
 @enum SpinCase SCα SCβ SCαβ
