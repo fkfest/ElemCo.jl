@@ -22,7 +22,7 @@ try
 catch
   #using .BOHF
 end
-#setup_scratch_and_fcidump(EC, fcidump)
+#setup(EC; fcidump)
 EBOHF, ϵ,CMOl,CMOr = bohf(EC)
 transform_fcidump(EC.fd, CMOl, CMOr)
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")

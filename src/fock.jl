@@ -28,19 +28,27 @@ end
 function gen_fock(EC::ECInfo, spincase::SpinCase)
   @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] 
   if spincase == SCα
-    @tensoropt fock[p,q] += ints2(EC,":O:O",SCαβ)[p,i,q,i]
+    if EC.noccb > 0 
+      @tensoropt fock[p,q] += ints2(EC,":O:O",SCαβ)[p,i,q,i]
+    end
     spo='o'
     spv='v'
     spin = "α"
+    nocc = EC.nocc
   else
-    @tensoropt fock[p,q] += ints2(EC,"o:o:",SCαβ)[i,p,i,q]
+    if EC.nocc > 0 
+      @tensoropt fock[p,q] += ints2(EC,"o:o:",SCαβ)[i,p,i,q]
+    end
     spo='O'
     spv='V'
     spin = "β"
+    nocc = EC.noccb
   end
-  @tensoropt begin
-    fock[p,q] += ints2(EC,":"*spo*":"*spo,spincase)[p,i,q,i]
-    fock[p,q] -= ints2(EC,":"*spo*spo*":",spincase)[p,i,i,q]
+  if nocc > 0
+    @tensoropt begin
+      fock[p,q] += ints2(EC,":"*spo*":"*spo,spincase)[p,i,q,i]
+      fock[p,q] -= ints2(EC,":"*spo*spo*":",spincase)[p,i,i,q]
+    end
   end
   ϵ = diag(fock)
   ϵo = ϵ[EC.space[spo]]

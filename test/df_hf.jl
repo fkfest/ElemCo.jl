@@ -22,23 +22,14 @@ basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
              "mp2fit"=>"cc-pvdz-rifit")
 
-ms = MSys(xyz,basis)
+EC = ECInfo(ms=MSys(xyz,basis))
 
-nelec = guess_nelec(ms)
-norb = guess_norb(ms) 
-occa = "-"*string(nelec÷2)
-occb = "-"
-EC = ECInfo()
-mkpath(EC.scr)
-EC.scr = mktempdir(EC.scr)
-SP = EC.space
-SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
-SP[':'] = 1:norb
+setup(EC)
 
-ϵ,cMO = dfhf(ms,EC,direct=true)
+ϵ,cMO = dfhf(EC,direct=true)
 
 fcidump = "DF_HF_TEST.FCIDUMP"
-dfdump(ms,EC,cMO,fcidump)
+dfdump(EC,cMO,fcidump)
 
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EHF-EHF_test) < epsilon

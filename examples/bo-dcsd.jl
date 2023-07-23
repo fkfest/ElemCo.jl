@@ -30,7 +30,7 @@ for dir in readdir()
     EHF, EMP2, ECCSD = ECdriver(EC, "dcsd"; fcidump)
 
     # to do directly BO-HF without calculating dcsd uncomment next line
-    #setup_scratch_and_fcidump(EC, fcidump)
+    #setup(EC; fcidump)
     if ElemCo.is_closed_shell(EC)[1]
       EBOHF, ϵ,CMOl,CMOr = bohf(EC)
     else
