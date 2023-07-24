@@ -90,10 +90,10 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int})
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
   orbs1 = replace(orbs1," "=>"")
-  symoffset = zeros(Int,8)
   if prod(orbsym) > 1 && occursin(".",orbs1)
     @assert(issorted(orbsym),"Orbital symmetries are not sorted. Specify occa and occb without symmetry.")
-    symlist = zeros(8)
+    symoffset = zeros(Int,maximum(orbsym))
+    symlist = zeros(Int,maximum(orbsym))
     for sym in eachindex(symlist)
       symlist[sym] = count(isequal(sym),orbsym)
     end
@@ -103,6 +103,8 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int})
     symlist = nothing
   elseif prod(orbsym) == 1 && occursin(".",orbs1)
     error("FCIDUMP without sym but orbital occupations with sym.")
+  else
+    symoffset = zeros(Int,1)
   end
   # println(orbs1)
   occursin(r"^[0-9:;.]+$",orbs1) || error("Use only `0123456789:;+-.` characters in the orbstring: $orbs")
@@ -134,7 +136,7 @@ If no sym given, just return the orbital number converted to Int.
 function symorb2orb(symorb::SubString, symoffset::Vector{Int})
   if occursin(".",symorb)
     orb, sym = filter(!isempty,split(symorb,'.'))
-    @assert(parse(Int,sym) <= 8,"Symmetry label $sym not in range 1-8")
+    @assert(parse(Int,sym) <= length(symoffset),"Symmetry label $sym larger than maximum of orbsym vector.")
     orb = parse(Int,orb)
     orb += symoffset[parse(Int,sym)]
     return orb
