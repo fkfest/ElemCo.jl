@@ -62,7 +62,7 @@ function setup(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms
     nelec = (nelec==0) ? headvar(EC.fd, "NELEC") : nelec
     nelec += charge
     ms2 = (ms2==0) ? headvar(EC.fd, "MS2") : ms2
-    orbsym = headvar(EC.fd, "ORBSYM")
+    orbsym = convert(Vector{Int},headvar(EC.fd, "ORBSYM"))
   elseif ms_exists(EC.ms)
     norb = guess_norb(EC.ms) 
     nelec = (nelec==0) ? guess_nelec(EC.ms) : nelec
@@ -74,7 +74,7 @@ function setup(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms
   end
 
   SP = EC.space
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, orbsym, ms2)
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
   SP[':'] = 1:norb
   EC.nocc = length(SP['o'])
   EC.noccb = length(SP['O'])
@@ -85,23 +85,22 @@ parse a string specifying some list of orbitals, e.g.,
 `-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
 or use ':' and ';' instead of '-' and '+', respectively
 """
-function parse_orbstring(orbs::String, orbsym::Vector{Any})
+function parse_orbstring(orbs::String; orbsym = Vector{Int})
   # make it in julia syntax
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
   orbs1 = replace(orbs1," "=>"")
-  symoffset = Dict{Int,Int}()
+  symoffset = zeros(Int,8)
   if prod(orbsym) > 1 && occursin(".",orbs1)
-    syms = [1,2,3,4]
-    symlist = Dict{Int,Int}()
-    for sym in syms
+    @assert(issorted(orbsym),"Orbital symmetries are not sorted. Specify occa and occb without symmetry.")
+    symlist = zeros(8)
+    for sym in eachindex(symlist)
       symlist[sym] = count(isequal(sym),orbsym)
     end
-    symoffset[1] = 0
-    symoffset[2] = symlist[1]
-    symoffset[3] = symlist[1] + symlist[2]
-    symoffset[4] = symlist[1] + symlist[2] + symlist[3]
-    symlist, syms = nothing, nothing
+    for iter in eachindex(symoffset[2:end])
+      symoffset[iter] = sum(symlist[1:iter-1])
+    end
+    symlist = nothing
   elseif prod(orbsym) == 1 && occursin(".",orbs1)
     error("FCIDUMP without sym but orbital occupations with sym.")
   end
@@ -132,9 +131,10 @@ end
 convert a symorb (like 1.3 [orb.sym]) to an orbital number.
 If no sym given, just return the orbital number converted to Int.
 """
-function symorb2orb(symorb::SubString, symoffset::Dict{Int,Int})
+function symorb2orb(symorb::SubString, symoffset::Vector{Int})
   if occursin(".",symorb)
     orb, sym = filter(!isempty,split(symorb,'.'))
+    @assert(parse(Int,sym) <= 8,"Symmetry label $sym not in range 1-8")
     orb = parse(Int,orb)
     orb += symoffset[parse(Int,sym)]
     return orb
@@ -146,15 +146,16 @@ end
 """
 use a +/- string to specify the occupation. If occbs=="-", the occupation from occas is used (closed-shell).
 if both are "-", the occupation is deduced from nelec.
+the optional argument orbsym is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
-function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec, orbsym, ms2=0)
+function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int})
   if occas != "-"
-    occa = parse_orbstring(occas, orbsym)
+    occa = parse_orbstring(occas; orbsym)
     if occbs == "-"
       # copy occa to occb
       occb = deepcopy(occa)
     else
-      occb = parse_orbstring(occbs, orbsym)
+      occb = parse_orbstring(occbs; orbsym)
     end
     if length(occa)+length(occb) != nelec && !EC.ignore_error
       error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error (-f) to ignore.")
