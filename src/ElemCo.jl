@@ -47,8 +47,35 @@ using .DFHF
 using .DfDump
 
 
-export ECdriver
+export ECdriver 
+export @ECsetup, @tryECsetup, @dfhf
 
+macro ECsetup()
+  return quote
+    global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
+    setup($(esc(:EC)))
+  end
+end
+
+macro tryECsetup()
+  return quote
+    try
+      $(esc(:EC)).ignore_error
+    catch
+      $(esc(:@ECsetup))
+    end
+  end
+end
+
+macro dfhf()
+  return quote
+    $(esc(:@tryECsetup))
+    # $(length(args) == 0) ? dfhf($(esc(:EC))) : dfhf($(esc(:EC)), $args)
+    dfhf($(esc(:EC)))
+  end
+end
+
+""" parse command line arguments """
 function parse_commandline(EC::ECInfo)
   s = ArgParseSettings()
   @add_arg_table! s begin
