@@ -48,15 +48,18 @@ using .DfDump
 
 
 export ECdriver 
-export @ECsetup, @tryECsetup, @dfhf
+export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints
 
+""" setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` """
 macro ECsetup()
   return quote
     global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
-    setup($(esc(:EC)))
+    setup!($(esc(:EC)))
   end
 end
 
+""" setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
+    if not already done """
 macro tryECsetup()
   return quote
     try
@@ -67,13 +70,50 @@ macro tryECsetup()
   end
 end
 
+""" set options for `EC::ECInfo`. If `EC` is not already setup, it will be done. 
+    Usage: e.g., to set maxit=10 for scf: `@opt scf maxit=10` 
+"""
+macro opt(what, kwargs...)
+  strwhat="$what"
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECsetup))
+    if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
+      set_options!($(esc(:EC)).options.$what; $(ekwa...))
+    else
+      error("no such option: ",$(esc(strwhat)))
+    end
+  end
+end
+
+""" general runner """
+macro run(method, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECsetup))
+    $method($(esc(:EC)); $(ekwa...))
+  end
+end
+
+""" run DFHF calculation """
 macro dfhf()
   return quote
     $(esc(:@tryECsetup))
-    # $(length(args) == 0) ? dfhf($(esc(:EC))) : dfhf($(esc(:EC)), $args)
-    dfhf($(esc(:EC)))
+    $(esc(:EPS)), $(esc(:ORBS)) = dfhf($(esc(:EC)))
   end
 end
+
+""" generate 2 and 4-idx integrals using density fitting """
+macro dfints(orbs = nothing, fcidump = "FCIDUMP")
+  return quote
+    $(esc(:@tryECsetup))
+    if isnothing($orbs)
+      orbs = $(esc(:ORBS))
+    end
+    dfdump($(esc(:EC)),orbs, $fcidump)
+  end
+end
+
 
 """ parse command line arguments """
 function parse_commandline(EC::ECInfo)
@@ -197,7 +237,7 @@ end
 function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()
   method_names = split(methods)
-  setup(EC;fcidump,occa,occb)
+  setup!(EC;fcidump,occa,occb)
   closed_shell, addname = is_closed_shell(EC)
 
   calc_fock_matrix(EC, closed_shell)

@@ -6,7 +6,7 @@ using ..ElemCo.Utils
 using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
-export ECInfo, setup, parse_orbstring, get_occvirt
+export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
 
 include("options.jl")
 @with_kw mutable struct ECInfo <: AbstractECInfo
@@ -46,7 +46,7 @@ include("options.jl")
 end
 
 """ setup ECInfo """
-function setup(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms2=0)
+function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms2=0)
   t1 = time_ns()
   # create scratch directory
   mkpath(EC.scr)
@@ -78,6 +78,17 @@ function setup(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms
   SP[':'] = 1:norb
   EC.nocc = length(SP['o'])
   EC.noccb = length(SP['O'])
+end
+
+""" set options using keyword arguments """
+function set_options!(opt; kwargs...)
+  for (key,value) in kwargs
+    if hasproperty(opt, key)
+      setproperty!(opt, key, value)
+    else
+      error("invalid option name: $key")
+    end
+  end
 end
 
 """
