@@ -112,10 +112,12 @@ function guess_sad(ms::MSys, EC::ECInfo)
   bao,bfit = generate_basis(ms)
   smin2ao = overlap(bminao,bao)
   eldist = electron_distribution(ms,minao)
-  saoinv = invchol(Hermitian(load(EC,"sao")))
-  denao = saoinv * smin2ao' * diagm(eldist) * smin2ao * saoinv
-  # dc = nc
-  n,cMO = eigen(Hermitian(-denao))
+  sao = load(EC,"sao")
+  denao = smin2ao' * diagm(eldist) * smin2ao
+  n,cMO = eigen(Hermitian(-denao),Hermitian(sao))
+
+  # sao = load(EC,"sao")
+  # display(cMO'* sao * cMO)
   #display(n)
   return cMO
 end
