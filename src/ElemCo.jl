@@ -40,6 +40,7 @@ using .TensorTools
 using .Focks
 using .CoupledCluster
 using .FciDump
+using .DfDump
 
 using .MSystem
 using .DFHF
@@ -139,6 +140,39 @@ function run_mcscf()
   ϵ,cMO = dfmcscf(ms,EC,direct=false)
 end
 
+
+function run_uhff()
+  xyz="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+
+  basis = Dict("ao"=>"cc-pVDZ",
+             "jkfit"=>"cc-pvtz-jkfit",
+             "mp2fit"=>"cc-pvdz-rifit")
+
+  ms = MSys(xyz,basis)
+
+  nelec = guess_nelec(ms)+1
+  norb = guess_norb(ms)
+  occa = "-"*string((nelec+1)÷2)
+  occb = "-"*string(nelec÷2)
+  EC = ECInfo()
+  mkpath(EC.scr)
+  EC.scr = mktempdir(EC.scr)
+  SP = EC.space
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
+  SP[':'] = 1:norb
+  EC.options.scf.maxit = 0
+  ϵ,cMO = dfhf(ms,EC,direct=false)
+  fcidump = "DF_HF_TEST.FCIDUMP"
+  dfdump(ms,EC,cMO,fcidump)
+  EC.ignore_error = true
+  EHF, EMP2, EDCSD = ECdriver(EC, "ump2"; fcidump,occa,occb)
+#  ϵ,cMO = dfmcscf(ms,EC,direct=false)
+end
+
 function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
   t1 = time_ns()
   # create scratch directory
@@ -150,6 +184,7 @@ function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
   println(size(EC.fd.int2))
   norb = headvar(EC.fd, "NORB")
   nelec = headvar(EC.fd, "NELEC")
+  println("nelec when reading fcidump ", nelec)
   ms2 = headvar(EC.fd, "MS2")
 
   SP = EC.space
@@ -189,7 +224,21 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
   if closed_shell
     EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
   else
+    println("UHF here")
     EHF = 0.5*(sum(EC.ϵo)+sum(EC.ϵob) + sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']])) + EC.fd.int0
+    println(SP['o'], SP['O'])
+    println("integ1 start")
+    display(integ1(EC.fd, SCα) )
+    println("EC.ϵo start")
+    display(EC.ϵo)
+    println("EC.ϵob start")
+    display(EC.ϵob)
+    println("E_α ", sum(EC.ϵo))
+    println("E_β ", sum(EC.ϵob))
+    println(EC.fd.int0)
+    println("E_H1 ", sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']]))
+    println("E_H2 ", 0.5 * (sum(EC.ϵo)+sum(EC.ϵob) - (sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']]))))
+    println(EHF - EC.fd.int0)
   end
   return EHF
 end

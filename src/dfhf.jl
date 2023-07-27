@@ -113,11 +113,10 @@ function guess_sad(ms::MSys, EC::ECInfo)
   smin2ao = overlap(bminao,bao)
   eldist = electron_distribution(ms,minao)
   saoinv = invchol(Hermitian(load(EC,"sao")))
-  # display(eldist)
   denao = saoinv * smin2ao' * diagm(eldist) * smin2ao * saoinv
   # dc = nc
   n,cMO = eigen(Hermitian(-denao))
-  # display(n)
+  #display(n)
   return cMO
 end
 
@@ -144,6 +143,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   diis = Diis(EC.scr)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = generate_integrals(ms, EC; save3idx=!direct)
+  println("Enuc ", Enuc)
   if direct
     bao,bfit = generate_basis(ms)
   end
