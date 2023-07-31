@@ -115,10 +115,6 @@ function guess_sad(ms::MSys, EC::ECInfo)
   sao = load(EC,"sao")
   denao = smin2ao' * diagm(eldist) * smin2ao
   n,cMO = eigen(Hermitian(-denao),Hermitian(sao))
-
-  # sao = load(EC,"sao")
-  # display(cMO'* sao * cMO)
-  #display(n)
   return cMO
 end
 
