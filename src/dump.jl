@@ -14,7 +14,7 @@ using Printf
 using ..ElemCo.MNPY
 
 export FDump, fd_exists, read_fcidump, write_fcidump, transform_fcidump
-export headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular
+export headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular, uppertriangular_range
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -207,11 +207,11 @@ function read_integrals!(fd::FDump, dir::AbstractString)
   fd.int0 = headvar(fd, "ENUC")
 end
 
-# return upper triangular index from two indices i1 <= i2
+""" return upper triangular index from two indices i1 <= i2 """
 function uppertriangular(i1,i2)
   return i1+i2*(i2-1)÷2
 end
-# return upper triangular index from three indices i1 <= i2 <= i3
+""" return upper triangular index from three indices i1 <= i2 <= i3 """
 function uppertriangular(i1,i2,i3)
   return i1+i2*(i2-1)÷2+(i3+1)*i3*(i3-1)÷6
 end
