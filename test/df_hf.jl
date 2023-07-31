@@ -24,7 +24,7 @@ basis = Dict("ao"=>"cc-pVDZ",
 
 EC = ECInfo(ms=MSys(xyz,basis))
 
-setup(EC)
+setup!(EC)
 
 ϵ,cMO = dfhf(EC,direct=true)
 

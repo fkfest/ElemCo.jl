@@ -34,9 +34,10 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
   @assert fdump.triang # store only upper triangle
   # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
   fdump.int2 = zeros(size(cMO,1),size(cMO,1),(size(cMO,1)+1)*size(cMO,1)÷2)
-  for s = 1:size(pqL,1), q = 1:s # only upper triangle
-    I = uppertriangular(q,s)
-    @tensoropt fdump.int2[:,:,I][p,r] = pqL[:,q,:][p,L] * pqL[:,s,:][r,L]
+  Threads.@threads for s = 1:size(pqL,1)
+    q = 1:s # only upper triangle
+    Iq = uppertriangular_range(s)
+    @tensoropt fdump.int2[:,:,Iq][p,r,q] = pqL[:,q,:][p,q,L] * pqL[:,s,:][r,L]
   end
   fdump.int0 = nuclear_repulsion(EC.ms)
 end
@@ -47,8 +48,10 @@ function dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
   nelec = guess_nelec(EC.ms)
   fdump = FDump(size(cMO,2), nelec)
   generate_integrals(EC, fdump, cMO)
-  println("writing fcidump $dumpfile")
-  write_fcidump(fdump, dumpfile, -1.0)  
+  if length(dumpfile) > 0
+    println("writing fcidump $dumpfile")
+    write_fcidump(fdump, dumpfile, -1.0)  
+  end
 end
 
 end
