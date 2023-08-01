@@ -941,7 +941,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     R2r[a,b,i,j] -= int2[a,k,c,i] * T2[c,b,k,j]
     # -<kb|ic> T^kj_ac
     R2r[a,b,i,j] -= int2[b,k,c,i] * T2[a,c,k,j]
-    # t1 = print_time(EC,t1,"-<ka|ic> T^kj_cb -<kb|ic> T^kj_ac",2)
+    @notensor t1 = print_time(EC,t1,"-<ka|ic> T^kj_cb -<kb|ic> T^kj_ac",2)
 
     R2[a,b,i,j] += R2r[a,b,i,j] + R2r[b,a,j,i]
   end
