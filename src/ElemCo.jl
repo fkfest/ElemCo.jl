@@ -48,9 +48,13 @@ using .DfDump
 
 
 export ECdriver 
-export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints
+export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc
 
-""" setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` """
+""" 
+  @ECsetup()
+
+  setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
+"""
 macro ECsetup()
   return quote
     global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
@@ -58,8 +62,12 @@ macro ECsetup()
   end
 end
 
-""" setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
-    if not already done """
+""" 
+  @tryECsetup()
+
+  setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
+  if not already done 
+"""
 macro tryECsetup()
   return quote
     try
@@ -70,8 +78,11 @@ macro tryECsetup()
   end
 end
 
-""" set options for `EC::ECInfo`. If `EC` is not already setup, it will be done. 
-    Usage: e.g., to set maxit=10 for scf: `@opt scf maxit=10` 
+""" 
+  @opt(what, kwargs...)
+
+  set options for `EC::ECInfo`. If `EC` is not already setup, it will be done. 
+  Usage: e.g., to set maxit=10 for scf: `@opt scf maxit=10` 
 """
 macro opt(what, kwargs...)
   strwhat="$what"
@@ -95,7 +106,11 @@ macro run(method, kwargs...)
   end
 end
 
-""" run DFHF calculation """
+""" 
+  @dfhf()
+
+  run DFHF calculation and return MO coefficients (`ORBS`) and orbital energies (`EPS`)
+"""
 macro dfhf()
   return quote
     $(esc(:@tryECsetup))
@@ -103,17 +118,55 @@ macro dfhf()
   end
 end
 
-""" generate 2 and 4-idx integrals using density fitting """
-macro dfints(orbs = nothing, fcidump = "FCIDUMP")
+"""
+  @dfints(orbs = nothing, fcidump = "")
+
+  generate 2 and 4-idx MO integrals using density fitting.
+  If `orbs` is given, the orbitals are used to generate the integrals, 
+  otherwise the last orbitals (`ORBS`) are used.
+  If `fcidump` is given, the integrals are written to the fcidump file.
+"""
+macro dfints(orbs = nothing, fcidump = "")
   return quote
     $(esc(:@tryECsetup))
     if isnothing($orbs)
-      orbs = $(esc(:ORBS))
+      orbitals = $(esc(:ORBS))
+    else
+      orbitals = $orbs
     end
-    dfdump($(esc(:EC)),orbs, $fcidump)
+    dfdump($(esc(:EC)),orbitals, $fcidump)
   end
 end
 
+""" 
+  @cc(method, kwargs...)
+
+  run coupled cluster calculation
+  The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc)
+  The following keyword arguments are available:
+  * `fcidump`: fcidump file (default: "", i.e., use integrals from `EC`)
+  * `occa`: occupied α orbitals (default: "-")
+  * `occb`: occupied β orbitals (default: "-")
+"""
+macro cc(method, kwargs...)
+  strmethod="$method"
+  ekwa = [esc(a) for a in kwargs]
+  fcidump_given = false
+  for a in ekwa
+    if a.args[1].args[1] == :fcidump
+      fcidump_given = true
+    end
+  end
+  if fcidump_given
+    return quote
+      ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
+    end
+  else
+    return quote
+      ECdriver($(esc(:EC)), $(esc(strmethod)); fcidump="", $(ekwa...))
+    end
+  end
+end
 
 """ parse command line arguments """
 function parse_commandline(EC::ECInfo)
