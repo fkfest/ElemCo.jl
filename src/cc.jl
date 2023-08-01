@@ -69,9 +69,9 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if !fock_only
-    @tensoropt ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b])
+    @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
   end
-  @tensoropt ET1 += scalar(2.0*T1[a,i] * EC.fock[SP['o'],SP['v']][i,a])
+  @tensoropt ET1 += 2.0*T1[a,i] * EC.fock[SP['o'],SP['v']][i,a]
   return ET1
 end
 
@@ -79,31 +79,31 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if !fock_only
-    @tensoropt ET1 += 0.5*scalar((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b])
+    @tensoropt ET1 += 0.5*(T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b]
     if EC.noccb > 0
       @tensoropt begin
-        ET1 += 0.5*scalar((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b])
-        ET1 += scalar(T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b])
+        ET1 += 0.5*(T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b]
+        ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
       end
     end
   end
   @tensoropt begin
-    ET1 += scalar(T1a[a,i] * EC.fock[SP['o'],SP['v']][i,a])
-    ET1 += scalar(T1b[a,i] * EC.fockb[SP['O'],SP['V']][i,a])
+    ET1 += T1a[a,i] * EC.fock[SP['o'],SP['v']][i,a]
+    ET1 += T1b[a,i] * EC.fockb[SP['O'],SP['V']][i,a]
   end
   return ET1
 end
 
 function calc_doubles_energy(EC::ECInfo, T2)
-  @tensoropt ET2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j]) * ints2(EC,"oovv")[i,j,a,b])
+  @tensoropt ET2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * ints2(EC,"oovv")[i,j,a,b]
   return ET2
 end
 
 function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
   @tensoropt begin
-    ET2 = 0.5*scalar(T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b])
-    ET2 += 0.5*scalar(T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b])
-    ET2 += scalar(T2ab[a,b,i,j] * ints2(EC,"oOvV")[i,j,a,b])
+    ET2 = 0.5*T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b]
+    ET2 += 0.5*T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b]
+    ET2 += T2ab[a,b,i,j] * ints2(EC,"oOvV")[i,j,a,b]
   end
   return ET2
 end
@@ -113,12 +113,12 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
   int2 = ints2(EC,"oovv")
   @tensoropt begin
     int2[i,j,a,b] += R2[a,b,i,j]
-    ET2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j]) * int2[i,j,a,b])
+    ET2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * int2[i,j,a,b]
   end
   if length(T1) > 0
     dfock = load(EC,"dfock"*'o')
     fov = dfock[SP['o'],SP['v']] + EC.fock[SP['o'],SP['v']] # undressed part should be with factor two
-    @tensoropt ET1 = scalar((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
+    @tensoropt ET1 = (fov[i,a] + 2.0 * R1[a,i])*T1[a,i]
     # ET1 = scalar(2.0*(EC.fock[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
     # ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*int2[i,j,a,b])
     ET2 += ET1
@@ -136,12 +136,12 @@ function calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
   end
   @tensoropt begin
     int2[i,j,a,b] += fac*R2[a,b,i,j]
-    ET2 = fac*scalar(T2[a,b,i,j] * int2[i,j,a,b])
+    ET2 = fac*T2[a,b,i,j] * int2[i,j,a,b]
   end
   if length(T1) > 0
     dfock = load(EC,"dfock"*o1)
     dfov = dfock[SP[o1],SP[v1]] + fov # undressed part should be with factor two
-    @tensoropt ET1 = scalar((0.5*dfov[i,a] + R1[a,i])*T1[a,i])
+    @tensoropt ET1 = (0.5*dfov[i,a] + R1[a,i])*T1[a,i]
     ET2 += ET1
   end
   return ET2
@@ -158,28 +158,28 @@ function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b
 end
 
 function calc_singles_norm(T1)
-  @tensor NormT1 = 2.0*scalar(T1[a,i]*T1[a,i])
+  @tensor NormT1 = 2.0*T1[a,i]*T1[a,i]
   return NormT1
 end
 
 function calc_singles_norm(T1a, T1b)
   @tensor begin
-    NormT1 = scalar(T1a[a,i]*T1a[a,i])
-    NormT1 += scalar(T1b[a,i]*T1b[a,i])
+    NormT1 = T1a[a,i]*T1a[a,i]
+    NormT1 += T1b[a,i]*T1b[a,i]
   end
   return NormT1
 end
 
 function calc_doubles_norm(T2)
-  @tensoropt NormT2 = scalar((2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j])
+  @tensoropt NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j]
   return NormT2
 end
 
 function calc_doubles_norm(T2a, T2b, T2ab)
   @tensoropt begin
-    NormT2 = 0.25*scalar(T2a[a,b,i,j]*T2a[a,b,i,j])
-    NormT2 += 0.25*scalar(T2b[a,b,i,j]*T2b[a,b,i,j])
-    NormT2 += scalar(T2ab[a,b,i,j]*T2ab[a,b,i,j])
+    NormT2 = 0.25*T2a[a,b,i,j]*T2a[a,b,i,j]
+    NormT2 += 0.25*T2b[a,b,i,j]*T2b[a,b,i,j]
+    NormT2 += T2ab[a,b,i,j]*T2ab[a,b,i,j]
   end
   return NormT2
 end
@@ -941,7 +941,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     R2r[a,b,i,j] -= int2[a,k,c,i] * T2[c,b,k,j]
     # -<kb|ic> T^kj_ac
     R2r[a,b,i,j] -= int2[b,k,c,i] * T2[a,c,k,j]
-    t1 = print_time(EC,t1,"-<ka|ic> T^kj_cb -<kb|ic> T^kj_ac",2)
+    @notensor t1 = print_time(EC,t1,"-<ka|ic> T^kj_cb -<kb|ic> T^kj_ac",2)
 
     R2[a,b,i,j] += R2r[a,b,i,j] + R2r[b,a,j,i]
   end
@@ -1008,7 +1008,7 @@ function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
           X[abc] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
         end
 
-        @tensoropt Enb3 += fac * scalar(Kijk[a,b,c] * X[a,b,c])
+        @tensoropt Enb3 += fac * Kijk[a,b,c] * X[a,b,c]
       
         # julia 1.9 r1: cannot use @tensoropt begin/end here, since 
         # IntX[:,j] overwrites IntX[:,i] if j == i
@@ -1022,7 +1022,7 @@ function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
     closemmap(EC,t3file,T3)
   end
   # singles contribution
-  @tensoropt En3 = scalar(T1[a,i] * IntX[a,i])
+  @tensoropt En3 = T1[a,i] * IntX[a,i]
   En3 += Enb3
   return En3, Enb3
 end
@@ -1664,7 +1664,7 @@ end
   calculate `simple` norm of triples (without contravariant!)
 """
 function calc_triples_norm(T3)
-  @tensoropt NormT3 = scalar(T3[X,Y,Z] * T3[X,Y,Z])
+  @tensoropt NormT3 = T3[X,Y,Z] * T3[X,Y,Z]
   return NormT3
 end
 
