@@ -51,6 +51,8 @@ function dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
   if length(dumpfile) > 0
     println("writing fcidump $dumpfile")
     write_fcidump(fdump, dumpfile, -1.0)  
+  else
+    EC.fd = fdump
   end
 end
 
