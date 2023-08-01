@@ -165,7 +165,7 @@ function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
     end
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
-    @tensoropt efhsmall = scalar(cMO2[p,i]*fhsmall[p,q]*cMO2[q,i])
+    @tensoropt efhsmall = cMO2[p,i]*fhsmall[p,q]*cMO2[q,i]
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
