@@ -1215,7 +1215,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
         R1b[a,i] -= x1b[k,i] * T1b[a,k]
       end
     end
-    if EC.nocc > 0 && EC.noccb > 0
+    if EC.nocc > 0 && EC.noccb > 0 && length(T1a) > 0
       @tensoropt begin
         R2ab[a,b,i,j] -= R2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
         R2ab[a,b,i,j] -= R2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
