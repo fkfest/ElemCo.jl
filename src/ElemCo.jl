@@ -237,7 +237,7 @@ function parse_commandline(EC::ECInfo)
   return fcidump_file, method, occa, occb
 end
 
-function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", use_kext::Bool=true, occa="-", occb="-")
+function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)
   EC = ECInfo()
   fcidump = joinpath(@__DIR__,"..","test",dumpfile)
   EC.options.cc.maxit = 100
