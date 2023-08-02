@@ -1441,6 +1441,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     @tensoropt R2a[a,b,i,j] += M2a[a,b,i,j] * W
     @tensoropt R2b[a,b,i,j] += M2b[a,b,i,j] * W
     @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
+    return R1a, R1b, R2a, R2b, R2ab, W
   end
 
   return R1a, R1b, R2a, R2b, R2ab
@@ -1682,7 +1683,11 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   t0 = time_ns()
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    R1a, R1b, R2a, R2b, R2ab = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
+    if( uppercase(EC.currentMethod[1:2]) == "TD" )
+      R1a, R1b, R2a, R2b, R2ab, W = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
+    else 
+      R1a, R1b, R2a, R2b, R2ab = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
+    end
     t1 = print_time(EC,t1,"residual",2)
     NormT2 = calc_doubles_norm(T2a,T2b,T2ab)
     NormR2 = calc_doubles_norm(R2a,R2b,R2ab)
@@ -1711,6 +1716,11 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
     flush(stdout)
     if NormR < EC.options.cc.thr
+      if( uppercase(EC.currentMethod[1:2]) == "TD" )
+        @printf "%26s %12.8f \n" "W:" W
+        @printf "%26s %12.8f \n" "Open-shell singlet energy:" Eh+W
+        @printf "%26s %12.8f \n" "Ms = 0 triplet energy:" Eh-W
+      end
       break
     end
   end
