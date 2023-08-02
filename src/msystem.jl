@@ -5,7 +5,7 @@ macros to specify geometry and basis sets
 """
 module MSystem
 using ..ElemCo.ECInts
-export MSys, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
+export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
 
 include("elements.jl")
 include("minbas.jl")
@@ -122,6 +122,9 @@ geometry and basis set for each element name in the geometry
 """
 mutable struct MSys
   atoms::AbstractArray{ACenter,1}
+  function MSys()
+    new(ACenter[])
+  end
   function MSys(xyz::AbstractString, basis::Dict)
     xyz_lines = strip.(split(xyz,"\n"))
     if length(xyz_lines) == 0
@@ -156,6 +159,11 @@ function Base.show(io::IO, val::MSys)
   for atom in val.atoms
     println(io, atom)
   end
+end
+
+""" check whether the system is not empty """
+function ms_exists(ms::MSys)
+  return length(ms.atoms) > 0
 end
 
 """ generate xyz string with element without numbers """

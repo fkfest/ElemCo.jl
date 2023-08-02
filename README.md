@@ -1,4 +1,4 @@
-# ElemCo.jl <img style="float: right;" src="e-coil.png"> <br/><br/>
+# ElemCo.jl <img style="float: right;" src="files/coil.png" height=74> <br/><br/>
 
 Julia implementation of various electron-correlation methods (main focus on coupled cluster) 
 using fcidump/npy interface.  
@@ -7,7 +7,7 @@ using fcidump/npy interface.
 
 Requirements: julia (>1.8)
 
-Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, ArgParse, Parameters, IterativeSolvers, MKL(optional)
+Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, ArgParse, Parameters, IterativeSolvers, GaussianBasis, MKL(optional)
 
 ## Usage
 

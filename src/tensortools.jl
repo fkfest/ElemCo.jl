@@ -7,7 +7,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MyIO
 
-export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol
+export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol, rotate_eigenvectors_to_real!
 
 function save(EC::ECInfo, fname::String, a::AbstractArray)
   miosave(joinpath(EC.scr, fname*".bin"), a)
@@ -150,5 +150,35 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   return M * M'
 end
 
+""" transform complex eigenvectors of a real matrix to a real space 
+    such that they block-diagonalize the matrix
+"""
+function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVector)
+  npairs = 0
+  skip = false
+  for i = 1:length(evals)
+    if skip 
+      skip = false
+      continue
+    end
+    if abs(imag(evals[i])) > 0.0
+      println("complex: ",evals[i], " ",i)
+      if evals[i] == conj(evals[i+1])
+        evecs[:,i] = real.(evecs[:,i])
+        @assert  evecs[:,i] == real.(evecs[:,i+1])
+        evecs[:,i+1] = imag.(evecs[:,i+1])
+        normalize!(evecs[:,i])
+        normalize!(evecs[:,i+1])
+        npairs += 1
+        skip = true
+      else
+        error("eigenvalue pair expected but not found: conj(",evals[i], ") != ",evals[i+1])
+      end
+    end
+  end
+  if npairs > 0
+    println("$npairs eigenvector pairs rotated to the real space")
+  end
+end
 
 end #module

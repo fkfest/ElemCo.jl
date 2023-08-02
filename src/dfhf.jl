@@ -79,8 +79,8 @@ function generate_basis(ms::MSys)
   return bao,bfit
 end
 
-function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
-  bao,bfit = generate_basis(ms)
+function generate_integrals(EC::ECInfo; save3idx = true)
+  bao,bfit = generate_basis(EC.ms)
   save(EC,"sao",overlap(bao))
   save(EC,"hsmall",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
@@ -92,7 +92,7 @@ function generate_integrals(ms::MSys, EC::ECInfo; save3idx = true)
   else
     save(EC,"PL",M)
   end
-  return nuclear_repulsion(ms)
+  return nuclear_repulsion(EC.ms)
 end
 
 @enum GuessType GUESS_HCORE GUESS_SAD GUESS_GWH GUESS_ORB
@@ -104,14 +104,14 @@ function guess_hcore(EC::ECInfo)
   return cMO
 end
 
-function guess_sad(ms::MSys, EC::ECInfo)
+function guess_sad(EC::ECInfo)
   # minao = "ano-rcc-mb"
   minao = "ano-r0"
   # minao = "sto-6g"
-  bminao = BasisSet(minao,genxyz(ms,bohr=false))
-  bao,bfit = generate_basis(ms)
+  bminao = BasisSet(minao,genxyz(EC.ms,bohr=false))
+  bao,bfit = generate_basis(EC.ms)
   smin2ao = overlap(bminao,bao)
-  eldist = electron_distribution(ms,minao)
+  eldist = electron_distribution(EC.ms,minao)
   saoinv = invchol(Hermitian(load(EC,"sao")))
   # display(eldist)
   denao = saoinv * smin2ao' * diagm(eldist) * smin2ao * saoinv
@@ -121,17 +121,17 @@ function guess_sad(ms::MSys, EC::ECInfo)
   return cMO
 end
 
-function guess_gwh(ms::MSys, EC::ECInfo)
+function guess_gwh(EC::ECInfo)
   error("not implemented yet")
 end
 
-function guess_orb(ms::MSys, EC::ECInfo, guess::GuessType)
+function guess_orb(EC::ECInfo, guess::GuessType)
   if guess == GUESS_HCORE
     return guess_hcore(EC)
   elseif guess == GUESS_SAD
-    return guess_sad(ms,EC)
+    return guess_sad(EC)
   elseif guess == GUESS_GWH
-    return guess_gwh(ms,EC)
+    return guess_gwh(EC)
   elseif guess == GUESS_ORB
     return load(EC,"cMO")
   else
@@ -139,15 +139,15 @@ function guess_orb(ms::MSys, EC::ECInfo, guess::GuessType)
   end
 end
 
-function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
+function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
   println("DF-HF")
   diis = Diis(EC.scr)
   thren = sqrt(EC.options.scf.thr)*0.1
-  Enuc = generate_integrals(ms, EC; save3idx=!direct)
+  Enuc = generate_integrals(EC; save3idx=!direct)
   if direct
-    bao,bfit = generate_basis(ms)
+    bao,bfit = generate_basis(EC.ms)
   end
-  cMO = guess_orb(ms,EC,guess)
+  cMO = guess_orb(EC,guess)
   ϵ = zeros(size(cMO,1))
   hsmall = load(EC,"hsmall")
   sao = load(EC,"sao")
@@ -165,7 +165,7 @@ function dfhf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     end
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
-    @tensoropt efhsmall = scalar(cMO2[p,i]*fhsmall[p,q]*cMO2[q,i])
+    @tensoropt efhsmall = cMO2[p,i]*fhsmall[p,q]*cMO2[q,i]
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF

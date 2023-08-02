@@ -6,13 +6,16 @@ ELEctronic Methods of COrrelation
 
 module ElemCo
 
+include("abstractEC.jl")
+include("utils.jl")
 include("myio.jl")
 include("mnpy.jl")
 include("dump.jl")
+include("integrals.jl")
+include("msystem.jl")
 include("diis.jl")
 
 include("ecinfos.jl")
-include("utils.jl")
 include("ecmethods.jl")
 include("tensortools.jl")
 include("fock.jl")
@@ -20,8 +23,6 @@ include("cc.jl")
 
 include("bohf.jl")
 
-include("integrals.jl")
-include("msystem.jl")
 include("dfhf.jl")
 include("dfdump.jl")
 
@@ -40,10 +41,134 @@ using .TensorTools
 using .Focks
 using .CoupledCluster
 using .FciDump
+using .MSystem
+using .BOHF
+using .DFHF
+using .DfDump
 
 
-export ECdriver, setup_scratch_and_fcidump
+export ECdriver 
+export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc
 
+""" 
+  @ECsetup()
+
+  setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
+"""
+macro ECsetup()
+  return quote
+    global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
+    setup!($(esc(:EC)))
+  end
+end
+
+""" 
+  @tryECsetup()
+
+  setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
+  if not already done 
+"""
+macro tryECsetup()
+  return quote
+    try
+      $(esc(:EC)).ignore_error
+    catch
+      $(esc(:@ECsetup))
+    end
+  end
+end
+
+""" 
+  @opt(what, kwargs...)
+
+  set options for `EC::ECInfo`. If `EC` is not already setup, it will be done. 
+  Usage: e.g., to set maxit=10 for scf: `@opt scf maxit=10` 
+"""
+macro opt(what, kwargs...)
+  strwhat="$what"
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECsetup))
+    if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
+      set_options!($(esc(:EC)).options.$what; $(ekwa...))
+    else
+      error("no such option: ",$(esc(strwhat)))
+    end
+  end
+end
+
+""" general runner """
+macro run(method, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECsetup))
+    $method($(esc(:EC)); $(ekwa...))
+  end
+end
+
+""" 
+  @dfhf()
+
+  run DFHF calculation and return MO coefficients (`ORBS`) and orbital energies (`EPS`)
+"""
+macro dfhf()
+  return quote
+    $(esc(:@tryECsetup))
+    $(esc(:EPS)), $(esc(:ORBS)) = dfhf($(esc(:EC)))
+  end
+end
+
+"""
+  @dfints(orbs = nothing, fcidump = "")
+
+  generate 2 and 4-idx MO integrals using density fitting.
+  If `orbs` is given, the orbitals are used to generate the integrals, 
+  otherwise the last orbitals (`ORBS`) are used.
+  If `fcidump` is given, the integrals are written to the fcidump file.
+"""
+macro dfints(orbs = nothing, fcidump = "")
+  return quote
+    $(esc(:@tryECsetup))
+    if isnothing($orbs)
+      orbitals = $(esc(:ORBS))
+    else
+      orbitals = $orbs
+    end
+    dfdump($(esc(:EC)),orbitals, $fcidump)
+  end
+end
+
+""" 
+  @cc(method, kwargs...)
+
+  run coupled cluster calculation
+  The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc)
+  The following keyword arguments are available:
+  * `fcidump`: fcidump file (default: "", i.e., use integrals from `EC`)
+  * `occa`: occupied α orbitals (default: "-")
+  * `occb`: occupied β orbitals (default: "-")
+"""
+macro cc(method, kwargs...)
+  strmethod="$method"
+  ekwa = [esc(a) for a in kwargs]
+  fcidump_given = false
+  for a in ekwa
+    if a.args[1].args[1] == :fcidump
+      fcidump_given = true
+    end
+  end
+  if fcidump_given
+    return quote
+      ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
+    end
+  else
+    return quote
+      ECdriver($(esc(:EC)), $(esc(strmethod)); fcidump="", $(ekwa...))
+    end
+  end
+end
+
+""" parse command line arguments """
 function parse_commandline(EC::ECInfo)
   s = ArgParseSettings()
   @add_arg_table! s begin
@@ -126,27 +251,6 @@ function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", oc
   return ECCSD
 end
 
-function setup_scratch_and_fcidump(EC::ECInfo, fcidump, occa="-", occb="-" )
-  t1 = time_ns()
-  # create scratch directory
-  mkpath(EC.scr)
-  EC.scr = mktempdir(EC.scr)
-  if fcidump != ""
-    # read fcidump intergrals
-    EC.fd = read_fcidump(fcidump)
-    t1 = print_time(EC,t1,"read fcidump",1)
-  end
-  println(size(EC.fd.int2))
-  norb = headvar(EC.fd, "NORB")
-  nelec = headvar(EC.fd, "NELEC")
-  ms2 = headvar(EC.fd, "MS2")
-
-  SP = EC.space
-
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec, ms2)
-  SP[':'] = 1:norb
-end
-
 function is_closed_shell(EC::ECInfo)
   SP = EC.space
   closed_shell = (SP['o'] == SP['O'] && !EC.fd.uhf)
@@ -186,7 +290,7 @@ end
 function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()
   method_names = split(methods)
-  setup_scratch_and_fcidump(EC,fcidump,occa,occb)
+  setup!(EC;fcidump,occa,occb)
   closed_shell, addname = is_closed_shell(EC)
 
   calc_fock_matrix(EC, closed_shell)
