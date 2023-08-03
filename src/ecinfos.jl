@@ -162,7 +162,7 @@ if both are "-", the occupation is deduced from nelec.
 the optional argument orbsym is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
 function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int})
-  @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons")
+  @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   if occas != "-"
     occa = parse_orbstring(occas; orbsym)
     if occbs == "-"
