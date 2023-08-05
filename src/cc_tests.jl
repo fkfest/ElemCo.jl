@@ -1,6 +1,8 @@
 
 """
-  compare to 4-idx dressed integrals
+    test_dressed_ints(EC,T1)
+
+  Compare 3-idx dressed integrals to 4-idx dressed integrals.
 """
 function test_dressed_ints(EC,T1)
   calc_dressed_ints(EC,T1)
@@ -32,7 +34,11 @@ function test_dressed_ints(EC,T1)
   close(ooPfile)
 end
 
-# test R1(T3) and R2(T3)
+"""
+    test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2)
+
+  Test R1(T3) and R2(T3)
+"""
 function test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2) 
   @tensoropt ETb3 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j]
   println("ETb3: ",ETb3)
@@ -40,6 +46,11 @@ function test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2)
   println("ETT1: ",ETT1)
 end
 
+"""
+    test_calc_pertT_from_T3(EC,T3)
+
+  Test [T]
+"""
 function test_calc_pertT_from_T3(EC::ECInfo, T3)
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])
@@ -62,7 +73,11 @@ function test_calc_pertT_from_T3(EC::ECInfo, T3)
   println("Enb3: ",Enb3)
 end
 
-#UaiX Test
+"""
+    test_UaiX(EC,UaiX)
+
+  Test UaiX
+"""
 function test_UaiX(EC::ECInfo, UaiX)
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])

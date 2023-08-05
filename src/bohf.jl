@@ -11,7 +11,11 @@ using ..ElemCo.DIIS
 
 export bohf, bouhf
 
-""" bo-hf on fcidump"""
+""" 
+    bohf(EC::ECInfo)
+
+  Perform BO-HF using integrals from fcidump EC.fd.
+"""
 function bohf(EC::ECInfo)
   println("Bi-orthogonal Hartree-Fock")
   flush(stdout)
@@ -64,7 +68,11 @@ function bohf(EC::ECInfo)
   return EHF, ϵ, cMOl, cMOr
 end
 
-""" bo-uhf on fcidump"""
+""" 
+    bouhf(EC::ECInfo)
+
+  Perform BO-UHF using integrals from fcidump EC.fd.
+"""
 function bouhf(EC::ECInfo)
   println("Bi-orthogonal unrestricted Hartree-Fock")
   flush(stdout)

@@ -22,8 +22,12 @@ export calc_MP2, calc_UMP2, method_name, calc_cc, calc_pertT
 
 include("cc_tests.jl")
 
-""" calculate MP2 energy """
 
+"""
+    update_singles(R1, ϵo, ϵv, shift)
+
+  Calculate update for singles amplitudes.
+"""
 function update_singles(R1, ϵo, ϵv, shift)
   ΔT1 = deepcopy(R1)
   for I ∈ CartesianIndices(ΔT1)
@@ -33,6 +37,11 @@ function update_singles(R1, ϵo, ϵv, shift)
   return ΔT1
 end
 
+"""
+    update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
+
+  Calculate update for singles amplitudes for a given `spincase`.
+"""
 function update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
   shift = use_shift ? EC.options.cc.shifts : 0.0
   if spincase == SCα
@@ -42,6 +51,11 @@ function update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
   end
 end
 
+"""
+    update_doubles(R2, ϵo1, ϵv1, ϵo2, ϵv2, shift)
+
+  Calculate update for doubles amplitudes.
+"""
 function update_doubles(R2, ϵo1, ϵv1, ϵo2, ϵv2, shift, antisymmetrize=false)
   ΔT2 = deepcopy(R2)
   if antisymmetrize
@@ -54,6 +68,11 @@ function update_doubles(R2, ϵo1, ϵv1, ϵo2, ϵv2, shift, antisymmetrize=false)
   return ΔT2
 end
 
+"""
+    update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
+
+  Calculate update for doubles amplitudes for a given `spincase`.
+"""
 function update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
   shift = use_shift ? EC.options.cc.shiftp : 0.0
   if spincase == SCα
@@ -65,6 +84,11 @@ function update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=
   end
 end
 
+"""
+    calc_singles_energy(EC::ECInfo, T1; fock_only=false)
+
+  Calculate coupled-cluster closed-shell singles energy.
+"""
 function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
@@ -75,6 +99,11 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   return ET1
 end
 
+"""
+    calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
+
+  Calculate energy for α (T1a) and β (T1b) singles amplitudes.
+"""
 function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   SP = EC.space
   ET1 = 0.0
@@ -94,11 +123,21 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   return ET1
 end
 
+"""
+    calc_doubles_energy(EC::ECInfo, T2; fock_only=false)
+
+  Calculate coupled-cluster closed-shell doubles energy.
+"""
 function calc_doubles_energy(EC::ECInfo, T2)
   @tensoropt ET2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * ints2(EC,"oovv")[i,j,a,b]
   return ET2
 end
 
+"""
+    calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab; fock_only=false)
+
+  Calculate energy for αα (T2a), ββ (T2b) and αβ (T2ab) doubles amplitudes.
+"""
 function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
   @tensoropt begin
     ET2 = 0.5*T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b]
@@ -108,6 +147,11 @@ function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
   return ET2
 end
 
+"""
+    calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
+
+  Calculate closed-shell singles and doubles Hylleraas energy
+"""
 function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
   SP = EC.space
   int2 = ints2(EC,"oovv")
@@ -126,6 +170,11 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
   return ET2
 end
 
+"""
+    calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
+
+  Calculate singles and doubles Hylleraas energy for one spin case.
+"""
 function calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
   SP = EC.space
   int2 = ints2(EC,o1*o2*v1*v2)
@@ -147,6 +196,11 @@ function calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
   return ET2
 end
 
+"""
+    calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
+
+  Calculate singles and doubles Hylleraas energy.
+"""
 function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
   SP = EC.space
   Eh = calc_hylleraas4spincase(EC, 'o','v','o','v', T1a, T2a, R1a, R2a, EC.fock[SP['o'],SP['v']])
@@ -157,11 +211,21 @@ function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b
   return Eh
 end
 
+"""
+    calc_singles_norm(T1)
+
+  Calculate squared norm of closed-shell singles amplitudes.
+"""
 function calc_singles_norm(T1)
   @tensor NormT1 = 2.0*T1[a,i]*T1[a,i]
   return NormT1
 end
 
+"""
+    calc_singles_norm(T1a, T1b)
+
+  Calculate squared norm of unrestricted singles amplitudes.
+"""
 function calc_singles_norm(T1a, T1b)
   @tensor begin
     NormT1 = T1a[a,i]*T1a[a,i]
@@ -170,11 +234,21 @@ function calc_singles_norm(T1a, T1b)
   return NormT1
 end
 
+"""
+    calc_doubles_norm(T2)
+
+  Calculate squared norm of closed-shell doubles amplitudes.
+"""
 function calc_doubles_norm(T2)
   @tensoropt NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j]
   return NormT2
 end
 
+"""
+    calc_doubles_norm(T2a, T2b, T2ab)
+
+  Calculate squared norm of unrestricted doubles amplitudes.
+"""
 function calc_doubles_norm(T2a, T2b, T2ab)
   @tensoropt begin
     NormT2 = 0.25*T2a[a,b,i,j]*T2a[a,b,i,j]
@@ -184,13 +258,23 @@ function calc_doubles_norm(T2a, T2b, T2ab)
   return NormT2
 end
 
-""" lengths of orbital spaces """
+""" 
+    lenspace(EC::ECInfo, o1::Char, o2::Char)
+
+  Return lengths of two orbital spaces.
+"""
 function lenspace(EC::ECInfo, o1::Char, o2::Char)
   return length(EC.space[o1]), length(EC.space[o2])
 end
 
-""" dress integrals with singles. 
-    The singles and orbspaces for first and second electron are T1,o1,v1 and T12,o2,v2, respectively."""
+""" 
+    calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
+
+  Dress integrals with singles amplitudes. 
+
+  The singles and orbspaces for first and second electron are `T1`, `o1`, `v1` and `T12, `o2`, `v2`, respectively.
+  The integrals from EC.fd are used and dressed integrals are stored as `d_????`.
+"""
 function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
   t1 = time_ns()
   mixed = (o1 != o2)
@@ -434,7 +518,11 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
 end
 
-""" dress the fock matrix (closed-shell) """
+""" 
+    dress_fock_closedshell(EC::ECInfo, T1)
+
+  Dress the fock matrix (closed-shell). The dressed fock matrix is stored as `dfocko`.
+"""
 function dress_fock_closedshell(EC::ECInfo, T1)
   t1 = time_ns()
   SP = EC.space
@@ -472,7 +560,12 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   save(EC,"dfocko",dfock)
   t1 = print_time(EC,t1,"dress fock",3)
 end
-""" dress the fock matrix (same-spin part) """
+
+""" 
+    dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
+
+  Dress the fock matrix (same-spin part). 
+"""
 function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   t1 = time_ns()
   SP = EC.space
@@ -517,7 +610,11 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   t1 = print_time(EC,t1,"dress fock",3)
 end
 
-""" dress the fock matrix (opposite-spin part) """
+""" 
+    dress_fock_oppositespin(EC::ECInfo)
+
+  Add the dressed opposite-spin part to the dressed Fock matrix. 
+"""
 function dress_fock_oppositespin(EC::ECInfo)
   t1 = time_ns()
   SP = EC.space
@@ -561,7 +658,11 @@ function dress_fock_oppositespin(EC::ECInfo)
   save(EC,"dfock"*'O',dfockb)
 end
 
-"""dress integrals with singles"""
+"""
+    calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
+
+  Dress integrals with singles.
+"""
 function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
   if ndims(T1b) != 2
     calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
@@ -576,7 +677,11 @@ function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
   end
 end
 
-"""save non-dressed integrals in files instead of dressed integrals"""
+"""
+    pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
+
+  Save non-dressed integrals in files instead of dressed integrals.
+"""
 function pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
   #TODO write like in itf with chars as arguments, so three calls for three spin cases...
   t1 = time_ns()
@@ -630,8 +735,12 @@ function pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
   end
 end
 
-""" Calculate closed-shell MP2 energy and amplitudes. 
-    Return (EMp2, T2) """
+""" 
+    calc_MP2(EC::ECInfo)
+
+  Calculate closed-shell MP2 energy and amplitudes. 
+  Return (EMp2, T2) 
+"""
 function calc_MP2(EC::ECInfo)
   T2 = update_doubles(EC,ints2(EC,"vvoo"), use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2)
@@ -640,8 +749,12 @@ function calc_MP2(EC::ECInfo)
   return EMp2, T2
 end
 
-""" Calculate unrestricted MP2 energy and amplitudes. 
-    Return (EMp2, T2a, T2b, T2ab)"""
+""" 
+    calc_UMP2(EC::ECInfo, addsingles=true)
+
+  Calculate unrestricted MP2 energy and amplitudes. 
+  Return (EMp2, T2a, T2b, T2ab)
+"""
 function calc_UMP2(EC::ECInfo, addsingles=true)
   SP = EC.space
   T2a = update_doubles(EC,ints2(EC,"vvoo"), spincase=SCα, antisymmetrize = true, use_shift=false)
@@ -656,6 +769,12 @@ function calc_UMP2(EC::ECInfo, addsingles=true)
   return EMp2, T2a, T2b, T2ab
 end
 
+
+"""
+    method_name(T1, dc = false)
+  
+  Guess method name (CCSD/DCSD/CCD/DCD)
+"""
 function method_name(T1, dc = false)
   if dc
     name = "DC"
@@ -671,11 +790,12 @@ function method_name(T1, dc = false)
 end
 
 """ 
-calc D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
+    calc_D2(EC::ECInfo, T1, T2, scalepp = false)
 
-return as D[pqij] 
+  Calculate D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
+  Return as D[pqij] 
 
-if `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
+  If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
 """
 function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
   SP = EC.space
@@ -705,13 +825,19 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
   return D2
 end
 
+""" 
+    calc_D2a(EC::ECInfo, T1a, T2a)
+
+  Calculate ^{αα}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})
+  with P_{ij} X_{ij} = X_{ij} - X_{ji}.
+  Return as D[pqij] 
+"""
 function calc_D2a(EC::ECInfo, T1a, T2a)
   SP = EC.space
   norb = length(SP[':'])
   nocc = length(SP['o'])
   if length(T1a) > 0
     D2a = Array{Float64}(undef,norb,norb,nocc,nocc)
-    # D2a = zeros(norb,norb,nocc,nocc)
   else
     D2a = zeros(norb,norb,nocc,nocc)
   end
@@ -729,13 +855,19 @@ function calc_D2a(EC::ECInfo, T1a, T2a)
   return D2a
 end
 
+""" 
+    calc_D2b(EC::ECInfo, T1b, T2b)
+
+  Calculate ^{ββ}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})
+  with P_{ij} X_{ij} = X_{ij} - X_{ji}.
+  Return as D[pqij] 
+"""
 function calc_D2b(EC::ECInfo, T1b, T2b)
   SP = EC.space
   norb = length(SP[':'])
   nocc = length(SP['O'])
   if length(T1b) > 0
     D2b = Array{Float64}(undef,norb,norb,nocc,nocc)
-    # D2b = zeros(norb,norb,nocc,nocc)
   else
     D2b = zeros(norb,norb,nocc,nocc)
   end
@@ -753,6 +885,14 @@ function calc_D2b(EC::ECInfo, T1b, T2b)
   return D2b
 end
 
+""" 
+    calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
+
+  Calculate ^{αβ}D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
+  Return as D[pqij] 
+
+  If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
+"""
 function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
   SP = EC.space
   norb = length(SP[':'])
@@ -760,7 +900,6 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
   noccb = length(SP['O'])
   if length(T1a) > 0
     D2ab = Array{Float64}(undef,norb,norb,nocca,noccb)
-    # D2ab = zeros(norb,norb,nocca,noccb)
   else
     D2ab = zeros(norb,norb,nocca,noccb)
   end
@@ -783,7 +922,9 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
 end
 
 """
-Calculate CCSD or DCSD residual.
+    calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
+
+  Calculate CCSD or DCSD closed-shell residual.
 """
 function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
   t1 = time_ns()
@@ -949,8 +1090,13 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
 
   return R1,R2
 end
+
 """
-Calculate (T) correction for CCSD
+    calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
+
+  Calculate (T) correction for closed-shell CCSD.
+
+  Return ( (T)-energy, [T]-energy))
 """
 function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
   # <ab|ck>
@@ -1028,7 +1174,9 @@ function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
 end
 
 """
-Calculate UCCSD or UDCSD residual.
+    calc_ccsd_resid(EC::ECInfo, T1a,T1b,T2a,T2b,T2ab,dc)
+
+  Calculate UCCSD or UDCSD residual.
 """
 function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   t1 = time_ns()
@@ -1412,7 +1560,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
 end
 
 """
-Calculate coupled cluster amplitudes.
+    calc_cc(EC::ECInfo, T1, T2, dc = false)
+
+Calculate closed-shell coupled cluster amplitudes.
 
 If length(T1) is 0 on input, no singles will be calculated.
 If dc: calculate distinguishable cluster.
@@ -1468,10 +1618,12 @@ function calc_cc(EC::ECInfo, T1, T2, dc = false)
 end
 
 """
-Calculate unrestricted coupled cluster amplitudes.
+    calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
 
-If length(T1a) && length(T1b) are 0 on input, no singles will be calculated.
-If dc: calculate distinguishable cluster.
+  Calculate unrestricted coupled cluster amplitudes.
+
+  If length(T1a) && length(T1b) are 0 on input, no singles will be calculated.
+  If dc: calculate distinguishable cluster.
 """
 function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   println(method_name(T1a,dc))
@@ -1527,8 +1679,14 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   return Eh, T1a, T1b, T2a, T2b, T2ab
 end
 
-#Charlotte start
-""" calculate DC-CCSDT"""
+""" 
+    calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
+
+  Calculate decomposed closed-shell DC-CCSDT amplitudes.
+
+  If `useT3`: (T) amplitudes from a preceding calculations will be used as starting guess.
+  If cc3: calculate CC3 amplitudes.
+"""
 function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
   calc_integrals_decomposition(EC)
   if useT3
@@ -1601,7 +1759,9 @@ end
 
 
 """
-generate end-of-block indices for auxiliary basis
+    get_endauxblks(naux, blocksize = 100)
+
+  Generate end-of-block indices for auxiliary basis (for loop over blocks).
 """
 function get_endauxblks(naux, blocksize = 100)
   nauxblks = naux ÷ blocksize
@@ -1613,7 +1773,9 @@ function get_endauxblks(naux, blocksize = 100)
 end
 
 """
-calculate dressed integrals for 3-index integrals
+    calc_dressed_3idx(EC,T1)
+
+  Calculate dressed integrals for 3-index integrals from file `pqP`.
 """
 function calc_dressed_3idx(EC,T1)
   pqPfile, pqP = mmap(EC, "pqP")
@@ -1649,6 +1811,11 @@ function calc_dressed_3idx(EC,T1)
   close(pqPfile)
 end
 
+"""
+    update_triples(EC,R3, use_shift = true)
+
+  Update decomposed triples amplitudes.
+"""
 function update_triples(EC,R3, use_shift = true)
   shift = use_shift ? EC.options.cc.shiftt : 0.0
   ΔT3 = deepcopy(R3)
@@ -1661,13 +1828,20 @@ function update_triples(EC,R3, use_shift = true)
 end
 
 """
-  calculate `simple` norm of triples (without contravariant!)
+    calc_triples_norm(T3)
+
+  Calculate a *simple* norm of triples (without contravariant!)
 """
 function calc_triples_norm(T3)
   @tensoropt NormT3 = T3[X,Y,Z] * T3[X,Y,Z]
   return NormT3
 end
 
+"""
+    add_to_singles_and_doubles_residuals(EC,R1,R2)
+
+  Add contributions from triples to singles and doubles residuals.
+"""
 function add_to_singles_and_doubles_residuals(EC,R1,R2)
   SP = EC.space
   ooPfile, ooP = mmap(EC,"d_ooP")
@@ -1705,7 +1879,9 @@ function add_to_singles_and_doubles_residuals(EC,R1,R2)
 end
 
 """
-  decompose (pq|rs) as (pq|P)(P|rs)
+    calc_integrals_decomposition(EC::ECInfo)
+
+  Decompose (pq|rs) as (pq|P)(P|rs) and store as `pqP`.
 """
 function calc_integrals_decomposition(EC::ECInfo)
   pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
@@ -1732,9 +1908,11 @@ function calc_integrals_decomposition(EC::ECInfo)
 end
 
 """
-  eigen decompose symmetric doubles T2[ai,bj] matrix: 
-  T^ij_ab = U^iX_a * S_XY * U^jY_b δ_XY
-  return U^iX_a for S > tol
+    eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
+
+  Eigenvector-decompose symmetric doubles T2[ai,bj] matrix: 
+  T^ij_ab = U^iX_a * S_XY * U^jY_b δ_XY.
+  Return U^iX_a for S > tol
 """
 function eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
   Sval, U = eigen(Symmetric(-T2mat))
@@ -1751,8 +1929,10 @@ function eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
 end
 
 """
-  decompose A as U^iX_a * S * Vt
-  return U^iX_a for S > tol
+    svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
+
+  SVD-decompose A as U^iX_a * S * Vt.
+  Return U^iX_a for S > tol
 """
 function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
   U, S, = svd(Amat)
@@ -1771,8 +1951,10 @@ function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
 end
 
 """
-  iteratively decompose A as U^iX_a * S * Vt
-  return U^iX_a for first naux S
+    iter_svd_decompose(Amat, nvirt, nocc, naux)
+
+  Iteratively decompose A as U^iX_a * S * Vt.
+  Return U^iX_a for first naux S
 """
 function iter_svd_decompose(Amat, nvirt, nocc, naux)
   # U, S2, Vt = tsvd(Amat, naux )
@@ -1787,8 +1969,10 @@ function iter_svd_decompose(Amat, nvirt, nocc, naux)
 end
 
 """ 
-  diagonalize ϵv - ϵo transformed with UaiX (for update)
-  return eigenvalues and rotated UaiX
+    rotate_U2pseudocanonical(EC::ECInfo, UaiX)
+
+  Diagonalize ϵv - ϵo transformed with UaiX (for update).
+  Return eigenvalues and rotated UaiX
 """
 function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
   SP = EC.space
@@ -1809,8 +1993,12 @@ function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
 end
 
 """
-  decompose T^ijk_abc as U^iX_a * U^jY_b * U^kZ_c * T_XYZ
-  compute T^i_aXY and decompose D^ij_ab = (T^i_aXY T^j_bXY) to get U^iX_a
+    calc_triples_decomposition_without_triples(EC::ECInfo, T2)
+
+  Decompose T^{ijk}_{abc} as U^{iX}_a * U^{jY}_b * U^{kZ}_c * T_{XYZ} 
+  without explicit calculation of T^{ijk}_{abc}.
+
+  Compute perturbative T^i_{aXY} and decompose D^{ij}_{ab} = (T^i_{aXY} T^j_{bXY}) to get U^{iX}_a.
 """
 function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   println("T^ijk_abc-free-decomposition")
@@ -1834,7 +2022,9 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
 end
 
 """
-  decompose T^ijk_abs as U^iX_a * U^jY_b * U^kZ_c * T_XYZ
+    calc_triples_decomposition(EC::ECInfo)
+
+  Decompose T^{ijk}_{abc} as U^{iX}_a * U^{jY}_b * U^{kZ}_c * T_{XYZ}.
 """
 function calc_triples_decomposition(EC::ECInfo)
   println("T^ijk_abc-decomposition")
@@ -1879,8 +2069,10 @@ function calc_triples_decomposition(EC::ECInfo)
 end
 
 """
-  calculate D^ij_ab = T^i_aXY T^j_bXY using half-decomposed perturbative triple amplitudes 
-  T^i_aXY from T2 (and UvoX)
+    calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
+
+  Calculate D^{ij}_{ab} = T^i_{aXY} T^j_{bXY} using half-decomposed perturbative triple amplitudes 
+  T^i_{aXY} from T2 (and UvoX)
 """
 function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   voPfile, voP = mmap(EC,"d_voP")
@@ -1940,6 +2132,11 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   return D2
 end
 
+"""
+    calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
+
+  Calculate decomposed triples DC-CCSDT or CC3 residuals.
+"""
 function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   t1 = time_ns()
   UvoX = load(EC,"UvoX")
@@ -2056,10 +2253,5 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   save(EC,"R3_decomp",R3decomp)
   
 end
-
-
-#Erklärung für save Funktion: save(EC, NamedesFiles,dasgespeichertwerdensoll, zuspeichernder Tensor)
-
-#Charlotte end
 
 end #module
