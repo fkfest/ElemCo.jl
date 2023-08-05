@@ -792,10 +792,10 @@ end
 """ 
     calc_D2(EC::ECInfo, T1, T2, scalepp = false)
 
-  Calculate D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
+  Calculate ``D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}``.
   Return as D[pqij] 
 
-  If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
+  If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation).
 """
 function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
   SP = EC.space
@@ -828,8 +828,8 @@ end
 """ 
     calc_D2a(EC::ECInfo, T1a, T2a)
 
-  Calculate ^{αα}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})
-  with P_{ij} X_{ij} = X_{ij} - X_{ji}.
+  Calculate ``^{αα}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})``
+  with ``P_{ij} X_{ij} = X_{ij} - X_{ji}``.
   Return as D[pqij] 
 """
 function calc_D2a(EC::ECInfo, T1a, T2a)
