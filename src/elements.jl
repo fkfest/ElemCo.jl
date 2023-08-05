@@ -124,6 +124,11 @@ const ELEMENTS = Dict(
   "OG" =>[118, 294.0   , "Oganesson"  , "[RN]5f^14 6d^10 7s^2 7p^6", "[RN]5f^14 6d^10", "[XE]"]
   )
 
+"""
+    nuclear_charge_of_center(elem::AbstractString)
+
+  Return the nuclear charge of the element.
+"""
 function nuclear_charge_of_center(elem::AbstractString)
   return get(ELEMENTS, uppercase(elem), [0])[1]
 end
@@ -132,19 +137,29 @@ const SUBSHELLS_NAMES = "spdfghi"
 
 const SUBSHELL2L = Dict('s'=>0,'p'=>1,'d'=>2,'f'=>3,'g'=>4,'h'=>5,'i'=>6)
 
-"""return the number of orbitals in the shell"""
+"""
+    n_orbitals_in_subshell(shell::Char)
+
+  Return the number of orbitals in the subshell.
+"""
 n_orbitals_in_subshell(shell::Char) = 2*SUBSHELL2L[shell]+1
 n_orbitals_in_subshell(lnum::Int) = 2*lnum+1
 
-""" occupation of the subshell with quantum numbers n and l"""
+""" 
+  Occupation of the subshell with quantum numbers n and l.
+"""
 struct SubShell
   n::Int
   l::Int
   nel::Int
 end
 
-""" parse the electron configuration string and return the number of electrons in each subshell
-    e.g. "[He] 2s^2 2p^6 3s^2 3p^6" -> [SubShell(1,0,2), SubShell(2,0,2), SubShell(2,1,6), SubShell(3,0,2), SubShell(3,1,6)] """
+""" 
+    parse_electron_configuration(e::AbstractString)
+
+  Parse the electron configuration string and return the number of electrons in each subshell.
+  e.g. "[He] 2s^2 2p^6 3s^2 3p^6" -> [SubShell(1,0,2), SubShell(2,0,2), SubShell(2,1,6), SubShell(3,0,2), SubShell(3,1,6)] 
+"""
 function parse_electron_configuration(e::AbstractString)
   subshells = SubShell[]
   if e == ""
@@ -165,9 +180,13 @@ function parse_electron_configuration(e::AbstractString)
   return subshells
 end
 
-""" distribute electrons among first atomic orbitals in nsh4l[1]s nsh4l[2]p nsh4l[3]d nsh4l[4]f... order
-    considering the Hund's rule and electron configuration of the atom.
-    Average occupations to account for the spin degeneracy and hybridization."""
+""" 
+    electron_distribution(elem::AbstractString, nsh4l::Vector{Int})
+
+  Distribute electrons among first atomic orbitals in nsh4l[1]s nsh4l[2]p nsh4l[3]d nsh4l[4]f... order
+  considering the Hund's rule and electron configuration of the atom.
+  Average occupations to account for the spin degeneracy and hybridization.
+"""
 function electron_distribution(elem::AbstractString, nsh4l::Vector{Int})
   eldist = Float64[]
   n = nuclear_charge_of_center(elem)

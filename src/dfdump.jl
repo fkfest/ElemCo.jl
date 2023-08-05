@@ -1,3 +1,4 @@
+""" generate fcidump using df integrals and store in dumpfile """
 module DfDump
 using LinearAlgebra, TensorOperations
 using ..ElemCo.ECInfos
@@ -8,6 +9,11 @@ using ..ElemCo.TensorTools
 
 export dfdump
 
+"""
+    generate_basis(ms::MSys)
+
+  Generate basis sets for integral calculations.
+"""
 function generate_basis(ms::MSys)
   # TODO: use element-specific basis!
   aobasis = lowercase(ms.atoms[1].basis["ao"].name)
@@ -17,6 +23,11 @@ function generate_basis(ms::MSys)
   return bao,bfit
 end
 
+"""
+    generate_integrals(EC::ECInfo, fdump::FDump, cMO)
+
+  Generate `int2`, `int1` and `int0` integrals for fcidump.
+"""
 function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
   @assert !fdump.uhf # TODO: uhf
   bao,bfit = generate_basis(EC.ms)
@@ -42,7 +53,12 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
   fdump.int0 = nuclear_repulsion(EC.ms)
 end
 
-""" generate fcidump using df integrals and store in dumpfile """
+""" 
+    dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
+
+  Generate fcidump using df integrals and store in dumpfile.
+  If dumpfile is empty, don't write to fcidump file, store in EC.fd.
+"""
 function dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
   println("generating fcidump $dumpfile")
   nelec = guess_nelec(EC.ms)
