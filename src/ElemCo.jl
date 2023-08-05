@@ -54,6 +54,16 @@ export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc
     @ECsetup()
 
   Setup `EC::ECInfo` from variables `geometry::String` and `basis::Dict{String,Any}`.
+
+  # Examples
+```jldoctest
+geometry="\nHe 0.0 0.0 0.0"
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+@ECsetup
+# output
+Occupied orbitals:[1]
+1
+```
 """
 macro ECsetup()
   return quote
@@ -86,14 +96,10 @@ end
   If `EC` is not already setup, it will be done. 
 
   # Examples
-  ```jldoctest
-  julia> geometry="He 0.0 0.0 0.0"
-  julia> basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
-  julia> @opt scf thr=1.e-14 maxit=10
-  julia> @opt cc maxit=100
-  julia> EC.options.cc.maxit
-  100
-  ```
+```julia
+@opt scf thr=1.e-14 maxit=10
+@opt cc maxit=100
+```
 """
 macro opt(what, kwargs...)
   strwhat="$what"
@@ -163,16 +169,16 @@ end
   - `occb::String`: occupied β orbitals (default: "-").
 
   # Examples
-  ```jldoctest
-  julia> geometry="bohr
-         O      0.000000000    0.000000000   -0.130186067
-         H1     0.000000000    1.489124508    1.033245507
-         H2     0.000000000   -1.489124508    1.033245507"
-  julia> basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
-  julia> @dfhf
-  julia> @dfints
-  julia> @cc ccsd
-  ```
+```julia
+geometry="bohr
+O      0.000000000    0.000000000   -0.130186067
+H1     0.000000000    1.489124508    1.033245507
+H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+@dfhf
+@dfints
+@cc ccsd
+```
 """
 macro cc(method, kwargs...)
   strmethod="$method"
@@ -338,8 +344,9 @@ end
 
   The integrals are read from `fcidump::String` (default: "FCIDUMP").
   If `fcidump::String` is empty, the integrals from `EC.fd` are used.
-  The occupied α orbitals are given by `occa::String` (default: "-")..
-  If the fcidump string is empty, EC.fd integrals are usedault: "-").
+  The occupied α orbitals are given by `occa::String` (default: "-").
+  The occupied β orbitals are given by `occb::String` (default: "-").
+  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
 """
 function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()

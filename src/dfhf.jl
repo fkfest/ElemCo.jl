@@ -116,6 +116,15 @@ function generate_integrals(EC::ECInfo; save3idx = true)
   return nuclear_repulsion(EC.ms)
 end
 
+"""
+    Type of initial guess for MO coefficients
+
+  Possible values:
+  - GUESS_HCORE: from core Hamiltonian
+  - GUESS_SAD: from atomic densities
+  - GUESS_GWH: not implemented yet
+  - GUESS_ORB: from previous orbitals stored as `cMO`
+"""
 @enum GuessType GUESS_HCORE GUESS_SAD GUESS_GWH GUESS_ORB
 
 """
