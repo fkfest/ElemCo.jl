@@ -2,6 +2,7 @@
 Info about molecular system (geometry/basis).
 """
 module MSystem
+using DocStringExtensions
 using ..ElemCo.ECInts
 export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
 
@@ -13,9 +14,11 @@ const ANGSTROM2BOHR = 1/BOHR2ANGSTROM
 
 """
 Basis set
+
+$(FIELDS)
 """
 struct Basis
-  # e.g., vdz
+  """ e.g., vdz, cc-pvdz, aug-cc-pvdz, cc-pvdz-jkfit. """
   name::String
   # coeffs, exponents..
 end
@@ -56,15 +59,17 @@ end
 
 """
 Atomic center
+
+$(FIELDS)
 """
 mutable struct ACenter
-  """name (as defined in input)"""
+  """name (as defined in input)."""
   name::String
-  """nuclear charge (can be changed...)"""
+  """nuclear charge (can be changed...)."""
   nuccharge::Float64
-  """coordinates in bohr"""
+  """coordinates in bohr."""
   coord::AbstractArray{Float64,1}
-  """various basis sets (ao,mp2fit,jkfit)"""
+  """various basis sets (ao,mp2fit,jkfit)."""
   basis::Dict{String,Basis}
 end
 
@@ -141,8 +146,11 @@ end
 
 """
 Geometry and basis set for each element name in the geometry
+
+$(FIELDS)
 """
 mutable struct MSys
+  """array of atomic centers."""
   atoms::AbstractArray{ACenter,1}
   function MSys()
     new(ACenter[])

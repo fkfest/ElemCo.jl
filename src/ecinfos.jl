@@ -1,6 +1,6 @@
 """ Various global infos """
 module ECInfos
-using Parameters
+using Parameters, DocStringExtensions
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDump
@@ -14,40 +14,42 @@ include("options.jl")
     ECInfo
 
   Global information for `ElemCo`.
+
+  $(FIELDS)
 """
 @with_kw mutable struct ECInfo <: AbstractECInfo
-  """ path to scratch directory """
+  """ path to scratch directory. """
   scr::String = joinpath(tempdir(),"elemcojlscr")
-  """ output file """
+  """ output file. """
   out = ""
-  """ verbosity level """
+  """ verbosity level. """
   verbosity::Int = 2
-  """ options """
+  """ options. """
   options::Options = Options()
 
-  """ molecular system """
+  """ molecular system. """
   ms::MSys = MSys()
-  """ fcidump """
+  """ fcidump. """
   fd::FDump = FDump()
-  """ ignore various errors """
+  """ ignore various errors. """
   ignore_error::Bool = false
-  """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general """
+  """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
   space::Dict{Char,Any} = Dict{Char,Any}()
-  """ number of occupied orbitals (for UHF: α) """
+  """ number of occupied orbitals (for UHF: α). """
   nocc::Int = 0
-  """ number of occupied orbitals (β) """
+  """ number of occupied orbitals (β). """
   noccb::Int = 0
-  """ fock matrix (for UHF: α) """
+  """ fock matrix (for UHF: α). """
   fock::Array{Float64} = Float64[]
-  """ fock matrix (β) """
+  """ fock matrix (β). """
   fockb::Array{Float64} = Float64[]
-  """ occupied orbital energies (for UHF: α) """
+  """ occupied orbital energies (for UHF: α). """
   ϵo::Array{Float64} = Float64[]
-  """ virtual orbital energies (for UHF: α) """
+  """ virtual orbital energies (for UHF: α). """
   ϵv::Array{Float64} = Float64[]
-  """ occupied orbital energies (β) """
+  """ occupied orbital energies (β). """
   ϵob::Array{Float64} = Float64[]
-  """ virtual orbital energies (β) """
+  """ virtual orbital energies (β). """
   ϵvb::Array{Float64} = Float64[]
 end
 
