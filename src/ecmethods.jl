@@ -1,4 +1,4 @@
-""" Specify ecmethods """
+""" Specify methods available for electron-correlation calculations"""
 module ECMethods
 
 export ECMethod, ExcType, NoExc, FullExc, PertExc, PertExcIter

@@ -5,8 +5,11 @@ using ..ElemCo.AbstractEC
 
 export print_time
 
-""" print time with message `info` 
-    if verbosity `verb` is smaller than EC.verbosity """
+""" 
+    print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
+
+  Print time with message `info` if verbosity `verb` is smaller than EC.verbosity.
+"""
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
   if verb < EC.verbosity

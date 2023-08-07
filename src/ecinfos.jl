@@ -1,6 +1,6 @@
-""" various global infos """
+""" Various global infos """
 module ECInfos
-using Parameters
+using Parameters, DocStringExtensions
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDump
@@ -9,44 +9,56 @@ using ..ElemCo.MSystem
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
 
 include("options.jl")
+
+"""
+    ECInfo
+
+  Global information for `ElemCo`.
+
+  $(FIELDS)
+"""
 @with_kw mutable struct ECInfo <: AbstractECInfo
-  """ path to scratch directory """
+  """ path to scratch directory. """
   scr::String = joinpath(tempdir(),"elemcojlscr")
-  """ output file """
+  """ output file. """
   out = ""
-  """ verbosity level """
+  """ verbosity level. """
   verbosity::Int = 2
-  """ options """
+  """ options. """
   options::Options = Options()
 
-  """ molecular system """
+  """ molecular system. """
   ms::MSys = MSys()
-  """ fcidump """
+  """ fcidump. """
   fd::FDump = FDump()
-  """ ignore various errors """
+  """ ignore various errors. """
   ignore_error::Bool = false
-  """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general """
+  """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
   space::Dict{Char,Any} = Dict{Char,Any}()
-  """ number of occupied orbitals (for UHF: α) """
+  """ number of occupied orbitals (for UHF: α). """
   nocc::Int = 0
-  """ number of occupied orbitals (β) """
+  """ number of occupied orbitals (β). """
   noccb::Int = 0
-  """ fock matrix (for UHF: α) """
+  """ fock matrix (for UHF: α). """
   fock::Array{Float64} = Float64[]
-  """ fock matrix (β) """
+  """ fock matrix (β). """
   fockb::Array{Float64} = Float64[]
-  """ occupied orbital energies (for UHF: α) """
+  """ occupied orbital energies (for UHF: α). """
   ϵo::Array{Float64} = Float64[]
-  """ virtual orbital energies (for UHF: α) """
+  """ virtual orbital energies (for UHF: α). """
   ϵv::Array{Float64} = Float64[]
-  """ occupied orbital energies (β) """
+  """ occupied orbital energies (β). """
   ϵob::Array{Float64} = Float64[]
-  """ virtual orbital energies (β) """
+  """ virtual orbital energies (β). """
   ϵvb::Array{Float64} = Float64[]
   currentMethod::String = ""
 end
 
-""" setup ECInfo """
+""" 
+    setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms2=0)
+
+  Setup ECInfo from fcidump or molecular system.
+"""
 function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms2=0)
   t1 = time_ns()
   # create scratch directory
@@ -81,7 +93,11 @@ function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, m
   EC.noccb = length(SP['O'])
 end
 
-""" set options using keyword arguments """
+""" 
+    set_options!(opt; kwargs...)
+
+  Set options for option `opt` using keyword arguments.
+"""
 function set_options!(opt; kwargs...)
   for (key,value) in kwargs
     if hasproperty(opt, key)
@@ -93,9 +109,11 @@ function set_options!(opt; kwargs...)
 end
 
 """
-parse a string specifying some list of orbitals, e.g., 
-`-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
-or use ':' and ';' instead of '-' and '+', respectively
+    parse_orbstring(orbs::String; orbsym = Vector{Int})
+
+  Parse a string specifying some list of orbitals, e.g., 
+  `-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
+  or use ':' and ';' instead of '-' and '+', respectively.
 """
 function parse_orbstring(orbs::String; orbsym = Vector{Int})
   # make it in julia syntax
@@ -142,8 +160,10 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int})
 end
 
 """
-convert a symorb (like 1.3 [orb.sym]) to an orbital number.
-If no sym given, just return the orbital number converted to Int.
+    symorb2orb(symorb::SubString, symoffset::Vector{Int})
+
+  Convert a symorb (like 1.3 [orb.sym]) to an orbital number.
+  If no sym given, just return the orbital number converted to Int.
 """
 function symorb2orb(symorb::SubString, symoffset::Vector{Int})
   if occursin(".",symorb)
@@ -158,11 +178,14 @@ function symorb2orb(symorb::SubString, symoffset::Vector{Int})
 end
 
 """
-use a +/- string to specify the occupation. If occbs=="-", the occupation from occas is used (closed-shell).
-if both are "-", the occupation is deduced from nelec.
-the optional argument orbsym is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
+    get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int})
+
+  Use a +/- string to specify the occupation. If `occbs`=="-", the occupation from `occas` is used (closed-shell).
+  If both are "-", the occupation is deduced from `nelec` and `ms2`.
+  The optional argument `orbsym` is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
 function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int})
+  @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   if occas != "-"
     occa = parse_orbstring(occas; orbsym)
     if occbs == "-"

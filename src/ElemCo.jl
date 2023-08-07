@@ -51,9 +51,19 @@ export ECdriver
 export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc
 
 """ 
-  @ECsetup()
+    @ECsetup()
 
-  setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
+  Setup `EC::ECInfo` from variables `geometry::String` and `basis::Dict{String,Any}`.
+
+  # Examples
+```jldoctest
+geometry="\nHe 0.0 0.0 0.0"
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+@ECsetup
+# output
+Occupied orbitals:[1]
+1
+```
 """
 macro ECsetup()
   return quote
@@ -63,10 +73,10 @@ macro ECsetup()
 end
 
 """ 
-  @tryECsetup()
+    @tryECsetup()
 
-  setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
-  if not already done 
+  Setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
+  if not already done.
 """
 macro tryECsetup()
   return quote
@@ -79,10 +89,17 @@ macro tryECsetup()
 end
 
 """ 
-  @opt(what, kwargs...)
+    @opt(what, kwargs...)
 
-  set options for `EC::ECInfo`. If `EC` is not already setup, it will be done. 
-  Usage: e.g., to set maxit=10 for scf: `@opt scf maxit=10` 
+  Set options for `EC::ECInfo`. 
+    
+  If `EC` is not already setup, it will be done. 
+
+  # Examples
+```julia
+@opt scf thr=1.e-14 maxit=10
+@opt cc maxit=100
+```
 """
 macro opt(what, kwargs...)
   strwhat="$what"
@@ -107,9 +124,9 @@ macro run(method, kwargs...)
 end
 
 """ 
-  @dfhf()
+    @dfhf()
 
-  run DFHF calculation and return MO coefficients (`ORBS`) and orbital energies (`EPS`)
+  Run DFHF calculation and return MO coefficients (`ORBS`) and orbital energies (`EPS`).
 """
 macro dfhf()
   return quote
@@ -119,12 +136,13 @@ macro dfhf()
 end
 
 """
-  @dfints(orbs = nothing, fcidump = "")
+    @dfints(orbs = nothing, fcidump = "")
 
-  generate 2 and 4-idx MO integrals using density fitting.
-  If `orbs` is given, the orbitals are used to generate the integrals, 
+  Generate 2 and 4-idx MO integrals using density fitting.
+
+  If `orbs::Matrix` is given, the orbitals are used to generate the integrals, 
   otherwise the last orbitals (`ORBS`) are used.
-  If `fcidump` is given, the integrals are written to the fcidump file.
+  If `fcidump::String` is given, the integrals are written to the fcidump file.
 """
 macro dfints(orbs = nothing, fcidump = "")
   return quote
@@ -139,14 +157,28 @@ macro dfints(orbs = nothing, fcidump = "")
 end
 
 """ 
-  @cc(method, kwargs...)
+    @cc(method, kwargs...)
 
-  run coupled cluster calculation
+  Run coupled cluster calculation.
+
   The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc)
-  The following keyword arguments are available:
-  * `fcidump`: fcidump file (default: "", i.e., use integrals from `EC`)
-  * `occa`: occupied α orbitals (default: "-")
-  * `occb`: occupied β orbitals (default: "-")
+  
+  # Keyword arguments
+  - `fcidump::String`: fcidump file (default: "", i.e., use integrals from `EC`).
+  - `occa::String`: occupied α orbitals (default: "-").
+  - `occb::String`: occupied β orbitals (default: "-").
+
+  # Examples
+```julia
+geometry="bohr
+O      0.000000000    0.000000000   -0.130186067
+H1     0.000000000    1.489124508    1.033245507
+H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+@dfhf
+@dfints
+@cc ccsd
+```
 """
 macro cc(method, kwargs...)
   strmethod="$method"
@@ -168,7 +200,11 @@ macro cc(method, kwargs...)
   end
 end
 
-""" parse command line arguments """
+""" 
+    parse_commandline(EC::ECInfo)
+
+Parse command line arguments. 
+"""
 function parse_commandline(EC::ECInfo)
   s = ArgParseSettings()
   @add_arg_table! s begin
@@ -251,6 +287,12 @@ function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", oc
   return ECCSD
 end
 
+"""
+    is_closed_shell(EC::ECInfo)
+
+  Check if the system is closed-shell 
+  according the to the reference occupation and FCIDump.
+"""
 function is_closed_shell(EC::ECInfo)
   SP = EC.space
   closed_shell = (SP['o'] == SP['O'] && !EC.fd.uhf)
@@ -261,7 +303,11 @@ function is_closed_shell(EC::ECInfo)
   return closed_shell, addname
 end
 
-""" calculate fock matrix """
+""" 
+    calc_fock_matrix(EC::ECInfo, closed_shell)
+
+  Calculate fock matrix from FCIDump
+"""
 function calc_fock_matrix(EC::ECInfo, closed_shell)
   t1 = time_ns()
   if closed_shell
@@ -276,7 +322,11 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
   t1 = print_time(EC,t1,"fock matrix",1)
 end
 
-""" calculate HF energy """
+""" 
+    calc_HF_energy(EC::ECInfo, closed_shell)
+
+  Calculate HF energy from FCIDump and EC info. 
+"""
 function calc_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
@@ -287,6 +337,17 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
   return EHF
 end
 
+""" 
+    ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
+
+  Run electronic structure calculation for `EC::ECInfo` using methods `methods::String`.
+
+  The integrals are read from `fcidump::String` (default: "FCIDUMP").
+  If `fcidump::String` is empty, the integrals from `EC.fd` are used.
+  The occupied α orbitals are given by `occa::String` (default: "-").
+  The occupied β orbitals are given by `occb::String` (default: "-").
+  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
+"""
 function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()
   method_names = split(methods)
@@ -393,6 +454,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     end
   end
 end
+
 
 function main()
   EC = ECInfo()

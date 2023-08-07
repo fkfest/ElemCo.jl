@@ -8,7 +8,11 @@ using ..ElemCo.TensorTools
 
 export dfhf, GuessType, GUESS_HCORE, GUESS_SAD
 
-""" integral direct df-hf """ 
+""" 
+    dffock(EC::ECInfo, cMO, bao, bfit)
+
+  Compute closed-shell DF-HF Fock matrix (integral direct).
+"""
 function dffock(EC,cMO,bao,bfit)
   pqP = ERI_2e3c(bao,bfit)
   PL = load(EC,"PL")
@@ -44,7 +48,12 @@ function dffock(EC,cMO,bao,bfit)
   return fock
 end
 
-""" cholesky decomposed integrals df-hf """
+"""
+    dffock(EC::ECInfo, cMO)
+
+  Compute closed-shell DF-HF Fock matrix 
+  (using precalculated Cholesky-decomposed integrals).
+"""
 function dffock(EC,cMO)
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
@@ -70,6 +79,11 @@ function dffock(EC,cMO)
   return fock
 end
 
+"""
+    generate_basis(ms::MSys)
+
+  Generate basis sets for AO and JK fitting.
+"""
 function generate_basis(ms::MSys)
   # TODO: use element-specific basis!
   aobasis = lowercase(ms.atoms[1].basis["ao"].name)
@@ -79,6 +93,13 @@ function generate_basis(ms::MSys)
   return bao,bfit
 end
 
+"""
+    generate_integrals(EC::ECInfo; save3idx = true)
+
+  Generate integrals for DF-HF.
+  If save3idx is true, save Cholesky-decomposed 3-index integrals, 
+  otherwise save pseudo-square-root-inverse Cholesky decomposition.
+"""
 function generate_integrals(EC::ECInfo; save3idx = true)
   bao,bfit = generate_basis(EC.ms)
   save(EC,"sao",overlap(bao))
@@ -95,15 +116,34 @@ function generate_integrals(EC::ECInfo; save3idx = true)
   return nuclear_repulsion(EC.ms)
 end
 
+"""
+    Type of initial guess for MO coefficients
+
+  Possible values:
+  - GUESS_HCORE: from core Hamiltonian
+  - GUESS_SAD: from atomic densities
+  - GUESS_GWH: not implemented yet
+  - GUESS_ORB: from previous orbitals stored as `cMO`
+"""
 @enum GuessType GUESS_HCORE GUESS_SAD GUESS_GWH GUESS_ORB
 
+"""
+    guess_hcore(EC::ECInfo)
+
+  Guess MO coefficients from core Hamiltonian.
+"""
 function guess_hcore(EC::ECInfo)
   hsmall = load(EC,"hsmall")
   sao = load(EC,"sao")
   ϵ,cMO = eigen(Hermitian(hsmall),Hermitian(sao))
   return cMO
 end
-
+  
+"""
+    guess_sad(EC::ECInfo)
+  
+  Guess MO coefficients from atomic densities.
+"""
 function guess_sad(EC::ECInfo)
   # minao = "ano-rcc-mb"
   minao = "ano-r0"
@@ -125,6 +165,11 @@ function guess_gwh(EC::ECInfo)
   error("not implemented yet")
 end
 
+"""
+    guess_orb(EC::ECInfo, guess::GuessType)
+
+  Calculate starting guess for MO coefficients.
+"""
 function guess_orb(EC::ECInfo, guess::GuessType)
   if guess == GUESS_HCORE
     return guess_hcore(EC)
@@ -139,6 +184,11 @@ function guess_orb(EC::ECInfo, guess::GuessType)
   end
 end
 
+"""
+    dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
+
+  Perform closed-shell DF-HF calculation.
+"""
 function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
   println("DF-HF")
   diis = Diis(EC.scr)

@@ -14,7 +14,11 @@ using ..ElemCo.FciDump
 
 export gen_fock, gen_ufock, gen_density_matrix
 
-""" calc closed-shell fock matrix """
+""" 
+    gen_fock(EC::ECInfo)
+
+  Calculate closed-shell fock matrix from FCIDump integrals. 
+"""
 function gen_fock(EC::ECInfo)
   @tensoropt fock[p,q] := integ1(EC.fd,SCα)[p,q] + 2.0*ints2(EC,":o:o",SCα)[p,i,q,i] - ints2(EC,":oo:",SCα)[p,i,i,q]
   ϵ = diag(fock)
@@ -24,7 +28,11 @@ function gen_fock(EC::ECInfo)
   return fock, ϵo, ϵv
 end
 
-""" calc uhf fock matrix """
+""" 
+    gen_fock(EC::ECInfo, spincase::SpinCase)
+
+  Calculate UHF fock matrix from FCIDump integrals. 
+"""
 function gen_fock(EC::ECInfo, spincase::SpinCase)
   @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] 
   if spincase == SCα
@@ -57,8 +65,11 @@ function gen_fock(EC::ECInfo, spincase::SpinCase)
   return fock, ϵo, ϵv
 end
 
-""" generate D_{μν}=C^l_{μi} C^r_{νi} with i defined by occvec
-    Only real part of D is kept.
+""" 
+    gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occvec)
+
+  Generate D_{μν}=C^l_{μi} C^r_{νi} with i defined by occvec
+  Only real part of D is kept.
 """ 
 function gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occvec)
   CMOlo = CMOl[:,occvec]
@@ -72,7 +83,11 @@ function gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray
   return denr
 end
 
-""" calc fock matrix for non-fcidump orbitals """
+""" 
+    gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
+
+  Calculate closed-shell fock matrix from FCIDump integrals and orbitals `CMOl`, `CMOr`. 
+"""
 function gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
   @assert EC.space['o'] == EC.space['O'] # closed-shell
   occ2 = EC.space['o']
@@ -85,7 +100,12 @@ function gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
   return fock
 end
 
-""" calc UHF fock matrix for non-fcidump orbitals """
+""" 
+    gen_fock(EC::ECInfo, spincase::SpinCase, CMOl::AbstractArray, CMOr::AbstractArray)
+
+  Calculate UHF fock matrix from FCIDump integrals for `spincase` and orbitals `CMOl`, `CMOr` and
+  orbitals for the opposite-spin `CMOlOS` and `CMOrOS`. 
+"""
 function gen_fock(EC::ECInfo, spincase::SpinCase, CMOl::AbstractArray, CMOr::AbstractArray,
                   CMOlOS::AbstractArray, CMOrOS::AbstractArray)
   if spincase == SCα
@@ -105,6 +125,13 @@ function gen_fock(EC::ECInfo, spincase::SpinCase, CMOl::AbstractArray, CMOr::Abs
   return fock
 end
 
+""" 
+    gen_ufock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
+
+  Calculate UHF fock matrix from FCIDump integrals and orbitals `cMOl`, `cMOr`
+  with `cMOl[1]` and `cMOr[1]` - α-MO transformation coefficients and 
+  `cMOl[2]` and `cMOr[2]` - β-MO transformation coefficients. 
+"""
 function gen_ufock(EC::ECInfo, cMOl::AbstractArray, cMOr::AbstractArray)
   return [gen_fock(EC,SCα, cMOl[1],cMOr[1], cMOl[2],cMOr[2]), gen_fock(EC,SCβ, cMOl[2],cMOr[2], cMOl[1],cMOr[1])]
 end
