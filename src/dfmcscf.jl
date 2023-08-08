@@ -195,6 +195,49 @@ function calc_realE(EC, fockClosed, D1, D2, cMO)
   return E
 end
 
+function davidson(H::Matrix, N::Integer, n::Integer, thres::Number, convTrack::Bool=false)
+  V = zeros(N,n)
+  σ = zeros(N,n)
+  h = zeros(n,n)
+  v = rand(N)
+  v = v./norm(v)
+  V[:,1] = v
+  ac = zeros(n)
+  H0 = diag(H)
+  λ = zeros(n)
+  eigvec_index = 1
+  pick_vec = 50
+  converged = false
+  for i in 2:n
+    newσ = H * v
+    σ[:,i-1] = newσ
+    newh = V' * newσ
+    h[:,i-1] = newh
+    h[i-1,:] = newh
+    λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
+    if convTrack && i > pick_vec
+      eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
+    end
+    ac[1:i-1] = a[:,eigvec_index]
+    r = σ * ac - λ[eigvec_index] * (V * ac)
+    if norm(r) < thres
+      converged = true
+      println("Iter ", i, " converged!")
+      break
+    end
+    v = -1.0 ./ (H0 .- λ[eigvec_index]) .* r
+    c = transpose(v) * V
+    v = v - V * transpose(c)
+    v = v./norm(v)
+    V[:,i] = v
+  end
+  if !converged
+    println("davidson algorithm not converged!")
+  end
+  v = V * ac
+  return λ[eigvec_index], v, converged
+end
+
 """
 find a λ to fit x in trust region,
 return λ and x
@@ -204,32 +247,46 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
   λl = 1.0
   λr = λmax
   micro_converged = false
+  N_rk = size(h,1)
+  davItMax = 100 # for davidson eigenvalue solving algorithm
+  davError = 1e-7
   # λ tuning loop (micro loop)
   for it=1:maxit
     # calc x
-    W = zeros(size(h,1)+1, size(h,1)+1) # workng matrix W
-    W[1, 2:size(h,1)+1] = g[:]
-    W[2:size(h,1)+1, 1] = g[:]
-    W[2:size(h,1)+1,2:size(h,1)+1] = h[:,:]./λ
-    display(W)
-    vals, vecs = eigen(Hermitian(W))
-    x = vecs[2:end, 1] ./ (vecs[1,1]*λ)
+    W = zeros(N_rk+1, N_rk+1) # workng matrix W
+    W[1, 2:N_rk+1] = g
+    W[2:N_rk+1, 1] = g
+    W[2:N_rk+1,2:N_rk+1] = h./λ
+    W = Matrix(Hermitian(W))
+    vec = zeros(N_rk+1)
+    if N_rk < 600
+      vals, vecs = eigen(W)
+      vec = vecs[:,1]
+    else
+      val, vec, converged = davidson(W, N_rk+1, davItMax, davError)
+      while !converged
+        davItMax += 50
+        println("Davidson max iteration number increased to ", davItMax)
+        val, vec, converged = davidson(W, N_rk+1, davItMax, davError)
+      end
+    end
+    x = vec[2:end] ./ (vec[1]*λ)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
-    if sum(x .^2) > trust 
+    sumx2 = (1/vec[1]^2 - 1) / λ^2
+    if sumx2 > trust 
       λl = λ
-    elseif sum(x .^2) < 0.8*trust
+    elseif sumx2 < 0.8*trust
       λr = λ
     else
-      break
       micro_converged = true
+      break
     end
-    if λr ≈ λl
+    if λr ≈ λl # norm of x too small
       micro_converged = true
       break
     end
     λ = (λl + λr) / 2
   end
-  println("λ: ", λ)
   if !micro_converged
     println("micro NOT converged")
   end
@@ -269,59 +326,6 @@ function checkE_modifyTrust(E, E_former, E_2o, trust)
   return reject, trust
 end
 
-function davidson(H::Matrix, N::Integer, n::Integer, thres::Number)
-  V = zeros(N,n)
-  σ = zeros(N,n)
-  h = zeros(n,n)
-  v = rand(N)
-  v = v./norm(v)
-  V[:,1] = v
-  ac = zeros(n)
-  H0 = diag(H)
-  λ = zeros(n)
-  eigvec_index = 1
-  pick_vec = 50
-  veccounter = zeros(pick_vec)
-  for i in 2:n
-    #println(i)
-    newσ = H * v
-    σ[:,i-1] = newσ
-    newh = V' * newσ
-    h[:,i-1] = newh
-    h[i-1,:] = newh
-    #display(h[1:i-1,1:i-1])
-    λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
-    #display(λ) 
-    #display(a)
-    eigvec_index = 1
-    #=
-    if i > pick_vec
-      eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
-      veccounter[eigvec_index] += 1
-      #println(eigvec_index)
-    end
-    =#
-    ac[1:i-1] = a[:,eigvec_index]
-    #display(ac)
-    #display(σ)
-    r = σ * ac - λ[eigvec_index] * (V * ac)
-    #println(norm(r))
-    if norm(r) < thres
-      println("Iter ", i, " converged!")
-      println(i)
-      v = V * ac
-      break
-    end
-    v = -1.0 ./ (H0 .- λ[eigvec_index]) .* r
-    c = transpose(v) * V
-    v = v - V * transpose(c)
-    v = v./norm(v)
-    V[:,i] = v
-  end
-  println(veccounter)
-  return λ[eigvec_index], v
-end
-
 function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   # constant system parameter 
   Enuc = generate_integrals(ms, EC; save3idx=!direct)
@@ -352,7 +356,7 @@ function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   λ = 500.0
 
   # macro loop, g and h updated
-  while norm(g) > 1e-6 && iteration_times < 30
+  while norm(g) > 1e-6 && iteration_times < 50
     println()
     println("Iter ", iteration_times)
 
@@ -384,7 +388,7 @@ function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
 
     # reorthogonalize molecular orbitals
     smo = cMO' * sao * cMO
-    cMO = cMO * Hermitian(smo)^(-1/2) 
+    cMO = cMO * Hermitian(smo)^(-1/2)
 
     # calc energy E with updated cMO
     projDenFitInt(EC, cMO)
