@@ -112,6 +112,25 @@ function parse_commandline(EC::ECInfo)
   return fcidump_file, method, occa, occb
 end
 
+function run_davidson(n::Integer, nIt::Integer, thres::Number)
+  H = Matrix(Hermitian(rand(n,n)))
+  t = time()
+  e_davidson = davidson(H,n,nIt,thres)
+  println("david time ", time()-t)
+  println("davidson eigenvalue: ", e_davidson[1])
+  t = time()
+  e,x = eigen(H)
+  println("eigen time ", time()-t)
+  e_index = findmax(-abs.(e.-e_davidson[1]))[2]
+  println("difference between eigenvector ", norm(x[:,e_index]-e_davidson[2]))
+  println(e_index)
+  if e_index > 2 && e_index < n-2
+    println("nearest Es: ", e[e_index-2:e_index+2])
+  else
+    println("lowest Es: ", e[1:5])
+  end
+end
+
 function run_mcscf()
   xyz="bohr
      O      0.000000000    0.000000000   -0.130186067

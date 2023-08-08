@@ -8,6 +8,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.DFHF
 
 export dfmcscf
+export davidson
 
 """
 calc density matrix of active electrons, 
@@ -210,6 +211,7 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
     W[1, 2:size(h,1)+1] = g[:]
     W[2:size(h,1)+1, 1] = g[:]
     W[2:size(h,1)+1,2:size(h,1)+1] = h[:,:]./λ
+    display(W)
     vals, vecs = eigen(Hermitian(W))
     x = vecs[2:end, 1] ./ (vecs[1,1]*λ)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
@@ -265,6 +267,59 @@ function checkE_modifyTrust(E, E_former, E_2o, trust)
     trust = 1.2 * trust
   end
   return reject, trust
+end
+
+function davidson(H::Matrix, N::Integer, n::Integer, thres::Number)
+  V = zeros(N,n)
+  σ = zeros(N,n)
+  h = zeros(n,n)
+  v = rand(N)
+  v = v./norm(v)
+  V[:,1] = v
+  ac = zeros(n)
+  H0 = diag(H)
+  λ = zeros(n)
+  eigvec_index = 1
+  pick_vec = 50
+  veccounter = zeros(pick_vec)
+  for i in 2:n
+    #println(i)
+    newσ = H * v
+    σ[:,i-1] = newσ
+    newh = V' * newσ
+    h[:,i-1] = newh
+    h[i-1,:] = newh
+    #display(h[1:i-1,1:i-1])
+    λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
+    #display(λ) 
+    #display(a)
+    eigvec_index = 1
+    #=
+    if i > pick_vec
+      eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
+      veccounter[eigvec_index] += 1
+      #println(eigvec_index)
+    end
+    =#
+    ac[1:i-1] = a[:,eigvec_index]
+    #display(ac)
+    #display(σ)
+    r = σ * ac - λ[eigvec_index] * (V * ac)
+    #println(norm(r))
+    if norm(r) < thres
+      println("Iter ", i, " converged!")
+      println(i)
+      v = V * ac
+      break
+    end
+    v = -1.0 ./ (H0 .- λ[eigvec_index]) .* r
+    c = transpose(v) * V
+    v = v - V * transpose(c)
+    v = v./norm(v)
+    V[:,i] = v
+  end
+  println(veccounter)
+  return λ[eigvec_index], v
 end
 
 function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
