@@ -1759,7 +1759,7 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
   end
   if !isempty(occcorea) && !isempty(occcoreb)
     @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,morbb,occcorea,norbb][j] * T2ab[virtualsa,virtualsb,morba,occcoreb][b,a,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,morbb,morba,occcorea][i] * T2ab[virtualsa,virtualsb,occcorea,norbb][b,a,j]
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * T2ab[virtualsb,virtualsb,occcoreb,norbb][b,a,j]
     @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[virtualsa,morbb,morba,norbb][b] * T2ab[norba,virtualsb,occcorea,occcoreb][a,j,i]
     @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,virtualsb,morba,norbb][a] * T2ab[virtualsa,morbb,occcorea,occcoreb][b,j,i]
     @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2b[morbb,virtualsb,occcoreb,norbb][a,i] * T2a[norba,virtualsa,morba,occcorea][b,j]
