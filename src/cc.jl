@@ -1673,14 +1673,14 @@ function calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab,activeorbs)
 end
 
 function calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab,activeorbs)
-  # morba, norbb, morbb, norba = activeorbs
+# morba, norbb, morbb, norba = activeorbs
   norbb, morba, norba, morbb = activeorbs
   occcoreb, occcorea = occcore
   virtualsb, virtualsa = virtuals
   P12 = (2,1,4,3)
   M2 = zeros(Float64,size(T2a))
   if length(T1a) > 0
-    @tensoropt T1[a,i] := T1a[a,i] - T1b[a,i]
+    @tensoropt T1[a,i] := T1b[a,i] - T1a[a,i]
     @tensoropt T2t[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
 
     @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1[virtualsa,occcorea][a,j]
@@ -1729,10 +1729,10 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
     @tensoropt T2ta[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
     @tensoropt T2tab[a,b,i,j] := T2ab[a,b,i,j] + T1a[a,i] * T1b[b,j]
     if !isempty(occcorea) && !isempty(occcoreb)
-      @tensoropt M2[norba,virtualsa,occcorea,occcoreb][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsb,occcoreb][a,j]
-      @tensoropt M2[norba,virtualsa,occcorea,occcoreb][a,i,j] -= T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1a[norba,occcorea][j]
-      @tensoropt M2[norba,virtualsa,occcorea,occcoreb][a,i,j] -= T2a[virtualsa,norba,morba,occcorea][a,j] * T1b[morbb,occcoreb][i]
-      @tensoropt M2[norba,virtualsa,occcorea,occcoreb][a,i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i] * T1a[virtualsa,morba][a]
+      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsb,occcoreb][a,j]
+      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] += T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1a[norba,occcorea][j]
+      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] += T2a[virtualsa,norba,morba,occcorea][a,j] * T1b[morbb,occcoreb][i]
+      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] += T2tab[norba,morbb,occcorea,occcoreb][j,i] * T1a[virtualsa,morba][a]
 
       @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1[virtualsb,occcoreb][b,i]
       @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,occcorea,norbb][a,i] * T1a[virtualsa,morba][b] 
