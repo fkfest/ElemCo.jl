@@ -388,7 +388,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       continue
     end
 
-    dc = (ecmethod.theory == "DC")
+    dc = (ecmethod.theory == "DC" || ecmethod.theory == "TD-DC")
 
     if ecmethod.exclevel[4] != NoExc
       error("no quadruples implemented yet...")
