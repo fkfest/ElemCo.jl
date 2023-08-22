@@ -10,12 +10,14 @@ using ..ElemCo.MIO
 export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol, rotate_eigenvectors_to_real!
 
 """
-    save(EC::ECInfo, fname::String, a::AbstractArray)
+    save(EC::ECInfo, fname::String, a::AbstractArray, descr="tmp"; overwrite=true)
 
   Save array `a` to file `fname` in EC.scr directory.
+  Add file to `EC.files` with description `descr`.
 """
-function save(EC::ECInfo, fname::String, a::AbstractArray)
-  miosave(joinpath(EC.scr, fname*".bin"), a)
+function save(EC::ECInfo, fname::String, a::AbstractArray, descr="tmp"; overwrite=true)
+  miosave(joinpath(EC.scr, fname*EC.ext), a)
+  add_file(EC, fname, descr; overwrite)
 end
 
 """
@@ -24,17 +26,19 @@ end
   Load array from file `fname` in EC.scr directory.
 """
 function load(EC::ECInfo, fname::String)
-  return mioload(joinpath(EC.scr, fname*".bin"))
+  return mioload(joinpath(EC.scr, fname*EC.ext))
 end
 
 """
-    newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}})
+    newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}, descr="tmp")
 
   Create a new memory-map file for writing (overwrites existing file).
+  Add file to `EC.files` with description `descr`.
   Return a pointer to the file and the mmaped array.
 """
-function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}})
-  return mionewmmap(joinpath(EC.scr, fname*".bin"), Type, dims)
+function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}, descr="tmp")
+  add_file(EC, fname, descr; overwrite=true)
+  return mionewmmap(joinpath(EC.scr, fname*EC.ext), Type, dims)
 end
 
 """
@@ -53,7 +57,7 @@ end
   Return a pointer to the file and the mmaped array.
 """
 function mmap(EC::ECInfo, fname::String)
-  return miommap(joinpath(EC.scr, fname*".bin"))
+  return miommap(joinpath(EC.scr, fname*EC.ext))
 end
 
 """

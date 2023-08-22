@@ -13,12 +13,14 @@ include("mnpy.jl")
 include("dump.jl")
 include("integrals.jl")
 include("msystem.jl")
-include("diis.jl")
 
 include("ecinfos.jl")
 include("ecmethods.jl")
 include("tensortools.jl")
+include("diis.jl")
+include("dfutils.jl")
 include("fock.jl")
+include("dfcc.jl")
 include("cc.jl")
 
 include("bohf.jl")
@@ -444,6 +446,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println(add2name*"$main_name correlation energy: ",ECC)
     println(add2name*"$main_name total energy: ",ECC+EHF)
     t1 = print_time(EC, t1,"CC",1)
+    delete_temporary_files(EC)
     if length(method_names) == 1
       if ecmethod.exclevel[3] != NoExc
         return EHF, EMp2, ECC, ET3

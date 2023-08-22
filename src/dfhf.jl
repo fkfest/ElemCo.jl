@@ -3,6 +3,7 @@ using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
+using ..ElemCo.DFUtils
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
@@ -80,20 +81,6 @@ function dffock(EC,cMO)
 end
 
 """
-    generate_basis(ms::MSys)
-
-  Generate basis sets for AO and JK fitting.
-"""
-function generate_basis(ms::MSys)
-  # TODO: use element-specific basis!
-  aobasis = lowercase(ms.atoms[1].basis["ao"].name)
-  jkfit = lowercase(ms.atoms[1].basis["jkfit"].name)
-  bao = BasisSet(aobasis,genxyz(ms,bohr=false))
-  bfit = BasisSet(jkfit,genxyz(ms,bohr=false))
-  return bao,bfit
-end
-
-"""
     generate_integrals(EC::ECInfo; save3idx = true)
 
   Generate integrals for DF-HF.
@@ -101,7 +88,8 @@ end
   otherwise save pseudo-square-root-inverse Cholesky decomposition.
 """
 function generate_integrals(EC::ECInfo; save3idx = true)
-  bao,bfit = generate_basis(EC.ms)
+  bao = generate_basis(EC.ms, "ao")
+  bfit = generate_basis(EC.ms, "jkfit")
   save(EC,"sao",overlap(bao))
   save(EC,"hsmall",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
@@ -149,7 +137,7 @@ function guess_sad(EC::ECInfo)
   minao = "ano-r0"
   # minao = "sto-6g"
   bminao = BasisSet(minao,genxyz(EC.ms,bohr=false))
-  bao,bfit = generate_basis(EC.ms)
+  bao = generate_basis(EC.ms, "ao")
   smin2ao = overlap(bminao,bao)
   eldist = electron_distribution(EC.ms,minao)
   saoinv = invchol(Hermitian(load(EC,"sao")))
@@ -191,11 +179,12 @@ end
 """
 function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
   println("DF-HF")
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = generate_integrals(EC; save3idx=!direct)
   if direct
-    bao,bfit = generate_basis(EC.ms)
+    bao = generate_basis(EC.ms, "ao")
+    bfit = generate_basis(EC.ms, "jkfit")
   end
   cMO = guess_orb(EC,guess)
   ϵ = zeros(size(cMO,1))
@@ -234,6 +223,7 @@ function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
     # display(ϵ)
   end
   println("DF-HF energy: ", EHF)
+  delete_temporary_files(EC)
   return ϵ, cMO
 end
 

@@ -21,7 +21,7 @@ function bohf(EC::ECInfo)
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = EC.fd.int0
   cMOl = Matrix{Float64}(I, norb, norb)
@@ -65,6 +65,7 @@ function bohf(EC::ECInfo)
   cMOl = (inv(cMOr))'
   println("BO-HF energy: ", EHF)
   flush(stdout)
+  delete_temporary_files(EC)
   return EHF, ϵ, cMOl, cMOr
 end
 
@@ -78,7 +79,7 @@ function bouhf(EC::ECInfo)
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = EC.fd.int0
   # 1: alpha, 2: beta (cMOs can become complex(?))
@@ -133,6 +134,7 @@ function bouhf(EC::ECInfo)
   end
   println("BO-UHF energy: ", EHF)
   flush(stdout)
+  delete_temporary_files(EC)
   return EHF, ϵ, cMOl, cMOr
 end
 

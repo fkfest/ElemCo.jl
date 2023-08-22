@@ -58,6 +58,18 @@ end
   thr::Float64 = 1.e-6
 end
 
+"""
+  Options for DIIS.
+
+  $(FIELDS)
+"""
+@with_kw mutable struct DiisOptions
+  """ maximum number of DIIS vectors. """
+  maxdiis::Int = 6
+  """ DIIS residual threshold. """
+  resthr::Float64 = 10.0
+end
+
 """ 
   Options for ElemCo.jl
 
@@ -70,4 +82,6 @@ end
   cc::CcOptions = CcOptions()
   """ Cholesky options. """
   cholesky::CholeskyOptions = CholeskyOptions()
+  """ DIIS options. """
+  diis::DiisOptions = DiisOptions()
 end
