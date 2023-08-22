@@ -1556,47 +1556,57 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     d_VOVO, rR2b = nothing, nothing
   end
 
-  if( uppercase(EC.currentMethod[1:2]) == "TD" )
+  if( uppercase(EC.currentMethod[1:2]) == "TD" || uppercase(EC.currentMethod[1:2]) == "FR" )
     # TD-CC assumes open-shell singlet reference morba and norbb occupied
     @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "TD-CCSD needs two open-shell alpha beta orbitals"
-    morb = setdiff(SP['o'],SP['O'])[1]
-    norb = setdiff(SP['O'],SP['o'])[1]
-    morba = findfirst(isequal(morb),SP['o'])
-    norbb = findfirst(isequal(norb),SP['O'])
-    morbb = findfirst(isequal(morb),SP['V'])
-    norba = findfirst(isequal(norb),SP['v'])
-    activeorbs = (morba,norbb,morbb,norba)
-    occcorea = collect(1:length(SP['o']))
-    occcoreb = collect(1:length(SP['O']))
-    filter!(x -> x != morba, occcorea)
-    filter!(x -> x != norbb, occcoreb)
-    occcore = (occcorea, occcoreb)
-    virtualsa = collect(1:length(SP['v']))
-    virtualsb = collect(1:length(SP['V']))
-    filter!(x -> x != norba, virtualsa)
-    filter!(x -> x != morbb, virtualsb)
-    virtuals = (virtualsa, virtualsb)
-    println("W: ", R2ab[norba,morbb,morba,norbb])
-    W = R2ab[norba,morbb,morba,norbb]
-    R2ab[norba,morbb,morba,norbb] = 0.0
-    if length(T1a) > 0
-      M1a = calc_M1a(occcore,virtuals,T1b, T2ab, activeorbs)
-      M1b = calc_M1b(occcore,virtuals,T1a, T2ab, activeorbs)
-      @tensoropt R1a[a,i] += M1a[a,i] * W
-      @tensoropt R1b[a,i] += M1b[a,i] * W
+    morba, norbb, morbb, norba = active_orbitals(EC)
+    if uppercase(EC.currentMethod[1:2]) == "TD"
+      activeorbs = (morba, norbb, morbb, norba)
+      occcorea = collect(1:length(SP['o']))
+      occcoreb = collect(1:length(SP['O']))
+      filter!(x -> x != morba, occcorea)
+      filter!(x -> x != norbb, occcoreb)
+      occcore = (occcorea, occcoreb)
+      virtualsa = collect(1:length(SP['v']))
+      virtualsb = collect(1:length(SP['V']))
+      filter!(x -> x != norba, virtualsa)
+      filter!(x -> x != morbb, virtualsb)
+      virtuals = (virtualsa, virtualsb)
+      println("W: ", R2ab[norba,morbb,morba,norbb])
+      W = R2ab[norba,morbb,morba,norbb]
+      R2ab[norba,morbb,morba,norbb] = 0.0
+      if length(T1a) > 0
+        M1a = calc_M1a(occcore,virtuals,T1b, T2ab, activeorbs)
+        M1b = calc_M1b(occcore,virtuals,T1a, T2ab, activeorbs)
+        @tensoropt R1a[a,i] += M1a[a,i] * W
+        @tensoropt R1b[a,i] += M1b[a,i] * W
+      end
+      if !isempty(occcorea) && !isempty(occcoreb)
+        M2a = calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab, activeorbs)
+        M2b = calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab, activeorbs)
+        @tensoropt R2a[a,b,i,j] += M2a[a,b,i,j] * W
+        @tensoropt R2b[a,b,i,j] += M2b[a,b,i,j] * W
+      end
+      M2ab = calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab, activeorbs)
+      @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
+      return R1a, R1b, R2a, R2b, R2ab, W
+    elseif( uppercase(EC.currentMethod[1:2]) == "FR" )
+      R2ab[norba,morbb,morba,norbb] = 0
     end
-    if !isempty(occcorea) && !isempty(occcoreb)
-      M2a = calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab, activeorbs)
-      M2b = calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab, activeorbs)
-      @tensoropt R2a[a,b,i,j] += M2a[a,b,i,j] * W
-      @tensoropt R2b[a,b,i,j] += M2b[a,b,i,j] * W
-    end
-    M2ab = calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab, activeorbs)
-    @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
-    return R1a, R1b, R2a, R2b, R2ab, W
   end
-
   return R1a, R1b, R2a, R2b, R2ab
+end
+
+function active_orbitals(EC::ECInfo)
+  SP = EC.space
+  @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "Assumed two open-shell alpha beta orbitals here."
+  morb = setdiff(SP['o'],SP['O'])[1]
+  norb = setdiff(SP['O'],SP['o'])[1]
+  morba = findfirst(isequal(morb),SP['o'])
+  norbb = findfirst(isequal(norb),SP['O'])
+  morbb = findfirst(isequal(morb),SP['V'])
+  norba = findfirst(isequal(norb),SP['v'])
+  return morba,norbb,morbb,norba
 end
 
 function calc_M1a(occcore,virtuals,T1, T2, activeorbs)
@@ -1862,6 +1872,10 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     T2a += update_doubles(EC,R2a)
     T2b += update_doubles(EC,R2b;spincase=SCβ)
     T2ab += update_doubles(EC,R2ab;spincase=SCαβ)
+    if( uppercase(EC.currentMethod[1:2]) == "FR" )
+      morba, norbb, morbb, norba = active_orbitals(EC)
+      T2ab[norba,morbb,morba,norbb] = 1.0
+    end
     if nosing
       T2a,T2b,T2ab = perform(diis,[T2a,T2b,T2ab],[R2a,R2b,2.0*R2ab])
       En = 0.0

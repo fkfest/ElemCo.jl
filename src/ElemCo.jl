@@ -388,7 +388,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       continue
     end
 
-    dc = (ecmethod.theory == "DC" || ecmethod.theory == "TD-DC")
+    dc = (ecmethod.theory == "DC" || ecmethod.theory == "TD-DC" || ecmethod.theory == "FR-DC")
 
     if ecmethod.exclevel[4] != NoExc
       error("no quadruples implemented yet...")
@@ -442,6 +442,11 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     end
     flush(stdout)
 
+    if ecmethod.theory[1:2] == "FR"
+      add2name = "FR-"*add2name
+    elseif ecmethod.theory[1:2] == "TD"
+      add2name = "TD-"*add2name
+    end
     println(add2name*"$main_name correlation energy: ",ECC)
     println(add2name*"$main_name total energy: ",ECC+EHF)
     t1 = print_time(EC, t1,"CC",1)
