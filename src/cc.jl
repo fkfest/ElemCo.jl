@@ -1588,6 +1588,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       end
       M2ab = calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab, activeorbs)
       @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
+      return R1a, R1b, R2a, R2b, R2ab, W
     elseif( uppercase(EC.currentMethod[1:2]) == "FR" )
       R2ab[norba,morbb,morba,norbb] = 0
     end
@@ -1858,7 +1859,11 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   t0 = time_ns()
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
+    if uppercase(EC.currentMethod[1:2]) == "TD"
+      R1a, R1b, R2a, R2b, R2ab, W = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
+    else
       R1a, R1b, R2a, R2b, R2ab = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
+    end
     t1 = print_time(EC,t1,"residual",2)
     NormT2 = calc_doubles_norm(T2a,T2b,T2ab)
     NormR2 = calc_doubles_norm(R2a,R2b,R2ab)
