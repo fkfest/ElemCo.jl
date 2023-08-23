@@ -1,12 +1,16 @@
-#!/usr/bin/env julia
-
+"""
+  DIIS module for iterative solvers
+"""
 module DIIS
 using LinearAlgebra
 using Parameters
-using ..ElemCo.MyIO
+using ..ElemCo.MIO
 
 export Diis, perform
 
+"""
+  DIIS object
+"""
 mutable struct Diis
   scr::String
   maxdiis::Int
@@ -16,30 +20,63 @@ mutable struct Diis
   next::Int
   nDim::Int
   bmat::Array{Float64}
-  function Diis(scr_::String, maxdiis_::Int = 6)
+  function Diis(scr_::String; maxdiis_::Int = 6)
     ampfiles = [ joinpath(scr_, "amp"*string(i)*".bin") for i in 1:maxdiis_ ]
     resfiles = [ joinpath(scr_, "res"*string(i)*".bin") for i in 1:maxdiis_ ]
     new(scr_,maxdiis_,10.0,ampfiles,resfiles,1,0,zeros(maxdiis_+1,maxdiis_+1))
   end
 end
 
+"""
+    saveamps(diis::Diis,vecs,ipos)
+
+  Save vectors to file (replacing previous vectors at position `ipos`).
+"""
 function saveamps(diis::Diis,vecs,ipos)
   miosave(diis.ampfiles[ipos],vecs...)
 end
 
+"""
+    saveres(diis::Diis,vecs,ipos)
+
+  Save residuals to file (replacing previous residuals at position `ipos`).
+"""
 function saveres(diis::Diis,vecs,ipos)
   miosave(diis.resfiles[ipos],vecs...)
 end
+
+"""
+    loadvecs(file)
+
+  Load vectors from file.
+"""
 function loadvecs(file)
   return mioload(file, array_of_arrays = true)
 end
+
+"""
+    loadamps(diis::Diis,ipos)
+
+  Load vectors from file at position `ipos`.
+"""
 function loadamps(diis::Diis,ipos)
   return loadvecs(diis.ampfiles[ipos])
 end
+
+"""
+    loadres(diis::Diis,ipos)
+
+  Load residuals from file at position `ipos`.
+"""
 function loadres(diis::Diis,ipos)
   return loadvecs(diis.resfiles[ipos])
 end
 
+"""
+    combine(diis::Diis,vecfiles,coeffs)
+
+  Combine vectors from files with coefficients.
+"""
 function combine(diis::Diis,vecfiles,coeffs)
   outvecs = coeffs[1] * loadvecs(vecfiles[1])
   for i in 2:diis.nDim
@@ -48,6 +85,11 @@ function combine(diis::Diis,vecfiles,coeffs)
   return outvecs
 end
 
+"""
+    perform(diis::Diis,Amps, Res)
+
+  Perform DIIS.
+"""
 function perform(diis::Diis,Amps, Res)
   if diis.nDim < diis.maxdiis
     diis.nDim += 1
