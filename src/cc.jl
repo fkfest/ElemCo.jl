@@ -1877,6 +1877,10 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     elseif uppercase(EC.currentMethod[1:2]) == "TD"
       morba, norbb, morbb, norba = active_orbitals(EC)
       T2ab[norba,morbb,morba,norbb] = 0.0
+      println("T1a all internal: ", T1a[norba,morba])
+      println("T1b all internal: ", T1b[morbb,norbb])
+      # T1a[norba,morba] = 0.0
+      # T1b[morbb,norbb] = 0.0
     end
     if nosing
       T2a,T2b,T2ab = perform(diis,[T2a,T2b,T2ab],[R2a,R2b,2.0*R2ab])
