@@ -290,8 +290,8 @@ function run_mcscf()
   EC = ECInfo(ms=MSys(xyz,basis))
   setup!(EC,ms2=2,charge=-2)
 
-  #ϵ,cMO = dfhf(EC,direct=true)
-  dfmcscf(EC,direct=false)
+  E,cMO =  dfmcscf(EC,direct=false)
+
 end
 
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)

@@ -286,7 +286,7 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
     W[2:N_rk+1,2:N_rk+1] = h./λ
     W = Matrix(Hermitian(W))
     vec = zeros(N_rk+1)
-    if N_rk < 6
+    if N_rk < 600
       vals, vecs = eigen(W)
       vec = vecs[:,1]
     else
@@ -364,11 +364,11 @@ function checkE_modifyTrust(E, E_former, E_2o, trust)
 end
 
 """
-    dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
+    dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
+function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
   Enuc = generate_integrals(EC; save3idx=!direct)
   sao = load(EC,"sao")
   nAO = size(sao,2) # number of atomic orbitals
@@ -397,9 +397,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
   λ = 500.0
 
   # macro loop, g and h updated
-  while norm(g) > 1e-6 && iteration_times < 50
-    println()
-    println("Iter ", iteration_times)
+  while norm(g) > 1e-6 && iteration_times < IterMax
 
     # calc g and h with updated cMO
     projDenFitInt(EC, cMO)
@@ -407,21 +405,21 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
     A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
     g = calc_g(A, EC)
     h = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
-    println("norm of g: ", norm(g))
+    #println("norm of g: ", norm(g))
     
     # λ tuning loop (micro loop)
     λmax = 1000.0
     maxit = 100
     λ, x = λTuning(trust, maxit, λmax, λ, h, g)
-    println("square of the norm of x: ", sum(x.^2))
+    #println("square of the norm of x: ", sum(x.^2))
 
     # calc 2nd order perturbation energy
     E_2o = sum(g .* x) + 0.5*(transpose(x) * h * x)
-    println("2nd order perturbation energy difference: ", E_2o)
+    #println("2nd order perturbation energy difference: ", E_2o)
     
     # calc rotation matrix U
     U = calc_U(EC, nAO, x)
-    println("difference between U and a real unitary matrix: ", sum((U'*U-I).^2))
+    #println("difference between U and a real unitary matrix: ", sum((U'*U-I).^2))
 
     # update cMO with U
     prev_cMO = deepcopy(cMO)
@@ -435,7 +433,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
     projDenFitInt(EC, cMO)
     fock, fockClosed = dffockCAS(EC,cMO,D1)
     E = calc_realE(EC, fockClosed, D1, D2, cMO)
-    println("energy: ", E+Enuc)
+    println("Iter ", iteration_times, " energy: ", E+Enuc)
 
     # check if reject the update and tune trust
     reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
@@ -448,5 +446,11 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
     iteration_times += 1
     E_former = E
   end
+  if iteration_times < IterMax
+    println("Convergent!")
+  else
+    println("Not Convergent!")
+  end
+  return E_former+Enuc, cMO
 end
 end #module
