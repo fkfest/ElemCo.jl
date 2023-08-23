@@ -44,7 +44,7 @@ end
 """ generate fcidump using df integrals and store in dumpfile """
 function dfdump(ms::MSys, EC::ECInfo, cMO, dumpfile = "FCIDUMP")
   println("generating fcidump $dumpfile")
-  nelec = guess_nelec(ms)+1 # to be modified
+  nelec = guess_nelec(ms)
   fdump = FDump(size(cMO,2), nelec)
   generate_integrals(ms, EC, fdump, cMO)
   println("writing fcidump $dumpfile")

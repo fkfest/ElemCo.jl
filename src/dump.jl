@@ -81,7 +81,6 @@ end
 """return 2-e⁻ integrals """
 function integ2(fd::FDump,spincase::SpinCase = SCα)
   if !fd.uhf
-    println("return wrongggggggg")
     return fd.int2
   elseif spincase == SCα
     return fd.int2aa
@@ -100,20 +99,17 @@ function read_fcidump(fcidump::String)
   fd = FDump()
   fd.head = read_header(fdf)
   fd.uhf = (headvar(fd, "IUHF") > 0)
-  println("whether fd.uhf is true or not ",fd.uhf)
   simtra = (headvar(fd, "ST") > 0)
   if simtra
     println("Non-Hermitian")
   end
   if isnothing(headvar(fd, "NPY2")) && isnothing(headvar(fd, "NPY2AA"))
     # read integrals from fcidump file
-    println("read integrals from fcidump file")
     read_integrals!(fd,fdf)
     close(fdf)
   else
     close(fdf)
     # read integrals from npy files
-    println("read integrals from fcidump file")
     read_integrals!(fd,dirname(fcidump))
   end
   return fd
@@ -300,13 +296,9 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     end
     fd.int2ab = zeros(norb,norb,norb,norb)
   else
-    print("hahahhahahahh")
     fd.int1 = zeros(norb,norb)
     if fd.triang
-      println("triang")
       fd.int2 = zeros(norb,norb,norb*(norb+1)÷2)
-      println("size of int2, ", size(fd.int2))
-      println("size of int2ab, ", size(fd.int2ab))
     else
       fd.int2 = zeros(norb,norb,norb,norb)
     end
@@ -327,8 +319,6 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     if i1 > norb || i2 > norb || i3 > norb || i4 > norb
       error("Index larger than norb: "*linestr)
     end
-
-
     if i4 > 0
       if spincase == 0
         if fd.uhf
@@ -351,7 +341,6 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
       elseif spincase == 4
         set_int1!(fd.int1b,i1,i2,integ,simtra)
       else
-        println(i1, i2, i3, i4, spincase)
         error("Unexpected 1-el integrals for spin-case "*string(spincase))
       end
     elseif i1 <= 0

@@ -13,11 +13,12 @@ export davidson
 """
     denMatCreate(EC::ECInfo)
 
-D1[t,u] = ``\\langle\\Psi|\\hat{E}_{tu}|\\Psi\\rangle  = \\langle \\Psi |\\hat{a}^\\dagger_t \\hat{a}_u|\\Psi\\rangle``, 
-D2[t,u,v,w] = ``\\frac{1}{2} \\langle\\Psi|\\hat{E}_{tu,vw}+\\hat{E}_{ut,vw}|\\Psi\\rangle``, 
-in which ``\\hat{E}_{tu,vw} = \\hat{E}_{tu} \\hat{E}_{vw} - \\delta_{uv} \\hat{E}_{tw} = \\hat{a}^\\dagger_{t} \\hat{a}^\\dagger_{v} \\hat{a}_{w} \\hat{a}_{u}``, 
-Give the one particle density matrix and two particle density matrix of active electrons, 
-return D1 and D2
+Calculate the one particle density matrix and two particle density matrix of active electrons
+for high-spin determinant.
+D1[t,u] = ``^1D^t_u = ⟨Ψ|\\hat{E}^t_u|Ψ⟩  = ⟨ Ψ |∑_σ \\hat{a}^†_{tσ} \\hat{a}_{uσ}|Ψ⟩``, 
+D2[t,u,v,w] = ``=^2D^{tv}_{uw}=0.5 ⟨Ψ|\\hat{E}^{tv}_{uw}+\\hat{E}^{uv}_{tw}|Ψ⟩``, 
+in which ``\\hat{E}_{tu,vw} = \\hat{E}^t_u \\hat{E}^v_w - δ_{uv} \\hat{E}^t_w = ∑_{στ}\\hat{a}^†_{tσ} \\hat{a}^†_{vτ} \\hat{a}_{wτ} \\hat{a}_{uσ}``.
+Return D1 and D2.
 """
 function denMatCreate(EC::ECInfo)
   SP = EC.space
@@ -33,7 +34,7 @@ end
 Read the μνL density fitting integral, 
 project to μjL and μuL with the coefficients cMO, 
 j -> doubly occupied orbital, u -> active orbital, 
-save in "mudL" and "muaL" in EC disk, 
+save in "mudL" and "muaL" on disk. 
 """
 function projDenFitInt(EC::ECInfo, cMO::Matrix)
   μνL = load(EC,"munuL")
@@ -52,10 +53,10 @@ end
 """
     dffockCAS(EC::ECInfo, cMO::Matrix, D1::Matrix)
 
-Calculate fock matrix in atomic orbital basis (μ,ν,σ,ρ),     
-return matrix fock and fockClosed, 
-first index as atomic orbital, second as molecular orbital, 
-d -> doubly occupied orbital, a -> active orbital
+Calculate fock matrices in atomic orbital basis.     
+Return matrix fock and fockClosed.
+fockClosed[μ,ν] = ``^cf_μ^ν = h_μ^ν + 2v_{μi}^{νi} - v_{μi}^{iν}``, 
+fock[μ,ν] = ``f_μ^ν = ^cf_μ^ν + D^t_u (v_{μt}^{νu} - 0.5 v_{μt}^{uν})``.
 """
 function dffockCAS(EC::ECInfo, cMO::Matrix, D1::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -85,8 +86,8 @@ end
 """
     dfACAS(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix)
 
-Calculate the A matrix in molecular basis p,q,r,s, 
-return matrix A
+Calculate the A-intermediate matrix in molecular orbital basis.
+return matrix A[p,q]
 """
 function dfACAS(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -106,11 +107,11 @@ function dfACAS(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
 end
 
 """
-    function calc_g(A::Matrix, EC::ECInfo)
+    calc_g(A::Matrix, EC::ECInfo)
 
-Transform the matrix A to a vector g, 
-first index r as active and virtual orbitals reordered with [occ1o;occv], 
-second index k as occupied orbitals reordered with [occ2;occ1o]
+Calculate the orbital gradient g by antisymmetrizing the matrix A
+and rearranging the elements.
+The order of the elements in g[r,k] is (active|virtual) × (closed-shell|active) 
 """
 function calc_g(A::Matrix, EC::ECInfo)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -125,9 +126,9 @@ end
 """
     calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix)
 
-Calculate Hessian matrix h
-first indexes r,s refer to open orbitals reordered in [occ1o;occv], 
-second indexes k,l refer to occupied orbitals reordered in [occ2;occ1o]
+Calculate Hessian matrix `h[rk,sl]`. `rk` and `sl` are combined indices of `r,k` and `s,l`, where
+indexes r,s refer to open orbitals reordered as (active|virtual), 
+and indexes k,l refer to occupied orbitals reordered as (closed-shell|active).
 """
 function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -190,7 +191,7 @@ end
     calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
 
 Calculate the energy with the given density matrices and (updated) cMO, 
-formular to be added here
+``E = (h_i^i + ^cf_i^i) + ^1D^t_u ^cf_t^u + 0.5 ^2D^{tv}_{uw} v_{tv}^{uw}``.
 """
 function calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -211,7 +212,7 @@ end
 """
     davidson(H::Matrix, N::Integer, n::Integer, thres::Number, convTrack::Bool=false)
 
-calculate one of the eigenvalues and corresponding eigenvector of the matrix H
+Calculate one of the eigenvalues and corresponding eigenvector of the matrix H
 (usually the lowest eigenvalue), 
 N is the size of the matrix H, 
 n is the maximal size of projected matrix, 
@@ -264,9 +265,9 @@ end
 """
     λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector)
 
-find the rotation parameters as the vector x in trust region,
-tuning λ with the norm of x in the iterations, 
-return λ and x
+Find the rotation parameters as the vector x in trust region,
+tuning λ with the norm of x in the iterations.
+Return λ and x.
 """
 function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector)
   x = zeros(size(h,1))
@@ -299,7 +300,7 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
     x = vec[2:end] ./ (vec[1]*λ)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
     sumx2 = (1/vec[1]^2 - 1) / λ^2
-    if sumx2 > trust 
+    if sumx2 > trust
       λl = λ
     elseif sumx2 < 0.8*trust
       λr = λ
@@ -320,9 +321,10 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
 end
 
 """
-    function calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
+    calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
 
-calculate U matrix (approximately unitary because of the anti-hermitian property of the R)
+calculate orbital-rotational matrix U (approximately unitary because of the anti-hermitian property of the R
+which is constructed from `x`).
 """
 function calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -333,10 +335,17 @@ function calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
   R[[occ1o;occv],[occ2;occ1o]] = R_sub
   R[[occ2;occ1o],[occ1o;occv]] = -1.0 .* transpose(R_sub)
   U = 1.0 * Matrix(I,N_MO,N_MO) + R
-  U = U + 1/2 .* R*R + 1/6 .* R*R*R 
+  U = U + 1/2 .* R*R + 1/6 .* R*R*R
   return U
 end
 
+"""
+    checkE_modifyTrust(E::Number, E_former::Number, E_2o::Number, trust::Number)
+
+Check if the energy E is lower than the former energy E_former,
+if not, reject the update of coefficients and modify the trust region.
+Return reject::Bool and trust.
+"""
 function checkE_modifyTrust(E, E_former, E_2o, trust)
   energy_diff = E - E_former
   energy_quotient = energy_diff / E_2o
@@ -357,13 +366,12 @@ end
 """
     dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
 
-Main body of density fitting Multi-Configuration self convergent field method
+Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
 function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
-  # constant system parameter 
   Enuc = generate_integrals(ms, EC; save3idx=!direct)
   sao = load(EC,"sao")
-  N = size(sao,2) # number of atomic orbitals
+  nAO = size(sao,2) # number of atomic orbitals
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2)
   if size(occ1o,1) == 0
@@ -412,7 +420,7 @@ function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
     println("2nd order perturbation energy difference: ", E_2o)
     
     # calc rotation matrix U
-    U = calc_U(EC, N, x)
+    U = calc_U(EC, nAO, x)
     println("difference between U and a real unitary matrix: ", sum((U'*U-I).^2))
 
     # update cMO with U

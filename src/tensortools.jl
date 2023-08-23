@@ -103,24 +103,16 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
     sc = spincase
   end
   allint = integ2(EC.fd, sc)
-  println("size of allint ", size(allint))
   if ndims(allint) == 4
     return allint[EC.space[spaces[1]],EC.space[spaces[2]],EC.space[spaces[3]],EC.space[spaces[4]]]
   elseif detri
     # last two indices as a triangular index, desymmetrize
     @assert ndims(allint) == 3
     out = Array{Float64}(undef,length(EC.space[spaces[1]]),length(EC.space[spaces[2]]),length(EC.space[spaces[3]]),length(EC.space[spaces[4]]))
-    
     cio, maski = triinds(EC,EC.space[spaces[3]],EC.space[spaces[4]])
-
     out[:,:,cio] = allint[EC.space[spaces[1]],EC.space[spaces[2]],maski]
-
     cio, maski = triinds(EC,EC.space[spaces[4]],EC.space[spaces[3]],true)
-    #println("maski", maski)
-    println(size(cio))
-    println(cio[size(cio)[1]])
     out[:,:,cio] = permutedims(allint[EC.space[spaces[2]],EC.space[spaces[1]],maski],(2,1,3))
-    println("size of out ", size(out))
     return out
   else
     cio, maski = triinds(EC,EC.space[spaces[3]],EC.space[spaces[4]])
