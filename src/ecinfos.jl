@@ -72,13 +72,13 @@ function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, m
     println(size(EC.fd.int2))
     norb = headvar(EC.fd, "NORB")
     nelec = (nelec==0) ? headvar(EC.fd, "NELEC") : nelec
-    nelec += charge
+    nelec -= charge
     ms2 = (ms2==0) ? headvar(EC.fd, "MS2") : ms2
     orbsym = convert(Vector{Int},headvar(EC.fd, "ORBSYM"))
   elseif ms_exists(EC.ms)
     norb = guess_norb(EC.ms) 
     nelec = (nelec==0) ? guess_nelec(EC.ms) : nelec
-    nelec += charge
+    nelec -= charge
     ms2 = (ms2==0) ? mod(nelec,2) : ms2
     orbsym = ones(Int,norb)
   else
@@ -114,7 +114,7 @@ end
   `-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
   or use ':' and ';' instead of '-' and '+', respectively.
 """
-function parse_orbstring(orbs::String; orbsym = Vector{Int})
+function parse_orbstring(orbs::String; orbsym = Vector{Int}())
   # make it in julia syntax
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
@@ -183,7 +183,7 @@ end
   If both are "-", the occupation is deduced from `nelec` and `ms2`.
   The optional argument `orbsym` is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
-function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int})
+function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int}())
   @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   if occas != "-"
     occa = parse_orbstring(occas; orbsym)

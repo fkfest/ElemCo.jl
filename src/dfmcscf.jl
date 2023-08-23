@@ -286,7 +286,7 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
     W[2:N_rk+1,2:N_rk+1] = h./λ
     W = Matrix(Hermitian(W))
     vec = zeros(N_rk+1)
-    if N_rk < 600
+    if N_rk < 6
       vals, vecs = eigen(W)
       vec = vecs[:,1]
     else
@@ -364,12 +364,12 @@ function checkE_modifyTrust(E, E_former, E_2o, trust)
 end
 
 """
-    dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
+    dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
-  Enuc = generate_integrals(ms, EC; save3idx=!direct)
+function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD)
+  Enuc = generate_integrals(EC; save3idx=!direct)
   sao = load(EC,"sao")
   nAO = size(sao,2) # number of atomic orbitals
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -379,7 +379,7 @@ function dfmcscf(ms::MSys, EC::ECInfo; direct = false, guess = GUESS_SAD)
   end
 
   # cMO and density matrices initialization
-  cMO = guess_orb(ms,EC,guess)
+  cMO = guess_orb(EC,guess)
   D1, D2 = denMatCreate(EC)
 
   # calc initial energy

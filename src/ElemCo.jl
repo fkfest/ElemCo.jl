@@ -287,85 +287,11 @@ function run_mcscf()
              "jkfit"=>"cc-pvtz-jkfit",
              "mp2fit"=>"cc-pvdz-rifit")
 
-  ms = MSys(xyz,basis)
+  EC = ECInfo(ms=MSys(xyz,basis))
+  setup!(EC,ms2=2,charge=-2)
 
-  # ms2 = 1
-  # charge = -1
-  ms2 = 2
-  charge = -2
-  nelec = guess_nelec(ms)-charge
-  norb = guess_norb(ms)
-  occa = "-"*string((nelec+ms2)÷2)
-  occb = "-"*string((nelec-ms2)÷2)
-  EC = ECInfo()
-  mkpath(EC.scr)
-  EC.scr = mktempdir(EC.scr)
-  SP = EC.space
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
-  SP[':'] = 1:norb
-
-  #ϵ,cMO = dfhf(ms,EC,direct=true)
-  dfmcscf(ms,EC,direct=false)
-end
-
-function run_hf()
-  xyz="bohr
-     O      0.000000000    0.000000000   -0.130186067
-     H1     0.000000000    1.489124508    1.033245507
-     H2     0.000000000   -1.489124508    1.033245507"
-
-
-  basis = Dict("ao"=>"cc-pVDZ",
-             "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
-
-  ms = MSys(xyz,basis)
-
-  nelec = guess_nelec(ms)
-  norb = guess_norb(ms)
-  occa = "-"*string((nelec+1)÷2)
-  occb = "-"*string(nelec÷2)
-  EC = ECInfo()
-  mkpath(EC.scr)
-  EC.scr = mktempdir(EC.scr)
-  SP = EC.space
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
-  SP[':'] = 1:norb
-
-  ϵ,cMO = dfhf(ms,EC,direct=true)
-  # ϵ,cMO = dfmcscf(ms,EC,direct=false)
-end
-
-function run_mcscf()
-  xyz="bohr
-     O      0.000000000    0.000000000   -0.130186067
-     H1     0.000000000    1.489124508    1.033245507
-     H2     0.000000000   -1.489124508    1.033245507"
-
-
-  basis = Dict("ao"=>"cc-pVDZ",
-             "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
-
-  ms = MSys(xyz,basis)
-
-  # ms2 = 1
-  # charge = -1
-  ms2 = 2
-  charge = -2
-  nelec = guess_nelec(ms)-charge
-  norb = guess_norb(ms)
-  occa = "-"*string((nelec+ms2)÷2)
-  occb = "-"*string((nelec-ms2)÷2)
-  EC = ECInfo()
-  mkpath(EC.scr)
-  EC.scr = mktempdir(EC.scr)
-  SP = EC.space
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec)
-  SP[':'] = 1:norb
-
-  #ϵ,cMO = dfhf(ms,EC,direct=true)
-  dfmcscf(ms,EC,direct=false)
+  #ϵ,cMO = dfhf(EC,direct=true)
+  dfmcscf(EC,direct=false)
 end
 
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)
