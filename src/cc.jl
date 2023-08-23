@@ -1572,7 +1572,6 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       filter!(x -> x != norba, virtualsa)
       filter!(x -> x != morbb, virtualsb)
       virtuals = (virtualsa, virtualsb)
-      println("W: ", R2ab[norba,morbb,morba,norbb])
       W = R2ab[norba,morbb,morba,norbb]
       R2ab[norba,morbb,morba,norbb] = 0.0
       if length(T1a) > 0
@@ -1589,7 +1588,6 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       end
       M2ab = calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab, activeorbs)
       @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
-      return R1a, R1b, R2a, R2b, R2ab, W
     elseif( uppercase(EC.currentMethod[1:2]) == "FR" )
       R2ab[norba,morbb,morba,norbb] = 0
     end
@@ -1860,11 +1858,7 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   t0 = time_ns()
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    if( uppercase(EC.currentMethod[1:2]) == "TD" )
-      R1a, R1b, R2a, R2b, R2ab, W = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
-    else 
       R1a, R1b, R2a, R2b, R2ab = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
-    end
     t1 = print_time(EC,t1,"residual",2)
     NormT2 = calc_doubles_norm(T2a,T2b,T2ab)
     NormR2 = calc_doubles_norm(R2a,R2b,R2ab)
@@ -1875,6 +1869,9 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     if( uppercase(EC.currentMethod[1:2]) == "FR" )
       morba, norbb, morbb, norba = active_orbitals(EC)
       T2ab[norba,morbb,morba,norbb] = 1.0
+    elseif uppercase(EC.currentMethod[1:2]) == "TD"
+      morba, norbb, morbb, norba = active_orbitals(EC)
+      T2ab[norba,morbb,morba,norbb] = 0.0
     end
     if nosing
       T2a,T2b,T2ab = perform(diis,[T2a,T2b,T2ab],[R2a,R2b,2.0*R2ab])
@@ -1898,7 +1895,6 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     flush(stdout)
     if NormR < EC.options.cc.thr
       if( uppercase(EC.currentMethod[1:2]) == "TD" )
-        @printf "%26s %12.8f \n" "W:" W
         @printf "%26s %12.8f \n" "Open-shell singlet energy:" Eh+W
         @printf "%26s %12.8f \n" "Ms = 0 triplet energy:" Eh-W
       end
