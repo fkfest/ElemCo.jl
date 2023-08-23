@@ -200,7 +200,7 @@ function calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
   CMO2 = cMO[:,occ2] 
   CMOa = cMO[:,occ1o] 
   μνL = load(EC,"munuL")
-  @tensoropt E = scalar(CMO2[μ,i]*(hsmall[μ,ν]+fockClosed[μ,ν])*CMO2[ν,i])
+  @tensoropt E = CMO2[μ,i]*(hsmall[μ,ν]+fockClosed[μ,ν])*CMO2[ν,i]
   @tensoropt fockClosed_MO[t,u] := fockClosed[μ,ν] * CMOa[μ,t] *CMOa[ν,u]
   E += sum(fockClosed_MO .* D1)
   @tensoropt tuL[t,u,L] := μνL[p,q,L] * CMOa[p,t] * CMOa[q,u]
