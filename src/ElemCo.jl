@@ -28,6 +28,8 @@ include("bohf.jl")
 include("dfhf.jl")
 include("dfdump.jl")
 
+include("dfmcscf.jl")
+
 try
   using MKL
 catch
@@ -46,6 +48,7 @@ using .FciDump
 using .MSystem
 using .BOHF
 using .DFHF
+using .DFMCSCF
 using .DfDump
 
 
@@ -273,6 +276,24 @@ function parse_commandline(EC::ECInfo)
     fcidump_file = ""
   end
   return fcidump_file, method, occa, occb
+end
+
+function run_mcscf()
+  xyz="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+
+  basis = Dict("ao"=>"cc-pVDZ",
+             "jkfit"=>"cc-pvtz-jkfit",
+             "mp2fit"=>"cc-pvdz-rifit")
+
+  EC = ECInfo(ms=MSys(xyz,basis))
+  setup!(EC,ms2=2,charge=-2)
+
+  E,cMO =  dfmcscf(EC,direct=false)
+
 end
 
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)

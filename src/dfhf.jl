@@ -7,7 +7,7 @@ using ..ElemCo.DFUtils
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
-export dfhf, GuessType, GUESS_HCORE, GUESS_SAD
+export dfhf, generate_integrals, guess_orb, GuessType, GUESS_HCORE, GUESS_SAD
 
 """ 
     dffock(EC::ECInfo, cMO, bao, bfit)
@@ -139,13 +139,11 @@ function guess_sad(EC::ECInfo)
   bminao = BasisSet(minao,genxyz(EC.ms,bohr=false))
   bao = generate_basis(EC.ms, "ao")
   smin2ao = overlap(bminao,bao)
+  smin = overlap(bminao)
   eldist = electron_distribution(EC.ms,minao)
-  saoinv = invchol(Hermitian(load(EC,"sao")))
-  # display(eldist)
-  denao = saoinv * smin2ao' * diagm(eldist) * smin2ao * saoinv
-  # dc = nc
-  n,cMO = eigen(Hermitian(-denao))
-  # display(n)
+  sao = load(EC,"sao")
+  denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
+  eigs,cMO = eigen(Hermitian(-denao),Hermitian(sao))
   return cMO
 end
 
