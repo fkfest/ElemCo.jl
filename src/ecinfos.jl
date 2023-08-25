@@ -7,6 +7,7 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
+export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs
 export file_exists, add_file, delete_temporary_files
 
 include("options.jl")
@@ -38,6 +39,9 @@ include("options.jl")
   `prefix` can be:
     - `d` for dressed integrals 
     - `S` for overlap matrix
+    - `f` for Fock matrix
+    - `e` for orbital energies
+    - `D` for density matrix
     - `h` for core Hamiltonian
     - `C` for transformation from one basis to another
 
@@ -46,8 +50,8 @@ include("options.jl")
     - `v` for virtual
     - `O` for occupied-β
     - `V` for virtual-β
-    - `m` for full MO space
-    - `M` for full MO-β space
+    - `m` for (full) MO space
+    - `M` for (full) β-MO space
     - `A` for AO basis
     - `a` for active orbitals
     - `c` for closed-shell (doubly-occupied) orbitals
@@ -61,22 +65,6 @@ include("options.jl")
   ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
   space::Dict{Char,Any} = Dict{Char,Any}()
-  """ number of occupied orbitals (for UHF: α). """
-  nocc::Int = 0
-  """ number of occupied orbitals (β). """
-  noccb::Int = 0
-  """ fock matrix (for UHF: α). """
-  fock::Array{Float64} = Float64[]
-  """ fock matrix (β). """
-  fockb::Array{Float64} = Float64[]
-  """ occupied orbital energies (for UHF: α). """
-  ϵo::Array{Float64} = Float64[]
-  """ virtual orbital energies (for UHF: α). """
-  ϵv::Array{Float64} = Float64[]
-  """ occupied orbital energies (β). """
-  ϵob::Array{Float64} = Float64[]
-  """ virtual orbital energies (β). """
-  ϵvb::Array{Float64} = Float64[]
 end
 
 """ 
@@ -114,8 +102,51 @@ function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, m
   SP = EC.space
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
   SP[':'] = 1:norb
-  EC.nocc = length(SP['o'])
-  EC.noccb = length(SP['O'])
+end
+
+"""
+    n_occ_orbs(EC::ECInfo)
+
+  Return number of occupied orbitals (for UHF: α).
+"""
+function n_occ_orbs(EC::ECInfo)
+  return length(EC.space['o'])
+end
+  
+"""
+    n_occb_orbs(EC::ECInfo)
+
+  Return number of occupied orbitals (β).
+"""
+function n_occb_orbs(EC::ECInfo)
+  return length(EC.space['O'])
+end
+
+"""
+    n_orbs(EC::ECInfo)
+
+  Return number of orbitals.
+"""
+function n_orbs(EC::ECInfo)
+  return length(EC.space[':'])
+end
+
+"""
+    n_virt_orbs(EC::ECInfo)
+
+  Return number of virtual orbitals (for UHF: α).
+"""
+function n_virt_orbs(EC::ECInfo)
+  return length(EC.space['v'])
+end
+
+"""
+    n_virtb_orbs(EC::ECInfo)
+
+  Return number of virtual orbitals (β).
+"""
+function n_virtb_orbs(EC::ECInfo)
+  return length(EC.space['V'])
 end
 
 """ 

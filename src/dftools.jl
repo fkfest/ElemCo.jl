@@ -6,9 +6,10 @@ using LinearAlgebra, TensorOperations
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
+using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
 
-export generate_AO_DF_integrals, generate_3idx_integrals
+export generate_AO_DF_integrals, generate_DF_integrals
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
@@ -35,18 +36,16 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
 end
 
 """
-    generate_3idx_integrals(EC::ECInfo, cMO)
+    generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
 
-  Generate ``v_p^{qL}``, ``f_p^q`` and `E_{nuc}` with
-  ``v_{pr}^{qs} = v_p^{qL} 1_{LL'} v_r^{sL'}``.
+  Generate ``v_p^{qL}`` with
+  ``v_{pr}^{qs} = v_p^{qL} 1_{LL'} v_r^{sL'}``
+  and store in file `mmL`.
 """
-function generate_3idx_integrals(EC::ECInfo, cMO)
+function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
   @assert ndims(cMO) == 2 "unrestricted not implemented yet"
   bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, "mp2fit")
-  bjkfit = generate_basis(EC.ms, "jkfit")
-  hAO = kinetic(bao) + nuclear(bao)
-  hMO = cMO' * hAO * cMO
+  bfit = generate_basis(EC.ms, fitbasis)
 
   PQ = ERI_2e2c(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
@@ -56,8 +55,30 @@ function generate_3idx_integrals(EC::ECInfo, cMO)
   M = nothing
   @tensoropt pqL[p,q,L] := cMO[μ,p] * μνL[μ,ν,L] * cMO[ν,q]
   μνL = nothing
-  save(EC,"pqP",pqL)
-  return nuclear_repulsion(EC.ms)
+  save(EC,"mmL",pqL)
+end
+
+"""
+    generate_DF_integrals(EC::ECInfo, cMO)
+
+  Generate ``v_p^{qL}``, ``f_p^q`` and `E_{nuc}` with
+  ``v_{pr}^{qs} = v_p^{qL} 1_{LL'} v_r^{sL'}``.
+  The ``v_p^{qL}`` are generated using `mp2fit` fitting basis, and
+  the ``f_p^q`` are generated using `jkfit` fitting basis.
+  The integrals are stored in files `mmL` and `f_mm`.
+"""
+function generate_DF_integrals(EC::ECInfo, cMO)
+  @assert ndims(cMO) == 2 "unrestricted not implemented yet"
+
+  # calculate fock matrix in AO basis (integral direct)
+  generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
+  bao = generate_basis(EC.ms, "ao")
+  bfit = generate_basis(EC.ms, "jkfit")
+  fock = gen_dffock(EC, cMO, bao, bfit)
+  fock_MO = cMO' * fock * cMO
+  save(EC,"f_mm",fock_MO)
+  # calculate 3-index integrals
+  generate_3idx_integrals(EC, cMO, "mp2fit")
 end
 
 end #module

@@ -54,6 +54,7 @@ end
 function test_calc_pertT_from_T3(EC::ECInfo, T3)
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])
+  ϵo, ϵv = orbital_energies(EC)
   # test [T]
   Enb3 = 0.0
   for i = 1:nocc
@@ -62,7 +63,7 @@ function test_calc_pertT_from_T3(EC::ECInfo, T3)
         for a = 1:nvirt
           for b = 1:nvirt
             for c = 1:nvirt
-              W = (T3[a,i,b,j,c,k] * (EC.ϵv[a] + EC.ϵv[b] + EC.ϵv[c] - EC.ϵo[i] - EC.ϵo[j] - EC.ϵo[k]))
+              W = (T3[a,i,b,j,c,k] * (ϵv[a] + ϵv[b] + ϵv[c] - ϵo[i] - ϵo[j] - ϵo[k]))
               Enb3 += W*(4/3*T3[a,i,b,j,c,k]-2.0* T3[a,i,b,k,c,j]+2/3*T3[c,i,a,j,b,k])
             end
           end
@@ -82,9 +83,10 @@ function test_UaiX(EC::ECInfo, UaiX)
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])
   rescaledU = deepcopy(UaiX)
+  ϵo, ϵv = orbital_energies(EC)
   for a in 1:nvirt
     for i in 1:nocc
-      rescaledU[a,i,:] *= (EC.ϵv[a] - EC.ϵo[i])
+      rescaledU[a,i,:] *= (ϵv[a] - ϵo[i])
     end
   end
 

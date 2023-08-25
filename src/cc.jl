@@ -24,6 +24,19 @@ export calc_MP2, calc_UMP2, method_name, calc_cc, calc_pertT
 include("cc_tests.jl")
 
 
+function orbital_energies(EC::ECInfo, spincase::SpinCase=SCα)
+  if spincase == SCα
+    eps = load(EC, "e_m")
+    ϵo = eps[EC.space['o']]
+    ϵv = eps[EC.space['v']]
+  else
+    eps = load(EC, "e_M")
+    ϵo = eps[EC.space['O']]
+    ϵv = eps[EC.space['V']]
+  end
+  return ϵo, ϵv
+end
+
 """
     update_singles(R1, ϵo, ϵv, shift)
 
@@ -46,9 +59,11 @@ end
 function update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
   shift = use_shift ? EC.options.cc.shifts : 0.0
   if spincase == SCα
-    return update_singles(R1, EC.ϵo, EC.ϵv, shift)
+    ϵo, ϵv = orbital_energies(EC)
+    return update_singles(R1, ϵo, ϵv, shift)
   else
-    return update_singles(R1, EC.ϵob, EC.ϵvb, shift)
+    ϵob, ϵvb = orbital_energies(EC, SCβ)
+    return update_singles(R1, ϵob, ϵvb, shift)
   end
 end
 
@@ -77,11 +92,15 @@ end
 function update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
   shift = use_shift ? EC.options.cc.shiftp : 0.0
   if spincase == SCα
-    return update_doubles(R2, EC.ϵo, EC.ϵv, EC.ϵo, EC.ϵv, shift, antisymmetrize)
+    ϵo, ϵv = orbital_energies(EC)
+    return update_doubles(R2, ϵo, ϵv, ϵo, ϵv, shift, antisymmetrize)
   elseif spincase == SCβ
-    return update_doubles(R2, EC.ϵob, EC.ϵvb, EC.ϵob, EC.ϵvb, shift, antisymmetrize)
+    ϵob, ϵvb = orbital_energies(EC, SCβ)
+    return update_doubles(R2, ϵob, ϵvb, ϵob, ϵvb, shift, antisymmetrize)
   else
-    return update_doubles(R2, EC.ϵo, EC.ϵv, EC.ϵob, EC.ϵvb, shift, antisymmetrize)
+    ϵo, ϵv = orbital_energies(EC)
+    ϵob, ϵvb = orbital_energies(EC, SCβ)
+    return update_doubles(R2, ϵo, ϵv, ϵob, ϵvb, shift, antisymmetrize)
   end
 end
 
@@ -96,7 +115,7 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   if !fock_only
     @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
   end
-  @tensoropt ET1 += 2.0*T1[a,i] * EC.fock[SP['o'],SP['v']][i,a]
+  @tensoropt ET1 += 2.0*T1[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
   return ET1
 end
 
@@ -110,7 +129,7 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   ET1 = 0.0
   if !fock_only
     @tensoropt ET1 += 0.5*(T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b]
-    if EC.noccb > 0
+    if n_occb_orbs(EC) > 0
       @tensoropt begin
         ET1 += 0.5*(T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b]
         ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
@@ -118,8 +137,8 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
     end
   end
   @tensoropt begin
-    ET1 += T1a[a,i] * EC.fock[SP['o'],SP['v']][i,a]
-    ET1 += T1b[a,i] * EC.fockb[SP['O'],SP['V']][i,a]
+    ET1 += T1a[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
+    ET1 += T1b[a,i] * load(EC,"f_MM")[SP['O'],SP['V']][i,a]
   end
   return ET1
 end
@@ -162,9 +181,9 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   end
   if length(T1) > 0
     dfock = load(EC,"dfock"*'o')
-    fov = dfock[SP['o'],SP['v']] + EC.fock[SP['o'],SP['v']] # undressed part should be with factor two
+    fov = dfock[SP['o'],SP['v']] + load(EC,"f_mm")[SP['o'],SP['v']] # undressed part should be with factor two
     @tensoropt ET1 = (fov[i,a] + 2.0 * R1[a,i])*T1[a,i]
-    # ET1 = scalar(2.0*(EC.fock[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
+    # ET1 = scalar(2.0*(load(EC,"f_mm")[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
     # ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*int2[i,j,a,b])
     ET2 += ET1
   end
@@ -204,10 +223,10 @@ end
 """
 function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
   SP = EC.space
-  Eh = calc_hylleraas4spincase(EC, 'o','v','o','v', T1a, T2a, R1a, R2a, EC.fock[SP['o'],SP['v']])
-  if EC.noccb > 0
-    Eh += calc_hylleraas4spincase(EC, 'O','V','O','V', T1b, T2b, R1b, R2b, EC.fockb[SP['O'],SP['V']])
-    Eh += calc_hylleraas4spincase(EC, 'o','v','O','V', Float64[], T2ab, Float64[], R2ab, Float64[])
+  Eh = calc_hylleraas4spincase(EC, "ovov"..., T1a, T2a, R1a, R2a, load(EC,"f_mm")[SP['o'],SP['v']])
+  if n_occb_orbs(EC) > 0
+    Eh += calc_hylleraas4spincase(EC, "OVOV"..., T1b, T2b, R1b, R2b, load(EC,"f_MM")[SP['O'],SP['V']])
+    Eh += calc_hylleraas4spincase(EC, "ovOV"..., Float64[], T2ab, Float64[], R2ab, Float64[])
   end
   return Eh
 end
@@ -572,10 +591,10 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   SP = EC.space
   if isuppercase(o1)
     spin = SCβ
-    no1 = EC.noccb
+    no1 = n_occb_orbs(EC)
   else
     spin = SCα
-    no1 = EC.nocc
+    no1 = n_occ_orbs(EC)
   end
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd,spin))
@@ -666,14 +685,14 @@ end
 """
 function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
   if ndims(T1b) != 2
-    calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
+    calc_dressed_ints(EC,T1a,T1a,"ovov"...)
     dress_fock_closedshell(EC,T1a)
   else
-    calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
-    calc_dressed_ints(EC,T1b,T1b,'O','V','O','V')
-    calc_dressed_ints(EC,T1a,T1b,'o','v','O','V')
-    dress_fock_samespin(EC,T1a,'o','v')
-    dress_fock_samespin(EC,T1b,'O','V')
+    calc_dressed_ints(EC,T1a,T1a,"ovov"...)
+    calc_dressed_ints(EC,T1b,T1b,"OVOV"...)
+    calc_dressed_ints(EC,T1a,T1b,"ovOV"...)
+    dress_fock_samespin(EC,T1a,"ov"...)
+    dress_fock_samespin(EC,T1b,"OV"...)
     dress_fock_oppositespin(EC)
   end
 end
@@ -704,8 +723,8 @@ function pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
     save(EC,"d_vvoo",ints2(EC,"vvoo"))
   end
   save(EC,"dint1"*'o',integ1(EC.fd))
-  save(EC,"dfock"*'o',EC.fock)
-  save(EC,"dfock"*'O',EC.fockb)
+  save(EC,"dfock"*'o',load(EC,"f_mm"))
+  save(EC,"dfock"*'O',load(EC,"f_MM"))
   t1 = print_time(EC,t1,"pseudo-dressing",3)
   if unrestricted
     save(EC,"d_OOVO",ints2(EC,"OOVO"))
@@ -745,7 +764,8 @@ end
 function calc_MP2(EC::ECInfo)
   T2 = update_doubles(EC,ints2(EC,"vvoo"), use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2)
-  T1 = update_singles(EC.fock[EC.space['v'],EC.space['o']],EC.ϵo,EC.ϵv,0.0)
+  ϵo, ϵv = orbital_energies(EC)
+  T1 = update_singles(load(EC,"f_mm")[EC.space['v'],EC.space['o']], ϵo, ϵv, 0.0)
   EMp2 += calc_singles_energy(EC,T1,fock_only=true)
   return EMp2, T2
 end
@@ -763,8 +783,8 @@ function calc_UMP2(EC::ECInfo, addsingles=true)
   T2ab = update_doubles(EC,ints2(EC,"vVoO"), spincase=SCαβ, use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2a,T2b,T2ab)
   if addsingles
-    T1a = update_singles(EC,EC.fock[SP['v'],SP['o']], spincase=SCα, use_shift=false)
-    T1b = update_singles(EC,EC.fockb[SP['V'],SP['O']], spincase=SCβ, use_shift=false)
+    T1a = update_singles(EC,load(EC,"f_mm")[SP['v'],SP['o']], spincase=SCα, use_shift=false)
+    T1b = update_singles(EC,load(EC,"f_MM")[SP['V'],SP['O']], spincase=SCβ, use_shift=false)
     EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only = true)
   end
   return EMp2, T2a, T2b, T2ab
@@ -800,8 +820,8 @@ end
 """
 function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
   SP = EC.space
-  norb = length(SP[':'])
-  nocc = length(SP['o'])
+  norb = n_orbs(EC)
+  nocc = n_occ_orbs(EC)
   if length(T1) > 0
     D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
     # D2 = zeros(norb,norb,nocc,nocc)
@@ -835,8 +855,8 @@ end
 """
 function calc_D2a(EC::ECInfo, T1a, T2a)
   SP = EC.space
-  norb = length(SP[':'])
-  nocc = length(SP['o'])
+  norb = n_orbs(EC)
+  nocc = n_occ_orbs(EC)
   if length(T1a) > 0
     D2a = Array{Float64}(undef,norb,norb,nocc,nocc)
   else
@@ -865,8 +885,8 @@ end
 """
 function calc_D2b(EC::ECInfo, T1b, T2b)
   SP = EC.space
-  norb = length(SP[':'])
-  nocc = length(SP['O'])
+  norb = n_orbs(EC)
+  nocc = n_occb_orbs(EC)
   if length(T1b) > 0
     D2b = Array{Float64}(undef,norb,norb,nocc,nocc)
   else
@@ -896,9 +916,9 @@ end
 """
 function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
   SP = EC.space
-  norb = length(SP[':'])
-  nocca = length(SP['o'])
-  noccb = length(SP['O'])
+  norb = n_orbs(EC)
+  nocca = n_occ_orbs(EC)
+  noccb = n_occb_orbs(EC)
   if length(T1a) > 0
     D2ab = Array{Float64}(undef,norb,norb,nocca,noccb)
   else
@@ -930,6 +950,9 @@ end
 function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
   t1 = time_ns()
   SP = EC.space
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  norb = n_orbs(EC)
   if length(T1) > 0
     calc_dressed_ints(EC,T1)
     t1 = print_time(EC,t1,"dressing",2)
@@ -963,7 +986,7 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
 
   # <ab|ij>
   if EC.options.cc.use_kext
-    R2 = zeros((length(SP['v']),length(SP['v']),length(SP['o']),length(SP['o'])))
+    R2 = zeros(nvirt,nvirt,nocc,nocc)
   else
     if !EC.options.cc.calc_d_vvoo
       error("for not use_kext calc_d_vvoo has to be True")
@@ -988,13 +1011,11 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
     int2 = integ2(EC.fd)
     if ndims(int2) == 4
       if EC.options.cc.triangular_kext
-        trioo = [CartesianIndex(i,j) for j in 1:length(SP['o']) for i in 1:j]
+        trioo = [CartesianIndex(i,j) for j in 1:nocc for i in 1:j]
         D2 = calc_D2(EC, T1, T2)[:,:,trioo]
         # <pq|rs> D^ij_rs
         @tensoropt R2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
         D2 = nothing
-        norb = length(SP[':'])
-        nocc = length(SP['o'])
         Rpqoo = Array{Float64}(undef,norb,norb,nocc,nocc)
         Rpqoo[:,:,trioo] = R2pqx
         trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
@@ -1010,7 +1031,7 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
       end
     else
       # last two indices of integrals are stored as upper triangular 
-      tripp = [CartesianIndex(i,j) for j in 1:length(SP[':']) for i in 1:j]
+      tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
       D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
       # <pq|rs> D^ij_rs
       @tensoropt rR2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
@@ -1106,10 +1127,9 @@ function calc_pertT(EC::ECInfo, T1, T2; save_t3=false)
   iajk = ints2(EC,"ovoo")
   # <ij|ab>
   ijab = ints2(EC,"oovv")
-  nocc = length(EC.space['o'])
-  nvir = length(EC.space['v'])
-  ϵo = EC.ϵo
-  ϵv = EC.ϵv
+  nocc = n_occ_orbs(EC)
+  nvir = n_virt_orbs(EC)
+  ϵo, ϵv = orbital_energies(EC)
   Enb3 = 0.0
   IntX = zeros(nvir,nocc)
   if save_t3
@@ -1182,6 +1202,11 @@ end
 function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   t1 = time_ns()
   SP = EC.space
+  nocc = n_occ_orbs(EC)
+  noccb = n_occb_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nvirtb = n_virtb_orbs(EC)
+  norb = n_orbs(EC)
   linearized::Bool = false
   if ndims(T1a) == 2
     calc_dressed_ints(EC,T1a,T1b)
@@ -1243,12 +1268,12 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       R1a[a,i] += fIA[J,B] * T2ab[a,B,i,J]
       R1b[A,I] += fia[j,b] * T2ab[b,A,j,I]
     end
-    if EC.nocc > 0 
+    if n_occ_orbs(EC) > 0 
       d_oovo = load(EC,"d_oovo")
       @tensoropt R1a[a,i] -= d_oovo[k,j,d,i] * T2a[a,d,j,k]
       d_oovo = nothing
     end
-    if EC.noccb > 0
+    if n_occb_orbs(EC) > 0
       d_OOVO = load(EC,"d_OOVO")
       @tensoropt R1b[A,I] -= d_OOVO[K,J,D,I] * T2b[A,D,J,K]
       d_OOVO = nothing
@@ -1262,9 +1287,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
 
   #driver terms
   if EC.options.cc.use_kext
-    R2a = zeros((length(SP['v']),length(SP['v']),length(SP['o']),length(SP['o'])))
-    R2b = zeros((length(SP['V']),length(SP['V']),length(SP['O']),length(SP['O'])))
-    R2ab = zeros((length(SP['v']),length(SP['V']),length(SP['o']),length(SP['O'])))
+    R2a = zeros(nvirt, nvirt, nocc, nocc)
+    R2b = zeros(nvirtb, nvirtb, noccb, noccb)
+    R2ab = zeros(nvirt, nvirtb, nocc, noccb)
   else
     d_vvoo = load(EC,"d_vvoo")
     R2a = deepcopy(d_vvoo)
@@ -1280,7 +1305,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   #ladder terms
   if EC.options.cc.use_kext
     # last two indices of integrals (apart from αβ) are stored as upper triangular 
-    tripp = [CartesianIndex(i,j) for j in 1:length(SP[':']) for i in 1:j]
+    tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
     if(EC.fd.uhf)
       # αα
       int2a = integ2(EC.fd,SCα::SpinCase)
@@ -1292,7 +1317,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
       rR2pqa = nothing
       R2a += R2pqa[SP['v'],SP['v'],:,:]
-      if EC.noccb > 0
+      if n_occb_orbs(EC) > 0
         # ββ
         int2b = integ2(EC.fd,SCβ::SpinCase)
         D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
@@ -1321,7 +1346,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
       rR2pqa = nothing
       R2a += R2pqa[SP['v'],SP['v'],:,:]
-      if EC.noccb > 0
+      if n_occb_orbs(EC) > 0
         # ββ
         D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
         @tensoropt rR2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
@@ -1364,7 +1389,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
         R1b[a,i] -= x1b[k,i] * T1b[a,k]
       end
     end
-    if EC.nocc > 0 && EC.noccb > 0 && length(T1a) > 0
+    if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
       @tensoropt begin
         R2ab[a,b,i,j] -= R2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
         R2ab[a,b,i,j] -= R2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
@@ -1408,7 +1433,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       xab[a,b] -= dcfac * oovv[i,k,b,d] * T2a[a,d,i,k]
     end
     !dc && @tensoropt x_klij[k,l,i,j] += 0.5 * oovv[k,l,c,d] * T2a[c,d,i,j]
-    if EC.noccb > 0
+    if n_occb_orbs(EC) > 0
       @tensoropt x_dAlI[d,A,l,I] := oovv[k,l,c,d] * T2ab[c,A,k,I]
       !dc && @tensoropt x_dAlI[d,A,l,I] -= oovv[k,l,d,c] * T2ab[c,A,k,I]
       @tensoropt begin
@@ -1421,7 +1446,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     !dc && @tensoropt x_adil[a,d,i,l] -= 0.5 * oovv[k,l,d,c] * T2a[a,c,i,k]
     @tensoropt R2ab[a,B,i,J] += x_adil[a,d,i,l] * T2ab[d,B,l,J]
     oovv = nothing
-    if EC.noccb > 0
+    if n_occb_orbs(EC) > 0
       OOVV = ints2(EC,"OOVV")
       @tensoropt begin
         xIJ[I,J] += dcfac * OOVV[I,K,B,D] * T2b[B,D,J,K]
@@ -1476,7 +1501,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   end
 
   @tensoropt R2a[a,b,i,j] += x_klij[k,l,i,j] *  T2a[a,b,k,l]
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     @tensoropt begin
       R2b[A,B,I,J] += x_KLIJ[K,L,I,J] *  T2b[A,B,K,L]
       R2ab[a,B,i,J] += x_kLiJ[k,L,i,J] * T2ab[a,B,k,L]
@@ -1490,7 +1515,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i]
   end
   rR2a = nothing
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     @tensoropt begin
       rR2b[A,B,I,J] := xAB[A,C] * T2b[C,B,I,J]
       rR2b[A,B,I,J] -= xIJ[K,I] * T2b[A,B,K,J]
@@ -1506,7 +1531,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   end
   xij, xIJ, xab, xAB = nothing, nothing, nothing, nothing
   #ph-ab-ladder
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     d_vOvO = load(EC,"d_vOvO")
     @tensoropt R2ab[a,B,i,J] -= d_vOvO[a,K,c,J] * T2ab[c,B,i,K]
     d_vOvO = nothing
@@ -1535,7 +1560,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     R2ab[a,B,i,J] -= d_vovo[a,k,c,i] * T2ab[c,B,k,J]
   end
   d_vovo, rR2a = nothing, nothing
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     d_VOOV = load(EC,"d_VOOV")
     @tensoropt begin
       rR2b[A,B,I,J] := d_VOOV[B,K,J,C] * T2b[A,C,I,K]
@@ -1923,12 +1948,13 @@ end
 """
 function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
   SP = EC.space
-  nocc = length(SP['o'])
-  nvirt = length(SP['v'])
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
   UaiX2 = deepcopy(UaiX)
+  ϵo, ϵv = orbital_energies(EC)
   for a in 1:nvirt
     for i in 1:nocc
-      UaiX2[a,i,:] *= EC.ϵv[a] - EC.ϵo[i]
+      UaiX2[a,i,:] *= ϵv[a] - ϵo[i]
     end
   end
 
@@ -1949,8 +1975,8 @@ end
 """
 function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   println("T^ijk_abc-free-decomposition")
-  nocc = length(EC.space['o'])
-  nvirt = length(EC.space['v'])
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
 
   # first approx for U^iX_a from doubles decomposition
   tol2 = EC.options.cc.ampsvdtol*0.01
@@ -1976,8 +2002,8 @@ end
 function calc_triples_decomposition(EC::ECInfo)
   println("T^ijk_abc-decomposition")
   use_svd = true 
-  nocc = length(EC.space['o'])
-  nvirt = length(EC.space['v'])
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
 
   Triples_Amplitudes = zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
   t3file, T3 = mmap(EC, "T3abcijk")
@@ -2046,11 +2072,12 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   close(voPfile)
   close(ooPfile)
   close(vvPfile)
+  ϵo, ϵv = orbital_energies(EC)
   for I ∈ CartesianIndices(R)
     X,Y,a,i = Tuple(I)
-    R[I] /= -(ϵX[X] + ϵX[Y] + EC.ϵv[a] - EC.ϵo[i])
+    R[I] /= -(ϵX[X] + ϵX[Y] + ϵv[a] - ϵo[i])
   end
-  nocc = length(EC.space['o'])
+  nocc = n_occ_orbs(EC)
   naux = length(ϵX)
   # @tensoropt T3_decomp_check[a,i,b,j,c,k] := R[X,Y,a,i] * UvoX[c,k,X] * UvoX[b,j,Y]
   # for i = 1:nocc
