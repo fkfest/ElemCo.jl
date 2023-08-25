@@ -68,7 +68,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit
 @ECsetup
 # output
 Occupied orbitals:[1]
-1
+
 ```
 """
 macro ECsetup()
