@@ -5,6 +5,7 @@ module MSystem
 using DocStringExtensions
 using ..ElemCo.ECInts
 export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
+export generate_basis
 
 include("elements.jl")
 include("minbas.jl")
@@ -331,6 +332,19 @@ function electron_distribution(ms::MSys, minbas::AbstractString)
     eldist = vcat(eldist,electron_distribution(elnam,nshell4l_minbas(nnum,uppercase(minbas))))
   end
   return eldist
+end
+
+"""
+    generate_basis(ms::MSys, type = "ao")
+
+  Generate basis sets for integral calculations.
+  `type` can be `"ao"`, `"mp2fit"` or `"jkfit"`.
+"""
+function generate_basis(ms::MSys, type = "ao")
+  # TODO: use element-specific basis!
+  basis_name = lowercase(ms.atoms[1].basis[type].name)
+  basis = BasisSet(basis_name,genxyz(ms,bohr=false))
+  return basis
 end
 
 end #module

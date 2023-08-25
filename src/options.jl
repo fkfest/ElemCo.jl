@@ -12,6 +12,10 @@
   maxit::Int = 50
   """ tolerance for imaginary part of MO coefs (for biorthogonal). """
   imagtol::Float64 = 1.e-8
+  """ orbital guess. """
+  guess::Symbol = :SAD
+  """ orbitals for orbital guess. """
+  orbsguess::String = "C_Am"
 end
 
 """ 

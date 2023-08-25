@@ -6,7 +6,7 @@ using ..ElemCo.ECInts
 using ..ElemCo.MSystem
 using ..ElemCo.FciDump
 using ..ElemCo.TensorTools
-using ..ElemCo.DFUtils
+using ..ElemCo.DFTools
 
 export dfdump
 

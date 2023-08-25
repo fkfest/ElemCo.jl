@@ -39,15 +39,15 @@ include("options.jl")
     - `d` for dressed integrals 
     - `S` for overlap matrix
     - `h` for core Hamiltonian
-    - `M` for Cholesky decomposition of metric
+    - `C` for transformation from one basis to another
 
   `name` is given by the subspaces involved:
     - `o` for occupied
     - `v` for virtual
     - `O` for occupied-β
     - `V` for virtual-β
-    - `f` for full MO space
-    - `F` for full MO-β space
+    - `m` for full MO space
+    - `M` for full MO-β space
     - `A` for AO basis
     - `a` for active orbitals
     - `c` for closed-shell (doubly-occupied) orbitals
