@@ -102,6 +102,7 @@ function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, m
   SP = EC.space
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
   SP[':'] = 1:norb
+  return
 end
 
 """
