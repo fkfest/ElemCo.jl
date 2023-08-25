@@ -12,6 +12,10 @@
   maxit::Int = 50
   """ tolerance for imaginary part of MO coefs (for biorthogonal). """
   imagtol::Float64 = 1.e-8
+  """ orbital guess. """
+  guess::Symbol = :SAD
+  """ orbitals for orbital guess. """
+  orbsguess::String = "C_Am"
 end
 
 """ 
@@ -58,6 +62,18 @@ end
   thr::Float64 = 1.e-6
 end
 
+"""
+  Options for DIIS.
+
+  $(FIELDS)
+"""
+@with_kw mutable struct DiisOptions
+  """ maximum number of DIIS vectors. """
+  maxdiis::Int = 6
+  """ DIIS residual threshold. """
+  resthr::Float64 = 10.0
+end
+
 """ 
   Options for ElemCo.jl
 
@@ -70,4 +86,6 @@ end
   cc::CcOptions = CcOptions()
   """ Cholesky options. """
   cholesky::CholeskyOptions = CholeskyOptions()
+  """ DIIS options. """
+  diis::DiisOptions = DiisOptions()
 end

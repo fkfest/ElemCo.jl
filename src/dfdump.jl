@@ -6,22 +6,9 @@ using ..ElemCo.ECInts
 using ..ElemCo.MSystem
 using ..ElemCo.FciDump
 using ..ElemCo.TensorTools
+using ..ElemCo.DFTools
 
 export dfdump
-
-"""
-    generate_basis(ms::MSys)
-
-  Generate basis sets for integral calculations.
-"""
-function generate_basis(ms::MSys)
-  # TODO: use element-specific basis!
-  aobasis = lowercase(ms.atoms[1].basis["ao"].name)
-  mp2fit = lowercase(ms.atoms[1].basis["mp2fit"].name)
-  bao = BasisSet(aobasis,genxyz(ms,bohr=false))
-  bfit = BasisSet(mp2fit,genxyz(ms,bohr=false))
-  return bao,bfit
-end
 
 """
     generate_integrals(EC::ECInfo, fdump::FDump, cMO)
@@ -30,7 +17,8 @@ end
 """
 function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
   @assert !fdump.uhf # TODO: uhf
-  bao,bfit = generate_basis(EC.ms)
+  bao = generate_basis(EC.ms, "ao")
+  bfit = generate_basis(EC.ms, "mp2fit")
   hAO = kinetic(bao) + nuclear(bao)
   fdump.int1 = cMO' * hAO * cMO
 

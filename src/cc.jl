@@ -17,6 +17,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
 using ..ElemCo.DIIS
+using ..ElemCo.DFCoupledCluster
 
 export calc_MP2, calc_UMP2, method_name, calc_cc, calc_pertT
 
@@ -148,11 +149,11 @@ function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
 end
 
 """
-    calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
+    calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
 
   Calculate closed-shell singles and doubles Hylleraas energy
 """
-function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
+function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
   int2 = ints2(EC,"oovv")
   @tensoropt begin
@@ -171,11 +172,11 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
 end
 
 """
-    calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
+    calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov)
 
   Calculate singles and doubles Hylleraas energy for one spin case.
 """
-function calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
+function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov)
   SP = EC.space
   int2 = ints2(EC,o1*o2*v1*v2)
   if o1 == o2
@@ -678,11 +679,11 @@ function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
 end
 
 """
-    pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
+    pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
 
   Save non-dressed integrals in files instead of dressed integrals.
 """
-function pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
+function pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
   #TODO write like in itf with chars as arguments, so three calls for three spin cases...
   t1 = time_ns()
   save(EC,"d_oovo",ints2(EC,"oovo"))
@@ -771,11 +772,11 @@ end
 
 
 """
-    method_name(T1, dc = false)
+    method_name(T1, dc=false)
   
   Guess method name (CCSD/DCSD/CCD/DCD)
 """
-function method_name(T1, dc = false)
+function method_name(T1, dc=false)
   if dc
     name = "DC"
   else
@@ -797,7 +798,7 @@ end
 
   If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation).
 """
-function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
+function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
   SP = EC.space
   norb = length(SP[':'])
   nocc = length(SP['o'])
@@ -886,14 +887,14 @@ function calc_D2b(EC::ECInfo, T1b, T2b)
 end
 
 """ 
-    calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
+    calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 
   Calculate ^{αβ}D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
   Return as D[pqij] 
 
   If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
 """
-function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
+function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
   SP = EC.space
   norb = length(SP[':'])
   nocca = length(SP['o'])
@@ -922,11 +923,11 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
+    calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
+function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
   t1 = time_ns()
   SP = EC.space
   if length(T1) > 0
@@ -1092,13 +1093,13 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
 end
 
 """
-    calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
+    calc_pertT(EC::ECInfo, T1, T2; save_t3=false)
 
   Calculate (T) correction for closed-shell CCSD.
 
   Return ( (T)-energy, [T]-energy))
 """
-function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
+function calc_pertT(EC::ECInfo, T1, T2; save_t3=false)
   # <ab|ck>
   abck = ints2(EC,"vvvo")
   # <ia|jk>
@@ -1569,7 +1570,7 @@ If dc: calculate distinguishable cluster.
 """
 function calc_cc(EC::ECInfo, T1, T2, dc = false)
   println(method_name(T1,dc))
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
@@ -1627,7 +1628,7 @@ end
 """
 function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   println(method_name(T1a,dc))
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
@@ -1701,7 +1702,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
   else
     println("DC-CCSDT")
   end
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
@@ -1755,60 +1756,6 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
   flush(stdout)
   
   return Eh,T1,T2
-end
-
-
-"""
-    get_endauxblks(naux, blocksize = 100)
-
-  Generate end-of-block indices for auxiliary basis (for loop over blocks).
-"""
-function get_endauxblks(naux, blocksize = 100)
-  nauxblks = naux ÷ blocksize
-  if nauxblks == 0 || naux - nauxblks*blocksize > 0.5*blocksize
-    nauxblks += 1
-  end
-  endauxblks = [ (i == nauxblks) ? naux : i*blocksize for i in 1:nauxblks ]
-  return endauxblks
-end
-
-"""
-    calc_dressed_3idx(EC,T1)
-
-  Calculate dressed integrals for 3-index integrals from file `pqP`.
-"""
-function calc_dressed_3idx(EC,T1)
-  pqPfile, pqP = mmap(EC, "pqP")
-  # println(size(pqP))
-  SP = EC.space
-  nP = size(pqP,3)
-  nocc = length(SP['o'])
-  nvirt = length(SP['v'])
-  # create mmaps for dressed integrals
-  ovPfile, ovP = newmmap(EC,"d_ovP",Float64,(nocc,nvirt,nP))
-  voPfile, voP = newmmap(EC,"d_voP",Float64,(nvirt,nocc,nP))
-  ooPfile, ooP = newmmap(EC,"d_ooP",Float64,(nocc,nocc,nP))
-  vvPfile, vvP = newmmap(EC,"d_vvP",Float64,(nvirt,nvirt,nP))
-
-  PBlks = get_endauxblks(nP)
-  sP = 1 # start index of each block
-  for eP in PBlks # end index of each block
-    P = sP:eP
-    ovP[:,:,P] = pqP[SP['o'],SP['v'],P]
-    vvP[:,:,P] = pqP[SP['v'],SP['v'],P]
-    @tensoropt vvP[:,:,P][a,b,P] -= T1[a,i] * ovP[:,:,P][i,b,P]
-    voP[:,:,P] = pqP[SP['v'],SP['o'],P]
-    @tensoropt voP[:,:,P][a,i,P] += T1[b,i] * vvP[:,:,P][a,b,P]
-    ooP[:,:,P] = pqP[SP['o'],SP['o'],P]
-    @tensoropt voP[:,:,P][a,i,P] -= T1[a,j] * ooP[:,:,P][j,i,P]
-    @tensoropt ooP[:,:,P][i,j,P] += T1[b,j] * ovP[:,:,P][i,b,P]
-    sP = eP + 1
-  end
-  closemmap(EC,ovPfile,ovP)
-  closemmap(EC,voPfile,voP)
-  closemmap(EC,ooPfile,ooP)
-  closemmap(EC,vvPfile,vvP)
-  close(pqPfile)
 end
 
 """

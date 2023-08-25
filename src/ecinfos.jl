@@ -7,6 +7,7 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
+export file_exists, add_file, delete_temporary_files
 
 include("options.jl")
 
@@ -20,17 +21,42 @@ include("options.jl")
 @with_kw mutable struct ECInfo <: AbstractECInfo
   """ path to scratch directory. """
   scr::String = joinpath(tempdir(),"elemcojlscr")
+  """ extension of temporary files. """
+  ext::String = ".bin"
   """ output file. """
   out = ""
   """ verbosity level. """
   verbosity::Int = 2
   """ options. """
   options::Options = Options()
-
   """ molecular system. """
   ms::MSys = MSys()
   """ fcidump. """
   fd::FDump = FDump()
+  """ information about (temporary) files. 
+  The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
+  `prefix` can be:
+    - `d` for dressed integrals 
+    - `S` for overlap matrix
+    - `h` for core Hamiltonian
+    - `C` for transformation from one basis to another
+
+  `name` is given by the subspaces involved:
+    - `o` for occupied
+    - `v` for virtual
+    - `O` for occupied-β
+    - `V` for virtual-β
+    - `m` for full MO space
+    - `M` for full MO-β space
+    - `A` for AO basis
+    - `a` for active orbitals
+    - `c` for closed-shell (doubly-occupied) orbitals
+    - `P` for auxiliary orbitals (fitting basis)
+    - `L` for auxiliary orbitals (Cholesky decomposition, orthogonal)
+    - `X` for auxiliary orbitals (amplitudes decomposition)
+  """
+  files::Dict{String,String} = Dict{String,String}()
+
   """ ignore various errors. """
   ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
@@ -106,6 +132,48 @@ function set_options!(opt; kwargs...)
     end
   end
 end
+
+"""
+    file_exists(EC::ECInfo, name::String)
+
+  Check if file `name` exists in ECInfo.
+"""
+function file_exists(EC::ECInfo, name::String)
+  return haskey(EC.files,name)
+end
+
+"""
+    add_file(EC::ECInfo, name::String, descr::String; overwrite = false)
+
+  Add file `name` to ECInfo with (space-separated) descriptions `descr`.
+  Possible description: `tmp` (temporary).
+"""
+function add_file(EC::ECInfo, name::String, descr::String; overwrite=false)
+  if !file_exists(EC,name) || overwrite
+    EC.files[name] = descr
+  else
+    error("File $name already exists in ECInfo.")
+  end
+end
+
+"""
+    delete_temporary_files(EC::ECInfo)
+
+  Delete all temporary files in ECInfo.  
+"""
+function delete_temporary_files(EC::ECInfo)
+  for (name,descr) in EC.files
+    if "tmp" in split(descr)
+      rm(joinpath(EC.scr,name*EC.ext), force=true)
+    end
+  end
+end
+
+"""
+    mmap(EC::ECInfo, name::String)
+
+  Memory-map file `name` in ECInfo.
+"""
 
 """
     parse_orbstring(orbs::String; orbsym = Vector{Int})
@@ -210,6 +278,7 @@ function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=
   end
   return occa, virta, occb, virtb
 end
+
 
 
 end #module
