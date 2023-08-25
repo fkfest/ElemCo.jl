@@ -10,7 +10,7 @@ catch
   using ElemCo.ECInfos
   using ElemCo.ECMethods
   using ElemCo.TensorTools
-  using ElemCo.Focks
+  using ElemCo.FockFactory
   using ElemCo.CoupledCluster
   using ElemCo.FciDump
 end

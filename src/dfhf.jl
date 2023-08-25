@@ -5,58 +5,11 @@ using ..ElemCo.ECInts
 using ..ElemCo.MSystem
 using ..ElemCo.OrbTools
 using ..ElemCo.DFTools
+using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
 export dfhf, generate_integrals 
-
-""" 
-    dffock(EC::ECInfo, cMO, bao, bfit)
-
-  Compute closed-shell DF-HF Fock matrix (integral direct).
-"""
-function dffock(EC,cMO,bao,bfit)
-  pqP = ERI_2e3c(bao,bfit)
-  PL = load(EC,"C_PL")
-  hsmall = load(EC,"h_AA")
-  # println(size(Ppq))
-  occ2 = intersect(EC.space['o'],EC.space['O'])
-  @assert length(setdiff(EC.space['o'],occ2)) == 0 "Closed-shell only!"
-  @assert length(setdiff(EC.space['O'],occ2)) == 0 "Closed-shell only!"
-  CMO2 = cMO[:,occ2]
-  @tensoropt begin 
-    pjP[p,j,P] := pqP[p,q,P] * CMO2[q,j]
-    cpjL[p,j,L] := pjP[p,j,P] * PL[P,L]
-    cL[L] := cpjL[p,j,L] * CMO2[p,j]
-    fock[p,q] := hsmall[p,q] - cpjL[p,j,L]*cpjL[q,j,L]
-  end
-  @tensoropt begin
-    cP[P] := cL[L] * PL[P,L]
-    fock[p,q] += 2.0*cP[P]*pqP[p,q,P]
-  end
-  return fock
-end
-
-"""
-    dffock(EC::ECInfo, cMO)
-
-  Compute closed-shell DF-HF Fock matrix 
-  (using precalculated Cholesky-decomposed integrals).
-"""
-function dffock(EC,cMO)
-  occ2 = intersect(EC.space['o'],EC.space['O'])
-  @assert length(setdiff(EC.space['o'],occ2)) == 0 "Closed-shell only!"
-  @assert length(setdiff(EC.space['O'],occ2)) == 0 "Closed-shell only!"
-  CMO2 = cMO[:,occ2]
-  pqL = load(EC,"AAL")
-  hsmall = load(EC,"h_AA")
-  @tensoropt pjL[p,j,L] := pqL[p,q,L] * CMO2[q,j]
-
-  @tensoropt L[L] := pjL[p,j,L] * CMO2[p,j]
-  @tensoropt fock[p,q] := hsmall[p,q] - pjL[p,j,L]*pjL[q,j,L]
-  @tensoropt fock[p,q] += 2.0*L[L]*pqL[p,q,L]
-  return fock
-end
 
 """
     dfhf(EC::ECInfo; direct=false, guess=:SAD)
@@ -84,9 +37,9 @@ function dfhf(EC::ECInfo; direct=false, guess=:SAD)
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
     if direct
-      fock = dffock(EC,cMO,bao,bfit)
+      fock = gen_dffock(EC,cMO,bao,bfit)
     else
-      fock = dffock(EC,cMO)
+      fock = gen_dffock(EC,cMO)
     end
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall

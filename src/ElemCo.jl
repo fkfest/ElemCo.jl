@@ -17,10 +17,10 @@ include("msystem.jl")
 include("ecinfos.jl")
 include("ecmethods.jl")
 include("tensortools.jl")
+include("fockfactory.jl")
 include("diis.jl")
 include("orbtools.jl")
 include("dftools.jl")
-include("fock.jl")
 include("dfcc.jl")
 include("cc.jl")
 
@@ -43,7 +43,7 @@ using .Utils
 using .ECInfos
 using .ECMethods
 using .TensorTools
-using .Focks
+using .FockFactory
 using .CoupledCluster
 using .FciDump
 using .MSystem
@@ -335,13 +335,24 @@ end
 function calc_fock_matrix(EC::ECInfo, closed_shell)
   t1 = time_ns()
   if closed_shell
-    EC.fock,EC.ϵo,EC.ϵv = gen_fock(EC)
-    EC.fockb = EC.fock
-    EC.ϵob = EC.ϵo
-    EC.ϵvb = EC.ϵv
+    fock = gen_fock(EC)
+    save(EC, "f_mm", fock)
+    save(EC, "f_MM", fock)
+    eps = diag(fock)
+    println("Occupied orbital energies: ", eps[EC.space['o']])
+    save(EC, "e_m", eps)
+    save(EC, "e_M", eps)
   else
-    EC.fock,EC.ϵo,EC.ϵv = gen_fock(EC,SCα)
-    EC.fockb,EC.ϵob,EC.ϵvb = gen_fock(EC,SCβ)
+    fock = gen_fock(EC, SCα)
+    eps = diag(fock)
+    println("Occupied \alpha orbital energies: ", eps[EC.space['o']])
+    save(EC, "f_mm", fock)
+    save(EC, "e_m", eps)
+    fock = gen_fock(EC, SCβ)
+    eps = diag(fock)
+    println("Occupied \beta orbital energies: ", eps[EC.space['O']])
+    save(EC,"f_MM", fock)
+    save(EC,"e_M", eps)
   end
   t1 = print_time(EC,t1,"fock matrix",1)
 end
@@ -354,9 +365,12 @@ end
 function calc_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
-    EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
+    ϵo = load(EC,"e_m")[SP['o']]
+    EHF = sum(ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
   else
-    EHF = 0.5*(sum(EC.ϵo)+sum(EC.ϵob) + sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']])) + EC.fd.int0
+    ϵo = load(EC,"e_m")[SP['o']]
+    ϵob = load(EC,"e_M")[SP['O']]
+    EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']])) + EC.fd.int0
   end
   return EHF
 end

@@ -1,5 +1,5 @@
-""" Fock builders (using FciDump integrals) """
-module Focks
+""" Fock builders (using FciDump or DF integrals) """
+module FockFactory
 try
   using MKL
 catch
@@ -11,8 +11,9 @@ using TensorOperations
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
+using ..ElemCo.ECInts
 
-export gen_fock, gen_ufock, gen_density_matrix
+export gen_fock, gen_ufock, gen_dffock, gen_density_matrix
 
 """ 
     gen_fock(EC::ECInfo)
@@ -21,11 +22,7 @@ export gen_fock, gen_ufock, gen_density_matrix
 """
 function gen_fock(EC::ECInfo)
   @tensoropt fock[p,q] := integ1(EC.fd,SCα)[p,q] + 2.0*ints2(EC,":o:o",SCα)[p,i,q,i] - ints2(EC,":oo:",SCα)[p,i,i,q]
-  ϵ = diag(fock)
-  ϵo = ϵ[EC.space['o']]
-  ϵv = ϵ[EC.space['v']]
-  println("Occupied orbital energies: ",ϵo)
-  return fock, ϵo, ϵv
+  return fock
 end
 
 """ 
@@ -36,21 +33,19 @@ end
 function gen_fock(EC::ECInfo, spincase::SpinCase)
   @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] 
   if spincase == SCα
-    if EC.noccb > 0 
+    if n_occb_orbs(EC) > 0 
       @tensoropt fock[p,q] += ints2(EC,":O:O",SCαβ)[p,i,q,i]
     end
     spo='o'
     spv='v'
-    spin = "α"
-    nocc = EC.nocc
+    nocc = n_occ_orbs(EC)
   else
-    if EC.nocc > 0 
+    if n_occ_orbs(EC) > 0 
       @tensoropt fock[p,q] += ints2(EC,"o:o:",SCαβ)[i,p,i,q]
     end
     spo='O'
     spv='V'
-    spin = "β"
-    nocc = EC.noccb
+    nocc = n_occb_orbs(EC)
   end
   if nocc > 0
     @tensoropt begin
@@ -58,11 +53,7 @@ function gen_fock(EC::ECInfo, spincase::SpinCase)
       fock[p,q] -= ints2(EC,":"*spo*spo*":",spincase)[p,i,i,q]
     end
   end
-  ϵ = diag(fock)
-  ϵo = ϵ[EC.space[spo]]
-  ϵv = ϵ[EC.space[spv]]
-  println("Occupied $spin orbital energies: ",ϵo)
-  return fock, ϵo, ϵv
+  return fock
 end
 
 """ 
@@ -134,6 +125,53 @@ end
 """
 function gen_ufock(EC::ECInfo, cMOl::AbstractArray, cMOr::AbstractArray)
   return [gen_fock(EC,SCα, cMOl[1],cMOr[1], cMOl[2],cMOr[2]), gen_fock(EC,SCβ, cMOl[2],cMOr[2], cMOl[1],cMOr[1])]
+end
+
+""" 
+    gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+
+  Compute closed-shell DF-HF Fock matrix (integral direct) in AO basis.
+"""
+function gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+  @assert ndims(cMO) == 2 "Restricted orbitals only!"
+  μνL = ERI_2e3c(bao,bfit)
+  PL = load(EC,"C_PL")
+  hsmall = load(EC,"h_AA")
+  # println(size(Ppq))
+  @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
+  occ2 = EC.space['o']
+  CMO2 = cMO[:,occ2]
+  @tensoropt begin 
+    μjP[p,j,P] := μνL[p,q,P] * CMO2[q,j]
+    cμjL[p,j,L] := μjP[p,j,P] * PL[P,L]
+    cL[L] := cμjL[p,j,L] * CMO2[p,j]
+    fock[p,q] := hsmall[p,q] - cμjL[p,j,L]*cμjL[q,j,L]
+    cP[P] := cL[L] * PL[P,L]
+    fock[p,q] += 2.0*cP[P]*μνL[p,q,P]
+  end
+  return fock
+end
+
+"""
+    gen_dffock(EC::ECInfo, cMO::AbstractArray)
+
+  Compute closed-shell DF-HF Fock matrix in AO basis
+  (using precalculated Cholesky-decomposed integrals).
+"""
+function gen_dffock(EC::ECInfo, cMO::AbstractArray)
+  @assert ndims(cMO) == 2 "Restricted orbitals only!"
+  @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
+  occ2 = EC.space['o']
+  CMO2 = cMO[:,occ2]
+  μνL = load(EC,"AAL")
+  hsmall = load(EC,"h_AA")
+  @tensoropt begin 
+    μjL[p,j,L] := μνL[p,q,L] * CMO2[q,j]
+    L[L] := μjL[p,j,L] * CMO2[p,j]
+    fock[p,q] := hsmall[p,q] - μjL[p,j,L]*μjL[q,j,L]
+    fock[p,q] += 2.0*L[L]*μνL[p,q,L]
+  end
+  return fock
 end
 
 end #module

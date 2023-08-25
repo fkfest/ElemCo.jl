@@ -6,7 +6,7 @@ using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
-using ..ElemCo.Focks
+using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
 
 export bohf, bouhf

@@ -453,6 +453,7 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=50)
   else
     println("Not Convergent!")
   end
+  delete_temporary_files(EC)
   return E_former+Enuc, cMO
 end
 end #module
