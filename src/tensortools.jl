@@ -81,16 +81,16 @@ end
 
   Return subset of 1e⁻ integrals according to spaces. 
   
-  The spincase can explicitly be given, or will be deduced 
+  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification. 
 """
 function ints1(EC::ECInfo, spaces::String, spincase = nothing)
   sc = spincase
   if isnothing(sc)
     if isalphaspin(spaces[1],spaces[2])
-      sc = SCα
+      sc = :α
     else
-      sc = SCβ
+      sc = :β
     end
   end
   return integ1(EC.fd, sc)[EC.space[spaces[1]],EC.space[spaces[2]]]
@@ -125,7 +125,7 @@ end
 
   Return subset of 2e⁻ integrals according to spaces. 
   
-  The spincase can explicitly be given, or will be deduced 
+  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification.
   If the last two indices are stored as triangular and detri - make them full,
   otherwise return as a triangular cut.
@@ -135,13 +135,13 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
     second_el_alpha = isalphaspin(spaces[2],spaces[4])
     if isalphaspin(spaces[1],spaces[3])
       if second_el_alpha
-        sc = SCα
+        sc = :α
       else
-        sc = SCαβ
+        sc = :αβ
       end
     else
       !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
-      sc = SCβ
+      sc = :β
     end
   else 
     sc = spincase

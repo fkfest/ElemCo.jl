@@ -23,9 +23,13 @@ export calc_MP2, calc_UMP2, method_name, calc_cc, calc_pertT
 
 include("cc_tests.jl")
 
+"""
+    orbital_energies(EC::ECInfo, spincase::Symbol=:α)
 
-function orbital_energies(EC::ECInfo, spincase::SpinCase=SCα)
-  if spincase == SCα
+  Return orbital energies for a given `spincase`∈{`:α`,`:β`}.
+"""
+function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
+  if spincase == :α
     eps = load(EC, "e_m")
     ϵo = eps[EC.space['o']]
     ϵv = eps[EC.space['v']]
@@ -52,17 +56,17 @@ function update_singles(R1, ϵo, ϵv, shift)
 end
 
 """
-    update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
+    update_singles(EC::ECInfo, R1; spincase::Symbol=:α, use_shift=true)
 
-  Calculate update for singles amplitudes for a given `spincase`.
+  Calculate update for singles amplitudes for a given `spincase`∈{`:α`,`:β`}.
 """
-function update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
+function update_singles(EC::ECInfo, R1; spincase::Symbol=:α, use_shift=true)
   shift = use_shift ? EC.options.cc.shifts : 0.0
-  if spincase == SCα
+  if spincase == :α
     ϵo, ϵv = orbital_energies(EC)
     return update_singles(R1, ϵo, ϵv, shift)
   else
-    ϵob, ϵvb = orbital_energies(EC, SCβ)
+    ϵob, ϵvb = orbital_energies(EC, :β)
     return update_singles(R1, ϵob, ϵvb, shift)
   end
 end
@@ -85,21 +89,21 @@ function update_doubles(R2, ϵo1, ϵv1, ϵo2, ϵv2, shift, antisymmetrize=false)
 end
 
 """
-    update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
+    update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=false, use_shift=true)
 
-  Calculate update for doubles amplitudes for a given `spincase`.
+  Calculate update for doubles amplitudes for a given `spincase`∈{`:α`,`:β`,`:αβ`}.
 """
-function update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
+function update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=false, use_shift=true)
   shift = use_shift ? EC.options.cc.shiftp : 0.0
-  if spincase == SCα
+  if spincase == :α
     ϵo, ϵv = orbital_energies(EC)
     return update_doubles(R2, ϵo, ϵv, ϵo, ϵv, shift, antisymmetrize)
-  elseif spincase == SCβ
-    ϵob, ϵvb = orbital_energies(EC, SCβ)
+  elseif spincase == :β
+    ϵob, ϵvb = orbital_energies(EC, :β)
     return update_doubles(R2, ϵob, ϵvb, ϵob, ϵvb, shift, antisymmetrize)
   else
     ϵo, ϵv = orbital_energies(EC)
-    ϵob, ϵvb = orbital_energies(EC, SCβ)
+    ϵob, ϵvb = orbital_energies(EC, :β)
     return update_doubles(R2, ϵo, ϵv, ϵob, ϵvb, shift, antisymmetrize)
   end
 end
@@ -590,10 +594,10 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   t1 = time_ns()
   SP = EC.space
   if isuppercase(o1)
-    spin = SCβ
+    spin = :β
     no1 = n_occb_orbs(EC)
   else
-    spin = SCα
+    spin = :α
     no1 = n_occ_orbs(EC)
   end
   # dress 1-el part
@@ -778,13 +782,13 @@ end
 """
 function calc_UMP2(EC::ECInfo, addsingles=true)
   SP = EC.space
-  T2a = update_doubles(EC,ints2(EC,"vvoo"), spincase=SCα, antisymmetrize = true, use_shift=false)
-  T2b = update_doubles(EC,ints2(EC,"VVOO"), spincase=SCβ, antisymmetrize = true, use_shift=false)
-  T2ab = update_doubles(EC,ints2(EC,"vVoO"), spincase=SCαβ, use_shift=false)
+  T2a = update_doubles(EC,ints2(EC,"vvoo"), spincase=:α, antisymmetrize = true, use_shift=false)
+  T2b = update_doubles(EC,ints2(EC,"VVOO"), spincase=:β, antisymmetrize = true, use_shift=false)
+  T2ab = update_doubles(EC,ints2(EC,"vVoO"), spincase=:αβ, use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2a,T2b,T2ab)
   if addsingles
-    T1a = update_singles(EC,load(EC,"f_mm")[SP['v'],SP['o']], spincase=SCα, use_shift=false)
-    T1b = update_singles(EC,load(EC,"f_MM")[SP['V'],SP['O']], spincase=SCβ, use_shift=false)
+    T1a = update_singles(EC,load(EC,"f_mm")[SP['v'],SP['o']], spincase=:α, use_shift=false)
+    T1b = update_singles(EC,load(EC,"f_MM")[SP['V'],SP['O']], spincase=:β, use_shift=false)
     EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only = true)
   end
   return EMp2, T2a, T2b, T2ab
@@ -1308,7 +1312,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
     if(EC.fd.uhf)
       # αα
-      int2a = integ2(EC.fd,SCα::SpinCase)
+      int2a = integ2(EC.fd,:α)
       D2a = calc_D2a(EC, T1a, T2a)[tripp,:,:]
       @tensoropt rR2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
       D2a = nothing
@@ -1319,7 +1323,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       R2a += R2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
-        int2b = integ2(EC.fd,SCβ::SpinCase)
+        int2b = integ2(EC.fd,:β)
         D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
         @tensoropt rR2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
@@ -1329,7 +1333,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
         rR2pqb = nothing
         R2b += R2pqb[SP['V'],SP['V'],:,:]
         # αβ
-        int2ab = integ2(EC.fd,SCαβ::SpinCase)
+        int2ab = integ2(EC.fd,:αβ)
         D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
         @tensoropt R2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
         D2ab = nothing
@@ -1672,16 +1676,16 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     NormR2 = calc_doubles_norm(R2a,R2b,R2ab)
     Eh = calc_hylleraas(EC,T1a,T1b,T2a,T2b,T2ab,R1a,R1b,R2a,R2b,R2ab)
     T2a += update_doubles(EC,R2a)
-    T2b += update_doubles(EC,R2b;spincase=SCβ)
-    T2ab += update_doubles(EC,R2ab;spincase=SCαβ)
+    T2b += update_doubles(EC,R2b;spincase=:β)
+    T2ab += update_doubles(EC,R2ab;spincase=:αβ)
     if nosing
       T2a,T2b,T2ab = perform(diis,[T2a,T2b,T2ab],[R2a,R2b,2.0*R2ab])
       En = 0.0
     else
       NormT1 = calc_singles_norm(T1a, T1b)
       NormR1 = calc_singles_norm(R1a, R1b)
-      T1a += update_singles(EC,R1a;spincase=SCα)
-      T1b += update_singles(EC,R1b;spincase=SCβ)
+      T1a += update_singles(EC,R1a;spincase=:α)
+      T1b += update_singles(EC,R1b;spincase=:β)
       T1a,T1b,T2a,T2b,T2ab = perform(diis,[T1a,T1b,T2a,T2b,T2ab],[R1a,R1b,R2a,R2b,2.0*R2ab])
       En1 = calc_singles_energy(EC, T1a, T1b)
       En = En1
@@ -1856,7 +1860,7 @@ end
   Decompose (pq|rs) as (pq|P)(P|rs) and store as `pqP`.
 """
 function calc_integrals_decomposition(EC::ECInfo)
-  pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
+  pqrs = permutedims(ints2(EC,"::::",:α),(1,3,2,4))
   n = size(pqrs,1)
   B, S, Bt = svd(reshape(pqrs, (n^2,n^2)))
   # display(S)

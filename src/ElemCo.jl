@@ -343,12 +343,12 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
     save(EC, "e_m", eps)
     save(EC, "e_M", eps)
   else
-    fock = gen_fock(EC, SCα)
+    fock = gen_fock(EC, :α)
     eps = diag(fock)
     println("Occupied \alpha orbital energies: ", eps[EC.space['o']])
     save(EC, "f_mm", fock)
     save(EC, "e_m", eps)
-    fock = gen_fock(EC, SCβ)
+    fock = gen_fock(EC, :β)
     eps = diag(fock)
     println("Occupied \beta orbital energies: ", eps[EC.space['O']])
     save(EC,"f_MM", fock)
@@ -370,7 +370,7 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
   else
     ϵo = load(EC,"e_m")[SP['o']]
     ϵob = load(EC,"e_M")[SP['O']]
-    EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']])) + EC.fd.int0
+    EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(integ1(EC.fd, :α))[SP['o']]) + sum(diag(integ1(EC.fd, :β))[SP['O']])) + EC.fd.int0
   end
   return EHF
 end
@@ -427,19 +427,19 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
 
     dc = (ecmethod.theory == "DC")
 
-    if ecmethod.exclevel[4] != NoExc
+    if ecmethod.exclevel[4] != :none
       error("no quadruples implemented yet...")
     end
 
     if closed_shell_method
-      if ecmethod.exclevel[1] == FullExc
+      if ecmethod.exclevel[1] == :full
         T1 = zeros(size(SP['v'],1),size(SP['o'],1))
       else
         T1 = zeros(0)
       end
       ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
     else
-      if ecmethod.exclevel[1] == FullExc
+      if ecmethod.exclevel[1] == :full
         T1a = zeros(size(SP['v'],1),size(SP['o'],1))
         T1b = zeros(size(SP['V'],1),size(SP['O'],1))
         if(!EC.options.cc.use_kext)
@@ -454,8 +454,8 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
 
     if closed_shell_method
       main_name = method_name(T1,dc)
-      if ecmethod.exclevel[3] != NoExc
-        do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
+      if ecmethod.exclevel[3] != :none
+        do_full_t3 = (ecmethod.exclevel[3] == :full || ecmethod.exclevel[3] == :pertiter)
         save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
         ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
         println()
@@ -463,7 +463,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
         println("$main_name(T) correlation energy: ",ECC+ET3)
         println("$main_name(T) total energy: ",ECC+ET3+EHF)
         if do_full_t3
-          cc3 = (ecmethod.exclevel[3] == PertExcIter)
+          cc3 = (ecmethod.exclevel[3] == :pertiter)
           ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, EC.options.cc.calc_t3_for_decomposition, cc3)
           if cc3
             main_name = "CC3"
@@ -484,7 +484,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     t1 = print_time(EC, t1,"CC",1)
     delete_temporary_files(EC)
     if length(method_names) == 1
-      if ecmethod.exclevel[3] != NoExc
+      if ecmethod.exclevel[3] != :none
         return EHF, EMp2, ECC, ET3
       else
         return EHF, EMp2, ECC
