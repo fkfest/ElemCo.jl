@@ -21,27 +21,27 @@ export gen_fock, gen_ufock, gen_dffock, gen_density_matrix
   Calculate closed-shell fock matrix from FCIDump integrals. 
 """
 function gen_fock(EC::ECInfo)
-  @tensoropt fock[p,q] := integ1(EC.fd,SCα)[p,q] + 2.0*ints2(EC,":o:o",SCα)[p,i,q,i] - ints2(EC,":oo:",SCα)[p,i,i,q]
+  @tensoropt fock[p,q] := integ1(EC.fd,:α)[p,q] + 2.0*ints2(EC,":o:o",:α)[p,i,q,i] - ints2(EC,":oo:",:α)[p,i,i,q]
   return fock
 end
 
 """ 
-    gen_fock(EC::ECInfo, spincase::SpinCase)
+    gen_fock(EC::ECInfo, spincase::Symbol)
 
-  Calculate UHF fock matrix from FCIDump integrals. 
+  Calculate UHF fock matrix from FCIDump integrals for `spincase`∈{`:α`,`:β`}. 
 """
-function gen_fock(EC::ECInfo, spincase::SpinCase)
+function gen_fock(EC::ECInfo, spincase::Symbol)
   @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] 
-  if spincase == SCα
+  if spincase == :α
     if n_occb_orbs(EC) > 0 
-      @tensoropt fock[p,q] += ints2(EC,":O:O",SCαβ)[p,i,q,i]
+      @tensoropt fock[p,q] += ints2(EC,":O:O",:αβ)[p,i,q,i]
     end
     spo='o'
     spv='v'
     nocc = n_occ_orbs(EC)
   else
     if n_occ_orbs(EC) > 0 
-      @tensoropt fock[p,q] += ints2(EC,"o:o:",SCαβ)[i,p,i,q]
+      @tensoropt fock[p,q] += ints2(EC,"o:o:",:αβ)[i,p,i,q]
     end
     spo='O'
     spv='V'
@@ -84,28 +84,28 @@ function gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
   occ2 = EC.space['o']
   den = gen_density_matrix(EC, CMOl, CMOr, occ2)
   @tensoropt begin 
-    fock[p,q] := integ1(EC.fd,SCα)[p,q] 
-    fock[p,q] += 2.0*ints2(EC,"::::",SCα)[p,r,q,s] * den[r,s]
-    fock[p,q] -= ints2(EC,"::::",SCα)[p,r,s,q] * den[r,s]
+    fock[p,q] := integ1(EC.fd,:α)[p,q] 
+    fock[p,q] += 2.0*ints2(EC,"::::",:α)[p,r,q,s] * den[r,s]
+    fock[p,q] -= ints2(EC,"::::",:α)[p,r,s,q] * den[r,s]
   end
   return fock
 end
 
 """ 
-    gen_fock(EC::ECInfo, spincase::SpinCase, CMOl::AbstractArray, CMOr::AbstractArray)
+    gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractArray, CMOr::AbstractArray)
 
-  Calculate UHF fock matrix from FCIDump integrals for `spincase` and orbitals `CMOl`, `CMOr` and
+  Calculate UHF fock matrix from FCIDump integrals for `spincase`∈{`:α`,`:β`} and orbitals `CMOl`, `CMOr` and
   orbitals for the opposite-spin `CMOlOS` and `CMOrOS`. 
 """
-function gen_fock(EC::ECInfo, spincase::SpinCase, CMOl::AbstractArray, CMOr::AbstractArray,
+function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractArray, CMOr::AbstractArray,
                   CMOlOS::AbstractArray, CMOrOS::AbstractArray)
-  if spincase == SCα
+  if spincase == :α
     denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['O'])
-    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[p,r,q,s]*denOS[r,s]
+    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
     spo = 'o'
   else
     denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['o'])
-    @tensoropt fock[p,q] := ints2(EC,"::::",SCαβ)[r,p,s,q]*denOS[r,s]
+    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
     spo = 'O'
   end
   den =  gen_density_matrix(EC, CMOl, CMOr, EC.space[spo])
@@ -124,7 +124,7 @@ end
   `cMOl[2]` and `cMOr[2]` - β-MO transformation coefficients. 
 """
 function gen_ufock(EC::ECInfo, cMOl::AbstractArray, cMOr::AbstractArray)
-  return [gen_fock(EC,SCα, cMOl[1],cMOr[1], cMOl[2],cMOr[2]), gen_fock(EC,SCβ, cMOl[2],cMOr[2], cMOl[1],cMOr[1])]
+  return [gen_fock(EC, :α, cMOl[1], cMOr[1], cMOl[2], cMOr[2]), gen_fock(EC, :β, cMOl[2], cMOr[2], cMOl[1], cMOr[1])]
 end
 
 """ 

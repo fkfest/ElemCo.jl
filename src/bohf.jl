@@ -27,7 +27,7 @@ function bohf(EC::ECInfo)
   cMOl = Matrix{Float64}(I, norb, norb)
   cMOr = Matrix{Float64}(I, norb, norb)
   ϵ = zeros(norb)
-  hsmall = integ1(EC.fd,SCα)
+  hsmall = integ1(EC.fd,:α)
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
@@ -86,7 +86,7 @@ function bouhf(EC::ECInfo)
   cMOl = Any[Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb)]
   cMOr = deepcopy(cMOl)
   ϵ = Any[zeros(norb), zeros(norb)]
-  hsmall = [integ1(EC.fd,SCα), integ1(EC.fd,SCβ)]
+  hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")

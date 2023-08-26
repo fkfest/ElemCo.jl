@@ -1,28 +1,34 @@
 """ Specify methods available for electron-correlation calculations"""
 module ECMethods
+using DocStringExtensions
 
-export ECMethod, ExcType, NoExc, FullExc, PertExc, PertExcIter
+export ECMethod
 
 const ExcLevels = "SDTQP"
 
-@enum ExcType NoExc FullExc PertExc PertExcIter
 """
 Description of the electron-correlation method
 """
 struct ECMethod
+  """unrestricted calculation."""
   unrestricted::Bool
-  """theory level: MP, CC, DC"""
+  """theory level: MP, CC, DC."""
   theory::String
-  """ excitation level for each class (exclevel[1] for singles etc.)"""
-  exclevel::Array{ExcType}
+  """ excitation level for each class (exclevel[1] for singles etc.).
+      Possible values: :none, :full, :pert, :pertiter. """
+  exclevel::Array{Symbol,1}
+  """
+      ECMethod(mname::AbstractString)" 
 
+    Parse method name `mname` and return `ECMethod` object.
+  """
   function ECMethod(mname::AbstractString)
     if isempty(mname)
       error("Empty method name!")
     end
     unrestricted = false
     theory = ""
-    exclevel = [NoExc for i in 1:length(ExcLevels)]
+    exclevel = [:none for i in 1:length(ExcLevels)]
     ipos = 1
     if uppercase(mname[ipos:ipos+2]) == "EOM"
       error("EOM methods not implemented!")
@@ -57,28 +63,28 @@ struct ECMethod
     end
     # loop over remaining letters to get excitation levels
     # currently case-insensitive, can change later...
-    next_level = FullExc
+    next_level = :full
     for char in uppercase(mname[ipos:end])
       if isnumeric(char)
         # perturbation theory
         level = parse(Int,char)
         if pure_PT
-          lower_level = PertExc
-          exclevel[level] = PertExc
+          lower_level = :pert
+          exclevel[level] = :pert
         else
-          lower_level = FullExc
-          exclevel[level] = PertExcIter
+          lower_level = :full
+          exclevel[level] = :pertiter
         end
         for i in 1:level-1
-          if exclevel[i] == NoExc
+          if exclevel[i] == :none
             exclevel[i] = lower_level
           end
         end
       else  
         if char == '('
-          next_level = PertExc
+          next_level = :pert
         elseif char == ')'
-          next_level = FullExc
+          next_level = :full
         else
           iexc = findfirst(char,ExcLevels)
           if isnothing(iexc)
