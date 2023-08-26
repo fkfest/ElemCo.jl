@@ -93,7 +93,7 @@ function test_UaiX(EC::ECInfo, UaiX)
   @tensoropt begin
     TestIntermediate1[X,Y] := UaiX[a,i,X] * rescaledU[a,i,Y]
   end
-  if TestIntermediate1 ≈ diagm(load(EC,"epsilonX"))
+  if TestIntermediate1 ≈ diagm(load(EC,"e_X"))
     println("UaiX ok")
   else
     println("UaiX not ok")

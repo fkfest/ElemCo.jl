@@ -9,6 +9,7 @@ using ..ElemCo.MSystem
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs
 export file_exists, add_file, delete_temporary_files
+export isalphaspin, space4spin
 
 include("options.jl")
 
@@ -202,10 +203,34 @@ function delete_temporary_files(EC::ECInfo)
 end
 
 """
-    mmap(EC::ECInfo, name::String)
+    isalphaspin(sp1::Char,sp2::Char)
 
-  Memory-map file `name` in ECInfo.
+  Try to guess spin of an electron: lowcase α, uppercase β, non-letters skipped.
+  Return true for α spin.  Throws an error if cannot decide.
 """
+function isalphaspin(sp1::Char,sp2::Char)
+  if isletter(sp1)
+    return islowercase(sp1)
+  elseif isletter(sp2)
+    return islowercase(sp2)
+  else
+    error("Cannot guess spincase for $sp1 $sp2 . Specify the spincase explicitly!")
+  end
+end
+
+"""
+    space4spin(sp::Char, alpha::Bool)
+    
+  Return the space character for a given spin.
+  `sp` on input has to be lowercase.
+"""
+function space4spin(sp::Char, alpha::Bool)
+  if alpha
+    return sp
+  else
+    return uppercase(sp)
+  end
+end
 
 """
     parse_orbstring(orbs::String; orbsym = Vector{Int})
