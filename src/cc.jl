@@ -1141,7 +1141,7 @@ function calc_pertT(EC::ECInfo, T1, T2; save_t3=false)
   Enb3 = 0.0
   IntX = zeros(nvir,nocc)
   if save_t3
-    t3file, T3 = newmmap(EC,"T3abcijk",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
+    t3file, T3 = newmmap(EC,"T_vvvooo",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
   end
   for k = 1:nocc 
     for j = 1:k
@@ -2014,7 +2014,7 @@ function calc_triples_decomposition(EC::ECInfo)
   nvirt = n_virt_orbs(EC)
 
   Triples_Amplitudes = zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
-  t3file, T3 = mmap(EC, "T3abcijk")
+  t3file, T3 = mmap(EC, "T_vvvooo")
   trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
   for ijk in axes(T3,4)
     i,j,k = Tuple(trippp[ijk])                                            #trippp is giving the indices according to the joint index ijk as a tuple
