@@ -60,22 +60,6 @@ function mmap(EC::ECInfo, fname::String)
   return miommap(joinpath(EC.scr, fname*EC.ext))
 end
 
-"""
-    isalphaspin(sp1::Char,sp2::Char)
-
-  Try to guess spin of an electron: lowcase α, uppercase β, non-letters skipped.
-  Return true for α spin.  Throws an error if cannot decide.
-"""
-function isalphaspin(sp1::Char,sp2::Char)
-  if isletter(sp1)
-    return islowercase(sp1)
-  elseif isletter(sp2)
-    return islowercase(sp2)
-  else
-    error("Cannot guess spincase for $sp1 $sp2 . Specify the spincase explicitly!")
-  end
-end
-
 """ 
     ints1(EC::ECInfo, spaces::String, spincase = nothing)
 

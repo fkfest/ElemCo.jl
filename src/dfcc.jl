@@ -30,10 +30,10 @@ end
 """
     calc_dressed_3idx(EC,T1)
 
-  Calculate dressed integrals for 3-index integrals from file `pqP`.
+  Calculate dressed integrals for 3-index integrals from file `mmL`.
 """
 function calc_dressed_3idx(EC,T1)
-  pqPfile, pqP = mmap(EC, "pqP")
+  pqPfile, pqP = mmap(EC, "mmL")
   # println(size(pqP))
   SP = EC.space
   nP = size(pqP,3)

@@ -184,7 +184,8 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
     ET2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * int2[i,j,a,b]
   end
   if length(T1) > 0
-    dfock = load(EC,"dfock"*'o')
+    mo = 'm'
+    dfock = load(EC,"df_"*mo*mo)
     fov = dfock[SP['o'],SP['v']] + load(EC,"f_mm")[SP['o'],SP['v']] # undressed part should be with factor two
     @tensoropt ET1 = (fov[i,a] + 2.0 * R1[a,i])*T1[a,i]
     # ET1 = scalar(2.0*(load(EC,"f_mm")[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
@@ -212,7 +213,8 @@ function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov
     ET2 = fac*T2[a,b,i,j] * int2[i,j,a,b]
   end
   if length(T1) > 0
-    dfock = load(EC,"dfock"*o1)
+    mo = space4spin('m', isalphaspin(o1,o1))
+    dfock = load(EC,"df_"*mo*mo)
     dfov = dfock[SP[o1],SP[v1]] + fov # undressed part should be with factor two
     @tensoropt ET1 = (0.5*dfov[i,a] + R1[a,i])*T1[a,i]
     ET2 += ET1
@@ -558,7 +560,7 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   dinter = d_int1[SP['o'],:]
   @tensoropt d_int1[SP['v'],:][b,p] -= dinter[j,p] * T1[b,j]
   # display(d_int1[SP['v'],SP['o']])
-  save(EC,"dint1o",d_int1)
+  save(EC,"dh_mm",d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
 
   # calc dressed fock
@@ -581,7 +583,7 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   dfock[SP['o'],SP['v']] += fov
   dfock[SP['v'],SP['v']] += fvv
 
-  save(EC,"dfocko",dfock)
+  save(EC,"df_mm",dfock)
   t1 = print_time(EC,t1,"dress fock",3)
 end
 
@@ -596,9 +598,11 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   if isuppercase(o1)
     spin = :β
     no1 = n_occb_orbs(EC)
+    mo = 'M'
   else
     spin = :α
     no1 = n_occ_orbs(EC)
+    mo = 'm'
   end
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd,spin))
@@ -606,7 +610,7 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   @tensoropt d_int1[:,SP[o1]][p,j] += dinter[p,b] * T1[b,j]
   dinter = d_int1[SP[o1],:]
   @tensoropt d_int1[SP[v1],:][b,p] -= dinter[j,p] * T1[b,j]
-  save(EC,"dint1"*o1,d_int1)
+  save(EC,"dh_"*mo*mo,d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
   # calc dressed fock
   dfock = d_int1
@@ -630,7 +634,7 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   dfock[SP[v1],SP[o1]] += fvo
   dfock[SP[o1],SP[v1]] += fov
   dfock[SP[v1],SP[v1]] += fvv
-  save(EC,"dfock"*o1,dfock)
+  save(EC,"df_"*mo*mo,dfock)
   t1 = print_time(EC,t1,"dress fock",3)
 end
 
@@ -667,19 +671,19 @@ function dress_fock_oppositespin(EC::ECInfo)
   @tensoropt fVV[a,b] := d_ovov[k,a,k,b]
   d_ovov = nothing
 
-  dfocka = load(EC,"dfocko")
+  dfocka = load(EC,"df_mm")
   dfocka[SP['o'],SP['o']] += foo
   dfocka[SP['o'],SP['v']] += fov
   dfocka[SP['v'],SP['o']] += fvo
   dfocka[SP['v'],SP['v']] += fvv
-  save(EC,"dfocko",dfocka)
+  save(EC,"df_mm",dfocka)
 
-  dfockb = load(EC,"dfockO")
+  dfockb = load(EC,"df_MM")
   dfockb[SP['O'],SP['O']] += fOO
   dfockb[SP['O'],SP['V']] += fOV
   dfockb[SP['V'],SP['O']] += fVO
   dfockb[SP['V'],SP['V']] += fVV
-  save(EC,"dfock"*'O',dfockb)
+  save(EC,"df_MM",dfockb)
 end
 
 """
@@ -726,9 +730,9 @@ function pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
   if EC.options.cc.calc_d_vvoo
     save(EC,"d_vvoo",ints2(EC,"vvoo"))
   end
-  save(EC,"dint1"*'o',integ1(EC.fd))
-  save(EC,"dfock"*'o',load(EC,"f_mm"))
-  save(EC,"dfock"*'O',load(EC,"f_MM"))
+  save(EC,"dh_mm",integ1(EC.fd))
+  save(EC,"df_mm",load(EC,"f_mm"))
+  save(EC,"df_MM",load(EC,"f_MM"))
   t1 = print_time(EC,t1,"pseudo-dressing",3)
   if unrestricted
     save(EC,"d_OOVO",ints2(EC,"OOVO"))
@@ -755,7 +759,7 @@ function pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
     save(EC,"d_oVoO",ints2(EC,"oVoO"))
     save(EC,"d_vOvV",ints2(EC,"vOvV"))
     save(EC,"d_oVvV",ints2(EC,"oVvV"))
-    save(EC,"dint1"*'O',integ1(EC.fd))
+    save(EC,"dh_MM",integ1(EC.fd))
   end
 end
 
@@ -964,10 +968,10 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
     pseudo_dressed_ints(EC)
   end
   @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
-  dfock = load(EC,"dfock"*'o')
+  dfock = load(EC,"df_mm")
   if length(T1) > 0
     if EC.options.cc.use_kext
-      dint1 = load(EC,"dint1"*'o')
+      dint1 = load(EC,"dh_mm")
       R1 = dint1[SP['v'],SP['o']]
     else
       R1 = dfock[SP['v'],SP['o']]
@@ -1137,7 +1141,7 @@ function calc_pertT(EC::ECInfo, T1, T2; save_t3=false)
   Enb3 = 0.0
   IntX = zeros(nvir,nocc)
   if save_t3
-    t3file, T3 = newmmap(EC,"T3abcijk",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
+    t3file, T3 = newmmap(EC,"T_vvvooo",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
   end
   for k = 1:nocc 
     for j = 1:k
@@ -1231,8 +1235,8 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   end
 
 
-  dfock = load(EC,"dfock"*'o')
-  dfockb = load(EC,"dfock"*'O')
+  dfock = load(EC,"df_mm")
+  dfockb = load(EC,"df_MM")
   fij = dfock[SP['o'],SP['o']]
   fab = dfock[SP['v'],SP['v']]
   fIJ = dfockb[SP['O'],SP['O']]
@@ -1240,9 +1244,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
 
   if length(T1a) > 0
     if EC.options.cc.use_kext
-      dint1a = load(EC,"dint1"*'o')
+      dint1a = load(EC,"dh_mm")
       R1a = dint1a[SP['v'],SP['o']]
-      dint1b = load(EC,"dint1"*'O')
+      dint1b = load(EC,"dh_MM")
       R1b = dint1b[SP['V'],SP['O']]
     else
       fai = dfock[SP['v'],SP['o']]
@@ -1755,18 +1759,18 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
     t1 = print_time(EC,t1,"R3",2)
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
-    T3 = load(EC,"T3_XYZ")
+    T3 = load(EC,"T_XXX")
     NormT3 = calc_triples_norm(T3)
     NormR1 = calc_singles_norm(R1)
     NormR2 = calc_doubles_norm(R2)
-    R3 = load(EC,"R3_decomp")
+    R3 = load(EC,"R_XXX")
     NormR3 = calc_triples_norm(R3)
     Eh = calc_hylleraas(EC,T1,T2,R1,R2)
     T1 += update_singles(EC,R1)
     T2 += update_doubles(EC,R2)
     T3 += update_triples(EC,R3)
     T1,T2,T3 = perform(diis,[T1,T2,T3],[R1,R2,R3])
-    save(EC,"T3_XYZ",T3)
+    save(EC,"T_XXX",T3)
     En = calc_singles_energy(EC, T1)
     En += calc_doubles_energy(EC,T2)
     ΔE = En - Eh
@@ -1795,7 +1799,7 @@ end
 function update_triples(EC,R3, use_shift = true)
   shift = use_shift ? EC.options.cc.shiftt : 0.0
   ΔT3 = deepcopy(R3)
-  ϵX = load(EC,"epsilonX")
+  ϵX = load(EC,"e_X")
   for I ∈ CartesianIndices(ΔT3)
     X,Y,Z = Tuple(I)
     ΔT3[I] /= (ϵX[X] + ϵX[Y] + ϵX[Z] + shift)
@@ -1822,9 +1826,9 @@ function add_to_singles_and_doubles_residuals(EC,R1,R2)
   SP = EC.space
   ooPfile, ooP = mmap(EC,"d_ooP")
   ovPfile, ovP = mmap(EC,"d_ovP")
-  Txyz = load(EC,"T3_XYZ")
+  Txyz = load(EC,"T_XXX")
   
-  U = load(EC,"UvoX")
+  U = load(EC,"C_voX")
   # println(size(U))
 
   @tensoropt Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
@@ -1840,7 +1844,7 @@ function add_to_singles_and_doubles_residuals(EC,R1,R2)
   @tensoropt Bvo[a,i,P,X] := vvP[a,b,P] * U[b,i,X]
   close(vvPfile)
   vvP = nothing
-  dfock = load(EC,"dfock"*'o')
+  dfock = load(EC,"df_mm")
   fov = dfock[SP['o'],SP['v']]
   # R2[abij] = RR2[abij] + RR2[baji]  
   @tensoropt RR2[a,b,i,j] := U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
@@ -1857,7 +1861,7 @@ end
 """
     calc_integrals_decomposition(EC::ECInfo)
 
-  Decompose (pq|rs) as (pq|P)(P|rs) and store as `pqP`.
+  Decompose (pq|rs) as (pq|P)(P|rs) and store as `mmL`.
 """
 function calc_integrals_decomposition(EC::ECInfo)
   pqrs = permutedims(ints2(EC,"::::",:α),(1,3,2,4))
@@ -1878,7 +1882,7 @@ function calc_integrals_decomposition(EC::ECInfo)
   
   #get integral decomposition
   pqP = B[:,1:naux1].*sqrt.(S[1:naux1]')
-  save(EC, "pqP", reshape(pqP, (n,n,naux1)))
+  save(EC, "mmL", reshape(pqP, (n,n,naux1)))
   #B_comparison = pqP * pqP'
   #println( B_comparison ≈ reshape(pqrs, (n^2,n^2)) )
 end
@@ -1990,12 +1994,12 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
   # UaiX = eigen_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  save(EC, "epsilonX", ϵX)
+  save(EC, "e_X", ϵX)
   #display(UaiX)
   naux = length(ϵX)
-  save(EC,"UvoX",UaiX)
+  save(EC,"C_voX",UaiX)
   # TODO: calc starting guess for T3_XYZ from T2 and UvoX
-  save(EC,"T3_XYZ",zeros(naux,naux,naux))
+  save(EC,"T_XXX",zeros(naux,naux,naux))
 end
 
 """
@@ -2010,7 +2014,7 @@ function calc_triples_decomposition(EC::ECInfo)
   nvirt = n_virt_orbs(EC)
 
   Triples_Amplitudes = zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
-  t3file, T3 = mmap(EC, "T3abcijk")
+  t3file, T3 = mmap(EC, "T_vvvooo")
   trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
   for ijk in axes(T3,4)
     i,j,k = Tuple(trippp[ijk])                                            #trippp is giving the indices according to the joint index ijk as a tuple
@@ -2029,14 +2033,14 @@ function calc_triples_decomposition(EC::ECInfo)
     UaiX = iter_svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, naux)
   end
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  save(EC, "epsilonX", ϵX)
+  save(EC, "e_X", ϵX)
   #display(UaiX)
-  save(EC,"UvoX",UaiX)
+  save(EC,"C_voX",UaiX)
 
   @tensoropt begin
     T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX[a,i,X]) * UaiX[b,j,Y]) * UaiX[c,k,Z])
   end
-  save(EC,"T3_XYZ",T3_decomp_starting_guess)
+  save(EC,"T_XXX",T3_decomp_starting_guess)
   #display(T3_decomp_starting_guess)
 
   # @tensoropt begin
@@ -2117,11 +2121,11 @@ end
 """
 function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   t1 = time_ns()
-  UvoX = load(EC,"UvoX")
+  UvoX = load(EC,"C_voX")
   #display(UvoX)
 
   #load decomposed amplitudes
-  T3_XYZ = load(EC, "T3_XYZ")
+  T3_XYZ = load(EC, "T_XXX")
   #display(T3_XYZ)
 
   #load df coeff
@@ -2132,7 +2136,7 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
 
   #load dressed fock matrices
   SP = EC.space
-  dfock = load(EC,"dfock"*'o')    
+  dfock = load(EC,"df_mm")    
   dfoo = dfock[SP['o'],SP['o']]
   dfov = dfock[SP['o'],SP['v']]
   dfvv = dfock[SP['v'],SP['v']]
@@ -2228,7 +2232,7 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   close(ooPfile)
   close(vvPfile)
 
-  save(EC,"R3_decomp",R3decomp)
+  save(EC,"R_XXX",R3decomp)
   
 end
 
