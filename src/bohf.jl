@@ -3,6 +3,7 @@
 """
 module BOHF
 using LinearAlgebra, TensorOperations, Printf
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
@@ -17,7 +18,7 @@ export bohf, bouhf
   Perform BO-HF using integrals from fcidump EC.fd.
 """
 function bohf(EC::ECInfo)
-  println("Bi-orthogonal Hartree-Fock")
+  print_info("Bi-orthogonal Hartree-Fock")
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])
@@ -75,7 +76,7 @@ end
   Perform BO-UHF using integrals from fcidump EC.fd.
 """
 function bouhf(EC::ECInfo)
-  println("Bi-orthogonal unrestricted Hartree-Fock")
+  print_info("Bi-orthogonal unrestricted Hartree-Fock")
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])

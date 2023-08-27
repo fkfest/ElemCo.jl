@@ -3,7 +3,7 @@ module Utils
 using Printf
 using ..ElemCo.AbstractEC
 
-export print_time
+export print_time, draw_line, print_info
 
 """ 
     print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
@@ -18,4 +18,24 @@ function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
   return t2
 end
 
+"""
+    draw_line(n = 60)
+
+  Print a line of `n` dashes.
+"""
+function draw_line(n=60)
+  println(repeat("─", n))
+end
+
+"""
+    print_info(info::AbstractString)
+
+  Print `info` between two lines.
+"""
+function print_info(info::AbstractString)
+  println()
+  draw_line()
+  println(info)
+  draw_line()
+end
 end #module

@@ -1,5 +1,6 @@
 module DFHF
 using LinearAlgebra, TensorOperations, Printf
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
@@ -17,7 +18,7 @@ export dfhf, generate_integrals
   Perform closed-shell DF-HF calculation.
 """
 function dfhf(EC::ECInfo; direct=false, guess=:SAD)
-  println("DF-HF")
+  print_info("DF-HF")
   diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
