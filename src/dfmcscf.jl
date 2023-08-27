@@ -1,5 +1,6 @@
 module DFMCSCF
 using LinearAlgebra, TensorOperations, Printf
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
@@ -371,6 +372,7 @@ end
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
 function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=50)
+  print_info("DF-MCSCF")
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   sao = load(EC,"S_AA")
   nAO = size(sao,2) # number of atomic orbitals

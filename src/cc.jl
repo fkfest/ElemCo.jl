@@ -1602,7 +1602,7 @@ If length(T1) is 0 on input, no singles will be calculated.
 If dc: calculate distinguishable cluster.
 """
 function calc_cc(EC::ECInfo, T1, T2, dc = false)
-  println(method_name(T1,dc))
+  print_info(method_name(T1,dc))
   diis = Diis(EC)
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
@@ -1660,7 +1660,7 @@ end
   If dc: calculate distinguishable cluster.
 """
 function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
-  println(method_name(T1a,dc))
+  print_info(method_name(T1a,dc))
   diis = Diis(EC)
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
@@ -1722,6 +1722,11 @@ end
   If cc3: calculate CC3 amplitudes.
 """
 function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
+  if cc3
+    print_info("CC3")
+  else
+    print_info("DC-CCSDT")
+  end
   calc_integrals_decomposition(EC)
   if useT3
     calc_triples_decomposition(EC)
@@ -1729,11 +1734,6 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
     # calc_dressed_3idx(EC,zeros(size(T1)))
     calc_dressed_3idx(EC,T1)
     calc_triples_decomposition_without_triples(EC,T2)
-  end
-  if cc3
-    println("CC3")
-  else
-    println("DC-CCSDT")
   end
   diis = Diis(EC)
 
