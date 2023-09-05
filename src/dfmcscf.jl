@@ -164,17 +164,15 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   @tensoropt Gtu[r,s,t,u] += 2 * (puL[r,v,L] * puL[s,w,L]) * D2[t,v,u,w]
 
   # G
-  n_AO = size(cMO,1)
-  G = zeros((n_AO,n_AO,n_AO,n_AO))
+  n_MO = size(cMO,2)
+  G = zeros((n_MO,n_MO,n_MO,n_MO))
   G[:,:,occ2,occ2] = Gij
   G[:,:,occ1o,occ2] = Gtj
   G[:,:,occ2,occ1o] = permutedims(Gtj, [2,1,4,3])
   G[:,:,occ1o,occ1o] = Gtu
 
   # calc h with G
-  # matters can be saved here
-  # 4 * O(N^4)
-  I_kl = 1.0 * Matrix(I, n_AO, n_AO)
+  I_kl = 1.0 * Matrix(I, n_MO, n_MO)
   @tensoropt h[r,k,s,l] := 2 * G[r,s,k,l] - I_kl[k,l] * (A[r,s] + A[s,r])
   @tensoropt h[r,k,s,l] += 2 * G[k,l,r,s] - I_kl[r,s] * (A[k,l] + A[l,k])
   @tensoropt h[r,k,s,l] -= 2 * G[k,s,r,l] - I_kl[r,l] * (A[k,s] + A[s,k])
@@ -184,8 +182,91 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   h_rk_sl = reshape(h_rk_sl, d, d)
 
   #save(EC,"h_rk_sl",h_rk_sl)
+  return h_rk_sl,h
+end
+
+"""
+    function calc_h_SCI(EC::ECInfo, fock::Matrix, D1::Matrix, D2, h_SO)
+
+Calculate the hessian matrix with first order super-CI method
+"""
+function calc_h_SCI(EC::ECInfo, cMO::Matrix, fock::Matrix, D1::Matrix, D2, h_SO)
+  n_MO = size(cMO,2)
+  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
+  occ1o = setdiff(EC.space['o'],occ2)
+  occv = setdiff(1:n_MO, EC.space['o']) # to be modified
+  n_2 = size(occ2, 1)
+  n_1o = size(occ1o, 1)
+  n_v = size(occv, 1)
+  I_ij = 1.0 * Matrix(I, n_2, n_2)
+  I_ab = 1.0 * Matrix(I, n_v, n_v)
+  I_tu = 1.0 * Matrix(I, n_1o, n_1o)
+  fock = cMO' * fock * cMO
+  @tensoropt begin
+    h_ai_bj[a,i,b,j] := 4 * I_ij[i,j] * fock[occv,occv][a,b] - 4 * I_ab[a,b] * fock[occ2,occ2][i,j]
+    h_ai_bu[a,i,b,u] := -2 * I_ab[a,b] * fock[occ2,occ1o][i,v] * D1[v,u]
+    h_ai_uj[a,i,u,j] := I_ij[i,j] * (4 * fock[occv,occ1o][a,u] - 2 * fock[occv,occ1o][a,v]*D1[v,u]) 
+    h_ti_uj[t,i,u,j] := (2*D1[t,u] - 4*I_tu[t,u]) * fock[occ2,occ2][i,j] +
+                                  2 * I_ij[i,j] * (2*fock[occ1o,occ1o][t,u] - (D2[t,u,v,w] - D1[t,u]*D1[v,w]) * fock[occ1o,occ1o][v,w]-
+                                      D1[t,v] * fock[occ1o,occ1o][v,u] - D1[v,u] * fock[occ1o,occ1o][t,v])
+    h_at_bu[a,t,b,u] := 2*I_ab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock[occ1o,occ1o][v,w] +2*D1[t,u]*fock[occv,occv][a,b] 
+  end
+  h = zeros((n_MO,n_MO,n_MO,n_MO))
+  #h = zeros((n_1o+n_v,n_2+n_1o,n_1o+n_v,n_2+n_1o))
+  h[occv,occ2,occv,occ2] = h_ai_bj
+  h[occv,occ2,occv,occ1o] = h_ai_bu
+  h[occv,occ1o,occv,occ2] = permutedims(h_ai_bu, [3,4,1,2])
+  h[occv,occ2,occ1o,occ2] = h_ai_uj
+  h[occ1o,occ2,occv,occ2] = permutedims(h_ai_uj, [3,4,1,2])
+  h[occ1o,occ2,occ1o,occ2] = h_ti_uj
+  h[occv,occ1o,occv,occ1o] = h_at_bu
+  h[occ1o,occ1o,:,:] = h_SO[occ1o,occ1o,:,:]
+  h[:,:,occ1o,occ1o] = h_SO[:,:,occ1o,occ1o]
+  h_rk_sl = h[[occ1o;occv],[occ2;occ1o],[occ1o;occv],[occ2;occ1o]]
+  d = (n_1o+n_v)*(n_2+n_1o)
+  h_rk_sl = reshape(h_rk_sl, d, d)
   return h_rk_sl
 end
+
+"""
+    function calc_h_combined(EC::ECInfo, fock::Matrix, D1::Matrix, D2, h_SO)
+
+Calculate the hessian matrix with combination of Super CI and Second Order Approximation methods
+"""
+function calc_h_combined(EC::ECInfo, cMO::Matrix, fock::Matrix, D1::Matrix, D2, h_SO)
+  n_MO = size(cMO,2)
+  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
+  occ1o = setdiff(EC.space['o'],occ2)
+  occv = setdiff(1:n_MO, EC.space['o']) # to be modified
+  n_2 = size(occ2, 1)
+  n_1o = size(occ1o, 1)
+  n_v = size(occv, 1)
+  I_ij = 1.0 * Matrix(I, n_2, n_2)
+  I_ab = 1.0 * Matrix(I, n_v, n_v)
+  I_tu = 1.0 * Matrix(I, n_1o, n_1o)
+  fock = cMO' * fock * cMO
+  @tensoropt begin
+    h_ai_bj[a,i,b,j] := 4 * I_ij[i,j] * fock[occv,occv][a,b] - 4 * I_ab[a,b] * fock[occ2,occ2][i,j]
+    h_ai_bu[a,i,b,u] := -2 * I_ab[a,b] * fock[occ2,occ1o][i,v] * D1[v,u]
+    h_ai_uj[a,i,u,j] := I_ij[i,j] * (4 * fock[occv,occ1o][a,u] - 2 * fock[occv,occ1o][a,v]*D1[v,u])
+  end
+  h = zeros((n_MO,n_MO,n_MO,n_MO))
+  #h = zeros((n_1o+n_v,n_2+n_1o,n_1o+n_v,n_2+n_1o))
+  h[occv,occ2,occv,occ2] = h_ai_bj
+  h[occv,occ2,occv,occ1o] = h_ai_bu
+  h[occv,occ1o,occv,occ2] = permutedims(h_ai_bu, [3,4,1,2])
+  h[occv,occ2,occ1o,occ2] = h_ai_uj
+  h[occ1o,occ2,occv,occ2] = permutedims(h_ai_uj, [3,4,1,2])
+  h[occ1o,occ2,occ1o,occ2] = h_SO[occ1o,occ2,occ1o,occ2]
+  h[occv,occ1o,occv,occ1o] = h_SO[occv,occ1o,occv,occ1o] 
+  h[occ1o,occ1o,:,:] = h_SO[occ1o,occ1o,:,:]
+  h[:,:,occ1o,occ1o] = h_SO[:,:,occ1o,occ1o]
+  h_rk_sl = h[[occ1o;occv],[occ2;occ1o],[occ1o;occv],[occ2;occ1o]]
+  d = (n_1o+n_v)*(n_2+n_1o)
+  h_rk_sl = reshape(h_rk_sl, d, d)
+  return h_rk_sl
+end
+
 
 """
     calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
@@ -404,7 +485,9 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
     fock, fockClosed = dffockCAS(EC,cMO,D1)
     A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
     g = calc_g(A, EC)
-    h = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
+    h, h_SO = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
+    #h = calc_h_SCI(EC, cMO, fock, D1, D2, h_SO)
+    #h = calc_h_combined(EC, cMO, fock, D1, D2, h_SO)
     #println("norm of g: ", norm(g))
     
     # λ tuning loop (micro loop)

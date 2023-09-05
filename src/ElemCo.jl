@@ -290,7 +290,7 @@ function run_mcscf()
   EC = ECInfo(ms=MSys(xyz,basis))
   setup!(EC,ms2=2,charge=-2)
 
-  E,cMO =  dfmcscf(EC,direct=false)
+  E,cMO =  dfmcscf(EC,direct=false, IterMax=500)
 
 end
 
