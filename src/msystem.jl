@@ -82,7 +82,7 @@ Base.show(io::IO, val::ACenter) = print(io, val.name, " ", val.coord[1], " ", va
   Return element name without numbers.
 """
 function element_name(name::AbstractString)
-  return rstrip(name,['0','1','2','3','4','5','6','7','8','9'])
+  return titlecase(rstrip(name,['0','1','2','3','4','5','6','7','8','9']),strict=true)
 end
 
 """ 

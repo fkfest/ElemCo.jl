@@ -13,14 +13,16 @@ using ..ElemCo.TensorTools
 export dfhf, generate_integrals 
 
 """
-    dfhf(EC::ECInfo; direct=false, guess=:SAD)
+    dfhf(EC::ECInfo)
 
   Perform closed-shell DF-HF calculation.
 """
-function dfhf(EC::ECInfo; direct=false, guess=:SAD)
+function dfhf(EC::ECInfo)
   print_info("DF-HF")
   diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
+  direct = EC.options.scf.direct
+  guess = EC.options.scf.guess
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   if direct
     bao = generate_basis(EC.ms, "ao")
@@ -64,7 +66,8 @@ function dfhf(EC::ECInfo; direct=false, guess=:SAD)
   end
   println("DF-HF energy: ", EHF)
   delete_temporary_files(EC)
-  return ϵ, cMO
+  save(EC, EC.options.scf.save, cMO, "DFHF orbitals")
+  return EHF
 end
 
 end #module

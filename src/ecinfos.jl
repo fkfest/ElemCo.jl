@@ -164,6 +164,7 @@ function set_options!(opt; kwargs...)
       error("invalid option name: $key")
     end
   end
+  return opt
 end
 
 """

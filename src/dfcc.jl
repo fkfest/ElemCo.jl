@@ -8,6 +8,7 @@ using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
+using ..ElemCo.DFTools
 using ..ElemCo.DIIS
 
 export calc_dressed_3idx, calc_svd_dcsd_residual
@@ -78,6 +79,26 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2_XY)
   SP = EC.space
   if length(T1) > 0
     # calc_dressed_ints(EC,T1)
+    t1 = print_time(EC,t1,"dressing",2)
+  else
+  end
+end
+
+"""
+    calc_svd_dcsd(EC::ECInfo, T1)
+
+  Calculate decomposed closed-shell DCSD with
+  ``T^{ij}_{ab}=U^{iX}_a U^{jY}_b T_{XY}``.
+"""
+function calc_svd_dcsd(EC::ECInfo, T1)
+  t1 = time_ns()
+  SP = EC.space
+  # integrals
+  generate_DF_integrals(EC,)
+  # starting guess
+
+  if length(T1) > 0
+    calc_dressed_3idx(EC,T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
   end

@@ -195,7 +195,7 @@ end
 function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVector)
   npairs = 0
   skip = false
-  for i = 1:length(evals)
+  for i in eachindex(evals)
     if skip 
       skip = false
       continue

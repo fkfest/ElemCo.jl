@@ -3,7 +3,7 @@ module Utils
 using Printf
 using ..ElemCo.AbstractEC
 
-export print_time, draw_line, print_info
+export print_time, draw_line, print_info, kwarg_provided_in_macro
 
 """ 
     print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
@@ -38,4 +38,26 @@ function print_info(info::AbstractString)
   println(info)
   draw_line()
 end
+
+"""
+    kwarg_provided_in_macro(kwargs, key::Symbol)
+
+  Check whether `key` is in `kwargs`. 
+
+  This is used in macros to check whether a keyword argument is passed.
+  The keyword argument in question `key` is passed as a symbol, e.g. `:thr`.
+  `kwargs` is the keyword argument list passed to the macro.
+"""
+function kwarg_provided_in_macro(kwargs, key::Symbol)
+  for kwarg in kwargs
+    if typeof(kwarg) != Expr || kwarg.head != :(=)
+      error("Not a keyword argument!")
+    end
+    if kwarg.args[1] == key
+      return true
+    end
+  end
+  return false
+end
+
 end #module

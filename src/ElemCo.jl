@@ -62,7 +62,7 @@ export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc
   Setup `EC::ECInfo` from variables `geometry::String` and `basis::Dict{String,Any}`.
 
   # Examples
-```jldoctest
+```julia
 geometry="\nHe 0.0 0.0 0.0"
 basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
 @ECsetup
@@ -99,7 +99,11 @@ end
 
   Set options for `EC::ECInfo`. 
     
+  The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`).
+  The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
+  The current state of the options can be stored in a variable, e.g., `opt_cc = EC.options`. 
   If `EC` is not already setup, it will be done. 
+
 
   # Examples
 ```julia
@@ -132,33 +136,26 @@ end
 """ 
     @dfhf()
 
-  Run DFHF calculation and return MO coefficients (`ORBS`) and orbital energies (`EPS`).
+  Run DFHF calculation. The orbitals are stored to `ScfOptions.save`.
 """
 macro dfhf()
   return quote
     $(esc(:@tryECsetup))
-    $(esc(:EPS)), $(esc(:ORBS)) = dfhf($(esc(:EC)))
+    dfhf($(esc(:EC)))
   end
 end
 
 """
-    @dfints(orbs = nothing, fcidump = "")
+    @dfints()
 
   Generate 2 and 4-idx MO integrals using density fitting.
-
-  If `orbs::Matrix` is given, the orbitals are used to generate the integrals, 
-  otherwise the last orbitals (`ORBS`) are used.
-  If `fcidump::String` is given, the integrals are written to the fcidump file.
+  The MO coefficients are read from `IntOptions.orbs`,
+  and if empty string - from `ScfOptions.save`.
 """
-macro dfints(orbs = nothing, fcidump = "")
+macro dfints()
   return quote
     $(esc(:@tryECsetup))
-    if isnothing($orbs)
-      orbitals = $(esc(:ORBS))
-    else
-      orbitals = $orbs
-    end
-    dfdump($(esc(:EC)),orbitals, $fcidump)
+    dfdump($(esc(:EC)))
   end
 end
 
@@ -189,13 +186,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit
 macro cc(method, kwargs...)
   strmethod="$method"
   ekwa = [esc(a) for a in kwargs]
-  fcidump_given = false
-  for a in ekwa
-    if a.args[1].args[1] == :fcidump
-      fcidump_given = true
-    end
-  end
-  if fcidump_given
+  if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
       ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
     end
