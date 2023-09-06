@@ -244,7 +244,7 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int}())
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
   orbs1 = replace(orbs1," "=>"")
-  if prod(orbsym) > 1 && occursin(".",orbs1)
+  if maximum(orbsym) > 1 && occursin(".",orbs1)
     @assert(issorted(orbsym),"Orbital symmetries are not sorted. Specify occa and occb without symmetry.")
     symoffset = zeros(Int,maximum(orbsym))
     symlist = zeros(Int,maximum(orbsym))
@@ -260,13 +260,16 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int}())
   else
     symoffset = zeros(Int,1)
   end
-  # println(orbs1)
   occursin(r"^[0-9:;.]+$",orbs1) || error("Use only `0123456789:;+-.` characters in the orbstring: $orbs")
   if first(orbs1) == ':'
     orbs1 = "1"*orbs1
   end
   orblist=Vector{Int}()
   for range in filter(!isempty,split(orbs1,';'))
+    if first(range) == ':'
+      sym = filter(!isempty,split(range[2:end],'.'))[2]
+      range = "1."*sym*range
+    end
     firstlast = filter(!isempty,split(range,':'))
     if length(firstlast) == 1
       # add the orbital
