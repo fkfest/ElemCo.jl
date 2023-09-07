@@ -133,20 +133,30 @@ and indexes k,l refer to occupied orbitals reordered as (closed-shell|active).
 function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2)
-  occv = setdiff(1:size(A,1), EC.space['o']) # to be modified
+  occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
+  n_1o = size(occ1o, 1)
+  n_2 = size(occ2,1)
+  n_v = size(occv,1)
+  n_occ = n_2+n_1o
+  n_open = n_1o+n_v
+  n_MO = size(cMO,2)
   μνL = load(EC,"munuL")
   μjL = load(EC,"mudL")
   μuL = load(EC,"muaL")
+  println("load done")
 
+  G = zeros((n_MO,n_MO,n_occ,n_occ))
   # Gij
   @tensoropt pjL[p,j,L] := μjL[μ,j,L] * cMO[μ,p] # to transfer the first index from atomic basis to molecular basis
-  @tensoropt Gij[r,s,i,j] := 8 * pjL[r,i,L] * pjL[s,j,L]
-  @tensoropt Gij[r,s,i,j] -= 2 * pjL[s,i,L] * pjL[r,j,L]
+  @tensoropt G[:,:,1:n_2,1:n_2][r,s,i,j] = 8 * pjL[r,i,L] * pjL[s,j,L]
+  @tensoropt G[:,:,1:n_2,1:n_2][r,s,i,j] -= 2 * pjL[s,i,L] * pjL[r,j,L]
   ijL = pjL[occ2,:,:]
   @tensoropt pqL[p,q,L] := μνL[μ,ν,L] * cMO[μ,p] * cMO[ν,q]
-  @tensoropt Gij[r,s,i,j] -= 2 * ijL[i,j,L] * pqL[r,s,L]
+  @tensoropt G[:,:,1:n_2,1:n_2][r,s,i,j] -= 2 * ijL[i,j,L] * pqL[r,s,L]
   Iij = 1.0 * Matrix(I, length(occ2), length(occ2))
-  @tensoropt Gij[r,s,i,j] += 2 * fock[μ,ν] * cMO[μ,r] * cMO[ν,s] * Iij[i,j] # lower cost?
+  @tensoropt G[:,:,1:n_2,1:n_2][r,s,i,j] += 2 * fock[μ,ν] * cMO[μ,r] * cMO[ν,s] * Iij[i,j] 
+
+  println("Gij done")
 
   # Gtj
   @tensoropt puL[p,u,L] := μuL[μ,u,L] * cMO[μ,p] #transfer from atomic basis to molecular basis
@@ -155,34 +165,52 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   @tensoropt multiplier[r,s,v,j] -= puL[s,v,L] * pjL[r,j,L]
   tjL = pjL[occ1o,:,:]
   @tensoropt multiplier[r,s,v,j] -= pqL[r,s,L] * tjL[v,j,L]
-  @tensoropt Gtj[r,s,t,j] := multiplier[r,s,v,j] * D1[t,v]
+  @tensoropt G[:,:,n_2+1:n_occ,1:n_2][r,s,t,j] = multiplier[r,s,v,j] * D1[t,v]
   
+  println("Gtj done")
+
   # Gtu 
-  @tensoropt Gtu[r,s,t,u] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s] * D1[t,u]
+  @tensoropt G[:,:,n_2+1:n_occ,n_2+1:n_occ][r,s,t,u] = fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s] * D1[t,u]
   tuL = pqL[occ1o, occ1o, :]
-  @tensoropt Gtu[r,s,t,u] += pqL[r,s,L] * (tuL[v,w,L] * D2[t,u,v,w])
-  @tensoropt Gtu[r,s,t,u] += 2 * (puL[r,v,L] * puL[s,w,L]) * D2[t,v,u,w]
+  @tensoropt G[:,:,n_2+1:n_occ,n_2+1:n_occ][r,s,t,u] += pqL[r,s,L] * (tuL[v,w,L] * D2[t,u,v,w])
+  @tensoropt G[:,:,n_2+1:n_occ,n_2+1:n_occ][r,s,t,u] += 2 * (puL[r,v,L] * puL[s,w,L]) * D2[t,v,u,w]
 
-  # G
-  n_MO = size(cMO,2)
-  G = zeros((n_MO,n_MO,n_MO,n_MO))
-  G[:,:,occ2,occ2] = Gij
-  G[:,:,occ1o,occ2] = Gtj
-  G[:,:,occ2,occ1o] = permutedims(Gtj, [2,1,4,3])
-  G[:,:,occ1o,occ1o] = Gtu
+  # Gjt
+  G[:,:,1:n_2,n_2+1:n_occ] = permutedims(G[:,:,n_2+1:n_occ,1:n_2], [2,1,4,3])
 
-  # calc h with G
-  I_kl = 1.0 * Matrix(I, n_MO, n_MO)
-  @tensoropt h[r,k,s,l] := 2 * G[r,s,k,l] - I_kl[k,l] * (A[r,s] + A[s,r])
-  @tensoropt h[r,k,s,l] += 2 * G[k,l,r,s] - I_kl[r,s] * (A[k,l] + A[l,k])
-  @tensoropt h[r,k,s,l] -= 2 * G[k,s,r,l] - I_kl[r,l] * (A[k,s] + A[s,k])
-  @tensoropt h[r,k,s,l] -= 2 * G[r,l,k,s] - I_kl[k,s] * (A[r,l] + A[l,r])
-  h_rk_sl = h[[occ1o;occv],[occ2;occ1o],[occ1o;occv],[occ2;occ1o]]
-  d = size(h_rk_sl,1) * size(h_rk_sl,2)
-  h_rk_sl = reshape(h_rk_sl, d, d)
+  println("G done")
 
-  #save(EC,"h_rk_sl",h_rk_sl)
-  return h_rk_sl,h
+  if findmax(occ2)[1] > findmin(occ1o)[1] || findmax(occ1o)[1] > findmin(occv)[1]
+    println("G reordered!")
+    G = G[[occ2;occ1o;occv];[occ2;occ1o;occv];:;:]
+  end
+
+  # calc h with G 
+  I_kl = 1.0 * Matrix(I, n_2+n_1o, n_2+n_1o)
+  h = zeros((n_open,n_occ,n_open,n_occ))
+  A = A[:,1:n_occ]
+  @tensoropt h[r,k,s,l] += 2 * G[n_2+1:end,n_2+1:end,:,:][r,s,k,l]
+  @tensoropt h[1:n_1o,:,:,:][r,k,s,l] -= 2 * G[1:n_occ,n_2+1:end,n_2+1:end,:][k,s,r,l]
+  @tensoropt h[:,:,1:n_1o,:][r,k,s,l] -= 2 * G[n_2+1:end,1:n_occ,:,n_2+1:end][r,l,k,s]
+  @tensoropt h[1:n_1o,:,1:n_1o,:][r,k,s,l] += 2 * G[1:n_occ,1:n_occ,n_2+1:end,n_2+1:end][k,l,r,s]
+  for i in 1:n_occ
+    h[:,i,1:n_1o,i] -= A[n_2+1:end,n_2+1:end]
+    h[1:n_1o,i,:,i] -= transpose(A)[n_2+1:end,n_2+1:end]
+  end
+  for i in 1:n_open
+    h[i,:,i,:] -= A[1:n_occ,:]
+    h[i,:,i,:] -= transpose(A)[:,1:n_occ]
+  end
+  for i in 1:n_1o
+    h[i,:,1:n_1o,n_2+i] += A[1:n_occ,n_2+1:end]
+    h[i,:,:,n_2+i] += transpose(A)[:,n_2+1:end]
+    h[:,n_2+i,i,:] += A[n_2+1:end,:]
+    h[1:n_1o,n_2+i,i,:] += transpose(A)[n_2+1:end,1:n_occ]
+  end
+
+  d = n_occ * n_open
+  h = reshape(h, d, d)
+  return h
 end
 
 """
@@ -435,7 +463,7 @@ function checkE_modifyTrust(E, E_former, E_2o, trust)
   if energy_quotient < 0.0
     trust = 0.7 * trust
     reject = true
-    println("REJECT the update of coefficients, new trust value: ", trust)
+    #println("REJECT the update of coefficients, new trust value: ", trust)
   elseif energy_quotient < 0.25
     trust = 0.7 * trust
   elseif energy_quotient > 0.75
@@ -483,9 +511,13 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
     # calc g and h with updated cMO
     projDenFitInt(EC, cMO)
     fock, fockClosed = dffockCAS(EC,cMO,D1)
+    println("fock done")
     A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
+    println("A done")
     g = calc_g(A, EC)
-    h, h_SO = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
+    println("g done")
+    h = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
+    println("h done")
     #h = calc_h_SCI(EC, cMO, fock, D1, D2, h_SO)
     #h = calc_h_combined(EC, cMO, fock, D1, D2, h_SO)
     #println("norm of g: ", norm(g))

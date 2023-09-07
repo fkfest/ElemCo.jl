@@ -109,6 +109,7 @@ function generate_integrals(EC::ECInfo; save3idx = true)
   if save3idx
     pqP = ERI_2e3c(bao,bfit)
     @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
+    println("size of pqL", size(pqL))
     save(EC,"munuL",pqL)
   else
     save(EC,"PL",M)
