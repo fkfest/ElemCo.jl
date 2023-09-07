@@ -1739,34 +1739,43 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
   if length(T1a) > 0
     @tensoropt T1[a,i] := T1a[a,i] - T1b[a,i]
     @tensoropt T2ta[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
+    @tensoropt T2tb[a,b,i,j] := T2b[a,b,i,j] + T1b[a,i] * T1b[b,j]
     @tensoropt T2tab[a,b,i,j] := T2ab[a,b,i,j] + T1a[a,i] * T1b[b,j]
     if !isempty(occcorea) && !isempty(occcoreb)
       @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsb,occcoreb][a,j]
+      @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] += T2ab[norba,morbb,occcorea,norbb][i] * T1[virtualsa,occcorea][a,j]
       @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1a[norba,occcorea][j]
-      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2a[norba,virtualsa,occcorea,morba][a,j] * T1b[morbb,occcoreb][i]
+      @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2ab[norba,virtualsb,occcorea,norbb][a,i] * T1b[morbb,occcoreb][j]
       @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i] * T1a[virtualsa,morba][a]
+      @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2tab[norba,morbb,occcorea,occcoreb][i,j] * T1b[virtualsa,norbb][a]
 
       @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1[virtualsb,occcoreb][b,i]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] -= T2ab[virtualsa,morbb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
       @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,occcorea,norbb][a,i] * T1a[virtualsa,morba][b] 
-      @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2a[virtualsa,norba,morba,occcorea][b,i] * T1b[virtualsb,norbb][a]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
       @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2tab[virtualsa,virtualsb,morba,norbb][b,a] * T1a[norba,occcorea][i]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2tab[virtualsa,virtualsb,morba,norbb][a,b] * T1b[morbb,occcoreb][i] 
 
       @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsb,occcoreb][b,j]
-      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsa,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsb,occcoreb][b,j]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][b,a,j,i] += T2ab[norba,morbb,occcorea,norbb][i] * T1a[virtualsa,morba][a] * T1[virtualsb,occcoreb][b,j]
 
-      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,morbb,occcorea,norbb][i] * T1a[virtualsa,morba][a] * T1[virtualsb,occcoreb][b,j]
-      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[virtualsa,morbb,morba,norbb][a] * T1a[norba,occcorea][i] * T1[virtualsb,occcoreb][b,j]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsb,occcoreb][b,j]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][b,a,j,i] += T2ab[virtualsa,morbb,morba,norbb][a] * T1a[norba,occcorea][i] * T1[virtualsa,occcorea][b,j]
       @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2a[norba,virtualsa,morba,occcorea][b,j] * T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][i]
       @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T1a[norba,occcorea][j] * T1a[virtualsa,morba][b]
       @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[virtualsa,morbb,morba,occcoreb][b,i] * T1a[norba,occcorea][j] * T1b[virtualsb,norbb][a]
       @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,occcorea,norbb][a,j] * T1a[virtualsa,morba][b] * T1b[morbb,occcoreb][i]
       @tensoropt M2[norba,morbb,morba,occcoreb][i] += T1a[norba,occcorea][i]
+      @tensoropt M2[norba,morbb,occcorea,norbb][i] += T1b[morbb,occcoreb][i]
       @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2tab[norba,morbb,occcorea,occcoreb][i,j] * T2tab[virtualsa,virtualsb,morba,norbb][a,b]
       @tensoropt M2[norba,morbb,occcorea,occcoreb][i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i]
       @tensoropt M2[norba,virtualsb,morba,occcoreb][a,i] += T2ta[norba,virtualsa,occcorea,morba][a,i]
+      @tensoropt M2[virtualsa,morbb,occcorea,norbb][a,i] += T2tb[morbb,virtualsb,occcoreb,norbb][a,i]
       @tensoropt M2[virtualsa,morbb,morba,occcoreb][a,i] += T2tab[norba,virtualsb,occcorea,norbb][a,i]
+      @tensoropt M2[norba,virtualsb,occcorea,norbb][a,i] += T2tab[virtualsa,morbb,morba,occcoreb][a,i]
     end
     @tensoropt M2[norba,virtualsb,morba,norbb][a] -= T1a[virtualsa,morba][a]
+    @tensoropt M2[virtualsa,morbb,morba,norbb][a] -= T1b[virtualsb,norbb][a]
     @tensoropt M2[virtualsa,virtualsb,morba,norbb][a,b] -= T2tab[virtualsa,virtualsb,morba,norbb][b,a]
   end
   if !isempty(occcorea) && !isempty(occcoreb)
