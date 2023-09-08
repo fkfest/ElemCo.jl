@@ -13,21 +13,35 @@ export Diis, perform
   DIIS object
 """
 mutable struct Diis
+  """ maximum number of DIIS vectors """
   maxdiis::Int
+  """ threshold for residual norm to start DIIS """
   resthr::Float64
+  """ files for DIIS vectors """
   ampfiles::Array{String}
+  """ files for DIIS residuals """
   resfiles::Array{String}
+  """ square weights for DIIS residuals components """
+  weights::Array{Float64}
+  """ next vector to be replaced """
   next::Int
+  """ number of DIIS vectors """
   nDim::Int
+  """ B matrix """
   bmat::Array{Float64}
-  function Diis(EC::ECInfo; maxdiis::Int = EC.options.diis.maxdiis, resthr::Float64 = EC.options.diis.resthr)
+  """
+    Diis(EC::ECInfo, weights = Float64[]; maxdiis::Int = EC.options.diis.maxdiis, resthr::Float64 = EC.options.diis.resthr)
+  
+  Create DIIS object. `weights` is an array of square weights for DIIS residuals components.
+  """
+  function Diis(EC::ECInfo, weights = Float64[]; maxdiis::Int = EC.options.diis.maxdiis, resthr::Float64 = EC.options.diis.resthr)
     ampfiles = [ joinpath(EC.scr, "amp"*string(i)*EC.ext) for i in 1:maxdiis ]
     resfiles = [ joinpath(EC.scr, "res"*string(i)*EC.ext) for i in 1:maxdiis ]
     for i in 1:maxdiis
       add_file(EC, "amp"*string(i), "tmp", overwrite=true)
       add_file(EC, "res"*string(i), "tmp", overwrite=true)
     end
-    new(maxdiis,resthr,ampfiles,resfiles,1,0,zeros(maxdiis+1,maxdiis+1))
+    new(maxdiis,resthr,ampfiles,resfiles,weights,1,0,zeros(maxdiis+1,maxdiis+1))
   end
 end
 
@@ -90,6 +104,23 @@ function combine(diis::Diis, vecfiles, coeffs)
 end
 
 """
+    weighted_dot(diis::Diis, vecs1, vecs2)
+
+  Compute weighted (with diis.weights) dot product of vectors.
+"""
+function weighted_dot(diis::Diis, vecs1, vecs2)
+  if length(diis.weights) == 0
+    return vecs1 ⋅ vecs2
+  end
+  @assert length(vecs1) == length(diis.weights)
+  dot = 0.0
+  for i in eachindex(vecs1)
+    dot += diis.weights[i] * (vecs1[i] ⋅ vecs2[i])
+  end
+  return dot
+end
+
+"""
     perform(diis::Diis, Amps, Res)
 
   Perform DIIS.
@@ -102,12 +133,12 @@ function perform(diis::Diis, Amps, Res)
   nDim = diis.nDim
   saveamps(diis,Amps,ithis)
   saveres(diis,Res,ithis)
-  thisResDot = Res ⋅ Res
+  thisResDot = weighted_dot(diis, Res, Res)
   # update B matrix
   for i in 1:nDim
     if i != ithis
       resi = loadres(diis,i)
-      dot = Res ⋅ resi
+      dot = weighted_dot(diis, Res, resi)
       diis.bmat[i,ithis] = dot
       diis.bmat[ithis,i] = dot
     else
