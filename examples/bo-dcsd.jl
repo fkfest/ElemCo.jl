@@ -32,11 +32,12 @@ for dir in readdir()
     # to do directly BO-HF without calculating dcsd uncomment next line
     #setup(EC; fcidump)
     if ElemCo.is_closed_shell(EC)[1]
-      EBOHF, ϵ,CMOl,CMOr = bohf(EC)
+      EBOHF = bohf(EC)
     else
-      EBOHF, ϵ,CMOl,CMOr = bouhf(EC)
+      EBOHF = bouhf(EC)
     end
-    display(ϵ)
+    CMOr = load(EC, EC.options.scf.save)
+    CMOl = load(EC, EC.options.scf.save*EC.options.scf.left)
     transform_fcidump(EC.fd, CMOl, CMOr)
     EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
   end

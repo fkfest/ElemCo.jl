@@ -42,13 +42,19 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
 end
 
 """ 
-    dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
+    dfdump(EC::ECInfo)
 
-  Generate fcidump using df integrals and store in dumpfile.
-  If dumpfile is empty, don't write to fcidump file, store in EC.fd.
+  Generate fcidump using df integrals and store in `IntOptions.fcidump`.
+  If `IntOptions.fcidump` is empty, don't write to fcidump file, store in EC.fd.
 """
-function dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
-  println("generating fcidump $dumpfile")
+function dfdump(EC::ECInfo)
+  println("generating integrals")
+  dumpfile = EC.options.int.fcidump 
+  if !EC.options.int.df
+    error("Only density-fitted integrals implemented")
+  end
+  orbsfile = (EC.options.int.orbs == "") ? EC.options.scf.save : EC.options.int.orbs
+  cMO = load(EC, orbsfile)
   nelec = guess_nelec(EC.ms)
   fdump = FDump(size(cMO,2), nelec)
   generate_integrals(EC, fdump, cMO)

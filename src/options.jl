@@ -12,10 +12,16 @@
   maxit::Int = 50
   """ tolerance for imaginary part of MO coefs (for biorthogonal). """
   imagtol::Float64 = 1.e-8
+  """ direct calculation without storing integrals. """
+  direct::Bool = false
   """ orbital guess. """
   guess::Symbol = :SAD
-  """ orbitals for orbital guess. """
+  """ filename of orbitals for orbital guess. """
   orbsguess::String = "C_Am"
+  """ filename to save orbitals. """
+  save::String = "C_Am"
+  """ addition to the filename for left orbitals (for biorthogonal calculations). """
+  left::String = "-left"
 end
 
 """ 
@@ -50,6 +56,26 @@ end
   triangular_kext::Bool = true
   """ calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
+  """ filename of orbitals (for non-fcidump calculations). """
+  orbs::String = "C_Am"
+  """ filename for start amplitudes. """
+  start::String = "cc_amplitudes"
+  """ filename to save amplitudes. """
+  save::String = "cc_amplitudes"
+end
+
+"""
+  Options for integral calculation.
+
+  $(FIELDS)
+"""
+@with_kw mutable struct IntOptions
+  """ use density-fitted integrals. """
+  df::Bool = true
+  """ store integrals in FCIDump format. """
+  fcidump::String = ""
+  """ filename of orbitals for MO transformation. If empty: ScfOptions.save is used. """
+  orbs::String = ""
 end
 
 """ 
@@ -82,6 +108,8 @@ end
 @with_kw mutable struct Options
   """ SCF options. """
   scf::ScfOptions = ScfOptions()
+  """ Integral options. """
+  int::IntOptions = IntOptions()
   """ Coupled-Cluster options. """
   cc::CcOptions = CcOptions()
   """ Cholesky options. """

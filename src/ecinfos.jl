@@ -7,7 +7,7 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
-export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs
+export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file, delete_temporary_files
 export isalphaspin, space4spin
 
@@ -151,6 +151,21 @@ function n_virtb_orbs(EC::ECInfo)
   return length(EC.space['V'])
 end
 
+"""
+    len_spaces(EC::ECInfo, spaces::String)
+
+  Return lengths of `spaces` (e.g., "vo" for occupied and virtual orbitals).
+"""
+function len_spaces(EC::ECInfo, spaces::String)
+  return [length(EC.space[sp]) for sp in spaces]
+end
+
+"""
+    len_spaces(EC::ECInfo, spaces::String)
+
+  Return a tuple of lengths of `spaces` (e.g., "ov" for occupied and virtual orbitals).
+"""
+
 """ 
     set_options!(opt; kwargs...)
 
@@ -164,6 +179,7 @@ function set_options!(opt; kwargs...)
       error("invalid option name: $key")
     end
   end
+  return opt
 end
 
 """

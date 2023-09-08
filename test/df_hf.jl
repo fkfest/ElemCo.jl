@@ -25,11 +25,11 @@ basis = Dict("ao"=>"cc-pVDZ",
 EC = ECInfo(ms=MSys(xyz,basis))
 
 setup!(EC)
-
-ϵ,cMO = dfhf(EC,direct=true)
-
+EC.options.scf.direct=true
+dfhf(EC)
 fcidump = "DF_HF_TEST.FCIDUMP"
-dfdump(EC,cMO,fcidump)
+EC.options.int.fcidump=fcidump
+dfdump(EC)
 
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EHF-EHF_test) < epsilon

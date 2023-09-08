@@ -20,6 +20,11 @@ end
 include("h2o.jl")
 include("h2o_st1.jl")
 include("h2o_cation.jl")
+
+end
+
+@testset verbose = true "DF Calculations" begin
+
 include("df_hf.jl")
 include("df_mcscf.jl")
 
