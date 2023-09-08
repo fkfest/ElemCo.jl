@@ -1560,7 +1560,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   end
 
   if( uppercase(EC.currentMethod[1:2]) == "TD" || uppercase(EC.currentMethod[1:2]) == "FR" )
-    # TD-CC assumes open-shell singlet reference morba and norbb occupied
+    # TD-CC assumes open-shell singlet reference morba and norbb occupied in Φ^A and morbb and norba in Φ^B.
     @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "TD-CCSD needs two open-shell alpha beta orbitals"
     morba, norbb, morbb, norba = active_orbitals(EC)
     if uppercase(EC.currentMethod[1:2]) == "TD"
