@@ -29,3 +29,9 @@ include("df_hf.jl")
 include("df_mcscf.jl")
 
 end
+
+@testset verbose = true "Unit tests" begin
+
+include("unit_tests.jl")
+
+end
