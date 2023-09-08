@@ -1724,7 +1724,7 @@ function calc_ucc(EC::ECInfo, method::ECMethod)
     Amps[ββ] = read_starting_guess4amplitudes(EC, 2, :β, :β)
     Amps[αβ] = read_starting_guess4amplitudes(EC, 2, :α, :β)
   end
-  diis = Diis(EC)
+  diis = Diis(EC, [1.0, 1.0, 1.0, 1.0, 4.0])
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
@@ -1743,7 +1743,6 @@ function calc_ucc(EC::ECInfo, method::ECMethod)
     Amps[αα] += update_doubles(EC, Res[αα])
     Amps[ββ] += update_doubles(EC, Res[ββ]; spincase=:β)
     Amps[αβ] += update_doubles(EC, Res[αβ]; spincase=:αβ)
-    # TODO: scale \alpha\beta residual by 2 for DIIS
     if nosing
       Amps = perform(diis,Amps,Res)
       En = 0.0

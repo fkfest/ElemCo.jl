@@ -423,7 +423,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     end
 
     ecmethod_save = ecmethod
-    if ecmethod.exclevel[3] == :full || ecmethod.exclevel[3] == :pertiter
+    if ecmethod.exclevel[3] in [:full, :pertiter]
       ecmethod = ECMethod("CCSD")
     end     
     if closed_shell_method
