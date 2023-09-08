@@ -336,12 +336,12 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
   else
     fock = gen_fock(EC, :α)
     eps = diag(fock)
-    println("Occupied \alpha orbital energies: ", eps[EC.space['o']])
+    println("Occupied α orbital energies: ", eps[EC.space['o']])
     save(EC, "f_mm", fock)
     save(EC, "e_m", eps)
     fock = gen_fock(EC, :β)
     eps = diag(fock)
-    println("Occupied \beta orbital energies: ", eps[EC.space['O']])
+    println("Occupied β orbital energies: ", eps[EC.space['O']])
     save(EC,"f_MM", fock)
     save(EC,"e_M", eps)
   end
@@ -403,9 +403,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     # at the moment we always calculate MP2 first
     # calculate MP2
     if closed_shell_method
-      EMp2, T2 = calc_MP2(EC)
+      EMp2 = calc_MP2(EC)
     else
-      EMp2, T2a, T2b, T2ab = calc_UMP2(EC)
+      EMp2 = calc_UMP2(EC)
     end
     println(add2name*"MP2 correlation energy: ",EMp2)
     println(add2name*"MP2 total energy: ",EMp2+EHF)
@@ -422,58 +422,45 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       error("no quadruples implemented yet...")
     end
 
+    ecmethod_save = ecmethod
+    if ecmethod.exclevel[3] == :full || ecmethod.exclevel[3] == :pertiter
+      ecmethod = ECMethod("CCSD")
+    end     
     if closed_shell_method
-      if ecmethod.exclevel[1] == :full
-        T1 = zeros(size(SP['v'],1),size(SP['o'],1))
-      else
-        T1 = zeros(0)
-      end
-      ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
+      ECC = calc_cc(EC, ecmethod)
     else
-      if ecmethod.exclevel[1] == :full
-        T1a = zeros(size(SP['v'],1),size(SP['o'],1))
-        T1b = zeros(size(SP['V'],1),size(SP['O'],1))
-        if(!EC.options.cc.use_kext)
-          error("open-shell CCSD only implemented with kext")
-        end
-      else
-        T1a = zeros(0)
-        T1b = zeros(0)
-      end
-      ECC, T1a, T1b, T2a, T2b, T2ab = calc_cc(EC,T1a,T1b,T2a,T2b,T2ab,dc)
+      ECC = calc_ucc(EC, ecmethod)
     end
 
+    main_name = method_name(ecmethod)
+    println("$main_name correlation energy: ",ECC)
+    println("$main_name total energy: ",ECC+EHF)
+
+    ecmethod = ecmethod_save # restore
     if closed_shell_method
-      main_name = method_name(T1,dc)
       if ecmethod.exclevel[3] != :none
         do_full_t3 = (ecmethod.exclevel[3] == :full || ecmethod.exclevel[3] == :pertiter)
         save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
+        ET3, ET3b = calc_pertT(EC; save_t3 = save_pert_t3)
         println()
         println("$main_name[T] total energy: ",ECC+ET3b+EHF)
         println("$main_name(T) correlation energy: ",ECC+ET3)
         println("$main_name(T) total energy: ",ECC+ET3+EHF)
         if do_full_t3
           cc3 = (ecmethod.exclevel[3] == :pertiter)
-          ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, EC.options.cc.calc_t3_for_decomposition, cc3)
-          if cc3
-            main_name = "CC3"
-          else
-            main_name = "DC-CCSDT"
-          end
+          ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
+          main_name = method_name(ecmethod)
           println("$main_name correlation energy: ",ECC)
           println("$main_name total energy: ",ECC+EHF)
         end 
       end
-    else
-      main_name = method_name(T1a,dc)
     end
+    println()
     flush(stdout)
 
-    println(add2name*"$main_name correlation energy: ",ECC)
-    println(add2name*"$main_name total energy: ",ECC+EHF)
     t1 = print_time(EC, t1,"CC",1)
     delete_temporary_files(EC)
+    draw_endline()
     if length(method_names) == 1
       if ecmethod.exclevel[3] != :none
         return EHF, EMp2, ECC, ET3

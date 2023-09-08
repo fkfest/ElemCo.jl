@@ -3,7 +3,7 @@ module Utils
 using Printf
 using ..ElemCo.AbstractEC
 
-export print_time, draw_line, print_info, kwarg_provided_in_macro
+export print_time, draw_line, print_info, draw_endline, kwarg_provided_in_macro
 
 """ 
     print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
@@ -37,6 +37,15 @@ function print_info(info::AbstractString)
   draw_line()
   println(info)
   draw_line()
+end
+
+"""
+    draw_endline()
+
+  Print a line of 🙨.
+"""
+function draw_endline(n=60)
+  println(repeat("🙨", n))
 end
 
 """
