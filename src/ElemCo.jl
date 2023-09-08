@@ -32,6 +32,7 @@ catch
   println("MKL package not found, using OpenBLAS.")
 end
 using LinearAlgebra
+using Printf
 #BLAS.set_num_threads(1)
 using ArgParse
 using .Utils
@@ -275,7 +276,7 @@ end
 
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)
   EC = ECInfo()
-  fcidump = joinpath(@__DIR__,"..","test",dumpfile)
+  fcidump = joinpath(dumpfile)
   EC.options.cc.maxit = 100
   EC.options.cc.thr = 1.e-12
   EC.options.cc.use_kext = use_kext
@@ -283,8 +284,7 @@ function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", oc
   EC.options.cc.calc_d_vvvo = !use_kext
   EC.options.cc.calc_d_vovv = !use_kext
   EC.options.cc.calc_d_vvoo = !use_kext
-  EHF, EMP2, ECCSD = ECdriver(EC,method; fcidump, occa, occb)
-  return ECCSD
+  EHF, EMP2, ECC, W = ECdriver(EC,method; fcidump, occa, occb)
 end
 
 """
@@ -444,17 +444,23 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
 
     if ecmethod.theory[1:2] == "FR"
       add2name = "FR-"*add2name
-    elseif ecmethod.theory[1:2] == "TD"
-      add2name = "TD-"*add2name
     end
-    println(add2name*"$main_name correlation energy: ",ECC)
-    println(add2name*"$main_name total energy: ",ECC+EHF)
-    t1 = print_time(EC, t1,"CC",1)
-    if length(method_names) == 1
-      if ecmethod.exclevel[3] != NoExc
-        return EHF, EMp2, ECC, ET3
-      else
-        return EHF, EMp2, ECC
+    if ecmethod.theory[1:2] == "TD"
+      add2name = "TD-"*add2name
+      W = load(EC,"td_ccsd_W")[1]
+      @printf "%26s %16.12f \n" add2name*"$main_name singlet energy:" EHF+ECC+W
+      @printf "%26s %16.12f \n" add2name*"$main_name triplet energy:" EHF+ECC-W
+      return EHF, EMp2, ECC, W
+    else
+      println(add2name*"$main_name correlation energy: ",ECC)
+      println(add2name*"$main_name total energy: ",ECC+EHF)
+      t1 = print_time(EC, t1,"CC",1)
+      if length(method_names) == 1
+        if ecmethod.exclevel[3] != NoExc
+          return EHF, EMp2, ECC, ET3
+        else
+          return EHF, EMp2, ECC
+        end
       end
     end
   end
