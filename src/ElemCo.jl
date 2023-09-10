@@ -276,7 +276,11 @@ end
 
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)
   EC = ECInfo()
-  fcidump = joinpath(dumpfile)
+  if !isdir(dumpfile)
+    fcidump = joinpath(@__DIR__,"..","test",dumpfile)
+  else
+    fcidump = dumpfile
+  end
   EC.options.cc.maxit = 100
   EC.options.cc.thr = 1.e-12
   EC.options.cc.use_kext = use_kext
@@ -284,7 +288,11 @@ function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", oc
   EC.options.cc.calc_d_vvvo = !use_kext
   EC.options.cc.calc_d_vovv = !use_kext
   EC.options.cc.calc_d_vvoo = !use_kext
-  EHF, EMP2, ECC, W = ECdriver(EC,method; fcidump, occa, occb)
+  if uppercase(method[1:2]) == "TD"
+    EHF, EMP2, ECC, W = ECdriver(EC,method; fcidump, occa, occb)
+  else
+    EHF, EMP2, ECC = ECdriver(EC,method; fcidump, occa, occb)
+  end
 end
 
 """
@@ -388,7 +396,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       continue
     end
 
-    dc = (ecmethod.theory == "DC" || ecmethod.theory == "TD-DC" || ecmethod.theory == "FR-DC")
+    dc = (ecmethod.theory == "DC" || ecmethod.theory == "TD-DC" || ecmethod.theory == "FRS-DC" || ecmethod.theory == "FRT-DC")
 
     if ecmethod.exclevel[4] != NoExc
       error("no quadruples implemented yet...")

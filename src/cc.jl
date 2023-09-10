@@ -1879,9 +1879,12 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
     T2a += update_doubles(EC,R2a)
     T2b += update_doubles(EC,R2b;spincase=SCβ)
     T2ab += update_doubles(EC,R2ab;spincase=SCαβ)
-    if( uppercase(EC.currentMethod[1:2]) == "FR" )
+    if uppercase(EC.currentMethod[1:3]) == "FRS"
       morba, norbb, morbb, norba = active_orbitals(EC)
       T2ab[norba,morbb,morba,norbb] = 1.0
+    elseif uppercase(EC.currentMethod[1:3]) == "FRT"
+      morba, norbb, morbb, norba = active_orbitals(EC)
+      T2ab[norba,morbb,morba,norbb] = -1.0
     elseif uppercase(EC.currentMethod[1:2]) == "TD"
       morba, norbb, morbb, norba = active_orbitals(EC)
       println("T1a all internal: ", T1a[norba,morba])

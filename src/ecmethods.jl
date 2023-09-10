@@ -34,9 +34,12 @@ struct ECMethod
     if uppercase(mname[ipos:ipos+1]) == "TD"
       theory = "TD-"
       ipos += 3
-    elseif uppercase(mname[ipos:ipos+1]) == "FR"
-      theory = "FR-"
-      ipos += 3
+    elseif uppercase(mname[ipos:ipos+2]) == "FRS"
+      theory = "FRS-"
+      ipos += 4
+    elseif uppercase(mname[ipos:ipos+2]) == "FRT"
+      theory = "FRT-"
+      ipos += 4
     end
     if uppercase(mname[ipos]) == 'U'
       unrestricted = true
