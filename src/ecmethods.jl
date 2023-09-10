@@ -14,7 +14,7 @@ Description of the electron-correlation method
 
 $(FIELDS)
 """
-struct ECMethod
+mutable struct ECMethod
   """unrestricted calculation."""
   unrestricted::Bool
   """theory level: MP, CC, DC."""

@@ -20,7 +20,7 @@ using ..ElemCo.FciDump
 using ..ElemCo.DIIS
 using ..ElemCo.DFCoupledCluster
 
-export calc_MP2, calc_UMP2, method_name_old, calc_cc, calc_ucc, calc_pertT
+export calc_MP2, calc_UMP2, calc_cc, calc_pertT
 
 include("cc_tests.jl")
 
@@ -109,6 +109,44 @@ function update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=fal
   end
 end
 
+"""
+    update_singles!(EC::ECInfo, T1, R1)
+
+  Update singles amplitudes in `T1` with `R1`.
+"""
+function update_singles!(EC::ECInfo, T1, R1)
+  T1 .+= update_singles(EC, R1)
+end
+
+"""
+    update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
+
+  Update singles amplitudes in `T1a`, `T1b` with `R1a`, `R1b`.
+"""
+function update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
+  T1a .+= update_singles(EC, R1a)
+  T1b .+= update_singles(EC, R1b; spincase=:β)
+end
+
+"""
+    update_doubles!(EC::ECInfo, T2, R2)
+
+  Update doubles amplitudes in `T2` with `R2`.
+"""
+function update_doubles!(EC::ECInfo, T2, R2)
+  T2 .+= update_doubles(EC, R2)
+end
+
+"""
+    update_doubles!(EC::ECInfo, T2a, T2b, T2ab, R2a, R2b, R2ab)
+
+  Update doubles amplitudes in `T2a`, `T2b`, `T2ab` with `R2a`, `R2b`, `R2ab`.
+"""
+function update_doubles!(EC::ECInfo, T2a, T2b, T2ab, R2a, R2b, R2ab)
+  T2a .+= update_doubles(EC, R2a)
+  T2b .+= update_doubles(EC, R2b; spincase=:β)
+  T2ab .+= update_doubles(EC, R2ab; spincase=:αβ)
+end
 
 """
     calc_singles_energy(EC::ECInfo, T1; fock_only=false)
@@ -118,10 +156,12 @@ end
 function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
-  if !fock_only
-    @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
+  if length(T1) > 0
+    if !fock_only
+      @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
+    end
+    @tensoropt ET1 += 2.0*T1[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
   end
-  @tensoropt ET1 += 2.0*T1[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
   return ET1
 end
 
@@ -134,17 +174,21 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if !fock_only
-    @tensoropt ET1 += 0.5*(T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b]
-    if n_occb_orbs(EC) > 0
-      @tensoropt begin
-        ET1 += 0.5*(T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b]
-        ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
+    if length(T1a) > 0
+      @tensoropt ET1 += 0.5*(T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b]
+    end
+    if length(T1b) > 0
+      @tensoropt ET1 += 0.5*(T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b]
+      if length(T1a) > 0
+        @tensoropt ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
       end
     end
   end
-  @tensoropt begin
-    ET1 += T1a[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
-    ET1 += T1b[a,i] * load(EC,"f_MM")[SP['O'],SP['V']][i,a]
+  if length(T1a) > 0
+    @tensoropt ET1 += T1a[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
+  end
+  if length(T1b) > 0
+    @tensoropt ET1 += T1b[a,i] * load(EC,"f_MM")[SP['O'],SP['V']][i,a]
   end
   return ET1
 end
@@ -835,22 +879,42 @@ function read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
 end
 
 """
-    method_name(T1, dc=false)
-  
-  Guess method name (CCSD/DCSD/CCD/DCD)
+    save_current_singles(EC::ECInfo, T1)
+
+  Save current singles amplitudes `T1` to file `T_vo`
 """
-function method_name_old(T1, dc=false)
-  if dc
-    name = "DC"
-  else
-    name = "CC"
-  end
-  if ndims(T1) != 2
-    name *= "D"
-  else
-    name *= "SD"
-  end
-  return name
+function save_current_singles(EC::ECInfo, T1)
+  save(EC, "T_vo", T1)
+end
+
+"""
+    save_current_singles(EC::ECInfo, T1a, T1b)
+
+  Save current singles amplitudes `T1a` and `T1b` to files `T_vo` and `T_VO`
+"""
+function save_current_singles(EC::ECInfo, T1a, T1b)
+  save(EC, "T_vo", T1a)
+  save(EC, "T_VO", T1b)
+end
+
+"""
+    save_current_doubles(EC::ECInfo, T2)
+
+  Save current doubles amplitudes `T2` to file `T_vvoo`
+"""
+function save_current_doubles(EC::ECInfo, T2)
+  save(EC, "T_vvoo", T2)
+end
+
+"""
+    save_current_doubles(EC::ECInfo, T2a, T2b, T2ab)
+
+  Save current doubles amplitudes `T2a`, `T2b`, and `T2ab` to files `T_vvoo`, `T_VVOO`, and `T_vVoO`
+"""
+function save_current_doubles(EC::ECInfo, T2a, T2b, T2ab)
+  save(EC, "T_vvoo", T2a)
+  save(EC, "T_VVOO", T2b)
+  save(EC, "T_vVoO", T2ab)
 end
 
 """ 
@@ -1254,6 +1318,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   norb = n_orbs(EC)
   linearized::Bool = false
   if ndims(T1a) == 2
+    if !EC.options.cc.use_kext
+      error("open-shell CCSD only implemented with kext")
+    end
     calc_dressed_ints(EC,T1a,T1b)
     t1 = print_time(EC,t1,"dressing",2)
   else
@@ -1621,142 +1688,94 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   return R1a, R1b, R2a, R2b, R2ab
 end
 
+"""
+    starting_amplitudes(EC::ECInfo, method::ECMethod)
+
+  Prepare starting amplitudes for coupled cluster calculation.
+  
+  The starting amplitudes are read from files `T_vo`, `T_VO`, `T_vvoo`, etc.
+  If the files do not exist, the amplitudes are initialized to zero.
+  The order of amplitudes is as follows:
+  - singles: `α`, `β`
+  - doubles: `αα`, `ββ`, `αβ`
+  - triples: `ααα`, `βββ`, `ααβ`, `αββ`
+  Return a list of vectors of starting amplitudes 
+  and a list of ranges for excitation levels.
+"""
+function starting_amplitudes(EC::ECInfo, method::ECMethod)
+  highest_full_exc = max_full_exc(method)
+  if highest_full_exc > 3
+    error("starting_amplitudes only implemented upto triples")
+  end
+  if method.unrestricted
+    namps = sum([i + 1 for i in 1:highest_full_exc])
+    exc_ranges = [1:2, 3:5, 6:9]
+    spins = [(:α,), (:β,), (:α, :α), (:β, :β), (:α, :β), (:α, :α, :α), (:β, :β, :β), (:α, :α, :β), (:α, :β, :β)]
+  else
+    namps = highest_full_exc
+    exc_ranges = [1:1, 2:2, 3:3]
+    spins = [(:α,), (:α, :α), (:α, :α, :α)]
+  end
+  Amps = AbstractArray[Float64[] for i in 1:namps]
+  # starting guesses
+  for (iex,ex) in enumerate(method.exclevel)
+    if ex == :full
+      for iamp in exc_ranges[iex]
+        Amps[iamp] = read_starting_guess4amplitudes(EC, iex, spins[iamp]...)
+      end
+    end
+  end
+  return Amps, exc_ranges
+end
 
 """
     calc_cc(EC::ECInfo, method::ECMethod)
 
-  Calculate closed-shell coupled cluster amplitudes.
+  Calculate coupled cluster amplitudes.
 
   Exact specification of the method is given by `method`.
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC")
   print_info(method_name(method))
-  highest_full_exc = max_full_exc(method)
-  Amps = Any[Float64[] for i in 1:highest_full_exc]
-  # starting guess
-  for (iex,ex) in enumerate(method.exclevel)
-    if ex == :full
-      Amps[iex] = read_starting_guess4amplitudes(EC, iex)
-    end
+  Amps, exc_ranges = starting_amplitudes(EC, method)
+  singles, doubles, triples = exc_ranges[1:3]
+  if method.unrestricted
+    @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
+  else
+    @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
   end
   diis = Diis(EC)
 
-  println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
+  do_sing = (method.exclevel[1] == :full)
   Eh = 0.0
+  En1 = 0.0
   t0 = time_ns()
-  for it in 1:EC.options.cc.maxit
-    t1 = time_ns()
-    Res = calc_ccsd_resid(EC, Amps..., dc)
-    t1 = print_time(EC, t1, "residual", 2)
-    NormT2 = calc_doubles_norm(Amps[2])
-    NormR2 = calc_doubles_norm(Res[2])
-    Eh = calc_hylleraas(EC, Amps..., Res...)
-    Amps[2] += update_doubles(EC, Res[2])
-    if length(Amps[1]) == 0
-      Amps = perform(diis, Amps, Res)
-      En = 0.0
-    else
-      NormT1 = calc_singles_norm(Amps[1])
-      NormR1 = calc_singles_norm(Res[1])
-      Amps[1] += update_singles(EC, Res[1])
-      Amps = perform(diis, Amps, Res)
-      En1 = calc_singles_energy(EC, Amps[1])
-      En = En1
-    end
-    En2 = calc_doubles_energy(EC, Amps[2])
-    En += En2
-    ΔE = En - Eh  
-    NormR = NormR1 + NormR2
-    NormT = 1.0 + NormT1 + NormT2
-    tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
-    flush(stdout)
-    if NormR < EC.options.cc.thr
-      break
-    end
-  end
-  println()
-  @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
-  println()
-  flush(stdout)
-  save(EC, "T_vo", Amps[1])
-  save(EC, "T_vvoo", Amps[2])
-  return Eh
-end
-
-"""
-    calc_ucc(EC::ECInfo, method::ECMethod)
-
-  Calculate unrestricted coupled cluster amplitudes.
-
-  Exact specification of the method is given by `method`.
-"""
-function calc_ucc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC")
-  print_info(method_name(method))
-  highest_full_exc = max_full_exc(method)
-  namps = 0
-  for i = 1:highest_full_exc
-    namps += i + 1
-  end
-  Amps = Any[Float64[] for i in 1:namps]
-  if highest_full_exc != 2
-    error("UCC only implemented for doubles")
-  end
-  # offsets for Amps
-  α, β, αα, ββ, αβ = 1:5
-  singles = α:β
-  doubles = αα:αβ
-  # starting guess
-  if method.exclevel[1] == :full
-    Amps[α] = read_starting_guess4amplitudes(EC, 1, :α)
-    Amps[β] = read_starting_guess4amplitudes(EC, 1, :β)
-    if !EC.options.cc.use_kext
-      error("open-shell CCSD only implemented with kext")
-    end
-  end
-  if method.exclevel[2] == :full
-    Amps[αα] = read_starting_guess4amplitudes(EC, 2, :α, :α)
-    Amps[ββ] = read_starting_guess4amplitudes(EC, 2, :β, :β)
-    Amps[αβ] = read_starting_guess4amplitudes(EC, 2, :α, :β)
-  end
-  diis = Diis(EC, [1.0, 1.0, 1.0, 1.0, 4.0])
-
   println("Iter     SqNorm      Energy      DE          Res         Time")
-  NormR1 = 0.0
-  NormT1 = 0.0
-  NormT2 = 0.0
-  nosing = (method.exclevel[1] != :full)
-  Eh = 0.0
-  t0 = time_ns()
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     Res = calc_ccsd_resid(EC, Amps..., dc)
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
-    NormR2 = calc_doubles_norm(Res[doubles]...) 
+    NormR2 = calc_doubles_norm(Res[doubles]...)
     Eh = calc_hylleraas(EC, Amps..., Res...)
-    Amps[αα] += update_doubles(EC, Res[αα])
-    Amps[ββ] += update_doubles(EC, Res[ββ]; spincase=:β)
-    Amps[αβ] += update_doubles(EC, Res[αβ]; spincase=:αβ)
-    if nosing
-      Amps = perform(diis,Amps,Res)
-      En = 0.0
-    else
+    update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
+    if do_sing
       NormT1 = calc_singles_norm(Amps[singles]...)
       NormR1 = calc_singles_norm(Res[singles]...)
-      Amps[α] += update_singles(EC, Res[α]; spincase=:α)
-      Amps[β] += update_singles(EC, Res[β]; spincase=:β)
-      Amps = perform(diis, Amps, Res)
-      En1 = calc_singles_energy(EC, Amps[singles]...)
-      En = En1
+      update_singles!(EC, Amps[singles]..., Res[singles]...)
     end
+    Amps = perform(diis, Amps, Res)
+    if do_sing
+      save_current_singles(EC, Amps[singles]...)
+      En1 = calc_singles_energy(EC, Amps[singles]...)
+    end
+    save_current_doubles(EC, Amps[doubles]...)
     En2 = calc_doubles_energy(EC, Amps[doubles]...)
-    En += En2
+    En = En1 + En2
     ΔE = En - Eh  
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
@@ -1771,11 +1790,6 @@ function calc_ucc(EC::ECInfo, method::ECMethod)
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
   println()
   flush(stdout)
-  save(EC, "T_vo", Amps[1])
-  save(EC, "T_VO", Amps[2])
-  save(EC, "T_vvoo", Amps[αα])
-  save(EC, "T_VVOO", Amps[ββ])
-  save(EC, "T_vVoO", Amps[αβ])
   return Eh
 end
 

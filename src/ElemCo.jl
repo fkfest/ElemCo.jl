@@ -399,6 +399,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     else
       add2name = addname
       closed_shell_method = closed_shell
+      ecmethod.unrestricted = !closed_shell
     end
     # at the moment we always calculate MP2 first
     # calculate MP2
@@ -411,12 +412,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println(add2name*"MP2 total energy: ",EMp2+EHF)
     t1 = print_time(EC,t1,"MP2",1)
     flush(stdout)
-
     if ecmethod.theory == "MP"
       continue
     end
-
-    dc = (ecmethod.theory == "DC")
 
     if ecmethod.exclevel[4] != :none
       error("no quadruples implemented yet...")
@@ -425,12 +423,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ecmethod_save = ecmethod
     if ecmethod.exclevel[3] in [:full, :pertiter]
       ecmethod = ECMethod("CCSD")
+      ecmethod.unrestricted = ecmethod_save.unrestricted
     end     
-    if closed_shell_method
-      ECC = calc_cc(EC, ecmethod)
-    else
-      ECC = calc_ucc(EC, ecmethod)
-    end
+    ECC = calc_cc(EC, ecmethod)
 
     main_name = method_name(ecmethod)
     println("$main_name correlation energy: ",ECC)
