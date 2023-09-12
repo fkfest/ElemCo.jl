@@ -42,7 +42,7 @@ end
 """
     draw_endline()
 
-  Print a line of 🙨.
+  Print a line of ═.
 """
 function draw_endline(n=63)
   println(repeat("═", n))
