@@ -13,18 +13,23 @@ include("mnpy.jl")
 include("dump.jl")
 include("integrals.jl")
 include("msystem.jl")
-include("diis.jl")
 
 include("ecinfos.jl")
 include("ecmethods.jl")
 include("tensortools.jl")
-include("fock.jl")
+include("fockfactory.jl")
+include("diis.jl")
+include("orbtools.jl")
+include("dftools.jl")
+include("dfcc.jl")
 include("cc.jl")
 
 include("bohf.jl")
 
 include("dfhf.jl")
 include("dfdump.jl")
+
+include("dfmcscf.jl")
 
 try
   using MKL
@@ -39,12 +44,13 @@ using .Utils
 using .ECInfos
 using .ECMethods
 using .TensorTools
-using .Focks
+using .FockFactory
 using .CoupledCluster
 using .FciDump
 using .MSystem
 using .BOHF
 using .DFHF
+using .DFMCSCF
 using .DfDump
 
 
@@ -57,13 +63,13 @@ export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc
   Setup `EC::ECInfo` from variables `geometry::String` and `basis::Dict{String,Any}`.
 
   # Examples
-```jldoctest
+```julia
 geometry="\nHe 0.0 0.0 0.0"
 basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
 @ECsetup
 # output
 Occupied orbitals:[1]
-1
+
 ```
 """
 macro ECsetup()
@@ -94,7 +100,11 @@ end
 
   Set options for `EC::ECInfo`. 
     
+  The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`).
+  The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
+  The current state of the options can be stored in a variable, e.g., `opt_cc = EC.options`. 
   If `EC` is not already setup, it will be done. 
+
 
   # Examples
 ```julia
@@ -127,33 +137,26 @@ end
 """ 
     @dfhf()
 
-  Run DFHF calculation and return MO coefficients (`ORBS`) and orbital energies (`EPS`).
+  Run DFHF calculation. The orbitals are stored to `ScfOptions.save`.
 """
 macro dfhf()
   return quote
     $(esc(:@tryECsetup))
-    $(esc(:EPS)), $(esc(:ORBS)) = dfhf($(esc(:EC)))
+    dfhf($(esc(:EC)))
   end
 end
 
 """
-    @dfints(orbs = nothing, fcidump = "")
+    @dfints()
 
   Generate 2 and 4-idx MO integrals using density fitting.
-
-  If `orbs::Matrix` is given, the orbitals are used to generate the integrals, 
-  otherwise the last orbitals (`ORBS`) are used.
-  If `fcidump::String` is given, the integrals are written to the fcidump file.
+  The MO coefficients are read from `IntOptions.orbs`,
+  and if empty string - from `ScfOptions.save`.
 """
-macro dfints(orbs = nothing, fcidump = "")
+macro dfints()
   return quote
     $(esc(:@tryECsetup))
-    if isnothing($orbs)
-      orbitals = $(esc(:ORBS))
-    else
-      orbitals = $orbs
-    end
-    dfdump($(esc(:EC)),orbitals, $fcidump)
+    dfdump($(esc(:EC)))
   end
 end
 
@@ -184,13 +187,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit
 macro cc(method, kwargs...)
   strmethod="$method"
   ekwa = [esc(a) for a in kwargs]
-  fcidump_given = false
-  for a in ekwa
-    if a.args[1].args[1] == :fcidump
-      fcidump_given = true
-    end
-  end
-  if fcidump_given
+  if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
       ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
     end
@@ -274,6 +271,24 @@ function parse_commandline(EC::ECInfo)
   return fcidump_file, method, occa, occb
 end
 
+function run_mcscf()
+  xyz="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+
+  basis = Dict("ao"=>"cc-pVDZ",
+             "jkfit"=>"cc-pvtz-jkfit",
+             "mp2fit"=>"cc-pvdz-rifit")
+
+  EC = ECInfo(ms=MSys(xyz,basis))
+  setup!(EC,ms2=2,charge=-2)
+
+  E,cMO =  dfmcscf(EC,direct=false)
+
+end
+
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)
   EC = ECInfo()
   if !isdir(dumpfile)
@@ -319,13 +334,24 @@ end
 function calc_fock_matrix(EC::ECInfo, closed_shell)
   t1 = time_ns()
   if closed_shell
-    EC.fock,EC.ϵo,EC.ϵv = gen_fock(EC)
-    EC.fockb = EC.fock
-    EC.ϵob = EC.ϵo
-    EC.ϵvb = EC.ϵv
+    fock = gen_fock(EC)
+    save(EC, "f_mm", fock)
+    save(EC, "f_MM", fock)
+    eps = diag(fock)
+    println("Occupied orbital energies: ", eps[EC.space['o']])
+    save(EC, "e_m", eps)
+    save(EC, "e_M", eps)
   else
-    EC.fock,EC.ϵo,EC.ϵv = gen_fock(EC,SCα)
-    EC.fockb,EC.ϵob,EC.ϵvb = gen_fock(EC,SCβ)
+    fock = gen_fock(EC, :α)
+    eps = diag(fock)
+    println("Occupied α orbital energies: ", eps[EC.space['o']])
+    save(EC, "f_mm", fock)
+    save(EC, "e_m", eps)
+    fock = gen_fock(EC, :β)
+    eps = diag(fock)
+    println("Occupied β orbital energies: ", eps[EC.space['O']])
+    save(EC,"f_MM", fock)
+    save(EC,"e_M", eps)
   end
   t1 = print_time(EC,t1,"fock matrix",1)
 end
@@ -338,9 +364,12 @@ end
 function calc_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
-    EHF = sum(EC.ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
+    ϵo = load(EC,"e_m")[SP['o']]
+    EHF = sum(ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
   else
-    EHF = 0.5*(sum(EC.ϵo)+sum(EC.ϵob) + sum(diag(integ1(EC.fd, SCα))[SP['o']]) + sum(diag(integ1(EC.fd, SCβ))[SP['O']])) + EC.fd.int0
+    ϵo = load(EC,"e_m")[SP['o']]
+    ϵob = load(EC,"e_M")[SP['O']]
+    EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(integ1(EC.fd, :α))[SP['o']]) + sum(diag(integ1(EC.fd, :β))[SP['O']])) + EC.fd.int0
   end
   return EHF
 end
@@ -379,92 +408,76 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     else
       add2name = addname
       closed_shell_method = closed_shell
+      ecmethod.unrestricted = !closed_shell
     end
     # at the moment we always calculate MP2 first
     # calculate MP2
     if closed_shell_method
-      EMp2, T2 = calc_MP2(EC)
+      EMp2 = calc_MP2(EC)
     else
-      EMp2, T2a, T2b, T2ab = calc_UMP2(EC)
+      EMp2 = calc_UMP2(EC)
     end
     println(add2name*"MP2 correlation energy: ",EMp2)
     println(add2name*"MP2 total energy: ",EMp2+EHF)
     t1 = print_time(EC,t1,"MP2",1)
     flush(stdout)
-
     if ecmethod.theory == "MP"
       continue
     end
 
-    dc = (ecmethod.theory == "DC" || ecmethod.theory == "TD-DC" || ecmethod.theory == "FRS-DC" || ecmethod.theory == "FRT-DC")
-
-    if ecmethod.exclevel[4] != NoExc
+    if ecmethod.exclevel[4] != :none
       error("no quadruples implemented yet...")
     end
 
-    if closed_shell_method
-      if ecmethod.exclevel[1] == FullExc
-        T1 = zeros(size(SP['v'],1),size(SP['o'],1))
-      else
-        T1 = zeros(0)
-      end
-      ECC, T1, T2 = calc_cc(EC, T1, T2, dc)
-    else
-      if ecmethod.exclevel[1] == FullExc
-        T1a = zeros(size(SP['v'],1),size(SP['o'],1))
-        T1b = zeros(size(SP['V'],1),size(SP['O'],1))
-        if(!EC.options.cc.use_kext)
-          error("open-shell CCSD only implemented with kext")
-        end
-      else
-        T1a = zeros(0)
-        T1b = zeros(0)
-      end
-      ECC, T1a, T1b, T2a, T2b, T2ab = calc_cc(EC,T1a,T1b,T2a,T2b,T2ab,dc)
-    end
+    ecmethod_save = ecmethod
+    if ecmethod.exclevel[3] in [:full, :pertiter]
+      ecmethod = ECMethod("CCSD")
+      ecmethod.unrestricted = ecmethod_save.unrestricted
+    end     
+    ECC = calc_cc(EC, ecmethod)
 
+    main_name = method_name(ecmethod)
+    println("$main_name correlation energy: ",ECC)
+    println("$main_name total energy: ",ECC+EHF)
+
+    ecmethod = ecmethod_save # restore
     if closed_shell_method
-      main_name = method_name(T1,dc)
-      if ecmethod.exclevel[3] != NoExc
-        do_full_t3 = (ecmethod.exclevel[3] == FullExc || ecmethod.exclevel[3] == PertExcIter)
+      if ecmethod.exclevel[3] != :none
+        do_full_t3 = (ecmethod.exclevel[3] == :full || ecmethod.exclevel[3] == :pertiter)
         save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        ET3, ET3b = calc_pertT(EC, T1, T2; save_t3 = save_pert_t3)
+        ET3, ET3b = calc_pertT(EC; save_t3 = save_pert_t3)
         println()
         println("$main_name[T] total energy: ",ECC+ET3b+EHF)
         println("$main_name(T) correlation energy: ",ECC+ET3)
         println("$main_name(T) total energy: ",ECC+ET3+EHF)
         if do_full_t3
-          cc3 = (ecmethod.exclevel[3] == PertExcIter)
-          ECC, T1, T2 = CoupledCluster.calc_ccsdt(EC, T1, T2, EC.options.cc.calc_t3_for_decomposition, cc3)
-          if cc3
-            main_name = "CC3"
-          else
-            main_name = "DC-CCSDT"
-          end
+          cc3 = (ecmethod.exclevel[3] == :pertiter)
+          ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
+          main_name = method_name(ecmethod)
           println("$main_name correlation energy: ",ECC)
           println("$main_name total energy: ",ECC+EHF)
         end 
       end
-    else
-      main_name = method_name(T1a,dc)
     end
+    println()
     flush(stdout)
 
-    if ecmethod.theory[1:2] == "FR"
-      add2name = "FR-"*add2name
-    end
     if ecmethod.theory[1:2] == "TD"
-      add2name = "TD-"*add2name
       W = load(EC,"td_ccsd_W")[1]
-      @printf "%26s %16.12f \n" add2name*"$main_name singlet energy:" EHF+ECC+W
-      @printf "%26s %16.12f \n" add2name*"$main_name triplet energy:" EHF+ECC-W
+      @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
+      @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W
+      t1 = print_time(EC, t1,"CC",1)
+      delete_temporary_files(EC)
+      draw_endline()
       return EHF, EMp2, ECC, W
     else
-      println(add2name*"$main_name correlation energy: ",ECC)
-      println(add2name*"$main_name total energy: ",ECC+EHF)
+      println("$main_name correlation energy: ",ECC)
+      println("$main_name total energy: ",ECC+EHF)
       t1 = print_time(EC, t1,"CC",1)
+      delete_temporary_files(EC)
+      draw_endline()
       if length(method_names) == 1
-        if ecmethod.exclevel[3] != NoExc
+        if ecmethod.exclevel[3] != :none
           return EHF, EMp2, ECC, ET3
         else
           return EHF, EMp2, ECC

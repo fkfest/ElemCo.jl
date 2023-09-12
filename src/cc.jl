@@ -14,14 +14,33 @@ using IterativeSolvers
 using Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
+using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
 using ..ElemCo.DIIS
+using ..ElemCo.DFCoupledCluster
 
-export calc_MP2, calc_UMP2, method_name, calc_cc, calc_pertT
+export calc_MP2, calc_UMP2, calc_cc, calc_pertT
 
 include("cc_tests.jl")
 
+"""
+    orbital_energies(EC::ECInfo, spincase::Symbol=:α)
+
+  Return orbital energies for a given `spincase`∈{`:α`,`:β`}.
+"""
+function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
+  if spincase == :α
+    eps = load(EC, "e_m")
+    ϵo = eps[EC.space['o']]
+    ϵv = eps[EC.space['v']]
+  else
+    eps = load(EC, "e_M")
+    ϵo = eps[EC.space['O']]
+    ϵv = eps[EC.space['V']]
+  end
+  return ϵo, ϵv
+end
 
 """
     update_singles(R1, ϵo, ϵv, shift)
@@ -38,16 +57,18 @@ function update_singles(R1, ϵo, ϵv, shift)
 end
 
 """
-    update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
+    update_singles(EC::ECInfo, R1; spincase::Symbol=:α, use_shift=true)
 
-  Calculate update for singles amplitudes for a given `spincase`.
+  Calculate update for singles amplitudes for a given `spincase`∈{`:α`,`:β`}.
 """
-function update_singles(EC::ECInfo, R1; spincase::SpinCase=SCα, use_shift=true)
+function update_singles(EC::ECInfo, R1; spincase::Symbol=:α, use_shift=true)
   shift = use_shift ? EC.options.cc.shifts : 0.0
-  if spincase == SCα
-    return update_singles(R1, EC.ϵo, EC.ϵv, shift)
+  if spincase == :α
+    ϵo, ϵv = orbital_energies(EC)
+    return update_singles(R1, ϵo, ϵv, shift)
   else
-    return update_singles(R1, EC.ϵob, EC.ϵvb, shift)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_singles(R1, ϵob, ϵvb, shift)
   end
 end
 
@@ -69,19 +90,62 @@ function update_doubles(R2, ϵo1, ϵv1, ϵo2, ϵv2, shift, antisymmetrize=false)
 end
 
 """
-    update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
+    update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=false, use_shift=true)
 
-  Calculate update for doubles amplitudes for a given `spincase`.
+  Calculate update for doubles amplitudes for a given `spincase`∈{`:α`,`:β`,`:αβ`}.
 """
-function update_doubles(EC::ECInfo, R2; spincase::SpinCase=SCα, antisymmetrize=false, use_shift=true)
+function update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=false, use_shift=true)
   shift = use_shift ? EC.options.cc.shiftp : 0.0
-  if spincase == SCα
-    return update_doubles(R2, EC.ϵo, EC.ϵv, EC.ϵo, EC.ϵv, shift, antisymmetrize)
-  elseif spincase == SCβ
-    return update_doubles(R2, EC.ϵob, EC.ϵvb, EC.ϵob, EC.ϵvb, shift, antisymmetrize)
+  if spincase == :α
+    ϵo, ϵv = orbital_energies(EC)
+    return update_doubles(R2, ϵo, ϵv, ϵo, ϵv, shift, antisymmetrize)
+  elseif spincase == :β
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_doubles(R2, ϵob, ϵvb, ϵob, ϵvb, shift, antisymmetrize)
   else
-    return update_doubles(R2, EC.ϵo, EC.ϵv, EC.ϵob, EC.ϵvb, shift, antisymmetrize)
+    ϵo, ϵv = orbital_energies(EC)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_doubles(R2, ϵo, ϵv, ϵob, ϵvb, shift, antisymmetrize)
   end
+end
+
+"""
+    update_singles!(EC::ECInfo, T1, R1)
+
+  Update singles amplitudes in `T1` with `R1`.
+"""
+function update_singles!(EC::ECInfo, T1, R1)
+  T1 .+= update_singles(EC, R1)
+end
+
+"""
+    update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
+
+  Update singles amplitudes in `T1a`, `T1b` with `R1a`, `R1b`.
+"""
+function update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
+  T1a .+= update_singles(EC, R1a)
+  T1b .+= update_singles(EC, R1b; spincase=:β)
+end
+
+"""
+    update_doubles!(EC::ECInfo, T2, R2)
+
+  Update doubles amplitudes in `T2` with `R2`.
+"""
+function update_doubles!(EC::ECInfo, T2, R2)
+  T2 .+= update_doubles(EC, R2)
+end
+
+"""
+    update_doubles!(EC::ECInfo, T2a, T2b, T2ab, R2a, R2b, R2ab)
+
+  Update doubles amplitudes in `T2a`, `T2b`, `T2ab` with `R2a`, `R2b`, `R2ab`.
+"""
+function update_doubles!(EC::ECInfo, T2a, T2b, T2ab, R2a, R2b, R2ab)
+  T2a .+= update_doubles(EC, R2a)
+  T2b .+= update_doubles(EC, R2b; spincase=:β)
+  T2ab .+= update_doubles(EC, R2ab; spincase=:αβ)
 end
 
 """
@@ -92,10 +156,12 @@ end
 function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
-  if !fock_only
-    @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
+  if length(T1) > 0
+    if !fock_only
+      @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
+    end
+    @tensoropt ET1 += 2.0*T1[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
   end
-  @tensoropt ET1 += 2.0*T1[a,i] * EC.fock[SP['o'],SP['v']][i,a]
   return ET1
 end
 
@@ -108,17 +174,21 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if !fock_only
-    @tensoropt ET1 += 0.5*(T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b]
-    if EC.noccb > 0
-      @tensoropt begin
-        ET1 += 0.5*(T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b]
-        ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
+    if length(T1a) > 0
+      @tensoropt ET1 += 0.5*(T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b]
+    end
+    if length(T1b) > 0
+      @tensoropt ET1 += 0.5*(T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b]
+      if length(T1a) > 0
+        @tensoropt ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
       end
     end
   end
-  @tensoropt begin
-    ET1 += T1a[a,i] * EC.fock[SP['o'],SP['v']][i,a]
-    ET1 += T1b[a,i] * EC.fockb[SP['O'],SP['V']][i,a]
+  if length(T1a) > 0
+    @tensoropt ET1 += T1a[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
+  end
+  if length(T1b) > 0
+    @tensoropt ET1 += T1b[a,i] * load(EC,"f_MM")[SP['O'],SP['V']][i,a]
   end
   return ET1
 end
@@ -148,11 +218,11 @@ function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
 end
 
 """
-    calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
+    calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
 
   Calculate closed-shell singles and doubles Hylleraas energy
 """
-function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
+function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
   int2 = ints2(EC,"oovv")
   @tensoropt begin
@@ -160,10 +230,11 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
     ET2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * int2[i,j,a,b]
   end
   if length(T1) > 0
-    dfock = load(EC,"dfock"*'o')
-    fov = dfock[SP['o'],SP['v']] + EC.fock[SP['o'],SP['v']] # undressed part should be with factor two
+    mo = 'm'
+    dfock = load(EC,"df_"*mo*mo)
+    fov = dfock[SP['o'],SP['v']] + load(EC,"f_mm")[SP['o'],SP['v']] # undressed part should be with factor two
     @tensoropt ET1 = (fov[i,a] + 2.0 * R1[a,i])*T1[a,i]
-    # ET1 = scalar(2.0*(EC.fock[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
+    # ET1 = scalar(2.0*(load(EC,"f_mm")[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
     # ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*int2[i,j,a,b])
     ET2 += ET1
   end
@@ -171,11 +242,11 @@ function calc_hylleraas(EC::ECInfo, T1,T2,R1,R2)
 end
 
 """
-    calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
+    calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov)
 
   Calculate singles and doubles Hylleraas energy for one spin case.
 """
-function calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
+function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov)
   SP = EC.space
   int2 = ints2(EC,o1*o2*v1*v2)
   if o1 == o2
@@ -188,7 +259,8 @@ function calc_hylleraas4spincase(EC::ECInfo, o1,v1,o2,v2, T1, T2, R1, R2, fov)
     ET2 = fac*T2[a,b,i,j] * int2[i,j,a,b]
   end
   if length(T1) > 0
-    dfock = load(EC,"dfock"*o1)
+    mo = space4spin('m', isalphaspin(o1,o1))
+    dfock = load(EC,"df_"*mo*mo)
     dfov = dfock[SP[o1],SP[v1]] + fov # undressed part should be with factor two
     @tensoropt ET1 = (0.5*dfov[i,a] + R1[a,i])*T1[a,i]
     ET2 += ET1
@@ -203,10 +275,10 @@ end
 """
 function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
   SP = EC.space
-  Eh = calc_hylleraas4spincase(EC, 'o','v','o','v', T1a, T2a, R1a, R2a, EC.fock[SP['o'],SP['v']])
-  if EC.noccb > 0
-    Eh += calc_hylleraas4spincase(EC, 'O','V','O','V', T1b, T2b, R1b, R2b, EC.fockb[SP['O'],SP['V']])
-    Eh += calc_hylleraas4spincase(EC, 'o','v','O','V', Float64[], T2ab, Float64[], R2ab, Float64[])
+  Eh = calc_hylleraas4spincase(EC, "ovov"..., T1a, T2a, R1a, R2a, load(EC,"f_mm")[SP['o'],SP['v']])
+  if n_occb_orbs(EC) > 0
+    Eh += calc_hylleraas4spincase(EC, "OVOV"..., T1b, T2b, R1b, R2b, load(EC,"f_MM")[SP['O'],SP['V']])
+    Eh += calc_hylleraas4spincase(EC, "ovOV"..., Float64[], T2ab, Float64[], R2ab, Float64[])
   end
   return Eh
 end
@@ -259,15 +331,6 @@ function calc_doubles_norm(T2a, T2b, T2ab)
 end
 
 """ 
-    lenspace(EC::ECInfo, o1::Char, o2::Char)
-
-  Return lengths of two orbital spaces.
-"""
-function lenspace(EC::ECInfo, o1::Char, o2::Char)
-  return length(EC.space[o1]), length(EC.space[o2])
-end
-
-""" 
     calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
 
   Dress integrals with singles amplitudes. 
@@ -278,7 +341,7 @@ end
 function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
   t1 = time_ns()
   mixed = (o1 != o2)
-  no1, no2 = lenspace(EC,o1,o2)
+  no1, no2 = len_spaces(EC,o1*o2)
   # first make half-transformed integrals
   if EC.options.cc.calc_d_vvvv
     # <a\hat c|bd>
@@ -534,7 +597,7 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   dinter = d_int1[SP['o'],:]
   @tensoropt d_int1[SP['v'],:][b,p] -= dinter[j,p] * T1[b,j]
   # display(d_int1[SP['v'],SP['o']])
-  save(EC,"dint1o",d_int1)
+  save(EC,"dh_mm",d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
 
   # calc dressed fock
@@ -557,7 +620,7 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   dfock[SP['o'],SP['v']] += fov
   dfock[SP['v'],SP['v']] += fvv
 
-  save(EC,"dfocko",dfock)
+  save(EC,"df_mm",dfock)
   t1 = print_time(EC,t1,"dress fock",3)
 end
 
@@ -570,11 +633,13 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   t1 = time_ns()
   SP = EC.space
   if isuppercase(o1)
-    spin = SCβ
-    no1 = EC.noccb
+    spin = :β
+    no1 = n_occb_orbs(EC)
+    mo = 'M'
   else
-    spin = SCα
-    no1 = EC.nocc
+    spin = :α
+    no1 = n_occ_orbs(EC)
+    mo = 'm'
   end
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd,spin))
@@ -582,7 +647,7 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   @tensoropt d_int1[:,SP[o1]][p,j] += dinter[p,b] * T1[b,j]
   dinter = d_int1[SP[o1],:]
   @tensoropt d_int1[SP[v1],:][b,p] -= dinter[j,p] * T1[b,j]
-  save(EC,"dint1"*o1,d_int1)
+  save(EC,"dh_"*mo*mo,d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
   # calc dressed fock
   dfock = d_int1
@@ -606,7 +671,7 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   dfock[SP[v1],SP[o1]] += fvo
   dfock[SP[o1],SP[v1]] += fov
   dfock[SP[v1],SP[v1]] += fvv
-  save(EC,"dfock"*o1,dfock)
+  save(EC,"df_"*mo*mo,dfock)
   t1 = print_time(EC,t1,"dress fock",3)
 end
 
@@ -643,19 +708,19 @@ function dress_fock_oppositespin(EC::ECInfo)
   @tensoropt fVV[a,b] := d_ovov[k,a,k,b]
   d_ovov = nothing
 
-  dfocka = load(EC,"dfocko")
+  dfocka = load(EC,"df_mm")
   dfocka[SP['o'],SP['o']] += foo
   dfocka[SP['o'],SP['v']] += fov
   dfocka[SP['v'],SP['o']] += fvo
   dfocka[SP['v'],SP['v']] += fvv
-  save(EC,"dfocko",dfocka)
+  save(EC,"df_mm",dfocka)
 
-  dfockb = load(EC,"dfockO")
+  dfockb = load(EC,"df_MM")
   dfockb[SP['O'],SP['O']] += fOO
   dfockb[SP['O'],SP['V']] += fOV
   dfockb[SP['V'],SP['O']] += fVO
   dfockb[SP['V'],SP['V']] += fVV
-  save(EC,"dfock"*'O',dfockb)
+  save(EC,"df_MM",dfockb)
 end
 
 """
@@ -665,24 +730,24 @@ end
 """
 function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
   if ndims(T1b) != 2
-    calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
+    calc_dressed_ints(EC,T1a,T1a,"ovov"...)
     dress_fock_closedshell(EC,T1a)
   else
-    calc_dressed_ints(EC,T1a,T1a,'o','v','o','v')
-    calc_dressed_ints(EC,T1b,T1b,'O','V','O','V')
-    calc_dressed_ints(EC,T1a,T1b,'o','v','O','V')
-    dress_fock_samespin(EC,T1a,'o','v')
-    dress_fock_samespin(EC,T1b,'O','V')
+    calc_dressed_ints(EC,T1a,T1a,"ovov"...)
+    calc_dressed_ints(EC,T1b,T1b,"OVOV"...)
+    calc_dressed_ints(EC,T1a,T1b,"ovOV"...)
+    dress_fock_samespin(EC,T1a,"ov"...)
+    dress_fock_samespin(EC,T1b,"OV"...)
     dress_fock_oppositespin(EC)
   end
 end
 
 """
-    pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
+    pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
 
   Save non-dressed integrals in files instead of dressed integrals.
 """
-function pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
+function pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
   #TODO write like in itf with chars as arguments, so three calls for three spin cases...
   t1 = time_ns()
   save(EC,"d_oovo",ints2(EC,"oovo"))
@@ -702,9 +767,9 @@ function pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
   if EC.options.cc.calc_d_vvoo
     save(EC,"d_vvoo",ints2(EC,"vvoo"))
   end
-  save(EC,"dint1"*'o',integ1(EC.fd))
-  save(EC,"dfock"*'o',EC.fock)
-  save(EC,"dfock"*'O',EC.fockb)
+  save(EC,"dh_mm",integ1(EC.fd))
+  save(EC,"df_mm",load(EC,"f_mm"))
+  save(EC,"df_MM",load(EC,"f_MM"))
   t1 = print_time(EC,t1,"pseudo-dressing",3)
   if unrestricted
     save(EC,"d_OOVO",ints2(EC,"OOVO"))
@@ -731,62 +796,125 @@ function pseudo_dressed_ints(EC::ECInfo, unrestricted = false)
     save(EC,"d_oVoO",ints2(EC,"oVoO"))
     save(EC,"d_vOvV",ints2(EC,"vOvV"))
     save(EC,"d_oVvV",ints2(EC,"oVvV"))
-    save(EC,"dint1"*'O',integ1(EC.fd))
+    save(EC,"dh_MM",integ1(EC.fd))
   end
 end
 
 """ 
-    calc_MP2(EC::ECInfo)
+    calc_MP2(EC::ECInfo, addsingles=true)
 
   Calculate closed-shell MP2 energy and amplitudes. 
-  Return (EMp2, T2) 
+  The amplitudes are stored in `T_vvoo` file.
+  If `addsingles`: singles are also calculated and stored in `T_vo` file.
+  Return EMp2 
 """
-function calc_MP2(EC::ECInfo)
+function calc_MP2(EC::ECInfo, addsingles=true)
   T2 = update_doubles(EC,ints2(EC,"vvoo"), use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2)
-  T1 = update_singles(EC.fock[EC.space['v'],EC.space['o']],EC.ϵo,EC.ϵv,0.0)
-  EMp2 += calc_singles_energy(EC,T1,fock_only=true)
-  return EMp2, T2
+  save(EC, "T_vvoo", T2)
+  if addsingles
+    ϵo, ϵv = orbital_energies(EC)
+    T1 = update_singles(load(EC,"f_mm")[EC.space['v'],EC.space['o']], ϵo, ϵv, 0.0)
+    EMp2 += calc_singles_energy(EC,T1,fock_only=true)
+    save(EC, "T_vo", T1)
+  end
+  return EMp2
 end
 
 """ 
     calc_UMP2(EC::ECInfo, addsingles=true)
 
   Calculate unrestricted MP2 energy and amplitudes. 
-  Return (EMp2, T2a, T2b, T2ab)
+  The amplitudes are stored in `T_vvoo`, `T_VVOO`, and `T_vVoO` files.
+  If `addsingles`: singles are also calculated and stored in `T_vo` and `T_VO` files.
+  Return EMp2
 """
 function calc_UMP2(EC::ECInfo, addsingles=true)
   SP = EC.space
-  T2a = update_doubles(EC,ints2(EC,"vvoo"), spincase=SCα, antisymmetrize = true, use_shift=false)
-  T2b = update_doubles(EC,ints2(EC,"VVOO"), spincase=SCβ, antisymmetrize = true, use_shift=false)
-  T2ab = update_doubles(EC,ints2(EC,"vVoO"), spincase=SCαβ, use_shift=false)
+  T2a = update_doubles(EC,ints2(EC,"vvoo"), spincase=:α, antisymmetrize = true, use_shift=false)
+  T2b = update_doubles(EC,ints2(EC,"VVOO"), spincase=:β, antisymmetrize = true, use_shift=false)
+  T2ab = update_doubles(EC,ints2(EC,"vVoO"), spincase=:αβ, use_shift=false)
   EMp2 = calc_doubles_energy(EC,T2a,T2b,T2ab)
+  save(EC, "T_vvoo", T2a)
+  save(EC, "T_VVOO", T2b)
+  save(EC, "T_vVoO", T2ab)
   if addsingles
-    T1a = update_singles(EC,EC.fock[SP['v'],SP['o']], spincase=SCα, use_shift=false)
-    T1b = update_singles(EC,EC.fockb[SP['V'],SP['O']], spincase=SCβ, use_shift=false)
+    T1a = update_singles(EC,load(EC,"f_mm")[SP['v'],SP['o']], spincase=:α, use_shift=false)
+    T1b = update_singles(EC,load(EC,"f_MM")[SP['V'],SP['O']], spincase=:β, use_shift=false)
     EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only = true)
+    save(EC, "T_vo", T1a)
+    save(EC, "T_VO", T1b)
   end
-  return EMp2, T2a, T2b, T2ab
+  return EMp2
 end
 
+"""
+    read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
+
+  Read starting guess for excitation `level`.
+
+  The guess will be read from `T_vo`, `T_VO`, `T_vvoo` etc files.
+  If the file does not exist, the guess will be a zeroed-vector.
+"""
+function read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
+  if length(spins) == 0
+    spins = [:α for i in 1:level]
+  end
+  if length(spins) != level
+    error("number of spins does not match level")
+  end
+  spaces = ""
+  for spin in spins
+    spaces *= (spin == :α ? "v" : "V")
+  end
+  for spin in spins
+    spaces *= (spin == :α ? "o" : "O")
+  end
+  filename = "T_"*spaces
+  if file_exists(EC, filename)
+    return load(EC, filename)
+  else
+    return zeros(len_spaces(EC, spaces)...)
+  end
+end
 
 """
-    method_name(T1, dc = false)
-  
-  Guess method name (CCSD/DCSD/CCD/DCD)
+    save_current_singles(EC::ECInfo, T1)
+
+  Save current singles amplitudes `T1` to file `T_vo`
 """
-function method_name(T1, dc = false)
-  if dc
-    name = "DC"
-  else
-    name = "CC"
-  end
-  if ndims(T1) != 2
-    name *= "D"
-  else
-    name *= "SD"
-  end
-  return name
+function save_current_singles(EC::ECInfo, T1)
+  save(EC, "T_vo", T1)
+end
+
+"""
+    save_current_singles(EC::ECInfo, T1a, T1b)
+
+  Save current singles amplitudes `T1a` and `T1b` to files `T_vo` and `T_VO`
+"""
+function save_current_singles(EC::ECInfo, T1a, T1b)
+  save(EC, "T_vo", T1a)
+  save(EC, "T_VO", T1b)
+end
+
+"""
+    save_current_doubles(EC::ECInfo, T2)
+
+  Save current doubles amplitudes `T2` to file `T_vvoo`
+"""
+function save_current_doubles(EC::ECInfo, T2)
+  save(EC, "T_vvoo", T2)
+end
+
+"""
+    save_current_doubles(EC::ECInfo, T2a, T2b, T2ab)
+
+  Save current doubles amplitudes `T2a`, `T2b`, and `T2ab` to files `T_vvoo`, `T_VVOO`, and `T_vVoO`
+"""
+function save_current_doubles(EC::ECInfo, T2a, T2b, T2ab)
+  save(EC, "T_vvoo", T2a)
+  save(EC, "T_VVOO", T2b)
+  save(EC, "T_vVoO", T2ab)
 end
 
 """ 
@@ -797,10 +925,10 @@ end
 
   If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation).
 """
-function calc_D2(EC::ECInfo, T1, T2, scalepp = false)
+function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
   SP = EC.space
-  norb = length(SP[':'])
-  nocc = length(SP['o'])
+  norb = n_orbs(EC)
+  nocc = n_occ_orbs(EC)
   if length(T1) > 0
     D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
     # D2 = zeros(norb,norb,nocc,nocc)
@@ -834,8 +962,8 @@ end
 """
 function calc_D2a(EC::ECInfo, T1a, T2a)
   SP = EC.space
-  norb = length(SP[':'])
-  nocc = length(SP['o'])
+  norb = n_orbs(EC)
+  nocc = n_occ_orbs(EC)
   if length(T1a) > 0
     D2a = Array{Float64}(undef,norb,norb,nocc,nocc)
   else
@@ -864,8 +992,8 @@ end
 """
 function calc_D2b(EC::ECInfo, T1b, T2b)
   SP = EC.space
-  norb = length(SP[':'])
-  nocc = length(SP['O'])
+  norb = n_orbs(EC)
+  nocc = n_occb_orbs(EC)
   if length(T1b) > 0
     D2b = Array{Float64}(undef,norb,norb,nocc,nocc)
   else
@@ -886,18 +1014,18 @@ function calc_D2b(EC::ECInfo, T1b, T2b)
 end
 
 """ 
-    calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
+    calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 
   Calculate ^{αβ}D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
   Return as D[pqij] 
 
   If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
 """
-function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
+function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
   SP = EC.space
-  norb = length(SP[':'])
-  nocca = length(SP['o'])
-  noccb = length(SP['O'])
+  norb = n_orbs(EC)
+  nocca = n_occ_orbs(EC)
+  noccb = n_occb_orbs(EC)
   if length(T1a) > 0
     D2ab = Array{Float64}(undef,norb,norb,nocca,noccb)
   else
@@ -922,13 +1050,16 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp = false)
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
+    calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
+function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
   t1 = time_ns()
   SP = EC.space
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  norb = n_orbs(EC)
   if length(T1) > 0
     calc_dressed_ints(EC,T1)
     t1 = print_time(EC,t1,"dressing",2)
@@ -936,10 +1067,10 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     pseudo_dressed_ints(EC)
   end
   @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
-  dfock = load(EC,"dfock"*'o')
+  dfock = load(EC,"df_mm")
   if length(T1) > 0
     if EC.options.cc.use_kext
-      dint1 = load(EC,"dint1"*'o')
+      dint1 = load(EC,"dh_mm")
       R1 = dint1[SP['v'],SP['o']]
     else
       R1 = dfock[SP['v'],SP['o']]
@@ -962,7 +1093,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
 
   # <ab|ij>
   if EC.options.cc.use_kext
-    R2 = zeros((length(SP['v']),length(SP['v']),length(SP['o']),length(SP['o'])))
+    R2 = zeros(nvirt,nvirt,nocc,nocc)
   else
     if !EC.options.cc.calc_d_vvoo
       error("for not use_kext calc_d_vvoo has to be True")
@@ -987,13 +1118,11 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
     int2 = integ2(EC.fd)
     if ndims(int2) == 4
       if EC.options.cc.triangular_kext
-        trioo = [CartesianIndex(i,j) for j in 1:length(SP['o']) for i in 1:j]
+        trioo = [CartesianIndex(i,j) for j in 1:nocc for i in 1:j]
         D2 = calc_D2(EC, T1, T2)[:,:,trioo]
         # <pq|rs> D^ij_rs
         @tensoropt R2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
         D2 = nothing
-        norb = length(SP[':'])
-        nocc = length(SP['o'])
         Rpqoo = Array{Float64}(undef,norb,norb,nocc,nocc)
         Rpqoo[:,:,trioo] = R2pqx
         trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
@@ -1009,7 +1138,7 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
       end
     else
       # last two indices of integrals are stored as upper triangular 
-      tripp = [CartesianIndex(i,j) for j in 1:length(SP[':']) for i in 1:j]
+      tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
       D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
       # <pq|rs> D^ij_rs
       @tensoropt rR2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
@@ -1092,27 +1221,28 @@ function calc_ccsd_resid(EC::ECInfo, T1,T2,dc)
 end
 
 """
-    calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
+    calc_pertT(EC::ECInfo; save_t3=false)
 
   Calculate (T) correction for closed-shell CCSD.
 
   Return ( (T)-energy, [T]-energy))
 """
-function calc_pertT(EC::ECInfo, T1,T2; save_t3 = false)
+function calc_pertT(EC::ECInfo; save_t3=false)
+  T1 = load(EC,"T_vo")
+  T2 = load(EC,"T_vvoo")
   # <ab|ck>
   abck = ints2(EC,"vvvo")
   # <ia|jk>
   iajk = ints2(EC,"ovoo")
   # <ij|ab>
   ijab = ints2(EC,"oovv")
-  nocc = length(EC.space['o'])
-  nvir = length(EC.space['v'])
-  ϵo = EC.ϵo
-  ϵv = EC.ϵv
+  nocc = n_occ_orbs(EC)
+  nvir = n_virt_orbs(EC)
+  ϵo, ϵv = orbital_energies(EC)
   Enb3 = 0.0
   IntX = zeros(nvir,nocc)
   if save_t3
-    t3file, T3 = newmmap(EC,"T3abcijk",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
+    t3file, T3 = newmmap(EC,"T_vvvooo",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
   end
   for k = 1:nocc 
     for j = 1:k
@@ -1181,31 +1311,33 @@ end
 function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   t1 = time_ns()
   SP = EC.space
+  nocc = n_occ_orbs(EC)
+  noccb = n_occb_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nvirtb = n_virtb_orbs(EC)
+  norb = n_orbs(EC)
   linearized::Bool = false
   if ndims(T1a) == 2
+    if !EC.options.cc.use_kext
+      error("open-shell CCSD only implemented with kext")
+    end
     calc_dressed_ints(EC,T1a,T1b)
     t1 = print_time(EC,t1,"dressing",2)
   else
     pseudo_dressed_ints(EC,true)
   end
 
-  if length(T1a) > 0
-    R1a = Float64[]
-  else
-    R1a = nothing
-  end
-  if length(T1b) > 0
-    R1b = Float64[]
-  else
-    R1b = nothing
-  end
   if uppercase(EC.currentMethod[1:2]) == "TD"
     morba, norbb, morbb, norba = active_orbitals(EC)
     T2ab[norba,morbb,morba,norbb] = 0
   end
 
-  dfock = load(EC,"dfock"*'o')
-  dfockb = load(EC,"dfock"*'O')
+  R1a = Float64[]
+  R1b = Float64[]
+
+  dfock = load(EC,"df_mm")
+  dfockb = load(EC,"df_MM")
+
   fij = dfock[SP['o'],SP['o']]
   fab = dfock[SP['v'],SP['v']]
   fIJ = dfockb[SP['O'],SP['O']]
@@ -1213,9 +1345,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
 
   if length(T1a) > 0
     if EC.options.cc.use_kext
-      dint1a = load(EC,"dint1"*'o')
+      dint1a = load(EC,"dh_mm")
       R1a = dint1a[SP['v'],SP['o']]
-      dint1b = load(EC,"dint1"*'O')
+      dint1b = load(EC,"dh_MM")
       R1b = dint1b[SP['V'],SP['O']]
     else
       fai = dfock[SP['v'],SP['o']]
@@ -1245,12 +1377,12 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       R1a[a,i] += fIA[J,B] * T2ab[a,B,i,J]
       R1b[A,I] += fia[j,b] * T2ab[b,A,j,I]
     end
-    if EC.nocc > 0 
+    if n_occ_orbs(EC) > 0 
       d_oovo = load(EC,"d_oovo")
       @tensoropt R1a[a,i] -= d_oovo[k,j,d,i] * T2a[a,d,j,k]
       d_oovo = nothing
     end
-    if EC.noccb > 0
+    if n_occb_orbs(EC) > 0
       d_OOVO = load(EC,"d_OOVO")
       @tensoropt R1b[A,I] -= d_OOVO[K,J,D,I] * T2b[A,D,J,K]
       d_OOVO = nothing
@@ -1264,9 +1396,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
 
   #driver terms
   if EC.options.cc.use_kext
-    R2a = zeros((length(SP['v']),length(SP['v']),length(SP['o']),length(SP['o'])))
-    R2b = zeros((length(SP['V']),length(SP['V']),length(SP['O']),length(SP['O'])))
-    R2ab = zeros((length(SP['v']),length(SP['V']),length(SP['o']),length(SP['O'])))
+    R2a = zeros(nvirt, nvirt, nocc, nocc)
+    R2b = zeros(nvirtb, nvirtb, noccb, noccb)
+    R2ab = zeros(nvirt, nvirtb, nocc, noccb)
   else
     d_vvoo = load(EC,"d_vvoo")
     R2a = deepcopy(d_vvoo)
@@ -1282,10 +1414,10 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   #ladder terms
   if EC.options.cc.use_kext
     # last two indices of integrals (apart from αβ) are stored as upper triangular 
-    tripp = [CartesianIndex(i,j) for j in 1:length(SP[':']) for i in 1:j]
+    tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
     if(EC.fd.uhf)
       # αα
-      int2a = integ2(EC.fd,SCα::SpinCase)
+      int2a = integ2(EC.fd,:α)
       D2a = calc_D2a(EC, T1a, T2a)[tripp,:,:]
       @tensoropt rR2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
       D2a = nothing
@@ -1294,9 +1426,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
       rR2pqa = nothing
       R2a += R2pqa[SP['v'],SP['v'],:,:]
-      if EC.noccb > 0
+      if n_occb_orbs(EC) > 0
         # ββ
-        int2b = integ2(EC.fd,SCβ::SpinCase)
+        int2b = integ2(EC.fd,:β)
         D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
         @tensoropt rR2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
@@ -1306,7 +1438,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
         rR2pqb = nothing
         R2b += R2pqb[SP['V'],SP['V'],:,:]
         # αβ
-        int2ab = integ2(EC.fd,SCαβ::SpinCase)
+        int2ab = integ2(EC.fd,:αβ)
         D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
         @tensoropt R2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
         D2ab = nothing
@@ -1323,7 +1455,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
       rR2pqa = nothing
       R2a += R2pqa[SP['v'],SP['v'],:,:]
-      if EC.noccb > 0
+      if n_occb_orbs(EC) > 0
         # ββ
         D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
         @tensoropt rR2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
@@ -1366,7 +1498,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
         R1b[a,i] -= x1b[k,i] * T1b[a,k]
       end
     end
-    if EC.nocc > 0 && EC.noccb > 0 && length(T1a) > 0
+    if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
       @tensoropt begin
         R2ab[a,b,i,j] -= R2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
         R2ab[a,b,i,j] -= R2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
@@ -1410,7 +1542,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       xab[a,b] -= dcfac * oovv[i,k,b,d] * T2a[a,d,i,k]
     end
     !dc && @tensoropt x_klij[k,l,i,j] += 0.5 * oovv[k,l,c,d] * T2a[c,d,i,j]
-    if EC.noccb > 0
+    if n_occb_orbs(EC) > 0
       @tensoropt x_dAlI[d,A,l,I] := oovv[k,l,c,d] * T2ab[c,A,k,I]
       !dc && @tensoropt x_dAlI[d,A,l,I] -= oovv[k,l,d,c] * T2ab[c,A,k,I]
       @tensoropt begin
@@ -1423,7 +1555,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     !dc && @tensoropt x_adil[a,d,i,l] -= 0.5 * oovv[k,l,d,c] * T2a[a,c,i,k]
     @tensoropt R2ab[a,B,i,J] += x_adil[a,d,i,l] * T2ab[d,B,l,J]
     oovv = nothing
-    if EC.noccb > 0
+    if n_occb_orbs(EC) > 0
       OOVV = ints2(EC,"OOVV")
       @tensoropt begin
         xIJ[I,J] += dcfac * OOVV[I,K,B,D] * T2b[B,D,J,K]
@@ -1478,7 +1610,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   end
 
   @tensoropt R2a[a,b,i,j] += x_klij[k,l,i,j] *  T2a[a,b,k,l]
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     @tensoropt begin
       R2b[A,B,I,J] += x_KLIJ[K,L,I,J] *  T2b[A,B,K,L]
       R2ab[a,B,i,J] += x_kLiJ[k,L,i,J] * T2ab[a,B,k,L]
@@ -1492,7 +1624,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i]
   end
   rR2a = nothing
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     @tensoropt begin
       rR2b[A,B,I,J] := xAB[A,C] * T2b[C,B,I,J]
       rR2b[A,B,I,J] -= xIJ[K,I] * T2b[A,B,K,J]
@@ -1508,7 +1640,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
   end
   xij, xIJ, xab, xAB = nothing, nothing, nothing, nothing
   #ph-ab-ladder
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     d_vOvO = load(EC,"d_vOvO")
     @tensoropt R2ab[a,B,i,J] -= d_vOvO[a,K,c,J] * T2ab[c,B,i,K]
     d_vOvO = nothing
@@ -1537,7 +1669,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     R2ab[a,B,i,J] -= d_vovo[a,k,c,i] * T2ab[c,B,k,J]
   end
   d_vovo, rR2a = nothing, nothing
-  if EC.noccb > 0
+  if n_occb_orbs(EC) > 0
     d_VOOV = load(EC,"d_VOOV")
     @tensoropt begin
       rR2b[A,B,I,J] := d_VOOV[B,K,J,C] * T2b[A,C,I,K]
@@ -1791,121 +1923,106 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
 end
 
 """
-    calc_cc(EC::ECInfo, T1, T2, dc = false)
+    starting_amplitudes(EC::ECInfo, method::ECMethod)
 
-Calculate closed-shell coupled cluster amplitudes.
-
-If length(T1) is 0 on input, no singles will be calculated.
-If dc: calculate distinguishable cluster.
+  Prepare starting amplitudes for coupled cluster calculation.
+  
+  The starting amplitudes are read from files `T_vo`, `T_VO`, `T_vvoo`, etc.
+  If the files do not exist, the amplitudes are initialized to zero.
+  The order of amplitudes is as follows:
+  - singles: `α`, `β`
+  - doubles: `αα`, `ββ`, `αβ`
+  - triples: `ααα`, `βββ`, `ααβ`, `αββ`
+  Return a list of vectors of starting amplitudes 
+  and a list of ranges for excitation levels.
 """
-function calc_cc(EC::ECInfo, T1, T2, dc = false)
-  println(method_name(T1,dc))
-  diis = Diis(EC.scr)
-
-  println("Iter     SqNorm      Energy      DE          Res         Time")
-  NormR1 = 0.0
-  NormT1 = 0.0
-  NormT2 = 0.0
-  R1 = Float64[]
-  Eh = 0.0
-  t0 = time_ns()
-  for it in 1:EC.options.cc.maxit
-    t1 = time_ns()
-    R1, R2 = calc_ccsd_resid(EC,T1,T2,dc)
-    t1 = print_time(EC,t1,"residual",2)
-    NormT2 = calc_doubles_norm(T2)
-    NormR2 = calc_doubles_norm(R2)
-    Eh = calc_hylleraas(EC,T1,T2,R1,R2)
-    T2 += update_doubles(EC,R2)
-    if length(T1) == 0
-      T2, = perform(diis,[T2],[R2])
-      En = 0.0
-    else
-      NormT1 = calc_singles_norm(T1)
-      NormR1 = calc_singles_norm(R1)
-      T1 += update_singles(EC,R1)
-      T1,T2 = perform(diis,[T1,T2],[R1,R2])
-      En1 = calc_singles_energy(EC, T1)
-      En = En1
-    end
-    En2 = calc_doubles_energy(EC,T2)
-    En += En2
-    ΔE = En - Eh  
-    NormR = NormR1 + NormR2
-    NormT = 1.0 + NormT1 + NormT2
-    tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
-    flush(stdout)
-    if NormR < EC.options.cc.thr
-      break
+function starting_amplitudes(EC::ECInfo, method::ECMethod)
+  highest_full_exc = max_full_exc(method)
+  if highest_full_exc > 3
+    error("starting_amplitudes only implemented upto triples")
+  end
+  if method.unrestricted
+    namps = sum([i + 1 for i in 1:highest_full_exc])
+    exc_ranges = [1:2, 3:5, 6:9]
+    spins = [(:α,), (:β,), (:α, :α), (:β, :β), (:α, :β), (:α, :α, :α), (:β, :β, :β), (:α, :α, :β), (:α, :β, :β)]
+  else
+    namps = highest_full_exc
+    exc_ranges = [1:1, 2:2, 3:3]
+    spins = [(:α,), (:α, :α), (:α, :α, :α)]
+  end
+  Amps = AbstractArray[Float64[] for i in 1:namps]
+  # starting guesses
+  for (iex,ex) in enumerate(method.exclevel)
+    if ex == :full
+      for iamp in exc_ranges[iex]
+        Amps[iamp] = read_starting_guess4amplitudes(EC, iex, spins[iamp]...)
+      end
     end
   end
-  println()
-  @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
-  println()
-  flush(stdout)
-
-  return Eh,T1,T2
+  return Amps, exc_ranges
 end
 
 """
-    calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
+    calc_cc(EC::ECInfo, method::ECMethod)
 
-  Calculate unrestricted coupled cluster amplitudes.
+  Calculate coupled cluster amplitudes.
 
-  If length(T1a) && length(T1b) are 0 on input, no singles will be calculated.
-  If dc: calculate distinguishable cluster.
+  Exact specification of the method is given by `method`.
 """
-function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
-  println(method_name(T1a,dc))
-  diis = Diis(EC.scr)
+function calc_cc(EC::ECInfo, method::ECMethod)
+  dc = (method.theory == "DC" || method.theory == "TD-DC" || method.theory == "FRS-DC" || method.theory == "FRT-DC")
+  print_info(method_name(method))
+  Amps, exc_ranges = starting_amplitudes(EC, method)
+  singles, doubles, triples = exc_ranges[1:3]
+  if method.unrestricted
+    @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
+  else
+    @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
+  end
+  diis = Diis(EC)
 
-  println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
-  R1a = Float64[]
-  R1b = Float64[]
-  nosing = (length(T1a) == 0) && (length(T1b) == 0)  
+  do_sing = (method.exclevel[1] == :full)
   Eh = 0.0
+  En1 = 0.0
   t0 = time_ns()
+  println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    R1a, R1b, R2a, R2b, R2ab = calc_ccsd_resid(EC,T1a,T1b,T2a,T2b,T2ab,dc)
-    t1 = print_time(EC,t1,"residual",2)
-    NormT2 = calc_doubles_norm(T2a,T2b,T2ab)
-    NormR2 = calc_doubles_norm(R2a,R2b,R2ab)
-    Eh = calc_hylleraas(EC,T1a,T1b,T2a,T2b,T2ab,R1a,R1b,R2a,R2b,R2ab)
-    T2a += update_doubles(EC,R2a)
-    T2b += update_doubles(EC,R2b;spincase=SCβ)
-    T2ab += update_doubles(EC,R2ab;spincase=SCαβ)
-    if uppercase(EC.currentMethod[1:3]) == "FRS"
+    Res = calc_ccsd_resid(EC, Amps..., dc)
+    t1 = print_time(EC, t1, "residual", 2)
+    NormT2 = calc_doubles_norm(Amps[doubles]...)
+    NormR2 = calc_doubles_norm(Res[doubles]...)
+    Eh = calc_hylleraas(EC, Amps..., Res...)
+    update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
+    if uppercase(method.theory[1:3]) == "FRS"
       morba, norbb, morbb, norba = active_orbitals(EC)
-      T2ab[norba,morbb,morba,norbb] = 1.0
-    elseif uppercase(EC.currentMethod[1:3]) == "FRT"
+      Amps[5][norba,morbb,morba,norbb] = 1.0
+    elseif uppercase(method.theory[1:3]) == "FRT"
       morba, norbb, morbb, norba = active_orbitals(EC)
-      T2ab[norba,morbb,morba,norbb] = -1.0
-    elseif uppercase(EC.currentMethod[1:2]) == "TD"
+      Amps[5][norba,morbb,morba,norbb] = -1.0
+    elseif uppercase(method.theory[1:2]) == "TD"
       morba, norbb, morbb, norba = active_orbitals(EC)
-      println("T1a all internal: ", T1a[norba,morba])
-      println("T1b all internal: ", T1b[morbb,norbb])
+      # println("T1a all internal: ", T1a[norba,morba])
+      # println("T1b all internal: ", T1b[morbb,norbb])
       # T1a[norba,morba] = 0.0
       # T1b[morbb,norbb] = 0.0
     end
-    if nosing
-      T2a,T2b,T2ab = perform(diis,[T2a,T2b,T2ab],[R2a,R2b,2.0*R2ab])
-      En = 0.0
-    else
-      NormT1 = calc_singles_norm(T1a, T1b)
-      NormR1 = calc_singles_norm(R1a, R1b)
-      T1a += update_singles(EC,R1a;spincase=SCα)
-      T1b += update_singles(EC,R1b;spincase=SCβ)
-      T1a,T1b,T2a,T2b,T2ab = perform(diis,[T1a,T1b,T2a,T2b,T2ab],[R1a,R1b,R2a,R2b,2.0*R2ab])
-      En1 = calc_singles_energy(EC, T1a, T1b)
-      En = En1
+    if do_sing
+      NormT1 = calc_singles_norm(Amps[singles]...)
+      NormR1 = calc_singles_norm(Res[singles]...)
+      update_singles!(EC, Amps[singles]..., Res[singles]...)
     end
-    En2 = calc_doubles_energy(EC,T2a,T2b,T2ab)
-    En += En2
+    Amps = perform(diis, Amps, Res)
+    if do_sing
+      save_current_singles(EC, Amps[singles]...)
+      En1 = calc_singles_energy(EC, Amps[singles]...)
+    end
+    save_current_doubles(EC, Amps[doubles]...)
+    En2 = calc_doubles_energy(EC, Amps[doubles]...)
+    En = En1 + En2
     ΔE = En - Eh  
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
@@ -1920,19 +2037,26 @@ function calc_cc(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc = false)
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
   println()
   flush(stdout)
-  return Eh, T1a, T1b, T2a, T2b, T2ab
+  return Eh
 end
 
 """ 
-    calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
+    calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
 
   Calculate decomposed closed-shell DC-CCSDT amplitudes.
 
   If `useT3`: (T) amplitudes from a preceding calculations will be used as starting guess.
   If cc3: calculate CC3 amplitudes.
 """
-function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
+function calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
+  if cc3
+    print_info("CC3")
+  else
+    print_info("DC-CCSDT")
+  end
   calc_integrals_decomposition(EC)
+  T1 = read_starting_guess4amplitudes(EC, 1)
+  T2 = read_starting_guess4amplitudes(EC, 2)
   if useT3
     calc_triples_decomposition(EC)
   else
@@ -1940,12 +2064,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
     calc_dressed_3idx(EC,T1)
     calc_triples_decomposition_without_triples(EC,T2)
   end
-  if cc3
-    println("CC3")
-  else
-    println("DC-CCSDT")
-  end
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
@@ -1969,18 +2088,18 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
     t1 = print_time(EC,t1,"R3",2)
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
-    T3 = load(EC,"T3_XYZ")
+    T3 = load(EC,"T_XXX")
     NormT3 = calc_triples_norm(T3)
     NormR1 = calc_singles_norm(R1)
     NormR2 = calc_doubles_norm(R2)
-    R3 = load(EC,"R3_decomp")
+    R3 = load(EC,"R_XXX")
     NormR3 = calc_triples_norm(R3)
     Eh = calc_hylleraas(EC,T1,T2,R1,R2)
     T1 += update_singles(EC,R1)
     T2 += update_doubles(EC,R2)
     T3 += update_triples(EC,R3)
     T1,T2,T3 = perform(diis,[T1,T2,T3],[R1,R2,R3])
-    save(EC,"T3_XYZ",T3)
+    save(EC,"T_XXX",T3)
     En = calc_singles_energy(EC, T1)
     En += calc_doubles_energy(EC,T2)
     ΔE = En - Eh
@@ -1998,61 +2117,7 @@ function calc_ccsdt(EC::ECInfo, T1, T2, useT3 = false, cc3 = false)
   println()
   flush(stdout)
   
-  return Eh,T1,T2
-end
-
-
-"""
-    get_endauxblks(naux, blocksize = 100)
-
-  Generate end-of-block indices for auxiliary basis (for loop over blocks).
-"""
-function get_endauxblks(naux, blocksize = 100)
-  nauxblks = naux ÷ blocksize
-  if nauxblks == 0 || naux - nauxblks*blocksize > 0.5*blocksize
-    nauxblks += 1
-  end
-  endauxblks = [ (i == nauxblks) ? naux : i*blocksize for i in 1:nauxblks ]
-  return endauxblks
-end
-
-"""
-    calc_dressed_3idx(EC,T1)
-
-  Calculate dressed integrals for 3-index integrals from file `pqP`.
-"""
-function calc_dressed_3idx(EC,T1)
-  pqPfile, pqP = mmap(EC, "pqP")
-  # println(size(pqP))
-  SP = EC.space
-  nP = size(pqP,3)
-  nocc = length(SP['o'])
-  nvirt = length(SP['v'])
-  # create mmaps for dressed integrals
-  ovPfile, ovP = newmmap(EC,"d_ovP",Float64,(nocc,nvirt,nP))
-  voPfile, voP = newmmap(EC,"d_voP",Float64,(nvirt,nocc,nP))
-  ooPfile, ooP = newmmap(EC,"d_ooP",Float64,(nocc,nocc,nP))
-  vvPfile, vvP = newmmap(EC,"d_vvP",Float64,(nvirt,nvirt,nP))
-
-  PBlks = get_endauxblks(nP)
-  sP = 1 # start index of each block
-  for eP in PBlks # end index of each block
-    P = sP:eP
-    ovP[:,:,P] = pqP[SP['o'],SP['v'],P]
-    vvP[:,:,P] = pqP[SP['v'],SP['v'],P]
-    @tensoropt vvP[:,:,P][a,b,P] -= T1[a,i] * ovP[:,:,P][i,b,P]
-    voP[:,:,P] = pqP[SP['v'],SP['o'],P]
-    @tensoropt voP[:,:,P][a,i,P] += T1[b,i] * vvP[:,:,P][a,b,P]
-    ooP[:,:,P] = pqP[SP['o'],SP['o'],P]
-    @tensoropt voP[:,:,P][a,i,P] -= T1[a,j] * ooP[:,:,P][j,i,P]
-    @tensoropt ooP[:,:,P][i,j,P] += T1[b,j] * ovP[:,:,P][i,b,P]
-    sP = eP + 1
-  end
-  closemmap(EC,ovPfile,ovP)
-  closemmap(EC,voPfile,voP)
-  closemmap(EC,ooPfile,ooP)
-  closemmap(EC,vvPfile,vvP)
-  close(pqPfile)
+  return Eh
 end
 
 """
@@ -2063,7 +2128,7 @@ end
 function update_triples(EC,R3, use_shift = true)
   shift = use_shift ? EC.options.cc.shiftt : 0.0
   ΔT3 = deepcopy(R3)
-  ϵX = load(EC,"epsilonX")
+  ϵX = load(EC,"e_X")
   for I ∈ CartesianIndices(ΔT3)
     X,Y,Z = Tuple(I)
     ΔT3[I] /= (ϵX[X] + ϵX[Y] + ϵX[Z] + shift)
@@ -2090,9 +2155,9 @@ function add_to_singles_and_doubles_residuals(EC,R1,R2)
   SP = EC.space
   ooPfile, ooP = mmap(EC,"d_ooP")
   ovPfile, ovP = mmap(EC,"d_ovP")
-  Txyz = load(EC,"T3_XYZ")
+  Txyz = load(EC,"T_XXX")
   
-  U = load(EC,"UvoX")
+  U = load(EC,"C_voX")
   # println(size(U))
 
   @tensoropt Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
@@ -2108,7 +2173,7 @@ function add_to_singles_and_doubles_residuals(EC,R1,R2)
   @tensoropt Bvo[a,i,P,X] := vvP[a,b,P] * U[b,i,X]
   close(vvPfile)
   vvP = nothing
-  dfock = load(EC,"dfock"*'o')
+  dfock = load(EC,"df_mm")
   fov = dfock[SP['o'],SP['v']]
   # R2[abij] = RR2[abij] + RR2[baji]  
   @tensoropt RR2[a,b,i,j] := U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
@@ -2125,10 +2190,10 @@ end
 """
     calc_integrals_decomposition(EC::ECInfo)
 
-  Decompose (pq|rs) as (pq|P)(P|rs) and store as `pqP`.
+  Decompose (pq|rs) as (pq|P)(P|rs) and store as `mmL`.
 """
 function calc_integrals_decomposition(EC::ECInfo)
-  pqrs = permutedims(ints2(EC,"::::",SCα),(1,3,2,4))
+  pqrs = permutedims(ints2(EC,"::::",:α),(1,3,2,4))
   n = size(pqrs,1)
   B, S, Bt = svd(reshape(pqrs, (n^2,n^2)))
   # display(S)
@@ -2146,7 +2211,7 @@ function calc_integrals_decomposition(EC::ECInfo)
   
   #get integral decomposition
   pqP = B[:,1:naux1].*sqrt.(S[1:naux1]')
-  save(EC, "pqP", reshape(pqP, (n,n,naux1)))
+  save(EC, "mmL", reshape(pqP, (n,n,naux1)))
   #B_comparison = pqP * pqP'
   #println( B_comparison ≈ reshape(pqrs, (n^2,n^2)) )
 end
@@ -2220,12 +2285,13 @@ end
 """
 function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
   SP = EC.space
-  nocc = length(SP['o'])
-  nvirt = length(SP['v'])
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
   UaiX2 = deepcopy(UaiX)
+  ϵo, ϵv = orbital_energies(EC)
   for a in 1:nvirt
     for i in 1:nocc
-      UaiX2[a,i,:] *= EC.ϵv[a] - EC.ϵo[i]
+      UaiX2[a,i,:] *= ϵv[a] - ϵo[i]
     end
   end
 
@@ -2246,8 +2312,8 @@ end
 """
 function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   println("T^ijk_abc-free-decomposition")
-  nocc = length(EC.space['o'])
-  nvirt = length(EC.space['v'])
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
 
   # first approx for U^iX_a from doubles decomposition
   tol2 = EC.options.cc.ampsvdtol*0.01
@@ -2257,12 +2323,12 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
   # UaiX = eigen_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  save(EC, "epsilonX", ϵX)
+  save(EC, "e_X", ϵX)
   #display(UaiX)
   naux = length(ϵX)
-  save(EC,"UvoX",UaiX)
+  save(EC,"C_voX",UaiX)
   # TODO: calc starting guess for T3_XYZ from T2 and UvoX
-  save(EC,"T3_XYZ",zeros(naux,naux,naux))
+  save(EC,"T_XXX",zeros(naux,naux,naux))
 end
 
 """
@@ -2273,11 +2339,11 @@ end
 function calc_triples_decomposition(EC::ECInfo)
   println("T^ijk_abc-decomposition")
   use_svd = true 
-  nocc = length(EC.space['o'])
-  nvirt = length(EC.space['v'])
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
 
   Triples_Amplitudes = zeros(nvirt,nocc,nvirt,nocc,nvirt,nocc)
-  t3file, T3 = mmap(EC, "T3abcijk")
+  t3file, T3 = mmap(EC, "T_vvvooo")
   trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
   for ijk in axes(T3,4)
     i,j,k = Tuple(trippp[ijk])                                            #trippp is giving the indices according to the joint index ijk as a tuple
@@ -2296,14 +2362,14 @@ function calc_triples_decomposition(EC::ECInfo)
     UaiX = iter_svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, naux)
   end
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  save(EC, "epsilonX", ϵX)
+  save(EC, "e_X", ϵX)
   #display(UaiX)
-  save(EC,"UvoX",UaiX)
+  save(EC,"C_voX",UaiX)
 
   @tensoropt begin
     T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX[a,i,X]) * UaiX[b,j,Y]) * UaiX[c,k,Z])
   end
-  save(EC,"T3_XYZ",T3_decomp_starting_guess)
+  save(EC,"T_XXX",T3_decomp_starting_guess)
   #display(T3_decomp_starting_guess)
 
   # @tensoropt begin
@@ -2343,11 +2409,12 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   close(voPfile)
   close(ooPfile)
   close(vvPfile)
+  ϵo, ϵv = orbital_energies(EC)
   for I ∈ CartesianIndices(R)
     X,Y,a,i = Tuple(I)
-    R[I] /= -(ϵX[X] + ϵX[Y] + EC.ϵv[a] - EC.ϵo[i])
+    R[I] /= -(ϵX[X] + ϵX[Y] + ϵv[a] - ϵo[i])
   end
-  nocc = length(EC.space['o'])
+  nocc = n_occ_orbs(EC)
   naux = length(ϵX)
   # @tensoropt T3_decomp_check[a,i,b,j,c,k] := R[X,Y,a,i] * UvoX[c,k,X] * UvoX[b,j,Y]
   # for i = 1:nocc
@@ -2383,11 +2450,11 @@ end
 """
 function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   t1 = time_ns()
-  UvoX = load(EC,"UvoX")
+  UvoX = load(EC,"C_voX")
   #display(UvoX)
 
   #load decomposed amplitudes
-  T3_XYZ = load(EC, "T3_XYZ")
+  T3_XYZ = load(EC, "T_XXX")
   #display(T3_XYZ)
 
   #load df coeff
@@ -2398,7 +2465,7 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
 
   #load dressed fock matrices
   SP = EC.space
-  dfock = load(EC,"dfock"*'o')    
+  dfock = load(EC,"df_mm")    
   dfoo = dfock[SP['o'],SP['o']]
   dfov = dfock[SP['o'],SP['v']]
   dfvv = dfock[SP['v'],SP['v']]
@@ -2494,7 +2561,7 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   close(ooPfile)
   close(vvPfile)
 
-  save(EC,"R3_decomp",R3decomp)
+  save(EC,"R_XXX",R3decomp)
   
 end
 

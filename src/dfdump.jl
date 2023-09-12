@@ -6,22 +6,9 @@ using ..ElemCo.ECInts
 using ..ElemCo.MSystem
 using ..ElemCo.FciDump
 using ..ElemCo.TensorTools
+using ..ElemCo.DFTools
 
 export dfdump
-
-"""
-    generate_basis(ms::MSys)
-
-  Generate basis sets for integral calculations.
-"""
-function generate_basis(ms::MSys)
-  # TODO: use element-specific basis!
-  aobasis = lowercase(ms.atoms[1].basis["ao"].name)
-  mp2fit = lowercase(ms.atoms[1].basis["mp2fit"].name)
-  bao = BasisSet(aobasis,genxyz(ms,bohr=false))
-  bfit = BasisSet(mp2fit,genxyz(ms,bohr=false))
-  return bao,bfit
-end
 
 """
     generate_integrals(EC::ECInfo, fdump::FDump, cMO)
@@ -30,7 +17,8 @@ end
 """
 function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
   @assert !fdump.uhf # TODO: uhf
-  bao,bfit = generate_basis(EC.ms)
+  bao = generate_basis(EC.ms, "ao")
+  bfit = generate_basis(EC.ms, "mp2fit")
   hAO = kinetic(bao) + nuclear(bao)
   fdump.int1 = cMO' * hAO * cMO
 
@@ -54,13 +42,19 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO)
 end
 
 """ 
-    dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
+    dfdump(EC::ECInfo)
 
-  Generate fcidump using df integrals and store in dumpfile.
-  If dumpfile is empty, don't write to fcidump file, store in EC.fd.
+  Generate fcidump using df integrals and store in `IntOptions.fcidump`.
+  If `IntOptions.fcidump` is empty, don't write to fcidump file, store in EC.fd.
 """
-function dfdump(EC::ECInfo, cMO, dumpfile = "FCIDUMP")
-  println("generating fcidump $dumpfile")
+function dfdump(EC::ECInfo)
+  println("generating integrals")
+  dumpfile = EC.options.int.fcidump 
+  if !EC.options.int.df
+    error("Only density-fitted integrals implemented")
+  end
+  orbsfile = (EC.options.int.orbs == "") ? EC.options.scf.save : EC.options.int.orbs
+  cMO = load(EC, orbsfile)
   nelec = guess_nelec(EC.ms)
   fdump = FDump(size(cMO,2), nelec)
   generate_integrals(EC, fdump, cMO)

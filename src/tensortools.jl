@@ -10,12 +10,14 @@ using ..ElemCo.MIO
 export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol, rotate_eigenvectors_to_real!
 
 """
-    save(EC::ECInfo, fname::String, a::AbstractArray)
+    save(EC::ECInfo, fname::String, a::AbstractArray, descr="tmp"; overwrite=true)
 
   Save array `a` to file `fname` in EC.scr directory.
+  Add file to `EC.files` with description `descr`.
 """
-function save(EC::ECInfo, fname::String, a::AbstractArray)
-  miosave(joinpath(EC.scr, fname*".bin"), a)
+function save(EC::ECInfo, fname::String, a::AbstractArray, descr="tmp"; overwrite=true)
+  miosave(joinpath(EC.scr, fname*EC.ext), a)
+  add_file(EC, fname, descr; overwrite)
 end
 
 """
@@ -24,17 +26,19 @@ end
   Load array from file `fname` in EC.scr directory.
 """
 function load(EC::ECInfo, fname::String)
-  return mioload(joinpath(EC.scr, fname*".bin"))
+  return mioload(joinpath(EC.scr, fname*EC.ext))
 end
 
 """
-    newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}})
+    newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}, descr="tmp")
 
   Create a new memory-map file for writing (overwrites existing file).
+  Add file to `EC.files` with description `descr`.
   Return a pointer to the file and the mmaped array.
 """
-function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}})
-  return mionewmmap(joinpath(EC.scr, fname*".bin"), Type, dims)
+function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}, descr="tmp")
+  add_file(EC, fname, descr; overwrite=true)
+  return mionewmmap(joinpath(EC.scr, fname*EC.ext), Type, dims)
 end
 
 """
@@ -53,23 +57,7 @@ end
   Return a pointer to the file and the mmaped array.
 """
 function mmap(EC::ECInfo, fname::String)
-  return miommap(joinpath(EC.scr, fname*".bin"))
-end
-
-"""
-    isalphaspin(sp1::Char,sp2::Char)
-
-  Try to guess spin of an electron: lowcase α, uppercase β, non-letters skipped.
-  Return true for α spin.  Throws an error if cannot decide.
-"""
-function isalphaspin(sp1::Char,sp2::Char)
-  if isletter(sp1)
-    return islowercase(sp1)
-  elseif isletter(sp2)
-    return islowercase(sp2)
-  else
-    error("Cannot guess spincase for $sp1 $sp2 . Specify the spincase explicitly!")
-  end
+  return miommap(joinpath(EC.scr, fname*EC.ext))
 end
 
 """ 
@@ -77,16 +65,16 @@ end
 
   Return subset of 1e⁻ integrals according to spaces. 
   
-  The spincase can explicitly be given, or will be deduced 
+  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification. 
 """
 function ints1(EC::ECInfo, spaces::String, spincase = nothing)
   sc = spincase
   if isnothing(sc)
     if isalphaspin(spaces[1],spaces[2])
-      sc = SCα
+      sc = :α
     else
-      sc = SCβ
+      sc = :β
     end
   end
   return integ1(EC.fd, sc)[EC.space[spaces[1]],EC.space[spaces[2]]]
@@ -121,7 +109,7 @@ end
 
   Return subset of 2e⁻ integrals according to spaces. 
   
-  The spincase can explicitly be given, or will be deduced 
+  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification.
   If the last two indices are stored as triangular and detri - make them full,
   otherwise return as a triangular cut.
@@ -131,13 +119,13 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
     second_el_alpha = isalphaspin(spaces[2],spaces[4])
     if isalphaspin(spaces[1],spaces[3])
       if second_el_alpha
-        sc = SCα
+        sc = :α
       else
-        sc = SCαβ
+        sc = :αβ
       end
     else
       !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
-      sc = SCβ
+      sc = :β
     end
   else 
     sc = spincase
@@ -207,7 +195,7 @@ end
 function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVector)
   npairs = 0
   skip = false
-  for i = 1:length(evals)
+  for i in eachindex(evals)
     if skip 
       skip = false
       continue
