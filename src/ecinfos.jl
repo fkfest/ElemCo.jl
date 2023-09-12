@@ -7,6 +7,9 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
+export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
+export file_exists, add_file, delete_temporary_files
+export isalphaspin, space4spin
 
 include("options.jl")
 
@@ -20,37 +23,49 @@ include("options.jl")
 @with_kw mutable struct ECInfo <: AbstractECInfo
   """ path to scratch directory. """
   scr::String = joinpath(tempdir(),"elemcojlscr")
+  """ extension of temporary files. """
+  ext::String = ".bin"
   """ output file. """
   out = ""
   """ verbosity level. """
   verbosity::Int = 2
   """ options. """
   options::Options = Options()
-
   """ molecular system. """
   ms::MSys = MSys()
   """ fcidump. """
   fd::FDump = FDump()
+  """ information about (temporary) files. 
+  The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
+  `prefix` can be:
+    - `d` for dressed integrals 
+    - `S` for overlap matrix
+    - `f` for Fock matrix
+    - `e` for orbital energies
+    - `D` for density matrix
+    - `h` for core Hamiltonian
+    - `C` for transformation from one basis to another
+
+  `name` is given by the subspaces involved:
+    - `o` for occupied
+    - `v` for virtual
+    - `O` for occupied-β
+    - `V` for virtual-β
+    - `m` for (full) MO space
+    - `M` for (full) β-MO space
+    - `A` for AO basis
+    - `a` for active orbitals
+    - `c` for closed-shell (doubly-occupied) orbitals
+    - `P` for auxiliary orbitals (fitting basis)
+    - `L` for auxiliary orbitals (Cholesky decomposition, orthogonal)
+    - `X` for auxiliary orbitals (amplitudes decomposition)
+  """
+  files::Dict{String,String} = Dict{String,String}()
+
   """ ignore various errors. """
   ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
   space::Dict{Char,Any} = Dict{Char,Any}()
-  """ number of occupied orbitals (for UHF: α). """
-  nocc::Int = 0
-  """ number of occupied orbitals (β). """
-  noccb::Int = 0
-  """ fock matrix (for UHF: α). """
-  fock::Array{Float64} = Float64[]
-  """ fock matrix (β). """
-  fockb::Array{Float64} = Float64[]
-  """ occupied orbital energies (for UHF: α). """
-  ϵo::Array{Float64} = Float64[]
-  """ virtual orbital energies (for UHF: α). """
-  ϵv::Array{Float64} = Float64[]
-  """ occupied orbital energies (β). """
-  ϵob::Array{Float64} = Float64[]
-  """ virtual orbital energies (β). """
-  ϵvb::Array{Float64} = Float64[]
   currentMethod::String = ""
 end
 
@@ -73,13 +88,13 @@ function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, m
     println(size(EC.fd.int2))
     norb = headvar(EC.fd, "NORB")
     nelec = (nelec==0) ? headvar(EC.fd, "NELEC") : nelec
-    nelec += charge
+    nelec -= charge
     ms2 = (ms2==0) ? headvar(EC.fd, "MS2") : ms2
     orbsym = convert(Vector{Int},headvar(EC.fd, "ORBSYM"))
   elseif ms_exists(EC.ms)
     norb = guess_norb(EC.ms) 
     nelec = (nelec==0) ? guess_nelec(EC.ms) : nelec
-    nelec += charge
+    nelec -= charge
     ms2 = (ms2==0) ? mod(nelec,2) : ms2
     orbsym = ones(Int,norb)
   else
@@ -89,9 +104,68 @@ function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, m
   SP = EC.space
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
   SP[':'] = 1:norb
-  EC.nocc = length(SP['o'])
-  EC.noccb = length(SP['O'])
+  return
 end
+
+"""
+    n_occ_orbs(EC::ECInfo)
+
+  Return number of occupied orbitals (for UHF: α).
+"""
+function n_occ_orbs(EC::ECInfo)
+  return length(EC.space['o'])
+end
+  
+"""
+    n_occb_orbs(EC::ECInfo)
+
+  Return number of occupied orbitals (β).
+"""
+function n_occb_orbs(EC::ECInfo)
+  return length(EC.space['O'])
+end
+
+"""
+    n_orbs(EC::ECInfo)
+
+  Return number of orbitals.
+"""
+function n_orbs(EC::ECInfo)
+  return length(EC.space[':'])
+end
+
+"""
+    n_virt_orbs(EC::ECInfo)
+
+  Return number of virtual orbitals (for UHF: α).
+"""
+function n_virt_orbs(EC::ECInfo)
+  return length(EC.space['v'])
+end
+
+"""
+    n_virtb_orbs(EC::ECInfo)
+
+  Return number of virtual orbitals (β).
+"""
+function n_virtb_orbs(EC::ECInfo)
+  return length(EC.space['V'])
+end
+
+"""
+    len_spaces(EC::ECInfo, spaces::String)
+
+  Return lengths of `spaces` (e.g., "vo" for occupied and virtual orbitals).
+"""
+function len_spaces(EC::ECInfo, spaces::String)
+  return [length(EC.space[sp]) for sp in spaces]
+end
+
+"""
+    len_spaces(EC::ECInfo, spaces::String)
+
+  Return a tuple of lengths of `spaces` (e.g., "ov" for occupied and virtual orbitals).
+"""
 
 """ 
     set_options!(opt; kwargs...)
@@ -106,6 +180,73 @@ function set_options!(opt; kwargs...)
       error("invalid option name: $key")
     end
   end
+  return opt
+end
+
+"""
+    file_exists(EC::ECInfo, name::String)
+
+  Check if file `name` exists in ECInfo.
+"""
+function file_exists(EC::ECInfo, name::String)
+  return haskey(EC.files,name)
+end
+
+"""
+    add_file(EC::ECInfo, name::String, descr::String; overwrite = false)
+
+  Add file `name` to ECInfo with (space-separated) descriptions `descr`.
+  Possible description: `tmp` (temporary).
+"""
+function add_file(EC::ECInfo, name::String, descr::String; overwrite=false)
+  if !file_exists(EC,name) || overwrite
+    EC.files[name] = descr
+  else
+    error("File $name already exists in ECInfo.")
+  end
+end
+
+"""
+    delete_temporary_files(EC::ECInfo)
+
+  Delete all temporary files in ECInfo.  
+"""
+function delete_temporary_files(EC::ECInfo)
+  for (name,descr) in EC.files
+    if "tmp" in split(descr)
+      rm(joinpath(EC.scr,name*EC.ext), force=true)
+    end
+  end
+end
+
+"""
+    isalphaspin(sp1::Char,sp2::Char)
+
+  Try to guess spin of an electron: lowcase α, uppercase β, non-letters skipped.
+  Return true for α spin.  Throws an error if cannot decide.
+"""
+function isalphaspin(sp1::Char,sp2::Char)
+  if isletter(sp1)
+    return islowercase(sp1)
+  elseif isletter(sp2)
+    return islowercase(sp2)
+  else
+    error("Cannot guess spincase for $sp1 $sp2 . Specify the spincase explicitly!")
+  end
+end
+
+"""
+    space4spin(sp::Char, alpha::Bool)
+    
+  Return the space character for a given spin.
+  `sp` on input has to be lowercase.
+"""
+function space4spin(sp::Char, alpha::Bool)
+  if alpha
+    return sp
+  else
+    return uppercase(sp)
+  end
 end
 
 """
@@ -115,19 +256,22 @@ end
   `-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
   or use ':' and ';' instead of '-' and '+', respectively.
 """
-function parse_orbstring(orbs::String; orbsym = Vector{Int})
+function parse_orbstring(orbs::String; orbsym = Vector{Int}())
   # make it in julia syntax
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
   orbs1 = replace(orbs1," "=>"")
-  if prod(orbsym) > 1 && occursin(".",orbs1)
+  if maximum(orbsym) > 1 && occursin(".",orbs1)
     @assert(issorted(orbsym),"Orbital symmetries are not sorted. Specify occa and occb without symmetry.")
     symoffset = zeros(Int,maximum(orbsym))
     symlist = zeros(Int,maximum(orbsym))
     for sym in eachindex(symlist)
       symlist[sym] = count(isequal(sym),orbsym)
     end
-    for iter in eachindex(symoffset[2:end])
+    for iter in eachindex(symoffset)
+      if iter == 1
+        continue
+      end
       symoffset[iter] = sum(symlist[1:iter-1])
     end
     symlist = nothing
@@ -136,13 +280,16 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int})
   else
     symoffset = zeros(Int,1)
   end
-  # println(orbs1)
   occursin(r"^[0-9:;.]+$",orbs1) || error("Use only `0123456789:;+-.` characters in the orbstring: $orbs")
   if first(orbs1) == ':'
     orbs1 = "1"*orbs1
   end
   orblist=Vector{Int}()
   for range in filter(!isempty,split(orbs1,';'))
+    if first(range) == ':'
+      sym = filter(!isempty,split(range[2:end],'.'))[2]
+      range = "1."*sym*range
+    end
     firstlast = filter(!isempty,split(range,':'))
     if length(firstlast) == 1
       # add the orbital
@@ -184,7 +331,7 @@ end
   If both are "-", the occupation is deduced from `nelec` and `ms2`.
   The optional argument `orbsym` is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
-function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int})
+function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int}())
   @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   if occas != "-"
     occa = parse_orbstring(occas; orbsym)
@@ -211,6 +358,7 @@ function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=
   end
   return occa, virta, occb, virtb
 end
+
 
 
 end #module

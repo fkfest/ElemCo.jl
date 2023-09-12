@@ -15,6 +15,7 @@ NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 TensorOperations = "6aa20fa7-93e2-5fca-9bc0-fbd0db3c71a2"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 TensorOperations = ">=3.2.5"

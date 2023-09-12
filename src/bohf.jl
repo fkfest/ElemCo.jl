@@ -3,10 +3,11 @@
 """
 module BOHF
 using LinearAlgebra, TensorOperations, Printf
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
-using ..ElemCo.Focks
+using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
 
 export bohf, bouhf
@@ -17,17 +18,17 @@ export bohf, bouhf
   Perform BO-HF using integrals from fcidump EC.fd.
 """
 function bohf(EC::ECInfo)
-  println("Bi-orthogonal Hartree-Fock")
+  print_info("Bi-orthogonal Hartree-Fock")
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = EC.fd.int0
   cMOl = Matrix{Float64}(I, norb, norb)
   cMOr = Matrix{Float64}(I, norb, norb)
   ϵ = zeros(norb)
-  hsmall = integ1(EC.fd,SCα)
+  hsmall = integ1(EC.fd,:α)
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
@@ -65,7 +66,10 @@ function bohf(EC::ECInfo)
   cMOl = (inv(cMOr))'
   println("BO-HF energy: ", EHF)
   flush(stdout)
-  return EHF, ϵ, cMOl, cMOr
+  delete_temporary_files(EC)
+  save(EC, EC.options.scf.save, cMOr, "BOHF right orbitals")
+  save(EC, EC.options.scf.save*EC.options.scf.left, cMOl, "BOHF left orbitals")
+  return EHF
 end
 
 """ 
@@ -74,18 +78,18 @@ end
   Perform BO-UHF using integrals from fcidump EC.fd.
 """
 function bouhf(EC::ECInfo)
-  println("Bi-orthogonal unrestricted Hartree-Fock")
+  print_info("Bi-orthogonal unrestricted Hartree-Fock")
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])
-  diis = Diis(EC.scr)
+  diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = EC.fd.int0
   # 1: alpha, 2: beta (cMOs can become complex(?))
   cMOl = Any[Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb)]
   cMOr = deepcopy(cMOl)
   ϵ = Any[zeros(norb), zeros(norb)]
-  hsmall = [integ1(EC.fd,SCα), integ1(EC.fd,SCβ)]
+  hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
@@ -133,7 +137,10 @@ function bouhf(EC::ECInfo)
   end
   println("BO-UHF energy: ", EHF)
   flush(stdout)
-  return EHF, ϵ, cMOl, cMOr
+  delete_temporary_files(EC)
+  save(EC, EC.options.scf.save, cMOr, "BOHF right orbitals")
+  save(EC, EC.options.scf.save*EC.options.scf.left, cMOl, "BOHF left orbitals")
+  return EHF
 end
 
 
