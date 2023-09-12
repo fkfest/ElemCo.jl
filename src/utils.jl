@@ -23,7 +23,7 @@ end
 
   Print a line of `n` dashes.
 """
-function draw_line(n=60)
+function draw_line(n=63)
   println(repeat("─", n))
 end
 
@@ -44,8 +44,8 @@ end
 
   Print a line of 🙨.
 """
-function draw_endline(n=60)
-  println(repeat("🙨", n))
+function draw_endline(n=63)
+  println(repeat("═", n))
 end
 
 """
