@@ -1970,7 +1970,7 @@ end
   Exact specification of the method is given by `method`.
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC" || method.theory == "TD-DC" || method.theory == "FRS-DC" || method.theory == "FRT-DC")
+  dc = (method.theory == "DC" || last(method.theory,2) == "DC")
   print_info(method_name(method))
   Amps, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
