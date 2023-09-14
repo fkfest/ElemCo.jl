@@ -1054,7 +1054,7 @@ end
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
+function calc_ccsd_resid(EC::ECInfo, T1, T2; dc = false, tworef = false, fixref = false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1308,7 +1308,7 @@ end
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc; tworef = false, fixref = false)
+function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc = false, tworef = false, fixref = false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1971,6 +1971,8 @@ end
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC" || last(method.theory,2) == "DC")
+  tworef = method.theory[1:2] == "2D"
+  fixref = method.theory[1:2] == "FR"
   print_info(method_name(method))
   Amps, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
@@ -1991,13 +1993,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    if method.theory[1:2] == "2D"
-      Res = calc_ccsd_resid(EC, Amps..., dc; tworef = true)
-    elseif method.theory[1:2] == "FR"
-      Res = calc_ccsd_resid(EC, Amps..., dc; fixref = true)
-    else
-      Res = calc_ccsd_resid(EC, Amps..., dc)
-    end
+    Res = calc_ccsd_resid(EC, Amps...; dc, tworef, fixref)
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
     NormR2 = calc_doubles_norm(Res[doubles]...)
@@ -2086,7 +2082,7 @@ function calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
     calc_dressed_3idx(EC,T1)
     # test_dressed_ints(EC,T1) #DEBUG
     t1 = print_time(EC,t1,"dressed 3-idx integrals",2)
-    R1, R2 = calc_ccsd_resid(EC, T1, T2, false)
+    R1, R2 = calc_ccsd_resid(EC,T1,T2)
     t1 = print_time(EC,t1,"ccsd residual",2)
     R1, R2 = add_to_singles_and_doubles_residuals(EC,R1,R2)
     t1 = print_time(EC,t1,"R1(T3) and R2(T3)",2)
