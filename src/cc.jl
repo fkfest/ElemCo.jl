@@ -1997,10 +1997,10 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     NormR2 = calc_doubles_norm(Res[doubles]...)
     Eh = calc_hylleraas(EC, Amps..., Res...)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
-    if uppercase(method.theory[1:3]) == "FRS"
+    if length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRS"
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[5][norba,morbb,morba,norbb] = 1.0
-    elseif uppercase(method.theory[1:3]) == "FRT"
+    elseif length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRT"
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[5][norba,morbb,morba,norbb] = -1.0
     elseif uppercase(method.theory[1:2]) == "TD"
