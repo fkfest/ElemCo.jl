@@ -1981,6 +1981,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   else
     @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
   end
+  T2αβ = last(doubles)
   diis = Diis(EC)
 
   NormR1 = 0.0
@@ -2001,10 +2002,10 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
     if length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRS"
       morba, norbb, morbb, norba = active_orbitals(EC)
-      Amps[5][norba,morbb,morba,norbb] = 1.0
+      Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
     elseif length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRT"
       morba, norbb, morbb, norba = active_orbitals(EC)
-      Amps[5][norba,morbb,morba,norbb] = -1.0
+      Amps[T2αβ][norba,morbb,morba,norbb] = -1.0
     elseif uppercase(method.theory[1:2]) == "2D"
       morba, norbb, morbb, norba = active_orbitals(EC)
       # println("T1a all internal: ", T1a[norba,morba])
