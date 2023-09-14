@@ -153,10 +153,10 @@ end
 
   Return NON-SYMMETRIC (pseudo)sqrt-inverse of a hermitian matrix using Cholesky decomposition.
   
-  Starting from A^{-1} = A^{-1} L (A^{-1} L)† = M M†
-  with A = L L†.
-  By solving the equation L† M = I (for low-rank: using QR decomposition).
-  Return M
+  Starting from ``A^{-1} = A^{-1} L (A^{-1} L)^† = M M^†``
+  with ``A = L L^†``.
+  By solving the equation ``L† M = 𝟙`` (for low-rank: using QR decomposition).
+  Return `M`.
 """
 function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   CA = cholesky(A, RowMaximum(), check = false, tol = tol)
@@ -177,9 +177,9 @@ end
 
   Return (pseudo)inverse of a hermitian matrix using Cholesky decomposition .
     
-  A^-1 = A^-1 L (A^-1 L)† = M M†
-  with A = L L†.
-  By solving the equation L† M = I (for low-rank: using QR decomposition) 
+  ``A^{-1} = A^{-1} L (A^{-1} L)^† = M M^†``
+  with ``A = L L^†``.
+  By solving the equation ``L† M = 𝟙`` (for low-rank: using QR decomposition) 
 """
 function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   M = sqrtinvchol(A, tol = tol, verbose = verbose)

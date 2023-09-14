@@ -21,8 +21,10 @@ include("options.jl")
   $(FIELDS)
 """
 @with_kw mutable struct ECInfo <: AbstractECInfo
-  """ path to scratch directory. """
-  scr::String = joinpath(tempdir(),"elemcojlscr")
+  """ path to main scratch directory. """
+  scr0::String = joinpath(tempdir(),"elemcojlscr")
+  """ path to working scratch directory. """
+  scr::String = scr0
   """ extension of temporary files. """
   ext::String = ".bin"
   """ output file. """
@@ -59,6 +61,12 @@ include("options.jl")
     - `P` for auxiliary orbitals (fitting basis)
     - `L` for auxiliary orbitals (Cholesky decomposition, orthogonal)
     - `X` for auxiliary orbitals (amplitudes decomposition)
+
+  The order of subspaces is important, e.g., `ov` is occupied-virtual, `vo` is virtual-occupied.
+  Normally, the first subspaces correspond to subscripts of the tensor. 
+  For example, `T_vo` contains the singles amplitudes ``T_{a}^{i}``.
+  Disambiguity can be resolved by introducing `^` to separate the subscripts from the superscripts,
+  e.g., `d_XX` contains ``\\hat v_{XY}`` and `d_^XX` contains ``\\hat v^{XY}`` integrals.
   """
   files::Dict{String,String} = Dict{String,String}()
 
@@ -76,8 +84,11 @@ end
 function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms2=0)
   t1 = time_ns()
   # create scratch directory
-  mkpath(EC.scr)
-  EC.scr = mktempdir(EC.scr)
+  mkpath(EC.scr0)
+  if EC.scr == EC.scr0 || isempty(EC.scr)
+    # create a new scratch directory
+    EC.scr = mktempdir(EC.scr0)
+  end
   if fcidump != ""
     # read fcidump intergrals
     EC.fd = read_fcidump(fcidump)
@@ -214,6 +225,7 @@ function delete_temporary_files(EC::ECInfo)
   for (name,descr) in EC.files
     if "tmp" in split(descr)
       rm(joinpath(EC.scr,name*EC.ext), force=true)
+      delete!(EC.files,name)
     end
   end
 end

@@ -3,11 +3,13 @@ epsilon    =   1.e-6
 EHF_test   = -76.02253606201079
 EMP2_test  =  -0.20694998731941067
 EDCSD_test =  -0.22117576578925288
+ESVDDCSD_test =  -0.22132558814564818
 
 try
   using ElemCo.MSystem
   using ElemCo.DFHF
   using ElemCo.DfDump
+  using ElemCo.DFCoupledCluster
 catch
   #using .MSystem
 end
@@ -37,5 +39,8 @@ EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
 rm(fcidump)
+
+ESVDDCSD = calc_svd_dc(EC, "dcsd")
+@test abs(ESVDDCSD-ESVDDCSD_test) < epsilon
 
 end

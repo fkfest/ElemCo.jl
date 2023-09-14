@@ -21,6 +21,8 @@ include("fockfactory.jl")
 include("diis.jl")
 include("orbtools.jl")
 include("dftools.jl")
+include("decomptools.jl")
+include("cctools.jl")
 include("dfcc.jl")
 include("cc.jl")
 
@@ -46,6 +48,7 @@ using .ECMethods
 using .TensorTools
 using .FockFactory
 using .CoupledCluster
+using .DFCoupledCluster
 using .FciDump
 using .MSystem
 using .BOHF
@@ -55,7 +58,7 @@ using .DfDump
 
 
 export ECdriver 
-export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc
+export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc, @svdcc
 
 """ 
     @ECsetup()
@@ -195,6 +198,31 @@ macro cc(method, kwargs...)
     return quote
       ECdriver($(esc(:EC)), $(esc(strmethod)); fcidump="", $(ekwa...))
     end
+  end
+end
+
+"""
+    @svdcc(method="dcsd")
+
+  Run coupled cluster calculation with SVD decomposition of the amplitudes.
+
+  The type of the method is determined by the first argument (dcsd/dcd)
+  
+  # Examples
+```julia
+geometry="bohr
+O      0.000000000    0.000000000   -0.130186067
+H1     0.000000000    1.489124508    1.033245507
+H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+@dfhf
+@svdcc
+```
+"""
+macro svdcc(method="dcsd")
+  strmethod="$method"
+  return quote
+    calc_svd_dc($(esc(:EC)), $(esc(strmethod)))
   end
 end
 

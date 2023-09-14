@@ -56,8 +56,12 @@ end
   triangular_kext::Bool = true
   """ calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
+  """ imaginary shift for denominator in doubles decomposition. """
+  deco_ishiftp::Float64 = 0.0
+  """ imaginary shift for denominator in triples decomposition. """
+  deco_ishiftt::Float64 = 0.0
   """ filename of orbitals (for non-fcidump calculations). """
-  orbs::String = "C_Am"
+  orbs::String = ""
   """ filename for start amplitudes. """
   start::String = "cc_amplitudes"
   """ filename to save amplitudes. """
