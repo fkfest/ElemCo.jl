@@ -19,11 +19,11 @@ function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
 end
 
 """
-    draw_line(n = 60)
+    draw_line(n = 63)
 
   Print a line of `n` dashes.
 """
-function draw_line(n=60)
+function draw_line(n=63)
   println(repeat("─", n))
 end
 
@@ -42,9 +42,9 @@ end
 """
     draw_endline()
 
-  Print a line of ═🙨.
+  Print a line of ═.
 """
-function draw_endline(n=60)
+function draw_endline(n=63)
   println(repeat("═", n))
 end
 

@@ -45,6 +45,16 @@ mutable struct ECMethod
         ipos += 1
       end
     end
+    if uppercase(mname[ipos:ipos+1]) == "2D"
+      theory = "2D-"
+      ipos += 3
+    elseif uppercase(mname[ipos:ipos+2]) == "FRS"
+      theory = "FRS-"
+      ipos += 4
+    elseif uppercase(mname[ipos:ipos+2]) == "FRT"
+      theory = "FRT-"
+      ipos += 4
+    end
     if uppercase(mname[ipos]) == 'U'
       unrestricted = true
       ipos += 1
@@ -52,14 +62,14 @@ mutable struct ECMethod
     # if pure PT: all excitation levels are perturbative, otherwise only the highest
     pure_PT = false
     if uppercase(mname[ipos:ipos+1]) == "CC"
-      theory = "CC"
+      theory *= "CC"
       ipos += 2
     elseif uppercase(mname[ipos:ipos+1]) == "DC"
       if length(mname)-ipos >= 4 && uppercase(mname[ipos:ipos+4]) == "DC-CC"
-        theory = "DC-CC"
+        theory *= "DC-CC"
         ipos += 5
       else
-        theory = "DC"
+        theory *= "DC"
         ipos += 2
       end
     elseif uppercase(mname[ipos:ipos+1]) == "MP"

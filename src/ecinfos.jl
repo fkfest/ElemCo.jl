@@ -279,7 +279,10 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int}())
     for sym in eachindex(symlist)
       symlist[sym] = count(isequal(sym),orbsym)
     end
-    for iter in eachindex(symoffset[2:end])
+    for iter in eachindex(symoffset)
+      if iter == 1
+        continue
+      end
       symoffset[iter] = sum(symlist[1:iter-1])
     end
     symlist = nothing
