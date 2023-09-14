@@ -1054,7 +1054,7 @@ end
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
+function calc_ccsd_resid(EC::ECInfo, T1, T2; dc = false, tworef = false, fixref = false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1308,7 +1308,7 @@ end
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
+function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc = false, tworef = false, fixref = false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1327,11 +1327,17 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     pseudo_dressed_ints(EC,true)
   end
 
+  if tworef
+    morba, norbb, morbb, norba = active_orbitals(EC)
+    T2ab[norba,morbb,morba,norbb] = 0
+  end
+
   R1a = Float64[]
   R1b = Float64[]
 
   dfock = load(EC,"df_mm")
   dfockb = load(EC,"df_MM")
+
   fij = dfock[SP['o'],SP['o']]
   fab = dfock[SP['v'],SP['v']]
   fIJ = dfockb[SP['O'],SP['O']]
@@ -1685,7 +1691,235 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     d_VOVO, rR2b = nothing, nothing
   end
 
+  if tworef || fixref
+    # 2D-CC assumes open-shell singlet reference morba and norbb occupied in Φ^A and morbb and norba in Φ^B.
+    @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "2D-CCSD needs two open-shell alpha beta orbitals"
+    morba, norbb, morbb, norba = active_orbitals(EC)
+    if tworef
+      activeorbs = (morba, norbb, morbb, norba)
+      occcorea = collect(1:length(SP['o']))
+      occcoreb = collect(1:length(SP['O']))
+      filter!(x -> x != morba, occcorea)
+      filter!(x -> x != norbb, occcoreb)
+      occcore = (occcorea, occcoreb)
+      virtualsa = collect(1:length(SP['v']))
+      virtualsb = collect(1:length(SP['V']))
+      filter!(x -> x != norba, virtualsa)
+      filter!(x -> x != morbb, virtualsb)
+      virtuals = (virtualsa, virtualsb)
+      W = R2ab[norba,morbb,morba,norbb]
+      R2ab[norba,morbb,morba,norbb] = 0.0
+      if length(T1a) > 0
+        M1a = calc_M1a(occcore,virtuals,T1b, T2ab, activeorbs)
+        M1b = calc_M1b(occcore,virtuals,T1a, T2ab, activeorbs)
+        @tensoropt R1a[a,i] += M1a[a,i] * W
+        @tensoropt R1b[a,i] += M1b[a,i] * W
+      end
+      if !isempty(occcorea) && !isempty(occcoreb)
+        M2a = calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab, activeorbs)
+        M2b = calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab, activeorbs)
+        @tensoropt R2a[a,b,i,j] += M2a[a,b,i,j] * W
+        @tensoropt R2b[a,b,i,j] += M2b[a,b,i,j] * W
+      end
+      M2ab = calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab, activeorbs)
+      @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
+      save(EC,"2d_ccsd_W",[W])
+    elseif fixref
+      R2ab[norba,morbb,morba,norbb] = 0
+    end
+  end
   return R1a, R1b, R2a, R2b, R2ab
+end
+
+function active_orbitals(EC::ECInfo)
+  SP = EC.space
+  @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "Assumed two open-shell alpha beta orbitals here."
+  morb = setdiff(SP['o'],SP['O'])[1]
+  norb = setdiff(SP['O'],SP['o'])[1]
+  morba = findfirst(isequal(morb),SP['o'])
+  norbb = findfirst(isequal(norb),SP['O'])
+  morbb = findfirst(isequal(morb),SP['V'])
+  norba = findfirst(isequal(norb),SP['v'])
+  return morba,norbb,morbb,norba
+end
+
+function calc_M1a(occcore,virtuals,T1, T2, activeorbs)
+  morba, norbb, morbb, norba = activeorbs
+  occcorea, occcoreb = occcore
+  virtualsa, virtualsb = virtuals
+  M1 = zeros(Float64,size(T1))
+  if !isempty(occcorea) && !isempty(occcoreb)
+    @tensoropt M1[norba,occcorea][i] += T2[norba,morbb,morba,occcoreb][i]
+    @tensoropt M1[virtualsa,occcorea][a,i] += T2[norba,morbb,morba,occcoreb][i] * T1[virtualsb,norbb][a]
+    @tensoropt M1[virtualsa,occcorea][a,i] += T2[norba,virtualsb,morba,norbb][a] * T1[morbb,occcoreb][i]
+  end
+  @tensoropt M1[virtualsa,morba][a] -= T2[norba,virtualsb,morba,norbb][a]
+  return M1
+end
+
+function calc_M1b(occcore,virtuals,T1, T2, activeorbs)
+  morba, norbb, morbb, norba = activeorbs
+  occcorea, occcoreb = occcore
+  virtualsa, virtualsb = virtuals
+  M1 = zeros(Float64,size(T1))
+  if !isempty(occcorea) && !isempty(occcoreb)
+    @tensoropt M1[morbb,occcoreb][i] += T2[norba,morbb,occcorea,norbb][i]
+    @tensoropt M1[virtualsb,occcoreb][a,i] += T2[norba,morbb,occcorea,norbb][i] * T1[virtualsa,morba][a]
+    @tensoropt M1[virtualsb,occcoreb][a,i] += T2[virtualsa,morbb,morba,norbb][a] * T1[norba,occcorea][i]
+  end
+  @tensoropt M1[virtualsb,norbb][a] -= T2[virtualsa,morbb,morba,norbb][a]
+  return M1
+end
+
+function calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab,activeorbs)
+  morba, norbb, morbb, norba = activeorbs
+  occcorea, occcoreb = occcore
+  virtualsa, virtualsb = virtuals
+  M2 = zeros(Float64,size(T2b))
+  if length(T1a) > 0
+    @tensoropt T1[a,i] := T1a[a,i] - T1b[a,i]
+    @tensoropt T2t[a,b,i,j] := T2b[a,b,i,j] + T1b[a,i] * T1b[b,j]
+
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsa,occcorea][a,j]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += T2ab[norba,morbb,morba,occcoreb][j] * T1[virtualsa,occcorea][a,i]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += T2ab[norba,virtualsb,morba,occcoreb][a,j] * T1b[morbb,occcoreb][i]
+
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= T2ab[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b]
+
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
+  end
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][j] * T2b[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,morbb,morba,occcoreb][j] * T2b[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
+
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][b] * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,virtualsb,morba,norbb][b] * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
+
+
+  @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i]
+  return M2
+end
+
+function calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab,activeorbs)
+# morba, norbb, morbb, norba = activeorbs
+  norbb, morba, norba, morbb = activeorbs
+  occcoreb, occcorea = occcore
+  virtualsb, virtualsa = virtuals
+  P12 = (2,1,4,3)
+  M2 = zeros(Float64,size(T2a))
+  if length(T1a) > 0
+    @tensoropt T1[a,i] := T1b[a,i] - T1a[a,i]
+    @tensoropt T2t[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
+
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1[virtualsa,occcorea][a,j]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T1[virtualsa,occcorea][a,i]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[morbb,occcoreb][j]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,j] * T1a[morbb,occcoreb][i]
+
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[virtualsb,norbb][b] 
+    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[virtualsb,norbb][b]
+
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * T1[virtualsa,occcorea][b,j]
+
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * T1[virtualsa,occcorea][b,j]
+
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
+    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2t[morbb,virtualsb,norbb,occcoreb][a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
+  end
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
+
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
+  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
+
+  @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i]
+  return M2
+end
+
+function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
+  morba, norbb, morbb, norba = activeorbs
+  occcorea, occcoreb = occcore
+  virtualsa, virtualsb = virtuals
+  M2 = zeros(Float64,size(T2ab))
+
+  if length(T1a) > 0
+    @tensoropt T1[a,i] := T1a[a,i] - T1b[a,i]
+    @tensoropt T2ta[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
+    @tensoropt T2tb[a,b,i,j] := T2b[a,b,i,j] + T1b[a,i] * T1b[b,j]
+    @tensoropt T2tab[a,b,i,j] := T2ab[a,b,i,j] + T1a[a,i] * T1b[b,j]
+    if !isempty(occcorea) && !isempty(occcoreb)
+      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1[virtualsb,occcoreb][a,j]
+      @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] += T2ab[norba,morbb,occcorea,norbb][i] * T1[virtualsa,occcorea][a,j]
+      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1a[norba,occcorea][j]
+      @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2ab[norba,virtualsb,occcorea,norbb][a,i] * T1b[morbb,occcoreb][j]
+      @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i] * T1a[virtualsa,morba][a]
+      @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2tab[norba,morbb,occcorea,occcoreb][i,j] * T1b[virtualsb,norbb][a]
+
+      @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1[virtualsb,occcoreb][b,i]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] -= T2ab[virtualsa,morbb,morba,norbb][a] * T1[virtualsa,occcorea][b,i]
+      @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,occcorea,norbb][a,i] * T1a[virtualsa,morba][b] 
+      @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
+      @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2tab[virtualsa,virtualsb,morba,norbb][b,a] * T1a[norba,occcorea][i]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2tab[virtualsa,virtualsb,morba,norbb][a,b] * T1b[morbb,occcoreb][i] 
+
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * T1[virtualsb,occcoreb][b,j]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][b,a,j,i] += T2ab[norba,morbb,occcorea,norbb][i] * T1a[virtualsa,morba][a] * T1[virtualsa,occcorea][b,j]
+
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * T1[virtualsb,occcoreb][b,j]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][b,a,j,i] += T2ab[virtualsa,morbb,morba,norbb][a] * T1a[norba,occcorea][i] * T1[virtualsa,occcorea][b,j]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2a[norba,virtualsa,morba,occcorea][b,j] * T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][i]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T1a[norba,occcorea][j] * T1a[virtualsa,morba][b]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[virtualsa,morbb,morba,occcoreb][b,i] * T1a[norba,occcorea][j] * T1b[virtualsb,norbb][a]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,occcorea,norbb][a,j] * T1a[virtualsa,morba][b] * T1b[morbb,occcoreb][i]
+      @tensoropt M2[norba,morbb,morba,occcoreb][i] += T1a[norba,occcorea][i]
+      @tensoropt M2[norba,morbb,occcorea,norbb][i] += T1b[morbb,occcoreb][i]
+      @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2tab[norba,morbb,occcorea,occcoreb][i,j] * T2tab[virtualsa,virtualsb,morba,norbb][a,b]
+      @tensoropt M2[norba,morbb,occcorea,occcoreb][i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i]
+      @tensoropt M2[norba,virtualsb,morba,occcoreb][a,i] += T2ta[norba,virtualsa,occcorea,morba][a,i]
+      @tensoropt M2[virtualsa,morbb,occcorea,norbb][a,i] += T2tb[morbb,virtualsb,occcoreb,norbb][a,i]
+      @tensoropt M2[virtualsa,morbb,morba,occcoreb][a,i] += T2tab[norba,virtualsb,occcorea,norbb][a,i]
+      @tensoropt M2[norba,virtualsb,occcorea,norbb][a,i] += T2tab[virtualsa,morbb,morba,occcoreb][a,i]
+    end
+    @tensoropt M2[norba,virtualsb,morba,norbb][a] -= T1a[virtualsa,morba][a]
+    @tensoropt M2[virtualsa,morbb,morba,norbb][a] -= T1b[virtualsb,norbb][a]
+    @tensoropt M2[virtualsa,virtualsb,morba,norbb][a,b] -= T2tab[virtualsa,virtualsb,morba,norbb][b,a]
+  end
+  if !isempty(occcorea) && !isempty(occcoreb)
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,morbb,occcorea,norbb][j] * T2ab[virtualsa,virtualsb,morba,occcoreb][b,a,i]
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * T2ab[virtualsa,virtualsb,occcorea,norbb][b,a,j]
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[virtualsa,morbb,morba,norbb][b] * T2ab[norba,virtualsb,occcorea,occcoreb][a,j,i]
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,virtualsb,morba,norbb][a] * T2ab[virtualsa,morbb,occcorea,occcoreb][b,j,i]
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2b[morbb,virtualsb,occcoreb,norbb][a,i] * T2a[norba,virtualsa,morba,occcorea][b,j]
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T2ab[virtualsa,morbb,occcorea,norbb][b,j]
+    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,occcorea,norbb][a,j] * T2ab[virtualsa,morbb,morba,occcoreb][b,i]
+  end
+  return M2
 end
 
 """
@@ -1736,7 +1970,9 @@ end
   Exact specification of the method is given by `method`.
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC")
+  dc = (method.theory == "DC" || last(method.theory,2) == "DC")
+  tworef = method.theory[1:2] == "2D"
+  fixref = method.theory[1:2] == "FR"
   print_info(method_name(method))
   Amps, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
@@ -1745,6 +1981,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   else
     @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
   end
+  T2αβ = last(doubles)
   diis = Diis(EC)
 
   NormR1 = 0.0
@@ -1757,12 +1994,25 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    Res = calc_ccsd_resid(EC, Amps..., dc)
+    Res = calc_ccsd_resid(EC, Amps...; dc, tworef, fixref)
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
     NormR2 = calc_doubles_norm(Res[doubles]...)
     Eh = calc_hylleraas(EC, Amps..., Res...)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
+    if length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRS"
+      morba, norbb, morbb, norba = active_orbitals(EC)
+      Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
+    elseif length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRT"
+      morba, norbb, morbb, norba = active_orbitals(EC)
+      Amps[T2αβ][norba,morbb,morba,norbb] = -1.0
+    elseif uppercase(method.theory[1:2]) == "2D"
+      morba, norbb, morbb, norba = active_orbitals(EC)
+      # println("T1a all internal: ", T1a[norba,morba])
+      # println("T1b all internal: ", T1b[morbb,norbb])
+      # T1a[norba,morba] = 0.0
+      # T1b[morbb,norbb] = 0.0
+    end
     if do_sing
       NormT1 = calc_singles_norm(Amps[singles]...)
       NormR1 = calc_singles_norm(Res[singles]...)
@@ -1833,11 +2083,11 @@ function calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
     calc_dressed_3idx(EC,T1)
     # test_dressed_ints(EC,T1) #DEBUG
     t1 = print_time(EC,t1,"dressed 3-idx integrals",2)
-    R1, R2 = calc_ccsd_resid(EC,T1,T2,false)
+    R1, R2 = calc_ccsd_resid(EC,T1,T2)
     t1 = print_time(EC,t1,"ccsd residual",2)
     R1, R2 = add_to_singles_and_doubles_residuals(EC,R1,R2)
     t1 = print_time(EC,t1,"R1(T3) and R2(T3)",2)
-    calc_triples_residuals(EC, T1, T2, cc3)
+    calc_triples_residuals(EC,T1,T2,cc3)
     t1 = print_time(EC,t1,"R3",2)
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
