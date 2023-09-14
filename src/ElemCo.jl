@@ -430,7 +430,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
         println("$main_name(T) total energy: ",ECC+ET3+EHF)
         if do_full_t3
           cc3 = (ecmethod.exclevel[3] == :pertiter)
-          ECC = CoupledCluster.calc_ccsdt(EC, ecmethod, EC.options.cc.calc_t3_for_decomposition, cc3)
+          ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
           main_name = method_name(ecmethod)
           println("$main_name correlation energy: ",ECC)
           println("$main_name total energy: ",ECC+EHF)
@@ -441,7 +441,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     flush(stdout)
 
     if ecmethod.theory[1:2] == "2D"
-      W = load(EC,"td_ccsd_W")[1]
+      W = load(EC,"2d_ccsd_W")[1]
       @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
       @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W
       t1 = print_time(EC, t1,"CC",1)
