@@ -66,6 +66,7 @@ include("options.jl")
   ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
   space::Dict{Char,Any} = Dict{Char,Any}()
+  currentMethod::String = ""
 end
 
 """ 

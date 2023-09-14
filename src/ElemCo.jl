@@ -37,6 +37,7 @@ catch
   println("MKL package not found, using OpenBLAS.")
 end
 using LinearAlgebra
+using Printf
 #BLAS.set_num_threads(1)
 using ArgParse
 using .Utils
@@ -290,7 +291,11 @@ end
 
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)
   EC = ECInfo()
-  fcidump = joinpath(@__DIR__,"..","test",dumpfile)
+  if !isdir(dumpfile)
+    fcidump = joinpath(@__DIR__,"..","test",dumpfile)
+  else
+    fcidump = dumpfile
+  end
   EC.options.cc.maxit = 100
   EC.options.cc.thr = 1.e-12
   EC.options.cc.use_kext = use_kext
@@ -298,8 +303,11 @@ function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", oc
   EC.options.cc.calc_d_vvvo = !use_kext
   EC.options.cc.calc_d_vovv = !use_kext
   EC.options.cc.calc_d_vvoo = !use_kext
-  EHF, EMP2, ECCSD = ECdriver(EC,method; fcidump, occa, occb)
-  return ECCSD
+  if uppercase(method[1:2]) == "TD"
+    EHF, EMP2, ECC, W = ECdriver(EC,method; fcidump, occa, occb)
+  else
+    EHF, EMP2, ECC = ECdriver(EC,method; fcidump, occa, occb)
+  end
 end
 
 """
@@ -393,6 +401,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println()
     println("Next method: ",mname)
     ecmethod = ECMethod(mname)
+    EC.currentMethod = ecmethod.theory
     if ecmethod.unrestricted
       add2name = "U"
       closed_shell_method = false
@@ -453,14 +462,26 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println()
     flush(stdout)
 
-    t1 = print_time(EC, t1,"CC",1)
-    delete_temporary_files(EC)
-    draw_endline()
-    if length(method_names) == 1
-      if ecmethod.exclevel[3] != :none
-        return EHF, EMp2, ECC, ET3
-      else
-        return EHF, EMp2, ECC
+    if ecmethod.theory[1:2] == "TD"
+      W = load(EC,"td_ccsd_W")[1]
+      @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
+      @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W
+      t1 = print_time(EC, t1,"CC",1)
+      delete_temporary_files(EC)
+      draw_endline()
+      return EHF, EMp2, ECC, W
+    else
+      println("$main_name correlation energy: ",ECC)
+      println("$main_name total energy: ",ECC+EHF)
+      t1 = print_time(EC, t1,"CC",1)
+      delete_temporary_files(EC)
+      draw_endline()
+      if length(method_names) == 1
+        if ecmethod.exclevel[3] != :none
+          return EHF, EMp2, ECC, ET3
+        else
+          return EHF, EMp2, ECC
+        end
       end
     end
   end
