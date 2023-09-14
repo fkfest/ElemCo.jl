@@ -1054,7 +1054,7 @@ end
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
+function calc_ccsd_resid(EC::ECInfo, T1, T2, dc; currentMethod::ECMethod)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1308,7 +1308,7 @@ end
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
+function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc; currentMethod::ECMethod)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1327,7 +1327,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     pseudo_dressed_ints(EC,true)
   end
 
-  if uppercase(EC.currentMethod[1:2]) == "2D"
+  if uppercase(currentMethod.theory[1:2]) == "2D"
     morba, norbb, morbb, norba = active_orbitals(EC)
     T2ab[norba,morbb,morba,norbb] = 0
   end
@@ -1691,11 +1691,11 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     d_VOVO, rR2b = nothing, nothing
   end
 
-  if( uppercase(EC.currentMethod[1:2]) == "2D" || uppercase(EC.currentMethod[1:2]) == "FR" )
+  if( uppercase(currentMethod.theory[1:2]) == "2D" || uppercase(currentMethod.theory[1:2]) == "FR" )
     # 2D-CC assumes open-shell singlet reference morba and norbb occupied in Φ^A and morbb and norba in Φ^B.
     @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "2D-CCSD needs two open-shell alpha beta orbitals"
     morba, norbb, morbb, norba = active_orbitals(EC)
-    if uppercase(EC.currentMethod[1:2]) == "2D"
+    if uppercase(currentMethod.theory[1:2]) == "2D"
       activeorbs = (morba, norbb, morbb, norba)
       occcorea = collect(1:length(SP['o']))
       occcoreb = collect(1:length(SP['O']))
@@ -1724,7 +1724,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
       M2ab = calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab, activeorbs)
       @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
       save(EC,"td_ccsd_W",[W])
-    elseif( uppercase(EC.currentMethod[1:2]) == "FR" )
+    elseif( uppercase(currentMethod.theory[1:2]) == "FR" )
       R2ab[norba,morbb,morba,norbb] = 0
     end
   end
@@ -1991,7 +1991,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    Res = calc_ccsd_resid(EC, Amps..., dc)
+    Res = calc_ccsd_resid(EC, Amps..., dc; currentMethod = method)
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
     NormR2 = calc_doubles_norm(Res[doubles]...)
@@ -2048,7 +2048,7 @@ end
   If `useT3`: (T) amplitudes from a preceding calculations will be used as starting guess.
   If cc3: calculate CC3 amplitudes.
 """
-function calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
+function calc_ccsdt(EC::ECInfo, method::ECMethod, useT3 = false, cc3 = false)
   if cc3
     print_info("CC3")
   else
@@ -2080,7 +2080,7 @@ function calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
     calc_dressed_3idx(EC,T1)
     # test_dressed_ints(EC,T1) #DEBUG
     t1 = print_time(EC,t1,"dressed 3-idx integrals",2)
-    R1, R2 = calc_ccsd_resid(EC,T1,T2,false)
+    R1, R2 = calc_ccsd_resid(EC, T1, T2, false; currentMethod = method)
     t1 = print_time(EC,t1,"ccsd residual",2)
     R1, R2 = add_to_singles_and_doubles_residuals(EC,R1,R2)
     t1 = print_time(EC,t1,"R1(T3) and R2(T3)",2)
