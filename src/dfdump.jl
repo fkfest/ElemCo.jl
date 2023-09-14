@@ -3,6 +3,7 @@ module DfDump
 using LinearAlgebra, TensorOperations
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
+using ..ElemCo.OrbTools
 using ..ElemCo.MSystem
 using ..ElemCo.FciDump
 using ..ElemCo.TensorTools
@@ -53,8 +54,7 @@ function dfdump(EC::ECInfo)
   if !EC.options.int.df
     error("Only density-fitted integrals implemented")
   end
-  orbsfile = (EC.options.int.orbs == "") ? EC.options.scf.save : EC.options.int.orbs
-  cMO = load(EC, orbsfile)
+  cMO = load_orbitals(EC)
   nelec = guess_nelec(EC.ms)
   fdump = FDump(size(cMO,2), nelec)
   generate_integrals(EC, fdump, cMO)
