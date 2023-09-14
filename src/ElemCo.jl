@@ -289,27 +289,6 @@ function run_mcscf()
 
 end
 
-function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)
-  EC = ECInfo()
-  if !isdir(dumpfile)
-    fcidump = joinpath(@__DIR__,"..","test",dumpfile)
-  else
-    fcidump = dumpfile
-  end
-  EC.options.cc.maxit = 100
-  EC.options.cc.thr = 1.e-12
-  EC.options.cc.use_kext = use_kext
-  EC.options.cc.calc_d_vvvv = !use_kext
-  EC.options.cc.calc_d_vvvo = !use_kext
-  EC.options.cc.calc_d_vovv = !use_kext
-  EC.options.cc.calc_d_vvoo = !use_kext
-  if uppercase(method[1:2]) == "2D"
-    EHF, EMP2, ECC, W = ECdriver(EC,method; fcidump, occa, occb)
-  else
-    EHF, EMP2, ECC = ECdriver(EC,method; fcidump, occa, occb)
-  end
-end
-
 """
     is_closed_shell(EC::ECInfo)
 
