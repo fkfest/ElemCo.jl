@@ -45,8 +45,8 @@ mutable struct ECMethod
         ipos += 1
       end
     end
-    if uppercase(mname[ipos:ipos+1]) == "TD"
-      theory = "TD-"
+    if uppercase(mname[ipos:ipos+1]) == "2D"
+      theory = "2D-"
       ipos += 3
     elseif uppercase(mname[ipos:ipos+2]) == "FRS"
       theory = "FRS-"

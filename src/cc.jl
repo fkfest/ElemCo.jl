@@ -1327,7 +1327,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     pseudo_dressed_ints(EC,true)
   end
 
-  if uppercase(EC.currentMethod[1:2]) == "TD"
+  if uppercase(EC.currentMethod[1:2]) == "2D"
     morba, norbb, morbb, norba = active_orbitals(EC)
     T2ab[norba,morbb,morba,norbb] = 0
   end
@@ -1691,11 +1691,11 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, dc)
     d_VOVO, rR2b = nothing, nothing
   end
 
-  if( uppercase(EC.currentMethod[1:2]) == "TD" || uppercase(EC.currentMethod[1:2]) == "FR" )
-    # TD-CC assumes open-shell singlet reference morba and norbb occupied in Φ^A and morbb and norba in Φ^B.
-    @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "TD-CCSD needs two open-shell alpha beta orbitals"
+  if( uppercase(EC.currentMethod[1:2]) == "2D" || uppercase(EC.currentMethod[1:2]) == "FR" )
+    # 2D-CC assumes open-shell singlet reference morba and norbb occupied in Φ^A and morbb and norba in Φ^B.
+    @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "2D-CCSD needs two open-shell alpha beta orbitals"
     morba, norbb, morbb, norba = active_orbitals(EC)
-    if uppercase(EC.currentMethod[1:2]) == "TD"
+    if uppercase(EC.currentMethod[1:2]) == "2D"
       activeorbs = (morba, norbb, morbb, norba)
       occcorea = collect(1:length(SP['o']))
       occcoreb = collect(1:length(SP['O']))
@@ -2003,7 +2003,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     elseif length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRT"
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[5][norba,morbb,morba,norbb] = -1.0
-    elseif uppercase(method.theory[1:2]) == "TD"
+    elseif uppercase(method.theory[1:2]) == "2D"
       morba, norbb, morbb, norba = active_orbitals(EC)
       # println("T1a all internal: ", T1a[norba,morba])
       # println("T1b all internal: ", T1b[morbb,norbb])

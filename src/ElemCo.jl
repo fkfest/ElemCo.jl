@@ -303,7 +303,7 @@ function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", oc
   EC.options.cc.calc_d_vvvo = !use_kext
   EC.options.cc.calc_d_vovv = !use_kext
   EC.options.cc.calc_d_vvoo = !use_kext
-  if uppercase(method[1:2]) == "TD"
+  if uppercase(method[1:2]) == "2D"
     EHF, EMP2, ECC, W = ECdriver(EC,method; fcidump, occa, occb)
   else
     EHF, EMP2, ECC = ECdriver(EC,method; fcidump, occa, occb)
@@ -462,7 +462,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println()
     flush(stdout)
 
-    if ecmethod.theory[1:2] == "TD"
+    if ecmethod.theory[1:2] == "2D"
       W = load(EC,"td_ccsd_W")[1]
       @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
       @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W
