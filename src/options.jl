@@ -60,6 +60,17 @@ end
   deco_ishiftp::Float64 = 0.0
   """ imaginary shift for denominator in triples decomposition. """
   deco_ishiftt::Float64 = 0.0
+  """ use a projected exchange for contravariant doubles amplitudes in SVD-DCSD,
+  ``\\tilde T_{XY} = U^{†a}_{iX} U^{†b}_{jY} \\tilde T^{ij}_{ab}``. """
+  use_projx::Bool = false
+  """ use full doubles amplitudes in SVD-DCSD. 
+  The decomposition is used only for ``N^6`` scaling terms.  """
+  use_full_t2::Bool = false
+  """ what to project in ``v_{ak}^{ci} T^{kj}_{cb}`` in SVD-DCSD:
+  0: both, 1: amplitudes, 2: residual, 3: robust fit. """
+  project_vovo_t2::Int = 2
+  """ decompose full doubles amplitudes in SVD-DCSD (slow). """
+  decompose_full_doubles::Bool = false
   """ filename of orbitals (for non-fcidump calculations). """
   orbs::String = ""
   """ filename for start amplitudes. """

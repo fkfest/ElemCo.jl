@@ -86,6 +86,28 @@ function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
 end
 
 """
+    svd_decompose(Amat, tol = 1e-6)
+
+  SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} S_X δ_{XY} V^{Y}_{ξ'}``.
+  Return ``U^{X}_{ξ}`` as `U[ξ,X]` for ``S_X`` > `tol`
+"""
+function svd_decompose(Amat, tol = 1e-6)
+  U, S, = svd(Amat)
+  # display(S)
+  naux = 0
+  for s in S
+    if s > tol
+      naux += 1
+    else
+      break
+    end
+  end
+  # display(S[1:naux])
+  println("SVD-basis size: ",naux)
+  return U[:,1:naux], S[1:naux]
+end
+
+"""
     iter_svd_decompose(Amat, nvirt, nocc, naux)
 
   Iteratively decompose `A[ai,ξ]` as ``U^{iX}_a S_X δ_{XY} V^Y_ξ``.
