@@ -148,19 +148,26 @@ function update_doubles!(EC::ECInfo, T2a, T2b, T2ab, R2a, R2b, R2ab)
 end
 
 """
-    update_deco_doubles(EC, R2, use_shift=true)
+    update_deco_doubles(EC, R2; use_shift=true)
 
   Update decomposed doubles amplitudes.
+  
+  If `R2` is ``R^{ij}_{ab}``, the update is calculated using
+  `update_doubles(EC, R2, use_shift=use_shift)`.
 """
-function update_deco_doubles(EC, R2, use_shift=true)
-  shift = use_shift ? EC.options.cc.shiftp : 0.0
-  ΔT2 = deepcopy(R2)
-  ϵX = load(EC,"e_X")
-  for I ∈ CartesianIndices(ΔT2)
-    X,Y = Tuple(I)
-    ΔT2[I] /= -(ϵX[X] + ϵX[Y] + shift)
+function update_deco_doubles(EC, R2; use_shift=true)
+  if ndims(R2) == 4
+    return update_doubles(EC, R2; use_shift)
+  else
+    shift = use_shift ? EC.options.cc.shiftp : 0.0
+    ΔT2 = deepcopy(R2)
+    ϵX = load(EC,"e_X")
+    for I ∈ CartesianIndices(ΔT2)
+      X,Y = Tuple(I)
+      ΔT2[I] /= -(ϵX[X] + ϵX[Y] + shift)
+    end
+    return ΔT2
   end
-  return ΔT2
 end
 
 """
@@ -234,18 +241,24 @@ end
 """
     calc_deco_doubles_norm(T2, tT2=Float64[])
 
-  Calculate a *simple* norm of doubles (without contravariant!)
+  Calculate squared norm of doubles (for decomposed doubles: without contravariant!)
+  T2 are decomposed doubles amplitudes `T2[X,Y]`=``T_{XY}`` or
+  full doubles amplitudes `T2[a,b,i,j]`=``T^{ij}_{ab}``. 
   
   If the contravariant amplitude `tT2` is provided, 
   the norm will be calculated as ``T_{XY} T̃_{XY}``.
 """
 function calc_deco_doubles_norm(T2, tT2=Float64[])
-  if length(tT2) > 0
-    @tensoropt NormT2 = T2[X,Y] * tT2[X,Y]
+  if ndims(T2) == 4
+    normT2 = calc_doubles_norm(T2)
   else
-    @tensoropt NormT2 = T2[X,Y] * T2[X,Y]
+    if length(tT2) > 0
+      @tensoropt normT2 = T2[X,Y] * tT2[X,Y]
+    else
+      @tensoropt normT2 = T2[X,Y] * T2[X,Y]
+    end
   end
-  return NormT2
+  return normT2
 end
 
 """

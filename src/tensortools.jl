@@ -8,6 +8,7 @@ using ..ElemCo.FciDump
 using ..ElemCo.MIO
 
 export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol, rotate_eigenvectors_to_real!
+export get_spaceblocks
 
 """
     save(EC::ECInfo, fname::String, a::AbstractArray, descr="tmp"; overwrite=true)
@@ -218,6 +219,63 @@ function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVect
   if npairs > 0
     println("$npairs eigenvector pairs rotated to the real space")
   end
+end
+
+""" 
+    get_spaceblocks(space, maxblocksize=100, strict=false)
+
+  Generate ranges for block indices for space (for loop over blocks).
+
+  `space` is a range or an array of indices. 
+  Even if `space` is non-contiguous, the blocks will be contiguous. 
+  If `strict` is true, the blocks will be of size `maxblocksize` (except for the last block and non-contiguous index-ranges).
+  Otherwise the actual block size will be as close as possible to `blocksize` such that
+  the resulting blocks are of similar size.
+"""
+function get_spaceblocks(space, maxblocksize=100, strict=false)
+  if length(space) == 0
+    return []
+  end
+  if last(space) - first(space) + 1 == length(space)
+    # contiguous
+    cblks = [ first(space):last(space) ]
+  else
+    # create an array of contiguous ranges
+    cblks = []
+    begr = first(space)
+    endr = begr - 1
+    for idx in space
+      if idx == endr + 1
+        endr = idx
+      else
+        push!(cblks, begr:endr)
+        endr = begr = idx
+      end 
+    end
+    push!(cblks, begr:endr)
+  end  
+
+  allblks = []
+  for range in cblks
+    nblks = length(range) ÷ maxblocksize
+    if nblks*maxblocksize < length(range)
+      nblks += 1
+    end
+    if strict 
+      blks = [ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
+    else
+      blocksize = length(range) ÷ nblks
+      n_largeblks = mod(length(range), nblks)
+      blks = [ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
+      start = n_largeblks*(blocksize+1)+first(range)
+      for i = n_largeblks+1:nblks
+        push!(blks, start:start+blocksize-1)
+        start += blocksize
+      end
+    end
+    append!(allblks, blks)
+  end
+  return allblks
 end
 
 end #module

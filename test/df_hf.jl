@@ -3,7 +3,8 @@ epsilon    =   1.e-6
 EHF_test   = -76.02253606201079
 EMP2_test  =  -0.20694998731941067
 EDCSD_test =  -0.22117576578925288
-ESVDDCSD_test =  -0.22132558814564818
+ESVDDCSD_test =  -0.22231068880187185
+ESVDDCSD_ft_test =  -0.2220077932610367
 
 try
   using ElemCo.MSystem
@@ -42,5 +43,8 @@ rm(fcidump)
 
 ESVDDCSD = calc_svd_dc(EC, "dcsd")
 @test abs(ESVDDCSD-ESVDDCSD_test) < epsilon
+EC.options.cc.use_full_t2=true
+ESVDDCSD_ft = calc_svd_dc(EC, "dcsd")
+@test abs(ESVDDCSD_ft-ESVDDCSD_ft_test) < epsilon
 
 end
