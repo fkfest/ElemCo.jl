@@ -192,6 +192,11 @@ macro cc(method, kwargs...)
   ekwa = [esc(a) for a in kwargs]
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
+      try
+        $(esc(:EC)).ignore_error
+      catch
+        global $(esc(:EC)) = ECInfo()
+      end
       ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
     end
   else
