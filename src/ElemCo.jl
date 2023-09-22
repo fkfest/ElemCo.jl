@@ -64,6 +64,8 @@ export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc, @svdcc
     @ECsetup()
 
   Setup `EC::ECInfo` from variables `geometry::String` and `basis::Dict{String,Any}`.
+  If `EC` is already setup, it will be overwritten.
+  If `EC` cannot be setup, it will be set to `ECInfo()`.
 
   # Examples
 ```julia
@@ -77,8 +79,12 @@ Occupied orbitals:[1]
 """
 macro ECsetup()
   return quote
-    global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
-    setup!($(esc(:EC)))
+    try
+      global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
+      setup!($(esc(:EC)))
+    catch
+      global $(esc(:EC)) = ECInfo()
+    end
   end
 end
 
@@ -192,11 +198,7 @@ macro cc(method, kwargs...)
   ekwa = [esc(a) for a in kwargs]
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
-      try
-        $(esc(:EC)).ignore_error
-      catch
-        global $(esc(:EC)) = ECInfo()
-      end
+      $(esc(:@tryECsetup))
       ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
     end
   else

@@ -18,7 +18,6 @@ for dir in readdir()
   end
   println(dir)
   cd(dir)
-  fcidump = "FCIDUMP"
   output = "dcsd.out"
   redirect_stdio(stdout=output) do
     @cc dcsd fcidump="FCIDUMP"
