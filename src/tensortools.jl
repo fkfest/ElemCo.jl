@@ -7,18 +7,18 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MIO
 
-export save, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol, rotate_eigenvectors_to_real!
+export save!, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol, rotate_eigenvectors_to_real!
 export get_spaceblocks
 
 """
-    save(EC::ECInfo, fname::String, a::AbstractArray, descr="tmp"; overwrite=true)
+    save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
 
-  Save array `a` to file `fname` in EC.scr directory.
-  Add file to `EC.files` with description `descr`.
+  Save array or tuple of arrays `a` to file `fname` in EC.scr directory.
+  Add file to `EC.files` with `description`.
 """
-function save(EC::ECInfo, fname::String, a::AbstractArray, descr="tmp"; overwrite=true)
-  miosave(joinpath(EC.scr, fname*EC.ext), a)
-  add_file(EC, fname, descr; overwrite)
+function save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
+  miosave(joinpath(EC.scr, fname*EC.ext), a...)
+  add_file!(EC, fname, description; overwrite)
 end
 
 """
@@ -31,14 +31,14 @@ function load(EC::ECInfo, fname::String)
 end
 
 """
-    newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}, descr="tmp")
+    newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}; description="tmp")
 
   Create a new memory-map file for writing (overwrites existing file).
-  Add file to `EC.files` with description `descr`.
+  Add file to `EC.files` with `description`.
   Return a pointer to the file and the mmaped array.
 """
-function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}, descr="tmp")
-  add_file(EC, fname, descr; overwrite=true)
+function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}; description="tmp")
+  add_file!(EC, fname, description; overwrite=true)
   return mionewmmap(joinpath(EC.scr, fname*EC.ext), Type, dims)
 end
 

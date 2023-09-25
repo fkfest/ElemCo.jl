@@ -4,7 +4,8 @@ Info about molecular system (geometry/basis).
 module MSystem
 using DocStringExtensions
 using ..ElemCo.ECInts
-export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
+export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution
+export guess_nelec, guess_norb, guess_ncore
 export generate_basis
 
 include("elements.jl")
@@ -312,6 +313,17 @@ function guess_norb(ms::MSys)
   aobasis = lowercase(ms.atoms[1].basis["ao"].name)
   bao = BasisSet(aobasis,genxyz(ms,bohr=false))
   return bao.nbas 
+end
+
+"""
+    guess_ncore(ms::MSys, coretype::Symbol=:large)
+
+  Guess the number of core orbitals in the system.
+
+  `coretype` as in [`ncoreorbs`](@ref).
+"""
+function guess_ncore(ms::MSys, coretype::Symbol=:large)
+  return sum([ncoreorbs(element_NAME(at.name),coretype) for at in ms.atoms])
 end
 
 """ 

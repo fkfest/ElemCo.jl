@@ -65,8 +65,8 @@ function dfhf(EC::ECInfo)
     # display(ϵ)
   end
   println("DF-HF energy: ", EHF)
-  delete_temporary_files(EC)
-  save(EC, EC.options.scf.save, cMO, "DFHF orbitals")
+  delete_temporary_files!(EC)
+  save!(EC, EC.options.scf.save, cMO, description="DFHF orbitals")
   return EHF
 end
 

@@ -34,6 +34,15 @@ end
   thr::Float64 = 1.e-10
   """ maximum number of iterations. """
   maxit::Int = 50
+  """ core type for frozen-core approximation: 
+  - :none (no frozen-core approximation), 
+  - :small (semi-core orbitals correlated), 
+  - :large (semi-core orbitals frozen). """
+  core::Symbol = :large
+  """ number of occupied (core) orbitals to freeze (overwrites core). """
+  freeze_nocc::Int = -1
+  """ number of virtual (highest) orbitals to freeze. """
+  freeze_nvirt::Int = 0
   """ level shift for singles. """
   shifts::Float64 = 0.15
   """ level shift for doubles. """
@@ -73,9 +82,10 @@ end
   decompose_full_doubles::Bool = false
   """ filename of orbitals (for non-fcidump calculations). """
   orbs::String = ""
-  """ filename for start amplitudes. """
+  """ main part of filename for start amplitudes. 
+      For example, the singles amplitudes are read from `start*"_singles.bin"` """
   start::String = "cc_amplitudes"
-  """ filename to save amplitudes. """
+  """ main part of filename to save amplitudes. """
   save::String = "cc_amplitudes"
 end
 

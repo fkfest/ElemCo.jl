@@ -66,9 +66,9 @@ function bohf(EC::ECInfo)
   cMOl = (inv(cMOr))'
   println("BO-HF energy: ", EHF)
   flush(stdout)
-  delete_temporary_files(EC)
-  save(EC, EC.options.scf.save, cMOr, "BOHF right orbitals")
-  save(EC, EC.options.scf.save*EC.options.scf.left, cMOl, "BOHF left orbitals")
+  delete_temporary_files!(EC)
+  save!(EC, EC.options.scf.save, cMOr, description="BOHF right orbitals")
+  save!(EC, EC.options.scf.save*EC.options.scf.left, cMOl, description="BOHF left orbitals")
   return EHF
 end
 
@@ -137,9 +137,9 @@ function bouhf(EC::ECInfo)
   end
   println("BO-UHF energy: ", EHF)
   flush(stdout)
-  delete_temporary_files(EC)
-  save(EC, EC.options.scf.save, cMOr, "BOHF right orbitals")
-  save(EC, EC.options.scf.save*EC.options.scf.left, cMOl, "BOHF left orbitals")
+  delete_temporary_files!(EC)
+  save!(EC, EC.options.scf.save, cMOr, description="BOHF right orbitals")
+  save!(EC, EC.options.scf.save*EC.options.scf.left, cMOl, description="BOHF left orbitals")
   return EHF
 end
 

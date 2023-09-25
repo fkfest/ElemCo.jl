@@ -15,6 +15,7 @@ export calc_singles_energy_using_dfock
 export update_singles, update_doubles, update_singles!, update_doubles!, update_deco_doubles, update_deco_triples
 export calc_singles_norm, calc_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles, starting_amplitudes
+export try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
 
 """
     calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
@@ -272,6 +273,64 @@ function calc_deco_triples_norm(T3)
 end
 
 """
+    try2save_singles!(EC::ECInfo, singles...)
+
+  Save singles amplitudes to file `EC.options.cc.save*"_singles"`.
+"""
+function try2save_singles!(EC::ECInfo, singles...)
+  if EC.options.cc.save != ""
+    filename = EC.options.cc.save*"_singles"
+    println("Save singles amplitudes to file $filename")
+    save!(EC, filename, singles..., description="singles amplitudes")
+  end
+end
+
+"""
+    try2save_doubles!(EC::ECInfo, doubles...)
+
+  Save doubles amplitudes to file `EC.options.cc.save*"_doubles"`.
+"""
+function try2save_doubles!(EC::ECInfo, doubles...)
+  if EC.options.cc.save != ""
+    filename = EC.options.cc.save*"_doubles"
+    println("Save doubles amplitudes to file $filename")
+    save!(EC, filename, doubles..., description="doubles amplitudes")
+  end
+end
+
+"""
+    try2start_singles(EC::ECInfo)
+
+  Read singles amplitudes from file `EC.options.cc.start*"_singles"`.
+"""
+function try2start_singles(EC::ECInfo)
+  if EC.options.cc.start != ""
+    filename = EC.options.cc.start*"_singles"
+    if file_exists(EC, filename)
+      println("Read singles amplitudes from file $filename")
+      return load(EC, filename)
+    end
+  end
+  return []
+end
+
+"""
+    try2start_doubles(EC::ECInfo)
+
+  Read doubles amplitudes from file `EC.options.cc.start*"_doubles"`.
+"""
+function try2start_doubles(EC::ECInfo)
+  if EC.options.cc.start != ""
+    filename = EC.options.cc.start*"_doubles"
+    if file_exists(EC, filename)
+      println("Read doubles amplitudes from file $filename")
+      return load(EC, filename)
+    end
+  end
+  return []
+end
+
+"""
     read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
 
   Read starting guess for excitation `level`.
@@ -307,7 +366,7 @@ end
   Save current singles amplitudes `T1` to file `T_vo`
 """
 function save_current_singles(EC::ECInfo, T1)
-  save(EC, "T_vo", T1)
+  save!(EC, "T_vo", T1)
 end
 
 """
@@ -316,8 +375,8 @@ end
   Save current singles amplitudes `T1a` and `T1b` to files `T_vo` and `T_VO`
 """
 function save_current_singles(EC::ECInfo, T1a, T1b)
-  save(EC, "T_vo", T1a)
-  save(EC, "T_VO", T1b)
+  save!(EC, "T_vo", T1a)
+  save!(EC, "T_VO", T1b)
 end
 
 """
@@ -326,7 +385,7 @@ end
   Save current doubles amplitudes `T2` to file `T_vvoo`
 """
 function save_current_doubles(EC::ECInfo, T2)
-  save(EC, "T_vvoo", T2)
+  save!(EC, "T_vvoo", T2)
 end
 
 """
@@ -335,9 +394,9 @@ end
   Save current doubles amplitudes `T2a`, `T2b`, and `T2ab` to files `T_vvoo`, `T_VVOO`, and `T_vVoO`
 """
 function save_current_doubles(EC::ECInfo, T2a, T2b, T2ab)
-  save(EC, "T_vvoo", T2a)
-  save(EC, "T_VVOO", T2b)
-  save(EC, "T_vVoO", T2ab)
+  save!(EC, "T_vvoo", T2a)
+  save!(EC, "T_VVOO", T2b)
+  save!(EC, "T_vVoO", T2ab)
 end
 
 """

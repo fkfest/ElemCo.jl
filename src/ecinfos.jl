@@ -7,8 +7,9 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
+export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
-export file_exists, add_file, delete_temporary_files
+export file_exists, add_file!, delete_file!, delete_files!, delete_temporary_files!
 export isalphaspin, space4spin
 
 include("options.jl")
@@ -172,10 +173,70 @@ function len_spaces(EC::ECInfo, spaces::String)
 end
 
 """
-    len_spaces(EC::ECInfo, spaces::String)
+    freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int)
 
-  Return a tuple of lengths of `spaces` (e.g., "ov" for occupied and virtual orbitals).
+  Freeze `freeze_nocc` occupied orbitals. If `freeze_nocc` is negative: guess the number of core orbitals.
+
+  `core` as in [`guess_ncore`](@ref).
 """
+function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int)
+  if freeze_nocc < 0
+    freeze_nocc = guess_ncore(EC.ms, core)
+  end
+  freeze_nocc!(EC, freeze_nocc)
+end
+
+"""
+    freeze_nocc!(EC::ECInfo, nfreeze::Int)
+
+  Freeze `nfreeze` occupied orbitals.
+"""
+function freeze_nocc!(EC::ECInfo, nfreeze::Int)
+  if nfreeze > n_occ_orbs(EC) || nfreeze > n_occb_orbs(EC) 
+    error("Cannot freeze more occupied orbitals than there are.")
+  end
+  if nfreeze > 0
+    println("Freezing ", nfreeze, " occupied orbitals")
+    println()
+  end
+  EC.space['o'] = EC.space['o'][nfreeze+1:end]
+  EC.space['O'] = EC.space['O'][nfreeze+1:end]
+end
+
+"""
+    freeze_nvirt!(EC::ECInfo, nfreeze::Int)
+
+  Freeze `nfreeze` virtual orbitals.
+"""
+function freeze_nvirt!(EC::ECInfo, nfreeze::Int)
+  if nfreeze > n_virt_orbs(EC) || nfreeze > n_virtb_orbs(EC) 
+    error("Cannot freeze more virtual orbitals than there are.")
+  end
+  if nfreeze > 0
+    println("Freezing ", nfreeze, " virtual orbitals")
+    println()
+  end
+  EC.space['v'] = EC.space['v'][1:end-nfreeze]
+  EC.space['V'] = EC.space['V'][1:end-nfreeze]
+end
+
+"""
+    save_space(EC::ECInfo)
+
+  Save the current subspaces of space.
+"""
+function save_space(EC::ECInfo)
+  return deepcopy(EC.space)
+end
+
+"""
+    restore_space!(EC::ECInfo, space)
+
+  Restore the space.
+"""
+function restore_space!(EC::ECInfo, space)
+  EC.space = deepcopy(space)
+end
 
 """ 
     set_options!(opt; kwargs...)
@@ -203,12 +264,12 @@ function file_exists(EC::ECInfo, name::String)
 end
 
 """
-    add_file(EC::ECInfo, name::String, descr::String; overwrite = false)
+    add_file!(EC::ECInfo, name::String, descr::String; overwrite=false)
 
   Add file `name` to ECInfo with (space-separated) descriptions `descr`.
   Possible description: `tmp` (temporary).
 """
-function add_file(EC::ECInfo, name::String, descr::String; overwrite=false)
+function add_file!(EC::ECInfo, name::String, descr::String; overwrite=false)
   if !file_exists(EC,name) || overwrite
     EC.files[name] = descr
   else
@@ -217,17 +278,60 @@ function add_file(EC::ECInfo, name::String, descr::String; overwrite=false)
 end
 
 """
-    delete_temporary_files(EC::ECInfo)
+    delete_file!(EC::ECInfo, name::AbstractString)
+
+  Delete file `name` from ECInfo.
+"""
+function delete_file!(EC::ECInfo, name::AbstractString)
+  if !file_exists(EC,name)
+    error("File $name is not registered in ECInfo.")
+  end
+  rm(joinpath(EC.scr, name*EC.ext), force=true)
+  delete!(EC.files, name)
+end
+
+"""
+    delete_files!(EC::ECInfo, which::AbstractString)
+
+  Delete files in ECInfo which match description in `which`.
+
+  `which` can be a space-separated string of descriptions (then all descriptions have to match)
+  Examples: 
+  - `delete_files!(EC, "tmp")` deletes all temporary files.
+  - `delete_files!(EC, "tmp orbs")` deletes all temporary files with additional description "orbs"
+"""
+function delete_files!(EC::ECInfo, which::AbstractString)
+  for (name,descr) in EC.files
+    delete = all([w in split(descr) for w in split(which)])
+    if delete
+      rm(joinpath(EC.scr, name*EC.ext), force=true)
+      delete!(EC.files, name)
+    end
+  end
+end
+
+"""
+    delete_files!(EC::ECInfo, which::AbstractArray{String})
+
+  Delete files in ECInfo which match any description in array `which`.
+
+  Examples: 
+  - `delete_files!(EC, ["tmp","orbs"])` deletes all temporary files and all files with description "orbs".
+  - `delete_files!(EC, ["tmp orbs","tmp2"])` deletes all temporary files with description "orbs" and all files with description "tmp2".
+"""
+function delete_files!(EC::ECInfo, which::AbstractArray{String})
+  for w in which
+    delete_files!(EC, w)
+  end
+end
+
+"""
+    delete_temporary_files!(EC::ECInfo)
 
   Delete all temporary files in ECInfo.  
 """
-function delete_temporary_files(EC::ECInfo)
-  for (name,descr) in EC.files
-    if "tmp" in split(descr)
-      rm(joinpath(EC.scr,name*EC.ext), force=true)
-      delete!(EC.files,name)
-    end
-  end
+function delete_temporary_files!(EC::ECInfo)
+  delete_files!(EC, "tmp")
 end
 
 """
@@ -236,7 +340,7 @@ end
   Try to guess spin of an electron: lowcase α, uppercase β, non-letters skipped.
   Return true for α spin.  Throws an error if cannot decide.
 """
-function isalphaspin(sp1::Char,sp2::Char)
+function isalphaspin(sp1::Char, sp2::Char)
   if isletter(sp1)
     return islowercase(sp1)
   elseif isletter(sp2)
@@ -261,23 +365,23 @@ function space4spin(sp::Char, alpha::Bool)
 end
 
 """
-    parse_orbstring(orbs::String; orbsym = Vector{Int})
+    parse_orbstring(orbs::String; orbsym=Vector{Int})
 
   Parse a string specifying some list of orbitals, e.g., 
   `-3+5-8+10-12` → `[1 2 3 5 6 7 8 10 11 12]`
   or use ':' and ';' instead of '-' and '+', respectively.
 """
-function parse_orbstring(orbs::String; orbsym = Vector{Int}())
+function parse_orbstring(orbs::String; orbsym=Vector{Int}())
   # make it in julia syntax
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
   orbs1 = replace(orbs1," "=>"")
-  if maximum(orbsym) > 1 && occursin(".",orbs1)
+  if maximum(orbsym) > 1 && occursin(".", orbs1)
     @assert(issorted(orbsym),"Orbital symmetries are not sorted. Specify occa and occb without symmetry.")
-    symoffset = zeros(Int,maximum(orbsym))
-    symlist = zeros(Int,maximum(orbsym))
+    symoffset = zeros(Int, maximum(orbsym))
+    symlist = zeros(Int, maximum(orbsym))
     for sym in eachindex(symlist)
-      symlist[sym] = count(isequal(sym),orbsym)
+      symlist[sym] = count(isequal(sym), orbsym)
     end
     for iter in eachindex(symoffset)
       if iter == 1
@@ -296,15 +400,15 @@ function parse_orbstring(orbs::String; orbsym = Vector{Int}())
     orbs1 = "1"*orbs1
   end
   orblist=Vector{Int}()
-  for range in filter(!isempty,split(orbs1,';'))
+  for range in filter(!isempty, split(orbs1,';'))
     if first(range) == ':'
-      sym = filter(!isempty,split(range[2:end],'.'))[2]
+      sym = filter(!isempty, split(range[2:end],'.'))[2]
       range = "1."*sym*range
     end
-    firstlast = filter(!isempty,split(range,':'))
+    firstlast = filter(!isempty, split(range,':'))
     if length(firstlast) == 1
       # add the orbital
-      orblist=push!(orblist,symorb2orb(firstlast[1],symoffset))
+      orblist=push!(orblist, symorb2orb(firstlast[1],symoffset))
     else
       length(firstlast) == 2 || error("Someting wrong in range $range in orbstring $orbs")
       firstorb = symorb2orb(firstlast[1],symoffset)
@@ -325,7 +429,7 @@ end
 """
 function symorb2orb(symorb::SubString, symoffset::Vector{Int})
   if occursin(".",symorb)
-    orb, sym = filter(!isempty,split(symorb,'.'))
+    orb, sym = filter(!isempty, split(symorb,'.'))
     @assert(parse(Int,sym) <= length(symoffset),"Symmetry label $sym larger than maximum of orbsym vector.")
     orb = parse(Int,orb)
     orb += symoffset[parse(Int,sym)]
@@ -336,13 +440,13 @@ function symorb2orb(symorb::SubString, symoffset::Vector{Int})
 end
 
 """
-    get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int})
+    get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int})
 
   Use a +/- string to specify the occupation. If `occbs`=="-", the occupation from `occas` is used (closed-shell).
   If both are "-", the occupation is deduced from `nelec` and `ms2`.
   The optional argument `orbsym` is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
-function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym = Vector{Int}())
+function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}())
   @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   if occas != "-"
     occa = parse_orbstring(occas; orbsym)
