@@ -450,10 +450,8 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ECC = calc_cc(EC, ecmethod)
 
     main_name = method_name(ecmethod)
-    println("$main_name correlation energy: ",ECC)
-    println("$main_name total energy: ",ECC+EHF)
-
     ecmethod = ecmethod_save # restore
+
     if closed_shell_method
       if ecmethod.exclevel[3] != :none
         do_full_t3 = (ecmethod.exclevel[3] == :full || ecmethod.exclevel[3] == :pertiter)
