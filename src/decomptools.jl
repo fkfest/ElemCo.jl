@@ -37,7 +37,7 @@ function calc_integrals_decomposition(EC::ECInfo)
   
   #get integral decomposition
   pqP = B[:,1:naux1].*sqrt.(S[1:naux1]')
-  save(EC, "mmL", reshape(pqP, (n,n,naux1)))
+  save!(EC, "mmL", reshape(pqP, (n,n,naux1)))
   #B_comparison = pqP * pqP'
   #println( B_comparison ≈ reshape(pqrs, (n^2,n^2)) )
 end

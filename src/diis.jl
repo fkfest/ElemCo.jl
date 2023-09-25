@@ -38,8 +38,8 @@ mutable struct Diis
     ampfiles = [ joinpath(EC.scr, "amp"*string(i)*EC.ext) for i in 1:maxdiis ]
     resfiles = [ joinpath(EC.scr, "res"*string(i)*EC.ext) for i in 1:maxdiis ]
     for i in 1:maxdiis
-      add_file(EC, "amp"*string(i), "tmp", overwrite=true)
-      add_file(EC, "res"*string(i), "tmp", overwrite=true)
+      add_file!(EC, "amp"*string(i), "tmp", overwrite=true)
+      add_file!(EC, "res"*string(i), "tmp", overwrite=true)
     end
     new(maxdiis,resthr,ampfiles,resfiles,weights,1,0,zeros(maxdiis+1,maxdiis+1))
   end

@@ -7,6 +7,7 @@ module DFCoupledCluster
 using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
+using ..ElemCo.MSystem
 using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
 using ..ElemCo.DecompTools
@@ -47,7 +48,7 @@ function get_tildevˣˣ(EC::ECInfo)
   end
   close(ovLfile)
   @tensoropt vxx[X,Y] := (2.0*vdagger_vvoo[a,b,i,j] - vdagger_vvoo[a,b,j,i]) * UvoX[a,i,X] * UvoX[b,j,Y]
-  save(EC, "td_^XX", vxx)
+  save!(EC, "td_^XX", vxx)
   return vxx
 end
 
@@ -227,7 +228,7 @@ function dress_df_fock(EC, T1)
   @tensoropt dfock[:,occ][p,j] += dinter[p,b] * T1[b,j]
   dinter = dfock[occ,:]
   @tensoropt dfock[virt,:][b,p] -= dinter[j,p] * T1[b,j]
-  save(EC, "df_mm", dfock)
+  save!(EC, "df_mm", dfock)
 end
 
 """
@@ -237,7 +238,20 @@ end
 """
 function save_pseudo_dress_df_fock(EC)
   dfock = load(EC, "f_mm")
-  save(EC, "df_mm", dfock)
+  save!(EC, "df_mm", dfock)
+end
+
+"""
+    calc_doubles_decomposition(EC::ECInfo)
+
+  Decompose ``T^{ij}_{ab}=U^{iX}_a U^{jY}_b T_{XY}``
+"""
+function calc_doubles_decomposition(EC::ECInfo)
+  if EC.options.cc.decompose_full_doubles
+    return calc_doubles_decomposition_with_doubles(EC)
+  else
+    return calc_doubles_decomposition_without_doubles(EC)
+  end
 end
 
 """
@@ -258,7 +272,7 @@ end
   Return full MP2 correlation energy (using the imaginary shift).
 """
 function calc_doubles_decomposition_without_doubles(EC::ECInfo)
-  println("decomposition without doubles using threshold ", EC.options.cc.ampsvdtol)
+  println("Decomposition without doubles using threshold ", EC.options.cc.ampsvdtol)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   SP = EC.space
@@ -276,22 +290,15 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     println("MP2 imaginary shift for decomposition: ", shifti)
     println("MP2 imaginary shifted correlation energy: ", fullEMP2)
   end
-  calc_T2 = (EC.options.cc.decompose_full_doubles || EC.options.cc.use_full_t2)
-  if calc_T2
-    T2 = calc_MP2_amplitudes_from_3idx(EC, voL, shifti)
-  end
   if EC.options.cc.use_full_t2
-    save(EC, "T_vvoo", T2)
-  end
-  if EC.options.cc.decompose_full_doubles
-    println("decompose full MP2 doubles (can be slow!)")
-    UaiX = svd_decompose(reshape(T2, (nvirt*nocc,nvirt*nocc)), nvirt, nocc, tol2)
-  else
-    UaiX = svd_decompose(reshape(voL, (nvirt*nocc,nL)), nvirt, nocc, tol2)
-  end
-  if calc_T2
+    T2 = try2start_doubles(EC)
+    if size(T2) != (nvirt,nvirt,nocc,nocc)
+      T2 = calc_MP2_amplitudes_from_3idx(EC, voL, shifti)
+    end
+    save!(EC, "T_vvoo", T2)
     T2 = nothing
   end
+  UaiX = svd_decompose(reshape(voL, (nvirt*nocc,nL)), nvirt, nocc, tol2)
   # UaiX = calc_3idx_svd_decomposition(EC, voL) 
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   # calculate rhs: v_{aX}^{i} = v_a^{iL} 𝟙_{LL} v_b^{jL} (U_b^{jX})^† 
@@ -309,10 +316,10 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   # decompose T^i_{aX}
   UaiX = svd_decompose(reshape(voX, (nvirt*nocc,naux)), nvirt, nocc, EC.options.cc.ampsvdtol)
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  save(EC, "e_X", ϵX)
+  save!(EC, "e_X", ϵX)
   #display(UaiX)
   naux = length(ϵX)
-  save(EC, "C_voX", UaiX)
+  save!(EC, "C_voX", UaiX)
   # calc starting guess for T_XY
   @tensoropt v_XL[X,L] := UaiX[a,i,X] * voL[a,i,L]
   @tensoropt v_XX[X,Y] := v_XL[X,L] * v_XL[Y,L]
@@ -321,9 +328,53 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     den = ϵX[X] + ϵX[Y]
     v_XX[I] *= -den/(den^2 + shifti)
   end
-  save(EC, "T_XX", v_XX)
-  # save(EC, "T_XX", zeros(size(v_XX)))
+  save!(EC, "T_XX", v_XX)
+  # save!(EC, "T_XX", zeros(size(v_XX)))
   return fullEMP2
+end
+
+"""
+    calc_doubles_decomposition_with_doubles(EC::ECInfo)
+
+  Decompose ``T^{ij}_{ab}=U^{iX}_a U^{jY}_b T_{XY}`` using explicit doubles amplitudes ``T^{ij}_{ab}``.
+"""
+function calc_doubles_decomposition_with_doubles(EC::ECInfo)
+  println("Decomposition with doubles using threshold ", EC.options.cc.ampsvdtol)
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  SP = EC.space
+  mmLfile, mmL = mmap(EC, "mmL")
+  nL = size(mmL, 3)
+  voL = mmL[SP['v'],SP['o'],:]
+  T2 = try2start_doubles(EC)
+  if size(T2) != (nvirt,nvirt,nocc,nocc)
+    println("Use MP2 doubles for decomposition")
+    shifti = EC.options.cc.deco_ishiftp
+    T2 = calc_MP2_amplitudes_from_3idx(EC, voL, shifti)
+  end
+  if EC.options.cc.use_full_t2
+    save!(EC, "T_vvoo", T2)
+  end
+  println("decompose full doubles (can be slow!)")
+  UaiX = svd_decompose(reshape(T2, (nvirt*nocc,nvirt*nocc)), nvirt, nocc, EC.options.cc.ampsvdtol)
+  ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
+  save!(EC, "e_X", ϵX)
+  #display(UaiX)
+  naux = length(ϵX)
+  save!(EC, "C_voX", UaiX)
+  if !EC.options.cc.use_full_t2
+    # calc starting guess for T_XY
+    @tensoropt v_XL[X,L] := UaiX[a,i,X] * voL[a,i,L]
+    @tensoropt v_XX[X,Y] := v_XL[X,L] * v_XL[Y,L]
+    for I ∈ CartesianIndices(v_XX)
+      X,Y = Tuple(I)
+      den = ϵX[X] + ϵX[Y]
+      v_XX[I] *= -den/(den^2 + shifti)
+    end
+    save!(EC, "T_XX", v_XX)
+    # save!(EC, "T_XX", zeros(size(v_XX)))
+  end
+  return 0.0
 end
 
 """
@@ -667,6 +718,17 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   return R1, R2
 end
 
+function additional_info(EC::ECInfo)
+  return """Convergence threshold:  $(EC.options.cc.thr)
+            Max. iterations:        $(EC.options.cc.maxit)
+            Core type:              $(EC.options.cc.core)
+            Level shifts:           $(EC.options.cc.shifts) $(EC.options.cc.shiftp)
+            SVD-tolerance:          $(EC.options.cc.ampsvdtol)
+            Projected contravariant exchange: $(EC.options.cc.use_projx)
+            Projection in pp-hh term:         $(EC.options.cc.project_vovo_t2)
+            Use full T2 for N^5 terms:        $(EC.options.cc.use_full_t2)"""
+end
+
 """
     calc_svd_dc(EC::ECInfo, method::AbstractString)
 
@@ -691,7 +753,7 @@ end
 function calc_svd_dc(EC::ECInfo, method::ECMethod)
   t1 = time_ns()
   methodname = "SVD-"*method_name(method)
-  print_info(methodname)
+  print_info(methodname, additional_info(EC))
 
   if method.theory != "DC"
     error("Only DC methods are supported in SVD!")
@@ -700,12 +762,16 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   # integrals
   cMO = load_orbitals(EC, EC.options.cc.orbs)
   ERef = generate_DF_integrals(EC, cMO)
+  cMO = nothing
   println("Reference energy: ", ERef)
   println()
 
-  use_projected_exchange = EC.options.cc.use_projx
+  space_save = save_space(EC)
+  freeze_core!(EC, EC.options.cc.core, EC.options.cc.freeze_nocc)
+  freeze_nvirt!(EC, EC.options.cc.freeze_nvirt)
+
   # decomposition and starting guess
-  fullEMP2 = calc_doubles_decomposition_without_doubles(EC)
+  fullEMP2 = calc_doubles_decomposition(EC)
   if do_sing
     T1 = read_starting_guess4amplitudes(EC, 1)
   else
@@ -715,7 +781,6 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   save_pseudo_dress_df_fock(EC)
   diis = Diis(EC)
 
-  println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
@@ -727,9 +792,12 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   else
     T2 = load(EC,"T_XX")
   end
-  # calc truncated MP2 energy
+  # calc starting guess energy 
   truncEMP2 = calc_deco_doubles_energy(EC, T2)
+  println("Starting guess energy: ", truncEMP2)
+  println()
   converged = false
+  println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     R1, R2 = calc_svd_dcsd_residual(EC, T1, T2)
@@ -764,17 +832,22 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   if !converged
     println("$methodname not converged!")
   end
+  try2save_singles!(EC, T1)
+  try2save_doubles!(EC, T2)
   println()
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
   println()
   println("$methodname correlation energy: ", Eh)
   println("$methodname total energy: ", Eh + ERef)
   println()
-  println("$methodname corrected correlation energy: ", Eh + fullEMP2 - truncEMP2)
-  println("$methodname corrected total energy: ", Eh + ERef + fullEMP2 - truncEMP2)
-  println()
+  if !EC.options.cc.use_full_t2
+    println("$methodname corrected correlation energy: ", Eh + fullEMP2 - truncEMP2)
+    println("$methodname corrected total energy: ", Eh + ERef + fullEMP2 - truncEMP2)
+    println()
+  end
   flush(stdout)
-  delete_temporary_files(EC)
+  delete_temporary_files!(EC)
+  restore_space!(EC, space_save)
   draw_endline()
   return Eh
 

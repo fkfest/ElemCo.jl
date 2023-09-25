@@ -48,9 +48,9 @@ function projDenFitInt(EC::ECInfo, cMO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2)
   @tensoropt μjL[μ,j,L] := μνL[μ,ν,L] * CMO2[ν,j]
-  save(EC,"AcL",μjL)
+  save!(EC,"AcL",μjL)
   @tensoropt μuL[μ,u,L] := μνL[μ,ν,L] * CMOa[ν,u]
-  save(EC,"AaL",μuL)
+  save!(EC,"AaL",μuL)
 end
 
 """
@@ -186,7 +186,7 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   d = size(h_rk_sl,1) * size(h_rk_sl,2)
   h_rk_sl = reshape(h_rk_sl, d, d)
 
-  #save(EC,"h_rk_sl",h_rk_sl)
+  #save!(EC,"h_rk_sl",h_rk_sl)
   return h_rk_sl
 end
 
@@ -455,7 +455,7 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=50)
   else
     println("Not Convergent!")
   end
-  delete_temporary_files(EC)
+  delete_temporary_files!(EC)
   return E_former+Enuc, cMO
 end
 end #module

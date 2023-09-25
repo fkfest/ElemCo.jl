@@ -68,7 +68,7 @@ end
   If there is only one array - return array itself
   (unless `array_of_arrays` is set to true).
 """
-function mioload(fname::String; array_of_arrays = false)
+function mioload(fname::String; array_of_arrays=false)
   io = open(fname)
   # type of numbers
   itype = read(io, Int)

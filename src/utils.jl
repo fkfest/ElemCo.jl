@@ -3,7 +3,7 @@ module Utils
 using Printf
 using ..ElemCo.AbstractEC
 
-export print_time, draw_line, print_info, draw_endline, kwarg_provided_in_macro
+export print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 
 """ 
     print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
@@ -21,22 +21,37 @@ end
 """
     draw_line(n = 63)
 
-  Print a line of `n` dashes.
+  Print a thick line of `n` characters.
 """
 function draw_line(n=63)
+  println(repeat("━", n))
+end
+
+"""
+    draw_thin_line(n = 63)
+
+  Print a thin line of `n` characters.
+"""
+function draw_thin_line(n=63)
   println(repeat("─", n))
 end
 
 """
-    print_info(info::AbstractString)
+    print_info(info::AbstractString, additional_info::AbstractString="")
 
   Print `info` between two lines.
+
+  If `additional` not empty: additional info after main.
 """
-function print_info(info::AbstractString)
+function print_info(info::AbstractString, additional_info::AbstractString="")
   println()
   draw_line()
   println(info)
   draw_line()
+  if additional_info != ""
+    println(additional_info)
+    draw_thin_line()
+  end
 end
 
 """

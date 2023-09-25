@@ -349,23 +349,23 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
   t1 = time_ns()
   if closed_shell
     fock = gen_fock(EC)
-    save(EC, "f_mm", fock)
-    save(EC, "f_MM", fock)
+    save!(EC, "f_mm", fock)
+    save!(EC, "f_MM", fock)
     eps = diag(fock)
     println("Occupied orbital energies: ", eps[EC.space['o']])
-    save(EC, "e_m", eps)
-    save(EC, "e_M", eps)
+    save!(EC, "e_m", eps)
+    save!(EC, "e_M", eps)
   else
     fock = gen_fock(EC, :α)
     eps = diag(fock)
     println("Occupied α orbital energies: ", eps[EC.space['o']])
-    save(EC, "f_mm", fock)
-    save(EC, "e_m", eps)
+    save!(EC, "f_mm", fock)
+    save!(EC, "e_m", eps)
     fock = gen_fock(EC, :β)
     eps = diag(fock)
     println("Occupied β orbital energies: ", eps[EC.space['O']])
-    save(EC,"f_MM", fock)
-    save(EC,"e_M", eps)
+    save!(EC,"f_MM", fock)
+    save!(EC,"e_M", eps)
   end
   t1 = print_time(EC,t1,"fock matrix",1)
 end
@@ -480,14 +480,14 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
       @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W
       t1 = print_time(EC, t1,"CC",1)
-      delete_temporary_files(EC)
+      delete_temporary_files!(EC)
       draw_endline()
       return EHF, EMp2, ECC, W
     else
       println("$main_name correlation energy: ",ECC)
       println("$main_name total energy: ",ECC+EHF)
       t1 = print_time(EC, t1,"CC",1)
-      delete_temporary_files(EC)
+      delete_temporary_files!(EC)
       draw_endline()
       if length(method_names) == 1
         if ecmethod.exclevel[3] != :none

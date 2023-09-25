@@ -52,16 +52,16 @@ end
 function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
   bao = generate_basis(EC.ms, "ao")
   bfit = generate_basis(EC.ms, fitbasis)
-  save(EC,"S_AA",overlap(bao))
-  save(EC,"h_AA",kinetic(bao) + nuclear(bao))
+  save!(EC,"S_AA",overlap(bao))
+  save!(EC,"h_AA",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
   if save3idx
     pqP = ERI_2e3c(bao,bfit)
     @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
-    save(EC,"AAL",pqL)
+    save!(EC,"AAL",pqL)
   else
-    save(EC,"C_PL",M)
+    save!(EC,"C_PL",M)
   end
   return nuclear_repulsion(EC.ms)
 end
@@ -86,7 +86,7 @@ function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
   M = nothing
   @tensoropt pqL[p,q,L] := cMO[μ,p] * μνL[μ,ν,L] * cMO[ν,q]
   μνL = nothing
-  save(EC,"mmL",pqL)
+  save!(EC,"mmL",pqL)
 end
 
 """
@@ -111,11 +111,11 @@ function generate_DF_integrals(EC::ECInfo, cMO)
   bfit = generate_basis(EC.ms, "jkfit")
   fock = gen_dffock(EC, cMO, bao, bfit)
   fock_MO = cMO' * fock * cMO
-  save(EC,"f_mm",fock_MO)
+  save!(EC,"f_mm",fock_MO)
   eps = diag(fock_MO)
   println("Occupied orbital energies: ", eps[EC.space['o']])
-  save(EC, "e_m", eps)
-  save(EC, "e_M", eps)
+  save!(EC, "e_m", eps)
+  save!(EC, "e_M", eps)
   occ = EC.space['o']
   hsmall = cMO' * load(EC,"h_AA") * cMO
   EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.ms)

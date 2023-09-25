@@ -181,6 +181,30 @@ function parse_electron_configuration(e::AbstractString)
 end
 
 """ 
+    ncoreorbs(elem::AbstractString, coretype::Symbol=:large)
+
+  Guess the number of core orbitals in the element.
+
+  coretype:
+  - :large - large core (w/o semi-core)
+  - :small - small core (w/ semi-core)
+  - :none - no core
+"""
+function ncoreorbs(elem::AbstractString, coretype::Symbol=:large)
+  if coretype == :large
+    ic = 5
+  elseif coretype == :small
+    ic = 6
+  elseif coretype == :none
+    return 0
+  else
+    error("unknown coretype $coretype")
+  end
+  subshells = parse_electron_configuration(ELEMENTS[elem][ic])
+  return sum([n_orbitals_in_subshell(sh.l) for sh in subshells])
+end
+
+""" 
     electron_distribution(elem::AbstractString, nsh4l::Vector{Int})
 
   Distribute electrons among first atomic orbitals in nsh4l[1]s nsh4l[2]p nsh4l[3]d nsh4l[4]f... order
