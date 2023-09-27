@@ -1,5 +1,6 @@
 # example: calculate DCSD/BO-HF/DCSD for all FCIDUMPs in "./*/" folders
-# modify include path to point to the ElemCo.jl-devel folder
+# create a symbolic link in the current directory pointing the ElemCo.jl-devel folder
+# ln -s <path-to-ElemCo.jl-devel-folder> .
 
 include("ElemCo.jl-devel/src/ElemCo.jl")
 using .ElemCo
@@ -7,37 +8,33 @@ using .ElemCo.ECInfos
 using .ElemCo.BOHF
 using .ElemCo.FciDump
 
-skip = false
-# if uncommented: skip all folders upto some specific folder 
-#skip = true
+# if non-empty list: calculate only specified folders
+calc_only = []
+# don't calculate the following folders
+dont_calc = ["ElemCo.jl-devel"]
 for dir in readdir()
-  if skip
-    if dir == "H2O2"
-      global skip = false
-    else
-      continue
-    end
+  if length(calc_only) > 0 && dir ∉ calc_only
+    continue
   end
-  if !isdir(dir) || dir == "H" #atm skip H
+  if !isdir(dir) || dir in dont_calc
     continue
   end
   println(dir)
   cd(dir)
-  fcidump = "FCIDUMP"
   output = "bo-dcsd.out"
-  EC = ECInfo()
   redirect_stdio(stdout=output) do
-    EHF, EMP2, ECCSD = ECdriver(EC, "dcsd"; fcidump)
+    @cc dcsd fcidump="FCIDUMP"
 
-    # to do directly BO-HF without calculating dcsd uncomment next line
-    #setup(EC; fcidump)
+    # to do directly BO-HF without calculating dcsd uncomment next lines
+    # EC=ECInfo()
+    # EC.fd = read_fcidump(fcidump)
     if ElemCo.is_closed_shell(EC)[1]
       EBOHF = bohf(EC)
     else
       EBOHF = bouhf(EC)
     end
-    CMOr = load(EC, EC.options.scf.save)
-    CMOl = load(EC, EC.options.scf.save*EC.options.scf.left)
+    CMOr = load(EC, EC.options.wf.orb)
+    CMOl = load(EC, EC.options.wf.orb*EC.options.wf.left)
     transform_fcidump(EC.fd, CMOl, CMOr)
     EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
   end

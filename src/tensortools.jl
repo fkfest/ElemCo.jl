@@ -7,7 +7,9 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MIO
 
-export save!, load, mmap, newmmap, closemmap, ints1, ints2, sqrtinvchol, invchol, rotate_eigenvectors_to_real!
+export save!, load, mmap, newmmap, closemmap
+export ints1, ints2, detri_int2
+export sqrtinvchol, invchol, rotate_eigenvectors_to_real!
 export get_spaceblocks
 
 """
@@ -82,15 +84,14 @@ function ints1(EC::ECInfo, spaces::String, spincase = nothing)
 end
 
 """ 
-    triinds(EC::ECInfo, sp1::AbstractArray{Int}, sp2::AbstractArray{Int}, reverseCartInd = false)
+    triinds(norb, sp1::AbstractArray{Int}, sp2::AbstractArray{Int}, reverseCartInd = false)
 
   Generate set of CartesianIndex for addressing the lhs and 
-  a bitmask for the rhs for transforming a triangular index from ':' 
+  a bitmask for the rhs for transforming a triangular index from 1:norb  
   to two original indices in spaces sp1 and sp2.
   If `reverse`: the cartesian indices are reversed.
 """
-function triinds(EC::ECInfo, sp1::AbstractArray{Int}, sp2::AbstractArray{Int}, reverseCartInd = false)
-  norb = length(EC.space[':'])
+function triinds(norb, sp1::AbstractArray{Int}, sp2::AbstractArray{Int}, reverseCartInd = false)
   # triangular index (TODO: save in EC or FDump)
   tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
   mask = falses(norb,norb)
@@ -132,21 +133,31 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
     sc = spincase
   end
   allint = integ2(EC.fd, sc)
+  norb = length(EC.space[':'])
   if ndims(allint) == 4
     return allint[EC.space[spaces[1]],EC.space[spaces[2]],EC.space[spaces[3]],EC.space[spaces[4]]]
   elseif detri
     # last two indices as a triangular index, desymmetrize
-    @assert ndims(allint) == 3
-    out = Array{Float64}(undef,length(EC.space[spaces[1]]),length(EC.space[spaces[2]]),length(EC.space[spaces[3]]),length(EC.space[spaces[4]]))
-    cio, maski = triinds(EC,EC.space[spaces[3]],EC.space[spaces[4]])
-    out[:,:,cio] = allint[EC.space[spaces[1]],EC.space[spaces[2]],maski]
-    cio, maski = triinds(EC,EC.space[spaces[4]],EC.space[spaces[3]],true)
-    out[:,:,cio] = permutedims(allint[EC.space[spaces[2]],EC.space[spaces[1]],maski],(2,1,3))
-    return out
+    return detri_int2(allint, norb, EC.space[spaces[1]], EC.space[spaces[2]], EC.space[spaces[3]], EC.space[spaces[4]])
   else
-    cio, maski = triinds(EC,EC.space[spaces[3]],EC.space[spaces[4]])
+    cio, maski = triinds(norb, EC.space[spaces[3]], EC.space[spaces[4]])
     return allint[EC.space[spaces[1]],EC.space[spaces[2]],maski]
   end
+end
+
+""" 
+    detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
+
+  Return full 2e⁻ integrals <sp1 sp2 | sp3 sp4> from allint2 with last two indices as a triangular index.
+"""
+function detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
+  @assert ndims(allint2) == 3
+  out = Array{Float64}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+  cio, maski = triinds(norb, sp3, sp4)
+  out[:,:,cio] = allint2[sp1,sp2,maski]
+  cio, maski = triinds(norb, sp4, sp3, true)
+  out[:,:,cio] = permutedims(allint2[sp2,sp1,maski], (2,1,3))
+  return out
 end
 
 """ 

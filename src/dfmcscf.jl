@@ -373,6 +373,7 @@ Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
 function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=50)
   print_info("DF-MCSCF")
+  setup_space_ms!(EC)
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   sao = load(EC,"S_AA")
   nAO = size(sao,2) # number of atomic orbitals

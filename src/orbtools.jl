@@ -54,7 +54,7 @@ end
   - :HCORE from core Hamiltonian
   - :SAD from atomic densities
   - :GWH not implemented yet
-  - :ORB from previous orbitals stored in file `EC.options.scf.orbsguess`
+  - :ORB from previous orbitals stored in file `EC.options.wf.orb`
 """
 function guess_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
@@ -64,7 +64,7 @@ function guess_orb(EC::ECInfo, guess::Symbol)
   elseif guess == :GWH || guess == :gwh
     return guess_gwh(EC)
   elseif guess == :ORB || guess == :orb
-    return load(EC,EC.options.scf.orbsguess)
+    return load(EC,EC.options.wf.orb)
   else
     error("unknown guess type")
   end
@@ -76,17 +76,14 @@ end
   Load (last) orbitals.
   
   - from file `orbsfile` if not empty
-  - from file `EC.options.int.orbs` if not empty
-  - from file `EC.options.scf.save` if not empty
+  - from file `EC.options.wf.orb` if not empty
   - error if all files are empty
 """
 function load_orbitals(EC::ECInfo, orbsfile::String="")
   if !isempty(strip(orbsfile))
     # orbsfile will be used
-  elseif !isempty(strip(EC.options.int.orbs))
-    orbsfile = EC.options.int.orbs
-  elseif !isempty(strip(EC.options.scf.save))
-    orbsfile = EC.options.scf.save
+  elseif !isempty(strip(EC.options.wf.orb))
+    orbsfile = EC.options.wf.orb
   else
     error("no orbitals found")
   end

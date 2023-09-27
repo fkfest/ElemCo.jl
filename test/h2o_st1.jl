@@ -22,10 +22,10 @@ try
 catch
   #using .BOHF
 end
-#setup(EC; fcidump)
+#EC.fd = read_fcidump(fcidump)
 EBOHF = bohf(EC)
-CMOr = load(EC, EC.options.scf.save)
-CMOl = load(EC, EC.options.scf.save*EC.options.scf.left)
+CMOr = load(EC, EC.options.wf.orb)
+CMOl = load(EC, EC.options.wf.orb*EC.options.wf.left)
 transform_fcidump(EC.fd, CMOl, CMOr)
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
 @test abs(EBOHF-EHF) < epsilon

@@ -1,7 +1,42 @@
 # Options
 
+"""
+  Options for wavefunction/orbitals.
+
+  $(FIELDS)
+"""
+@with_kw mutable struct WfOptions
+  """ spin magnetic quantum number times two (2×mₛ) of the system. """
+  ms2::Int = -1
+  """ number of electrons. If < 0, the number of electrons is 
+  read from the FCIDump file or guessed for the neutral system. """
+  nelec::Int = -1
+  """ charge of the system (relative to nelec/FCIDump/neutral system!). """
+  charge::Int = 0
+  """ filename of MO coefficients. 
+  Used by all programs to read and write orbitals from/to file. """
+  orb::String = "C_Am"
+  """ addition to the filename for left orbitals (for biorthogonal calculations). """
+  left::String = "-left"
+  """ core type for frozen-core approximation: 
+  - :none (no frozen-core approximation), 
+  - :small (semi-core orbitals correlated), 
+  - :large (semi-core orbitals frozen). """
+  core::Symbol = :large
+  """ number of occupied (core) orbitals to freeze (overwrites core). """
+  freeze_nocc::Int = -1
+  """ number of virtual (highest) orbitals to freeze. """
+  freeze_nvirt::Int = 0
+  """ occupied α (or closed-shell) orbitals. """
+  occa::String = "-"
+  """ occupied β orbitals. 
+  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
+  occb::String = "-"
+end
+
+
 """ 
-  Options for SCF calculation
+  Options for SCF calculation.
 
   $(FIELDS)    
 """
@@ -16,16 +51,10 @@
   direct::Bool = false
   """ orbital guess. """
   guess::Symbol = :SAD
-  """ filename of orbitals for orbital guess. """
-  orbsguess::String = "C_Am"
-  """ filename to save orbitals. """
-  save::String = "C_Am"
-  """ addition to the filename for left orbitals (for biorthogonal calculations). """
-  left::String = "-left"
 end
 
 """ 
-  Options for Coupled-Cluster calculation
+  Options for Coupled-Cluster calculation.
 
   $(FIELDS)
 """
@@ -34,15 +63,6 @@ end
   thr::Float64 = 1.e-10
   """ maximum number of iterations. """
   maxit::Int = 50
-  """ core type for frozen-core approximation: 
-  - :none (no frozen-core approximation), 
-  - :small (semi-core orbitals correlated), 
-  - :large (semi-core orbitals frozen). """
-  core::Symbol = :large
-  """ number of occupied (core) orbitals to freeze (overwrites core). """
-  freeze_nocc::Int = -1
-  """ number of virtual (highest) orbitals to freeze. """
-  freeze_nvirt::Int = 0
   """ level shift for singles. """
   shifts::Float64 = 0.15
   """ level shift for doubles. """
@@ -80,12 +100,11 @@ end
   project_vovo_t2::Int = 2
   """ decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
-  """ filename of orbitals (for non-fcidump calculations). """
-  orbs::String = ""
   """ main part of filename for start amplitudes. 
-      For example, the singles amplitudes are read from `start*"_singles.bin"` """
+      For example, the singles amplitudes are read from `start*"_singles"` """
   start::String = "cc_amplitudes"
-  """ main part of filename to save amplitudes. """
+  """ main part of filename to save amplitudes.
+      For example, the singles amplitudes are saved to `save*"_singles"` """
   save::String = "cc_amplitudes"
 end
 
@@ -99,8 +118,6 @@ end
   df::Bool = true
   """ store integrals in FCIDump format. """
   fcidump::String = ""
-  """ filename of orbitals for MO transformation. If empty: ScfOptions.save is used. """
-  orbs::String = ""
 end
 
 """ 
@@ -126,11 +143,13 @@ end
 end
 
 """ 
-  Options for ElemCo.jl
+  Options for ElemCo.jl.
 
   $(FIELDS)
 """  
 @with_kw mutable struct Options
+  """ Wavefunction options. """
+  wf::WfOptions = WfOptions()
   """ SCF options. """
   scf::ScfOptions = ScfOptions()
   """ Integral options. """

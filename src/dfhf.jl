@@ -19,6 +19,7 @@ export dfhf, generate_integrals
 """
 function dfhf(EC::ECInfo)
   print_info("DF-HF")
+  setup_space_ms!(EC)
   diis = Diis(EC)
   thren = sqrt(EC.options.scf.thr)*0.1
   direct = EC.options.scf.direct
@@ -65,8 +66,9 @@ function dfhf(EC::ECInfo)
     # display(ϵ)
   end
   println("DF-HF energy: ", EHF)
+  draw_endline()
   delete_temporary_files!(EC)
-  save!(EC, EC.options.scf.save, cMO, description="DFHF orbitals")
+  save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
   return EHF
 end
 

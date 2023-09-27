@@ -721,9 +721,11 @@ end
 function additional_info(EC::ECInfo)
   return """Convergence threshold:  $(EC.options.cc.thr)
             Max. iterations:        $(EC.options.cc.maxit)
-            Core type:              $(EC.options.cc.core)
+            Core type:              $(EC.options.wf.core)
             Level shifts:           $(EC.options.cc.shifts) $(EC.options.cc.shiftp)
             SVD-tolerance:          $(EC.options.cc.ampsvdtol)
+            # occupied orbitals to freeze:    $(EC.options.wf.freeze_nocc)
+            # virtual orbitals to freeze:     $(EC.options.wf.freeze_nvirt)
             Projected contravariant exchange: $(EC.options.cc.use_projx)
             Projection in pp-hh term:         $(EC.options.cc.project_vovo_t2)
             Use full T2 for N^5 terms:        $(EC.options.cc.use_full_t2)"""
@@ -754,21 +756,22 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   t1 = time_ns()
   methodname = "SVD-"*method_name(method)
   print_info(methodname, additional_info(EC))
-
+  setup_space_ms!(EC)
+  flush(stdout)
   if method.theory != "DC"
     error("Only DC methods are supported in SVD!")
   end
   do_sing = (method.exclevel[1] == :full)
   # integrals
-  cMO = load_orbitals(EC, EC.options.cc.orbs)
+  cMO = load_orbitals(EC, EC.options.wf.orb)
   ERef = generate_DF_integrals(EC, cMO)
   cMO = nothing
   println("Reference energy: ", ERef)
   println()
 
   space_save = save_space(EC)
-  freeze_core!(EC, EC.options.cc.core, EC.options.cc.freeze_nocc)
-  freeze_nvirt!(EC, EC.options.cc.freeze_nvirt)
+  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
+  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
 
   # decomposition and starting guess
   fullEMP2 = calc_doubles_decomposition(EC)
