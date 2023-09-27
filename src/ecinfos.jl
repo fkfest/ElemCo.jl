@@ -7,9 +7,10 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
+export setup_space_fd!, setup_space_ms!, setup_space!
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
-export file_exists, add_file!, delete_file!, delete_files!, delete_temporary_files!
+export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
 export isalphaspin, space4spin
 
 include("options.jl")
@@ -22,10 +23,8 @@ include("options.jl")
   $(FIELDS)
 """
 @with_kw mutable struct ECInfo <: AbstractECInfo
-  """ path to main scratch directory. """
-  scr0::String = joinpath(tempdir(),"elemcojlscr")
-  """ path to working scratch directory. """
-  scr::String = scr0
+  """ path to scratch directory. """
+  scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
   """ extension of temporary files. """
   ext::String = ".bin"
   """ output file. """
@@ -77,42 +76,54 @@ include("options.jl")
   space::Dict{Char,Any} = Dict{Char,Any}()
 end
 
-""" 
-    setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms2=0)
-
-  Setup ECInfo from fcidump or molecular system.
 """
-function setup!(EC::ECInfo; fcidump="", occa="-", occb="-", nelec=0, charge=0, ms2=0)
-  t1 = time_ns()
-  # create scratch directory
-  mkpath(EC.scr0)
-  if EC.scr == EC.scr0 || isempty(EC.scr)
-    # create a new scratch directory
-    EC.scr = mktempdir(EC.scr0)
-  end
-  if fcidump != ""
-    # read fcidump intergrals
-    EC.fd = read_fcidump(fcidump)
-    t1 = print_time(EC,t1,"read fcidump",1)
-  end
-  if fd_exists(EC.fd)
-    println(size(EC.fd.int2))
-    norb = headvar(EC.fd, "NORB")
-    nelec = (nelec==0) ? headvar(EC.fd, "NELEC") : nelec
-    nelec -= charge
-    ms2 = (ms2==0) ? headvar(EC.fd, "MS2") : ms2
-    orbsym = convert(Vector{Int},headvar(EC.fd, "ORBSYM"))
-  elseif ms_exists(EC.ms)
-    norb = guess_norb(EC.ms) 
-    nelec = (nelec==0) ? guess_nelec(EC.ms) : nelec
-    nelec -= charge
-    ms2 = (ms2==0) ? mod(nelec,2) : ms2
-    orbsym = ones(Int,norb)
-  else
-    error("No molecular system or fcidump specified!")
-  end
+    setup_space_fd!(EC::ECInfo)
 
+  Setup EC.space from fcidump EC.fd.
+"""
+function setup_space_fd!(EC::ECInfo)
+  @assert fd_exists(EC.fd) "EC.fd is not set up!"
+  nelec = EC.options.wf.nelec
+  charge = EC.options.wf.charge
+  ms2 = EC.options.wf.ms2
+
+  norb = headvar(EC.fd, "NORB")
+  nelec = (nelec < 0) ? headvar(EC.fd, "NELEC") : nelec
+  nelec -= charge
+  ms2 = (ms2 < 0) ? headvar(EC.fd, "MS2") : ms2
+  orbsym = convert(Vector{Int},headvar(EC.fd, "ORBSYM"))
+  setup_space!(EC, norb, nelec, ms2, orbsym)
+end
+
+"""
+    setup_space_ms!(EC::ECInfo)
+
+  Setup EC.space from molecular system EC.ms.
+"""
+function setup_space_ms!(EC::ECInfo)
+  @assert ms_exists(EC.ms) "EC.ms is not set up!"
+  nelec = EC.options.wf.nelec
+  charge = EC.options.wf.charge
+  ms2 = EC.options.wf.ms2
+
+  norb = guess_norb(EC.ms) 
+  nelec = (nelec < 0) ? guess_nelec(EC.ms) : nelec
+  nelec -= charge
+  ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
+  orbsym = ones(Int,norb)
+  setup_space!(EC, norb, nelec, ms2, orbsym)
+end
+
+"""
+    setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
+
+  Setup EC.space from `norb`, `nelec`, `ms2`, `orbsym` or `occa`/`occb`.
+"""
+function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
+  occa = EC.options.wf.occa
+  occb = EC.options.wf.occb
   SP = EC.space
+  println("Number of orbitals: ", norb)
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
   SP[':'] = 1:norb
   return
@@ -184,6 +195,7 @@ function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int)
     freeze_nocc = guess_ncore(EC.ms, core)
   end
   freeze_nocc!(EC, freeze_nocc)
+  return freeze_nocc
 end
 
 """
@@ -195,12 +207,14 @@ function freeze_nocc!(EC::ECInfo, nfreeze::Int)
   if nfreeze > n_occ_orbs(EC) || nfreeze > n_occb_orbs(EC) 
     error("Cannot freeze more occupied orbitals than there are.")
   end
-  if nfreeze > 0
-    println("Freezing ", nfreeze, " occupied orbitals")
-    println()
+  if nfreeze <= 0
+    return 0
   end
+  println("Freezing ", nfreeze, " occupied orbitals")
+  println()
   EC.space['o'] = EC.space['o'][nfreeze+1:end]
   EC.space['O'] = EC.space['O'][nfreeze+1:end]
+  return nfreeze
 end
 
 """
@@ -212,12 +226,14 @@ function freeze_nvirt!(EC::ECInfo, nfreeze::Int)
   if nfreeze > n_virt_orbs(EC) || nfreeze > n_virtb_orbs(EC) 
     error("Cannot freeze more virtual orbitals than there are.")
   end
-  if nfreeze > 0
-    println("Freezing ", nfreeze, " virtual orbitals")
-    println()
+  if nfreeze <= 0
+    return 0
   end
+  println("Freezing ", nfreeze, " virtual orbitals")
+  println()
   EC.space['v'] = EC.space['v'][1:end-nfreeze]
   EC.space['V'] = EC.space['V'][1:end-nfreeze]
+  return nfreeze
 end
 
 """
@@ -260,7 +276,7 @@ end
   Check if file `name` exists in ECInfo.
 """
 function file_exists(EC::ECInfo, name::String)
-  return haskey(EC.files,name)
+  return haskey(EC.files, name)
 end
 
 """
@@ -270,10 +286,27 @@ end
   Possible description: `tmp` (temporary).
 """
 function add_file!(EC::ECInfo, name::String, descr::String; overwrite=false)
-  if !file_exists(EC,name) || overwrite
+  if !file_exists(EC, name) || overwrite
     EC.files[name] = descr
   else
-    error("File $name already exists in ECInfo.")
+    error("File $name already exists in ECInfo. Use overwrite=true to overwrite.")
+  end
+end
+
+"""
+    copy_file!(EC::ECInfo, from::AbstractString, to::AbstractString; overwrite=false)
+
+  Copy file `from` to `to`.
+"""
+function copy_file!(EC::ECInfo, from::AbstractString, to::AbstractString; overwrite=false)
+  if !file_exists(EC, from)
+    error("File $from is not registered in ECInfo.")
+  end
+  if !file_exists(EC, to) || overwrite
+    EC.files[to] = EC.files[from]
+    cp(joinpath(EC.scr, from*EC.ext), joinpath(EC.scr, to*EC.ext), force=true)
+  else
+    error("File $to already exists in ECInfo. Use overwrite=true to overwrite.")
   end
 end
 
@@ -283,7 +316,7 @@ end
   Delete file `name` from ECInfo.
 """
 function delete_file!(EC::ECInfo, name::AbstractString)
-  if !file_exists(EC,name)
+  if !file_exists(EC, name)
     error("File $name is not registered in ECInfo.")
   end
   rm(joinpath(EC.scr, name*EC.ext), force=true)

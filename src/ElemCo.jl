@@ -58,7 +58,56 @@ using .DfDump
 
 
 export ECdriver 
+export @loadfile, @savefile, @copyfile
 export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc, @svdcc
+
+"""
+    @loadfile(filename)
+
+  Load file `filename` in `EC.scr` directory.
+
+  # Example
+```julia
+fock = @loadfile("f_mm")
+orbs = @loadfile("C_Am")
+```
+"""
+macro loadfile(filename)
+  return quote
+    load($(esc(:EC)), $(esc(filename)))
+  end
+end
+
+"""
+    @savefile(filename, arr, kwargs...)
+
+  Save array or tuple of arrays `arr` to file `filename` in `EC.scr` directory.
+
+  # Keyword arguments
+  - `description::String`: description of the file (default: "tmp").
+  - `overwrite::Bool`: overwrite existing file (default: `false`).
+"""
+macro savefile(filename, arr, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    save!($(esc(:EC)), $(esc(filename)), $(esc(arr)); $(ekwa...))
+  end
+end
+
+"""
+    @copyfile(from_file, to_file, kwargs...)
+
+  Copy file `from_file` to `to_file` in `EC.scr` directory.
+
+  # Keyword arguments
+  - `overwrite::Bool`: overwrite existing file (default: `false`).
+"""
+macro copyfile(from_file, to_file, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    copy_file!($(esc(:EC)), $(esc(from_file)), $(esc(to_file)); $(ekwa...))
+  end
+end
 
 """ 
     @ECsetup()
@@ -81,7 +130,6 @@ macro ECsetup()
   return quote
     try
       global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
-      setup!($(esc(:EC)))
     catch
       global $(esc(:EC)) = ECInfo()
     end
@@ -194,7 +242,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit
 ```
 """
 macro cc(method, kwargs...)
-  strmethod="$method"
+  strmethod=replace("$method", " " => "")
   ekwa = [esc(a) for a in kwargs]
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
@@ -227,7 +275,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit
 ```
 """
 macro svdcc(method="dcsd")
-  strmethod="$method"
+  strmethod=replace("$method", " " => "")
   return quote
     calc_svd_dc($(esc(:EC)), $(esc(strmethod)))
   end
@@ -307,21 +355,17 @@ function parse_commandline(EC::ECInfo)
 end
 
 function run_mcscf()
-  xyz="bohr
+  geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
      H1     0.000000000    1.489124508    1.033245507
      H2     0.000000000   -1.489124508    1.033245507"
-
 
   basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
              "mp2fit"=>"cc-pvdz-rifit")
 
-  EC = ECInfo(ms=MSys(xyz,basis))
-  setup!(EC,ms2=2,charge=-2)
-
+  @opt wf ms2=2 charge=-2
   E,cMO =  dfmcscf(EC,direct=false)
-
 end
 
 """
@@ -402,7 +446,19 @@ end
 function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()
   method_names = split(methods)
-  setup!(EC;fcidump,occa,occb)
+  if occa != "-"
+    EC.options.wf.occa = occa
+  end
+  if occb != "-"
+    EC.options.wf.occb = occb
+  end
+  if fcidump != ""
+    # read fcidump intergrals
+    EC.fd = read_fcidump(fcidump)
+    t1 = print_time(EC,t1,"read fcidump",1)
+  end
+  setup_space_fd!(EC)
+
   closed_shell, addname = is_closed_shell(EC)
 
   calc_fock_matrix(EC, closed_shell)

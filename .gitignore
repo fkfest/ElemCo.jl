@@ -1,1 +1,3 @@
 Manifest.toml
+examples/*.out
+examples/ElemCo.jl-devel

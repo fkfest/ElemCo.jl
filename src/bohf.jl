@@ -19,6 +19,7 @@ export bohf, bouhf
 """
 function bohf(EC::ECInfo)
   print_info("Bi-orthogonal Hartree-Fock")
+  setup_space_fd!(EC)
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])
@@ -67,8 +68,8 @@ function bohf(EC::ECInfo)
   println("BO-HF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  save!(EC, EC.options.scf.save, cMOr, description="BOHF right orbitals")
-  save!(EC, EC.options.scf.save*EC.options.scf.left, cMOl, description="BOHF left orbitals")
+  save!(EC, EC.options.wf.orb, cMOr, description="BOHF right orbitals")
+  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl, description="BOHF left orbitals")
   return EHF
 end
 
@@ -79,6 +80,7 @@ end
 """
 function bouhf(EC::ECInfo)
   print_info("Bi-orthogonal unrestricted Hartree-Fock")
+  setup_space_fd!(EC)
   flush(stdout)
   SP = EC.space
   norb = length(SP[':'])
@@ -138,8 +140,8 @@ function bouhf(EC::ECInfo)
   println("BO-UHF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  save!(EC, EC.options.scf.save, cMOr, description="BOHF right orbitals")
-  save!(EC, EC.options.scf.save*EC.options.scf.left, cMOl, description="BOHF left orbitals")
+  save!(EC, EC.options.wf.orb, cMOr, description="BOHF right orbitals")
+  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl, description="BOHF left orbitals")
   return EHF
 end
 

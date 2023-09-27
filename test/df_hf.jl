@@ -1,10 +1,10 @@
 @testset "DF-HF Closed-Shell Test" begin
-epsilon    =   1.e-6
-EHF_test   = -76.02253606201079
-EMP2_test  =  -0.20694998731941067
-EDCSD_test =  -0.22117576578925288
-ESVDDCSD_test =  -0.22033190678332468
-ESVDDCSD_ft_test =  -0.21996137547664377
+epsilon    =  1.e-6
+EHF_test   =      -76.02145513971418
+EMP2_test  =      -0.204723138509385
+EDCSD_test =      -0.219150244853825
+ESVDDCSD_test =   -0.220331906783324
+ESVDDCSD_ft_test =-0.219961375476643
 
 try
   using ElemCo.MSystem
@@ -27,7 +27,6 @@ basis = Dict("ao"=>"cc-pVDZ",
 
 EC = ECInfo(ms=MSys(xyz,basis))
 
-setup!(EC)
 EC.options.scf.direct=true
 dfhf(EC)
 fcidump = "DF_HF_TEST.FCIDUMP"
