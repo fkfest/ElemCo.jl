@@ -1,14 +1,8 @@
+using ElemCo
+
 @testset "DF-MCSCF HIGH-SPIN OPEN SHELL Test" begin
 epsilon    =   1.e-8
 EMCSCF_test   = -75.39523234954376
-
-try
-using ElemCo.MSystem
-using ElemCo.DFMCSCF
-using ElemCo.DfDump
-catch
-#using .MSystem
-end
 
 geometry="bohr
     O      0.000000000    0.000000000   -0.130186067
@@ -22,7 +16,7 @@ basis = Dict("ao"=>"cc-pVDZ",
 
 @opt wf ms2=2 charge=-2
 
-E,cMO =  dfmcscf(EC,direct=false)
+E,cMO =  ElemCo.dfmcscf(EC,direct=false)
 
 @test abs(E-EMCSCF_test) < epsilon
 
