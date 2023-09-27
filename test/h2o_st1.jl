@@ -1,3 +1,6 @@
+using ElemCo
+using ElemCo.BOHF
+
 @testset "H2O Closed-Shell ST Test" begin
 epsilon    =   1.e-6
 EHF_test   = -76.298014304953
@@ -8,7 +11,7 @@ EBODCSD_test =  -0.0852347071335213
 
 fcidump = joinpath(@__DIR__,"H2O_ST1.FCIDUMP")
 
-EC = ECInfo()
+EC = ElemCo.ECInfo()
 EHF, EMP2, ECCSD = ECdriver(EC, "ccsd"; fcidump)
 @test abs(EHF-EHF_test) < epsilon
 @test abs(EMP2-EMP2_test) < epsilon
@@ -17,16 +20,11 @@ EHF, EMP2, ECCSD = ECdriver(EC, "ccsd"; fcidump)
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
-try
-  using ElemCo.BOHF
-catch
-  #using .BOHF
-end
 #EC.fd = read_fcidump(fcidump)
 EBOHF = bohf(EC)
-CMOr = load(EC, EC.options.wf.orb)
-CMOl = load(EC, EC.options.wf.orb*EC.options.wf.left)
-transform_fcidump(EC.fd, CMOl, CMOr)
+CMOr = @loadfile EC.options.wf.orb
+CMOl = @loadfile EC.options.wf.orb*EC.options.wf.left
+ElemCo.transform_fcidump(EC.fd, CMOl, CMOr)
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
 @test abs(EBOHF-EHF) < epsilon
 @test abs(EDCSD-EBODCSD_test) < epsilon

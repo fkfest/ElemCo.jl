@@ -1,38 +1,54 @@
 using Test
 
-using LinearAlgebra
+# choose what to test with `Pkg.test("ElemCo", test_args=["h2o","df_hf","all"])``
+# or `$ julia runtests.jl h2o df_hf all`
 
-try
-  EC = ECInfo()
-catch
-  import ElemCo: ECdriver,@ECinit, @tryECinit, @opt
-  using ElemCo.Utils
-  using ElemCo.ECInfos
-  using ElemCo.ECMethods
-  using ElemCo.TensorTools
-  using ElemCo.FockFactory
-  using ElemCo.CoupledCluster
-  using ElemCo.FciDump
+runall = length(ARGS) == 0 || "all" in ARGS
+if runall
+    println("Running ALL tests")
+else
+    println("Running only $ARGS")
 end
+
+#using LinearAlgebra
+#import ElemCo: ECdriver,@ECinit, @tryECinit, @opt
+#using ElemCo.Utils
+#using ElemCo.ECInfos
+#using ElemCo.ECMethods
+#using ElemCo.TensorTools
+#using ElemCo.FockFactory
+#using ElemCo.CoupledCluster
+#using ElemCo.FciDump
 
 @testset verbose = true "FCIDUMP Calculations" begin
 
-include("h2o.jl")
-include("h2o_st1.jl")
-include("h2o_cation.jl")
-include("2d_cc.jl")
+tests = ["h2o", "h2o_st1", "h2o_cation", "2d_cc"]
+for test in tests
+  if runall || test in ARGS
+    include(test*".jl")
+  end
+end
 
 end
 
 @testset verbose = true "DF Calculations" begin
 
-include("df_hf.jl")
-include("df_mcscf.jl")
+tests = ["df_hf", "df_mcscf"]
+for test in tests
+  if runall || test in ARGS
+    include(test*".jl")
+  end
+end
 
 end
 
 @testset verbose = true "Unit tests" begin
 
-include("unit_tests.jl")
+tests = ["unit_tests"]
+for test in tests
+  if runall || test in ARGS
+    include(test*".jl")
+  end
+end
 
 end
