@@ -59,7 +59,7 @@ using .DfDump
 
 export ECdriver 
 export @loadfile, @savefile, @copyfile
-export @ECsetup, @tryECsetup, @opt, @run, @dfhf, @dfints, @cc, @svdcc
+export @ECinit, @tryECinit, @opt, @run, @dfhf, @dfints, @cc, @svdcc
 
 """
     @loadfile(filename)
@@ -110,44 +110,55 @@ macro copyfile(from_file, to_file, kwargs...)
 end
 
 """ 
-    @ECsetup()
+    @ECinit()
 
-  Setup `EC::ECInfo` from variables `geometry::String` and `basis::Dict{String,Any}`.
-  If `EC` is already setup, it will be overwritten.
-  If `EC` cannot be setup, it will be set to `ECInfo()`.
+  Initialize `EC::ECInfo` and add molecular system and/or fcidump 
+  if variables `geometry::String` and `basis::Dict{String,Any}`
+  and/or `fcidump::String` are defined.
+
+  If `EC` is already initialized, it will be overwritten.
 
   # Examples
 ```julia
 geometry="\nHe 0.0 0.0 0.0"
 basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
-@ECsetup
+@ECinit
 # output
 Occupied orbitals:[1]
 
 ```
 """
-macro ECsetup()
+macro ECinit()
   return quote
+    $(esc(:EC)) = ECInfo()
     try
-      global $(esc(:EC)) = ECInfo(ms=MSys($(esc(:geometry)),$(esc(:basis))))
-    catch
-      global $(esc(:EC)) = ECInfo()
+      $(esc(:EC)).ms = MSys($(esc(:geometry)),$(esc(:basis)))
+    catch err
+      isa(err, UndefVarError) || rethrow(err)
+    end
+    try
+      $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+    catch err
+      isa(err, UndefVarError) || rethrow(err)
     end
   end
 end
 
 """ 
-    @tryECsetup()
+    @tryECinit()
 
-  Setup `EC::ECInfo` from `geometry::String` and `basis::Dict{String,Any}` 
-  if not already done.
+  If `EC::ECInfo` is not yet initialized, run [`@ECinit`](@ref) macro.
 """
-macro tryECsetup()
+macro tryECinit()
   return quote
+    runECinit = [false]
     try
       $(esc(:EC)).ignore_error
     catch
-      $(esc(:@ECsetup))
+      runECinit[1] = true
+    end
+    if runECinit[1]
+      $(esc(:@ECinit))
     end
   end
 end
@@ -160,7 +171,7 @@ end
   The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`).
   The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
   The current state of the options can be stored in a variable, e.g., `opt_cc = EC.options`. 
-  If `EC` is not already setup, it will be done. 
+  If `EC` is not already initialized, it will be done. 
 
 
   # Examples
@@ -173,7 +184,7 @@ macro opt(what, kwargs...)
   strwhat="$what"
   ekwa = [esc(a) for a in kwargs]
   return quote
-    $(esc(:@tryECsetup))
+    $(esc(:@tryECinit))
     if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
       set_options!($(esc(:EC)).options.$what; $(ekwa...))
     else
@@ -186,7 +197,7 @@ end
 macro run(method, kwargs...)
   ekwa = [esc(a) for a in kwargs]
   return quote
-    $(esc(:@tryECsetup))
+    $(esc(:@tryECinit))
     $method($(esc(:EC)); $(ekwa...))
   end
 end
@@ -198,7 +209,7 @@ end
 """
 macro dfhf()
   return quote
-    $(esc(:@tryECsetup))
+    $(esc(:@tryECinit))
     dfhf($(esc(:EC)))
   end
 end
@@ -212,7 +223,7 @@ end
 """
 macro dfints()
   return quote
-    $(esc(:@tryECsetup))
+    $(esc(:@tryECinit))
     dfdump($(esc(:EC)))
   end
 end
@@ -246,7 +257,7 @@ macro cc(method, kwargs...)
   ekwa = [esc(a) for a in kwargs]
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
-      $(esc(:@tryECsetup))
+      $(esc(:@tryECinit))
       ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
     end
   else

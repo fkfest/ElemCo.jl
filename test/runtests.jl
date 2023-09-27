@@ -5,7 +5,7 @@ using LinearAlgebra
 try
   EC = ECInfo()
 catch
-  import ElemCo: ECdriver,@ECsetup, @tryECsetup, @opt
+  import ElemCo: ECdriver,@ECinit, @tryECinit, @opt
   using ElemCo.Utils
   using ElemCo.ECInfos
   using ElemCo.ECMethods
