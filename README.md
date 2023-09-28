@@ -1,32 +1,60 @@
 # ElemCo.jl <img style="float: right;" src="files/coil.png" height=74> <br/><br/>
 
-Julia implementation of various electron-correlation methods (main focus on coupled cluster) 
-using fcidump/npy interface.  
+Julia implementation of various electron-correlation methods (main focus on coupled cluster methods).
+The integrals are obtained from a FCIDUMP file or calculated using the `GaussianBasis` package.
 
 ## Getting started
 
 Requirements: julia (>1.8)
 
-Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, ArgParse, Parameters, IterativeSolvers, GaussianBasis, DocStringExtensions, MKL(optional)
+Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, Parameters, IterativeSolvers, GaussianBasis, DocStringExtensions, MKL(optional)
 
 ## Usage
-
+For a development version of `ElemCo.jl`, clone the repository and create a symbolic link in the working directory to the `ElemCo.jl-devel` directory:
 ```
 cd <working dir>
-ln -s <path_to_ElemCo>/ElemCo.sh .
+ln -s <path_to_ElemCo.jl-devel> .
 ```
 
-`julia` has to be in the PATH (or modify `ElemCo.sh`).
-
-Various options are available (use `-h` option for a list of `ElemCo.jl` options):
-
-```
-./ElemCo.sh [@j "<options to send to julia>"] [-s <scratch dir>] [-m <method name>] [<fcidump file>]
-```
-
-Default scratch dir path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`. 
+Default scratch directory path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`. 
 On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none of these are found, the path `/tmp` is used. 
-Default scratch folder name is `elemcojlscr`. Default fcidump file is `FCIDUMP`.
+Default scratch folder name is `elemcojlscr`. 
+
+Variable names `fcidump`, `geometry` and `basis` are reserved for the file name of FCIDUMP, geometry specification and basis sets, respectively.
+
+### Example
+#### DCSD calculation using integrals from a FCIDUMP file
+The ground state energy can be calculated using the DCSD method with the following script:
+```julia
+include("ElemCo.jl-devel/src/ElemCo.jl")
+using .ElemCo
+
+fcidump = "../test/H2O.FCIDUMP"
+@cc dcsd
+```
+#### DCSD calculation of the water molecule using density-fitted integrals
+In order to calculate the ground state energy of the water molecule using the DCSD method, the following script can be used:
+```julia
+include("ElemCo.jl-devel/src/ElemCo.jl")
+using .ElemCo
+geometry="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+basis = Dict("ao"=>"cc-pVDZ",
+             "jkfit"=>"cc-pvtz-jkfit",
+             "mp2fit"=>"cc-pvdz-rifit")
+@dfhf
+@dfints
+@cc dcsd
+```
+The `@dfhf` macro calculates the density-fitted Hartree-Fock energy 
+and the `@dfints` macro calculates the density-fitted two-electron integrals which are then employed in the DCSD calculation.
+
+Further example scripts are provided in the `examples` directory.
+
+Documentation is available at https://elem.co.il.
 
 ```
 Electron coil
