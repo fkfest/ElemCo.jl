@@ -188,7 +188,7 @@ end
 
   Freeze `freeze_nocc` occupied orbitals. If `freeze_nocc` is negative: guess the number of core orbitals.
 
-  `core` as in [`guess_ncore`](@ref).
+  `core` as in [`MSystem.guess_ncore`](@ref).
 """
 function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int)
   if freeze_nocc < 0
