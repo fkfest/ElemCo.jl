@@ -1,9 +1,8 @@
-#!/usr/bin/env julia
-
 """
-ELEctronic Methods of COrrelation 
+       ╭─────────────╮
+Electron Correlation methods
+       ╰─────────────╯
 """
-
 module ElemCo
 
 include("abstractEC.jl")
@@ -41,7 +40,6 @@ end
 using LinearAlgebra
 using Printf
 #BLAS.set_num_threads(1)
-using ArgParse
 using .Utils
 using .ECInfos
 using .ECMethods
@@ -262,6 +260,7 @@ macro cc(method, kwargs...)
     end
   else
     return quote
+      $(esc(:@tryECinit))
       ECdriver($(esc(:EC)), $(esc(strmethod)); fcidump="", $(ekwa...))
     end
   end
@@ -290,71 +289,6 @@ macro svdcc(method="dcsd")
   return quote
     calc_svd_dc($(esc(:EC)), $(esc(strmethod)))
   end
-end
-
-""" 
-    parse_commandline(EC::ECInfo)
-
-Parse command line arguments. 
-"""
-function parse_commandline(EC::ECInfo)
-  s = ArgParseSettings()
-  @add_arg_table! s begin
-    "--method", "-m"
-      help = "method or list of methods to calculate"
-      arg_type = String
-      default = "dcsd"
-    "--scratch", "-s"
-      help = "scratch directory"
-      arg_type = String
-      default = "elemcojlscr"
-    "--verbosity", "-v"
-      help = "verbosity"
-      arg_type = Int
-      default = 2
-    "--output", "-o"
-      help = "output file"
-      arg_type = String
-      default = ""
-    "--occa"
-      help = "occupied α orbitals (in '1-3+5' format)"
-      arg_type = String
-      default = "-"
-    "--occb"
-      help = "occupied β orbitals (in '1-3+6' format)"
-      arg_type = String
-      default = "-"
-    "--force", "-f"
-      help = "supress some of the error messages (ignore_error)"
-      action = :store_true
-    "--choltol", "-c"
-      help = "cholesky threshold"
-      arg_type = Float64
-      default = 1.e-6
-    "--amptol", "-a"
-      help = "amplitude threshold"
-      arg_type = Float64
-      default = 1.e-3
-    "--save_t3"
-      help = "save (T) for decomposition"
-      action = :store_true
-    "arg1"
-      help = "input file (currently fcidump file)"
-      default = "FCIDUMP"
-  end
-  args = parse_args(s)
-  EC.scr = args["scratch"]
-  EC.verbosity = args["verbosity"]
-  EC.out = args["output"]
-  EC.ignore_error = args["force"]
-  EC.options.cholesky.thr = args["choltol"]
-  EC.options.cc.ampsvdtol = args["amptol"]
-  EC.options.cc.calc_t3_for_decomposition = args["save_t3"]
-  fcidump_file = args["arg1"]
-  method = args["method"]
-  occa = args["occa"]
-  occb = args["occb"]
-  return fcidump_file, method, occa, occb
 end
 
 function run_mcscf()
@@ -555,27 +489,6 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       end
     end
   end
-end
-
-
-function main()
-  EC = ECInfo()
-  fcidump, method_string, occa, occb = parse_commandline(EC)
-  if fcidump == ""
-    println("No input file given.")
-    return
-  end
-  if EC.out != ""
-    output = EC.out
-  else
-    output = nothing
-  end
-  redirect_stdio(stdout=output) do
-    ECdriver(EC, method_string, fcidump=fcidump, occa=occa, occb=occb)
-  end
-end
-if abspath(PROGRAM_FILE) == @__FILE__
-  main()
 end
 
 end #module
