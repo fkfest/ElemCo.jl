@@ -261,6 +261,9 @@ macro cc(method, kwargs...)
   else
     return quote
       $(esc(:@tryECinit))
+      if !fd_exists($(esc(:EC)).fd)
+        $(esc(:@dfints))
+      end
       ECdriver($(esc(:EC)), $(esc(strmethod)); fcidump="", $(ekwa...))
     end
   end

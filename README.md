@@ -46,11 +46,10 @@ basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
              "mp2fit"=>"cc-pvdz-rifit")
 @dfhf
-@dfints
 @cc dcsd
 ```
-The `@dfhf` macro calculates the density-fitted Hartree-Fock energy 
-and the `@dfints` macro calculates the density-fitted two-electron integrals which are then employed in the DCSD calculation.
+The `@dfhf` macro calculates the density-fitted Hartree-Fock energy and orbitals 
+and then DCSD calculation is performed using density-fitted integrals.
 
 Further example scripts are provided in the `examples` directory.
 
