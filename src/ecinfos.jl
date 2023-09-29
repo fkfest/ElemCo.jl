@@ -1,6 +1,6 @@
 """ Various global infos """
 module ECInfos
-using Parameters, DocStringExtensions
+using DocStringExtensions
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDump
@@ -20,16 +20,14 @@ include("options.jl")
 
   Global information for `ElemCo`.
 
-  $(FIELDS)
+  $(TYPEDFIELDS)
 """
-@with_kw mutable struct ECInfo <: AbstractECInfo
-  """ path to scratch directory. """
+Base.@kwdef mutable struct ECInfo <: AbstractECInfo
+  """`⟨"system-tmpdir/elemcojlscr/jl_*"⟩` path to scratch directory. """
   scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
-  """ extension of temporary files. """
+  """`⟨".bin"⟩` extension of temporary files. """
   ext::String = ".bin"
-  """ output file. """
-  out = ""
-  """ verbosity level. """
+  """`⟨2⟩` verbosity level. """
   verbosity::Int = 2
   """ options. """
   options::Options = Options()
@@ -70,7 +68,7 @@ include("options.jl")
   """
   files::Dict{String,String} = Dict{String,String}()
 
-  """ ignore various errors. """
+  """`⟨false⟩` ignore various errors. """
   ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
   space::Dict{Char,Any} = Dict{Char,Any}()

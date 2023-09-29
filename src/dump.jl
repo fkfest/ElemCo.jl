@@ -9,7 +9,7 @@ module FciDump
 # using LinearAlgebra
 # using NPZ
 using TensorOperations
-using Parameters, DocStringExtensions
+using DocStringExtensions
 using Printf
 using ..ElemCo.MNPY
 
@@ -30,9 +30,9 @@ const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
   The 2-e integrals are stored in the physicists' notation: int2[pqrs] = <pq|rs>
   and for `triang` the last two indices are stored as a single upper triangular index (r <= s)
 
-  $(FIELDS)
+  $(TYPEDFIELDS)
 """
-@with_kw mutable struct FDump
+Base.@kwdef mutable struct FDump
   """ 2-e⁻ integrals for restricted orbitals fcidump. """
   int2::Array{Float64} = []
   """ αα 2-e⁻ integrals for unrestricted orbitals fcidump. """
@@ -51,9 +51,9 @@ const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
   head::Dict = Dict()
-  """ use an upper triangular index for last two indices of 2e⁻ integrals.""" 
+  """`⟨true⟩` use an upper triangular index for last two indices of 2e⁻ integrals.""" 
   triang::Bool = true
-  """ a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
+  """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
   uhf::Bool = false
 end
 
