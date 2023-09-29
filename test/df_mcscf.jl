@@ -4,11 +4,7 @@ using ElemCo
 epsilon    =   1.e-8
 EMCSCF_test   = -75.39523234954376
 
-geometry="bohr
-    O      0.000000000    0.000000000   -0.130186067
-    H1     0.000000000    1.489124508    1.033245507
-    H2     0.000000000   -1.489124508    1.033245507"
-
+geometry="h2o.xyz"
 
 basis = Dict("ao"=>"cc-pVDZ",
             "jkfit"=>"cc-pvtz-jkfit",
