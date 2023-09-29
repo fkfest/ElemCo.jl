@@ -3,7 +3,32 @@ module Utils
 using Printf
 using ..ElemCo.AbstractEC
 
-export print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+
+"""
+    mainname(file::String)
+
+  Return the main name of a file, i.e. the part before the last dot
+  and the extension.
+
+  Examples:
+  ```
+  julia> mainname("~/test.xyz")
+  ("test", "xyz")
+
+  julia> mainname("test")
+  ("test", "")
+  ```
+"""
+function mainname(file::String)
+  ffile = basename(file)
+  afile = split(ffile,'.')
+  if length(afile) == 1
+    return afile[1], ""
+  else
+    return join(afile[1:end-1], '.'), afile[end]
+  end
+end
 
 """ 
     print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)

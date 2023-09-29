@@ -2,6 +2,7 @@
 Info about molecular system (geometry/basis).
 """
 module MSystem
+using Printf
 using DocStringExtensions
 using ..ElemCo.ECInts
 export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution
@@ -161,27 +162,18 @@ mutable struct MSys
     xyz_lines = strip.(split(xyz,"\n"))
     if length(xyz_lines) == 0
       error("Empty geometry im MSys")
-    elseif length(xyz_lines) == 1
-      #check whether it's a file
-      error("xyz-files not implemented yet!")
     end
-    array_of_atoms = ACenter[]
-    bohr = true
-    for line in xyz_lines
-      ac, success = try2create_acenter(line,basis,bohr)
-      if success
-        push!(array_of_atoms,ac)
-      else
-        if line == "bohr"
-          bohr = true
-        elseif line == "angstrom"
-          bohr = false
-        elseif line == ""
-          # skip
-        else
-          error("Unsupported xyz line $line")
-        end
+    array_of_atoms, badline = parse_xyz_geometry(xyz_lines, basis)
+    if !isempty(badline) && length(xyz_lines) == 1 && isfile(xyz_lines[1])
+      filename = xyz_lines[1]
+      xyz_lines = strip.(readlines(filename))
+      if length(xyz_lines) == 0
+        error("Empty geometry file $filename im MSys")
       end
+      array_of_atoms, badline = parse_xyz_geometry(xyz_lines, basis)
+    end
+    if !isempty(badline)
+      error("Unsupported xyz line $badline")
     end
     new(array_of_atoms)
   end
@@ -191,6 +183,60 @@ function Base.show(io::IO, val::MSys)
   for atom in val.atoms
     println(io, atom)
   end
+end
+
+"""
+    parse_xyz_geometry(xyz_lines::AbstractArray, basis::Dict)
+
+  Parse xyz geometry `xyz_lines` stored as a vector of strings.
+  Return array of atomic centers and an empty string in case of success.
+
+  Empty lines are skipped.
+  If the line is `bohr` or `angstrom`: change the units.
+  If the first line is a number: assume xyz format and skip the second line.
+  If parsing fails: return empty array and the line that failed.
+"""
+function parse_xyz_geometry(xyz_lines::AbstractArray, basis::Dict)
+  array_of_atoms = ACenter[]
+  badline = ""
+  bohr = true
+  firstline = true
+  xyz_format = false
+  for line in xyz_lines
+    if xyz_format && firstline
+      # skip second line in xyz format
+      firstline = false
+      continue
+    end
+    ac, success = try2create_acenter(line,basis,bohr)
+    if success
+      push!(array_of_atoms,ac)
+    elseif line == "bohr"
+      bohr = true
+      success = true
+    elseif line == "angstrom"
+      bohr = false
+      success = true
+    elseif line == ""
+      # skip
+      continue
+    elseif firstline
+      # check whether it's the number of atoms in the xyz format
+      natoms = tryparse(Int64,line)
+      xyz_format = !isnothing(natoms)
+      if xyz_format
+        bohr = false # assume angstrom in xyz format
+        # skip the second line
+        continue
+      end
+    end
+    if !success
+      badline = line
+      break
+    end
+    firstline = false
+  end
+  return array_of_atoms, badline
 end
 
 """ 
@@ -210,7 +256,7 @@ end
 """
 function genxyz(ac::ACenter; bohr=true)
   name = element_name(ac.name)
-  return string(name," ",b2a(ac.coord[1],bohr)," ",b2a(ac.coord[2],bohr)," ",b2a(ac.coord[3],bohr))
+  return @sprintf("%-3s %16.10f %16.10f %16.10f",name,b2a(ac.coord[1],bohr),b2a(ac.coord[2],bohr),b2a(ac.coord[3],bohr)) 
 end
 
 """ 
