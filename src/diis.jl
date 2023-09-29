@@ -3,7 +3,6 @@
 """
 module DIIS
 using LinearAlgebra
-using Parameters
 using ..ElemCo.MIO
 using ..ElemCo.ECInfos
 
