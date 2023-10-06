@@ -39,6 +39,7 @@ function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
   if verb < EC.verbosity
     @printf "Time for %s:\t %8.2f \n" info (t2-t1)/10^9
+    flush(stdout)
   end
   return t2
 end
@@ -77,6 +78,7 @@ function print_info(info::AbstractString, additional_info::AbstractString="")
     println(additional_info)
     draw_thin_line()
   end
+  flush(stdout)
 end
 
 """
@@ -86,6 +88,7 @@ end
 """
 function draw_endline(n=63)
   println(repeat("═", n))
+  flush(stdout)
 end
 
 """

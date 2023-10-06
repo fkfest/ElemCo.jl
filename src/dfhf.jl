@@ -38,6 +38,7 @@ function dfhf(EC::ECInfo)
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
+  flush(stdout)
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
     if direct
@@ -57,6 +58,7 @@ function dfhf(EC::ECInfo)
     var = sum(abs2,Δfock)
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end

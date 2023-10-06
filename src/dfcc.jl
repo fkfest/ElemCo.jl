@@ -273,6 +273,7 @@ end
 """
 function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   println("Decomposition without doubles using threshold ", EC.options.cc.ampsvdtol)
+  flush(stdout)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   SP = EC.space
@@ -290,6 +291,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     println("MP2 imaginary shift for decomposition: ", shifti)
     println("MP2 imaginary shifted correlation energy: ", fullEMP2)
   end
+  flush(stdout)
   if EC.options.cc.use_full_t2
     T2 = try2start_doubles(EC)
     if size(T2) != (nvirt,nvirt,nocc,nocc)
@@ -340,6 +342,7 @@ end
 """
 function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   println("Decomposition with doubles using threshold ", EC.options.cc.ampsvdtol)
+  flush(stdout)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   SP = EC.space
@@ -349,6 +352,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   T2 = try2start_doubles(EC)
   if size(T2) != (nvirt,nvirt,nocc,nocc)
     println("Use MP2 doubles for decomposition")
+    flush(stdout)
     shifti = EC.options.cc.deco_ishiftp
     T2 = calc_MP2_amplitudes_from_3idx(EC, voL, shifti)
   end
@@ -356,7 +360,8 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
     save!(EC, "T_vvoo", T2)
   end
   println("decompose full doubles (can be slow!)")
-  UaiX = svd_decompose(reshape(T2, (nvirt*nocc,nvirt*nocc)), nvirt, nocc, EC.options.cc.ampsvdtol)
+  flush(stdout)
+  UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, EC.options.cc.ampsvdtol)
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
