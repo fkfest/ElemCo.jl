@@ -70,7 +70,7 @@ end
     generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
 
   Generate ``v_p^{qL}`` with
-  ``v_{pr}^{qs} = v_p^{qL} 𝟙_{LL'} v_r^{sL'}``
+  ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``
   and store in file `mmL`.
 """
 function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
@@ -93,7 +93,7 @@ end
     generate_DF_integrals(EC::ECInfo, cMO)
 
   Generate ``v_p^{qL}`` and ``f_p^q`` with
-  ``v_{pr}^{qs} = v_p^{qL} 𝟙_{LL'} v_r^{sL'}``.
+  ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``.
   The ``v_p^{qL}`` are generated using `mp2fit` fitting basis, and
   the ``f_p^q`` are generated using `jkfit` fitting basis.
   The integrals are stored in files `mmL` and `f_mm`.

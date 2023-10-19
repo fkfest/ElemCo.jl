@@ -1,7 +1,7 @@
 """
-       ╭─────────────╮
-Electron Correlation methods
-       ╰─────────────╯
+           ╭─────────────╮
+    Electron Correlation methods
+           ╰─────────────╯
 """
 module ElemCo
 

@@ -166,7 +166,7 @@ end
 
   Dress integrals with singles amplitudes. 
 
-  The singles and orbspaces for first and second electron are `T1`, `o1`, `v1` and `T12, `o2`, `v2`, respectively.
+  The singles and orbspaces for first and second electron are `T1`, `o1`, `v1` and `T12`, `o2`, `v2`, respectively.
   The integrals from EC.fd are used and dressed integrals are stored as `d_????`.
 """
 function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
@@ -683,9 +683,9 @@ end
     calc_D2(EC::ECInfo, T1, T2, scalepp = false)
 
   Calculate ``D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}``.
-  Return as D[pqij] 
+  Return as `D[pqij]` 
 
-  If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation).
+  If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation).
 """
 function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
   SP = EC.space
@@ -720,7 +720,7 @@ end
 
   Calculate ``^{αα}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})``
   with ``P_{ij} X_{ij} = X_{ij} - X_{ji}``.
-  Return as D[pqij] 
+  Return as `D[pqij]` 
 """
 function calc_D2a(EC::ECInfo, T1a, T2a)
   SP = EC.space
@@ -748,9 +748,9 @@ end
 """ 
     calc_D2b(EC::ECInfo, T1b, T2b)
 
-  Calculate ^{ββ}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})
-  with P_{ij} X_{ij} = X_{ij} - X_{ji}.
-  Return as D[pqij] 
+  Calculate ``^{ββ}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})``
+  with ``P_{ij} X_{ij} = X_{ij} - X_{ji}``.
+  Return as `D[pqij]` 
 """
 function calc_D2b(EC::ECInfo, T1b, T2b)
   SP = EC.space
@@ -778,10 +778,10 @@ end
 """ 
     calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 
-  Calculate ^{αβ}D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}
-  Return as D[pqij] 
+  Calculate ``^{αβ}D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}``
+  Return as `D[pqij]` 
 
-  If `scalepp`: D[ppij] elements are scaled by 0.5 (for triangular summation)
+  If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation)
 """
 function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
   SP = EC.space
@@ -1066,11 +1066,11 @@ function calc_pertT(EC::ECInfo; save_t3=false)
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1a,T1b,T2a,T2b,T2ab,dc)
+    calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc = false, tworef = false, fixref = false)
+function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1775,14 +1775,14 @@ function calc_cc(EC::ECInfo, method::ECMethod)
 end
 
 """ 
-    calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
+    calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
 
   Calculate decomposed closed-shell DC-CCSDT amplitudes.
 
   If `useT3`: (T) amplitudes from a preceding calculations will be used as starting guess.
   If cc3: calculate CC3 amplitudes.
 """
-function calc_ccsdt(EC::ECInfo, useT3 = false, cc3 = false)
+function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   if cc3
     print_info("CC3")
   else
@@ -1899,10 +1899,10 @@ end
 """
     calc_triples_decomposition_without_triples(EC::ECInfo, T2)
 
-  Decompose T^{ijk}_{abc} as U^{iX}_a * U^{jY}_b * U^{kZ}_c * T_{XYZ} 
-  without explicit calculation of T^{ijk}_{abc}.
+  Decompose ``T^{ijk}_{abc}`` as ``U^{iX}_a U^{jY}_b U^{kZ}_c T_{XYZ}`` 
+  without explicit calculation of ``T^{ijk}_{abc}``.
 
-  Compute perturbative T^i_{aXY} and decompose D^{ij}_{ab} = (T^i_{aXY} T^j_{bXY}) to get U^{iX}_a.
+  Compute perturbative ``T^i_{aXY}`` and decompose ``D^{ij}_{ab} = (T^i_{aXY} T^j_{bXY})`` to get ``U^{iX}_a``.
 """
 function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   println("T^ijk_abc-free-decomposition")
@@ -1929,7 +1929,7 @@ end
 """
     calc_triples_decomposition(EC::ECInfo)
 
-  Decompose T^{ijk}_{abc} as U^{iX}_a * U^{jY}_b * U^{kZ}_c * T_{XYZ}.
+  Decompose ``T^{ijk}_{abc}`` as ``U^{iX}_a U^{jY}_b U^{kZ}_c T_{XYZ}``.
 """
 function calc_triples_decomposition(EC::ECInfo)
   println("T^ijk_abc-decomposition")
@@ -1976,8 +1976,8 @@ end
 """
     calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
 
-  Calculate D^{ij}_{ab} = T^i_{aXY} T^j_{bXY} using half-decomposed imaginary-shifted perturbative triple amplitudes 
-  T^i_{aXY} from T2 (and UvoX)
+  Calculate ``D^{ij}_{ab} = T^i_{aXY} T^j_{bXY}`` using half-decomposed imaginary-shifted perturbative triple amplitudes 
+  ``T^i_{aXY}`` from `T2` (and `UvoX`)
 """
 function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   voPfile, voP = mmap(EC, "d_voL")
