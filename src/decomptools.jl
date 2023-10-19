@@ -45,8 +45,8 @@ end
 """
     eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
 
-  Eigenvector-decompose symmetric doubles T2[ai,bj] matrix: 
-  ``T^{ij}_{ab} = U^{iX}_a * T_{XY} * U^{jY}_b δ_{XY}``.
+  Eigenvector-decompose symmetric doubles `T2[ai,bj]` matrix: 
+  ``T^{ij}_{ab} = U^{iX}_a T_{XY} U^{jY}_b δ_{XY}``.
   Return ``U^iX_a`` as `U[a,i,X]` for ``T_{XX}`` > `tol`
 """
 function eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
@@ -66,8 +66,8 @@ end
 """
     svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
 
-  SVD-decompose `A[ai,ξ]` as ``U^{iX}_a S_X δ_{XY} V^{Y}_{ξ}``.
-  Return ``U^{iX}_a`` as `U[a,i,X]` for ``S_X`` > `tol`
+  SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``.
+  Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`
 """
 function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
   U, S, = svd(Amat)
@@ -88,8 +88,8 @@ end
 """
     svd_decompose(Amat, tol = 1e-6)
 
-  SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} S_X δ_{XY} V^{Y}_{ξ'}``.
-  Return ``U^{X}_{ξ}`` as `U[ξ,X]` for ``S_X`` > `tol`
+  SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} Σ_X δ_{XY} V^{Y}_{ξ'}``.
+  Return ``U^{X}_{ξ}`` as `U[ξ,X]` for ``Σ_X`` > `tol`
 """
 function svd_decompose(Amat, tol = 1e-6)
   U, S, = svd(Amat)
@@ -110,9 +110,9 @@ end
 """
     iter_svd_decompose(Amat, nvirt, nocc, naux)
 
-  Iteratively decompose `A[ai,ξ]` as ``U^{iX}_a S_X δ_{XY} V^Y_ξ``.
-  Return ``U^{iX}_a`` as `U[a,i,X]` for first `naux` ``S_X``
-  """
+  Iteratively decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^Y_ξ``.
+  Return ``U^{iX}_a`` as `U[a,i,X]` for first `naux` ``Σ_X``
+"""
 function iter_svd_decompose(Amat, nvirt, nocc, naux)
   # U, S2, Vt = tsvd(Amat, naux )
   # UaiX = reshape(U[:,1:naux], (nvirt,nocc,naux))

@@ -8,17 +8,17 @@ export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endli
 """
     mainname(file::String)
 
-  Return the main name of a file, i.e. the part before the last dot
-  and the extension.
+Return the main name of a file, i.e. the part before the last dot
+and the extension.
 
-  Examples:
-  ```
-  julia> mainname("~/test.xyz")
-  ("test", "xyz")
+Examples:
+```
+julia> mainname("~/test.xyz")
+("test", "xyz")
 
-  julia> mainname("test")
-  ("test", "")
-  ```
+julia> mainname("test")
+("test", "")
+```
 """
 function mainname(file::String)
   ffile = basename(file)

@@ -534,7 +534,7 @@ end
   Calculate decomposed closed-shell DCSD residual with
   ``T^{ij}_{ab}=U^{iX}_a U^{jY}_b T_{XY}`` and
   ``R_{XY}=U^{iX†}_a U^{jY†}_b R^{ij}_{ab}``.
-  `T2` contains decomposed amplitudes ``T_{XY}` or full amplitudes ``T^{ij}_{ab}``.
+  `T2` contains decomposed amplitudes ``T_{XY}`` or full amplitudes ``T^{ij}_{ab}``.
  
   If `T2` is ``T^{ij}_{ab}``, the residual is also returned in full form.
 """

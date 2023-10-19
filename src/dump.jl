@@ -27,7 +27,7 @@ const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
 
   Molecular integrals 
 
-  The 2-e integrals are stored in the physicists' notation: int2[pqrs] = <pq|rs>
+  The 2-e integrals are stored in the physicists' notation: `int2[pqrs]` ``= <pq|rs>=v_{pq}^{rs}``
   and for `triang` the last two indices are stored as a single upper triangular index (r <= s)
 
   $(TYPEDFIELDS)
@@ -740,7 +740,9 @@ end
                    Tr::AbstractArray, Tr2::AbstractArray, triang_in, triang_out)
 
   Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
-  <pq|rs> = <p'q'|r's'> * Tl[p',p] * Tl2[q',q] * Tr[r',r] * Tr2[s',s]
+
+  ``v_{pq}^{rs} = v_{p'q'}^{r's'}``* `Tl`[p',p] * `Tl2`[q',q] * `Tr`[r',r] * `Tr2`[s',s]
+
   If `triang`: the last two indices are stored as a single upper triangular index.
 """
 function transform_int2(int2::AbstractArray, Tl::AbstractArray, Tl2::AbstractArray, 
