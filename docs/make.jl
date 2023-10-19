@@ -41,3 +41,7 @@ makedocs(
     ]
   ],
   checkdocs=:exports)
+
+deploydocs(
+    repo = "github.com/fkfest/ElemCo.jl-devel.git",
+)
