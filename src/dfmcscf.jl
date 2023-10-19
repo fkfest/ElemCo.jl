@@ -143,7 +143,6 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   μνL = load(EC,"munuL")
   μjL = load(EC,"mudL")
   μuL = load(EC,"muaL")
-  println("load done")
 
   G = zeros((n_MO,n_MO,n_occ,n_occ))
   # Gij
@@ -156,8 +155,6 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   Iij = 1.0 * Matrix(I, length(occ2), length(occ2))
   @tensoropt G[:,:,1:n_2,1:n_2][r,s,i,j] += 2 * fock[μ,ν] * cMO[μ,r] * cMO[ν,s] * Iij[i,j] 
 
-  println("Gij done")
-
   # Gtj
   @tensoropt puL[p,u,L] := μuL[μ,u,L] * cMO[μ,p] #transfer from atomic basis to molecular basis
   @tensoropt testStuff[r,s,v,j] := puL[r,v,L] * pjL[s,j,L]
@@ -166,8 +163,6 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   tjL = pjL[occ1o,:,:]
   @tensoropt multiplier[r,s,v,j] -= pqL[r,s,L] * tjL[v,j,L]
   @tensoropt G[:,:,n_2+1:n_occ,1:n_2][r,s,t,j] = multiplier[r,s,v,j] * D1[t,v]
-  
-  println("Gtj done")
 
   # Gtu 
   @tensoropt G[:,:,n_2+1:n_occ,n_2+1:n_occ][r,s,t,u] = fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s] * D1[t,u]
@@ -177,8 +172,6 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
 
   # Gjt
   G[:,:,1:n_2,n_2+1:n_occ] = permutedims(G[:,:,n_2+1:n_occ,1:n_2], [2,1,4,3])
-
-  println("G done")
 
   if findmax(occ2)[1] > findmin(occ1o)[1] || findmax(occ1o)[1] > findmin(occv)[1]
     println("G reordered!")
@@ -328,12 +321,12 @@ n is the maximal size of projected matrix,
 thres is the criterion of convergence, 
 convTrack is to decide whether the tracking of eigenvectors is used
 """
-function davidson(H::Matrix, N::Integer, n::Integer, thres::Number, convTrack::Bool=false)
+function davidson(H::Matrix, v::Vector, N::Integer, n::Integer, thres::Number, convTrack::Bool=false)
   V = zeros(N,n)
   σ = zeros(N,n)
   h = zeros(n,n)
-  v = rand(N)
-  v = v./norm(v)
+  #v = rand(size(v  ,1))
+  v = v ./ norm(v)
   V[:,1] = v
   ac = zeros(n)
   H0 = diag(H)
@@ -355,7 +348,7 @@ function davidson(H::Matrix, N::Integer, n::Integer, thres::Number, convTrack::B
     r = σ * ac - λ[eigvec_index] * (V * ac)
     if norm(r) < thres
       converged = true
-      println("Iter ", i, " converged!")
+      println("Davidson iter ", i, " converged!")
       break
     end
     v = -1.0 ./ (H0 .- λ[eigvec_index]) .* r
@@ -378,7 +371,7 @@ Find the rotation parameters as the vector x in trust region,
 tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
-function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector)
+function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector, vec::Vector)
   x = zeros(size(h,1))
   λl = 1.0
   λr = λmax
@@ -386,6 +379,8 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
   N_rk = size(h,1)
   davItMax = 100 # for davidson eigenvalue solving algorithm
   davError = 1e-7
+  #vec = rand(N_rk+1)
+  #vec = vec ./ norm(vec)
   # λ tuning loop (micro loop)
   for it=1:maxit
     # calc x
@@ -394,16 +389,15 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
     W[2:N_rk+1, 1] = g
     W[2:N_rk+1,2:N_rk+1] = h./λ
     W = Matrix(Hermitian(W))
-    vec = zeros(N_rk+1)
-    if N_rk < 600
+    if N_rk < 6
       vals, vecs = eigen(W)
       vec = vecs[:,1]
     else
-      val, vec, converged = davidson(W, N_rk+1, davItMax, davError)
+      val, vec, converged = davidson(W, vec, N_rk+1, davItMax, davError)
       while !converged
         davItMax += 50
         println("Davidson max iteration number increased to ", davItMax)
-        val, vec, converged = davidson(W, N_rk+1, davItMax, davError)
+        val, vec, converged = davidson(W, vec, N_rk+1, davItMax, davError)
       end
     end
     x = vec[2:end] ./ (vec[1]*λ)
@@ -426,7 +420,7 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
   if !micro_converged
     println("micro NOT converged")
   end
-  return λ, x
+  return λ, x, vec
 end
 
 """
@@ -483,6 +477,10 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
   nAO = size(sao,2) # number of atomic orbitals
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2)
+  N_rk = (nAO - size(occ2,1)) * (size(occ1o,1)+size(occ2,1))
+  vec = rand(N_rk+1)
+  vec = vec ./ norm(vec)
+  inherit_large = true
   if size(occ1o,1) == 0
     error("NO ACTIVE ORBITALS, PLEASE USE DFHF")
   end
@@ -511,21 +509,22 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
     # calc g and h with updated cMO
     projDenFitInt(EC, cMO)
     fock, fockClosed = dffockCAS(EC,cMO,D1)
-    println("fock done")
     A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
-    println("A done")
     g = calc_g(A, EC)
-    println("g done")
     h = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
-    println("h done")
     #h = calc_h_SCI(EC, cMO, fock, D1, D2, h_SO)
     #h = calc_h_combined(EC, cMO, fock, D1, D2, h_SO)
-    #println("norm of g: ", norm(g))
+    println("norm of g: ", norm(g))
     
     # λ tuning loop (micro loop)
     λmax = 1000.0
     maxit = 100
-    λ, x = λTuning(trust, maxit, λmax, λ, h, g)
+    if inherit_large == false
+      vec = rand(N_rk+1)
+      vec = vec./norm(vec)
+      inherit_large == true
+    end
+    λ, x, vec = λTuning(trust, maxit, λmax, λ, h, g, vec)
     #println("square of the norm of x: ", sum(x.^2))
 
     # calc 2nd order perturbation energy
@@ -556,6 +555,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
       cMO = prev_cMO
       E = E_former
       iteration_times -= 1
+      inherit_large = false
     end
 
     iteration_times += 1
