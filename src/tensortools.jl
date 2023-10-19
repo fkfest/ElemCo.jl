@@ -167,7 +167,7 @@ end
   
   Starting from ``A^{-1} = A^{-1} L (A^{-1} L)^† = M M^†``
   with ``A = L L^†``.
-  By solving the equation ``L† M = 𝟙`` (for low-rank: using QR decomposition).
+  By solving the equation ``L^† M = 𝟙`` (for low-rank: using QR decomposition).
   Return `M`.
 """
 function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
@@ -189,9 +189,9 @@ end
 
   Return (pseudo)inverse of a hermitian matrix using Cholesky decomposition .
     
-  ``A^{-1} = A^{-1} L (A^{-1} L)^† = M M^†``
+  The inverse is calculated as ``A^{-1} = A^{-1} L (A^{-1} L)^† = M M^†``
   with ``A = L L^†``.
-  By solving the equation ``L† M = 𝟙`` (for low-rank: using QR decomposition) 
+  By solving the equation ``L^† M = 𝟙`` (for low-rank: using QR decomposition) 
 """
 function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
   M = sqrtinvchol(A, tol = tol, verbose = verbose)
