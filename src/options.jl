@@ -148,16 +148,16 @@ end
   $(TYPEDFIELDS)
 """  
 Base.@kwdef mutable struct Options
-  """ Wavefunction options. """
+  """ Wavefunction options ([`WfOptions`](@ref)). """
   wf::WfOptions = WfOptions()
-  """ SCF options. """
+  """ SCF options ([`ScfOptions`](@ref)). """
   scf::ScfOptions = ScfOptions()
-  """ Integral options. """
+  """ Integral options ([`IntOptions`](@ref)). """
   int::IntOptions = IntOptions()
-  """ Coupled-Cluster options. """
+  """ Coupled-Cluster options ([`CcOptions`](@ref)). """
   cc::CcOptions = CcOptions()
-  """ Cholesky options. """
+  """ Cholesky options ([`CholeskyOptions`](@ref)). """
   cholesky::CholeskyOptions = CholeskyOptions()
-  """ DIIS options. """
+  """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
 end
