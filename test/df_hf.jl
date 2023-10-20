@@ -7,6 +7,7 @@ EMP2_test  =      -0.204723138509385
 EDCSD_test =      -0.219150244853825
 ESVDDCSD_test =   -0.220331906783324
 ESVDDCSD_ft_test =-0.219961375476643
+EUHF_test  =      -75.79199546193901
 
 xyz="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -39,4 +40,8 @@ ESVDDCSD = @svdcc dcsd
 ESVDDCSD_ft = @svdcc dcsd
 @test abs(ESVDDCSD_ft-ESVDDCSD_ft_test) < epsilon
 
+@opt scf direct=false
+@opt wf ms2=2
+EUHF = @dfuhf
+@test abs(EUHF-EUHF_test) < epsilon
 end

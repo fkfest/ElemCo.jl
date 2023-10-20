@@ -16,9 +16,9 @@ include("msystem.jl")
 include("ecinfos.jl")
 include("ecmethods.jl")
 include("tensortools.jl")
-include("fockfactory.jl")
 include("diis.jl")
 include("orbtools.jl")
+include("fockfactory.jl")
 include("dftools.jl")
 include("decomptools.jl")
 include("cctools.jl")
@@ -58,7 +58,7 @@ using .DfDump
 export ECdriver 
 export @mainname
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @run, @dfhf, @dfints, @cc, @svdcc
+export @ECinit, @tryECinit, @opt, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
 
 """
     @mainname(file)
@@ -225,12 +225,24 @@ end
 """ 
     @dfhf()
 
-  Run DFHF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  Run DF-HF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
 """
 macro dfhf()
   return quote
     $(esc(:@tryECinit))
     dfhf($(esc(:EC)))
+  end
+end
+
+""" 
+    @dfuhf()
+
+  Run DF-UHF calculation. The orbitals are stored to `WfOptions.orb`.
+"""
+macro dfuhf()
+  return quote
+    $(esc(:@tryECinit))
+    dfuhf($(esc(:EC)))
   end
 end
 

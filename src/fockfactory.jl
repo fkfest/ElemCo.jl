@@ -12,6 +12,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
 using ..ElemCo.ECInts
+using ..ElemCo.OrbTools
 
 export gen_fock, gen_ufock, gen_dffock, gen_density_matrix
 
@@ -127,14 +128,45 @@ function gen_ufock(EC::ECInfo, cMOl::AbstractArray, cMOr::AbstractArray)
   return [gen_fock(EC, :α, cMOl[1], cMOr[1], cMOl[2], cMOr[2]), gen_fock(EC, :β, cMOl[2], cMOr[2], cMOl[1], cMOr[1])]
 end
 
-""" 
+"""
     gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+
+  Compute DF-HF Fock matrix (integral direct) in AO basis.
+
+  If cMO is unrestricted, α and β Fock matrices will be returned.
+"""
+function gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+  if is_unrestricted_MO(cMO)
+    return gen_unrestricted_dffock(EC, cMO, bao, bfit)
+  else
+    return gen_closed_shell_dffock(EC, cMO, bao, bfit)
+  end
+end
+
+"""
+    gen_dffock(EC::ECInfo, cMO::AbstractArray)
+
+  Compute DF-HF Fock matrix in AO basis
+  (using precalculated Cholesky-decomposed integrals).
+
+  If cMO is unrestricted, α and β Fock matrices will be returned.
+"""
+function gen_dffock(EC::ECInfo, cMO::AbstractArray)
+  if is_unrestricted_MO(cMO)
+    return gen_unrestricted_dffock(EC, cMO)
+  else
+    return gen_closed_shell_dffock(EC, cMO)
+  end
+end
+
+""" 
+    gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
 
   Compute closed-shell DF-HF Fock matrix (integral direct) in AO basis.
 """
-function gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
-  @assert ndims(cMO) == 2 "Restricted orbitals only!"
-  μνL = ERI_2e3c(bao,bfit)
+function gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+  @assert !is_unrestricted_MO(cMO) "Restricted orbitals only!"
+  μνP = ERI_2e3c(bao,bfit)
   PL = load(EC,"C_PL")
   hsmall = load(EC,"h_AA")
   # println(size(Ppq))
@@ -142,24 +174,57 @@ function gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
   occ2 = EC.space['o']
   CMO2 = cMO[:,occ2]
   @tensoropt begin 
-    μjP[p,j,P] := μνL[p,q,P] * CMO2[q,j]
+    μjP[p,j,P] := μνP[p,q,P] * CMO2[q,j]
     cμjL[p,j,L] := μjP[p,j,P] * PL[P,L]
     cL[L] := cμjL[p,j,L] * CMO2[p,j]
     fock[p,q] := hsmall[p,q] - cμjL[p,j,L]*cμjL[q,j,L]
     cP[P] := cL[L] * PL[P,L]
-    fock[p,q] += 2.0*cP[P]*μνL[p,q,P]
+    fock[p,q] += 2.0*cP[P]*μνP[p,q,P]
   end
   return fock
 end
 
+""" 
+    gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+
+  Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis (integral direct).
 """
-    gen_dffock(EC::ECInfo, cMO::AbstractArray)
+function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+  @assert is_unrestricted_MO(cMO) "Unrestricted orbitals only!"
+  μνP = ERI_2e3c(bao,bfit)
+  PL = load(EC,"C_PL")
+  hsmall = load(EC,"h_AA")
+  # println(size(Ppq))
+  occa = EC.space['o']
+  occb = EC.space['O']
+  CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
+  fock = Any[zeros(size(hsmall)), zeros(size(hsmall))]
+  cL = zeros(size(PL,2))
+  for isp = 1:2 # loop over [α, β]
+    @tensoropt begin 
+      μjP[p,j,P] := μνP[p,q,P] * CMOo[isp][q,j]
+      cμjL[p,j,L] := μjP[p,j,P] * PL[P,L]
+      cL[L] += cμjL[p,j,L] * CMOo[isp][p,j]
+      fock[isp][p,q] := hsmall[p,q] - cμjL[p,j,L]*cμjL[q,j,L]
+    end
+  end
+  @tensoropt begin
+    cP[P] := cL[L] * PL[P,L]
+    coulfock[p,q] := cP[P] * μνP[p,q,P]
+  end
+  fock[1] += coulfock
+  fock[2] += coulfock
+  return fock
+end
+
+"""
+    gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray)
 
   Compute closed-shell DF-HF Fock matrix in AO basis
   (using precalculated Cholesky-decomposed integrals).
 """
-function gen_dffock(EC::ECInfo, cMO::AbstractArray)
-  @assert ndims(cMO) == 2 "Restricted orbitals only!"
+function gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray)
+  @assert !is_unrestricted_MO(cMO) "Restricted orbitals only!"
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
   occ2 = EC.space['o']
   CMO2 = cMO[:,occ2]
@@ -171,6 +236,34 @@ function gen_dffock(EC::ECInfo, cMO::AbstractArray)
     fock[p,q] := hsmall[p,q] - μjL[p,j,L]*μjL[q,j,L]
     fock[p,q] += 2.0*L[L]*μνL[p,q,L]
   end
+  return fock
+end
+
+"""
+    gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray)
+
+  Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis
+  (using precalculated Cholesky-decomposed integrals).
+"""
+function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray)
+  @assert is_unrestricted_MO(cMO) "Unrestricted orbitals only!"
+  occa = EC.space['o']
+  occb = EC.space['O']
+  CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
+  hsmall = load(EC,"h_AA")
+  fock = Any[zeros(size(hsmall)), zeros(size(hsmall))]
+  μνL = load(EC,"AAL")
+  L = zeros(size(μνL,3))
+  for isp = 1:2 # loop over [α, β]
+    @tensoropt begin 
+      μjL[p,j,L] := μνL[p,q,L] * CMOo[isp][q,j]
+      fock[isp][p,q] := hsmall[p,q] - μjL[p,j,L]*μjL[q,j,L]
+      L[L] += μjL[p,j,L] * CMOo[isp][p,j]
+    end
+  end
+  @tensoropt coulfock[p,q] := L[L] * μνL[p,q,L]
+  fock[1] += coulfock
+  fock[2] += coulfock
   return fock
 end
 

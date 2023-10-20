@@ -11,7 +11,7 @@ using ..ElemCo.ECInts
 using ..ElemCo.MSystem
 using ..ElemCo.TensorTools
 
-export guess_orb, load_orbitals, orbital_energies
+export guess_orb, load_orbitals, orbital_energies, is_unrestricted_MO
 
 """
     guess_hcore(EC::ECInfo)
@@ -55,11 +55,7 @@ end
   Calculate starting guess for MO coefficients.
   Type of initial guess for MO coefficients is given by `guess`.
 
-  Possible values:
-  - :HCORE from core Hamiltonian
-  - :SAD from atomic densities
-  - :GWH not implemented yet
-  - :ORB from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
+  See [`ScfOptions.guess`](@ref ECInfos.ScfOptions) for possible values.
 """
 function guess_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
@@ -113,5 +109,19 @@ function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
   return ϵo, ϵv
 end
 
+"""
+    is_unrestricted_MO(cMO)
 
+  Return `true` if `cMO` is unrestricted MO coefficients of the form 
+  [CMOα, CMOβ].
+"""
+function is_unrestricted_MO(cMO)
+  if ndims(cMO) == 1
+    return true
+  elseif ndims(cMO) == 2
+    return false
+  else
+    error("Wrong number of dimensions in cMO: ", ndims(cMO))
+  end
+end
 end #module
