@@ -146,11 +146,16 @@ n_orbitals_in_subshell(shell::Char) = 2*SUBSHELL2L[shell]+1
 n_orbitals_in_subshell(lnum::Int) = 2*lnum+1
 
 """ 
-  Occupation of the subshell with quantum numbers n and l.
+  Occupation of the subshell with quantum numbers ``n`` and ``l``.
+
+$(TYPEDFIELDS)
 """
 struct SubShell
+  """ ``n``-quantum number of the subshell. """
   n::Int
+  """ ``l``-quantum number of the subshell. """
   l::Int
+  """ Number of electrons in the subshell. """
   nel::Int
 end
 
@@ -186,9 +191,9 @@ end
   Guess the number of core orbitals in the element.
 
   coretype:
-  - :large - large core (w/o semi-core)
-  - :small - small core (w/ semi-core)
-  - :none - no core
+  - `:large` - large core (w/o semi-core)
+  - `:small` - small core (w/ semi-core)
+  - `:none` - no core
 """
 function ncoreorbs(elem::AbstractString, coretype::Symbol=:large)
   if coretype == :large

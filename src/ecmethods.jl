@@ -17,10 +17,10 @@ $(FIELDS)
 mutable struct ECMethod
   """unrestricted calculation."""
   unrestricted::Bool
-  """theory level: MP, CC, DC."""
+  """theory level: `"MP"`, `"CC"`, `"DC"`."""
   theory::String
-  """ excitation level for each class (exclevel[1] for singles etc.).
-      Possible values: :none, :full, :pert, :pertiter. """
+  """ excitation level for each class (`exclevel[1]` for singles etc.).
+      Possible values: `:none`, `:full`, `:pert`, `:pertiter`. """
   exclevel::Array{Symbol,1}
   """ perturbation theory level (relevant for MP methods)."""
   pertlevel::Int

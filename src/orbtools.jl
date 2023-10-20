@@ -59,7 +59,7 @@ end
   - :HCORE from core Hamiltonian
   - :SAD from atomic densities
   - :GWH not implemented yet
-  - :ORB from previous orbitals stored in file `EC.options.wf.orb`
+  - :ORB from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
 """
 function guess_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
@@ -81,7 +81,7 @@ end
   Load (last) orbitals.
   
   - from file `orbsfile` if not empty
-  - from file `EC.options.wf.orb` if not empty
+  - from file [`WfOptions.orb`](@ref ECInfos.WfOptions) if not empty
   - error if all files are empty
 """
 function load_orbitals(EC::ECInfo, orbsfile::String="")

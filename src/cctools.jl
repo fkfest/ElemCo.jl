@@ -1,7 +1,7 @@
 """
     CCTools
 
-    A collection of tools for working with coupled cluster theory.
+A collection of tools for working with coupled cluster theory.
 """
 module CCTools
 using LinearAlgebra, TensorOperations, Printf
