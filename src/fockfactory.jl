@@ -187,7 +187,7 @@ end
 """ 
     gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
 
-  Compute unrestricted DF-HF Fock matrices [Fα, Fβ] (integral direct) in AO basis.
+  Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis (integral direct).
 """
 function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
   @assert is_unrestricted_MO(cMO) "Unrestricted orbitals only!"

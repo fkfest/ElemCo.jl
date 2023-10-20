@@ -55,11 +55,7 @@ end
   Calculate starting guess for MO coefficients.
   Type of initial guess for MO coefficients is given by `guess`.
 
-  Possible values:
-  - :HCORE from core Hamiltonian
-  - :SAD from atomic densities
-  - :GWH not implemented yet
-  - :ORB from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
+  See [`ScfOptions.guess`](@ref ECInfos.ScfOptions) for possible values.
 """
 function guess_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
