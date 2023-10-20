@@ -261,11 +261,11 @@ end
   calculation of ``T^{ij}_{ab}``.
 
   The decomposition is done in two steps:
-  1. ``\\bar U^{i\\bar X}_a`` is calculated from ``v_a^{iL}`` using SVD (with threshold `EC.options.cc.ampsvdtol`×0.01);
-  2. MP2 doubles ``T^{i}_{aX}`` are calculated from ``v_a^{iL}`` and ``U^{iX}_a`` and again decomposed using SVD and threshold `EC.options.cc.ampsvdtol`.
+  1. ``\\bar U^{i\\bar X}_a`` is calculated from ``v_a^{iL}`` using SVD (with threshold [`CcOptions.ampsvdtol`](@ref ECInfos.CcOptions)×0.01);
+  2. MP2 doubles ``T^{i}_{aX}`` are calculated from ``v_a^{iL}`` and ``U^{iX}_a`` and again decomposed using SVD and threshold [`CcOptions.ampsvdtol`](@ref ECInfos.CcOptions).
   The SVD-basis is rotated to pseudocanonical basis to diagonalize 
   orbital-energy differences, ``ϵ_X = U^{iX}_{a}(ϵ_a-ϵ_i)U^{iX}_a``.
-  The imaginary shift `EC.options.cc.deco_ishiftp` is used in the denominator in the calculation of the MP2 amplitudes.
+  The imaginary shift [`CcOptions.deco_ishiftp`](@ref ECInfos.CcOptions) is used in the denominator in the calculation of the MP2 amplitudes.
   The orbital energy differences are saved in file `e_X`.
   The SVD-coefficients ``U^{iX}_a`` are saved in file `C_voX`.
   The starting guess for doubles ``T_{XY}`` is saved in file `T_XX`.

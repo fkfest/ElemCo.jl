@@ -43,13 +43,13 @@ function calc_integrals_decomposition(EC::ECInfo)
 end
 
 """
-    eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
+    eigen_decompose(T2mat, nvirt, nocc, tol=1e-6)
 
   Eigenvector-decompose symmetric doubles `T2[ai,bj]` matrix: 
   ``T^{ij}_{ab} = U^{iX}_a T_{XY} U^{jY}_b δ_{XY}``.
   Return ``U^iX_a`` as `U[a,i,X]` for ``T_{XX}`` > `tol`
 """
-function eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
+function eigen_decompose(T2mat, nvirt, nocc, tol=1e-6)
   Tval, U = eigen(Symmetric(-T2mat))
   naux = 0
   for s in Tval
@@ -64,12 +64,12 @@ function eigen_decompose(T2mat, nvirt, nocc, tol = 1e-6)
 end
 
 """
-    svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
+    svd_decompose(Amat, nvirt, nocc, tol=1e-6)
 
   SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``.
   Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`
 """
-function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
+function svd_decompose(Amat, nvirt, nocc, tol=1e-6)
   U, S, = svd(Amat)
   # display(S)
   naux = 0
@@ -86,12 +86,12 @@ function svd_decompose(Amat, nvirt, nocc, tol = 1e-6)
 end
 
 """
-    svd_decompose(Amat, tol = 1e-6)
+    svd_decompose(Amat, tol=1e-6)
 
   SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} Σ_X δ_{XY} V^{Y}_{ξ'}``.
   Return ``U^{X}_{ξ}`` as `U[ξ,X]` for ``Σ_X`` > `tol`
 """
-function svd_decompose(Amat, tol = 1e-6)
+function svd_decompose(Amat, tol=1e-6)
   U, S, = svd(Amat)
   # display(S)
   naux = 0

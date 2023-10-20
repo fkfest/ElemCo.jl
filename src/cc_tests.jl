@@ -1,11 +1,11 @@
 
 """
-    test_dressed_ints(EC,T1)
+    test_dressed_ints(EC, T1)
 
   Compare 3-idx dressed integrals to 4-idx dressed integrals.
 """
-function test_dressed_ints(EC,T1)
-  calc_dressed_ints(EC,T1)
+function test_dressed_ints(EC, T1)
+  calc_dressed_ints(EC, T1)
   ooPfile, ooP = mmap(EC,"d_ooP")
   vvPfile, vvP = mmap(EC,"d_vvP")
   @tensoropt abij[a,b,i,j] := vvP[a,b,P] * ooP[i,j,P]
@@ -35,11 +35,11 @@ function test_dressed_ints(EC,T1)
 end
 
 """
-    test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2)
+    test_add_to_singles_and_doubles_residuals(R1, R2, T1, T2)
 
   Test R1(T3) and R2(T3)
 """
-function test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2) 
+function test_add_to_singles_and_doubles_residuals(R1, R2, T1, T2) 
   @tensoropt ETb3 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j]
   println("ETb3: ",ETb3)
   @tensoropt ETT1 = 2.0*T1[a,i] * R1[a,i]
@@ -47,7 +47,7 @@ function test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2)
 end
 
 """
-    test_calc_pertT_from_T3(EC,T3)
+    test_calc_pertT_from_T3(EC, T3)
 
   Test [T]
 """
@@ -75,7 +75,7 @@ function test_calc_pertT_from_T3(EC::ECInfo, T3)
 end
 
 """
-    test_UaiX(EC,UaiX)
+    test_UaiX(EC, UaiX)
 
   Test UaiX
 """

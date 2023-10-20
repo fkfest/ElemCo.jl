@@ -1,4 +1,4 @@
-""" coupled-cluster methods """
+""" Coupled-cluster methods """
 module CoupledCluster
 
 try
@@ -680,7 +680,7 @@ function calc_UMP2(EC::ECInfo, addsingles=true)
 end
 
 """ 
-    calc_D2(EC::ECInfo, T1, T2, scalepp = false)
+    calc_D2(EC::ECInfo, T1, T2, scalepp=false)
 
   Calculate ``D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}``.
   Return as `D[pqij]` 
@@ -1855,11 +1855,11 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
 end
 
 """
-    add_to_singles_and_doubles_residuals(EC,R1,R2)
+    add_to_singles_and_doubles_residuals(EC, R1, R2)
 
   Add contributions from triples to singles and doubles residuals.
 """
-function add_to_singles_and_doubles_residuals(EC,R1,R2)
+function add_to_singles_and_doubles_residuals(EC, R1, R2)
   SP = EC.space
   ooPfile, ooP = mmap(EC, "d_ooL")
   ovPfile, ovP = mmap(EC, "d_ovL")
