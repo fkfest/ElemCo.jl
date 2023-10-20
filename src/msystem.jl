@@ -72,7 +72,7 @@ mutable struct ACenter
   nuccharge::Float64
   """coordinates in bohr."""
   coord::AbstractArray{Float64,1}
-  """various basis sets (ao,mp2fit,jkfit)."""
+  """various basis sets (`"ao"`, `"mp2fit"`, `"jkfit"`)."""
   basis::Dict{String,Basis}
 end
 

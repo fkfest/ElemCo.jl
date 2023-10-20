@@ -60,8 +60,8 @@ end
 """ 
     gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occvec)
 
-  Generate ``D_{μν}=C^l_{μi} C^r_{νi}`` with i defined by occvec
-  Only real part of D is kept.
+  Generate ``D_{μν}=C^l_{μi} C^r_{νi}`` with ``i`` defined by `occvec`.
+  Only real part of ``D_{μν}`` is kept.
 """ 
 function gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occvec)
   CMOlo = CMOl[:,occvec]

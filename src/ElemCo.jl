@@ -188,7 +188,7 @@ end
 
   Set options for `EC::ECInfo`. 
     
-  The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`).
+  The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
   The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
   The current state of the options can be stored in a variable, e.g., `opt_cc = @opt cc`. 
   If `EC` is not already initialized, it will be done. 
@@ -225,7 +225,7 @@ end
 """ 
     @dfhf()
 
-  Run DF-HF calculation. The orbitals are stored to `WfOptions.orb`.
+  Run DF-HF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
 """
 macro dfhf()
   return quote
@@ -250,7 +250,7 @@ end
     @dfints()
 
   Generate 2 and 4-idx MO integrals using density fitting.
-  The MO coefficients are read from `WfOptions.orbs`.
+  The MO coefficients are read from [`WfOptions.orb`](@ref ECInfos.WfOptions).
 """
 macro dfints()
   return quote
