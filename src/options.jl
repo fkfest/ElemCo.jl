@@ -43,6 +43,8 @@ end
 Base.@kwdef mutable struct ScfOptions
   """`⟨1.e-10⟩` convergence threshold. """
   thr::Float64 = 1.e-10
+  """`⟨sqrt(thr)*0.1⟩` energy convergence threshold (used additionally to `thr`). """
+  thren::Float64 = -1.0
   """`⟨50⟩` maximum number of iterations. """
   maxit::Int = 50
   """`⟨1.e-8⟩` tolerance for imaginary part of MO coefs (for biorthogonal). """

@@ -105,7 +105,7 @@ function bouhf(EC::ECInfo)
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMOl[ispin], cMOr[ispin], SP[sp])
       fhsmall = fock[ispin] + hsmall[ispin]
-      @tensoropt efh = 0.5*den[p,q]*fhsmall[p,q]
+      @tensoropt efh = 0.5 * den[p,q] * fhsmall[p,q]
       efhsmall[ispin] = efh
       Δfock[ispin] = den'*fock[ispin] - fock[ispin]*den'
       var += sum(abs2,Δfock[ispin])
@@ -119,7 +119,7 @@ function bouhf(EC::ECInfo)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
-    fock = perform(diis,fock,Δfock)
+    fock = perform(diis, fock, Δfock)
     for ispin = 1:2
       ϵ[ispin],cMOr[ispin] = eigen(fock[ispin])
       cMOl[ispin] = (inv(cMOr[ispin]))'
@@ -140,8 +140,8 @@ function bouhf(EC::ECInfo)
   println("BO-UHF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  save!(EC, EC.options.wf.orb, cMOr, description="BOHF right orbitals")
-  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl, description="BOHF left orbitals")
+  save!(EC, EC.options.wf.orb, cMOr..., description="BOHF right orbitals")
+  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl..., description="BOHF left orbitals")
   return EHF
 end
 

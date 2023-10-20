@@ -10,7 +10,7 @@ using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
-export dfhf, generate_integrals 
+export dfhf, dfuhf
 
 """
     dfhf(EC::ECInfo)
@@ -20,8 +20,13 @@ export dfhf, generate_integrals
 function dfhf(EC::ECInfo)
   print_info("DF-HF")
   setup_space_ms!(EC)
+  SP = EC.space
+  norb = length(SP[':'])
   diis = Diis(EC)
-  thren = sqrt(EC.options.scf.thr)*0.1
+  thren = EC.options.scf.thren
+  if thren < 0.0
+    thren = sqrt(EC.options.scf.thr)*0.1
+  end
   direct = EC.options.scf.direct
   guess = EC.options.scf.guess
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
@@ -30,11 +35,11 @@ function dfhf(EC::ECInfo)
     bfit = generate_basis(EC.ms, "jkfit")
   end
   cMO = guess_orb(EC,guess)
-  ϵ = zeros(size(cMO,1))
-  hsmall = load(EC,"h_AA")
-  sao = load(EC,"S_AA")
+  @assert !is_unrestricted_MO(cMO) "DF-HF only implemented for closed-shell"
+  ϵ = zeros(norb)
+  hsmall = load(EC, "h_AA")
+  sao = load(EC, "S_AA")
   # display(sao)
-  SP = EC.space
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
@@ -71,6 +76,81 @@ function dfhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
+  return EHF
+end
+
+"""
+    dfuhf(EC::ECInfo)
+
+  Perform DF-UHF calculation.
+"""
+function dfuhf(EC::ECInfo)
+  print_info("DF-UHF")
+  setup_space_ms!(EC)
+  SP = EC.space
+  norb = length(SP[':'])
+  diis = Diis(EC)
+  thren = EC.options.scf.thren
+  if thren < 0.0
+    thren = sqrt(EC.options.scf.thr)*0.1
+  end
+  direct = EC.options.scf.direct
+  guess = EC.options.scf.guess
+  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
+  if direct
+    bao = generate_basis(EC.ms, "ao")
+    bfit = generate_basis(EC.ms, "jkfit")
+  end
+  cMO = guess_orb(EC,guess)
+  if !is_unrestricted_MO(cMO)
+    cMO = Any[cMO, cMO]
+  end
+  ϵ = [zeros(norb), zeros(norb)] 
+  hsmall = load(EC, "h_AA")
+  sao = load(EC, "S_AA")
+  # display(sao)
+  EHF = 0.0
+  previousEHF = 0.0
+  println("Iter     Energy      DE          Res         Time")
+  flush(stdout)
+  t0 = time_ns()
+  for it=1:EC.options.scf.maxit
+    if direct
+      fock = gen_dffock(EC,cMO,bao,bfit)
+    else
+      fock = gen_dffock(EC,cMO)
+    end
+    efhsmall = Any[0.0, 0.0]
+    Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
+    var = 0.0
+    for (ispin, sp) = enumerate(['o', 'O'])
+      den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])
+      fhsmall = fock[ispin] + hsmall
+      @tensoropt efh = 0.5 * den[p,q] * fhsmall[p,q]
+      efhsmall[ispin] = efh
+      Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
+      var += sum(abs2,Δfock[ispin])
+    end
+    EHF = efhsmall[1] + efhsmall[2] + Enuc
+    ΔE = EHF - previousEHF 
+    previousEHF = EHF
+    tt = (time_ns() - t0)/10^9
+    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    flush(stdout)
+    if abs(ΔE) < thren && var < EC.options.scf.thr
+      break
+    end
+    fock = perform(diis, fock, Δfock)
+    for ispin = 1:2
+      # use Hermitian to ensure real eigenvalues and normalized orbitals
+      ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]), Hermitian(sao))
+    end
+    # display(ϵ)
+  end
+  println("DF-UHF energy: ", EHF)
+  draw_endline()
+  delete_temporary_files!(EC)
+  save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
   return EHF
 end
 
