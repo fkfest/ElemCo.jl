@@ -58,7 +58,7 @@ using .DfDump
 export ECdriver 
 export @mainname
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
+export @ECinit, @tryECinit, @reset_wf, @opt, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
 
 """
     @mainname(file)
@@ -180,6 +180,17 @@ macro tryECinit()
     if runECinit[1]
       $(esc(:@ECinit))
     end
+  end
+end
+
+""" 
+    @reset_wf()
+
+  Reset wavefunction options to default values.
+"""
+macro reset_wf()
+  return quote
+    reset_wf_info!($(esc(:EC)))
   end
 end
 
