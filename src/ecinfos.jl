@@ -7,7 +7,7 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
-export setup_space_fd!, setup_space_ms!, setup_space!
+export setup_space_fd!, setup_space_ms!, setup_space!, reset_wf_info!
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
@@ -72,6 +72,15 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
   space::Dict{Char,Any} = Dict{Char,Any}()
+end
+
+"""
+    reset_wf_info!(EC::ECInfo)
+
+  Reset [`ECInfos.WfOptions`](@ref ECInfos.WfOptions) to default.
+"""
+function reset_wf_info!(EC::ECInfo)
+  EC.options.wf = WfOptions()
 end
 
 """

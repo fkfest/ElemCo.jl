@@ -19,9 +19,9 @@ Base.@kwdef mutable struct WfOptions
   """`⟨"-left"⟩` addition to the filename for left orbitals (for biorthogonal calculations). """
   left::String = "-left"
   """`⟨:large⟩` core type for frozen-core approximation: 
-  - :none (no frozen-core approximation), 
-  - :small (semi-core orbitals correlated), 
-  - :large (semi-core orbitals frozen). """
+  - `:none` no frozen-core approximation, 
+  - `:small` semi-core orbitals correlated, 
+  - `:large` semi-core orbitals frozen. """
   core::Symbol = :large
   """`⟨-1⟩` number of occupied (core) orbitals to freeze (overwrites core). """
   freeze_nocc::Int = -1
@@ -51,13 +51,11 @@ Base.@kwdef mutable struct ScfOptions
   imagtol::Float64 = 1.e-8
   """`⟨false⟩` direct calculation without storing integrals. """
   direct::Bool = false
-  """`⟨:SAD⟩` orbital guess.
-  
-  Possible values:
-  - :HCORE from core Hamiltonian
-  - :SAD from atomic densities
-  - :GWH not implemented yet
-  - :ORB from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
+  """`⟨:SAD⟩` orbital guess:
+  - `:HCORE` from core Hamiltonian
+  - `:SAD` from atomic densities
+  - `:GWH` not implemented yet
+  - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
 end

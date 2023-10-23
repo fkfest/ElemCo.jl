@@ -33,7 +33,7 @@ end
 
 @testset verbose = true "DF Calculations" begin
 
-tests = ["df_hf", "df_mcscf"]
+tests = ["df_hf", "df_uhf", "df_mcscf"]
 for test in tests
   if runall || test in ARGS
     include(test*".jl")
