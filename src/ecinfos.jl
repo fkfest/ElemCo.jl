@@ -277,6 +277,20 @@ function set_options!(opt; kwargs...)
   return opt
 end
 
+""" 
+    set_options!(opt, allopts)
+
+  Set options for option `opt` from `allopts`.
+"""
+function set_options!(opt, allopts)
+  if typeof(allopts) == typeof(opt)
+    opt .= allopts 
+  else
+    error("Argument has to be of type $(typeof(opt))")
+  end
+  return opt
+end
+
 """
     file_exists(EC::ECInfo, name::String)
 

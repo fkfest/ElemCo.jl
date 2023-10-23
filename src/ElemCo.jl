@@ -58,7 +58,7 @@ using .DfDump
 export ECdriver 
 export @mainname
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @reset_wf, @opt, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
+export @ECinit, @tryECinit, @reset_wf, @opt, @reset, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
 
 """
     @mainname(file)
@@ -184,42 +184,64 @@ macro tryECinit()
 end
 
 """ 
-    @reset_wf()
-
-  Reset wavefunction options to default values.
-"""
-macro reset_wf()
-  return quote
-    reset_wf_info!($(esc(:EC)))
-  end
-end
-
-""" 
     @opt(what, kwargs...)
 
   Set options for `EC::ECInfo`. 
     
   The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
   The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
-  The current state of the options can be stored in a variable, e.g., `opt_cc = @opt cc`. 
+  The current state of the options can be stored in a variable, e.g., `opt_cc = @opt cc`.
+  The state can then be restored by `@opt cc opt_cc`.
   If `EC` is not already initialized, it will be done. 
 
 
   # Examples
 ```julia
-@opt scf thr=1.e-14 maxit=10
+optscf = @opt scf thr=1.e-14 maxit=10
 @opt cc maxit=100
+...
+@opt scf optscf
 ```
 """
 macro opt(what, kwargs...)
   strwhat="$what"
   ekwa = [esc(a) for a in kwargs]
+  if length(kwargs) == 1 && (typeof(kwargs[1]) != Expr || kwargs[1].head != :(=)) 
+    # if only one argument is provided and it is not a keyword argument
+    # then set the option to the value of the argument
+    return quote
+      $(esc(:@tryECinit))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
+        typeof($(ekwa[1])) == typeof($(esc(:EC)).options.$what) || error("Wrong type of argument in @opt")
+        $(esc(:EC)).options.$what = deepcopy($(ekwa[1]))
+      else
+        error("no such option: ",$(esc(strwhat)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
+        deepcopy(set_options!($(esc(:EC)).options.$what; $(ekwa...)))
+      else
+        error("no such option: ",$(esc(strwhat)))
+      end
+    end
+  end
+end
+
+""" 
+    @reset(opt)
+
+  Reset options for `opt` to default values.
+"""
+macro reset(opt)
+  stropt="$opt"
   return quote
-    $(esc(:@tryECinit))
-    if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
-      set_options!($(esc(:EC)).options.$what; $(ekwa...))
+    if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
+      $(esc(:EC)).options.$opt = typeof($(esc(:EC)).options.$opt)()
     else
-      error("no such option: ",$(esc(strwhat)))
+      error("no such option: ",$(esc(stropt)))
     end
   end
 end
