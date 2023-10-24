@@ -505,6 +505,7 @@ end
   Write fcidump file.
 """
 function write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
+  println("Write fcidump $fcidump"...)
   fdf = open(fcidump,"w")
   write_header(fd,fdf)
   write_integrals(fd,fdf,tol)
@@ -706,6 +707,7 @@ end
   If Tl and Tr are arrays of arrays, then the function transforms rhf fcidump to uhf fcidump.
 """
 function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray) 
+  println("Transform integrals...")
   if length(Tl) == 2 && typeof(Tl[1]) <: AbstractArray
     genuhfdump = true
   else
