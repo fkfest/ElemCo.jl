@@ -58,7 +58,7 @@ using .DfDump
 export ECdriver 
 export @mainname
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @reset_wf, @opt, @reset, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
+export @ECinit, @tryECinit, @opt, @reset, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
 
 """
     @mainname(file)
