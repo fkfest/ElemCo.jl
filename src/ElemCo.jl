@@ -58,7 +58,9 @@ using .DfDump
 export ECdriver 
 export @mainname
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @reset, @run, @dfhf, @dfuhf, @dfints, @cc, @svdcc
+export @ECinit, @tryECinit, @opt, @reset, @run
+export @transform_ints, @write_ints, @dfints 
+export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
 
 """
     @mainname(file)
@@ -357,6 +359,94 @@ macro svdcc(method="dcsd")
   strmethod=replace("$method", " " => "")
   return quote
     calc_svd_dc($(esc(:EC)), $(esc(strmethod)))
+  end
+end
+
+""" 
+    @bohf()
+
+  Run bi-orthogonal HF calculation using FCIDUMP integrals.
+
+  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  For open-shell systems (or UHF FCIDUMPs), the BO-UHF energy is calculated.
+
+  # Examples
+```julia
+fcidump = "FCIDUMP"
+@bohf
+```
+"""
+macro bohf()
+  return quote
+    $(esc(:@tryECinit))
+    if !fd_exists($(esc(:EC)).fd)
+      error("No FCIDump found.")
+    end
+    if is_closed_shell($(esc(:EC)))[1]
+      bohf($(esc(:EC)))
+    else
+      bouhf($(esc(:EC)))
+    end
+  end
+end
+
+""" 
+    @bouhf()
+
+  Run bi-orthogonal UHF calculation using FCIDUMP integrals.
+"""
+macro bouhf()
+  return quote
+    $(esc(:@tryECinit))
+    if !fd_exists($(esc(:EC)).fd)
+      error("No FCIDump found.")
+    end
+    bouhf($(esc(:EC)))
+  end
+end
+
+"""
+    @transform_ints(type)
+
+  Rotate FCIDump integrals using [`WfOptions.orb`](@ref ECInfos.WfOptions) as transformation 
+  matrices.
+
+  The orbitals are read from [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  If type is one of [bo, BO, bi-orthogonal, Bi-orthogonal, biorth, biorthogonal, Biorthogonal], 
+  the bi-orthogonal orbitals are used and the left transformation matrix is
+  read from [`WfOptions.orb`*`WfOptions.left`](@ref ECInfos.WfOptions).
+"""
+macro transform_ints(type)
+  strtype=replace("$type", " " => "")
+  return quote
+    $(esc(:@tryECinit))
+    if !fd_exists($(esc(:EC)).fd)
+      error("No FCIDump found.")
+    end
+    CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
+    if $(esc(strtype)) ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
+      CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
+    else
+      CMOl = CMOr
+    end
+    transform_fcidump($(esc(:EC)).fd, CMOl, CMOr)
+  end
+end
+
+"""
+    @write_ints(file="FCIDUMP", tol=-1.0)
+
+  Write FCIDump integrals to file `file`.
+
+If `tol` is negative, all integrals are written, otherwise only integrals with absolute value larger than `tol` are written.
+"""
+macro write_ints(file="FCIDUMP", tol=-1.0)
+  return quote
+    $(esc(:@tryECinit))
+    if !fd_exists($(esc(:EC)).fd)
+      error("No FCIDump found.")
+    end
+    write_fcidump($(esc(:EC)).fd, $file, $tol)
   end
 end
 

@@ -4,9 +4,6 @@
 
 include("ElemCo.jl-devel/src/ElemCo.jl")
 using .ElemCo
-using .ElemCo.ECInfos
-using .ElemCo.BOHF
-using .ElemCo.FciDump
 
 # if non-empty list: calculate only specified folders
 calc_only = []
@@ -23,20 +20,11 @@ for dir in readdir()
   cd(dir)
   output = "bo-dcsd.out"
   redirect_stdio(stdout=output) do
-    @cc dcsd fcidump="FCIDUMP"
-
-    # to do directly BO-HF without calculating dcsd uncomment next lines
-    # EC=ECInfo()
-    # EC.fd = read_fcidump(fcidump)
-    if ElemCo.is_closed_shell(EC)[1]
-      EBOHF = bohf(EC)
-    else
-      EBOHF = bouhf(EC)
-    end
-    CMOr = load(EC, EC.options.wf.orb)
-    CMOl = load(EC, EC.options.wf.orb*EC.options.wf.left)
-    transform_fcidump(EC.fd, CMOl, CMOr)
-    EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
+    fcidump="FCIDUMP"
+    @cc dcsd
+    EBOHF = @bohf
+    @transform_ints biorth
+    @cc dcsd
   end
   cd("..")
 end
