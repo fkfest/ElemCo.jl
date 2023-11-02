@@ -36,6 +36,7 @@ end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
 using ArgParse
+using TimerOutputs
 using .Utils
 using .ECInfos
 using .ECMethods
@@ -315,7 +316,7 @@ function run_mcscf()
 
 end
 
-function run_mcscf_s()
+function run_mcscf_s(IterMax::Number)
   xyz="bohr
       O      0.000000000    0.000000000   -0.130186067
       H1     0.000000000    1.489124508    1.033245507
@@ -327,10 +328,8 @@ function run_mcscf_s()
               "mp2fit"=>"cc-pvdz-rifit")
 
   EC = ECInfo(ms=MSys(xyz,basis))
-  setup!(EC,ms2=2,charge=-2)
-
-  E,cMO =  dfmcscf(EC,direct=false)
-
+  @timeit "setup" setup!(EC,ms2=2,charge=-2)
+  @timeit "dfmcscf" E,cMO = dfmcscf(EC,direct=false,IterMax=IterMax)
 end
 
 function run(method::String="ccsd", dumpfile::String="H2O.FCIDUMP", occa="-", occb="-", use_kext::Bool=true)

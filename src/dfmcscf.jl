@@ -1,5 +1,5 @@
 module DFMCSCF
-using LinearAlgebra, TensorOperations, Printf
+using LinearAlgebra, TensorOperations, Printf, TimerOutputs
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
@@ -325,16 +325,35 @@ function davidson(H::Matrix, v::Vector, N::Integer, n::Integer, thres::Number, c
   V = zeros(N,n)
   σ = zeros(N,n)
   h = zeros(n,n)
-  #v = rand(size(v  ,1))
-  v = v ./ norm(v)
-  V[:,1] = v
   ac = zeros(n)
   H0 = diag(H)
   λ = zeros(n)
   eigvec_index = 1
-  pick_vec = 50
+  pick_vec = 1
   converged = false
-  for i in 2:n
+
+  numInitialVectors = 0
+
+  # random initial guess
+  # v = rand(size(v,1))
+  # numInitialVectors = 1
+
+  # inherit a initial vector from last Davidson procedure
+  v = v ./ norm(v)
+
+  numInitialVectors = 1
+  V[:,1] = v
+
+  # a special set of initial vectors guess
+  # V[1,1] = 1.0
+  # b1 = H[:,1]
+  # V[:,2] = b1 ./norm(b1)
+  # h = V' * H * V
+  # V[21,3] = 1.0
+  # v = V[:,3]
+  # numInitialVectors = 3
+   
+  for i in numInitialVectors+1:n
     newσ = H * v
     σ[:,i-1] = newσ
     newh = V' * newσ
@@ -379,6 +398,8 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
   N_rk = size(h,1)
   davItMax = 100 # for davidson eigenvalue solving algorithm
   davError = 1e-7
+  γ =  0.1 # gradient scaling factor for micro-iteration accuracy
+  davError = γ * norm(g)
   #vec = rand(N_rk+1)
   #vec = vec ./ norm(vec)
   # λ tuning loop (micro loop)
@@ -504,7 +525,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
   λ = 500.0
 
   # macro loop, g and h updated
-  while norm(g) > 1e-6 && iteration_times < IterMax
+  while norm(g) > 2e-6 && iteration_times < IterMax
 
     # calc g and h with updated cMO
     projDenFitInt(EC, cMO)
