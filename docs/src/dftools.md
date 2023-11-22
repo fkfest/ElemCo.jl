@@ -1,24 +1,20 @@
 # Density-fitting tools
 
-```@meta
-CurrentModule = ElemCo.DFTools
-```
-
 ```@docs
-DFTools
+ElemCo.DFTools
 ```
 
 ## Exported functions
 
 ```@autodocs
-Modules = [DFTools]
+Modules = [ElemCo.DFTools]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [DFTools]
+Modules = [ElemCo.DFTools]
 Public = false
 Order = [:function]
 ```

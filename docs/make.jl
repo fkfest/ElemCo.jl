@@ -3,6 +3,8 @@ using Documenter, ElemCo
 
 DocMeta.setdocmeta!(ElemCo, :DocTestSetup, :(using ElemCo); recursive=true)
 
+cp(joinpath(@__DIR__,"equations","equations.pdf"),joinpath(@__DIR__,"src","assets","equations.pdf"), force=true)
+
 makedocs(
   modules = [ElemCo],
   format = Documenter.HTML(

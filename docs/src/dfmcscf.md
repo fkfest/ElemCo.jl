@@ -1,20 +1,16 @@
 # MCSCF program
 
-```@meta
-CurrentModule = ElemCo.DFMCSCF
-```
-
 ## Exported functions
 
 ```@autodocs
-Modules = [DFMCSCF]
+Modules = [ElemCo.DFMCSCF]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [DFMCSCF]
+Modules = [ElemCo.DFMCSCF]
 Public = false
 Order = [:function]
 ```

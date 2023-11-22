@@ -45,6 +45,8 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
     - `D` for density matrix
     - `h` for core Hamiltonian
     - `C` for transformation from one basis to another
+    - `T` for amplitudes
+    - `U` for trial vectors or Lagrange multipliers
 
   `name` is given by the subspaces involved:
     - `o` for occupied
@@ -70,7 +72,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
 
   """`⟨false⟩` ignore various errors. """
   ignore_error::Bool = false
-  """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':' general. """
+  """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
   space::Dict{Char,Any} = Dict{Char,Any}()
 end
 
@@ -132,7 +134,7 @@ function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
   SP = EC.space
   println("Number of orbitals: ", norb)
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
-  SP[':'] = 1:norb
+  SP[':'] = SP['m'] = SP['M'] = 1:norb
   return
 end
 

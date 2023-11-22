@@ -1,24 +1,20 @@
 # Fock builders
 
-```@meta
-CurrentModule = ElemCo.FockFactory
-```
-
 ```@docs
-FockFactory
+ElemCo.FockFactory
 ```
 
 ## Exported functions
 
 ```@autodocs
-Modules = [FockFactory]
+Modules = [ElemCo.FockFactory]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [FockFactory]
+Modules = [ElemCo.FockFactory]
 Public = false
 Order = [:function]
 ```

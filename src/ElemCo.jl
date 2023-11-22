@@ -45,6 +45,7 @@ using .ECInfos
 using .ECMethods
 using .TensorTools
 using .FockFactory
+using .CCTools
 using .CoupledCluster
 using .DFCoupledCluster
 using .FciDump
@@ -414,7 +415,7 @@ end
   The orbitals are read from [`WfOptions.orb`](@ref ECInfos.WfOptions).
   If type is one of [bo, BO, bi-orthogonal, Bi-orthogonal, biorth, biorthogonal, Biorthogonal], 
   the bi-orthogonal orbitals are used and the left transformation matrix is
-  read from [`WfOptions.orb`*`WfOptions.left`](@ref ECInfos.WfOptions).
+  read from [`WfOptions.orb`](@ref ECInfos.WfOptions)*[`WfOptions.left`](@ref ECInfos.WfOptions).
 """
 macro transform_ints(type)
   strtype=replace("$type", " " => "")
@@ -637,6 +638,11 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       println("$main_name correlation energy: ",ECC)
       println("$main_name total energy: ",ECC+EHF)
       t1 = print_time(EC, t1,"CC",1)
+
+      if EC.options.cc.properties
+        calc_lm_cc(EC, ecmethod)
+      end
+
       delete_temporary_files!(EC)
       draw_endline()
       if length(method_names) == 1
