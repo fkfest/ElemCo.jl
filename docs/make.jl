@@ -3,6 +3,8 @@ using Documenter, ElemCo
 
 DocMeta.setdocmeta!(ElemCo, :DocTestSetup, :(using ElemCo); recursive=true)
 
+cp("equations/equations.pdf","src/assets/equations.pdf", force=true)
+
 makedocs(
   modules = [ElemCo],
   format = Documenter.HTML(
@@ -41,6 +43,8 @@ makedocs(
     ]
   ],
   checkdocs=:exports)
+
+#cp("equations/equations.pdf","build/assets/equations.pdf")
 
 deploydocs(
     repo = "github.com/fkfest/ElemCo.jl-devel.git",

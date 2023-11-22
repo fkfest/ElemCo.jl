@@ -1,24 +1,20 @@
 # Orbital tools
 
-```@meta
-CurrentModule = ElemCo.OrbTools
-```
-
 ```@docs
-OrbTools
+ElemCo.OrbTools
 ```
 
 ## Exported functions
 
 ```@autodocs
-Modules = [OrbTools]
+Modules = [ElemCo.OrbTools]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [OrbTools]
+Modules = [ElemCo.OrbTools]
 Public = false
 Order = [:function]
 ```

@@ -1,24 +1,20 @@
 # Density-fitted Coupled Cluster methods
 
-```@meta
-CurrentModule = ElemCo.DFCoupledCluster
-```
-
 ```@docs
-DFCoupledCluster
+ElemCo.DFCoupledCluster
 ```
 
 ## Exported functions
 
 ```@autodocs
-Modules = [DFCoupledCluster]
+Modules = [ElemCo.DFCoupledCluster]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [DFCoupledCluster]
+Modules = [ElemCo.DFCoupledCluster]
 Public = false
 Order = [:function]
 ```

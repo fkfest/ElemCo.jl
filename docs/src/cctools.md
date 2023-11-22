@@ -1,24 +1,20 @@
 # Coupled-cluster tools
 
-```@meta
-CurrentModule = ElemCo.CCTools
-```
-
 ```@docs
-CCTools
+ElemCo.CCTools
 ```
 
 ## Exported functions
 
 ```@autodocs
-Modules = [CCTools]
+Modules = [ElemCo.CCTools]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [CCTools]
+Modules = [ElemCo.CCTools]
 Public = false
 Order = [:function]
 ```

@@ -1,4 +1,41 @@
-""" Coupled-cluster methods """
+@doc raw""" Coupled-cluster methods 
+
+The most efficient version of closed-shell CCSD/DCSD in `ElemCo.jl` combines the dressed factorization from [^Kats2013] with 
+the `cckext` type of factorization from [^Hampel1992] and is given by
+```math
+\begin{align*}
+\mathcal{L} &= v_{kl}^{cd} \tilde T^{kl}_{cd} + \left(\hat f_k^c + f_k^c\right) T^k_c
++ Λ_{ij}^{ab} \left(\hat v_{kl}^{ij} \red{+ v_{kl}^{cd} T^{ij}_{cd}}\right) T^{kl}_{ab}
++ Λ_{ij}^{ab} R^{ij}_{pq} δ_a^p δ_b^q 
+\red{+Λ_{ij}^{ab} v_{kl}^{cd}T^{kj}_{ad}T^{il}_{cb}}\\
+&+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2}v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
+- \left(\hat f_k^i + \red{2\times}\frac{1}{2}v_{kl}^{cd}\tilde T^{il}_{cd}\right)T^{kj}_{ab} \right.\\
+&+ \left(\hat v_{al}^{id}
++ \frac{1}{2} v_{kl}^{cd}\tilde T^{ik}_{ac}\right)\tilde T^{lj}_{db}
+- \hat v_{ka}^{ic} T^{kj}_{cb} -\hat v_{kb}^{ic} T^{kj}_{ac}
+\red{-v_{kl}^{cd}T^{ki}_{da}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)}\\
+&\left.- R^{ij}_{pq} \left(δ_k^p δ_b^q - \frac{1}{2} δ_k^p δ_l^q T^l_b\right) T^k_a \right\}
++Λ_i^a R^{ij}_{pq}\left( 2δ_a^p δ_j^q - δ_j^p δ_a^q \right)
+-Λ_i^a T^k_a R^{ij}_{pq}\left( 2δ_k^p δ_j^q - δ_j^p δ_k^q \right)\\
+&+Λ_i^a \hat h_a^i + Λ_i^a \hat f_j^b \tilde T^{ij}_{ab} 
+- Λ_i^a \hat v_{jk}^{ic} \tilde T^{kj}_{ca},
+\end{align*}
+```
+where
+```math
+R^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b 
++δ_r^i T^j_b δ_s^b + T^i_a δ_r^a δ_s^j + δ_r^i δ_s^j \right). 
+```
+The DCSD Lagrangian is obtained by removing terms in red.
+Integrals with hats are dressed integrals, i.e. they are obtained by dressing the integrals with the singles amplitudes, e.g.,
+``\hat v_{kl}^{id} = v_{kl}^{id} + v_{kl}^{cd} T^i_c``.
+
+[^Kats2013]: D. Kats, and F.R. Manby, Sparse tensor framework for implementation of general local correlation methods, J. Chem. Phys. 138 (2013) 144101. doi:10.1063/1.4798940.
+
+[^Hampel1992]: C. Hampel, K.A. Peterson, and H.-J. Werner, A comparison of the efficiency and accuracy of the quadratic configuration interaction (QCISD), coupled cluster (CCSD), and Brueckner coupled cluster (BCCD) methods, Chem. Phys. Lett. 190 (1992) 1. doi:10.1016/0009-2614(92)86093-W.
+
+
+"""
 module CoupledCluster
 
 try
@@ -22,6 +59,9 @@ using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
 
 export calc_MP2, calc_UMP2, calc_cc, calc_pertT
+export calc_lm_cc
+
+include("cc_lagrange.jl")
 
 include("cc_tests.jl")
 
@@ -162,19 +202,25 @@ function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b
 end
 
 """ 
-    calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
+    calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
+              calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
 
   Dress integrals with singles amplitudes. 
 
   The singles and orbspaces for first and second electron are `T1`, `o1`, `v1` and `T12`, `o2`, `v2`, respectively.
   The integrals from EC.fd are used and dressed integrals are stored as `d_????`.
+  ``\\hat v_{ab}^{cd}``, ``\\hat v_{ab}^{ci}``, ``\\hat v_{ak}^{cd}`` and ``\\hat v_{ab}^{ij}`` are only 
+  calculated if requested in `EC.options.cc` or using keyword-arguments.
 """
-function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char)
+function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
+              calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
   t1 = time_ns()
   mixed = (o1 != o2)
   no1, no2 = len_spaces(EC,o1*o2)
   # first make half-transformed integrals
-  if EC.options.cc.calc_d_vvvv
+  if calc_d_vvvv
     # <a\hat c|bd>
     hd_vvvv = ints2(EC,v1*v2*v1*v2)
     vovv = ints2(EC,v1*o2*v1*v2)
@@ -190,7 +236,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   @tensoropt hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
   ooov = nothing
   t1 = print_time(EC,t1,"dress hd_"*o1*o2*o1*o2,3)
-  if EC.options.cc.calc_d_vvoo
+  if calc_d_vvoo
     # <a\hat c|j \hat l>
     hd_vvoo = ints2(EC,v1*v2*o1*o2)
     voov = ints2(EC,v1*o2*o1*v2)
@@ -286,7 +332,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     ovvv = nothing
   end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*v1*o2,3)
-  if EC.options.cc.calc_d_vvvo
+  if calc_d_vvvo
     # <a\hat c|b \hat l>
     hd_vvvo = ints2(EC,v1*v2*v1*o2)
     vvvv = ints2(EC,v1*v2*v1*v2)
@@ -310,7 +356,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
 
   # fully dressed
-  if EC.options.cc.calc_d_vovv
+  if calc_d_vovv
     # <ak\hat|bd>
     d_vovv = ints2(EC,v1*o2*v1*v2)
     @tensoropt d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
@@ -325,10 +371,10 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     end
   end
   oovv = nothing
-  if EC.options.cc.calc_d_vvvv
+  if calc_d_vvvv
     # <ab\hat|cd>
     d_vvvv = load(EC,"hd_"*v1*v2*v1*v2)
-    if !EC.options.cc.calc_d_vovv
+    if !calc_d_vovv
       error("for calc_d_vvvv calc_d_vovv has to be True")
     end
     if !mixed
@@ -368,7 +414,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     save!(EC,"d_"*o1*v2*o1*o2,d_ovoo)
   end
   t1 = print_time(EC,t1,"dress d_"*v1*o2*o1*o2,3)
-  if EC.options.cc.calc_d_vvvo
+  if calc_d_vvvo
     # <ab\hat|cl>
     if !mixed
       d_vvvo = load(EC,"hd_"*v1*v2*v1*o2)
@@ -392,8 +438,8 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   @tensoropt d_oooo[i,k,j,l] += d_oovo[i,k,b,l] * T1[b,j]
   save!(EC,"d_"*o1*o2*o1*o2,d_oooo)
   t1 = print_time(EC,t1,"dress d_"*o1*o2*o1*o2,3)
-  if EC.options.cc.calc_d_vvoo
-    if !EC.options.cc.calc_d_vvvo
+  if calc_d_vvoo
+    if !calc_d_vvvo
       error("for calc_d_vvoo calc_d_vvvo has to be True")
     end
     # <ac\hat|jl>
@@ -555,47 +601,58 @@ function dress_fock_oppositespin(EC::ECInfo)
 end
 
 """
-    calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
+    calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[];
+              calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
 
   Dress integrals with singles.
+
+  ``\\hat v_{ab}^{cd}``, ``\\hat v_{ab}^{ci}``, ``\\hat v_{ak}^{cd}`` and ``\\hat v_{ab}^{ij}`` are only 
+  calculated if requested in `EC.options.cc` or using keyword-arguments.
 """
-function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[])
+function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[];
+              calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
   if ndims(T1b) != 2
-    calc_dressed_ints(EC,T1a,T1a,"ovov"...)
-    dress_fock_closedshell(EC,T1a)
+    calc_dressed_ints(EC, T1a, T1a, "ovov"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+    dress_fock_closedshell(EC, T1a)
   else
-    calc_dressed_ints(EC,T1a,T1a,"ovov"...)
-    calc_dressed_ints(EC,T1b,T1b,"OVOV"...)
-    calc_dressed_ints(EC,T1a,T1b,"ovOV"...)
-    dress_fock_samespin(EC,T1a,"ov"...)
-    dress_fock_samespin(EC,T1b,"OV"...)
+    calc_dressed_ints(EC, T1a, T1a, "ovov"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+    calc_dressed_ints(EC, T1b, T1b, "OVOV"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+    calc_dressed_ints(EC, T1a, T1b, "ovOV"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+    dress_fock_samespin(EC, T1a, "ov"...)
+    dress_fock_samespin(EC, T1b, "OV"...)
     dress_fock_oppositespin(EC)
   end
 end
 
 """
-    pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
+    pseudo_dressed_ints(EC::ECInfo, unrestricted=false;
+              calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
 
   Save non-dressed integrals in files instead of dressed integrals.
 """
-function pseudo_dressed_ints(EC::ECInfo, unrestricted=false)
+function pseudo_dressed_ints(EC::ECInfo, unrestricted=false;
+              calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
   #TODO write like in itf with chars as arguments, so three calls for three spin cases...
   t1 = time_ns()
   save!(EC,"d_oovo",ints2(EC,"oovo"))
   save!(EC,"d_voov",ints2(EC,"voov"))
-  if EC.options.cc.calc_d_vovv
+  if calc_d_vovv
     save!(EC,"d_vovv",ints2(EC,"vovv"))
   end
-  if EC.options.cc.calc_d_vvvv
+  if calc_d_vvvv
     save!(EC,"d_vvvv",ints2(EC,"vvvv"))
   end
   save!(EC,"d_vovo",ints2(EC,"vovo"))
   save!(EC,"d_vooo",ints2(EC,"vooo"))
-  if EC.options.cc.calc_d_vvvo
+  if calc_d_vvvo
     save!(EC,"d_vvvo",ints2(EC,"vvvo"))
   end
   save!(EC,"d_oooo",ints2(EC,"oooo"))
-  if EC.options.cc.calc_d_vvoo
+  if calc_d_vvoo
     save!(EC,"d_vvoo",ints2(EC,"vvoo"))
   end
   save!(EC,"dh_mm",integ1(EC.fd))
@@ -812,11 +869,11 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1, T2, dc)
+    calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1, T2; dc = false, tworef = false, fixref = false)
+function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -873,9 +930,6 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc = false, tworef = false, fixref 
   # I_klij T^kl_ab
   @tensoropt R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
   t1 = print_time(EC,t1,"I_klij T^kl_ab",2)
-  # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
-  @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2t[c,a,k,i] * T2t[d,b,l,j]
-  t1 = print_time(EC,t1,"<kl|cd> tT^ki_ca tT^lj_db",2)
   if EC.options.cc.use_kext
     int2 = integ2(EC.fd)
     if ndims(int2) == 4
@@ -890,6 +944,7 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc = false, tworef = false, fixref 
         trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
         @tensor Rpqoo[:,:,trioor][p,q,x] = R2pqx[q,p,x]
         R2pqx = nothing
+        #TODO: remove Rpqoo!
         @tensor R2pq[a,b,i,j] := Rpqoo[a,b,i,j]
         Rpqoo = nothing
       else
@@ -958,6 +1013,8 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc = false, tworef = false, fixref 
   end
   t1 = print_time(EC,t1,"x_ad T^ij_db -x_ki T^kj_ab",2)
   int2 = load(EC,"d_voov")
+  # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
+  @tensoropt int2[a,k,i,c] += 0.5*klcd[k,l,c,d] * T2t[a,d,i,l] 
   # <ak|ic> \tilde T^kj_cb
   @tensoropt R2r[a,b,i,j] += int2[a,k,i,c] * T2t[c,b,k,j]
   t1 = print_time(EC,t1,"<ak|ic> tT^kj_cb",2)

@@ -76,6 +76,8 @@ Base.@kwdef mutable struct CcOptions
   shiftp::Float64 = 0.2
   """`⟨0.2⟩` level shift for triples. """
   shiftt::Float64 = 0.2
+  """`⟨false⟩` calculate properties. """
+  properties::Bool = false
   """`⟨1.e-3⟩` amplitude decomposition threshold. """
   ampsvdtol::Float64 = 1.e-3
   """`⟨true⟩` use kext for doubles residual. """
@@ -113,6 +115,12 @@ Base.@kwdef mutable struct CcOptions
   """`⟨"cc_amplitudes"⟩` main part of filename to save amplitudes.
       For example, the singles amplitudes are saved to `save*"_singles"` """
   save::String = "cc_amplitudes"
+  """`⟨"cc_multipliers"⟩` main part of filename for start Lagrange multipliers. 
+      For example, the singles Lagrange multipliers are read from `start_lm*"_singles"` """
+  start_lm::String = "cc_multipliers"
+  """`⟨"cc_multipliers"⟩` main part of filename to save Lagrange multipliers.
+      For example, the singles Lagrange multipliers are saved to `save_lm*"_singles"` """
+  save_lm::String = "cc_multipliers"
 end
 
 """

@@ -13,9 +13,10 @@ using ..ElemCo.OrbTools
 
 export calc_singles_energy_using_dfock
 export update_singles, update_doubles, update_singles!, update_doubles!, update_deco_doubles, update_deco_triples
-export calc_singles_norm, calc_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
+export calc_singles_norm, calc_doubles_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles, starting_amplitudes
-export try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
+export transform_amplitudes2lagrange_multipliers!
+export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
 
 """
     calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
@@ -203,6 +204,16 @@ function calc_singles_norm(T1)
 end
 
 """
+    calc_contra_singles_norm(T1)
+
+  Calculate squared norm of closed-shell contravariant singles amplitudes.
+"""
+function calc_contra_singles_norm(T1)
+  @tensor NormT1 = 0.5*T1[a,i]*T1[a,i]
+  return NormT1
+end
+
+"""
     calc_singles_norm(T1a, T1b)
 
   Calculate squared norm of unrestricted singles amplitudes.
@@ -216,6 +227,16 @@ function calc_singles_norm(T1a, T1b)
 end
 
 """
+    calc_contra_singles_norm(T1a, T1b)
+
+  Calculate squared norm of unrestricted singles amplitudes 
+  (same as `calc_singles_norm(T1a, T1b)`).
+"""
+function calc_contra_singles_norm(T1a, T1b)
+  return calc_singles_norm(T1a, T1b)
+end
+
+"""
     calc_doubles_norm(T2)
 
   Calculate squared norm of closed-shell doubles amplitudes.
@@ -223,6 +244,16 @@ end
 function calc_doubles_norm(T2)
   @tensoropt NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j]
   return NormT2
+end
+
+"""
+    calc_contra_doubles_norm(T2)
+
+  Calculate squared norm of closed-shell contravariant doubles amplitudes.
+"""
+function calc_contra_doubles_norm(T2)
+  @tensoropt NormT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2[a,b,i,j]
+  return NormT2/3.0
 end
 
 """
@@ -237,6 +268,16 @@ function calc_doubles_norm(T2a, T2b, T2ab)
     NormT2 += T2ab[a,b,i,j]*T2ab[a,b,i,j]
   end
   return NormT2
+end
+
+"""
+    calc_contra_doubles_norm(T2a, T2b, T2ab)
+
+  Calculate squared norm of unrestricted doubles amplitudes
+  (the same as `calc_doubles_norm`)
+"""
+function calc_contra_doubles_norm(T2a, T2b, T2ab)
+  return calc_doubles_norm(T2a, T2b, T2ab)
 end
 
 """
@@ -273,41 +314,54 @@ function calc_deco_triples_norm(T3)
 end
 
 """
-    try2save_singles!(EC::ECInfo, singles...)
+    save_or_start_file(EC::ECInfo, type, save=true)
 
-  Save singles amplitudes to file `EC.options.cc.save*"_singles"`.
+  Return filename and description for saving or starting amplitudes/lagrange multipliers.
+
+  `type` is either `"T"` for amplitudes or `"LM"` for Lagrange multipliers.
+  If `save` is true, the filename for saving is returned, otherwise the filename for starting.
 """
-function try2save_singles!(EC::ECInfo, singles...)
-  if EC.options.cc.save != ""
-    filename = EC.options.cc.save*"_singles"
-    println("Save singles amplitudes to file $filename")
-    save!(EC, filename, singles..., description="singles amplitudes")
+function save_or_start_file(EC::ECInfo, type, save=true)
+  mainfilename = descr = ""
+  if type == "T"
+    descr = "amplitudes"
+    mainfilename = save ? EC.options.cc.save : EC.options.cc.start
+  elseif type == "LM"
+    descr = "Lagrange multipliers"
+    mainfilename = save ? EC.options.cc.save_lm : EC.options.cc.start_lm
+  else
+    error("unknown type $type")
+  end
+  return mainfilename, descr
+end
+
+"""
+    try2save_amps!(EC::ECInfo, excitation_level::AbstractString, amps...; type="T")
+
+  Save amplitudes (type="T") or Lagrange multipliers (type="LM") 
+  to file `EC.options.cc.save[_lm]*"_"*excitation_level`.
+"""
+function try2save_amps!(EC::ECInfo, excitation_level::AbstractString, amps...; type="T")
+  mainfilename, descr = save_or_start_file(EC, type)
+  if mainfilename != ""
+    filename = mainfilename*"_"*excitation_level
+    println("Save $excitation_level $descr to file $filename")
+    save!(EC, filename, amps..., description=excitation_level*" "*descr)
   end
 end
 
 """
-    try2save_doubles!(EC::ECInfo, doubles...)
+    try2start_amps(EC::ECInfo, excitation_level::AbstractString; type="T")
 
-  Save doubles amplitudes to file `EC.options.cc.save*"_doubles"`.
+  Read amplitudes (type="T") or Lagrange multipliers (type="LM") 
+  from file `EC.options.cc.start[_lm]*"_"*excitation_level`.
 """
-function try2save_doubles!(EC::ECInfo, doubles...)
-  if EC.options.cc.save != ""
-    filename = EC.options.cc.save*"_doubles"
-    println("Save doubles amplitudes to file $filename")
-    save!(EC, filename, doubles..., description="doubles amplitudes")
-  end
-end
-
-"""
-    try2start_singles(EC::ECInfo)
-
-  Read singles amplitudes from file `EC.options.cc.start*"_singles"`.
-"""
-function try2start_singles(EC::ECInfo)
-  if EC.options.cc.start != ""
-    filename = EC.options.cc.start*"_singles"
+function try2start_amps(EC::ECInfo, excitation_level::AbstractString; type="T")
+  mainfilename, descr = save_or_start_file(EC, type)
+  if mainfilename != ""
+    filename = mainfilename*"_"*excitation_level
     if file_exists(EC, filename)
-      println("Read singles amplitudes from file $filename")
+      println("Read $excitation_level $descr from file $filename")
       return load(EC, filename)
     end
   end
@@ -315,18 +369,44 @@ function try2start_singles(EC::ECInfo)
 end
 
 """
+    try2save_singles!(EC::ECInfo, singles...; type="T")
+
+  Save singles amplitudes (type="T") or Lagrange multipliers (type="LM") 
+  to file `EC.options.cc.save[_lm]*"_singles"`.
+"""
+function try2save_singles!(EC::ECInfo, singles...; type="T")
+  try2save_amps!(EC, "singles", singles...; type)
+end
+
+"""
+    try2save_doubles!(EC::ECInfo, doubles...; type="T")
+
+  Save doubles amplitudes (type="T") or Lagrange multipliers (type="LM") 
+  to file `EC.options.cc.save[_lm]*"_doubles"`.
+"""
+function try2save_doubles!(EC::ECInfo, doubles...; type="T")
+  try2save_amps!(EC, "doubles", doubles...; type)
+end
+
+"""
+    try2start_singles(EC::ECInfo; type="T")
+
+  Read singles amplitudes (type="T") or Lagrange multipliers (type="LM")
+  from file `EC.options.cc.start[_lm]*"_singles"`.
+"""
+function try2start_singles(EC::ECInfo; type="T")
+  return try2start_amps(EC, "singles"; type)
+  return []
+end
+
+"""
     try2start_doubles(EC::ECInfo)
 
-  Read doubles amplitudes from file `EC.options.cc.start*"_doubles"`.
+  Read doubles amplitudes (type="T") or Lagrange multipliers (type="LM")
+  from file `EC.options.cc.start[_lm]*"_doubles"`.
 """
 function try2start_doubles(EC::ECInfo)
-  if EC.options.cc.start != ""
-    filename = EC.options.cc.start*"_doubles"
-    if file_exists(EC, filename)
-      println("Read doubles amplitudes from file $filename")
-      return load(EC, filename)
-    end
-  end
+  return try2start_amps(EC, "doubles"; type)
   return []
 end
 
@@ -361,42 +441,43 @@ function read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
 end
 
 """
-    save_current_singles(EC::ECInfo, T1)
+    save_current_singles(EC::ECInfo, T1; prefix="T")
 
-  Save current singles amplitudes `T1` to file `T_vo`
+  Save current singles amplitudes `T1` to file `prefix*"_vo"`
 """
-function save_current_singles(EC::ECInfo, T1)
-  save!(EC, "T_vo", T1)
+function save_current_singles(EC::ECInfo, T1; prefix="T")
+  save!(EC, prefix*"_vo", T1)
 end
 
 """
-    save_current_singles(EC::ECInfo, T1a, T1b)
+    save_current_singles(EC::ECInfo, T1a, T1b; prefix="T")
 
-  Save current singles amplitudes `T1a` and `T1b` to files `T_vo` and `T_VO`
+  Save current singles amplitudes `T1a` and `T1b` to files `prefix*"_vo"` and `prefix*"_VO"`
 """
-function save_current_singles(EC::ECInfo, T1a, T1b)
-  save!(EC, "T_vo", T1a)
-  save!(EC, "T_VO", T1b)
+function save_current_singles(EC::ECInfo, T1a, T1b; prefix="T")
+  save!(EC, prefix*"_vo", T1a)
+  save!(EC, prefix*"_VO", T1b)
 end
 
 """
-    save_current_doubles(EC::ECInfo, T2)
+    save_current_doubles(EC::ECInfo, T2; prefix="T")
 
-  Save current doubles amplitudes `T2` to file `T_vvoo`
+  Save current doubles amplitudes `T2` to file `prefix*"_vvoo"`
 """
-function save_current_doubles(EC::ECInfo, T2)
-  save!(EC, "T_vvoo", T2)
+function save_current_doubles(EC::ECInfo, T2; prefix="T")
+  save!(EC, prefix*"_vvoo", T2)
 end
 
 """
-    save_current_doubles(EC::ECInfo, T2a, T2b, T2ab)
+    save_current_doubles(EC::ECInfo, T2a, T2b, T2ab; prefix="T")
 
-  Save current doubles amplitudes `T2a`, `T2b`, and `T2ab` to files `T_vvoo`, `T_VVOO`, and `T_vVoO`
+  Save current doubles amplitudes `T2a`, `T2b`, and `T2ab` to files 
+  `prefix*"_vvoo"`, `prefix*"_VVOO"`, and `prefix*"_vVoO"`
 """
-function save_current_doubles(EC::ECInfo, T2a, T2b, T2ab)
-  save!(EC, "T_vvoo", T2a)
-  save!(EC, "T_VVOO", T2b)
-  save!(EC, "T_vVoO", T2ab)
+function save_current_doubles(EC::ECInfo, T2a, T2b, T2ab; prefix="T")
+  save!(EC, prefix*"_vvoo", T2a)
+  save!(EC, prefix*"_VVOO", T2b)
+  save!(EC, prefix*"_vVoO", T2ab)
 end
 
 """
@@ -437,6 +518,56 @@ function starting_amplitudes(EC::ECInfo, method::ECMethod)
     end
   end
   return Amps, exc_ranges
+end
+
+"""
+    transform_amplitudes2lagrange_multipliers!(Amps, exc_ranges)
+
+  Transform amplitudes to first guess for Lagrange multipliers.
+
+  The amplitudes are transformed in-place. 
+"""
+function transform_amplitudes2lagrange_multipliers!(Amps, exc_ranges)
+  singles, doubles, triples = exc_ranges[1:3]
+  unrestricted = (length(singles) == 2)
+  @assert (unrestricted && length(doubles) == 3) || (!unrestricted && length(doubles) == 1)
+  # add singles to doubles
+  add_singles2doubles!(Amps[doubles]..., Amps[singles]...)
+end
+
+"""
+    add_singles2doubles!(T2aa, T2bb, T2ab, T1a, T1b)
+
+  Add singles to doubles amplitudes.
+"""
+function add_singles2doubles!(T2aa, T2bb, T2ab, T1a, T1b)
+  if length(T1a) > 0
+    @tensoropt T2aa[a,b,i,j] += T1a[a,i] * T1a[b,j] - T1a[b,i] * T1a[a,j]
+  end
+  if length(T1b) > 0
+  @tensoropt T2bb[a,b,i,j] += T1b[a,i] * T1b[b,j] - T1b[b,i] * T1b[a,j]
+  end
+  if length(T1a) > 0 && length(T1b) > 0
+    @tensoropt T2ab[a,b,i,j] += T1a[a,i] * T1b[b,j]
+  end 
+end
+
+"""
+    add_singles2doubles!(T2, T1; make_contravariant=true)
+
+  Add singles to doubles amplitudes.
+  
+  If `make_contravariant` is true, the amplitudes will be made contravariant.
+"""
+function add_singles2doubles!(T2, T1; make_contravariant=true)
+  if length(T1) > 0
+    # @tensoropt T2[a,b,i,j] += T1[a,i] * T1[b,j]
+  end
+  if make_contravariant
+    @tensoropt tT2[a,b,i,j] := T2[a,b,i,j] - T2[a,b,j,i]
+    @tensoropt T2[a,b,i,j] += tT2[a,b,i,j]
+    T1 .+= T1
+  end
 end
 
 end # module

@@ -1,0 +1,285 @@
+\documentclass[a4paper,12pt,oneside]{book}
+\usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{color}
+\newcommand{\red}[1]{{\color{red} #1}}
+\usepackage[utf8]{inputenc}
+\usepackage{listings}
+\usepackage{hyperref}
+\hypersetup{
+    bookmarks=true,         % show bookmarks bar?
+    unicode=false,          % non-Latin characters in Acrobat’s bookmarks
+    pdftoolbar=true,        % show Acrobat’s toolbar?
+    pdfmenubar=true,        % show Acrobat’s menu?
+    colorlinks=true,        % false: boxed links; true: colored links
+    linkcolor=red,          % color of internal links
+    citecolor=green,        % color of links to bibliography
+    filecolor=magenta,      % color of file links
+    urlcolor=cyan           % color of external links
+}
+\DeclareUnicodeCharacter{039B}{\Lambda}
+\DeclareUnicodeCharacter{03B4}{\delta}
+\newcommand{\op}{\hat}
+\newcommand{\mat}{\mathbf}
+\newcommand{\eq}[1]{Eq.~(\ref{#1})}
+\newcommand{\eqs}[2]{Eqs.~(\ref{#1},~\ref{#2})}
+\newcommand{\ElemCojl}{\textsf{ElemCo.jl} }
+% Define \lt and \gt for `less than' and `greater than'
+\mathchardef\lt="313C \mathchardef\gt="313E
+% Set up `<' and `>' as angle brackets
+\mathcode`<="4268 \mathcode`>="5269
+
+\begin{document}
+\title{Equations and derivations for \ElemCojl}
+\author{Daniel Kats}
+\maketitle
+\tableofcontents
+\chapter{Introduction}
+\section{General}
+In this document we collect the equations and derivations for methods implemented in the \ElemCojl package.
+The final goal is to have a document which can be used as a reference for the equations and derivations.
+The final equations should also be contained in the code as docstrings or copied to the corresponding Markdown files.
+
+\section{Notation}
+
+We use the following notation throughout the document.
+
+The virtual orbitals are denoted by $a,b,c,\ldots$ and the occupied orbitals by $i,j,k,\ldots$. 
+The Einstein summation convention is used for repeated indices (repeated lower and upper indices are summed over).
+
+The integrals are \textbf{not antisymmetrized} and denoted by $v_{pq}^{rs}$, where $p,q,r,s$ are indices of orbitals,
+and the lower indices correspond to the creation and the upper indices to the annihilation operators in the Hamiltonian,
+\begin{equation}
+  \op H_N = f_p^q \left\{\op a^\dagger_p \op a_q\right\}_N + 
+  \frac{1}{2} v_{pq}^{rs} \left\{\op a^\dagger_p \op a^\dagger_q \op a_s \op a_r\right\}_N,
+\end{equation}
+i.e., $f_p^q = <p|\op f|q>$ and $v_{pq}^{rs} = <pq|rs>$.
+
+\chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
+\section{Closed-shell CCSD/DCSD Lagrangian}
+The singles-dressed factorization of the closed-shell CCSD and DCSD amplitude equations 
+roughly follows the factorization from Ref.~\cite{katsSparse2013}. 
+The closed-shell CCSD and DCSD Lagrangian is given by
+\begin{equation}
+\label{eq:ccsd-lagrangian}
+\begin{aligned} 
+\mathcal{L} &= v_{kl}^{cd} \tilde T^{kl}_{cd} + \left(\hat f_k^c + f_k^c\right) T^k_c
++ Λ_{ij}^{ab} \hat v_{ab}^{ij} 
++ Λ_{ij}^{ab} \left(\hat v_{kl}^{ij} \red{+ v_{kl}^{cd} T^{ij}_{cd}}\right) T^{kl}_{ab}
++ Λ_{ij}^{ab} \hat v_{ab}^{cd} T^{ij}_{cd} \\
+&\red{+Λ_{ij}^{ab} v_{kl}^{cd}T^{kj}_{ad}T^{il}_{cb}}\\
+&+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2} v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
+- \left(\hat f_k^i + \red{2\times}\frac{1}{2} v_{kl}^{cd}\tilde T^{il}_{cd}\right)T^{kj}_{ab} \right.\\
+&\left.+ \left(\hat v_{al}^{id}
++ \frac{1}{2} v_{kl}^{cd}\tilde T^{ik}_{ac}\right)\tilde T^{lj}_{db}
+ - \hat v_{ka}^{ic} T^{kj}_{cb} -\hat v_{kb}^{ic} T^{kj}_{ac}
+\red{-v_{kl}^{cd}T^{ki}_{da}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)}\right\}\\
+&+Λ_i^a \hat f_a^i + Λ_i^a \hat f_j^b \tilde T^{ij}_{ab} 
++ Λ_i^a \hat v_{ak}^{bc} \tilde T^{ki}_{cb} - Λ_i^a \hat v_{jk}^{ic} \tilde T^{kj}_{ca}.
+\end{aligned}
+\end{equation}
+The DCSD Lagrangian is obtained by removing terms in red.
+
+Integrals with hats are dressed integrals, i.e. they are obtained by dressing the integrals with the singles amplitudes, 
+and the Fock matrix is internally dressed, too, e.g.,
+\begin{equation}
+  \begin{aligned}
+&\hat v_{kl}^{id} = v_{kl}^{id} + v_{kl}^{cd} T^i_c\\
+&\hat v_{al}^{ij} = v_{al}^{ij} - v_{kl}^{ij} T^k_a\\
+&\hat f_k^c = h_k^c + 2\hat v_{kl}^{cl} - \hat v_{lk}^{cl} = f_k^c + \left(2v_{kl}^{cd} - v_{lk}^{cd}\right)T^l_d.
+  \end{aligned}
+\end{equation}
+Note that only the \textbf{lower virtual} and \textbf{upper occupied} indices are dressed.
+
+The amplitude equations can be obtained by taking the derivative of the Lagrangian with respect to the Lagrange multipliers $\Lambda$ 
+and setting the result to zero.
+
+The most efficient version of CCSD/DCSD in \ElemCojl combines the dressed factorization from above with 
+the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} and is given by
+\begin{equation}
+\begin{aligned}
+\mathcal{L} &= v_{kl}^{cd} \tilde T^{kl}_{cd} + \left(\hat f_k^c + f_k^c\right) T^k_c
++ Λ_{ij}^{ab} \left(\hat v_{kl}^{ij} \red{+ v_{kl}^{cd} T^{ij}_{cd}}\right) T^{kl}_{ab}
++ Λ_{ij}^{ab} R^{ij}_{pq} δ_a^p δ_b^q\\ 
+&\red{+Λ_{ij}^{ab} v_{kl}^{cd}T^{kj}_{ad}T^{il}_{cb}}\\
+&+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2}v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
+- \left(\hat f_k^i + \red{2\times}\frac{1}{2}v_{kl}^{cd}\tilde T^{il}_{cd}\right)T^{kj}_{ab} \right.\\
+&+ \left(\hat v_{al}^{id}
++ \frac{1}{2} v_{kl}^{cd}\tilde T^{ik}_{ac}\right)\tilde T^{lj}_{db}
+- \hat v_{ka}^{ic} T^{kj}_{cb} -\hat v_{kb}^{ic} T^{kj}_{ac}
+\red{-v_{kl}^{cd}T^{ki}_{da}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)}\\
+&\left.- R^{ij}_{pq} \left(δ_k^p δ_b^q - \frac{1}{2} δ_k^p δ_l^q T^l_b\right) T^k_a \right\}
++Λ_i^a R^{ij}_{pq}\left( 2δ_a^p δ_j^q - δ_j^p δ_a^q \right)\\
+&-Λ_i^a T^k_a R^{ij}_{pq}\left( 2δ_k^p δ_j^q - δ_j^p δ_k^q \right)
++Λ_i^a \hat h_a^i + Λ_i^a \hat f_j^b \tilde T^{ij}_{ab} 
+- Λ_i^a \hat v_{jk}^{ic} \tilde T^{kj}_{ca},
+\end{aligned}
+\end{equation}
+where
+\begin{equation}
+\begin{aligned}
+R^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b 
++δ_r^i T^j_b δ_s^b + T^i_a δ_r^a δ_s^j + δ_r^i δ_s^j \right)
+\end{aligned}
+\end{equation}
+and $h$ is the one-particle part of the Hamiltonian.
+
+\section{Closed-shell CCSD/DSCD Lagrangian multipliers equations}
+The $\Lambda$ equations are obtained by taking the derivative of the Lagrangian \eq{eq:ccsd-lagrangian} 
+with respect to the amplitudes and setting the result to zero, i.e.,
+\begin{equation}
+\begin{aligned}
+\frac{\partial\mathcal{L}}{\partial T^m_e}&=
+2 \left(2 v_{jm}^{be} - v_{jm}^{eb}\right) T^j_b + 2f_m^e 
+- Λ_{ij}^{eb} \hat v_{mb}^{ij}
+- Λ_{ij}^{ae} \hat v_{am}^{ij}
++ Λ_{mj}^{ab} \hat v_{ab}^{ej}
++ Λ_{im}^{ab} \hat v_{ab}^{ie}\\
+&+Λ_{mj}^{ab} \hat v_{kl}^{ej} T^{kl}_{ab} + Λ_{im}^{ab} \hat v_{kl}^{ie} T^{kl}_{ab} 
+- Λ_{ij}^{eb} \hat v_{mb}^{cd} T^{ij}_{cd} - Λ_{ij}^{ae} \hat v_{am}^{cd} T^{ij}_{cd}\\
+&- Λ_{ij}^{eb} \hat f_m^d T^{ij}_{db}- Λ_{ij}^{ae} \hat f_m^d T^{ij}_{ad}
+- Λ_{mj}^{ab} \hat f_k^e T^{kj}_{ab}- Λ_{im}^{ab} \hat f_k^e T^{ik}_{ab}\\
+&+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(2\hat v_{am}^{de} - \hat v_{am}^{ed}\right) T^{ij}_{db}
+- \left(2\hat v_{km}^{ie} - \hat v_{km}^{ei}\right) T^{kj}_{ab}\right\}\\
+&- Λ_{ij}^{eb} \hat v_{ml}^{id}\tilde T^{lj}_{db} - Λ_{ij}^{ae} \hat v_{ml}^{jd}\tilde T^{il}_{ad}
++ Λ_{mj}^{ab} \hat v_{al}^{ed}\tilde T^{lj}_{db}
++ Λ_{im}^{ab} \hat v_{bl}^{ed}\tilde T^{il}_{ad}\\
+&+ Λ_{ij}^{eb} \hat v_{km}^{ic} T^{kj}_{cb}
+- Λ_{mj}^{ab} \hat v_{ka}^{ec} T^{kj}_{cb}
++ Λ_{ij}^{ae} \hat v_{km}^{jc} T^{ik}_{ac}
+- Λ_{im}^{ab} \hat v_{kb}^{ec} T^{ik}_{ac}\\
+&+ Λ_{ij}^{ae} \hat v_{km}^{ic} T^{kj}_{ac}
+- Λ_{mj}^{ab} \hat v_{kb}^{ec} T^{kj}_{ac}
++ Λ_{ij}^{eb} \hat v_{km}^{jc} T^{ik}_{cb}
+- Λ_{im}^{ab} \hat v_{ka}^{ec} T^{ik}_{cb}\\
+&- Λ_{i}^{e} \hat f_{m}^{i}
++ Λ_{m}^{a} \hat f_{a}^{e}
++ Λ_{i}^{a} \left(2 \hat v_{am}^{ie} - \hat v_{am}^{ei}\right)\\
+&+ Λ_i^a \left(2 v_{jm}^{be} - v_{jm}^{eb}\right) \tilde T^{ij}_{ab}
+- Λ_i^e v_{mk}^{bc} \tilde T^{ki}_{cb}
+- Λ_m^a v_{jk}^{ec} \tilde T^{kj}_{ca}.
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial T^{mn}_{ef}}&= \frac{1}{2} \mathcal{P}(em;fn) \Big[
+  Λ_m^e \hat f_n^f
+\tilde v_{mn}^{ef}
++ Λ_{ij}^{ef} \left(\hat v_{mn}^{ij} \red{+ v_{mn}^{cd} T^{ij}_{cd}}\right) 
+\red{+ Λ_{mn}^{ab} v_{kl}^{ef} T^{kl}_{ab}} + Λ_{mn}^{ab} \hat v_{ab}^{ef} \\
+&\red{+Λ_{in}^{eb} v_{ml}^{cf}T^{il}_{cb}+Λ_{mj}^{af} v_{kn}^{ed}T^{kj}_{ad}}\\
+&+ Λ_{mn}^{af} \mathcal{P}(am;fn)\left(\hat f_a^e - \red{2\times}\frac{1}{2} v_{kl}^{ed} \tilde T^{kl}_{ad}\right)
+- Λ_{ij}^{eb} \mathcal{P}(ei;bj)\red{2\times}\frac{1}{2} \tilde v_{mn}^{cf} T^{ij}_{cb}\\
+&- Λ_{in}^{ef} \mathcal{P}(ei;fn)\left(\hat f_m^i + \red{2\times}\frac{1}{2} v_{ml}^{cd}\tilde T^{il}_{cd}\right)
+- Λ_{mj}^{ab} \mathcal{P}(am;bj) \red{2\times}\frac{1}{2} \tilde v_{kn}^{ef} T^{kj}_{ab}\\
+&+ 2Λ_{in}^{af} \mathcal{P}(ai;fn)\left(\hat v_{am}^{ie}
++ \frac{1}{2} v_{km}^{ce}\tilde T^{ik}_{ac}\right)
+- Λ_{im}^{af} \mathcal{P}(ai;fm)\left(\hat v_{an}^{ie}
++ \frac{1}{2} v_{kn}^{ce}\tilde T^{ik}_{ac}\right)\\
+&+ 2Λ_{mj}^{eb} \mathcal{P}(em;bj) \frac{1}{2} v_{nl}^{fd}\tilde T^{lj}_{db}
+- Λ_{nj}^{eb} \mathcal{P}(en;bj) \frac{1}{2} v_{ml}^{fd}\tilde T^{lj}_{db}\\
+&- Λ_{in}^{af} \mathcal{P}(ai;fn)\hat v_{ma}^{ie} 
+- Λ_{in}^{eb} \mathcal{P}(ei;bn)\hat v_{mb}^{if}\\
+&\red{-Λ_{nj}^{fb} \mathcal{P}(fn;bj) v_{ml}^{ce}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)
+-Λ_{in}^{af} \mathcal{P}(ai;fn)v_{km}^{ed}T^{ki}_{da}}\\
+&\red{+Λ_{in}^{ae} \mathcal{P}(ai;bj)v_{km}^{fd}T^{ki}_{da}}\\
+&+ \frac{1}{2} \tilde{\mathcal{P}}(em;fn) \left\{
+  Λ_m^e \hat f_n^f 
++ Λ_n^a \hat v_{am}^{fe} - Λ_i^f \hat v_{nm}^{ie} \right\}\Big].
+\end{aligned}
+\end{equation}
+
+Now we can introduce useful intermediate quantities, related to the density matrices.
+The one-body reduced density matrices can be written as
+\begin{equation}
+\begin{aligned}
+  D_i^j &= -2 \Lambda_{ik}^{cd} T^{jk}_{cd}, \\
+  D_a^b &= 2 \Lambda_{kl}^{bc} T^{kl}_{ac}, \\
+  D_i^a &= \Lambda_i^a,\\
+  D_a^i &= \Lambda_k^c \tilde T^{ik}_{ac}.
+\end{aligned}
+\end{equation}  
+Note that we have excluded here terms coming from the singles amplitudes.
+Thus, if this density matrix is used to calculate properties, the corresponding integrals should be dressed.
+Alternatively, one can define ``dressed'' density matrices which include the singles contributions,
+\begin{equation}
+\begin{aligned}
+  \hat D_i^j &= D_i^j - D_i^c T^j_c, \\
+  \hat D_a^b &= D_a^b + D_k^b T^k_a, \\
+  \hat D_i^a &= D_i^a,\\
+  \hat D_a^i &= D_a^i + 2T^i_a - D_a^c T^i_c + \hat D_k^i T^k_a.
+\end{aligned}
+\end{equation}  
+
+Some parts of the two-body reduced density matrices can be written as
+\begin{equation}
+\begin{aligned}
+D_{ij}^{kl} &= \Lambda_{ij}^{cd} T^{kl}_{cd} \\
+D_{ib}^{aj} &= \Lambda_{ik}^{ac} \tilde T^{kj}_{cb} \\
+\bar D_{ib}^{aj} &= \Lambda_{ik}^{ac} T^{kj}_{cb} + \Lambda_{ik}^{ca} T^{kj}_{bc} \\
+\end{aligned}
+\end{equation}
+Finally, we define the following quantities (which correspond to the \textsf{cckext}
+factorization and a doubles-dressing of the Fock matrix) and a ``contravariation'' operator,
+\begin{equation}
+\begin{aligned}
+&K_{mn}^{rs} = \hat \Lambda_{mn}^{pq} v_{pq}^{rs} \\
+&\hat \Lambda_{mn}^{pq} = Λ_{mn}^{ab}\delta_a^p\delta_b^q 
+- Λ_{mn}^{ab} T^i_a  \delta_i^p \delta_b^q
+- Λ_{mn}^{ab} \delta_a^p T^j_b \delta_j^q
++ Λ_{mn}^{ab} T^i_a T^j_b \delta_i^p \delta_j^q\\
+&x_m^i = \tilde T^{il}_{cd} v_{ml}^{cd} \qquad\qquad
+x_a^e = \tilde T^{kl}_{ac} v_{kl}^{ec}\\
+&\mathcal{T}(mn) X_{mn}^{ef} = 2X_{mn}^{ef} - X_{nm}^{ef}\\
+\end{aligned}
+\end{equation}
+
+With these definitions, the $\Lambda$ equations can be written as
+\begin{equation}
+\begin{aligned}
+\frac{\partial\mathcal{L}}{\partial T^m_e}&=
+\left(2 v_{qm}^{pe} - v_{qm}^{ep}\right) \hat D_p^q + 2f_m^e 
+- 2 Λ_{ij}^{eb} \hat v_{mb}^{ij}
++ 2 K_{mj}^{rs} \delta_r^e \left(\delta_s^j + \delta_s^b T^j_b \right) \\
+&+2 D_{mj}^{kl} \hat v_{kl}^{ej}  
+- 2 Λ_{ij}^{eb} \left(\hat v_{mb}^{cd} T^{ij}_{cd}\right)
+- D_d^e \hat f_m^d + D_m^k \hat f_k^e 
+- 2 D_{id}^{el} \hat v_{ml}^{id} 
++ 2 D_{md}^{al} \hat v_{al}^{ed}\\
+&+ 2\bar D_{ic}^{ek} \hat v_{km}^{ic} 
+- 2\bar D_{mc}^{ak} \hat v_{ka}^{ec} 
+- Λ_{i}^{e} \hat f_{m}^{i}
++ Λ_{m}^{a} \hat f_{a}^{e}
+- Λ_i^e x_m^i - Λ_m^a x_a^e.
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+\frac{\partial\mathcal{L}}{\partial T^{mn}_{ef}}&=
+\tilde v_{mn}^{ef} 
++ Λ_{ij}^{ef} \left(\hat v_{mn}^{ij} \red{+ v_{mn}^{cd} T^{ij}_{cd}}\right) 
+\red{+ D_{mn}^{kl} v_{kl}^{ef} } + K_{mn}^{rs} \delta_r^e \delta_s^f\\
+&+ \mathcal{P}(em;fn)\left\{ 
+Λ_{mn}^{af} \left(\hat f_a^e - \red{2\times}\frac{1}{2} x_a^e\right)
+- Λ_{in}^{ef} \left(\hat f_m^i + \red{2\times}\frac{1}{2} x_m^i\right)
+\right. \\
+&+ \mathcal{T}(mn) \left[\red{2\times}\frac{1}{4} v_{kn}^{ef} D_m^k 
+- \red{2\times}\frac{1}{4} v_{mn}^{cf} D_c^e
++ Λ_{in}^{af}\left(\hat v_{am}^{ie} + v_{km}^{ce}\tilde T^{ik}_{ac}\right)\right.\\
+&\left.+ \frac{1}{2} \left(
+  Λ_m^e \hat f_n^f 
++ Λ_n^a \hat v_{am}^{fe} - Λ_i^f \hat v_{nm}^{ie} \right) \right] 
+\\
+&\left.- Λ_{in}^{af} \hat v_{ma}^{ie} - Λ_{in}^{eb} \hat v_{mb}^{if}
+\red{-D_{nc}^{fl} v_{ml}^{ce} +\bar D_{nd}^{ek}v_{km}^{fd}} \right\}.\\
+\end{aligned}
+\end{equation}
+
+\addcontentsline{toc}{chapter}{Bibliography}
+\bibliography{references.bib}
+\bibliographystyle{naturemag}
+\end{document}

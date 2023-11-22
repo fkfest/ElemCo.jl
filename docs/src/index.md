@@ -57,3 +57,6 @@ To set options ([`ElemCo.ECInfos.Options`](@ref)) for the DF-HF, CC, etc calcula
 
 This code sets the maximum number of iterations for the SCF procedure to 10 using the [`@opt`](@ref) macro, and then computes DF-HF using the new options using the [`@dfhf`](@ref) macro.
 
+## Documentation
+
+[Equations](./assets/equations.pdf) for the methods implemented in ElemCo.jl.

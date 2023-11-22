@@ -1,24 +1,20 @@
 # Tensor-decomposition tools
 
-```@meta
-CurrentModule = ElemCo.DecompTools
-```
-
 ```@docs
-DecompTools
+ElemCo.DecompTools
 ```
 
 ## Exported functions
 
 ```@autodocs
-Modules = [DecompTools]
+Modules = [ElemCo.DecompTools]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [DecompTools]
+Modules = [ElemCo.DecompTools]
 Public = false
 Order = [:function]
 ```
