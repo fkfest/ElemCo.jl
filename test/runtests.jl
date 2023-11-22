@@ -10,16 +10,6 @@ else
     println("Running only $ARGS")
 end
 
-#using LinearAlgebra
-#import ElemCo: ECdriver,@ECinit, @tryECinit, @opt
-#using ElemCo.Utils
-#using ElemCo.ECInfos
-#using ElemCo.ECMethods
-#using ElemCo.TensorTools
-#using ElemCo.FockFactory
-#using ElemCo.CoupledCluster
-#using ElemCo.FciDump
-
 @testset verbose = true "FCIDUMP Calculations" begin
 
 tests = ["h2o", "h2o_st1", "h2o_cation", "2d_cc"]
