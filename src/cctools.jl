@@ -396,18 +396,16 @@ end
 """
 function try2start_singles(EC::ECInfo; type="T")
   return try2start_amps(EC, "singles"; type)
-  return []
 end
 
 """
-    try2start_doubles(EC::ECInfo)
+    try2start_doubles(EC::ECInfo; type="T")
 
   Read doubles amplitudes (type="T") or Lagrange multipliers (type="LM")
   from file `EC.options.cc.start[_lm]*"_doubles"`.
 """
-function try2start_doubles(EC::ECInfo)
+function try2start_doubles(EC::ECInfo; type="T")
   return try2start_amps(EC, "doubles"; type)
-  return []
 end
 
 """
