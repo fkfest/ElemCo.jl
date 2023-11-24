@@ -19,6 +19,7 @@ include("tensortools.jl")
 include("diis.jl")
 include("orbtools.jl")
 include("fockfactory.jl")
+include("dumptools.jl")
 include("dftools.jl")
 include("decomptools.jl")
 include("cctools.jl")
@@ -49,6 +50,7 @@ using .CCTools
 using .CoupledCluster
 using .DFCoupledCluster
 using .FciDump
+using .DumpTools
 using .MSystem
 using .BOHF
 using .DFHF
@@ -60,7 +62,7 @@ export ECdriver
 export @mainname
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @opt, @reset, @run
-export @transform_ints, @write_ints, @dfints 
+export @transform_ints, @write_ints, @dfints, @freeze_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
 
 """
@@ -448,6 +450,28 @@ macro write_ints(file="FCIDUMP", tol=-1.0)
       error("No FCIDump found.")
     end
     write_fcidump($(esc(:EC)).fd, $file, $tol)
+  end
+end
+
+"""
+    @freeze_orbs(freeze_orbs)
+
+  Freeze orbitals in the integrals according to an array or range 
+  `freeze_orbs`.
+
+  # Examples
+```julia
+fcidump = "FCIDUMP"
+@freeze_orbs 1:5
+...
+@ECinit
+@freeze_orbs [1,2,20,21]
+```
+"""
+macro freeze_orbs(freeze_orbs)
+  return quote
+    $(esc(:@tryECinit))
+    freeze_orbs_in_dump($(esc(:EC)), $(esc(freeze_orbs)))
   end
 end
 

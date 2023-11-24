@@ -8,6 +8,7 @@ EMP2_test  =  -0.069545740864
 ECCSD_test =  -0.082041632192
 EDCSD_test =  -0.082498102641
 EBODCSD_test =  -0.0852347071335213
+EBODCSDfc_test =  -0.08583428759404194
 
 fcidump = joinpath(@__DIR__,"H2O_ST1.FCIDUMP")
 
@@ -29,5 +30,8 @@ EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
 @test abs(EBOHF-EHF) < epsilon
 @test abs(EDCSD-EBODCSD_test) < epsilon
 
-
+@freeze_orbs [1]
+EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump="")
+@test abs(EBOHF-EHF) < epsilon
+@test abs(EDCSD-EBODCSDfc_test) < epsilon
 end

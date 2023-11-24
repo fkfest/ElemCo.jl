@@ -15,6 +15,7 @@ using ..ElemCo.MNPY
 
 export FDump, fd_exists, read_fcidump, write_fcidump, transform_fcidump
 export headvar, integ1, integ2, uppertriangular, uppertriangular_range
+export reorder_orbs_int2, modify_header!
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -92,6 +93,27 @@ function FDump(norb, nelec; ms2=0, isym=1, orbsym=[],
   fd.triang = triang
   fd.uhf = uhf
   return fd
+end
+
+"""
+    modify_header!(fd::FDump, norb, nelec; ms2=-1, isym=-1, orbsym=[])
+
+  Modify header of FDump object
+"""
+function modify_header!(fd::FDump, norb, nelec; ms2=-1, isym=-1, orbsym=[])
+  fd.head["NORB"] = [norb]
+  fd.head["NELEC"] = [nelec]
+  if ms2 >= 0
+    fd.head["MS2"] = [ms2]
+  end
+  if isym >= 0
+    fd.head["ISYM"] = [isym]
+  end
+  if isempty(orbsym)
+    fd.head["ORBSYM"] = ones(Int,norb)
+  else
+    fd.head["ORBSYM"] = orbsym
+  end
 end
 
 """
@@ -805,6 +827,49 @@ end
 function transform_int1(int1::AbstractArray, Tl::AbstractArray,  Tr::AbstractArray)
   @tensoropt int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
   return int1t
+end
+
+"""
+    reorder_orbs_int2(int2::AbstractArray, orbs)
+
+  Reorder orbitals in 2-e integrals according to `orbs`.
+
+  `orbs`can be a subset of orbitals or a permutation of orbitals.
+  Return `int2[orbs[p],orbs[q],orbs[r],orbs[s]]` or the triangular version.
+"""
+function reorder_orbs_int2(int2::AbstractArray, orbs)
+  norb = size(int2,1)
+  norbnew = length(orbs)
+  if orbs == 1:norb
+    return int2
+  end
+  if norbnew == 0
+    if ndims(int2) == 3
+      return zeros(0,0,0)
+    else
+      return zeros(0,0,0,0)
+    end
+  end
+  @assert maximum(orbs) <= norb && minimum(orbs) > 0 "Orbital index out of range"
+  if ndims(int2) == 3
+    # triangular
+    int2t = zeros(norbnew, norbnew, norbnew*(norbnew+1)÷2)
+    for s = 1:norbnew
+      for r = 1:s
+        ro = orbs[r]
+        so = orbs[s]
+        if ro <= so
+          int2t[:,:,uppertriangular(r,s)] = int2[orbs,orbs,uppertriangular(ro, so)]
+        else
+          int2t[:,:,uppertriangular(r,s)] = permutedims(int2[orbs,orbs,uppertriangular(so, ro)], [2,1])
+        end
+      end
+    end
+  else
+    int2t = zeros(length(orbs),length(orbs),length(orbs),length(orbs))
+    int2t = int2[orbs,orbs,orbs,orbs]
+  end
+  return int2t
 end
 
 end #module

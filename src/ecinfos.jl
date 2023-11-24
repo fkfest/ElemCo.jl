@@ -97,9 +97,11 @@ function setup_space_fd!(EC::ECInfo)
   ms2 = EC.options.wf.ms2
 
   norb = headvar(EC.fd, "NORB")
-  nelec = (nelec < 0) ? headvar(EC.fd, "NELEC") : nelec
+  nelec_from_fcidump = headvar(EC.fd, "NELEC")
+  nelec = (nelec < 0) ? nelec_from_fcidump : nelec
   nelec -= charge
-  ms2 = (ms2 < 0) ? headvar(EC.fd, "MS2") : ms2
+  ms2_default = (nelec == nelec_from_fcidump) ? headvar(EC.fd, "MS2") : mod(nelec,2)
+  ms2 = (ms2 < 0) ? ms2_default : ms2
   orbsym = convert(Vector{Int},headvar(EC.fd, "ORBSYM"))
   setup_space!(EC, norb, nelec, ms2, orbsym)
 end
@@ -120,6 +122,9 @@ function setup_space_ms!(EC::ECInfo)
   nelec -= charge
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
   orbsym = ones(Int,norb)
+  println("Number of orbitals: ", norb)
+  println("Number of electrons: ", nelec)
+  println("Spin: ", ms2)
   setup_space!(EC, norb, nelec, ms2, orbsym)
 end
 
@@ -193,55 +198,69 @@ function len_spaces(EC::ECInfo, spaces::String)
 end
 
 """
-    freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int)
+    freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
 
-  Freeze `freeze_nocc` occupied orbitals. If `freeze_nocc` is negative: guess the number of core orbitals.
+  Freeze `freeze_nocc` occupied orbitals or orbitals on the `freeze_orbs` list. 
+  If `freeze_nocc` is negative and `freeze_orbs` is empty: guess the number of core orbitals.
 
   `core` as in [`MSystem.guess_ncore`](@ref).
 """
-function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int)
-  if freeze_nocc < 0
-    freeze_nocc = guess_ncore(EC.ms, core)
+function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
+  if freeze_nocc < 0 && isempty(freeze_orbs)
+    freeze_orbs = 1:guess_ncore(EC.ms, core)
+  elseif freeze_nocc >= 0 && isempty(freeze_orbs)
+    freeze_orbs = 1:freeze_nocc
+  elseif freeze_nocc >= 0 && !isempty(freeze_orbs)
+    error("Cannot specify both freeze_nocc and freeze_orbs in freeze_core!.")
   end
-  freeze_nocc!(EC, freeze_nocc)
-  return freeze_nocc
+  freeze_nocc!(EC, freeze_orbs)
+  return length(freeze_orbs)
 end
 
 """
-    freeze_nocc!(EC::ECInfo, nfreeze::Int)
+    freeze_nocc!(EC::ECInfo, freeze)
 
-  Freeze `nfreeze` occupied orbitals.
+  Freeze occupied orbitals from the `freeze` list.
 """
-function freeze_nocc!(EC::ECInfo, nfreeze::Int)
-  if nfreeze > n_occ_orbs(EC) || nfreeze > n_occb_orbs(EC) 
+function freeze_nocc!(EC::ECInfo, freeze)
+  nfreeze = length(freeze)
+  if nfreeze != length(intersect(EC.space['o'],freeze)) || nfreeze != length(intersect(EC.space['O'],freeze)) 
     error("Cannot freeze more occupied orbitals than there are.")
   end
-  if nfreeze <= 0
+  if isempty(freeze)
     return 0
   end
   println("Freezing ", nfreeze, " occupied orbitals")
   println()
-  EC.space['o'] = EC.space['o'][nfreeze+1:end]
-  EC.space['O'] = EC.space['O'][nfreeze+1:end]
+  setdiff!(EC.space['o'], freeze)
+  setdiff!(EC.space['O'], freeze)
   return nfreeze
 end
 
 """
-    freeze_nvirt!(EC::ECInfo, nfreeze::Int)
+    freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[])
 
-  Freeze `nfreeze` virtual orbitals.
+  Freeze `nfreeze` virtual orbitals or orbitals on the `freeze_orbs` list.
 """
-function freeze_nvirt!(EC::ECInfo, nfreeze::Int)
-  if nfreeze > n_virt_orbs(EC) || nfreeze > n_virtb_orbs(EC) 
+function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[])
+  if nfreeze > 0 
+    if isempty(freeze_orbs)
+      freeze_orbs = 1:nfreeze
+    else
+      error("Cannot specify both nfreeze and freeze_orbs in freeze_nvirt!.")
+    end
+  end
+  nfreeze = length(freeze_orbs)
+  if nfreeze != length(intersect(EC.space['v'],freeze_orbs)) || nfreeze != length(intersect(EC.space['V'],freeze_orbs)) 
     error("Cannot freeze more virtual orbitals than there are.")
   end
-  if nfreeze <= 0
+  if isempty(freeze_orbs)
     return 0
   end
   println("Freezing ", nfreeze, " virtual orbitals")
   println()
-  EC.space['v'] = EC.space['v'][1:end-nfreeze]
-  EC.space['V'] = EC.space['V'][1:end-nfreeze]
+  setdiff!(EC.space['v'], freeze_orbs)
+  setdiff!(EC.space['V'], freeze_orbs)
   return nfreeze
 end
 

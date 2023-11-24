@@ -31,6 +31,7 @@ makedocs(
       "dftools.md",
       "diis.md",
       "dump.md",
+      "dumptools.md",
       "ecinfos.md",
       "ecmethod.md",
       "fockfactory.md",
