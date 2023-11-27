@@ -97,13 +97,19 @@ and rearranging the elements.
 The order of the elements in g[r,k] is (active|virtual) × (closed-shell|active) 
 """
 function calc_g(A::Matrix, EC::ECInfo)
+  @tensoropt g[r,s] := A[r,s] - A[s,r]
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2)
-  @tensoropt g[r,s] := A[r,s] - A[s,r]
   occv = setdiff(1:size(A,1), EC.space['o']) # to be modified
-  grk = g[[occ1o;occv],[occ2;occ1o]] # to be modified
-  grk = reshape(grk, size(grk,1) * size(grk,2))
-  return grk
+  n_1o = size(occ1o, 1)
+  n_2 = size(occ2,1)
+  n_v = size(occv,1)
+  g21 =reshape(g[occ1o,occ2], n_1o * n_2)
+  g31 =reshape(g[occv,occ2], n_v * n_2)
+  g22 =reshape(g[occ1o,occ1o], n_1o * n_1o)
+  g32 =reshape(g[occv,occ1o], n_v * n_1o)
+  g_blockwise = [g21;g31;g22;g32]
+  return g_blockwise
 end
 
 """
@@ -506,7 +512,7 @@ function davidson(H::Matrix, v::Vector, N::Integer, n_max::Integer, thres::Numbe
   n22 = n_1o * n_1o
   n32 = n_v * n_1o
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
-
+  
   numInitialVectors = 0
 
   # random initial guess
@@ -535,23 +541,18 @@ function davidson(H::Matrix, v::Vector, N::Integer, n_max::Integer, thres::Numbe
     newh = V' * newσ
 
     # for h_block temporarily
-    v21 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[1:n_1o,1:n_2], n_1o * n_2)
-    v31 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[n_1o+1:end,1:n_2], n_v * n_2)
-    v22 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[1:n_1o,n_2+1:end], n_1o * n_1o)
-    v32 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[n_1o+1:end,n_2+1:end], n_v * n_1o)
-
-    g21 =reshape(reshape(g,n_1o+n_v,n_2+n_1o)[1:n_1o,1:n_2], n_1o * n_2)
-    g31 =reshape(reshape(g,n_1o+n_v,n_2+n_1o)[n_1o+1:end,1:n_2], n_v * n_2)
-    g22 =reshape(reshape(g,n_1o+n_v,n_2+n_1o)[1:n_1o,n_2+1:end], n_1o * n_1o)
-    g32 =reshape(reshape(g,n_1o+n_v,n_2+n_1o)[n_1o+1:end,n_2+1:end], n_v * n_1o)
+    # v21 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[1:n_1o,1:n_2], n_1o * n_2)
+    # v31 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[n_1o+1:end,1:n_2], n_v * n_2)
+    # v22 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[1:n_1o,n_2+1:end], n_1o * n_1o)
+    # v32 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[n_1o+1:end,n_2+1:end], n_v * n_1o)
 
 
 
-    # # h_block
-    # v21 = v[2:n21+1] 
-    # v31 = v[n21+2:n21+n31+1]
-    # v22 = v[n21+n31+2:n21+n31+n22+1]
-    # v32 = v[n21+n31+n22+2:end]
+    # h_block
+    v21 = v[2:n21+1] 
+    v31 = v[n21+2:n21+n31+1]
+    v22 = v[n21+n31+2:n21+n31+n22+1]
+    v32 = v[n21+n31+n22+2:end]
 
     @tensoropt newσ_1[n] := h_2121[n,m] * v21[m]
     @tensoropt newσ_1[n] += h_3121[m,n] * v31[m]
@@ -573,16 +574,17 @@ function davidson(H::Matrix, v::Vector, N::Integer, n_max::Integer, thres::Numbe
     @tensoropt newσ_4[n] += h_3222[n,m] * v22[m]
     @tensoropt newσ_4[n] += h_3232[n,m] * v32[m]
 
-    # newσ_hb = [[g'*v[2:end].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
-    newσ_hb = [[([g21;g31;g22;g32])'*[v21;v31;v22;v32].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
+    newσ_hb = [[g'*v[2:end].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
+    # newσ_hb = [[([g21;g31;g22;g32])'*[v21;v31;v22;v32].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
     H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
-    newσ_hb[2:end] .+= [g21;g31;g22;g32] .* v[1] .*λ0
-    # σ[:,i-1] = newσ_hb
+    # newσ_hb[2:end] .+= [g21;g31;g22;g32] .* v[1] .*λ0
+    newσ_hb[2:end] .+= g .* v[1] .*λ0
+    σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
 
 
-    println("new_sigma: ",  norm(newσ)-norm(newσ_hb))
-    println(norm(sort(newσ) .- sort(newσ_hb)))
+    # println("new_sigma: ",  norm(newσ)-norm(newσ_hb))
+    # println(norm(sort(newσ) .- sort(newσ_hb)))
     # println("σ[1]: ", newσ[1], newσ_hb[1])
     # println("σ[2]: ", newσ[2], newσ_hb[2])
     # println("σ[3]: ", newσ[3], newσ_hb[3])
@@ -590,8 +592,8 @@ function davidson(H::Matrix, v::Vector, N::Integer, n_max::Integer, thres::Numbe
     # println("σ[5]: ", newσ[5], newσ_hb[5])
     # println("new_sigma: ", norm([newσ_1;newσ_2;newσ_3;newσ_4])- norm(H[2:end,2:end]*v[2:end]))
 
-    h[:,i-1] = newh
-    h[i-1,:] = newh
+    h[:,i-1] = newh_hb
+    h[i-1,:] = newh_hb
     λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
     if convTrack && i > pick_vec
       eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
@@ -603,7 +605,7 @@ function davidson(H::Matrix, v::Vector, N::Integer, n_max::Integer, thres::Numbe
       println("Davidson iter ", i, " converged!")
       break
     end
-    v = -1.0 ./ (H0 .- λ[eigvec_index]) .* r
+    v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
     c = transpose(v) * V
     v = v - V * transpose(c)
     v = v./norm(v)
@@ -693,15 +695,15 @@ function calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
   n_v = size(occv,1)
 
   R = zeros(N_MO,N_MO)
-  R_sub = reshape(x, N_MO-size(occ2,1), size(occ1o,1)+size(occ2,1))
-  R[[occ1o;occv],[occ2;occ1o]] = R_sub
-  R[[occ2;occ1o],[occ1o;occv]] = -1.0 .* transpose(R_sub)
+  # R_sub = reshape(x, N_MO-size(occ2,1), size(occ1o,1)+size(occ2,1))
+  # R[[occ1o;occv],[occ2;occ1o]] = R_sub
+  # R[[occ2;occ1o],[occ1o;occv]] = -1.0 .* transpose(R_sub)
 
-  # R[occ1o,occ2] = reshape(x[1:n_1o*n_2], n_1o, n_2)
-  # R[occv,occ2] = reshape(x[n_1o*n_2+1:n_1o*n_2+n_v*n_2], n_v, n_2)
-  # R[occ1o,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+1:n_1o*n_2+n_v*n_2+n_1o*n_1o], n_1o, n_1o)
-  # R[occv,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+n_1o*n_1o+1:end], n_v, n_1o)
-  # R = R-R'
+  R[occ1o,occ2] = reshape(x[1:n_1o*n_2], n_1o, n_2)
+  R[occv,occ2] = reshape(x[n_1o*n_2+1:n_1o*n_2+n_v*n_2], n_v, n_2)
+  R[occ1o,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+1:n_1o*n_2+n_v*n_2+n_1o*n_1o], n_1o, n_1o)
+  R[occv,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+n_1o*n_1o+1:end], n_v, n_1o)
+  R = R-R'
 
   U = 1.0 * Matrix(I,N_MO,N_MO) + R
   U = U + 1/2 .* R*R + 1/6 .* R*R*R
@@ -808,6 +810,42 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
 
       # calc 2nd order perturbation energy
       E_2o = sum(g .* x) + 0.5*(transpose(x) * h * x)
+
+      h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
+      # h_block
+
+      n21 = n_1o * n_2
+      n31 = n_v * n_2
+      n22 = n_1o * n_1o
+
+      x21 = x[1:n21] 
+      x31 = x[n21+1:n21+n31]
+      x22 = x[n21+n31+1:n21+n31+n22]
+      x32 = x[n21+n31+n22+1:end]
+
+      @tensoropt newσ_1[n] := h_2121[n,m] * x21[m]
+      @tensoropt newσ_1[n] += h_3121[m,n] * x31[m]
+      @tensoropt newσ_1[n] += h_2221[m,n] * x22[m]
+      @tensoropt newσ_1[n] += h_3221[m,n] * x32[m]
+
+      @tensoropt newσ_2[n] := h_3121[n,m] * x21[m]
+      @tensoropt newσ_2[n] += h_3131[n,m] * x31[m]
+      @tensoropt newσ_2[n] += h_2231[m,n] * x22[m]
+      @tensoropt newσ_2[n] += h_3231[m,n] * x32[m]
+
+      @tensoropt newσ_3[n] := h_2221[n,m] * x21[m]
+      @tensoropt newσ_3[n] += h_2231[n,m] * x31[m]
+      @tensoropt newσ_3[n] += h_2222[n,m] * x22[m]
+      @tensoropt newσ_3[n] += h_3222[m,n] * x32[m]
+
+      @tensoropt newσ_4[n] := h_3221[n,m] * x21[m]
+      @tensoropt newσ_4[n] += h_3231[n,m] * x31[m]
+      @tensoropt newσ_4[n] += h_3222[n,m] * x22[m]
+      @tensoropt newσ_4[n] += h_3232[n,m] * x32[m]
+
+      E_2o = sum(g .* x) + 0.5*(transpose(x) * [newσ_1;newσ_2;newσ_3;newσ_4])
+
+
       #println("2nd order perturbation energy difference: ", E_2o)
       
       # calc rotation matrix U
