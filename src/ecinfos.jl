@@ -205,8 +205,8 @@ function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=
   if occa == occb
     println("Occupied orbitals:", occa)
   else
-    println("Occupied α orbitals:", occa)
-    println("Occupied β orbitals:", occb)
+    # println("Occupied α orbitals:", occa)
+    # println("Occupied β orbitals:", occb)
   end
   return occa, virta, occb, virtb
 end
