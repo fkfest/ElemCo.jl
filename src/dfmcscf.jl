@@ -77,7 +77,7 @@ function dfACAS(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   occ1o = setdiff(EC.space['o'],occ2)
   CMO2 = cMO[:,occ2]
   CMOa = cMO[:,occ1o] # to be modified
-  @timeit "loadμuL" μuL = load(EC,"muaL")
+  μuL = load(EC,"muaL")
   # Apj
   @tensoropt Apj[p,j] := 2 * (fock[μ,ν] * CMO2[ν,j]) * cMO[μ,p]
   # Apu
@@ -363,18 +363,16 @@ function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockCl
   h_3232 .= h_3232 .* 2.0
   @tensoropt h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
 
-  @timeit "reshape" begin
-    h_2121 = reshape(h_2121, num_MO[2]*num_MO[1], num_MO[2]*num_MO[1])
-    h_3121 = reshape(h_3121, num_MO[3]*num_MO[1], num_MO[2]*num_MO[1])
-    h_3131 = reshape(h_3131, num_MO[3]*num_MO[1], num_MO[3]*num_MO[1])
-    h_2221 = reshape(h_2221, num_MO[2]*num_MO[2], num_MO[2]*num_MO[1])
-    h_2231 = reshape(h_2231, num_MO[2]*num_MO[2], num_MO[3]*num_MO[1])
-    h_2222 = reshape(h_2222, num_MO[2]*num_MO[2], num_MO[2]*num_MO[2])
-    h_3221 = reshape(h_3221, num_MO[3]*num_MO[2], num_MO[2]*num_MO[1])
-    h_3231 = reshape(h_3231, num_MO[3]*num_MO[2], num_MO[3]*num_MO[1])
-    h_3222 = reshape(h_3222, num_MO[3]*num_MO[2], num_MO[2]*num_MO[2])
-    h_3232 = reshape(h_3232, num_MO[3]*num_MO[2], num_MO[3]*num_MO[2])
-  end
+  h_2121 = reshape(h_2121, num_MO[2]*num_MO[1], num_MO[2]*num_MO[1])
+  h_3121 = reshape(h_3121, num_MO[3]*num_MO[1], num_MO[2]*num_MO[1])
+  h_3131 = reshape(h_3131, num_MO[3]*num_MO[1], num_MO[3]*num_MO[1])
+  h_2221 = reshape(h_2221, num_MO[2]*num_MO[2], num_MO[2]*num_MO[1])
+  h_2231 = reshape(h_2231, num_MO[2]*num_MO[2], num_MO[3]*num_MO[1])
+  h_2222 = reshape(h_2222, num_MO[2]*num_MO[2], num_MO[2]*num_MO[2])
+  h_3221 = reshape(h_3221, num_MO[3]*num_MO[2], num_MO[2]*num_MO[1])
+  h_3231 = reshape(h_3231, num_MO[3]*num_MO[2], num_MO[3]*num_MO[1])
+  h_3222 = reshape(h_3222, num_MO[3]*num_MO[2], num_MO[2]*num_MO[2])
+  h_3232 = reshape(h_3232, num_MO[3]*num_MO[2], num_MO[3]*num_MO[2])
   return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 end
 
@@ -494,36 +492,33 @@ n_max is the maximal size of projected matrix,
 thres is the criterion of convergence, 
 convTrack is to decide whether the tracking of eigenvectors is used
 """
-function davidson(H::Matrix, v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
+function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
   h_block::NTuple{10, Matrix{Float64}}, g::Vector, λ0::Number, convTrack::Bool=false,)
-  # return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
-  V = zeros(N,n_max)
-  σ = zeros(N,n_max)
-  h = zeros(n_max,n_max)
-  ac = zeros(n_max)
-  H0 = diag(H)
-  λ = zeros(n_max)
-  eigvec_index = 1
-  pick_vec = 1
-  converged = false
-  n_2, n_1o, n_v = num_MO
-  n21 = n_1o * n_2
-  n31 = n_v * n_2
-  n22 = n_1o * n_1o
-  n32 = n_v * n_1o
-  h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
-  
-  numInitialVectors = 0
+  @timeit "davidson partI" begin
+    V = zeros(N,n_max)
+    σ = zeros(N,n_max)
+    h = zeros(n_max,n_max)
+    ac = zeros(n_max)
+    λ = zeros(n_max)
+    eigvec_index = 1
+    pick_vec = 1
+    converged = false
+    n_2, n_1o, n_v = num_MO
+    n21 = n_1o * n_2
+    n31 = n_v * n_2
+    n22 = n_1o * n_1o
+    n32 = n_v * n_1o
+    h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
 
-  # random initial guess
-  # v = rand(size(v,1))
-  # numInitialVectors = 1
+    # random initial guess
+    # v = rand(size(v,1))
+    # numInitialVectors = 1
 
-  # inherit a initial vector from last Davidson procedure
-  v = v ./ norm(v)
-
-  numInitialVectors = 1
-  V[:,1] = v
+    # inherit a initial vector from last Davidson procedure
+    v = v ./ norm(v)
+    numInitialVectors = 1
+    V[:,1] = v
+  end
 
   # a special set of initial vectors guess
   # V[1,1] = 1.0
@@ -533,88 +528,58 @@ function davidson(H::Matrix, v::Vector, N::Integer, n_max::Integer, thres::Numbe
   # V[21,3] = 1.0
   # v = V[:,3]
   # numInitialVectors = 3
-   
-  for i in numInitialVectors+1:n_max
-    # H
-    newσ = H * v
-    σ[:,i-1] = newσ
-    newh = V' * newσ
-
-    # for h_block temporarily
-    # v21 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[1:n_1o,1:n_2], n_1o * n_2)
-    # v31 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[n_1o+1:end,1:n_2], n_v * n_2)
-    # v22 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[1:n_1o,n_2+1:end], n_1o * n_1o)
-    # v32 =reshape(reshape(v[2:end],n_1o+n_v,n_2+n_1o)[n_1o+1:end,n_2+1:end], n_v * n_1o)
-
-
-
-    # h_block
-    v21 = v[2:n21+1] 
-    v31 = v[n21+2:n21+n31+1]
-    v22 = v[n21+n31+2:n21+n31+n22+1]
-    v32 = v[n21+n31+n22+2:end]
-
-    @tensoropt newσ_1[n] := h_2121[n,m] * v21[m]
-    @tensoropt newσ_1[n] += h_3121[m,n] * v31[m]
-    @tensoropt newσ_1[n] += h_2221[m,n] * v22[m]
-    @tensoropt newσ_1[n] += h_3221[m,n] * v32[m]
-
-    @tensoropt newσ_2[n] := h_3121[n,m] * v21[m]
-    @tensoropt newσ_2[n] += h_3131[n,m] * v31[m]
-    @tensoropt newσ_2[n] += h_2231[m,n] * v22[m]
-    @tensoropt newσ_2[n] += h_3231[m,n] * v32[m]
-
-    @tensoropt newσ_3[n] := h_2221[n,m] * v21[m]
-    @tensoropt newσ_3[n] += h_2231[n,m] * v31[m]
-    @tensoropt newσ_3[n] += h_2222[n,m] * v22[m]
-    @tensoropt newσ_3[n] += h_3222[m,n] * v32[m]
-
-    @tensoropt newσ_4[n] := h_3221[n,m] * v21[m]
-    @tensoropt newσ_4[n] += h_3231[n,m] * v31[m]
-    @tensoropt newσ_4[n] += h_3222[n,m] * v22[m]
-    @tensoropt newσ_4[n] += h_3232[n,m] * v32[m]
-
-    newσ_hb = [[g'*v[2:end].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
-    # newσ_hb = [[([g21;g31;g22;g32])'*[v21;v31;v22;v32].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
-    H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
-    # newσ_hb[2:end] .+= [g21;g31;g22;g32] .* v[1] .*λ0
-    newσ_hb[2:end] .+= g .* v[1] .*λ0
-    σ[:,i-1] = newσ_hb
-    newh_hb = V' * newσ_hb
-
-
-    # println("new_sigma: ",  norm(newσ)-norm(newσ_hb))
-    # println(norm(sort(newσ) .- sort(newσ_hb)))
-    # println("σ[1]: ", newσ[1], newσ_hb[1])
-    # println("σ[2]: ", newσ[2], newσ_hb[2])
-    # println("σ[3]: ", newσ[3], newσ_hb[3])
-    # println("σ[4]: ", newσ[4], newσ_hb[4])
-    # println("σ[5]: ", newσ[5], newσ_hb[5])
-    # println("new_sigma: ", norm([newσ_1;newσ_2;newσ_3;newσ_4])- norm(H[2:end,2:end]*v[2:end]))
-
-    h[:,i-1] = newh_hb
-    h[i-1,:] = newh_hb
-    λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
-    if convTrack && i > pick_vec
-      eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
+  @timeit "davidson partII" begin
+    for i in numInitialVectors+1:n_max
+      # blockwise H * v
+      v21 = v[2:n21+1] 
+      v31 = v[n21+2:n21+n31+1]
+      v22 = v[n21+n31+2:n21+n31+n22+1]
+      v32 = v[n21+n31+n22+2:end]
+      @tensoropt newσ_1[n] := h_2121[n,m] * v21[m]
+      @tensoropt newσ_1[n] += h_3121[m,n] * v31[m]
+      @tensoropt newσ_1[n] += h_2221[m,n] * v22[m]
+      @tensoropt newσ_1[n] += h_3221[m,n] * v32[m]
+      @tensoropt newσ_2[n] := h_3121[n,m] * v21[m]
+      @tensoropt newσ_2[n] += h_3131[n,m] * v31[m]
+      @tensoropt newσ_2[n] += h_2231[m,n] * v22[m]
+      @tensoropt newσ_2[n] += h_3231[m,n] * v32[m]
+      @tensoropt newσ_3[n] := h_2221[n,m] * v21[m]
+      @tensoropt newσ_3[n] += h_2231[n,m] * v31[m]
+      @tensoropt newσ_3[n] += h_2222[n,m] * v22[m]
+      @tensoropt newσ_3[n] += h_3222[m,n] * v32[m]
+      @tensoropt newσ_4[n] := h_3221[n,m] * v21[m]
+      @tensoropt newσ_4[n] += h_3231[n,m] * v31[m]
+      @tensoropt newσ_4[n] += h_3222[n,m] * v22[m]
+      @tensoropt newσ_4[n] += h_3232[n,m] * v32[m]
+      newσ_hb = [[g'*v[2:end].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
+      H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
+      newσ_hb[2:end] .+= g .* v[1] .*λ0
+      σ[:,i-1] = newσ_hb
+      newh_hb = V' * newσ_hb
+      h[:,i-1] = newh_hb
+      h[i-1,:] = newh_hb
+      λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
+      if convTrack && i > pick_vec
+        eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
+      end
+      ac[1:i-1] = a[:,eigvec_index]
+      r = σ * ac - λ[eigvec_index] * (V * ac)
+      if norm(r) < thres
+        converged = true
+        println("Davidson iter ", i, " converged!")
+        break
+      end
+      v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
+      c = transpose(v) * V
+      v = v - V * transpose(c)
+      v = v./norm(v)
+      V[:,i] = v
     end
-    ac[1:i-1] = a[:,eigvec_index]
-    r = σ * ac - λ[eigvec_index] * (V * ac)
-    if norm(r) < thres
-      converged = true
-      println("Davidson iter ", i, " converged!")
-      break
+    if !converged
+      println("davidson algorithm not converged!")
     end
-    v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
-    c = transpose(v) * V
-    v = v - V * transpose(c)
-    v = v./norm(v)
-    V[:,i] = v
+    v = V * ac
   end
-  if !converged
-    println("davidson algorithm not converged!")
-  end
-  v = V * ac
   return λ[eigvec_index], v, converged
 end
 
@@ -625,41 +590,30 @@ Find the rotation parameters as the vector x in trust region,
 tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
-function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
+function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
   h_block::NTuple{10, Matrix{Float64}})
-  x = zeros(size(h,1))
+  N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
+  x = zeros(N_rk)
   λl = 1.0
   λr = λmax
   micro_converged = false
-  N_rk = size(h,1)
-  davItMax = 100 # for davidson eigenvalue solving algorithm
+  davItMax = 200 # for davidson eigenvalue solving algorithm
   davError = 1e-7
   γ =  0.1 # gradient scaling factor for micro-iteration accuracy
   davError = γ * norm(g)
-  #vec = rand(N_rk+1)
-  #vec = vec ./ norm(vec)
   # λ tuning loop (micro loop)
   for it=1:maxit
-    # calc x
-    W = zeros(N_rk+1, N_rk+1) # workng matrix W
-    W[1, 2:N_rk+1] = g .* λ
-    W[2:N_rk+1, 1] = g .* λ
-    W[2:N_rk+1,2:N_rk+1] = h
-    W = Matrix(Hermitian(W))
-    if N_rk < 6
-      vals, vecs = eigen(W)
-      vec = vecs[:,1]
-    else
-      val, vec, converged = davidson(W, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ)
-      while !converged
-        davItMax += 50
-        println("Davidson max iteration number increased to ", davItMax)
-        val, vec, converged = davidson(W, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ)
-      end
+    @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ)
+    while !converged
+      davItMax += 50
+      println("Davidson max iteration number increased to ", davItMax)
+      @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ)
     end
     x = vec[2:end] ./ (vec[1]*λ)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
     sumx2 = (1/vec[1]^2 - 1) / λ^2
+    sumx2 = sum(x.^2)
+    println("λl, λr: ", λl, " ", λr)
     if sumx2 > trust
       λl = λ
     elseif sumx2 < 0.8*trust
@@ -672,7 +626,8 @@ function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::M
       micro_converged = true
       break
     end
-    λ = (λl + λr) / 2
+    λ = (λl + λr) / 2.0
+    println("λ = ", λ)
   end
   if !micro_converged
     println("micro NOT converged")
@@ -693,18 +648,12 @@ function calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
   n_2 = size(occ2,1)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
-
   R = zeros(N_MO,N_MO)
-  # R_sub = reshape(x, N_MO-size(occ2,1), size(occ1o,1)+size(occ2,1))
-  # R[[occ1o;occv],[occ2;occ1o]] = R_sub
-  # R[[occ2;occ1o],[occ1o;occv]] = -1.0 .* transpose(R_sub)
-
   R[occ1o,occ2] = reshape(x[1:n_1o*n_2], n_1o, n_2)
   R[occv,occ2] = reshape(x[n_1o*n_2+1:n_1o*n_2+n_v*n_2], n_v, n_2)
   R[occ1o,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+1:n_1o*n_2+n_v*n_2+n_1o*n_1o], n_1o, n_1o)
   R[occv,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+n_1o*n_1o+1:end], n_v, n_1o)
   R = R-R'
-
   U = 1.0 * Matrix(I,N_MO,N_MO) + R
   U = U + 1/2 .* R*R + 1/6 .* R*R*R
   return U
@@ -720,6 +669,7 @@ Return reject::Bool and trust.
 function checkE_modifyTrust(E, E_former, E_2o, trust)
   energy_diff = E - E_former
   energy_quotient = energy_diff / E_2o
+  println("energy_quotient: ", energy_quotient)
   # modify the trust region
   reject = false
   if energy_quotient < 0.0
@@ -740,11 +690,10 @@ end
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
 function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
-
   Enuc = generate_integrals(EC; save3idx=!direct)
+  println("Enuc ", Enuc)
   sao = load(EC,"sao")
   nAO = size(sao,2) # number of atomic orbitals
-
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
   occv = setdiff(1:nAO, EC.space['o']) # to be modified
@@ -752,7 +701,6 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
   num_MO = [n_2,n_1o,n_v]
-
   N_rk = (n_1o+n_v) * (n_2+n_1o)
   vec = rand(N_rk+1)
   vec = vec ./ norm(vec)
@@ -761,42 +709,62 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
     error("NO ACTIVE ORBITALS, PLEASE USE DFHF")
   end
 
-  # prev_cMO = zeros(size(cMO))
-  # U = zeros(size(cMO))
-  # smo = zeros(size(cMO))
-  # h = zeros(N_rk,N_rk)
-
   # cMO and density matrices initialization
   cMO = guess_orb(EC,guess)
   D1, D2 = denMatCreate(EC)
 
-  # calc initial energy
-  fock, fockClosed = dffockCAS(EC,cMO,D1)
-  E0 = calc_realE(EC, fockClosed, D1, D2, cMO)
-  println("Enuc ", Enuc)
-  println("Initial energy: ", E0+Enuc)
-
   # macro loop parameters
-  iteration_times = 1
+  iteration_times = 0
   g = [1]
-  E_former = E0
+  E_former = 0.0
   trust = 0.4
   λ = 500.0
 
+  fock = zeros(nAO,nAO)
+  fockClosed = zeros(nAO,nAO)
+  prev_fock = zeros(nAO,nAO)
+  prev_fockClosed = zeros(nAO,nAO)
+  prev_cMO = deepcopy(cMO)
+  E_2o = 0.0
+  E = 0.0
+
   @timeit "iterations" begin
     # macro loop, g and h updated
-    while norm(g) > 2e-6 && iteration_times < IterMax
+    while iteration_times < IterMax
 
+      # calc energy E with updated cMO
+      prev_fock = deepcopy(fock)
+      prev_fockClosed = deepcopy(fockClosed)
+      @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
+      @timeit "E calc" E = calc_realE(EC, fockClosed, D1, D2, cMO)
+      println("Iter ", iteration_times, " energy: ", E+Enuc)
+
+      # check if reject the update and tune trust
+      if iteration_times > 0
+        reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
+        println("trust: ", trust)
+        if reject
+          cMO = prev_cMO
+          fock = prev_fock
+          fockClosed = prev_fockClosed
+          E = E_former
+          iteration_times -= 1
+          inherit_large = false
+        end
+      end
+      iteration_times += 1
+      E_former = E
       # calc g and h with updated cMO
-      fock, fockClosed = dffockCAS(EC,cMO,D1)
       @timeit "A calc" A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
       @timeit "g calc" g = calc_g(A, EC)
-      @timeit "h calc" h = calc_h(EC, cMO, D1, D2, fock, fockClosed, A)
+      println("norm of g: ", norm(g))
+      if norm(g) < 2e-6 
+        break
+      end
       @timeit "h calc new" h_block = calc_h_SO(EC, cMO, D1, D2, fock, fockClosed, A)
       # h = calc_h_SCI(EC, cMO, fock, D1, D2, h_SO)
       # h = calc_h_combined(EC, cMO, fock, D1, D2, h_SO)
-      println("norm of g: ", norm(g))
-      
+
       # λ tuning loop (micro loop)
       λmax = 1000.0
       maxit = 100
@@ -805,48 +773,38 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
         vec = vec./norm(vec)
         inherit_large == true
       end
-      λ, x, vec = λTuning(trust, maxit, λmax, λ, h, g, vec, num_MO, h_block)
-      #println("square of the norm of x: ", sum(x.^2))
-
-      # calc 2nd order perturbation energy
-      E_2o = sum(g .* x) + 0.5*(transpose(x) * h * x)
-
-      h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
-      # h_block
-
-      n21 = n_1o * n_2
-      n31 = n_v * n_2
-      n22 = n_1o * n_1o
-
-      x21 = x[1:n21] 
-      x31 = x[n21+1:n21+n31]
-      x22 = x[n21+n31+1:n21+n31+n22]
-      x32 = x[n21+n31+n22+1:end]
-
-      @tensoropt newσ_1[n] := h_2121[n,m] * x21[m]
-      @tensoropt newσ_1[n] += h_3121[m,n] * x31[m]
-      @tensoropt newσ_1[n] += h_2221[m,n] * x22[m]
-      @tensoropt newσ_1[n] += h_3221[m,n] * x32[m]
-
-      @tensoropt newσ_2[n] := h_3121[n,m] * x21[m]
-      @tensoropt newσ_2[n] += h_3131[n,m] * x31[m]
-      @tensoropt newσ_2[n] += h_2231[m,n] * x22[m]
-      @tensoropt newσ_2[n] += h_3231[m,n] * x32[m]
-
-      @tensoropt newσ_3[n] := h_2221[n,m] * x21[m]
-      @tensoropt newσ_3[n] += h_2231[n,m] * x31[m]
-      @tensoropt newσ_3[n] += h_2222[n,m] * x22[m]
-      @tensoropt newσ_3[n] += h_3222[m,n] * x32[m]
-
-      @tensoropt newσ_4[n] := h_3221[n,m] * x21[m]
-      @tensoropt newσ_4[n] += h_3231[n,m] * x31[m]
-      @tensoropt newσ_4[n] += h_3222[n,m] * x22[m]
-      @tensoropt newσ_4[n] += h_3232[n,m] * x32[m]
-
-      E_2o = sum(g .* x) + 0.5*(transpose(x) * [newσ_1;newσ_2;newσ_3;newσ_4])
-
-
-      #println("2nd order perturbation energy difference: ", E_2o)
+      @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block)
+      println("square of the norm of x: ", sum(x.^2))
+      
+      @timeit "calc 2nd E" begin
+        # calc 2nd order perturbation energy
+        h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
+        n21 = n_1o * n_2
+        n31 = n_v * n_2
+        n22 = n_1o * n_1o
+        x21 = x[1:n21] 
+        x31 = x[n21+1:n21+n31]
+        x22 = x[n21+n31+1:n21+n31+n22]
+        x32 = x[n21+n31+n22+1:end]
+        @tensoropt newσ_1[n] := h_2121[n,m] * x21[m]
+        @tensoropt newσ_1[n] += h_3121[m,n] * x31[m]
+        @tensoropt newσ_1[n] += h_2221[m,n] * x22[m]
+        @tensoropt newσ_1[n] += h_3221[m,n] * x32[m]
+        @tensoropt newσ_2[n] := h_3121[n,m] * x21[m]
+        @tensoropt newσ_2[n] += h_3131[n,m] * x31[m]
+        @tensoropt newσ_2[n] += h_2231[m,n] * x22[m]
+        @tensoropt newσ_2[n] += h_3231[m,n] * x32[m]
+        @tensoropt newσ_3[n] := h_2221[n,m] * x21[m]
+        @tensoropt newσ_3[n] += h_2231[n,m] * x31[m]
+        @tensoropt newσ_3[n] += h_2222[n,m] * x22[m]
+        @tensoropt newσ_3[n] += h_3222[m,n] * x32[m]
+        @tensoropt newσ_4[n] := h_3221[n,m] * x21[m]
+        @tensoropt newσ_4[n] += h_3231[n,m] * x31[m]
+        @tensoropt newσ_4[n] += h_3222[n,m] * x22[m]
+        @tensoropt newσ_4[n] += h_3232[n,m] * x32[m]
+        E_2o = sum(g .* x) + 0.5*(transpose(x) * [newσ_1;newσ_2;newσ_3;newσ_4])
+        #println("2nd order perturbation energy difference: ", E_2o)
+      end
       
       # calc rotation matrix U
       U = calc_U(EC, nAO, x)
@@ -859,23 +817,6 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
       # reorthogonalize molecular orbitals
       smo = cMO' * sao * cMO
       cMO = cMO * Hermitian(smo)^(-1/2)
-
-      # calc energy E with updated cMO
-      @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
-      @timeit "E calc" E = calc_realE(EC, fockClosed, D1, D2, cMO)
-      println("Iter ", iteration_times, " energy: ", E+Enuc)
-
-      # check if reject the update and tune trust
-      reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
-      if reject
-        cMO = prev_cMO
-        E = E_former
-        iteration_times -= 1
-        inherit_large = false
-      end
-
-      iteration_times += 1
-      E_former = E
     end
   end
 
