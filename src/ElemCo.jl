@@ -616,6 +616,8 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-", no
       if ecmethod.theory == "MP"
         continue
       end
+    else
+      EMp2 = 0.0
     end
 
     if ecmethod.exclevel[4] != :none
