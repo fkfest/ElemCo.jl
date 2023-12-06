@@ -563,9 +563,8 @@ end
   The occupied α orbitals are given by `occa::String` (default: "-").
   The occupied β orbitals are given by `occb::String` (default: "-").
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
-  With nomp2=1 the MP2 calculation will be skipped and no MP2 amplitudes will be used as starting guess in a subsequent CC calculation.
 """
-function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-", nomp2=0)
+function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()
   method_names = split(methods)
   if occa != "-"
@@ -603,7 +602,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-", no
     end
     # at the moment we always calculate MP2 first
     # calculate MP2
-    if nomp2 != 1
+    if EC.options.cc.nomp2 != 1
       if closed_shell_method
         EMp2 = calc_MP2(EC)
       else

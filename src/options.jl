@@ -121,6 +121,8 @@ Base.@kwdef mutable struct CcOptions
   """`⟨"cc_multipliers"⟩` main part of filename to save Lagrange multipliers.
       For example, the singles Lagrange multipliers are saved to `save_lm*"_singles"` """
   save_lm::String = "cc_multipliers"
+  """`⟨0⟩` Don't use MP2 amplitudes as starting guess for the CC amplitudes """
+  nomp2::Int = 0
 end
 
 """
