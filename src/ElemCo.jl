@@ -602,17 +602,21 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     end
     # at the moment we always calculate MP2 first
     # calculate MP2
-    if closed_shell_method
-      EMp2 = calc_MP2(EC)
+    if EC.options.cc.nomp2 != 1
+      if closed_shell_method
+        EMp2 = calc_MP2(EC)
+      else
+        EMp2 = calc_UMP2(EC)
+      end
+      println(add2name*"MP2 correlation energy: ",EMp2)
+      println(add2name*"MP2 total energy: ",EMp2+EHF)
+      t1 = print_time(EC,t1,"MP2",1)
+      flush(stdout)
+      if ecmethod.theory == "MP"
+        continue
+      end
     else
-      EMp2 = calc_UMP2(EC)
-    end
-    println(add2name*"MP2 correlation energy: ",EMp2)
-    println(add2name*"MP2 total energy: ",EMp2+EHF)
-    t1 = print_time(EC,t1,"MP2",1)
-    flush(stdout)
-    if ecmethod.theory == "MP"
-      continue
+      EMp2 = 0.0
     end
 
     if ecmethod.exclevel[4] != :none
