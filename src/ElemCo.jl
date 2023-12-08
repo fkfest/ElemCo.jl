@@ -315,7 +315,7 @@ function run_mcscf()
   setup!(EC,ms2=4,charge=2)
   to = TimerOutputs.get_defaulttimer()
   TimerOutputs.reset_timer!(to)
-  @timeit "dfmcscf" E,cMO = dfmcscf(EC,direct=false, IterMax=300)
+  @timeit "dfmcscf" E,cMO = dfmcscf(EC,direct=false, IterMax=64)
   display(to)
   TimerOutputs.reset_timer!(to)
 end

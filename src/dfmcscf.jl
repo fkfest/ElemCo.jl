@@ -493,7 +493,7 @@ thres is the criterion of convergence,
 convTrack is to decide whether the tracking of eigenvectors is used
 """
 function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
-  h_block::NTuple{10, Matrix{Float64}}, g::Vector, λ0::Number, convTrack::Bool=false,)
+  h_block::NTuple{10, Matrix{Float64}}, g::Vector, α::Number, convTrack::Bool=false,)
   @timeit "davidson partI" begin
     V = zeros(N,n_max)
     σ = zeros(N,n_max)
@@ -521,6 +521,7 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
   end
 
   # a special set of initial vectors guess
+
   # V[1,1] = 1.0
   # b1 = H[:,1]
   # V[:,2] = b1 ./norm(b1)
@@ -528,6 +529,7 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
   # V[21,3] = 1.0
   # v = V[:,3]
   # numInitialVectors = 3
+
   @timeit "davidson partII" begin
     for i in numInitialVectors+1:n_max
       # blockwise H * v
@@ -551,9 +553,9 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
       @tensoropt newσ_4[n] += h_3231[n,m] * v31[m]
       @tensoropt newσ_4[n] += h_3222[n,m] * v22[m]
       @tensoropt newσ_4[n] += h_3232[n,m] * v32[m]
-      newσ_hb = [[g'*v[2:end].*λ0];newσ_1;newσ_2;newσ_3;newσ_4]
+      newσ_hb = [[g'*v[2:end].* α];newσ_1;newσ_2;newσ_3;newσ_4]
       H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
-      newσ_hb[2:end] .+= g .* v[1] .*λ0
+      newσ_hb[2:end] .+= g .* v[1] .*α
       σ[:,i-1] = newσ_hb
       newh_hb = V' * newσ_hb
       h[:,i-1] = newh_hb
@@ -590,49 +592,50 @@ Find the rotation parameters as the vector x in trust region,
 tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
-function λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
+function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
   h_block::NTuple{10, Matrix{Float64}})
   N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
+  g_norm = norm(g)
   x = zeros(N_rk)
-  λl = 1.0
-  λr = λmax
+  αl = 1.0
+  αr = αmax
   micro_converged = false
   davItMax = 200 # for davidson eigenvalue solving algorithm
   davError = 1e-7
   γ =  0.1 # gradient scaling factor for micro-iteration accuracy
   davError = γ * norm(g)
-  # λ tuning loop (micro loop)
+  # α tuning loop (micro loop)
   for it=1:maxit
-    @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ)
+    @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α)
+    micro_counts = 0
     while !converged
       davItMax += 50
       println("Davidson max iteration number increased to ", davItMax)
-      @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ)
+      @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α)
+      micro_counts += 1
     end
-    x = vec[2:end] ./ (vec[1]*λ)
+    x = vec[2:end] ./ (vec[1] * α)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
-    sumx2 = (1/vec[1]^2 - 1) / λ^2
     sumx2 = sum(x.^2)
-    println("λl, λr: ", λl, " ", λr)
     if sumx2 > trust
-      λl = λ
+      αl = α
     elseif sumx2 < 0.8*trust
-      λr = λ
+      αr = α
     else
       micro_converged = true
       break
     end
-    if λr ≈ λl # norm of x too small
+    if αr ≈ αl || g_norm < 1e-3 # norm of x too small
+      α = αl
       micro_converged = true
       break
     end
-    λ = (λl + λr) / 2.0
-    println("λ = ", λ)
+    α = (αl + αr) / 2.0
   end
   if !micro_converged
     println("micro NOT converged")
   end
-  return λ, x, vec
+  return α, x, vec
 end
 
 """
@@ -740,7 +743,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
       println("Iter ", iteration_times, " energy: ", E+Enuc)
 
       # check if reject the update and tune trust
-      if iteration_times > 0
+      if iteration_times > 0 && norm(g) > 1e-3
         reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
         println("trust: ", trust)
         if reject
@@ -767,7 +770,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
 
       # λ tuning loop (micro loop)
       λmax = 1000.0
-      maxit = 100
+      maxit = 16
       if inherit_large == false
         vec = rand(N_rk+1)
         vec = vec./norm(vec)
