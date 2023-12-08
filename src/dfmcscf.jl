@@ -483,6 +483,17 @@ function calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
 end
 
 """
+    Type of initial guess vectors of Davidson iterations
+
+  Possible values:
+  - RANDOM: one random vector
+  - INHERIT: from last macro/micro iterations
+  - GRADIENT_SET: b0 as [1,0,0,...], b1 as gradient
+  - GRADIENT_SETPLUS: b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
+"""
+@enum InitialVectorType RANDOM INHERIT GRADIENT_SET GRADIENT_SETPLUS
+
+"""
     davidson(H::Matrix, N::Integer, n::Integer, thres::Number, convTrack::Bool=false)
 
 Calculate one of the eigenvalues and corresponding eigenvector of the matrix H
@@ -493,95 +504,108 @@ thres is the criterion of convergence,
 convTrack is to decide whether the tracking of eigenvectors is used
 """
 function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
-  h_block::NTuple{10, Matrix{Float64}}, g::Vector, α::Number, convTrack::Bool=false,)
-  @timeit "davidson partI" begin
-    V = zeros(N,n_max)
-    σ = zeros(N,n_max)
-    h = zeros(n_max,n_max)
-    ac = zeros(n_max)
-    λ = zeros(n_max)
-    eigvec_index = 1
-    pick_vec = 1
-    converged = false
-    n_2, n_1o, n_v = num_MO
-    n21 = n_1o * n_2
-    n31 = n_v * n_2
-    n22 = n_1o * n_1o
-    n32 = n_v * n_1o
-    h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
+  h_block::NTuple{10, Matrix{Float64}}, g::Vector, α::Number, convTrack::Bool=false, initVecType::InitialVectorType=INHERIT)
+  V = zeros(N,n_max)
+  σ = zeros(N,n_max)
+  h = zeros(n_max,n_max)
+  ac = zeros(n_max)
+  λ = zeros(n_max)
+  eigvec_index = 1
+  pick_vec = 6
+  converged = false
+  n_2, n_1o, n_v = num_MO
+  n21 = n_1o * n_2
+  n31 = n_v * n_2
+  n22 = n_1o * n_1o
+  n32 = n_v * n_1o
+  h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
+  H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
+  numInitialVectors = 0
 
-    # random initial guess
-    # v = rand(size(v,1))
-    # numInitialVectors = 1
+  function H_multiply(v::Vector)
+    v21 = v[2:n21+1] 
+    v31 = v[n21+2:n21+n31+1]
+    v22 = v[n21+n31+2:n21+n31+n22+1]
+    v32 = v[n21+n31+n22+2:end]
+    @tensoropt newσ_1[n] := h_2121[n,m] * v21[m]
+    @tensoropt newσ_1[n] += h_3121[m,n] * v31[m]
+    @tensoropt newσ_1[n] += h_2221[m,n] * v22[m]
+    @tensoropt newσ_1[n] += h_3221[m,n] * v32[m]
+    @tensoropt newσ_2[n] := h_3121[n,m] * v21[m]
+    @tensoropt newσ_2[n] += h_3131[n,m] * v31[m]
+    @tensoropt newσ_2[n] += h_2231[m,n] * v22[m]
+    @tensoropt newσ_2[n] += h_3231[m,n] * v32[m]
+    @tensoropt newσ_3[n] := h_2221[n,m] * v21[m]
+    @tensoropt newσ_3[n] += h_2231[n,m] * v31[m]
+    @tensoropt newσ_3[n] += h_2222[n,m] * v22[m]
+    @tensoropt newσ_3[n] += h_3222[m,n] * v32[m]
+    @tensoropt newσ_4[n] := h_3221[n,m] * v21[m]
+    @tensoropt newσ_4[n] += h_3231[n,m] * v31[m]
+    @tensoropt newσ_4[n] += h_3222[n,m] * v22[m]
+    @tensoropt newσ_4[n] += h_3232[n,m] * v32[m]
+    newσ_hb = [[g'*v[2:end].* α];newσ_1;newσ_2;newσ_3;newσ_4]
+    newσ_hb[2:end] .+= g .* v[1] .*α
+    return newσ_hb
+  end
 
-    # inherit a initial vector from last Davidson procedure
+  if initVecType == RANDOM
+    v = rand(size(v,1))
     v = v ./ norm(v)
     numInitialVectors = 1
     V[:,1] = v
+  elseif initVecType == INHERIT
+    v = v ./ norm(v)
+    numInitialVectors = 1
+    V[:,1] = v
+  elseif initVecType == GRADIENT_SET
+    V[1,1] = 1.0
+    v = [[0.];g] ./ norm(g)
+    V[:,2] = v
+    σ[:,1] = H_multiply(V[:,1])
+    numInitialVectors = 2
+  elseif initVecType == GRADIENT_SETPLUS
+    V[1,1] = 1.0
+    v = [[0.];g] ./ norm(g)
+    V[:,2] = v
+    σ[:,1] = H_multiply(V[:,1])
+    σ[:,2] = H_multiply(V[:,2])
+    V[n21+n31+n22+2, 3] = 1.0
+    v = V[:,3]
+    newh_hb = V' * σ[:,2]
+    h[:,2] = newh_hb
+    h[2,:] = newh_hb
+    numInitialVectors = 3
   end
-
-  # a special set of initial vectors guess
-
-  # V[1,1] = 1.0
-  # b1 = H[:,1]
-  # V[:,2] = b1 ./norm(b1)
-  # h = V' * H * V
-  # V[21,3] = 1.0
-  # v = V[:,3]
-  # numInitialVectors = 3
-
-  @timeit "davidson partII" begin
-    for i in numInitialVectors+1:n_max
-      # blockwise H * v
-      v21 = v[2:n21+1] 
-      v31 = v[n21+2:n21+n31+1]
-      v22 = v[n21+n31+2:n21+n31+n22+1]
-      v32 = v[n21+n31+n22+2:end]
-      @tensoropt newσ_1[n] := h_2121[n,m] * v21[m]
-      @tensoropt newσ_1[n] += h_3121[m,n] * v31[m]
-      @tensoropt newσ_1[n] += h_2221[m,n] * v22[m]
-      @tensoropt newσ_1[n] += h_3221[m,n] * v32[m]
-      @tensoropt newσ_2[n] := h_3121[n,m] * v21[m]
-      @tensoropt newσ_2[n] += h_3131[n,m] * v31[m]
-      @tensoropt newσ_2[n] += h_2231[m,n] * v22[m]
-      @tensoropt newσ_2[n] += h_3231[m,n] * v32[m]
-      @tensoropt newσ_3[n] := h_2221[n,m] * v21[m]
-      @tensoropt newσ_3[n] += h_2231[n,m] * v31[m]
-      @tensoropt newσ_3[n] += h_2222[n,m] * v22[m]
-      @tensoropt newσ_3[n] += h_3222[m,n] * v32[m]
-      @tensoropt newσ_4[n] := h_3221[n,m] * v21[m]
-      @tensoropt newσ_4[n] += h_3231[n,m] * v31[m]
-      @tensoropt newσ_4[n] += h_3222[n,m] * v22[m]
-      @tensoropt newσ_4[n] += h_3232[n,m] * v32[m]
-      newσ_hb = [[g'*v[2:end].* α];newσ_1;newσ_2;newσ_3;newσ_4]
-      H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
-      newσ_hb[2:end] .+= g .* v[1] .*α
-      σ[:,i-1] = newσ_hb
-      newh_hb = V' * newσ_hb
-      h[:,i-1] = newh_hb
-      h[i-1,:] = newh_hb
-      λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
-      if convTrack && i > pick_vec
-        eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
-      end
-      ac[1:i-1] = a[:,eigvec_index]
-      r = σ * ac - λ[eigvec_index] * (V * ac)
-      if norm(r) < thres
-        converged = true
-        println("Davidson iter ", i, " converged!")
-        break
-      end
-      v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
-      c = transpose(v) * V
-      v = v - V * transpose(c)
-      v = v./norm(v)
-      V[:,i] = v
+  
+  for i in numInitialVectors+1:n_max
+    # blockwise H * v
+    newσ_hb = H_multiply(v)
+    σ[:,i-1] = newσ_hb
+    newh_hb = V' * newσ_hb
+    h[:,i-1] = newh_hb
+    h[i-1,:] = newh_hb
+    λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
+    if convTrack && i > pick_vec
+      eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
     end
-    if !converged
-      println("davidson algorithm not converged!")
+    ac[1:i-1] = a[:,eigvec_index]
+    r = σ * ac - λ[eigvec_index] * (V * ac)
+    if norm(r) < thres
+      converged = true
+      println("Davidson iter ", i, " converged!")
+      break
     end
-    v = V * ac
+    v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
+    c = transpose(v) * V
+    v = v - V * transpose(c)
+    v = v./norm(v)
+    V[:,i] = v
   end
+  if !converged
+    println("davidson algorithm not converged!")
+  end
+  v = V * ac
+
   return λ[eigvec_index], v, converged
 end
 
@@ -692,7 +716,7 @@ end
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
+function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit = 16, )
   Enuc = generate_integrals(EC; save3idx=!direct)
   println("Enuc ", Enuc)
   sao = load(EC,"sao")
@@ -770,7 +794,6 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
 
       # λ tuning loop (micro loop)
       λmax = 1000.0
-      maxit = 16
       if inherit_large == false
         vec = rand(N_rk+1)
         vec = vec./norm(vec)
