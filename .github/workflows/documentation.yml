@@ -13,15 +13,24 @@ jobs:
       contents: write
       statuses: write
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        julia-version: ['1.9']
+        julia-arch: [x64]
+        os: [ubuntu-latest]
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v1
+      - uses: actions/checkout@v3
+      - uses: julia-actions/setup-julia@latest
         with:
-          version: '1.9'
-      - name: Install dependencies
-        run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-      - name: Build and deploy
+          version: ${{ matrix.julia-version }}
+          arch: ${{ matrix.julia-arch }}
+      #- name: Install dependencies
+        #run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+      #- name: Build and deploy
+      - uses: julia-actions/julia-buildpkg@latest
+      - uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # If authenticating with GitHub Actions token
           #DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }} # If authenticating with SSH deploy key
-        run: julia --project=docs/ docs/make.jl
+        #run: julia --project=docs/ docs/make.jl
