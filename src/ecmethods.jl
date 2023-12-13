@@ -1,11 +1,15 @@
 """ Specify methods available for electron-correlation calculations"""
 module ECMethods
 using DocStringExtensions
+using ..ElemCo.Utils
 
 export ECMethod, method_name, max_full_exc
+export has_spec, set_spec!, is_unrestricted, set_unrestricted!
 
 
 const ExcLevels = "SDTQP"
+
+const Specs4Methods = ["EOM-","2D-","FRS-","FRT-","Λ","U","R"]
 
 """
     ECMethod
@@ -19,6 +23,8 @@ mutable struct ECMethod
   unrestricted::Bool
   """theory level: `"MP"`, `"CC"`, `"DC"`."""
   theory::String
+  """specification of the methods, e.g., `"EOM"`, `"U"`, `"R"`, `"2D"`, `"FRS"`, `"FRT"`."""
+  specs::Vector{String}
   """ excitation level for each class (`exclevel[1]` for singles etc.).
       Possible values: `:none`, `:full`, `:pert`, `:pertiter`. """
   exclevel::Array{Symbol,1}
@@ -33,56 +39,44 @@ mutable struct ECMethod
     if isempty(mname)
       error("Empty method name!")
     end
+    Mname = uppercase(mname)
     unrestricted = false
     theory = ""
     exclevel = [:none for i in 1:length(ExcLevels)]
     pertlevel = 0
     ipos = 1
-    if uppercase(mname[ipos:ipos+2]) == "EOM"
+    # check for specs
+    specs, ipos = check_specs(Mname, ipos, Specs4Methods)
+    if "EOM" ∈ specs
       error("EOM methods not implemented!")
-      ipos += 3
-      if mname[ipos] == '-'
-        ipos += 1
-      end
     end
-    if uppercase(mname[ipos:ipos+1]) == "2D"
-      theory = "2D-"
-      ipos += 3
-    elseif uppercase(mname[ipos:ipos+2]) == "FRS"
-      theory = "FRS-"
-      ipos += 4
-    elseif uppercase(mname[ipos:ipos+2]) == "FRT"
-      theory = "FRT-"
-      ipos += 4
-    end
-    if uppercase(mname[ipos]) == 'U'
+    if 'U' ∈ specs
       unrestricted = true
-      ipos += 1
     end
     # if pure PT: all excitation levels are perturbative, otherwise only the highest
     pure_PT = false
-    if uppercase(mname[ipos:ipos+1]) == "CC"
+    if substr(Mname, ipos, 2) == "CC"
       theory *= "CC"
       ipos += 2
-    elseif uppercase(mname[ipos:ipos+1]) == "DC"
-      if length(mname)-ipos >= 4 && uppercase(mname[ipos:ipos+4]) == "DC-CC"
+    elseif substr(Mname, ipos, 2) == "DC"
+      if substr(Mname, ipos, 5) == "DC-CC"
         theory *= "DC-CC"
         ipos += 5
       else
         theory *= "DC"
         ipos += 2
       end
-    elseif uppercase(mname[ipos:ipos+1]) == "MP"
+    elseif substr(Mname, ipos, 2) == "MP"
       theory = "MP"
       ipos += 2
       pure_PT = true
     else
-      error("Theory not recognized in "*mname*": "*uppercase(mname[ipos:ipos+1]))
+      error("Theory not recognized in "*mname*": "*substr(Mname,ipos,2))
     end
     # loop over remaining letters to get excitation levels
     # currently case-insensitive, can change later...
     next_level = :full
-    for char in uppercase(mname[ipos:end])
+    for char in substr(Mname, ipos)
       if isnumeric(char)
         # perturbation theory
         level = parse(Int,char)
@@ -117,8 +111,79 @@ mutable struct ECMethod
         end
       end
     end
-    new(unrestricted,theory,exclevel,pertlevel)
+    new(unrestricted,theory,specs,exclevel,pertlevel)
   end
+end
+
+"""
+    check_specs(mname::AbstractString, pos, specs::Vector)
+
+  Check if starting from position `pos`, `mname` contains any of `specs`
+  and return a list of the matching ones (without dashes for multiple-letter specs!) 
+  and the final position after specs.
+"""
+function check_specs(mname::AbstractString, pos, specs::Vector)
+  matches = []
+  for spec in specs
+    if length(mname)-pos+1 >= length(spec)
+      if substr(mname, pos, length(spec)) == spec
+        if length(spec) > 2 && last(spec) == '-'
+          push!(matches, substr(spec,1,length(spec)-1))
+        else
+          push!(matches, spec)
+        end
+        pos += length(spec)
+      end
+    end
+  end
+  return matches, pos
+end
+
+"""
+    has_spec(method::ECMethod, spec::AbstractString)
+
+  Return `true` if `method` has specification `spec`, e.g., `"EOM"`.
+"""
+function has_spec(method::ECMethod, spec::AbstractString)
+  return spec ∈ method.specs
+end
+
+"""
+    set_spec!(method::ECMethod, spec::AbstractString)
+
+  Set `method` to have specification `spec`, e.g., `"EOM"`.
+"""
+function set_spec!(method::ECMethod, spec::AbstractString)
+  if !has_spec(method, spec)
+    push!(method.specs, spec)
+  end
+end
+
+"""
+    is_unrestricted(method::ECMethod)
+
+  Return `true` if `method` is unrestricted.
+"""
+function is_unrestricted(method::ECMethod)
+  return has_spec(method, "U")
+end
+
+"""
+    set_unrestricted!(method::ECMethod)
+
+  Set `method` to unrestricted.
+"""
+function set_unrestricted!(method::ECMethod)
+  set_spec!(method, "U")
+end
+
+"""
+    show(io::IO, method::ECMethod)
+
+  Print `method` to `io`.
+"""
+function Base.show(io::IO, method::ECMethod)
+  print(io, method_name(method))
 end
 
 """
@@ -130,8 +195,11 @@ end
 """
 function method_name(method::ECMethod, main::Bool = true)
   name = ""
-  if method.unrestricted
-    name *= "U"
+  for spec in method.specs
+    name *= spec
+    if length(spec) > 1
+      name *= "-"
+    end
   end
   name *= method.theory
   if method.theory == "MP"

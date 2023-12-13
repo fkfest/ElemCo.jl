@@ -17,6 +17,7 @@ export calc_singles_norm, calc_doubles_norm, calc_contra_singles_norm, calc_cont
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles, starting_amplitudes
 export transform_amplitudes2lagrange_multipliers!
 export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
+export contra2covariant
 
 """
     calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
@@ -497,7 +498,7 @@ function starting_amplitudes(EC::ECInfo, method::ECMethod)
   if highest_full_exc > 3
     error("starting_amplitudes only implemented upto triples")
   end
-  if method.unrestricted
+  if is_unrestricted(method)
     namps = sum([i + 1 for i in 1:highest_full_exc])
     exc_ranges = [1:2, 3:5, 6:9]
     spins = [(:α,), (:β,), (:α, :α), (:β, :β), (:α, :β), (:α, :α, :α), (:β, :β, :β), (:α, :α, :β), (:α, :β, :β)]
@@ -559,13 +560,23 @@ end
 """
 function add_singles2doubles!(T2, T1; make_contravariant=true)
   if length(T1) > 0
-    # @tensoropt T2[a,b,i,j] += T1[a,i] * T1[b,j]
+    @tensoropt T2[a,b,i,j] += T1[a,i] * T1[b,j]
   end
   if make_contravariant
     @tensoropt tT2[a,b,i,j] := T2[a,b,i,j] - T2[a,b,j,i]
     @tensoropt T2[a,b,i,j] += tT2[a,b,i,j]
     T1 .+= T1
   end
+end
+
+"""
+    contra2covariant(T2)
+
+  Transform contravariant doubles amplitudes to covariant.
+"""
+function contra2covariant(T2)
+  @tensoropt U2[a,b,i,j] := (1/3) * (2*T2[a,b,i,j] + T2[b,a,i,j])
+  return U2
 end
 
 end # module

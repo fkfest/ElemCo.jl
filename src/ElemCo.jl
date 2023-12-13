@@ -385,7 +385,7 @@ macro bohf()
     if !fd_exists($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
-    if is_closed_shell($(esc(:EC)))[1]
+    if is_closed_shell($(esc(:EC)))
       bohf($(esc(:EC)))
     else
       bouhf($(esc(:EC)))
@@ -497,12 +497,7 @@ end
 """
 function is_closed_shell(EC::ECInfo)
   SP = EC.space
-  closed_shell = (SP['o'] == SP['O'] && !EC.fd.uhf)
-  addname=""
-  if !closed_shell
-    addname = "U"
-  end
-  return closed_shell, addname
+  return (SP['o'] == SP['O'] && !EC.fd.uhf)
 end
 
 """ 
@@ -580,36 +575,38 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   end
   setup_space_fd!(EC)
 
-  closed_shell, addname = is_closed_shell(EC)
+  closed_shell = is_closed_shell(EC)
 
   calc_fock_matrix(EC, closed_shell)
   EHF = calc_HF_energy(EC, closed_shell)
-  println(addname*"HF energy: ",EHF)
+  hfname = closed_shell ? "HF" : "UHF"
+  println("$hfname energy: ",EHF)
   flush(stdout)
 
-  SP = EC.space
   for mname in method_names
     println()
     println("Next method: ",mname)
     ecmethod = ECMethod(mname)
-    if ecmethod.unrestricted
-      add2name = "U"
+    if is_unrestricted(ecmethod)
       closed_shell_method = false
     else
-      add2name = addname
       closed_shell_method = closed_shell
-      ecmethod.unrestricted = !closed_shell
+      if !closed_shell_method
+        set_unrestricted!(ecmethod)
+      end
     end
     # at the moment we always calculate MP2 first
     # calculate MP2
     if EC.options.cc.nomp2 != 1
       if closed_shell_method
         EMp2 = calc_MP2(EC)
+        method0 = "MP2"
       else
         EMp2 = calc_UMP2(EC)
+        method0 = "UMP2"
       end
-      println(add2name*"MP2 correlation energy: ",EMp2)
-      println(add2name*"MP2 total energy: ",EMp2+EHF)
+      println("$method0 correlation energy: ",EMp2)
+      println("$method0 total energy: ",EMp2+EHF)
       t1 = print_time(EC,t1,"MP2",1)
       flush(stdout)
       if ecmethod.theory == "MP"
@@ -626,7 +623,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ecmethod_save = ecmethod
     if ecmethod.exclevel[3] in [:full, :pertiter]
       ecmethod = ECMethod("CCSD")
-      ecmethod.unrestricted = ecmethod_save.unrestricted
+      if is_unrestricted(ecmethod_save)
+        set_unrestricted!(ecmethod)
+      end
     end
     ECC = calc_cc(EC, ecmethod)
 
@@ -634,10 +633,18 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ecmethod = ecmethod_save # restore
 
     if closed_shell_method
+      if has_spec(ecmethod, "Λ")
+        calc_lm_cc(EC, ecmethod)
+      end
       if ecmethod.exclevel[3] != :none
-        do_full_t3 = (ecmethod.exclevel[3] == :full || ecmethod.exclevel[3] == :pertiter)
+        do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
         save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        ET3, ET3b = calc_pertT(EC; save_t3 = save_pert_t3)
+        if has_spec(ecmethod, "Λ")
+          @assert !save_pert_t3 "Saving perturbative triples not implemented for ΛCCSD(T)"
+          ET3, ET3b = calc_ΛpertT(EC)
+        else
+          ET3, ET3b = calc_pertT(EC; save_t3 = save_pert_t3)
+        end
         println()
         println("$main_name[T] total energy: ",ECC+ET3b+EHF)
         println("$main_name(T) correlation energy: ",ECC+ET3)
@@ -654,7 +661,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println()
     flush(stdout)
 
-    if ecmethod.theory[1:2] == "2D"
+    if has_spec(ecmethod, "2D")
       W = load(EC,"2d_ccsd_W")[1]
       @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
       @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W

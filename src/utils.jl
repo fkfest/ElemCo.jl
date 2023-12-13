@@ -4,6 +4,7 @@ using Printf
 using ..ElemCo.AbstractEC
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+export substr
 
 """
     mainname(file::String)
@@ -110,6 +111,42 @@ function kwarg_provided_in_macro(kwargs, key::Symbol)
     end
   end
   return false
+end
+
+"""
+    substr(string::AbstractString, start::Int, len::Int=-1)
+
+  Return substring of `string`  starting at `start` spanning `len` characters 
+  (including unicode).
+  If `len` is not given, the substring spans to the end of `string`.
+
+  Example:
+  ```julia
+  julia> substr("λabδcd", 2, 3)
+  "abδ"
+  ```
+"""
+function substr(string::AbstractString, start::Int, len::Int=-1)
+  tail = length(string)-start-len+1
+  if len < 0 || tail < 0
+    tail = 0
+  end
+  return chop(string, head=start-1, tail=tail)
+end
+
+"""
+    substr(string::AbstractString, range::UnitRange{Int})
+
+  Return substring of `string` defined by `range` (including unicode).
+
+  Example:
+  ```julia
+  julia> substr("λabδcd", 2:4)
+  "abδ"
+  ```
+"""
+function substr(string::AbstractString, range::UnitRange{Int})
+  return substr(string, range.start, range.stop-range.start+1)
 end
 
 end #module
