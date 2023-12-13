@@ -279,6 +279,62 @@ With these definitions, the $\Lambda$ equations can be written as
 \end{aligned}
 \end{equation}
 
+\section{Perturbative triples for closed-shell CCSD}
+The perturbative triples equations for CCSD are given by
+\begin{equation}
+\begin{aligned}
+E_{[T]} &= \sum_{i\le j\le k}p(i,j,k) K^{abc}_{ijk} X_{abc}^{ijk}\\
+p(i,j,k) &= \left[\begin{matrix}
+  2 & i\ne j\ne k\\
+  1 & i=j \oplus j=k\\
+  0 & i=j=k
+\end{matrix}\right.
+\end{aligned}
+\end{equation}
+$X_{abc}^{ijk}$ and $K^{abc}_{ijk}$ are calculated for the triangular set of indices $i\le j\le k$
+(with $k=1:n_{occ}$),
+\begin{equation}
+\begin{aligned}
+K^{abc}_{ijk} = K_{abc}^{ijk} &= v_{bc}^{dk} T^{ij}_{ad} + v_{ac}^{dk} T^{ij}_{db} + v_{cb}^{dj} T^{ik}_{ad} 
++ v_{ab}^{dj} T^{ik}_{dc} + v_{ca}^{di} T^{jk}_{bd} + v_{ba}^{di} T^{jk}_{dc} \\
+&- v_{lc}^{jk} T^{li}_{ba} - v_{lc}^{ik} T^{lj}_{ab} - v_{lb}^{kj} T^{li}_{ca} 
+- v_{lb}^{ij} T^{lk}_{ac} - v_{la}^{ki} T^{lj}_{cb} - v_{la}^{ji} T^{lk}_{bc} \\
+X_{abc}^{ijk} &= \frac{4K_{abc}^{ijk} - 2K_{acb}^{ijk} - 2K_{cba}^{ijk} - 2K_{bac}^{ijk} 
++ K_{cab}^{ijk} + K_{bca}^{ijk}}{\epsilon_i +\epsilon_j +\epsilon_k -\epsilon_a -\epsilon_b -\epsilon_c}
+\end{aligned}
+\end{equation}
+The (T) correction contains additionally the following terms,
+\begin{equation}
+\begin{aligned}
+\label{eq:Eccsd(t)}
+E_{(T)}=E_{[T]} + \sum_{i\le j\le k}p(i,j,k) \left[
+  v_{jk}^{bc} X_{abc}^{ijk} T_{i}^{\dagger a} + v_{ik}^{ac} X_{abc}^{ijk} T_{j}^{\dagger b}
++ v_{ij}^{ab} X_{abc}^{ijk} T_{k}^{\dagger c} \right.\\
+\left.
+  + T_{jk}^{\dagger bc} X_{abc}^{ijk} f_i^a + T_{ik}^{\dagger ac} X_{abc}^{ijk} f_j^b
++ T_{ij}^{\dagger ab} X_{abc}^{ijk} f_k^c \right].
+\end{aligned}
+\end{equation}
+
+In case of \textbf{$\mathbf{\Lambda}$CCSD(T)} $K^{abc}_{ijk}$ is different from $K_{abc}^{ijk}$ and is 
+calculated using the Lagrange multipliers,
+\begin{equation}
+\begin{aligned}
+K^{abc}_{ijk} &= v_{dk}^{bc} \bar\Lambda_{ij}^{ad} + v_{dk}^{ac} \bar\Lambda_{ij}^{db} + v_{dj}^{cb} \bar\Lambda_{ik}^{ad} 
++ v_{dj}^{ab} \bar\Lambda_{ik}^{dc} + v_{di}^{ca} \bar\Lambda_{jk}^{bd} + v_{di}^{ba} \bar\Lambda_{jk}^{dc} \\
+&- v_{jk}^{lc} \bar\Lambda_{li}^{ba} - v_{ik}^{lc} \bar\Lambda_{lj}^{ab} - v_{kj}^{lb} \bar\Lambda_{li}^{ca} 
+- v_{ij}^{lb} \bar\Lambda_{lk}^{ac} - v_{ki}^{la} \bar\Lambda_{lj}^{cb} - v_{ji}^{la} \bar\Lambda_{lk}^{bc},
+\end{aligned}
+\end{equation}
+where $\bar\Lambda_{ij}^{ab}$ are the covariant Lagrange multipliers,
+\begin{equation}
+\begin{aligned}
+\bar \Lambda_{ij}^{ab} &= \frac{2}{3}\Lambda_{ij}^{ab} + \frac{1}{3} \Lambda_{ij}^{ba}.
+\end{aligned}
+\end{equation}
+Additionally, the conjugate-transposed amplitudes in \eq{eq:Eccsd(t)} are replaced by the covariant 
+Lagrange multipliers $\bar\Lambda_{ij}^{ab}$ and $\bar \Lambda_i^a = \frac{1}{2} \Lambda_i^a$.
+
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
 \bibliographystyle{naturemag}

@@ -58,7 +58,7 @@ using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
 
-export calc_MP2, calc_UMP2, calc_cc, calc_pertT
+export calc_MP2, calc_UMP2, calc_cc, calc_pertT, calc_ΛpertT
 export calc_lm_cc
 
 include("cc_lagrange.jl")
@@ -1049,17 +1049,18 @@ end
 function calc_pertT(EC::ECInfo; save_t3=false)
   T1 = load(EC,"T_vo")
   T2 = load(EC,"T_vvoo")
-  # <ab|ck>
-  abck = ints2(EC,"vvvo")
-  # <ia|jk>
-  iajk = ints2(EC,"ovoo")
-  # <ij|ab>
-  ijab = ints2(EC,"oovv")
+  # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
+  vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
+  # ``v_{ab}^{ck}``
+  vvvo = ints2(EC,"vvvo")
+  # ``v_{ia}^{jk}``
+  ovoo = ints2(EC,"ovoo")
   nocc = n_occ_orbs(EC)
   nvir = n_virt_orbs(EC)
   ϵo, ϵv = orbital_energies(EC)
   Enb3 = 0.0
   IntX = zeros(nvir,nocc)
+  IntY = zeros(nvir,nocc)
   if save_t3
     t3file, T3 = newmmap(EC,"T_vvvooo",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
   end
@@ -1074,20 +1075,36 @@ function calc_pertT(EC::ECInfo; save_t3=false)
           end 
           fac = 1.0
         end
+        T2ij = @view T2[:,:,i,j]
+        T2ik = @view T2[:,:,i,k]
+        T2jk = @view T2[:,:,j,k]
+        T2i = @view T2[:,:,:,i]
+        T2j = @view T2[:,:,:,j]
+        T2k = @view T2[:,:,:,k]
+        vvvk = @view vvvo[:,:,:,k]
+        vvvj = @view vvvo[:,:,:,j]
+        vvvi = @view vvvo[:,:,:,i]
+        ovjk = @view ovoo[:,:,j,k]
+        ovkj = @view ovoo[:,:,k,j]
+        ovik = @view ovoo[:,:,i,k]
+        ovki = @view ovoo[:,:,k,i]
+        ovij = @view ovoo[:,:,i,j]
+        ovji = @view ovoo[:,:,j,i]
         @tensoropt begin
-          Kijk[a,b,c] := T2[:,:,i,j][a,d] * abck[:,:,:,k][d,c,b]
-          Kijk[a,b,c] += T2[:,:,j,i][b,d] * abck[:,:,:,k][d,c,a]
-          Kijk[a,b,c] += T2[:,:,i,k][a,d] * abck[:,:,:,j][d,b,c]
-          Kijk[a,b,c] += T2[:,:,k,i][c,d] * abck[:,:,:,j][d,b,a]
-          Kijk[a,b,c] += T2[:,:,j,k][b,d] * abck[:,:,:,i][d,a,c]
-          Kijk[a,b,c] += T2[:,:,k,j][c,d] * abck[:,:,:,i][d,a,b]
+          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          Kijk[a,b,c] := T2ij[a,d] * vvvk[b,c,d]
+          Kijk[a,b,c] += T2ij[d,b] * vvvk[a,c,d]
+          Kijk[a,b,c] += T2ik[a,d] * vvvj[c,b,d]
+          Kijk[a,b,c] += T2ik[d,c] * vvvj[a,b,d]
+          Kijk[a,b,c] += T2jk[b,d] * vvvi[c,a,d]
+          Kijk[a,b,c] += T2jk[d,c] * vvvi[b,a,d]
 
-          Kijk[a,b,c] -= T2[:,:,:,i][b,a,l] * iajk[:,:,j,k][l,c]
-          Kijk[a,b,c] -= T2[:,:,:,j][a,b,l] * iajk[:,:,i,k][l,c]
-          Kijk[a,b,c] -= T2[:,:,:,i][c,a,l] * iajk[:,:,k,j][l,b]
-          Kijk[a,b,c] -= T2[:,:,:,k][a,c,l] * iajk[:,:,i,j][l,b]
-          Kijk[a,b,c] -= T2[:,:,:,j][c,b,l] * iajk[:,:,k,i][l,a]
-          Kijk[a,b,c] -= T2[:,:,:,k][b,c,l] * iajk[:,:,j,i][l,a]
+          Kijk[a,b,c] -= T2i[b,a,l] * ovjk[l,c]
+          Kijk[a,b,c] -= T2j[a,b,l] * ovik[l,c]
+          Kijk[a,b,c] -= T2i[c,a,l] * ovkj[l,b]
+          Kijk[a,b,c] -= T2k[a,c,l] * ovij[l,b]
+          Kijk[a,b,c] -= T2j[c,b,l] * ovki[l,a]
+          Kijk[a,b,c] -= T2k[b,c,l] * ovji[l,a]
         end
         if save_t3
           ijk = uppertriangular(i,j,k)
@@ -1104,12 +1121,18 @@ function calc_pertT(EC::ECInfo; save_t3=false)
         end
 
         @tensoropt Enb3 += fac * Kijk[a,b,c] * X[a,b,c]
-      
+        
+        vv_jk = @view vv_oo[:,:,j,k]
+        vv_ik = @view vv_oo[:,:,i,k]
+        vv_ij = @view vv_oo[:,:,i,j]
         # julia 1.9 r1: cannot use @tensoropt begin/end here, since 
         # IntX[:,j] overwrites IntX[:,i] if j == i
-        @tensoropt IntX[:,i][a] += fac * X[a,b,c] * ijab[j,k,:,:][b,c]
-        @tensoropt IntX[:,j][b] += fac * X[a,b,c] * ijab[i,k,:,:][a,c]
-        @tensoropt IntX[:,k][c] += fac * X[a,b,c] * ijab[i,j,:,:][a,b]
+        @tensoropt IntX[:,i][a] += fac * X[a,b,c] * vv_jk[b,c]
+        @tensoropt IntX[:,j][b] += fac * X[a,b,c] * vv_ik[a,c]
+        @tensoropt IntX[:,k][c] += fac * X[a,b,c] * vv_ij[a,b]
+        @tensoropt IntY[:,i][a] += fac * X[a,b,c] * T2jk[b,c]
+        @tensoropt IntY[:,j][b] += fac * X[a,b,c] * T2ik[a,c]
+        @tensoropt IntY[:,k][c] += fac * X[a,b,c] * T2ij[a,b]
       end 
     end
   end
@@ -1118,6 +1141,143 @@ function calc_pertT(EC::ECInfo; save_t3=false)
   end
   # singles contribution
   @tensoropt En3 = T1[a,i] * IntX[a,i]
+  # fock contribution
+  fov = load(EC,"f_mm")[EC.space['o'],EC.space['v']]
+  @tensoropt En3 += fov[i,a] * IntY[a,i]
+  En3 += Enb3
+  return En3, Enb3
+end
+
+"""
+    calc_ΛpertT(EC::ECInfo)
+
+  Calculate (T) correction for closed-shell ΛCCSD(T).
+
+  The amplitudes are stored in `T_vvoo` file, 
+  and the Lagrangian multipliers are stored in `U_vvoo` file.
+  Return ( (T) energy, [T] energy)
+"""
+function calc_ΛpertT(EC::ECInfo)
+  T1 = load(EC,"T_vo")
+  T2 = load(EC,"T_vvoo")
+  U1 = load(EC,"U_vo")
+  U2 = contra2covariant(load(EC,"U_vvoo"))
+  # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
+  vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
+  # ``v_{ab}^{ck}``
+  vvvo = ints2(EC,"vvvo")
+  # ``v_{ia}^{jk}``
+  ovoo = ints2(EC,"ovoo")
+  # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
+  vv_vo = permutedims(ints2(EC,"vovv"),[3,4,1,2])
+  # ``v_{jk}^{ia}``, reordered to ``v^{ia}_{jk}``
+  ov_oo = permutedims(ints2(EC,"ooov"),[3,4,1,2])
+  nocc = n_occ_orbs(EC)
+  nvir = n_virt_orbs(EC)
+  ϵo, ϵv = orbital_energies(EC)
+  Enb3 = 0.0
+  IntX = zeros(nvir,nocc)
+  IntY = zeros(nvir,nocc)
+  for k = 1:nocc 
+    for j = 1:k
+      prefac = (j == k) ? 1.0 : 2.0
+      for i = 1:j
+        fac = prefac 
+        if i == j 
+          if j == k
+            continue
+          end 
+          fac = 1.0
+        end
+        T2ij = @view T2[:,:,i,j]
+        T2ik = @view T2[:,:,i,k]
+        T2jk = @view T2[:,:,j,k]
+        T2i = @view T2[:,:,:,i]
+        T2j = @view T2[:,:,:,j]
+        T2k = @view T2[:,:,:,k]
+        vvvk = @view vvvo[:,:,:,k]
+        vvvj = @view vvvo[:,:,:,j]
+        vvvi = @view vvvo[:,:,:,i]
+        ovjk = @view ovoo[:,:,j,k]
+        ovkj = @view ovoo[:,:,k,j]
+        ovik = @view ovoo[:,:,i,k]
+        ovki = @view ovoo[:,:,k,i]
+        ovij = @view ovoo[:,:,i,j]
+        ovji = @view ovoo[:,:,j,i]
+        @tensoropt begin
+          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          Kijk[a,b,c] := T2ij[a,d] * vvvk[b,c,d]
+          Kijk[a,b,c] += T2ij[d,b] * vvvk[a,c,d]
+          Kijk[a,b,c] += T2ik[a,d] * vvvj[c,b,d]
+          Kijk[a,b,c] += T2ik[d,c] * vvvj[a,b,d]
+          Kijk[a,b,c] += T2jk[b,d] * vvvi[c,a,d]
+          Kijk[a,b,c] += T2jk[d,c] * vvvi[b,a,d]
+
+          Kijk[a,b,c] -= T2i[b,a,l] * ovjk[l,c]
+          Kijk[a,b,c] -= T2j[a,b,l] * ovik[l,c]
+          Kijk[a,b,c] -= T2i[c,a,l] * ovkj[l,b]
+          Kijk[a,b,c] -= T2k[a,c,l] * ovij[l,b]
+          Kijk[a,b,c] -= T2j[c,b,l] * ovki[l,a]
+          Kijk[a,b,c] -= T2k[b,c,l] * ovji[l,a]
+        end
+        @tensoropt  X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
+        for abc ∈ CartesianIndices(X)
+          a,b,c = Tuple(abc)
+          X[abc] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
+        end
+
+        U2ij = @view U2[:,:,i,j]
+        U2ik = @view U2[:,:,i,k]
+        U2jk = @view U2[:,:,j,k]
+        U2i = @view U2[:,:,:,i]
+        U2j = @view U2[:,:,:,j]
+        U2k = @view U2[:,:,:,k]
+        vv_vk = @view vv_vo[:,:,:,k]
+        vv_vj = @view vv_vo[:,:,:,j]
+        vv_vi = @view vv_vo[:,:,:,i]
+        ov_jk = @view ov_oo[:,:,j,k]
+        ov_kj = @view ov_oo[:,:,k,j]
+        ov_ik = @view ov_oo[:,:,i,k]
+        ov_ki = @view ov_oo[:,:,k,i]
+        ov_ij = @view ov_oo[:,:,i,j]
+        ov_ji = @view ov_oo[:,:,j,i]
+        @tensoropt begin
+          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          Kijk[a,b,c] = U2ij[a,d] * vv_vk[b,c,d]
+          Kijk[a,b,c] += U2ij[d,b] * vv_vk[a,c,d]
+          Kijk[a,b,c] += U2ik[a,d] * vv_vj[c,b,d]
+          Kijk[a,b,c] += U2ik[d,c] * vv_vj[a,b,d]
+          Kijk[a,b,c] += U2jk[b,d] * vv_vi[c,a,d]
+          Kijk[a,b,c] += U2jk[d,c] * vv_vi[b,a,d]
+
+          Kijk[a,b,c] -= U2i[b,a,l] * ov_jk[l,c]
+          Kijk[a,b,c] -= U2j[a,b,l] * ov_ik[l,c]
+          Kijk[a,b,c] -= U2i[c,a,l] * ov_kj[l,b]
+          Kijk[a,b,c] -= U2k[a,c,l] * ov_ij[l,b]
+          Kijk[a,b,c] -= U2j[c,b,l] * ov_ki[l,a]
+          Kijk[a,b,c] -= U2k[b,c,l] * ov_ji[l,a]
+        end
+        @tensoropt Enb3 += fac * Kijk[a,b,c] * X[a,b,c]
+        
+        vv_jk = @view vv_oo[:,:,j,k]
+        vv_ik = @view vv_oo[:,:,i,k]
+        vv_ij = @view vv_oo[:,:,i,j]
+        # julia 1.9 r1: cannot use @tensoropt begin/end here, since 
+        # IntX[:,j] overwrites IntX[:,i] if j == i
+        @tensoropt IntX[:,i][a] += fac * X[a,b,c] * vv_jk[b,c]
+        @tensoropt IntX[:,j][b] += fac * X[a,b,c] * vv_ik[a,c]
+        @tensoropt IntX[:,k][c] += fac * X[a,b,c] * vv_ij[a,b]
+        @tensoropt IntY[:,i][a] += fac * X[a,b,c] * U2jk[b,c]
+        @tensoropt IntY[:,j][b] += fac * X[a,b,c] * U2ik[a,c]
+        @tensoropt IntY[:,k][c] += fac * X[a,b,c] * U2ij[a,b]
+      end 
+    end
+  end
+  # singles contribution
+  @tensoropt En3 = 0.5 * U1[a,i] * IntX[a,i]
+  # fock contribution
+  fov = load(EC,"f_mm")[EC.space['o'],EC.space['v']]
+  @tensoropt En3 += fov[i,a] * IntY[a,i]
   En3 += Enb3
   return En3, Enb3
 end
@@ -1749,13 +1909,13 @@ end
   Exact specification of the method is given by `method`.
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC" || last(method.theory,2) == "DC")
-  tworef = method.theory[1:2] == "2D"
-  fixref = method.theory[1:2] == "FR"
+  dc = (method.theory == "DC")
+  tworef = has_spec(method, "2D")
+  fixref = has_spec(method, "FR")
   print_info(method_name(method))
   Amps, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
-  if method.unrestricted
+  if is_unrestricted(method)
     @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
   else
     @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
@@ -1780,13 +1940,13 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     NormR2 = calc_doubles_norm(Res[doubles]...)
     Eh = calc_hylleraas(EC, Amps..., Res...)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
-    if length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRS"
+    if has_spec(method, "FRS")
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
-    elseif length(method.theory) > 2 && uppercase(method.theory[1:3]) == "FRT"
+    elseif has_spec(method, "FRT")
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[T2αβ][norba,morbb,morba,norbb] = -1.0
-    elseif uppercase(method.theory[1:2]) == "2D"
+    elseif has_spec(method, "2D")
       morba, norbb, morbb, norba = active_orbitals(EC)
       # println("T1a all internal: ", T1a[norba,morba])
       # println("T1b all internal: ", T1b[morbb,norbb])
