@@ -25,6 +25,10 @@
 \newcommand{\mat}{\mathbf}
 \newcommand{\eq}[1]{Eq.~(\ref{#1})}
 \newcommand{\eqs}[2]{Eqs.~(\ref{#1},~\ref{#2})}
+\newcommand{\sect}[1]{Sec.~\ref{#1}}
+\newcommand{\spa}[1]{{#1}}
+\newcommand{\spb}[1]{\bar{#1}}
+\newcommand{\half}{\frac{1}{2}}
 \newcommand{\ElemCojl}{\textsf{ElemCo.jl} }
 % Define \lt and \gt for `less than' and `greater than'
 \mathchardef\lt="313C \mathchardef\gt="313E
@@ -46,8 +50,11 @@ The final equations should also be contained in the code as docstrings or copied
 
 We use the following notation throughout the document.
 
-The virtual orbitals are denoted by $a,b,c,\ldots$ and the occupied orbitals by $i,j,k,\ldots$. 
+The virtual orbitals are denoted by $a,b,c,\ldots$, the occupied orbitals by $i,j,k,\ldots$,
+the active (open-shell) orbitals by $t,u,v,\ldots$,
+and the general orbital indices are denoted by $p,q,r,s$.
 The Einstein summation convention is used for repeated indices (repeated lower and upper indices are summed over).
+The $\alpha$ and $\beta$ spin orbitals are denoted by $\spa{p}$ and $\spb{p}$.
 
 The integrals are \textbf{not antisymmetrized} and denoted by $v_{pq}^{rs}$, where $p,q,r,s$ are indices of orbitals,
 and the lower indices correspond to the creation and the upper indices to the annihilation operators in the Hamiltonian,
@@ -57,8 +64,16 @@ and the lower indices correspond to the creation and the upper indices to the an
 \end{equation}
 i.e., $f_p^q = <p|\op f|q>$ and $v_{pq}^{rs} = <pq|rs>$.
 
+Symmetrization operators:
+\begin{equation}
+\begin{aligned}
+\mathcal{P}(ai;bj) X^{ij}_{ab} &= X^{ij}_{ab} + X^{ji}_{ba}\\
+\bar{\mathcal{P}}(ai;bj) &= \mathcal{P}(ai;bj) - \mathcal{P}(bi;aj)\\
+\end{aligned}
+\end{equation}
+
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
-\section{Closed-shell CCSD/DCSD Lagrangian}
+\section{Closed-shell CCSD/DCSD Lagrangian} \label{sec:cs-ccsd}
 The singles-dressed factorization of the closed-shell CCSD and DCSD amplitude equations 
 roughly follows the factorization from Ref.~\cite{katsSparse2013}. 
 The closed-shell CCSD and DCSD Lagrangian is given by
@@ -102,7 +117,7 @@ the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} 
 \begin{aligned}
 \mathcal{L} &= v_{kl}^{cd} \tilde T^{kl}_{cd} + \left(\hat f_k^c + f_k^c\right) T^k_c
 + Λ_{ij}^{ab} \left(\hat v_{kl}^{ij} \red{+ v_{kl}^{cd} T^{ij}_{cd}}\right) T^{kl}_{ab}
-+ Λ_{ij}^{ab} R^{ij}_{pq} δ_a^p δ_b^q\\ 
++ Λ_{ij}^{ab} K^{ij}_{pq} δ_a^p δ_b^q\\ 
 &\red{+Λ_{ij}^{ab} v_{kl}^{cd}T^{kj}_{ad}T^{il}_{cb}}\\
 &+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2}v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
 - \left(\hat f_k^i + \red{2\times}\frac{1}{2}v_{kl}^{cd}\tilde T^{il}_{cd}\right)T^{kj}_{ab} \right.\\
@@ -110,9 +125,9 @@ the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} 
 + \frac{1}{2} v_{kl}^{cd}\tilde T^{ik}_{ac}\right)\tilde T^{lj}_{db}
 - \hat v_{ka}^{ic} T^{kj}_{cb} -\hat v_{kb}^{ic} T^{kj}_{ac}
 \red{-v_{kl}^{cd}T^{ki}_{da}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)}\\
-&\left.- R^{ij}_{pq} \left(δ_k^p δ_b^q - \frac{1}{2} δ_k^p δ_l^q T^l_b\right) T^k_a \right\}
-+Λ_i^a R^{ij}_{pq}\left( 2δ_a^p δ_j^q - δ_j^p δ_a^q \right)\\
-&-Λ_i^a T^k_a R^{ij}_{pq}\left( 2δ_k^p δ_j^q - δ_j^p δ_k^q \right)
+&\left.- K^{ij}_{pq} \left(δ_k^p δ_b^q - \frac{1}{2} δ_k^p δ_l^q T^l_b\right) T^k_a \right\}
++Λ_i^a K^{ij}_{pq}\left( 2δ_a^p δ_j^q - δ_j^p δ_a^q \right)\\
+&-Λ_i^a T^k_a K^{ij}_{pq}\left( 2δ_k^p δ_j^q - δ_j^p δ_k^q \right)
 +Λ_i^a \hat h_a^i + Λ_i^a \hat f_j^b \tilde T^{ij}_{ab} 
 - Λ_i^a \hat v_{jk}^{ic} \tilde T^{kj}_{ca},
 \end{aligned}
@@ -120,7 +135,7 @@ the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} 
 where
 \begin{equation}
 \begin{aligned}
-R^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b 
+K^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b 
 +δ_r^i T^j_b δ_s^b + T^i_a δ_r^a δ_s^j + δ_r^i δ_s^j \right)
 \end{aligned}
 \end{equation}
@@ -334,6 +349,110 @@ where $\bar\Lambda_{ij}^{ab}$ are the covariant Lagrange multipliers,
 \end{equation}
 Additionally, the conjugate-transposed amplitudes in \eq{eq:Eccsd(t)} are replaced by the covariant 
 Lagrange multipliers $\bar\Lambda_{ij}^{ab}$ and $\bar \Lambda_i^a = \frac{1}{2} \Lambda_i^a$.
+
+\section{Open-shell CCSD/DSCD Lagrangian}
+The factorization of the open-shell CCSD/DCSD amplitude equations roughly follows
+the factorization of the closed-shell equations, \sect{sec:cs-ccsd}. 
+The open-shell CCSD and DCSD Lagrangian -- i.e., spin dependent -- is given by
+\begin{equation}
+\begin{aligned}
+\mathcal{L} &= \mathcal{L}_{\alpha} + \mathcal{L}_{\beta} + \mathcal{L}_{\alpha\beta}
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+\mathcal{L}_{\alpha} &= 
+\half \left[v_{\spa{k}\spa{l}}^{\spa{c}\spa{d}} T^{\spa{k}\spa{l}}_{\spa{c}\spa{d}} + 
+\left(\hat f_{\spa{k}}^{\spa{c}} + f_{\spa{k}}^{\spa{c}}\right) T^{\spa{k}}_{\spa{c}} \right] 
++ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \left(\hat v_{\spa{k}\spa{l}}^{\spa{i}\spa{j}} 
+\red{+ \half v_{\spa{k}\spa{l}}^{\spa{c}\spa{d}} T^{\spa{i}\spa{j}}_{\spa{c}\spa{d}}}\right) 
+T^{\spa{k}\spa{l}}_{\spa{a}\spa{b}}
++ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}} 
+δ_{\spa{a}}^{\spa{p}} δ_{\spa{b}}^{\spa{q}}\\ 
+&+ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \mathcal{P}(\spa{a}\spa{i};\spa{b}\spa{j})\left\{
+  \hat x_{\spa{a}}^{\spa{c}} T^{\spa{i}\spa{j}}_{\spa{c}\spa{b}}
+- \hat x_{\spa{k}}^{\spa{i}} T^{\spa{k}\spa{j}}_{\spa{a}\spa{b}} 
+- K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}} 
+\left(δ_{\spa{k}}^{\spa{p}} δ_{\spa{b}}^{\spa{q}} - 
+\frac{1}{2} δ_{\spa{k}}^{\spa{p}} δ_{\spa{l}}^{\spa{q}} T^{\spa{l}}_{\spa{b}}\right) T^{\spa{k}}_{\spa{a}} \right\}\\
+&+ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \bar{\mathcal{P}}(\spa{a}\spa{i};\spa{b}\spa{j})\left\{
+ \left(\hat v_{\spa{a}\spa{l}}^{\spa{i}\spa{d}} - \hat v_{\spa{a}\spa{l}}^{\spa{d}\spa{i}}
++ \bar x_{\spa{a}\spa{l}}^{\spa{i}\spa{d}}\right)T^{\spa{l}\spa{j}}_{\spa{d}\spa{b}}
++ \left(\hat v_{\spa{a}\spb{l}}^{\spa{i}\spb{d}}
++ x_{\spa{a}\spb{l}}^{\spa{i}\spb{d}}\right)T^{\spa{j}\spb{l}}_{\spa{b}\spb{d}} \right\}\\
+&+Λ_{\spa{i}}^{\spa{a}} \left(K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}}
+δ_{\spa{a}}^{\spa{p}} δ_{\spa{j}}^{\spa{q}}  
++K^{\spa{i}\spb{j}}_{\spa{p}\spb{q}} δ_{\spa{a}}^{\spa{p}} δ_{\spb{j}}^{\spb{q}}\right)
+-Λ_{\spa{i}}^{\spa{a}} T^{\spa{k}}_{\spa{a}} \left(
+  K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}}δ_{\spa{k}}^{\spa{p}} δ_{\spa{j}}^{\spa{q}} 
+ +K^{\spa{i}\spb{j}}_{\spa{p}\spb{q}}δ_{\spa{k}}^{\spa{p}} δ_{\spb{j}}^{\spb{q}}\right) \\
+&+Λ_{\spa{i}}^{\spa{a}} \hat h_{\spa{a}}^{\spa{i}} 
++ Λ_{\spa{i}}^{\spa{a}} \hat f_{\spa{j}}^{\spa{b}} T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} 
++ Λ_{\spa{i}}^{\spa{a}} \hat f_{\spb{j}}^{\spb{b}} T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} 
+- Λ_{\spa{i}}^{\spa{a}} \hat v_{\spa{j}\spa{k}}^{\spa{i}\spa{c}} T^{\spa{j}\spa{k}}_{\spa{a}\spa{c}}
+- Λ_{\spa{i}}^{\spa{a}} \hat v_{\spa{j}\spb{k}}^{\spa{i}\spb{c}} T^{\spa{j}\spb{k}}_{\spa{a}\spb{c}},
+\end{aligned}
+\end{equation}
+$\mathcal{L}_{\beta}$ is obtained from $\mathcal{L}_{\alpha}$ by flipping the spins.
+\begin{equation}
+\begin{aligned}
+\mathcal{L}_{\alpha\beta} &= 
+v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}} T^{\spa{k}\spb{l}}_{\spa{c}\spb{d}}  
++ Λ_{\spa{i}\spb{j}}^{\spa{a}\spb{b}} \left(\hat v_{\spa{k}\spb{l}}^{\spa{i}\spb{j}} 
+\red{+ v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}} T^{\spa{i}\spb{j}}_{\spa{c}\spb{d}}}\right) 
+T^{\spa{k}\spb{l}}_{\spa{a}\spb{b}}
++ Λ_{\spa{i}\spb{j}}^{\spa{a}\spb{b}} K^{\spa{i}\spb{j}}_{\spa{p}\spb{q}} 
+δ_{\spa{a}}^{\spa{p}} δ_{\spb{b}}^{\spb{q}}\\ 
+&+ Λ_{\spa{i}\spb{j}}^{\spa{a}\spb{b}}\left\{ 
+  \hat x_{\spa{a}}^{\spa{c}} T^{\spa{i}\spb{j}}_{\spa{c}\spb{b}}
+ +\hat x_{\spb{b}}^{\spb{d}} T^{\spa{i}\spb{j}}_{\spa{a}\spb{d}}
+- \hat x_{\spa{k}}^{\spa{i}} T^{\spa{k}\spa{j}}_{\spa{a}\spa{b}} 
+- \hat x_{\spb{l}}^{\spb{j}} T^{\spa{i}\spb{l}}_{\spa{a}\spb{b}} \right.\\
+&+ \left(\hat v_{\spa{a}\spa{l}}^{\spa{i}\spa{d}} - \hat v_{\spa{a}\spa{l}}^{\spa{d}\spa{i}}
++ x_{\spa{a}\spa{l}}^{\spa{i}\spa{d}}+\bar x_{\spa{a}\spa{l}}^{\spa{i}\spa{d}}\right)T^{\spa{l}\spb{j}}_{\spa{d}\spb{b}}
++ \left(\hat v_{\spb{b}\spb{l}}^{\spb{j}\spb{d}} - \hat v_{\spb{b}\spb{l}}^{\spb{d}\spb{j}}
++ 2 x_{\spb{b}\spb{l}}^{\spb{j}\spb{d}}\right)T^{\spa{i}\spb{l}}_{\spa{a}\spb{d}}\\
+&+ \left(\hat v_{\spa{a}\spb{l}}^{\spa{i}\spb{d}} 
++ v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}} T^{\spa{i}\spa{k}}_{\spa{a}\spa{c}}\right)T^{\spb{l}\spb{j}}_{\spb{d}\spb{b}}
++ \hat v_{\spa{l}\spb{b}}^{\spa{d}\spb{j}} T^{\spa{i}\spa{l}}_{\spa{a}\spa{d}}
+-\hat v_{\spa{a}\spb{k}}^{\spa{c}\spb{j}} T^{\spa{i}\spb{k}}_{\spa{c}\spb{b}}
+-\left(\hat v_{\spa{k}\spb{b}}^{\spa{i}\spb{d}} \red{-v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}}T^{\spa{i}\spb{l}}_{\spa{c}\spb{b}}} \right) T^{\spa{k}\spb{j}}_{\spa{a}\spb{d}}\\
+&\left.- K^{\spa{i}\spb{j}}_{\spa{p}\spb{q}} 
+\left( T^{\spa{k}}_{\spa{a}} δ_{\spa{k}}^{\spa{p}} δ_{\spb{b}}^{\spb{q}}
++ T^{\spb{l}}_{\spb{b}} δ_{\spa{a}}^{\spa{q}} δ_{\spb{l}}^{\spb{q}} - 
+δ_{\spa{k}}^{\spa{p}} δ_{\spb{l}}^{\spb{q}} T^{\spa{k}}_{\spa{a}} T^{\spb{l}}_{\spb{b}}\right) \right\}\\
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}} &= v_{\spa{p}\spa{q}}^{\spa{r}\spa{s}} D^{\spa{i}\spa{j}}_{\spa{r}\spa{s}} \qquad\qquad
+K^{\spa{i}\spb{j}}_{\spa{p}\spb{q}} = v_{\spa{p}\spb{q}}^{\spa{r}\spb{s}} D^{\spa{i}\spb{j}}_{\spa{r}\spb{s}}\\
+D^{\spa{i}\spa{j}}_{\spa{r}\spa{s}} &= \left(T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} + 
+T^{\spa{i}}_{\spa{a}} T^{\spa{j}}_{\spa{b}} - T^{\spa{i}}_{\spa{b}} T^{\spa{j}}_{\spa{a}}\right)δ_{\spa{r}}^{\spa{a}} δ_{\spa{s}}^{\spa{b}}
++\bar{\mathcal{P}}(\spa{i}\spa{r};\spa{j}\spa{s}) δ_{\spa{r}}^{\spa{i}} T^{\spa{j}}_{\spa{b}} δ_{\spa{s}}^{\spa{b}}  
++δ_{\spa{r}}^{\spa{i}} δ_{\spa{s}}^{\spa{j}} - δ_{\spa{s}}^{\spa{i}} δ_{\spa{r}}^{\spa{j}} \\
+D^{\spa{i}\spb{j}}_{\spa{r}\spb{s}} &= \left(T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} + 
+T^{\spa{i}}_{\spa{a}} T^{\spb{j}}_{\spb{b}} \right)δ_{\spa{r}}^{\spa{a}} δ_{\spb{s}}^{\spb{b}}
++ δ_{\spa{r}}^{\spa{i}} T^{\spb{j}}_{\spb{b}} δ_{\spb{s}}^{\spb{b}} 
++ T^{\spa{i}}_{\spa{a}} δ_{\spa{s}}^{\spa{a}} δ_{\spb{s}}^{\spb{j}} 
++δ_{\spa{r}}^{\spa{i}} δ_{\spb{s}}^{\spb{j}} \\
+x_{\spa{a}\spa{l}}^{\spa{i}\spa{d}} &= \half T^{\spa{i}\spa{k}}_{\spa{a}\spa{c}} 
+\left(v_{\spa{k}\spa{l}}^{\spa{c}\spa{d}}\red{-v_{\spa{k}\spa{l}}^{\spa{d}\spa{c}}}\right)\\
+\bar x_{\spa{a}\spa{l}}^{\spa{i}\spa{d}} &= x_{\spa{a}\spa{l}}^{\spa{i}\spa{d}} 
++ T^{\spa{i}\spb{k}}_{\spa{a}\spb{c}} v_{\spa{l}\spb{k}}^{\spa{d}\spb{c}}\\
+x_{\spa{a}\spb{l}}^{\spa{i}\spb{d}} &= \half T^{\spa{i}\spb{k}}_{\spa{a}\spb{c}} 
+\left(v_{\spb{k}\spb{l}}^{\spb{c}\spb{d}}\red{-v_{\spb{k}\spb{l}}^{\spb{d}\spb{c}}}\right)\\
+\hat x_{\spa{k}}^{\spa{i}} &= \hat f_{\spa{k}}^{\spa{i}} + 
+\red{2\times}\frac{1}{2}\left(v_{\spa{k}\spa{l}}^{\spa{c}\spa{d}} T^{\spa{i}\spa{l}}_{\spa{c}\spa{d}}
++v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}} T^{\spa{i}\spb{l}}_{\spa{c}\spb{d}}\right)\\
+\hat x_{\spa{a}}^{\spa{c}} &= \hat f_{\spa{a}}^{\spa{c}} - 
+\red{2\times}\frac{1}{2}\left(v_{\spa{k}\spa{l}}^{\spa{c}\spa{d}} T^{\spa{k}\spa{l}}_{\spa{a}\spa{d}}
++v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}} T^{\spa{k}\spb{l}}_{\spa{a}\spb{d}}\right)
+\\
+\end{aligned}
+\end{equation}
 
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
