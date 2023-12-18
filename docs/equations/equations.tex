@@ -5,9 +5,12 @@
 \usepackage{amsfonts}
 \usepackage{color}
 \newcommand{\red}[1]{{\color{red} #1}}
+\newcommand{\blue}[1]{{\color{blue} #1}}
+\newcommand{\magenta}[1]{{\color{magenta} #1}}
 \usepackage[utf8]{inputenc}
 \usepackage{listings}
 \usepackage{hyperref}
+\usepackage{cancel}
 \hypersetup{
     bookmarks=true,         % show bookmarks bar?
     unicode=false,          % non-Latin characters in Acrobat’s bookmarks
@@ -22,6 +25,10 @@
 \DeclareUnicodeCharacter{039B}{\Lambda}
 \DeclareUnicodeCharacter{03B4}{\delta}
 \newcommand{\op}{\hat}
+\newcommand{\sop}[1]{{\cal S}\left(#1\right)}
+\newcommand{\Sop}[2]{{\cal S}\left(#1,#2\right)}
+\newcommand{\asop}[1]{{\cal A}\left(#1\right)}
+\newcommand{\ASop}[2]{{\cal A}\left(#1;#2\right)}
 \newcommand{\mat}{\mathbf}
 \newcommand{\eq}[1]{Eq.~(\ref{#1})}
 \newcommand{\eqs}[2]{Eqs.~(\ref{#1},~\ref{#2})}
@@ -37,7 +44,7 @@
 
 \begin{document}
 \title{Equations and derivations for \ElemCojl}
-\author{Daniel Kats}
+\author{Thomas Schraivogel and Daniel Kats}
 \maketitle
 \tableofcontents
 \chapter{Introduction}
@@ -67,8 +74,16 @@ i.e., $f_p^q = <p|\op f|q>$ and $v_{pq}^{rs} = <pq|rs>$.
 Symmetrization operators:
 \begin{equation}
 \begin{aligned}
-\mathcal{P}(ai;bj) X^{ij}_{ab} &= X^{ij}_{ab} + X^{ji}_{ba}\\
-\bar{\mathcal{P}}(ai;bj) &= \mathcal{P}(ai;bj) - \mathcal{P}(bi;aj)\\
+\sop{ab} X^{ij}_{ab} &= X^{ij}_{ab} + X^{ij}_{ba}\\
+\Sop{ab}{ij} X^{ij}_{ab} &= X^{ij}_{ab} + X^{ji}_{ba}\\
+\end{aligned}
+\end{equation}
+
+Antisymmetrization operators:
+\begin{equation}
+\begin{aligned}
+\asop{ab} X^{ij}_{ab} &= X^{ij}_{ab} - X^{ij}_{ba}\\
+\ASop{ab}{ij} X^{ij}_{ab} &= X^{ij}_{ab} - X^{ji}_{ab} - X^{ij}_{ba} + X^{ji}_{ba}\\
 \end{aligned}
 \end{equation}
 
@@ -85,7 +100,7 @@ The closed-shell CCSD and DCSD Lagrangian is given by
 + Λ_{ij}^{ab} \left(\hat v_{kl}^{ij} \red{+ v_{kl}^{cd} T^{ij}_{cd}}\right) T^{kl}_{ab}
 + Λ_{ij}^{ab} \hat v_{ab}^{cd} T^{ij}_{cd} \\
 &\red{+Λ_{ij}^{ab} v_{kl}^{cd}T^{kj}_{ad}T^{il}_{cb}}\\
-&+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2} v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
+&+ Λ_{ij}^{ab} \Sop{ab}{ij}\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2} v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
 - \left(\hat f_k^i + \red{2\times}\frac{1}{2} v_{kl}^{cd}\tilde T^{il}_{cd}\right)T^{kj}_{ab} \right.\\
 &\left.+ \left(\hat v_{al}^{id}
 + \frac{1}{2} v_{kl}^{cd}\tilde T^{ik}_{ac}\right)\tilde T^{lj}_{db}
@@ -119,7 +134,7 @@ the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} 
 + Λ_{ij}^{ab} \left(\hat v_{kl}^{ij} \red{+ v_{kl}^{cd} T^{ij}_{cd}}\right) T^{kl}_{ab}
 + Λ_{ij}^{ab} K^{ij}_{pq} δ_a^p δ_b^q\\ 
 &\red{+Λ_{ij}^{ab} v_{kl}^{cd}T^{kj}_{ad}T^{il}_{cb}}\\
-&+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2}v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
+&+ Λ_{ij}^{ab} \Sop{ab}{ij}\left\{\left(\hat f_a^c - \red{2\times}\frac{1}{2}v_{kl}^{cd} \tilde T^{kl}_{ad}\right)T^{ij}_{cb}
 - \left(\hat f_k^i + \red{2\times}\frac{1}{2}v_{kl}^{cd}\tilde T^{il}_{cd}\right)T^{kj}_{ab} \right.\\
 &+ \left(\hat v_{al}^{id}
 + \frac{1}{2} v_{kl}^{cd}\tilde T^{ik}_{ac}\right)\tilde T^{lj}_{db}
@@ -156,7 +171,7 @@ with respect to the amplitudes and setting the result to zero, i.e.,
 - Λ_{ij}^{eb} \hat v_{mb}^{cd} T^{ij}_{cd} - Λ_{ij}^{ae} \hat v_{am}^{cd} T^{ij}_{cd}\\
 &- Λ_{ij}^{eb} \hat f_m^d T^{ij}_{db}- Λ_{ij}^{ae} \hat f_m^d T^{ij}_{ad}
 - Λ_{mj}^{ab} \hat f_k^e T^{kj}_{ab}- Λ_{im}^{ab} \hat f_k^e T^{ik}_{ab}\\
-&+ Λ_{ij}^{ab} \mathcal{P}(ai;bj)\left\{\left(2\hat v_{am}^{de} - \hat v_{am}^{ed}\right) T^{ij}_{db}
+&+ Λ_{ij}^{ab} \Sop{ab}{ij}\left\{\left(2\hat v_{am}^{de} - \hat v_{am}^{ed}\right) T^{ij}_{db}
 - \left(2\hat v_{km}^{ie} - \hat v_{km}^{ei}\right) T^{kj}_{ab}\right\}\\
 &- Λ_{ij}^{eb} \hat v_{ml}^{id}\tilde T^{lj}_{db} - Λ_{ij}^{ae} \hat v_{ml}^{jd}\tilde T^{il}_{ad}
 + Λ_{mj}^{ab} \hat v_{al}^{ed}\tilde T^{lj}_{db}
@@ -180,27 +195,27 @@ with respect to the amplitudes and setting the result to zero, i.e.,
 
 \begin{equation}
 \begin{aligned}
-\frac{\partial \mathcal{L}}{\partial T^{mn}_{ef}}&= \frac{1}{2} \mathcal{P}(em;fn) \Big[
+\frac{\partial \mathcal{L}}{\partial T^{mn}_{ef}}&= \frac{1}{2} \Sop{ef}{mn} \Big[
   Λ_m^e \hat f_n^f
 \tilde v_{mn}^{ef}
 + Λ_{ij}^{ef} \left(\hat v_{mn}^{ij} \red{+ v_{mn}^{cd} T^{ij}_{cd}}\right) 
 \red{+ Λ_{mn}^{ab} v_{kl}^{ef} T^{kl}_{ab}} + Λ_{mn}^{ab} \hat v_{ab}^{ef} \\
 &\red{+Λ_{in}^{eb} v_{ml}^{cf}T^{il}_{cb}+Λ_{mj}^{af} v_{kn}^{ed}T^{kj}_{ad}}\\
-&+ Λ_{mn}^{af} \mathcal{P}(am;fn)\left(\hat f_a^e - \red{2\times}\frac{1}{2} v_{kl}^{ed} \tilde T^{kl}_{ad}\right)
-- Λ_{ij}^{eb} \mathcal{P}(ei;bj)\red{2\times}\frac{1}{2} \tilde v_{mn}^{cf} T^{ij}_{cb}\\
-&- Λ_{in}^{ef} \mathcal{P}(ei;fn)\left(\hat f_m^i + \red{2\times}\frac{1}{2} v_{ml}^{cd}\tilde T^{il}_{cd}\right)
-- Λ_{mj}^{ab} \mathcal{P}(am;bj) \red{2\times}\frac{1}{2} \tilde v_{kn}^{ef} T^{kj}_{ab}\\
-&+ 2Λ_{in}^{af} \mathcal{P}(ai;fn)\left(\hat v_{am}^{ie}
+&+ Λ_{mn}^{af} \Sop{af}{mn}\left(\hat f_a^e - \red{2\times}\frac{1}{2} v_{kl}^{ed} \tilde T^{kl}_{ad}\right)
+- Λ_{ij}^{eb} \Sop{eb}{ij}\red{2\times}\frac{1}{2} \tilde v_{mn}^{cf} T^{ij}_{cb}\\
+&- Λ_{in}^{ef} \Sop{ef}{in}\left(\hat f_m^i + \red{2\times}\frac{1}{2} v_{ml}^{cd}\tilde T^{il}_{cd}\right)
+- Λ_{mj}^{ab} \Sop{ab}{mj} \red{2\times}\frac{1}{2} \tilde v_{kn}^{ef} T^{kj}_{ab}\\
+&+ 2Λ_{in}^{af} \Sop{af}{in}\left(\hat v_{am}^{ie}
 + \frac{1}{2} v_{km}^{ce}\tilde T^{ik}_{ac}\right)
-- Λ_{im}^{af} \mathcal{P}(ai;fm)\left(\hat v_{an}^{ie}
+- Λ_{im}^{af} \Sop{af}{im}\left(\hat v_{an}^{ie}
 + \frac{1}{2} v_{kn}^{ce}\tilde T^{ik}_{ac}\right)\\
-&+ 2Λ_{mj}^{eb} \mathcal{P}(em;bj) \frac{1}{2} v_{nl}^{fd}\tilde T^{lj}_{db}
-- Λ_{nj}^{eb} \mathcal{P}(en;bj) \frac{1}{2} v_{ml}^{fd}\tilde T^{lj}_{db}\\
-&- Λ_{in}^{af} \mathcal{P}(ai;fn)\hat v_{ma}^{ie} 
-- Λ_{in}^{eb} \mathcal{P}(ei;bn)\hat v_{mb}^{if}\\
-&\red{-Λ_{nj}^{fb} \mathcal{P}(fn;bj) v_{ml}^{ce}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)
--Λ_{in}^{af} \mathcal{P}(ai;fn)v_{km}^{ed}T^{ki}_{da}}\\
-&\red{+Λ_{in}^{ae} \mathcal{P}(ai;bj)v_{km}^{fd}T^{ki}_{da}}\\
+&+ 2Λ_{mj}^{eb} \Sop{eb}{mj} \frac{1}{2} v_{nl}^{fd}\tilde T^{lj}_{db}
+- Λ_{nj}^{eb} \Sop{eb}{nj} \frac{1}{2} v_{ml}^{fd}\tilde T^{lj}_{db}\\
+&- Λ_{in}^{af} \Sop{af}{in}\hat v_{ma}^{ie} 
+- Λ_{in}^{eb} \Sop{eb}{in}\hat v_{mb}^{if}\\
+&\red{-Λ_{nj}^{fb} \Sop{fb}{nj} v_{ml}^{ce}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)
+-Λ_{in}^{af} \Sop{af}{in}v_{km}^{ed}T^{ki}_{da}}\\
+&\red{+Λ_{in}^{ae} \Sop{ab}{ij}v_{km}^{fd}T^{ki}_{da}}\\
 &+ \frac{1}{2} \tilde{\mathcal{P}}(em;fn) \left\{
   Λ_m^e \hat f_n^f 
 + Λ_n^a \hat v_{am}^{fe} - Λ_i^f \hat v_{nm}^{ie} \right\}\Big].
@@ -278,7 +293,7 @@ With these definitions, the $\Lambda$ equations can be written as
 \tilde v_{mn}^{ef} 
 + Λ_{ij}^{ef} \left(\hat v_{mn}^{ij} \red{+ v_{mn}^{cd} T^{ij}_{cd}}\right) 
 \red{+ D_{mn}^{kl} v_{kl}^{ef} } + K_{mn}^{rs} \delta_r^e \delta_s^f\\
-&+ \mathcal{P}(em;fn)\left\{ 
+&+ \Sop{ef}{mn}\left\{ 
 Λ_{mn}^{af} \left(\hat f_a^e - \red{2\times}\frac{1}{2} x_a^e\right)
 - Λ_{in}^{ef} \left(\hat f_m^i + \red{2\times}\frac{1}{2} x_m^i\right)
 \right. \\
@@ -370,13 +385,13 @@ The open-shell CCSD and DCSD Lagrangian -- i.e., spin dependent -- is given by
 T^{\spa{k}\spa{l}}_{\spa{a}\spa{b}}
 + Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}} 
 δ_{\spa{a}}^{\spa{p}} δ_{\spa{b}}^{\spa{q}}\\ 
-&+ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \mathcal{P}(\spa{a}\spa{i};\spa{b}\spa{j})\left\{
+&+ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \Sop{\spa{a}\spa{b}}{\spa{i}\spa{j}}\left\{
   \hat x_{\spa{a}}^{\spa{c}} T^{\spa{i}\spa{j}}_{\spa{c}\spa{b}}
 - \hat x_{\spa{k}}^{\spa{i}} T^{\spa{k}\spa{j}}_{\spa{a}\spa{b}} 
 - K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}} 
 \left(δ_{\spa{k}}^{\spa{p}} δ_{\spa{b}}^{\spa{q}} - 
 \frac{1}{2} δ_{\spa{k}}^{\spa{p}} δ_{\spa{l}}^{\spa{q}} T^{\spa{l}}_{\spa{b}}\right) T^{\spa{k}}_{\spa{a}} \right\}\\
-&+ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \bar{\mathcal{P}}(\spa{a}\spa{i};\spa{b}\spa{j})\left\{
+&+ Λ_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \ASop{\spa{a}\spa{b}}{\spa{i}\spa{j}}\left\{
  \left(\hat v_{\spa{a}\spa{l}}^{\spa{i}\spa{d}} - \hat v_{\spa{a}\spa{l}}^{\spa{d}\spa{i}}
 + \bar x_{\spa{a}\spa{l}}^{\spa{i}\spa{d}}\right)T^{\spa{l}\spa{j}}_{\spa{d}\spa{b}}
 + \left(\hat v_{\spa{a}\spb{l}}^{\spa{i}\spb{d}}
@@ -431,7 +446,7 @@ K^{\spa{i}\spa{j}}_{\spa{p}\spa{q}} &= v_{\spa{p}\spa{q}}^{\spa{r}\spa{s}} D^{\s
 K^{\spa{i}\spb{j}}_{\spa{p}\spb{q}} = v_{\spa{p}\spb{q}}^{\spa{r}\spb{s}} D^{\spa{i}\spb{j}}_{\spa{r}\spb{s}}\\
 D^{\spa{i}\spa{j}}_{\spa{r}\spa{s}} &= \left(T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} + 
 T^{\spa{i}}_{\spa{a}} T^{\spa{j}}_{\spa{b}} - T^{\spa{i}}_{\spa{b}} T^{\spa{j}}_{\spa{a}}\right)δ_{\spa{r}}^{\spa{a}} δ_{\spa{s}}^{\spa{b}}
-+\bar{\mathcal{P}}(\spa{i}\spa{r};\spa{j}\spa{s}) δ_{\spa{r}}^{\spa{i}} T^{\spa{j}}_{\spa{b}} δ_{\spa{s}}^{\spa{b}}  
++\ASop{\spa{i}\spa{j}}{\spa{r}\spa{s}} δ_{\spa{r}}^{\spa{i}} T^{\spa{j}}_{\spa{b}} δ_{\spa{s}}^{\spa{b}}  
 +δ_{\spa{r}}^{\spa{i}} δ_{\spa{s}}^{\spa{j}} - δ_{\spa{s}}^{\spa{i}} δ_{\spa{r}}^{\spa{j}} \\
 D^{\spa{i}\spb{j}}_{\spa{r}\spb{s}} &= \left(T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} + 
 T^{\spa{i}}_{\spa{a}} T^{\spb{j}}_{\spb{b}} \right)δ_{\spa{r}}^{\spa{a}} δ_{\spb{s}}^{\spb{b}}
@@ -452,6 +467,96 @@ x_{\spa{a}\spb{l}}^{\spa{i}\spb{d}} &= \half T^{\spa{i}\spb{k}}_{\spa{a}\spb{c}}
 +v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}} T^{\spa{k}\spb{l}}_{\spa{a}\spb{d}}\right)
 \\
 \end{aligned}
+\end{equation}
+
+\chapter{Two determinant coupled cluster}
+Amplitudes are normal ordered with respect to the formal reference with two active orbitals $t$ and $\spb{u}$.
+The occupied ($i,j,\ldots$) and virtual ($a,b,\ldots$) spaces do not contain the active orbitals.
+The equations follow the equations presented in Ref.\cite{szalay94}.
+Differences because of fixed typos or other reasons are coloured \blue{blue}.
+Terms we have added to ensure energy invariance with respect to the reference choice 
+and which are not explicitly listed in Ref.\cite{szalay94} are coloured \magenta{magenta}. \\ \\
+The following intermediates are used:
+\begin{align}
+\tau^{\spa{i}}_{\spa{a}}             &= t^{\spa{i}}_{\spa{a}} - t^{\spb{i}}_{\spb{a}}, \\
+\tau^{\spb{i}}_{\spb{a}} &= t^{\spb{i}}_{\spb{a}} - t^{\spa{i}}_{\spa{a}}, \\
+\tau^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}           &= t^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} + t^{\spa{i}}_{\spa{a}} t^{\spa{j}}_{\spa{b}}.
+\end{align}
+The singles $M$ tensor is built as follows,
+\begin{align}
+M^{\spa{i}}_{\spa{u}} &= t^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}, \\
+M^{\spa{t}}_{\spa{a}} &= -t^{\spa{t}\spb{n}}_{\spa{u}\spb{a}}, \\
+M^{\spa{i}}_{\spa{a}} &= t^{\spb{u}}_{\spb{a}} t^{t\spb{i}}_{u\spb{t}} + t^{\spb{i}}_{\spb{t}} t^{t\spb{u}}_{u\spb{a}}.
+\end{align}
+\begin{align}
+M^{\spb{i}}_{\spb{t}} &= t^{\spa{i}\spb{u}}_{\spa{u}\spb{t}}, \\
+M^{\spb{u}}_{\spb{a}} &= - t^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}, \\
+M^{\spb{i}}_{\bar{a}} &= t^{\spa{t}}_{\spa{a}} t^{\spa{i}\spb{u}}_{u\spb{t}} + t^{\spa{i}}_{\spa{u}} t^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}.
+\end{align}
+The all alpha part of the doubles part is built as follows,
+\begin{align}
+M^{\spa{i}\spa{j}}_{\spa{u}\spa{a}} = &-\tau^{\spa{j}}_{\spa{a}} t^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
+                                       +\tau^{\spa{i}}_{\spa{a}} t^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
+                                       -t^{\spb{j}}_{\spb{t}} t^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} 
+                                       +t^{\spb{i}}_{\spb{t}} t^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}, \\
+M^{\spa{t}\spa{i}}_{\spa{a}\spa{b}} = &\tau^{\spa{i}}_{\spa{b}} t^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
+                                      -\tau^{\spa{i}}_{\spa{a}} t^{\spa{t}\spb{u}}_{\spa{u}\spb{b}} 
+                                      +t^{\spb{u}}_{\spb{b}} t^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} 
+                                      -t^{\spb{u}}_{\spb{a}} t^{\spa{t}\spb{i}}_{\spa{u}\spb{b}}, \\
+M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} = &-\ASop{ij}{ab} \tau^{\spa{j}}_{\spa{b}} \left( t^{\spb{u}}_{\spb{a}} t^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
+                                       +t^{\spb{i}}_{\spb{t}} t^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} \right)
+                                       -\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \left( \tau^{\spb{u}\spb{i}}_{\spb{t}\spb{a}} t^{\spa{t}\spb{j}}_{\spa{u}\spb{b}} \right) \nonumber \\
+                                      &-\asop{\spa{i}\spa{j}} t^{\spb{u}\spb{i}}_{\spb{a}\spb{b}} t^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
+                                       -\asop{ab} t^{\spb{i}\spb{j}}_{\spb{t}\spb{a}} t^{\spa{t}\spb{u}}_{\spa{u}\spb{b}}, \\
+M^{\spa{i}\spa{t}}_{\spa{a}\spa{u}} = &-t^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}. 
+\end{align}
+The all beta part of the doubles $M$ tensor is obtained from the all alpha part analogously to the presented singles $M$ tensor. \newline
+The alpha beta part is calculated as follows,
+\begin{align}
+M^{\spa{i}\spb{j}}_{\spa{u}\spb{a}} = &-\tau^{\spb{j}}_{\spb{a}} t^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
+                                       -t^{\spa{j}}_{\spa{u}} t^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
+                                       -t^{\spa{t}}_{\spa{a}} \tau^{\spa{j}\spb{i}}_{\spa{u}\spb{t}} 
+                         \blue{\cancel{-t^{\spb{i}}_{\spb{t}} t^{\spa{t}\spa{j}}_{\spa{a}\spa{u}}}},\\
+\magenta{M^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}} = &\magenta{-\tau^{\spa{j}}_{\spa{a}} t^{\spa{i}\spb{u}}_{\spa{u}\spb{t}} 
+                                                -t^{\spb{j}}_{\spb{t}} t^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
+                                                -t^{\spb{u}}_{\spb{a}} \tau^{\spa{i}\spb{j}}_{\spa{u}\spb{t}}}, \\
+M^{\spa{t}\spb{i}}_{\spa{a}\spb{b}} = &\tau^{\spb{i}}_{\spb{b}} t^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
+                                      +t^{\spa{t}}_{\spa{b}} t^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
+                                      +t^{\spa{i}}_{\spa{u}} t^{\spa{t}\spb{u}}_{\spa{b}\spb{a}}
+                        \blue{\cancel{+t^{\spb{u}}_{\spb{a}} t^{\spa{i}\spa{t}}_{\spa{u}\spa{b}}}},\\
+\magenta{M^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} = &\magenta{\tau^{\spa{i}}_{\spa{b}} t^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}
+                                                +t^{\spb{u}}_{\spb{b}} t^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
+                                                +t^{\spb{i}}_{\spb{t}} t^{\spa{t}\spb{u}}_{\spa{a}\spb{b}}},\\
+M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} = &-\tau^{\spb{j}}_{\spb{b}} (t^{\spb{u}}_{\spb{a}} t^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}
+                                      +t^{\spb{i}}_{\spb{t}} t^{\spa{t}\spb{u}}_{\spa{u}\spb{a}})
+                                \blue{-\tau^{\spa{i}}_{\spa{a}}(t^{\spa{j}\spb{u}}_{\spa{u}\spb{m}} t^{\spa{t}}_{\spa{b}}
+                                      +t^{\spa{t}\spb{u}}_{\spa{b}\spb{t}} t^{\spa{j}}_{\spa{u}})} \nonumber \\
+                                     &+t^{\spb{i}}_{\spb{t}} t^{\spb{u}}_{\spb{a}} t^{\spa{t}\spa{j}}_{\spa{u}\spa{b}} 
+                                      +t^{\spa{t}}_{\spa{b}} t^{\spa{j}}_{\spa{u}} t^{\spb{u}\spb{i}}_{\spb{t}\spb{a}}
+                                      -t^{\spa{j}}_{\spa{u}} t^{\spb{u}}_{\spb{a}} t^{\spa{m}\spb{i}}_{\spa{b}\spb{t}}
+                                      -t^{\spa{t}}_{\spa{b}} t^{\spb{i}}_{\spb{t}} t^{\spa{j}\spb{u}}_{\spa{u}\spb{a}} \nonumber \\
+                                     &-\tau^{\spa{j}\spb{i}}_{\spa{u}\spb{t}} \tau^{\spa{t}\spb{u}}_{\spa{b}\bar{a}}
+                                      +t^{\spa{j}\spb{u}}_{\spa{u}\spb{t}} t^{\spa{t}\spb{i}}_{\spa{b}\spb{a}}
+                                      +t^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} t^{\blue{\spa{j}\spb{u}}}_{\spa{b}\spb{a}} 
+                                      +t^{\spa{t}\spb{u}}_{\spa{b}\spb{t}} t^{\spa{j}\spb{i}}_{\spa{u}\spb{a}} \nonumber \\
+                                     &+t^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} t^{\spa{j}\spb{i}}_{\spa{b}\spb{t}} 
+                                \blue{-t^{\spa{t}\spa{j}}_{\spa{u}\spa{b}} t^{\spb{u}\spb{i}}_{\spb{t}\spb{a}}}
+                                      -t^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} t^{\spa{j}\spb{u}}_{\spa{b}\spb{t}} 
+                                      -t^{\spa{j}\spb{u}}_{\spa{u}\spb{a}} t^{\spa{t}\spb{i}}_{\spa{b}\spb{t}},\\
+M^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} = &t^{\spa{i}}_{\spa{u}},\\
+\magenta{M^{\spa{i}\spb{u}}_{\spa{u}\spb{t}}} = &\magenta{t^{\spb{i}}_{\spb{t}}}, \\
+M^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} = &\tau^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}, \\
+\magenta{M^{\spa{i}\spb{u}}_{\spa{a}\spb{t}}} = &\magenta{\tau^{\spb{i}\spb{u}}_{\spb{t}\spb{a}}}, \\
+M^{\spa{t}\spb{i}}_{\spa{a}\spb{t}} = &\tau^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}, \\
+\magenta{M^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}} = &\magenta{\tau^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}},\\
+M^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} = &-t^{\spa{t}}_{\spa{a}},\\
+\magenta{M^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}} = &\magenta{-t^{\spb{u}}_{\spb{a}}},\\
+M^{\spa{i}\spb{j}}_{\spa{u}\spb{t}} = &-\tau^{\spa{j}\spb{i}}_{\spa{u}\spb{t}}, \\
+M^{\spa{t}\spb{u}}_{\spa{a}\spb{b}} = &-\tau^{\spa{t}\spb{u}}_{\spa{b}\spb{a}}.
+\end{align}
+The effective Hamiltonian $W$ is just the all active part of the residuum,
+\begin{equation}
+W = R^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}.
 \end{equation}
 
 \addcontentsline{toc}{chapter}{Bibliography}
