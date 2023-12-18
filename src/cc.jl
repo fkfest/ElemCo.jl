@@ -1606,45 +1606,35 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   end
 
   #ring terms
-  d_voov = load(EC,"d_voov")
+  A_d_voov = load(EC,"d_voov") - permutedims(load(EC,"d_vovo"),(1,2,4,3))
   @tensoropt begin
-    rR2a[a,b,i,j] := d_voov[b,k,j,c] * T2a[a,c,i,k]
-    R2ab[a,B,i,J] += d_voov[a,k,i,c] * T2ab[c,B,k,J]
+    rR2a[a,b,i,j] := A_d_voov[b,k,j,c] * T2a[a,c,i,k]
+    R2ab[a,B,i,J] += A_d_voov[a,k,i,c] * T2ab[c,B,k,J]
   end
-  d_voov = nothing
+  A_d_voov = nothing
   d_vOoV = load(EC,"d_vOoV")
   @tensoropt begin
     rR2a[a,b,i,j] += d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
     R2ab[a,B,i,J] += d_vOoV[a,K,i,C] * T2b[B,C,J,K]
   end
   d_vOoV = nothing
-  d_vovo = load(EC,"d_vovo")
-  @tensoropt begin
-    rR2a[a,b,i,j] -= d_vovo[b,k,c,j] * T2a[a,c,i,k]
-    R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
-    R2ab[a,B,i,J] -= d_vovo[a,k,c,i] * T2ab[c,B,k,J]
-  end
-  d_vovo, rR2a = nothing, nothing
+  @tensoropt R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
+  rR2a = nothing
   if n_occb_orbs(EC) > 0
-    d_VOOV = load(EC,"d_VOOV")
+    A_d_VOOV = load(EC,"d_VOOV") - permutedims(load(EC,"d_VOVO"),(1,2,4,3))
     @tensoropt begin
-      rR2b[A,B,I,J] := d_VOOV[B,K,J,C] * T2b[A,C,I,K]
-      R2ab[a,B,i,J] += d_VOOV[B,K,J,C] * T2ab[a,C,i,K]
+      rR2b[A,B,I,J] := A_d_VOOV[B,K,J,C] * T2b[A,C,I,K]
+      R2ab[a,B,i,J] += A_d_VOOV[B,K,J,C] * T2ab[a,C,i,K]
     end
-    d_VOOV = nothing
+    A_d_VOOV = nothing
     d_oVvO = load(EC,"d_oVvO")
     @tensoropt begin
       rR2b[A,B,I,J] += d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
       R2ab[a,B,i,J] += d_oVvO[k,B,c,J] * T2a[a,c,i,k]
     end
     d_oVvO = nothing
-    d_VOVO = load(EC,"d_VOVO")
-    @tensoropt begin
-      rR2b[A,B,I,J] -= d_VOVO[B,K,C,J] * T2b[A,C,I,K]
-      R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
-      R2ab[a,B,i,J] -= d_VOVO[B,K,C,J] * T2ab[a,C,i,K]
-    end
-    d_VOVO, rR2b = nothing, nothing
+    @tensoropt R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
+    rR2b = nothing
   end
 
   if tworef || fixref
