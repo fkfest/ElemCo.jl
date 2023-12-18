@@ -276,19 +276,23 @@ function parse_commandline(EC::ECInfo)
   end
   return fcidump_file, method, occa, occb
 end
-
-function run_mcscf()
+  
+  """ 
+      run_mcscf(initVecType::InitialVectorType=INHERIT)
+  
+    Run DF-MCSCF calculation.
+  """
+function run_mcscf()  
   xyz="angstrom
      Fe  -1.6827629   -0.5620638    0.0006858
      N   -1.7654701    1.7386430   -0.0155915
      H   -2.3091690    2.1062136    0.7643967
      H   -0.8575605    2.1961896    0.0569999
-     H   -2.1985074    2.1444062   -0.8446345"
-
-    #  N    0.6370910   -0.4829211    0.0198374
-    #  H    1.0410909   -0.1381987    0.8898340
-    #  H    1.0933299   -1.3794527   -0.1444124
-    #  H    1.0148101    0.1305669   -0.7014791
+     H   -2.1985074    2.1444062   -0.8446345
+     N    0.6370910   -0.4829211    0.0198374
+     H    1.0410909   -0.1381987    0.8898340
+     H    1.0933299   -1.3794527   -0.1444124
+     H    1.0148101    0.1305669   -0.7014791"
 
     #  N   -4.0024708   -0.5711646   -0.0821798
     #  H   -4.4120209   -1.4547568   -0.3829660
@@ -315,7 +319,7 @@ function run_mcscf()
   setup!(EC,ms2=4,charge=2)
   to = TimerOutputs.get_defaulttimer()
   TimerOutputs.reset_timer!(to)
-  @timeit "dfmcscf" E,cMO = dfmcscf(EC,direct=false, IterMax=64)
+  @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64)
   display(to)
   TimerOutputs.reset_timer!(to)
 end

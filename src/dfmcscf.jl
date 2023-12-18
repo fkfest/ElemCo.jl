@@ -10,6 +10,18 @@ using ..ElemCo.DFHF
 export dfmcscf
 export davidson
 export calc_h
+export InitialVectorType
+
+"""
+    Type of initial guess vectors of Davidson iterations
+
+  Possible values:
+  - RANDOM: one random vector
+  - INHERIT: from last macro/micro iterations
+  - GRADIENT_SET: b0 as [1,0,0,...], b1 as gradient
+  - GRADIENT_SETPLUS: b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
+"""
+@enum InitialVectorType RANDOM INHERIT GRADIENT_SET GRADIENT_SETPLUS
 
 """
     denMatCreate(EC::ECInfo)
@@ -483,17 +495,6 @@ function calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
 end
 
 """
-    Type of initial guess vectors of Davidson iterations
-
-  Possible values:
-  - RANDOM: one random vector
-  - INHERIT: from last macro/micro iterations
-  - GRADIENT_SET: b0 as [1,0,0,...], b1 as gradient
-  - GRADIENT_SETPLUS: b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
-"""
-@enum InitialVectorType RANDOM INHERIT GRADIENT_SET GRADIENT_SETPLUS
-
-"""
     davidson(H::Matrix, N::Integer, n::Integer, thres::Number, convTrack::Bool=false)
 
 Calculate one of the eigenvalues and corresponding eigenvector of the matrix H
@@ -504,7 +505,7 @@ thres is the criterion of convergence,
 convTrack is to decide whether the tracking of eigenvectors is used
 """
 function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
-  h_block::NTuple{10, Matrix{Float64}}, g::Vector, α::Number, convTrack::Bool=false, initVecType::InitialVectorType=INHERIT)
+  h_block::NTuple{10, Matrix{Float64}}, g::Vector, α::Number, initVecType::InitialVectorType, convTrack::Bool=false)
   V = zeros(N,n_max)
   σ = zeros(N,n_max)
   h = zeros(n_max,n_max)
@@ -520,6 +521,7 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
   n32 = n_v * n_1o
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
   H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
+  initGuessIndex = findmax(abs.(H0_hb))[2]
   numInitialVectors = 0
 
   function H_multiply(v::Vector)
@@ -559,18 +561,23 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
     V[:,1] = v
   elseif initVecType == GRADIENT_SET
     V[1,1] = 1.0
-    v = [[0.];g] ./ norm(g)
+    g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
+    v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
     σ[:,1] = H_multiply(V[:,1])
     numInitialVectors = 2
   elseif initVecType == GRADIENT_SETPLUS
     V[1,1] = 1.0
-    v = [[0.];g] ./ norm(g)
+    g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
+    v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
     σ[:,1] = H_multiply(V[:,1])
     σ[:,2] = H_multiply(V[:,2])
-    V[n21+n31+n22+2, 3] = 1.0
+    V[initGuessIndex, 3] = 1.0
     v = V[:,3]
+    v = v - V[initGuessIndex,2].* V[:,2]
+    v = v ./ norm(v)
+    V[:,3] = v
     newh_hb = V' * σ[:,2]
     h[:,2] = newh_hb
     h[2,:] = newh_hb
@@ -582,7 +589,7 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
     newσ_hb = H_multiply(v)
     σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
-    h[:,i-1] = newh_hb
+    h[:,i-1] = newh_hb 
     h[i-1,:] = newh_hb
     λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
     if convTrack && i > pick_vec
@@ -605,7 +612,7 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
     println("davidson algorithm not converged!")
   end
   v = V * ac
-
+  println("μ = ", λ[eigvec_index])
   return λ[eigvec_index], v, converged
 end
 
@@ -617,7 +624,7 @@ tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
 function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
-  h_block::NTuple{10, Matrix{Float64}})
+  h_block::NTuple{10, Matrix{Float64}}, initVecType::InitialVectorType)
   N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
   g_norm = norm(g)
   x = zeros(N_rk)
@@ -630,12 +637,12 @@ function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::V
   davError = γ * norm(g)
   # α tuning loop (micro loop)
   for it=1:maxit
-    @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α)
+    @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α, initVecType)
     micro_counts = 0
     while !converged
       davItMax += 50
       println("Davidson max iteration number increased to ", davItMax)
-      @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α)
+      @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α, initVecType)
       micro_counts += 1
     end
     x = vec[2:end] ./ (vec[1] * α)
@@ -716,7 +723,8 @@ end
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit = 16, )
+function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit = 16)
+  initVecType::InitialVectorType = GRADIENT_SETPLUS
   Enuc = generate_integrals(EC; save3idx=!direct)
   println("Enuc ", Enuc)
   sao = load(EC,"sao")
@@ -799,12 +807,16 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
         vec = vec./norm(vec)
         inherit_large == true
       end
-      @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block)
+      @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType)
+      # calc 2nd order perturbation energy
+      h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
+      if norm(g) < 1e-3
+        H_matrix = [[h_2121;h_3121;h_2221;h_3221] [h_3121';h_3131;h_2231;h_3231] [h_2221';h_2231';h_2222;h_3222] [h_3221';h_3231';h_3222';h_3232]]
+        x = - H_matrix \ g
+      end
       println("square of the norm of x: ", sum(x.^2))
-      
+
       @timeit "calc 2nd E" begin
-        # calc 2nd order perturbation energy
-        h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
         n21 = n_1o * n_2
         n31 = n_v * n_2
         n22 = n_1o * n_1o
