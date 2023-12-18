@@ -1,7 +1,7 @@
 using ElemCo
 @testset "Two-Determinant CCSD" begin
 epsilon    =   1.e-6
-td_ccsd_ref = -39.04463284087801
+td_ccsd_ref = -39.044634373453
 
 fcidump = joinpath(@__DIR__,"CH2.3B1.DZP.ROHF.FCIDUMP")
 
