@@ -773,63 +773,40 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
 end
 
 """ 
-    calc_D2a(EC::ECInfo, T1a, T2a)
+    calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
 
-  Calculate ``^{αα}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})``
+  Calculate ``^{σσ}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})``
   with ``P_{ij} X_{ij} = X_{ij} - X_{ji}``.
   Return as `D[pqij]` 
 """
-function calc_D2a(EC::ECInfo, T1a, T2a)
+function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
   SP = EC.space
   norb = n_orbs(EC)
-  nocc = n_occ_orbs(EC)
-  if length(T1a) > 0
-    D2a = Array{Float64}(undef,norb,norb,nocc,nocc)
+  if spin == :α
+    virt = SP['v']
+    occ = SP['o']
   else
-    D2a = zeros(norb,norb,nocc,nocc)
+    virt = SP['V']
+    occ = SP['O']
+  end
+  nocc = length(occ)
+  if length(T1) > 0
+    D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
+  else
+    D2 = zeros(norb,norb,nocc,nocc)
   end
   @tensoropt begin
-    D2a[SP['v'],SP['v'],:,:][a,b,i,j] = T2a[a,b,i,j] 
-    D2a[SP['o'],SP['o'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k] - Matrix(I,nocc,nocc)[k,j] * Matrix(I,nocc,nocc)[l,i]
+    D2[virt,virt,:,:][a,b,i,j] = T2[a,b,i,j] 
+    D2[occ,occ,:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k] - Matrix(I,nocc,nocc)[k,j] * Matrix(I,nocc,nocc)[l,i]
   end
-  if length(T1a) > 0
+  if length(T1) > 0
     @tensoropt begin
-      D2a[SP['v'],SP['v'],:,:][a,b,i,j] += T1a[a,i] * T1a[b,j] - T1a[b,i] * T1a[a,j]
-      D2a[SP['o'],SP['v'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1a[a,k] - Matrix(I,nocc,nocc)[k,j] * T1a[a,i]
-      D2a[SP['v'],SP['o'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1a[a,k] - Matrix(I,nocc,nocc)[k,j] * T1a[a,i]
+      D2[virt,virt,:,:][a,b,i,j] += T1[a,i] * T1[b,j] - T1[b,i] * T1[a,j]
+      D2[occ,virt,:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k] - Matrix(I,nocc,nocc)[k,j] * T1[a,i]
+      D2[virt,occ,:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k] - Matrix(I,nocc,nocc)[k,j] * T1[a,i]
     end
   end
-  return D2a
-end
-
-""" 
-    calc_D2b(EC::ECInfo, T1b, T2b)
-
-  Calculate ``^{ββ}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})``
-  with ``P_{ij} X_{ij} = X_{ij} - X_{ji}``.
-  Return as `D[pqij]` 
-"""
-function calc_D2b(EC::ECInfo, T1b, T2b)
-  SP = EC.space
-  norb = n_orbs(EC)
-  nocc = n_occb_orbs(EC)
-  if length(T1b) > 0
-    D2b = Array{Float64}(undef,norb,norb,nocc,nocc)
-  else
-    D2b = zeros(norb,norb,nocc,nocc)
-  end
-  @tensoropt begin
-    D2b[SP['V'],SP['V'],:,:][a,b,i,j] = T2b[a,b,i,j] 
-    D2b[SP['O'],SP['O'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k] - Matrix(I,nocc,nocc)[k,j] * Matrix(I,nocc,nocc)[l,i]
-  end
-  if length(T1b) > 0
-    @tensoropt begin
-      D2b[SP['V'],SP['V'],:,:][a,b,i,j] += T1b[a,i] * T1b[b,j] - T1b[b,i] * T1b[a,j]
-      D2b[SP['O'],SP['V'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1b[a,k] - Matrix(I,nocc,nocc)[k,j] * T1b[a,i]
-      D2b[SP['V'],SP['O'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1b[a,k] - Matrix(I,nocc,nocc)[k,j] * T1b[a,i]
-    end
-  end
-  return D2b
+  return D2
 end
 
 """ 
@@ -1397,7 +1374,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     if(EC.fd.uhf)
       # αα
       int2a = integ2(EC.fd,:α)
-      D2a = calc_D2a(EC, T1a, T2a)[tripp,:,:]
+      D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
       @tensoropt rR2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
       D2a = nothing
       int2a = nothing
@@ -1408,7 +1385,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       if n_occb_orbs(EC) > 0
         # ββ
         int2b = integ2(EC.fd,:β)
-        D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
+        D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
         @tensoropt rR2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
         int2b = nothing
@@ -1427,7 +1404,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     else
       int2 = integ2(EC.fd)
       # αα
-      D2a = calc_D2a(EC, T1a, T2a)[tripp,:,:]
+      D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
       @tensoropt rR2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
       D2a = nothing
       # symmetrize R
@@ -1436,7 +1413,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       R2a += R2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
-        D2b = calc_D2b(EC, T1b, T2b)[tripp,:,:]
+        D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
         @tensoropt rR2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
         D2b = nothing
         # symmetrize R
@@ -1629,45 +1606,35 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   end
 
   #ring terms
-  d_voov = load(EC,"d_voov")
+  A_d_voov = load(EC,"d_voov") - permutedims(load(EC,"d_vovo"),(1,2,4,3))
   @tensoropt begin
-    rR2a[a,b,i,j] := d_voov[b,k,j,c] * T2a[a,c,i,k]
-    R2ab[a,B,i,J] += d_voov[a,k,i,c] * T2ab[c,B,k,J]
+    rR2a[a,b,i,j] := A_d_voov[b,k,j,c] * T2a[a,c,i,k]
+    R2ab[a,B,i,J] += A_d_voov[a,k,i,c] * T2ab[c,B,k,J]
   end
-  d_voov = nothing
+  A_d_voov = nothing
   d_vOoV = load(EC,"d_vOoV")
   @tensoropt begin
     rR2a[a,b,i,j] += d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
     R2ab[a,B,i,J] += d_vOoV[a,K,i,C] * T2b[B,C,J,K]
   end
   d_vOoV = nothing
-  d_vovo = load(EC,"d_vovo")
-  @tensoropt begin
-    rR2a[a,b,i,j] -= d_vovo[b,k,c,j] * T2a[a,c,i,k]
-    R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
-    R2ab[a,B,i,J] -= d_vovo[a,k,c,i] * T2ab[c,B,k,J]
-  end
-  d_vovo, rR2a = nothing, nothing
+  @tensoropt R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
+  rR2a = nothing
   if n_occb_orbs(EC) > 0
-    d_VOOV = load(EC,"d_VOOV")
+    A_d_VOOV = load(EC,"d_VOOV") - permutedims(load(EC,"d_VOVO"),(1,2,4,3))
     @tensoropt begin
-      rR2b[A,B,I,J] := d_VOOV[B,K,J,C] * T2b[A,C,I,K]
-      R2ab[a,B,i,J] += d_VOOV[B,K,J,C] * T2ab[a,C,i,K]
+      rR2b[A,B,I,J] := A_d_VOOV[B,K,J,C] * T2b[A,C,I,K]
+      R2ab[a,B,i,J] += A_d_VOOV[B,K,J,C] * T2ab[a,C,i,K]
     end
-    d_VOOV = nothing
+    A_d_VOOV = nothing
     d_oVvO = load(EC,"d_oVvO")
     @tensoropt begin
       rR2b[A,B,I,J] += d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
       R2ab[a,B,i,J] += d_oVvO[k,B,c,J] * T2a[a,c,i,k]
     end
     d_oVvO = nothing
-    d_VOVO = load(EC,"d_VOVO")
-    @tensoropt begin
-      rR2b[A,B,I,J] -= d_VOVO[B,K,C,J] * T2b[A,C,I,K]
-      R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
-      R2ab[a,B,i,J] -= d_VOVO[B,K,C,J] * T2ab[a,C,i,K]
-    end
-    d_VOVO, rR2b = nothing, nothing
+    @tensoropt R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
+    rR2b = nothing
   end
 
   if tworef || fixref
