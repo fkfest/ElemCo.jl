@@ -409,7 +409,7 @@ macro bouhf()
 end
 
 """
-    @transform_ints(type)
+    @transform_ints(type="")
 
   Rotate FCIDump integrals using [`WfOptions.orb`](@ref ECInfos.WfOptions) as transformation 
   matrices.
@@ -419,7 +419,7 @@ end
   the bi-orthogonal orbitals are used and the left transformation matrix is
   read from [`WfOptions.orb`](@ref ECInfos.WfOptions)*[`WfOptions.left`](@ref ECInfos.WfOptions).
 """
-macro transform_ints(type)
+macro transform_ints(type="")
   strtype=replace("$type", " " => "")
   return quote
     $(esc(:@tryECinit))
@@ -429,8 +429,10 @@ macro transform_ints(type)
     CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
     if $(esc(strtype)) ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
       CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
-    else
+    elseif $(esc(strtype)) == ""
       CMOl = CMOr
+    else
+      error("Unknown type in @transform_ints: ", $(esc(strtype)))
     end
     transform_fcidump($(esc(:EC)).fd, CMOl, CMOr)
   end
@@ -497,7 +499,18 @@ end
 """
 function is_closed_shell(EC::ECInfo)
   SP = EC.space
-  return (SP['o'] == SP['O'] && !EC.fd.uhf)
+  SP_changed = false
+  if !haskey(SP, 'o') || !haskey(SP, 'O')
+    SP_save = save_space(EC)
+    setup_space_fd!(EC)
+    SP_changed = true
+    SP = EC.space
+  end
+  cs = (SP['o'] == SP['O'] && !EC.fd.uhf)
+  if SP_changed
+    restore_space!(EC, SP_save)
+  end
+  return cs
 end
 
 """ 
