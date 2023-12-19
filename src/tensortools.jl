@@ -11,6 +11,7 @@ export save!, load, mmap, newmmap, closemmap
 export ints1, ints2, detri_int2
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real!
 export get_spaceblocks
+export print_nonzeros
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
@@ -287,6 +288,29 @@ function get_spaceblocks(space, maxblocksize=100, strict=false)
     append!(allblks, blks)
   end
   return allblks
+end
+
+""" 
+    print_nonzeros(tensor::AbstractArray; ϵ=1.e-12, fname::String="")
+
+  Print cartesian index alongside value of array for elements with absolute value greater or equal than ϵ
+  either to stdout or to a file.
+"""
+function print_nonzeros(tensor::AbstractArray; ϵ=1.e-12, fname::String="")
+  cartindx = findall(x -> abs(x) >= ϵ, tensor)
+  if isempty(fname)
+    output=stdout
+  else
+    output = fname
+  end
+  redirect_stdio(stdout=output) do
+    for indx in eachindex(cartindx)
+      print(cartindx[indx])
+      print("    ")
+      print(tensor[cartindx][indx])
+      println()
+    end
+  end
 end
 
 end #module
