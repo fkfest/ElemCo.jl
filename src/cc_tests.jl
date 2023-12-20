@@ -42,7 +42,7 @@ end
 function test_add_to_singles_and_doubles_residuals(R1, R2, T1, T2) 
   @tensoropt ETb3 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j]
   println("ETb3: ",ETb3)
-  @tensoropt ETT1 = 2.0*T1[a,i] * R1[a,i]
+  @tensoropt ETT1 = 2.0*(T1[a,i] * R1[a,i])
   println("ETT1: ",ETT1)
 end
 
