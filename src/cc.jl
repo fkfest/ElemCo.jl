@@ -1904,7 +1904,7 @@ end
 function calc_cc(EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC")
   tworef = has_spec(method, "2D")
-  fixref = has_spec(method, "FR")
+  fixref = (has_spec(method, "FRS") || has_spec(method, "FRT"))
   print_info(method_name(method))
   Amps, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
