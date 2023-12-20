@@ -7,6 +7,8 @@
 \newcommand{\red}[1]{{\color{red} #1}}
 \newcommand{\blue}[1]{{\color{blue} #1}}
 \newcommand{\magenta}[1]{{\color{magenta} #1}}
+\definecolor{pinegreen}{rgb}{0.0, 0.47, 0.44}
+\newcommand{\green}[1]{{\color{pinegreen} #1}}
 \usepackage[utf8]{inputenc}
 \usepackage{listings}
 \usepackage{hyperref}
@@ -483,6 +485,7 @@ The equations follow the equations presented in Ref.\cite{szalay94}.
 Differences because of fixed typos or other reasons are coloured \blue{blue}.
 Terms we have added to ensure energy invariance with respect to the reference choice 
 and which are not explicitly listed in Ref.\cite{szalay94} are coloured \magenta{magenta}.
+Terms we have added to ensure proper antisymmetry and which are not explicitly listed in Ref.\cite{szalay94} are coloured \green{green}.
 \begin{align}
 R^i_a &= < {}^A\Phi^i_a |\op H_N e^{\op T_A} | {}^A \Phi >_C - \left( < {}^A\Phi^i_a | e^{\op T_B} | {}^B\Phi ><{}^B\Phi | \op H_N e^{\op T_A} | {}^A \Phi> \right)_C \NL
       &\equiv < {}^A\Phi^i_a | \op H_N e^{\op T_A} | {}^A \Phi >_C + M^i_a W = 0,
@@ -513,20 +516,23 @@ M^{\spb{i}}_{\bar{a}} &= T^{\spa{t}}_{\spa{a}} T^{\spa{i}\spb{u}}_{u\spb{t}} + T
 \end{align}
 The all alpha part of the doubles part is built as follows,
 \begin{align}
-M^{\spa{i}\spa{j}}_{\spa{u}\spa{a}} = &-\tau^{\spa{j}}_{\spa{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
-                                       +\tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
-                                       -T^{\spb{j}}_{\spb{t}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} 
-                                       +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}, \\
-M^{\spa{t}\spa{i}}_{\spa{a}\spa{b}} = &\tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
-                                      -\tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{b}} 
-                                      +T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} 
-                                      -T^{\spb{u}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{b}}, \\
+M^{\spa{i}\spa{j}}_{\spa{u}\spa{a}} = &\asop{ij} \tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
+                                       +\asop{ij} T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}, \\
+\green{M^{\spa{i}\spa{j}}_{\spa{a}\spa{u}}} = &\green{-\asop{ij} \tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
+                                       -\asop{ij} T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}}, \\
+M^{\spa{t}\spa{i}}_{\spa{a}\spa{b}} = &\asop{ab} \tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
+                                      +\asop{ab} T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} , \\
+\green{M^{\spa{i}\spa{t}}_{\spa{a}\spa{b}}} = &\green{-\asop{ab} \tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
+                                      -\asop{ab} T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}} , \\
 M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} = &-\ASop{ij}{ab} \tau^{\spa{j}}_{\spa{b}} \left( T^{\spb{u}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
                                        +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} \right)
                                        -\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \left( \tau^{\spb{u}\spb{i}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}} \right) \nonumber \\
                                       &-\asop{\spa{i}\spa{j}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
                                        -\asop{ab} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{b}}, \\
-M^{\spa{i}\spa{t}}_{\spa{a}\spa{u}} = &-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}. 
+M^{\spa{i}\spa{t}}_{\spa{a}\spa{u}}         = &-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}, \\
+\green{M^{\spa{t}\spa{i}}_{\spa{a}\spa{u}}} = &\green{T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
+\green{M^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}} = &\green{T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
+\green{M^{\spa{t}\spa{i}}_{\spa{u}\spa{a}}} = &\green{-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}.
 \end{align}
 The all beta part of the doubles $M$ tensor is obtained from the all alpha part analogously to the presented singles $M$ tensor. \newline
 The alpha beta part is calculated as follows,
@@ -534,19 +540,19 @@ The alpha beta part is calculated as follows,
 M^{\spa{i}\spb{j}}_{\spa{u}\spb{a}} = &-\tau^{\spb{j}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
                                        -T^{\spa{j}}_{\spa{u}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
                                        -T^{\spa{t}}_{\spa{a}} \tau^{\spa{j}\spb{i}}_{\spa{u}\spb{t}} 
-                         \blue{\cancel{-T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spa{j}}_{\spa{a}\spa{u}}}},\\
+                                       -T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spa{j}}_{\spa{a}\spa{u}},\\
 \magenta{M^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}} = &\magenta{-\tau^{\spa{j}}_{\spa{a}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{t}} 
                                                 -T^{\spb{j}}_{\spb{t}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
                                                 -T^{\spb{u}}_{\spb{a}} \tau^{\spa{i}\spb{j}}_{\spa{u}\spb{t}}
-                                        \cancel{-T^{\spa{i}}_{\spa{u}} T^{\spb{j}\spb{u}}_{\spb{t}\spb{a}}}}, \\
+                                                -T^{\spa{i}}_{\spa{u}} T^{\spb{j}\spb{u}}_{\spb{t}\spb{a}}}, \\
 M^{\spa{t}\spb{i}}_{\spa{a}\spb{b}} = &\tau^{\spb{i}}_{\spb{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
                                       +T^{\spa{t}}_{\spa{b}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
                                       +T^{\spa{i}}_{\spa{u}} \tau^{\spa{t}\spb{u}}_{\spa{b}\spb{a}}
-                        \blue{\cancel{+T^{\spb{u}}_{\spb{a}} T^{\spa{i}\spa{t}}_{\spa{u}\spa{b}}}},\\
+                                      +T^{\spb{u}}_{\spb{a}} T^{\spa{i}\spa{t}}_{\spa{u}\spa{b}},\\
 \magenta{M^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} = &\magenta{\tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}
                                                 +T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
                                                 +T^{\spb{i}}_{\spb{t}} \tau^{\spa{t}\spb{u}}_{\spa{a}\spb{b}}
-                                        \cancel{+T^{\spa{t}}_{\spa{a}} T^{\spb{i}\spb{u}}_{\spb{t}\spb{b}}}},\\
+                                                +T^{\spa{t}}_{\spa{a}} T^{\spb{i}\spb{u}}_{\spb{t}\spb{b}}},\\
 M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} = &-\tau^{\spb{j}}_{\spb{b}} (T^{\spb{u}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}
                                       +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}})
                                 \blue{-\tau^{\spa{i}}_{\spa{a}}(T^{\spa{j}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{b}}
