@@ -264,8 +264,8 @@ end
 """
 function calc_doubles_norm(T2a, T2b, T2ab)
   @tensoropt begin
-    NormT2 = 0.25*T2a[a,b,i,j]*T2a[a,b,i,j]
-    NormT2 += 0.25*T2b[a,b,i,j]*T2b[a,b,i,j]
+    NormT2 = 0.25*(T2a[a,b,i,j]*T2a[a,b,i,j])
+    NormT2 += 0.25*(T2b[a,b,i,j]*T2b[a,b,i,j])
     NormT2 += T2ab[a,b,i,j]*T2ab[a,b,i,j]
   end
   return NormT2

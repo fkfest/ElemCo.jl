@@ -78,7 +78,7 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
     if !fock_only
       @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
     end
-    @tensoropt ET1 += 2.0*T1[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a]
+    @tensoropt ET1 += 2.0*(T1[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a])
   end
   return ET1
 end
@@ -93,10 +93,10 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   ET1 = 0.0
   if !fock_only
     if length(T1a) > 0
-      @tensoropt ET1 += 0.5*(T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b]
+      @tensoropt ET1 += 0.5*((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b])
     end
     if length(T1b) > 0
-      @tensoropt ET1 += 0.5*(T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b]
+      @tensoropt ET1 += 0.5*((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b])
       if length(T1a) > 0
         @tensoropt ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
       end
@@ -128,8 +128,8 @@ end
 """
 function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
   @tensoropt begin
-    ET2 = 0.5*T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b]
-    ET2 += 0.5*T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b]
+    ET2 = 0.5*(T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b])
+    ET2 += 0.5*(T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b])
     ET2 += T2ab[a,b,i,j] * ints2(EC,"oOvV")[i,j,a,b]
   end
   return ET2
@@ -174,7 +174,7 @@ function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov
   end
   @tensoropt begin
     int2[i,j,a,b] += fac*R2[a,b,i,j]
-    ET2 = fac*T2[a,b,i,j] * int2[i,j,a,b]
+    ET2 = fac*(T2[a,b,i,j] * int2[i,j,a,b])
   end
   if length(T1) > 0
     mo = space4spin('m', isalphaspin(o1,o1))
@@ -1097,7 +1097,7 @@ function calc_pertT(EC::ECInfo; save_t3=false)
           X[abc] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
         end
 
-        @tensoropt Enb3 += fac * Kijk[a,b,c] * X[a,b,c]
+        @tensoropt Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
         
         vv_jk = @view vv_oo[:,:,j,k]
         vv_ik = @view vv_oo[:,:,i,k]
@@ -1234,7 +1234,7 @@ function calc_ΛpertT(EC::ECInfo)
           Kijk[a,b,c] -= U2j[c,b,l] * ov_ki[l,a]
           Kijk[a,b,c] -= U2k[b,c,l] * ov_ji[l,a]
         end
-        @tensoropt Enb3 += fac * Kijk[a,b,c] * X[a,b,c]
+        @tensoropt Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
         
         vv_jk = @view vv_oo[:,:,j,k]
         vv_ik = @view vv_oo[:,:,i,k]
@@ -1251,7 +1251,7 @@ function calc_ΛpertT(EC::ECInfo)
     end
   end
   # singles contribution
-  @tensoropt En3 = 0.5 * U1[a,i] * IntX[a,i]
+  @tensoropt En3 = 0.5 * (U1[a,i] * IntX[a,i])
   # fock contribution
   fov = load(EC,"f_mm")[EC.space['o'],EC.space['v']]
   @tensoropt En3 += fov[i,a] * IntY[a,i]

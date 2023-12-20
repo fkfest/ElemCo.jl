@@ -186,7 +186,7 @@ function bouhf(EC::ECInfo)
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMOl[ispin], cMOr[ispin], SP[sp])
       fhsmall = fock[ispin] + hsmall[ispin]
-      @tensoropt efh = 0.5 * den[p,q] * fhsmall[p,q]
+      @tensoropt efh = 0.5 * (den[p,q] * fhsmall[p,q])
       efhsmall[ispin] = efh
       Δfock[ispin] = den'*fock[ispin] - fock[ispin]*den'
       var += sum(abs2,Δfock[ispin])
