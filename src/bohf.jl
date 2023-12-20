@@ -145,12 +145,7 @@ function bohf(EC::ECInfo)
   end
   # check MOs to be real
   rotate_eigenvectors_to_real!(cMOr,ϵ)
-  #cMOr_real = real.(cMOr)    
-  #if sum(abs2,cMOr) - sum(abs2,cMOr_real) > EC.options.scf.imagtol
-    #println("Large imaginary part in orbital coefficients neglected!")
-    #println("Difference between squared norms:",sum(abs2,cMOr)-sum(abs2,cMOr_real))
-  #end
-  #cMOr = cMOr_real
+  cMOr = real.(cMOr)
   cMOl = (inv(cMOr))'
   println("BO-HF energy: ", EHF)
   flush(stdout)
@@ -215,12 +210,7 @@ function bouhf(EC::ECInfo)
   # check MOs to be real
   for ispin = 1:2
     rotate_eigenvectors_to_real!(cMOr[ispin],ϵ[ispin])
-    #cMOr_real = real.(cMOr[ispin])    
-    #if sum(abs2,cMOr[ispin]) - sum(abs2,cMOr_real) > EC.options.scf.imagtol
-      #println("Large imaginary part in orbital coefficients neglected!")
-      #println("Difference between squared norms:",sum(abs2,cMOr[ispin])-sum(abs2,cMOr_real))
-    #end
-    #cMOr[ispin] = cMOr_real
+    cMOr[ispin] = real.(cMOr[ispin])
     cMOl[ispin] = (inv(cMOr[ispin]))'
   end
   println("BO-UHF energy: ", EHF)
