@@ -1273,6 +1273,14 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   nvirtb = n_virtb_orbs(EC)
   norb = n_orbs(EC)
   linearized::Bool = false
+
+  if tworef
+    morba, norbb, morbb, norba = active_orbitals(EC)
+    T2ab[norba,morbb,morba,norbb] = 0.0
+    T1a[norba,morba] = 0.0
+    T1b[morbb,norbb] = 0.0
+  end
+
   if ndims(T1a) == 2
     if !EC.options.cc.use_kext
       error("open-shell CCSD only implemented with kext")
@@ -1281,11 +1289,6 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     t1 = print_time(EC,t1,"dressing",2)
   else
     pseudo_dressed_ints(EC,true)
-  end
-
-  if tworef
-    morba, norbb, morbb, norba = active_orbitals(EC)
-    T2ab[norba,morbb,morba,norbb] = 0
   end
 
   R1a = Float64[]
@@ -1939,12 +1942,6 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     elseif has_spec(method, "FRT")
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[T2αβ][norba,morbb,morba,norbb] = -1.0
-    elseif has_spec(method, "2D")
-      morba, norbb, morbb, norba = active_orbitals(EC)
-      # println("T1a all internal: ", T1a[norba,morba])
-      # println("T1b all internal: ", T1b[morbb,norbb])
-      # T1a[norba,morba] = 0.0
-      # T1b[morbb,norbb] = 0.0
     end
     if do_sing
       NormT1 = calc_singles_norm(Amps[singles]...)
