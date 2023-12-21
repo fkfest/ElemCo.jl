@@ -7,10 +7,15 @@ using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 using ..ElemCo.DFHF
 
-export dfmcscf
-export davidson
-export calc_h
-export InitialVectorType
+export dfmcscf, davidson, calc_h
+export InitialVectorType, RANDOM, INHERIT, GRADIENT_SET, GRADIENT_SETPLUS
+export HessianType, SO, SCI, SO_SCI
+
+"""
+    dfmcs(EC::ECInfo, cMO::Matrix)
+
+  DF-MCSCF calculation.
+"""
 
 """
     Type of initial guess vectors of Davidson iterations
@@ -22,6 +27,17 @@ export InitialVectorType
   - GRADIENT_SETPLUS: b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
 """
 @enum InitialVectorType RANDOM INHERIT GRADIENT_SET GRADIENT_SETPLUS
+
+"""
+    Type of Hessian matrix
+
+  Possible values:
+  - SO: Second Order Approximation
+  - SCI: Super CI
+  - SO-SCI: Second Order Approximation combing Super CI
+"""
+
+@enum HessianType SO SCI SO_SCI
 
 """
     denMatCreate(EC::ECInfo)
@@ -37,7 +53,8 @@ function denMatCreate(EC::ECInfo)
   SP = EC.space
   nact = length(SP['o'])- length(SP['O']) # to be modified
   D1 = 1.0 * Matrix(I, nact, nact)
-  @tensoropt D2[t,u,v,w] := D1[t,u]*D1[v,w] - D1[t,w]*D1[v,u]
+  @tensoropt D2[t,u,v,w] := (D1[t,u]*D1[v,w] - D1[t,w]*D1[v,u]) * 0.5
+  @tensoropt D2[t,u,v,w] += (D1[u,t]*D1[v,w] - D1[u,w]*D1[v,t]) * 0.5
   return D1, D2
 end
 
@@ -121,6 +138,7 @@ function calc_g(A::Matrix, EC::ECInfo)
   g22 =reshape(g[occ1o,occ1o], n_1o * n_1o)
   g32 =reshape(g[occv,occ1o], n_v * n_1o)
   g_blockwise = [g21;g31;g22;g32]
+  g_blockwise .= g_blockwise .* 2.0
   return g_blockwise
 end
 
@@ -211,7 +229,7 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   return h
 end
 
-function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix)
+function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix, HT::HessianType = SO)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
   occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
@@ -222,7 +240,11 @@ function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockCl
   index_MO = [occ2,occ1o,occv]
   μjL = load(EC,"mudL")
   μuL = load(EC,"muaL")
-  abL = load(EC,"abL")
+  if HT == SO
+    abL = load(EC,"abL")
+  else
+    abL = 0
+  end
   @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
   @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
   A = A + A'
@@ -612,7 +634,6 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
     println("davidson algorithm not converged!")
   end
   v = V * ac
-  println("μ = ", λ[eigvec_index])
   return λ[eigvec_index], v, converged
 end
 
@@ -656,7 +677,7 @@ function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::V
       micro_converged = true
       break
     end
-    if αr ≈ αl || g_norm < 1e-3 # norm of x too small
+    if αr ≈ αl || g_norm<1e-3
       α = αl
       micro_converged = true
       break
@@ -685,11 +706,11 @@ function calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
   R = zeros(N_MO,N_MO)
   R[occ1o,occ2] = reshape(x[1:n_1o*n_2], n_1o, n_2)
   R[occv,occ2] = reshape(x[n_1o*n_2+1:n_1o*n_2+n_v*n_2], n_v, n_2)
-  R[occ1o,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+1:n_1o*n_2+n_v*n_2+n_1o*n_1o], n_1o, n_1o)
   R[occv,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+n_1o*n_1o+1:end], n_v, n_1o)
   R = R-R'
+  R[occ1o,occ1o] = reshape(x[n_1o*n_2+n_v*n_2+1:n_1o*n_2+n_v*n_2+n_1o*n_1o], n_1o, n_1o)
   U = 1.0 * Matrix(I,N_MO,N_MO) + R
-  U = U + 1/2 .* R*R + 1/6 .* R*R*R
+  U = U + 1/2 .* R*R + 1/6 .* R*R*R + 1/24 .* R*R*R*R
   return U
 end
 
@@ -703,13 +724,11 @@ Return reject::Bool and trust.
 function checkE_modifyTrust(E, E_former, E_2o, trust)
   energy_diff = E - E_former
   energy_quotient = energy_diff / E_2o
-  println("energy_quotient: ", energy_quotient)
   # modify the trust region
   reject = false
-  if energy_quotient < 0.0
+  if energy_quotient < 0.0 || E_2o > 0.0
     trust = 0.7 * trust
     reject = true
-    #println("REJECT the update of coefficients, new trust value: ", trust)
   elseif energy_quotient < 0.25
     trust = 0.7 * trust
   elseif energy_quotient > 0.75
@@ -723,7 +742,7 @@ end
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit = 16)
+function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit=16)
   initVecType::InitialVectorType = GRADIENT_SETPLUS
   Enuc = generate_integrals(EC; save3idx=!direct)
   println("Enuc ", Enuc)
@@ -740,6 +759,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
   vec = rand(N_rk+1)
   vec = vec ./ norm(vec)
   inherit_large = true
+  reject = false
   if size(occ1o,1) == 0
     error("NO ACTIVE ORBITALS, PLEASE USE DFHF")
   end
@@ -757,8 +777,6 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
 
   fock = zeros(nAO,nAO)
   fockClosed = zeros(nAO,nAO)
-  prev_fock = zeros(nAO,nAO)
-  prev_fockClosed = zeros(nAO,nAO)
   prev_cMO = deepcopy(cMO)
   E_2o = 0.0
   E = 0.0
@@ -768,32 +786,33 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
     while iteration_times < IterMax
 
       # calc energy E with updated cMO
-      prev_fock = deepcopy(fock)
-      prev_fockClosed = deepcopy(fockClosed)
       @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
       @timeit "E calc" E = calc_realE(EC, fockClosed, D1, D2, cMO)
-      println("Iter ", iteration_times, " energy: ", E+Enuc)
-
       # check if reject the update and tune trust
-      if iteration_times > 0 && norm(g) > 1e-3
+      if iteration_times > 0
         reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
-        println("trust: ", trust)
         if reject
           cMO = prev_cMO
-          fock = prev_fock
-          fockClosed = prev_fockClosed
+          @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
           E = E_former
           iteration_times -= 1
           inherit_large = false
         end
       end
+
+      println("Iter ", iteration_times, " energy: ", E+Enuc)
+
       iteration_times += 1
       E_former = E
       # calc g and h with updated cMO
       @timeit "A calc" A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
       @timeit "g calc" g = calc_g(A, EC)
+      n21 = n_1o * n_2
+      n31 = n_v * n_2
+      n22 = n_1o * n_1o
+      n32 = n_v * n_1o
       println("norm of g: ", norm(g))
-      if norm(g) < 2e-6 
+      if norm(g) < 1e-5 
         break
       end
       @timeit "h calc new" h_block = calc_h_SO(EC, cMO, D1, D2, fock, fockClosed, A)
@@ -807,19 +826,24 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
         vec = vec./norm(vec)
         inherit_large == true
       end
-      @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType)
+      if norm(g) > 1e-3
+        @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType)
+      end
       # calc 2nd order perturbation energy
       h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
-      if norm(g) < 1e-3
-        H_matrix = [[h_2121;h_3121;h_2221;h_3221] [h_3121';h_3131;h_2231;h_3231] [h_2221';h_2231';h_2222;h_3222] [h_3221';h_3231';h_3222';h_3232]]
-        x = - H_matrix \ g
-      end
-      println("square of the norm of x: ", sum(x.^2))
 
-      @timeit "calc 2nd E" begin
-        n21 = n_1o * n_2
-        n31 = n_v * n_2
-        n22 = n_1o * n_1o
+      H_matrix = [[h_2121;h_3121;h_2221;h_3221] [h_3121';h_3131;h_2231;h_3231] [h_2221';h_2231';h_2222;h_3222] [h_3221';h_3231';h_3222';h_3232]]
+      if norm(g) < 1e-3
+        # I_rk = 1.0 * Matrix(I, N_rk-n22, N_rk-n22)
+        I_rk = 1.0 * Matrix(I, N_rk, N_rk)
+        H_matrix += rand() * 1e-10 .* I_rk
+        # x_no22 = - H_matrix \ [g[1:n21+n31];g[end-n32+1:end]]
+        # x = [x_no22[1:n21+n31];zeros(n22);x_no22[end-n32+1:end]]
+        x = - H_matrix \ g
+        println("square of the norm of x: ", sum(x.^2))      
+      end
+
+      function calc_E_2o(x)
         x21 = x[1:n21] 
         x31 = x[n21+1:n21+n31]
         x22 = x[n21+n31+1:n21+n31+n22]
@@ -841,8 +865,24 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
         @tensoropt newσ_4[n] += h_3222[n,m] * x22[m]
         @tensoropt newσ_4[n] += h_3232[n,m] * x32[m]
         E_2o = sum(g .* x) + 0.5*(transpose(x) * [newσ_1;newσ_2;newσ_3;newσ_4])
-        #println("2nd order perturbation energy difference: ", E_2o)
+        return E_2o
       end
+      # scale = 1.5
+      # x = x .* 2.0
+      E_2o_c = calc_E_2o(x)
+      # increase = true
+      # while(increase && scale < 10.0)
+      #   E_2o_trial = calc_E_2o(x.*scale)
+      #   if E_2o_trial > E_2o_c
+      #     x = x .* scale ./ 1.5
+      #     increase = false
+      #   else
+      #     println("scale increased to ", scale)
+      #     scale = scale * 1.5
+      #     E_2o_c = E_2o_trial
+      #   end
+      # end
+      E_2o = E_2o_c
       
       # calc rotation matrix U
       U = calc_U(EC, nAO, x)
