@@ -590,7 +590,8 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
     numInitialVectors = 2
   elseif initVecType == GRADIENT_SETPLUS
     V[1,1] = 1.0
-    g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
+    g_r = g 
+    # g_r = g_r + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
     σ[:,1] = H_multiply(V[:,1])
@@ -658,6 +659,7 @@ function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::V
   davError = γ * norm(g)
   # α tuning loop (micro loop)
   for it=1:maxit
+    println("α: ", α)
     @timeit "davidson" val, vec, converged = davidson(vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α, initVecType)
     micro_counts = 0
     while !converged
@@ -742,7 +744,7 @@ end
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit=16)
+function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit=50)
   initVecType::InitialVectorType = GRADIENT_SETPLUS
   Enuc = generate_integrals(EC; save3idx=!direct)
   println("Enuc ", Enuc)
@@ -792,11 +794,14 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
       if iteration_times > 0
         reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
         if reject
+          println("This update failed! With energy: ", E+Enuc)
+          iteration_times -= 1
           cMO = prev_cMO
           @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
           E = E_former
-          iteration_times -= 1
           inherit_large = false
+        elseif E-E_former > -1e-6 && E - E_former < 0
+          break
         end
       end
 
@@ -826,22 +831,22 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
         vec = vec./norm(vec)
         inherit_large == true
       end
-      if norm(g) > 1e-3
-        @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType)
-      end
+      @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType)
       # calc 2nd order perturbation energy
       h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
 
-      H_matrix = [[h_2121;h_3121;h_2221;h_3221] [h_3121';h_3131;h_2231;h_3231] [h_2221';h_2231';h_2222;h_3222] [h_3221';h_3231';h_3222';h_3232]]
-      if norm(g) < 1e-3
-        # I_rk = 1.0 * Matrix(I, N_rk-n22, N_rk-n22)
-        I_rk = 1.0 * Matrix(I, N_rk, N_rk)
-        H_matrix += rand() * 1e-10 .* I_rk
-        # x_no22 = - H_matrix \ [g[1:n21+n31];g[end-n32+1:end]]
-        # x = [x_no22[1:n21+n31];zeros(n22);x_no22[end-n32+1:end]]
-        x = - H_matrix \ g
-        println("square of the norm of x: ", sum(x.^2))      
-      end
+      # H_matrix = [[h_2121;h_3121;h_2221;h_3221] [h_3121';h_3131;h_2231;h_3231] [h_2221';h_2231';h_2222;h_3222] [h_3221';h_3231';h_3222';h_3232]]
+      # if norm(g) < 1e-3
+      #   # I_rk = 1.0 * Matrix(I, N_rk-n22, N_rk-n22)
+      #   I_rk = 1.0 * Matrix(I, N_rk, N_rk)
+      #   # H_matrix += rand() * 1e-10 .* I_rk
+      #   H_matrix += 1e-10 .* I_rk
+      #   # x_no22 = - H_matrix \ [g[1:n21+n31];g[end-n32+1:end]]
+      #   # x = [x_no22[1:n21+n31];zeros(n22);x_no22[end-n32+1:end]]
+      #   x = - H_matrix \ g
+      #   x[n21+n31+1:end-n32] .= zeros(n22)
+      #   println("square of the norm of x: ", sum(x.^2))      
+      # end
 
       function calc_E_2o(x)
         x21 = x[1:n21] 
