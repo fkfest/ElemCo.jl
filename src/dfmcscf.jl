@@ -77,11 +77,11 @@ function dffockCAS(EC::ECInfo, cMO::Matrix, D1::Matrix)
   CMOa = cMO[:,occ1o] # to be modified
   @timeit "loadμνL" μνL = load(EC,"AAL")
   @tensoropt μjL[μ,j,L] := μνL[μ,ν,L] * CMO2[ν,j]
-  save(EC,"AcL",μjL)
+  save!(EC,"AcL",μjL)
   @tensoropt μuL[μ,u,L] := μνL[μ,ν,L] * CMOa[ν,u]
-  save(EC,"AaL",μuL)
+  save!(EC,"AaL",μuL)
   @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-  save(EC,"vvL", abL)
+  save!(EC,"vvL", abL)
 
   # fockClosed
   hsmall = load(EC,"h_AA")
@@ -241,10 +241,10 @@ function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockCl
   n_v = size(occv,1)
   num_MO = [n_2,n_1o,n_v]
   index_MO = [occ2,occ1o,occv]
-  μjL = load(EC,"mudL")
-  μuL = load(EC,"muaL")
+  μjL = load(EC,"AcL")
+  μuL = load(EC,"AaL")
   if HT == SO
-    abL = load(EC,"abL")
+    abL = load(EC,"vvL")
   else
     abL = 0
   end
@@ -752,7 +752,7 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=50)
   setup_space_ms!(EC)
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   println("Enuc ", Enuc)
-  sao = load(EC,"sao")
+  sao = load(EC,"S_AA")
   nAO = size(sao,2) # number of atomic orbitals
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified

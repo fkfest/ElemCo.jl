@@ -484,22 +484,21 @@ end
     Run DF-MCSCF calculation.
   """
 function run_mcscf(moleType::Int=1)  
-  # xyz="bohr 
+  # geometry="bohr 
   #   Fe   -3.179961014   -1.062146647    0.001295974
   #   N    -3.336254970    3.285559098   -0.029463665
   #   H    -4.363696985    3.980166864    1.444500414
   #   H    -1.620554480    4.150196862    0.107714200
   #   H    -4.154576869    4.052340418   -1.596127880"
-  xyz = ""
   if moleType == 1
-    xyz="angstrom
+    geometry="angstrom
       Fe  -1.6827629   -0.5620638    0.0006858
       N   -1.7654701    1.7386430   -0.0155915
       H   -2.3091690    2.1062136    0.7643967
       H   -0.8575605    2.1961896    0.0569999
       H   -2.1985074    2.1444062   -0.8446345"
   elseif moleType == 2
-    xyz="angstrom
+    geometry="angstrom
     Fe  -1.6827629   -0.5620638    0.0006858
     N   -1.7654701    1.7386430   -0.0155915
     H   -2.3091690    2.1062136    0.7643967
@@ -532,8 +531,7 @@ function run_mcscf(moleType::Int=1)
              "jkfit"=>"cc-pvtz-rifit",
              "mp2fit"=>"cc-pvtz-rifit")
 
-  EC = ECInfo(ms=MSys(xyz,basis))
-  setup!(EC,ms2=4,charge=2)
+  @opt wf ms2=4 charge=2
   to = TimerOutputs.get_defaulttimer()
   TimerOutputs.reset_timer!(to)
   @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64)
