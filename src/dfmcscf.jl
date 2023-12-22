@@ -641,22 +641,25 @@ function davidson(v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO:
 end
 
 """
-    λTuning(trust::Number, maxit::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector)
+    λTuning(EC::ECInfo, trust::Number, maxit::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector)
 
 Find the rotation parameters as the vector x in trust region,
 tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
-function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
+function λTuning(EC::ECInfo, trust::Number, maxit::Integer, αmax::Number, α::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
   h_block::NTuple{10, Matrix{Float64}}, initVecType::InitialVectorType)
   N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
   g_norm = norm(g)
   x = zeros(N_rk)
   αl = 1.0
   αr = αmax
+  xαl = -1.0
+  xαr = -1.0
   micro_converged = false
   davItMax = 200 # for davidson eigenvalue solving algorithm
   davError = 1e-7
+  bisecdamp = EC.options.scf.bisecdamp  
   γ =  0.1 # gradient scaling factor for micro-iteration accuracy
   davError = γ * norm(g)
   # α tuning loop (micro loop)
@@ -672,11 +675,14 @@ function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::V
     end
     x = vec[2:end] ./ (vec[1] * α)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
-    sumx2 = sum(x.^2)
+    sumx2 = sqrt(sum(x.^2))
+    println("trust: ", trust, " sumx2: ", sumx2)
     if sumx2 > trust
       αl = α
+      xαl = sumx2
     elseif sumx2 < 0.8*trust
       αr = α
+      xαr = sumx2
     else
       micro_converged = true
       break
@@ -686,7 +692,15 @@ function λTuning(trust::Number, maxit::Integer, αmax::Number, α::Number, g::V
       micro_converged = true
       break
     end
-    α = (αl + αr) / 2.0
+    if xαl < 0 && α == αr && (αr - αl) < 0.1
+      α = αl
+    elseif xαl > 0 && xαr > 0
+      # line-search
+      α = ((xαl-trust)*αr - (xαr-trust)*αl) / (xαl - xαr)
+    else
+      # damped geometric mean
+      α = exp(log(αl) + log(αr/αl) * bisecdamp/2)
+    end
   end
   if !micro_converged
     println("micro NOT converged")
@@ -804,7 +818,8 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=50)
           @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
           E = E_former
           inherit_large = false
-        elseif E-E_former > -1e-6 && E - E_former < 0
+        elseif E_former - E < 1e-7 && E < E_former
+          println("Iter ", iteration_times, " energy: ", E+Enuc)
           break
         end
       end
@@ -835,7 +850,7 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=50)
         vec = vec./norm(vec)
         inherit_large == true
       end
-      @timeit "λTuning" λ, x, vec = λTuning(trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType)
+      @timeit "λTuning" λ, x, vec = λTuning(EC, trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType)
       # calc 2nd order perturbation energy
       h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
 

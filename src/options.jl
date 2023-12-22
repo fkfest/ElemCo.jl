@@ -58,6 +58,8 @@ Base.@kwdef mutable struct ScfOptions
   - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
+  """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
+  bisecdamp::Float64 = 0.5
 end
 
 """ 
