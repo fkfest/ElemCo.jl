@@ -1,216 +1,55 @@
 module DFHF
 using LinearAlgebra, TensorOperations, Printf
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
+using ..ElemCo.OrbTools
+using ..ElemCo.DFTools
+using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
-export dfhf, generate_integrals, guess_orb, GuessType, GUESS_HCORE, GUESS_SAD
-
-""" 
-    dffock(EC::ECInfo, cMO, bao, bfit)
-
-  Compute closed-shell DF-HF Fock matrix (integral direct).
-"""
-function dffock(EC,cMO,bao,bfit)
-  pqP = ERI_2e3c(bao,bfit)
-  PL = load(EC,"PL")
-  hsmall = load(EC,"hsmall")
-  # println(size(Ppq))
-  occ2 = intersect(EC.space['o'],EC.space['O'])
-  occ1o = setdiff(EC.space['o'],occ2)
-  occ1O = setdiff(EC.space['O'],occ2)
-  CMO2 = cMO[:,occ2]
-  @tensoropt begin 
-    pjP[p,j,P] := pqP[p,q,P] * CMO2[q,j]
-    cpjL[p,j,L] := pjP[p,j,P] * PL[P,L]
-    cL[L] := cpjL[p,j,L] * CMO2[p,j]
-    fock[p,q] := hsmall[p,q] - cpjL[p,j,L]*cpjL[q,j,L]
-  end
-  if length(occ1o) > 0
-    CMO1o = cMO[:,occ1o]
-    @tensoropt begin
-      pjP[p,j,P] := Ppq[p,q,P] * CMO1o[q,j]
-      cpjL[p,j,L] := pjP[p,j,P] * PL[P,L]
-      cL[L] += 0.5*cpjL[p,j,L] * CMO1o[p,j]
-      fock[p,q] -= cpjL[p,j,L]*cpjL[q,j,L]
-    end
-  end
-  if length(occ1O) > 0
-    # CMO1O = cMO[:,occ1O]
-    error("beta single occ not there yet")
-  end
-  @tensoropt begin
-    cP[P] := cL[L] * PL[P,L]
-    fock[p,q] += 2.0*cP[P]*pqP[p,q,P]
-  end
-  return fock
-end
+export dfhf, dfuhf
 
 """
-    dffock(EC::ECInfo, cMO)
-
-  Compute closed-shell DF-HF Fock matrix 
-  (using precalculated Cholesky-decomposed integrals).
-"""
-function dffock(EC,cMO)
-  occ2 = intersect(EC.space['o'],EC.space['O'])
-  occ1o = setdiff(EC.space['o'],occ2)
-  occ1O = setdiff(EC.space['O'],occ2)
-  CMO2 = cMO[:,occ2]
-  pqL = load(EC,"munuL")
-  hsmall = load(EC,"hsmall")
-  @tensoropt pjL[p,j,L] := pqL[p,q,L] * CMO2[q,j]
-
-  @tensoropt L[L] := pjL[p,j,L] * CMO2[p,j]
-  @tensoropt fock[p,q] := hsmall[p,q] - pjL[p,j,L]*pjL[q,j,L]
-  if length(occ1o) > 0
-    CMO1o = cMO[:,occ1o]
-    @tensoropt pjL[p,j,L] := pqL[p,q,L] * CMO1o[q,j]
-    @tensoropt L[L] += 0.5*pjL[p,j,L] * CMO1o[p,j]
-    @tensoropt fock[p,q] -= pjL[p,j,L]*pjL[q,j,L]
-  end
-  if length(occ1O) > 0
-    # CMO1O = cMO[:,occ1O]
-    error("beta single occ not there yet")
-  end
-  @tensoropt fock[p,q] += 2.0*L[L]*pqL[p,q,L]
-  return fock
-end
-
-"""
-    generate_basis(ms::MSys)
-
-  Generate basis sets for AO and JK fitting.
-"""
-function generate_basis(ms::MSys)
-  # TODO: use element-specific basis!
-  aobasis = lowercase(ms.atoms[1].basis["ao"].name)
-  jkfit = lowercase(ms.atoms[1].basis["jkfit"].name)
-  bao = BasisSet(aobasis,genxyz(ms,bohr=false))
-  bfit = BasisSet(jkfit,genxyz(ms,bohr=false))
-  return bao,bfit
-end
-
-"""
-    generate_integrals(EC::ECInfo; save3idx = true)
-
-  Generate integrals for DF-HF.
-  If save3idx is true, save Cholesky-decomposed 3-index integrals, 
-  otherwise save pseudo-square-root-inverse Cholesky decomposition.
-"""
-function generate_integrals(EC::ECInfo; save3idx = true)
-  bao,bfit = generate_basis(EC.ms)
-  save(EC,"sao",overlap(bao))
-  save(EC,"hsmall",kinetic(bao) + nuclear(bao))
-  PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
-  if save3idx
-    pqP = ERI_2e3c(bao,bfit)
-    @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
-    println("size of pqL", size(pqL))
-    save(EC,"munuL",pqL)
-  else
-    save(EC,"PL",M)
-  end
-  return nuclear_repulsion(EC.ms)
-end
-
-"""
-    Type of initial guess for MO coefficients
-
-  Possible values:
-  - GUESS_HCORE: from core Hamiltonian
-  - GUESS_SAD: from atomic densities
-  - GUESS_GWH: not implemented yet
-  - GUESS_ORB: from previous orbitals stored as `cMO`
-"""
-@enum GuessType GUESS_HCORE GUESS_SAD GUESS_GWH GUESS_ORB
-
-"""
-    guess_hcore(EC::ECInfo)
-
-  Guess MO coefficients from core Hamiltonian.
-"""
-function guess_hcore(EC::ECInfo)
-  hsmall = load(EC,"hsmall")
-  sao = load(EC,"sao")
-  ϵ,cMO = eigen(Hermitian(hsmall),Hermitian(sao))
-  return cMO
-end
-  
-"""
-    guess_sad(EC::ECInfo)
-  
-  Guess MO coefficients from atomic densities.
-"""
-function guess_sad(EC::ECInfo)
-  # minao = "ano-rcc-mb"
-  minao = "ano-r0"
-  # minao = "sto-6g"
-  bminao = BasisSet(minao,genxyz(EC.ms,bohr=false))
-  bao,bfit = generate_basis(EC.ms)
-  smin2ao = overlap(bminao,bao)
-  smin = overlap(bminao)
-  eldist = electron_distribution(EC.ms,minao)
-  sao = load(EC,"sao")
-  denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
-  eigs,cMO = eigen(Hermitian(-denao),Hermitian(sao))
-  return cMO
-end
-
-function guess_gwh(EC::ECInfo)
-  error("not implemented yet")
-end
-
-"""
-    guess_orb(EC::ECInfo, guess::GuessType)
-
-  Calculate starting guess for MO coefficients.
-"""
-function guess_orb(EC::ECInfo, guess::GuessType)
-  if guess == GUESS_HCORE
-    return guess_hcore(EC)
-  elseif guess == GUESS_SAD
-    return guess_sad(EC)
-  elseif guess == GUESS_GWH
-    return guess_gwh(EC)
-  elseif guess == GUESS_ORB
-    return load(EC,"cMO")
-  else
-    error("unknown guess type")
-  end
-end
-
-"""
-    dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
+    dfhf(EC::ECInfo)
 
   Perform closed-shell DF-HF calculation.
 """
-function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
-  println("DF-HF")
-  diis = Diis(EC.scr)
-  thren = sqrt(EC.options.scf.thr)*0.1
-  Enuc = generate_integrals(EC; save3idx=!direct)
+function dfhf(EC::ECInfo)
+  print_info("DF-HF")
+  setup_space_ms!(EC)
+  SP = EC.space
+  norb = length(SP[':'])
+  diis = Diis(EC)
+  thren = EC.options.scf.thren
+  if thren < 0.0
+    thren = sqrt(EC.options.scf.thr)*0.1
+  end
+  direct = EC.options.scf.direct
+  guess = EC.options.scf.guess
+  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   if direct
-    bao,bfit = generate_basis(EC.ms)
+    bao = generate_basis(EC.ms, "ao")
+    bfit = generate_basis(EC.ms, "jkfit")
   end
   cMO = guess_orb(EC,guess)
-  ϵ = zeros(size(cMO,1))
-  hsmall = load(EC,"hsmall")
-  sao = load(EC,"sao")
+  @assert !is_unrestricted_MO(cMO) "DF-HF only implemented for closed-shell"
+  ϵ = zeros(norb)
+  hsmall = load(EC, "h_AA")
+  sao = load(EC, "S_AA")
   # display(sao)
-  SP = EC.space
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
+  flush(stdout)
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
     if direct
-      fock = dffock(EC,cMO,bao,bfit)
+      fock = gen_dffock(EC,cMO,bao,bfit)
     else
-      fock = dffock(EC,cMO)
+      fock = gen_dffock(EC,cMO)
     end
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
@@ -224,6 +63,7 @@ function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
     var = sum(abs2,Δfock)
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
@@ -233,10 +73,85 @@ function dfhf(EC::ECInfo; direct = false, guess = GUESS_SAD)
     # display(ϵ)
   end
   println("DF-HF energy: ", EHF)
-  return ϵ, cMO
+  draw_endline()
+  delete_temporary_files!(EC)
+  save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
+  return EHF
 end
 
+"""
+    dfuhf(EC::ECInfo)
 
-
+  Perform DF-UHF calculation.
+"""
+function dfuhf(EC::ECInfo)
+  print_info("DF-UHF")
+  setup_space_ms!(EC)
+  SP = EC.space
+  norb = length(SP[':'])
+  diis = Diis(EC)
+  thren = EC.options.scf.thren
+  if thren < 0.0
+    thren = sqrt(EC.options.scf.thr)*0.1
+  end
+  direct = EC.options.scf.direct
+  guess = EC.options.scf.guess
+  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
+  if direct
+    bao = generate_basis(EC.ms, "ao")
+    bfit = generate_basis(EC.ms, "jkfit")
+  end
+  cMO = guess_orb(EC,guess)
+  if !is_unrestricted_MO(cMO)
+    cMO = Any[cMO, cMO]
+  end
+  ϵ = [zeros(norb), zeros(norb)] 
+  hsmall = load(EC, "h_AA")
+  sao = load(EC, "S_AA")
+  # display(sao)
+  EHF = 0.0
+  previousEHF = 0.0
+  println("Iter     Energy      DE          Res         Time")
+  flush(stdout)
+  t0 = time_ns()
+  for it=1:EC.options.scf.maxit
+    if direct
+      fock = gen_dffock(EC,cMO,bao,bfit)
+    else
+      fock = gen_dffock(EC,cMO)
+    end
+    efhsmall = Any[0.0, 0.0]
+    Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
+    var = 0.0
+    for (ispin, sp) = enumerate(['o', 'O'])
+      den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])
+      fhsmall = fock[ispin] + hsmall
+      @tensoropt efh = 0.5 * (den[p,q] * fhsmall[p,q])
+      efhsmall[ispin] = efh
+      Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
+      var += sum(abs2,Δfock[ispin])
+    end
+    EHF = efhsmall[1] + efhsmall[2] + Enuc
+    ΔE = EHF - previousEHF 
+    previousEHF = EHF
+    tt = (time_ns() - t0)/10^9
+    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    flush(stdout)
+    if abs(ΔE) < thren && var < EC.options.scf.thr
+      break
+    end
+    fock = perform(diis, fock, Δfock)
+    for ispin = 1:2
+      # use Hermitian to ensure real eigenvalues and normalized orbitals
+      ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]), Hermitian(sao))
+    end
+    # display(ϵ)
+  end
+  println("DF-UHF energy: ", EHF)
+  draw_endline()
+  delete_temporary_files!(EC)
+  save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
+  return EHF
+end
 
 end #module

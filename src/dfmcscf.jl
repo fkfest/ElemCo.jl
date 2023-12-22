@@ -1,10 +1,13 @@
 module DFMCSCF
 using LinearAlgebra, TensorOperations, Printf, TimerOutputs
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
 using ..ElemCo.MSystem
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
+using ..ElemCo.OrbTools
+using ..ElemCo.DFTools
 using ..ElemCo.DFHF
 
 export dfmcscf, davidson, calc_h
@@ -72,16 +75,16 @@ function dffockCAS(EC::ECInfo, cMO::Matrix, D1::Matrix)
   occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
   CMO2 = cMO[:,occ2]
   CMOa = cMO[:,occ1o] # to be modified
-  @timeit "loadμνL" μνL = load(EC,"munuL")
+  @timeit "loadμνL" μνL = load(EC,"AAL")
   @tensoropt μjL[μ,j,L] := μνL[μ,ν,L] * CMO2[ν,j]
-  save(EC,"mudL",μjL)
+  save(EC,"AcL",μjL)
   @tensoropt μuL[μ,u,L] := μνL[μ,ν,L] * CMOa[ν,u]
-  save(EC,"muaL",μuL)
+  save(EC,"AaL",μuL)
   @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-  save(EC,"abL", abL)
+  save(EC,"vvL", abL)
 
   # fockClosed
-  hsmall = load(EC,"hsmall")
+  hsmall = load(EC,"h_AA")
   @tensoropt L[L] := μjL[μ,j,L] * CMO2[μ,j]
   @tensoropt fockClosed[μ,ν] := hsmall[μ,ν] - μjL[μ,j,L]*μjL[ν,j,L]
   @tensoropt fockClosed[μ,ν] += 2.0*L[L]*μνL[μ,ν,L]
@@ -106,7 +109,7 @@ function dfACAS(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   occ1o = setdiff(EC.space['o'],occ2)
   CMO2 = cMO[:,occ2]
   CMOa = cMO[:,occ1o] # to be modified
-  μuL = load(EC,"muaL")
+  μuL = load(EC,"AaL")
   # Apj
   @tensoropt Apj[p,j] := 2 * (fock[μ,ν] * CMO2[ν,j]) * cMO[μ,p]
   # Apu
@@ -159,9 +162,9 @@ function calc_h(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClose
   n_occ = n_2+n_1o
   n_open = n_1o+n_v
   n_MO = size(cMO,2)
-  μνL = load(EC,"munuL")
-  μjL = load(EC,"mudL")
-  μuL = load(EC,"muaL")
+  μνL = load(EC,"AAL")
+  μjL = load(EC,"AcL")
+  μuL = load(EC,"AaL")
   G = zeros((n_MO,n_MO,n_occ,n_occ))
 
   # Gij
@@ -502,11 +505,10 @@ Calculate the energy with the given density matrices and (updated) cMO,
 function calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
-  hsmall = load(EC,"hsmall")
+  hsmall = load(EC,"h_AA")
   CMO2 = cMO[:,occ2] 
   CMOa = cMO[:,occ1o] 
-  #μνL = load(EC,"munuL")
-  μuL = load(EC,"muaL")
+  μuL = load(EC,"AaL")
   @tensoropt E = CMO2[μ,i]*(hsmall[μ,ν]+fockClosed[μ,ν])*CMO2[ν,i]
   @tensoropt fockClosed_MO[t,u] := fockClosed[μ,ν] * CMOa[μ,t] *CMOa[ν,u]
   E += sum(fockClosed_MO .* D1)
@@ -740,13 +742,15 @@ function checkE_modifyTrust(E, E_former, E_2o, trust)
 end
 
 """
-    dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=50)
+    dfmcscf(EC::ECInfo; direct = false, guess=:SAD, IterMax=50)
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxit=50)
+function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=50)
   initVecType::InitialVectorType = GRADIENT_SETPLUS
-  Enuc = generate_integrals(EC; save3idx=!direct)
+    print_info("DF-MCSCF")
+  setup_space_ms!(EC)
+  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   println("Enuc ", Enuc)
   sao = load(EC,"sao")
   nAO = size(sao,2) # number of atomic orbitals
@@ -908,6 +912,7 @@ function dfmcscf(EC::ECInfo; direct = false, guess = GUESS_SAD, IterMax=64, maxi
   else
     println("Not Convergent!")
   end
+  delete_temporary_files!(EC)
   return E_former+Enuc, cMO
 end
 end #module

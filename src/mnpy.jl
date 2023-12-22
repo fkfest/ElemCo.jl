@@ -1,14 +1,14 @@
+"""
+A simplified version of NPZ.jl for mmaping npy files
+
+NPY file format is described in
+https://github.com/numpy/numpy/blob/v1.7.0/numpy/lib/format.py
+"""
 module MNPY
-
-# a simplified version of NPZ.jl for mmaping npy files
-
 #NPZ.jl is licensed under the MIT License:
 #
 #Copyright (c) 2013: Fazlul Shahriar
 #Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-# NPZ file format is described in
-# https://github.com/numpy/numpy/blob/v1.7.0/numpy/lib/format.py
 
 using Mmap
 import Base.CodeUnits

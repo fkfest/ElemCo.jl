@@ -2,9 +2,12 @@
 Info about molecular system (geometry/basis).
 """
 module MSystem
+using Printf
 using DocStringExtensions
 using ..ElemCo.ECInts
-export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution, guess_nelec, guess_norb
+export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution
+export guess_nelec, guess_norb, guess_ncore
+export generate_basis
 
 include("elements.jl")
 include("minbas.jl")
@@ -69,7 +72,7 @@ mutable struct ACenter
   nuccharge::Float64
   """coordinates in bohr."""
   coord::AbstractArray{Float64,1}
-  """various basis sets (ao,mp2fit,jkfit)."""
+  """various basis sets (`"ao"`, `"mp2fit"`, `"jkfit"`)."""
   basis::Dict{String,Basis}
 end
 
@@ -81,7 +84,7 @@ Base.show(io::IO, val::ACenter) = print(io, val.name, " ", val.coord[1], " ", va
   Return element name without numbers.
 """
 function element_name(name::AbstractString)
-  return rstrip(name,['0','1','2','3','4','5','6','7','8','9'])
+  return titlecase(rstrip(name,['0','1','2','3','4','5','6','7','8','9']),strict=true)
 end
 
 """ 
@@ -159,27 +162,18 @@ mutable struct MSys
     xyz_lines = strip.(split(xyz,"\n"))
     if length(xyz_lines) == 0
       error("Empty geometry im MSys")
-    elseif length(xyz_lines) == 1
-      #check whether it's a file
-      error("xyz-files not implemented yet!")
     end
-    array_of_atoms = ACenter[]
-    bohr = true
-    for line in xyz_lines
-      ac, success = try2create_acenter(line,basis,bohr)
-      if success
-        push!(array_of_atoms,ac)
-      else
-        if line == "bohr"
-          bohr = true
-        elseif line == "angstrom"
-          bohr = false
-        elseif line == ""
-          # skip
-        else
-          error("Unsupported xyz line $line")
-        end
+    array_of_atoms, badline = parse_xyz_geometry(xyz_lines, basis)
+    if !isempty(badline) && length(xyz_lines) == 1 && isfile(xyz_lines[1])
+      filename = xyz_lines[1]
+      xyz_lines = strip.(readlines(filename))
+      if length(xyz_lines) == 0
+        error("Empty geometry file $filename im MSys")
       end
+      array_of_atoms, badline = parse_xyz_geometry(xyz_lines, basis)
+    end
+    if !isempty(badline)
+      error("Unsupported xyz line $badline")
     end
     new(array_of_atoms)
   end
@@ -189,6 +183,60 @@ function Base.show(io::IO, val::MSys)
   for atom in val.atoms
     println(io, atom)
   end
+end
+
+"""
+    parse_xyz_geometry(xyz_lines::AbstractArray, basis::Dict)
+
+  Parse xyz geometry `xyz_lines` stored as a vector of strings.
+  Return array of atomic centers and an empty string in case of success.
+
+  Empty lines are skipped.
+  If the line is `bohr` or `angstrom`: change the units.
+  If the first line is a number: assume xyz format and skip the second line.
+  If parsing fails: return empty array and the line that failed.
+"""
+function parse_xyz_geometry(xyz_lines::AbstractArray, basis::Dict)
+  array_of_atoms = ACenter[]
+  badline = ""
+  bohr = true
+  firstline = true
+  xyz_format = false
+  for line in xyz_lines
+    if xyz_format && firstline
+      # skip second line in xyz format
+      firstline = false
+      continue
+    end
+    ac, success = try2create_acenter(line,basis,bohr)
+    if success
+      push!(array_of_atoms,ac)
+    elseif line == "bohr"
+      bohr = true
+      success = true
+    elseif line == "angstrom"
+      bohr = false
+      success = true
+    elseif line == ""
+      # skip
+      continue
+    elseif firstline
+      # check whether it's the number of atoms in the xyz format
+      natoms = tryparse(Int64,line)
+      xyz_format = !isnothing(natoms)
+      if xyz_format
+        bohr = false # assume angstrom in xyz format
+        # skip the second line
+        continue
+      end
+    end
+    if !success
+      badline = line
+      break
+    end
+    firstline = false
+  end
+  return array_of_atoms, badline
 end
 
 """ 
@@ -208,7 +256,7 @@ end
 """
 function genxyz(ac::ACenter; bohr=true)
   name = element_name(ac.name)
-  return string(name," ",b2a(ac.coord[1],bohr)," ",b2a(ac.coord[2],bohr)," ",b2a(ac.coord[3],bohr))
+  return @sprintf("%-3s %16.10f %16.10f %16.10f",name,b2a(ac.coord[1],bohr),b2a(ac.coord[2],bohr),b2a(ac.coord[3],bohr)) 
 end
 
 """ 
@@ -313,6 +361,17 @@ function guess_norb(ms::MSys)
   return bao.nbas 
 end
 
+"""
+    guess_ncore(ms::MSys, coretype::Symbol=:large)
+
+  Guess the number of core orbitals in the system.
+
+  `coretype` as in [`ncoreorbs`](@ref).
+"""
+function guess_ncore(ms::MSys, coretype::Symbol=:large)
+  return sum([ncoreorbs(element_NAME(at.name),coretype) for at in ms.atoms])
+end
+
 """ 
     electron_distribution(elnam::AbstractString, minbas::AbstractString)
 
@@ -331,6 +390,19 @@ function electron_distribution(ms::MSys, minbas::AbstractString)
     eldist = vcat(eldist,electron_distribution(elnam,nshell4l_minbas(nnum,uppercase(minbas))))
   end
   return eldist
+end
+
+"""
+    generate_basis(ms::MSys, type = "ao")
+
+  Generate basis sets for integral calculations.
+  `type` can be `"ao"`, `"mp2fit"` or `"jkfit"`.
+"""
+function generate_basis(ms::MSys, type = "ao")
+  # TODO: use element-specific basis!
+  basis_name = lowercase(ms.atoms[1].basis[type].name)
+  basis = BasisSet(basis_name,genxyz(ms,bohr=false))
+  return basis
 end
 
 end #module

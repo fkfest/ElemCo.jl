@@ -146,11 +146,16 @@ n_orbitals_in_subshell(shell::Char) = 2*SUBSHELL2L[shell]+1
 n_orbitals_in_subshell(lnum::Int) = 2*lnum+1
 
 """ 
-  Occupation of the subshell with quantum numbers n and l.
+  Occupation of the subshell with quantum numbers ``n`` and ``l``.
+
+$(TYPEDFIELDS)
 """
 struct SubShell
+  """ ``n``-quantum number of the subshell. """
   n::Int
+  """ ``l``-quantum number of the subshell. """
   l::Int
+  """ Number of electrons in the subshell. """
   nel::Int
 end
 
@@ -178,6 +183,30 @@ function parse_electron_configuration(e::AbstractString)
     push!(subshells, SubShell(level, lnum, nel))
   end
   return subshells
+end
+
+""" 
+    ncoreorbs(elem::AbstractString, coretype::Symbol=:large)
+
+  Guess the number of core orbitals in the element.
+
+  coretype:
+  - `:large` - large core (w/o semi-core)
+  - `:small` - small core (w/ semi-core)
+  - `:none` - no core
+"""
+function ncoreorbs(elem::AbstractString, coretype::Symbol=:large)
+  if coretype == :large
+    ic = 5
+  elseif coretype == :small
+    ic = 6
+  elseif coretype == :none
+    return 0
+  else
+    error("unknown coretype $coretype")
+  end
+  subshells = parse_electron_configuration(ELEMENTS[elem][ic])
+  return sum([n_orbitals_in_subshell(sh.l) for sh in subshells])
 end
 
 """ 

@@ -9,12 +9,13 @@ module FciDump
 # using LinearAlgebra
 # using NPZ
 using TensorOperations
-using Parameters
+using DocStringExtensions
 using Printf
 using ..ElemCo.MNPY
 
 export FDump, fd_exists, read_fcidump, write_fcidump, transform_fcidump
-export headvar, SpinCase, SCα, SCβ, SCαβ, integ1, integ2, uppertriangular, uppertriangular_range
+export headvar, integ1, integ2, uppertriangular, uppertriangular_range
+export reorder_orbs_int2, modify_header!
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -23,24 +24,37 @@ const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
 const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
 
 """
-Molecular integrals 
+    FDump
 
-The 2-e integrals are stored in the physicists' notation: int2[pqrs] = <pq|rs>
-and for `triang` the last two indices are stored as a single upper triangular index (r <= s)
+  Molecular integrals 
+
+  The 2-e integrals are stored in the physicists' notation: `int2[pqrs]` ``= <pq|rs>=v_{pq}^{rs}``
+  and for `triang` the last two indices are stored as a single upper triangular index (r <= s)
+
+  $(TYPEDFIELDS)
 """
-@with_kw mutable struct FDump
+Base.@kwdef mutable struct FDump
+  """ 2-e⁻ integrals for restricted orbitals fcidump. """
   int2::Array{Float64} = []
+  """ αα 2-e⁻ integrals for unrestricted orbitals fcidump. """
   int2aa::Array{Float64} = []
+  """ ββ 2-e⁻ integrals for unrestricted orbitals fcidump. """
   int2bb::Array{Float64} = []
+  """ αβ 2-e⁻ integrals for unrestricted orbitals fcidump. """
   int2ab::Array{Float64} = []
+  """ 1-e⁻ integrals for restricted orbitals fcidump. """
   int1::Array{Float64} = []
+  """ α 1-e⁻ integrals for unrestricted orbitals fcidump. """
   int1a::Array{Float64} = []
+  """ β 1-e⁻ integrals for unrestricted orbitals fcidump. """
   int1b::Array{Float64} = []
+  """ core energy """
   int0::Float64 = 0.0
+  """ header of fcidump file, a dictionary of arrays. """
   head::Dict = Dict()
-  # use an upper triangular index for last two indices of 2e⁻ integrals 
+  """`⟨true⟩` use an upper triangular index for last two indices of 2e⁻ integrals.""" 
   triang::Bool = true
-  # a convinience variable, has to coincide with `head["IUHF"][1] > 0`
+  """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
   uhf::Bool = false
 end
 
@@ -62,7 +76,8 @@ FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1a
 
   Create a new FDump object
 """
-function FDump(norb,nelec;ms2=0,isym=1,orbsym=[],uhf=false,simtra=false,triang=true)
+function FDump(norb, nelec; ms2=0, isym=1, orbsym=[], 
+               uhf=false, simtra=false, triang=true)
   fd = FDump()
   fd.head["NORB"] = [norb]
   fd.head["NELEC"] = [nelec]
@@ -81,6 +96,27 @@ function FDump(norb,nelec;ms2=0,isym=1,orbsym=[],uhf=false,simtra=false,triang=t
 end
 
 """
+    modify_header!(fd::FDump, norb, nelec; ms2=-1, isym=-1, orbsym=[])
+
+  Modify header of FDump object
+"""
+function modify_header!(fd::FDump, norb, nelec; ms2=-1, isym=-1, orbsym=[])
+  fd.head["NORB"] = [norb]
+  fd.head["NELEC"] = [nelec]
+  if ms2 >= 0
+    fd.head["MS2"] = [ms2]
+  end
+  if isym >= 0
+    fd.head["ISYM"] = [isym]
+  end
+  if isempty(orbsym)
+    fd.head["ORBSYM"] = ones(Int,norb)
+  else
+    fd.head["ORBSYM"] = orbsym
+  end
+end
+
+"""
     fd_exists(fd::FDump)
 
   Return true if the object is a non-empty FDump
@@ -90,21 +126,15 @@ function fd_exists(fd::FDump)
 end
 
 """
-    SpinCase
-
-  Spin cases for uhf fcidump
-"""
-@enum SpinCase SCα SCβ SCαβ
-
-"""
-    integ1(fd::FDump,spincase::SpinCase = SCα)
+    integ1(fd::FDump, spincase::Symbol=:α)
 
   Return 1-e⁻ integrals (for UHF fcidump: for `spincase`).
+  `spincase` can be `:α` or `:β`.
 """
-function integ1(fd::FDump,spincase::SpinCase = SCα)
+function integ1(fd::FDump, spincase::Symbol=:α)
   if !fd.uhf
     return fd.int1
-  elseif spincase == SCα
+  elseif spincase == :α
     return fd.int1a
   else
     return fd.int1b
@@ -112,16 +142,17 @@ function integ1(fd::FDump,spincase::SpinCase = SCα)
 end
 
 """
-    integ2(fd::FDump,spincase::SpinCase = SCα)
+    integ2(fd::FDump, spincase::Symbol=:α)
 
   Return 2-e⁻ integrals (for UHF fcidump: for `spincase`).
+  `spincase` can be `:α`, `:β` or `:αβ`.
 """
-function integ2(fd::FDump,spincase::SpinCase = SCα)
+function integ2(fd::FDump, spincase::Symbol=:α)
   if !fd.uhf
     return fd.int2
-  elseif spincase == SCα
+  elseif spincase == :α
     return fd.int2aa
-  elseif spincase == SCβ
+  elseif spincase == :β
     return fd.int2bb
   else
     return fd.int2ab
@@ -248,20 +279,20 @@ function read_integrals!(fd::FDump, dir::AbstractString)
 end
 
 """ 
-    uppertriangular(i1,i2)
+    uppertriangular(i1, i2)
 
   Return upper triangular index from two indices i1 <= i2.
 """
-function uppertriangular(i1,i2)
+function uppertriangular(i1, i2)
   return i1+i2*(i2-1)÷2
 end
 
 """ 
-    uppertriangular(i1,i2,i3)
+    uppertriangular(i1, i2, i3)
 
   Return upper triangular index from three indices i1 <= i2 <= i3.
 """
-function uppertriangular(i1,i2,i3)
+function uppertriangular(i1, i2, i3)
   return i1+i2*(i2-1)÷2+(i3+1)*i3*(i3-1)÷6
 end
 
@@ -293,7 +324,7 @@ function strict_uppertriangular_range(i2)
 end
 
 """
-    set_int2!(int2::AbstractArray,i1,i2,i3,i4,integ,triang,simtra,ab)
+    set_int2!(int2::AbstractArray, i1, i2, i3, i4, integ, triang, simtra, ab)
 
   Set 2-e integral in `int2` array to `integ` considering permutational symmetries.
 
@@ -301,7 +332,8 @@ end
   Integrals are stored in physicists' notation.
   If `triang`: the last two indices are stored as a single upper triangular index.
 """
-function set_int2!(int2::AbstractArray,i1,i2,i3,i4,integ,triang,simtra,ab)
+function set_int2!(int2::AbstractArray, i1, i2, i3, i4, integ,
+                   triang, simtra, ab)
   if triang
     @assert !ab
     if i2 == i4
@@ -448,7 +480,7 @@ end
 """
     headvar(head::Dict, key::String)
 
-  Check header for `key``, return value if a list, 
+  Check header for `key`, return value if a list, 
   or the element or nothing if not there.
 """
 function headvar(head::Dict, key::String)
@@ -465,7 +497,7 @@ end
 """
     headvar(fd::FDump, key::String)
 
-  Check header for `key``, return value if a list, 
+  Check header for `key`, return value if a list, 
   or the element or nothing if not there.
 """
 function headvar(fd::FDump, key::String )
@@ -495,6 +527,7 @@ end
   Write fcidump file.
 """
 function write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
+  println("Write fcidump $fcidump"...)
   fdf = open(fcidump,"w")
   write_header(fd,fdf)
   write_integrals(fd,fdf,tol)
@@ -696,6 +729,7 @@ end
   If Tl and Tr are arrays of arrays, then the function transforms rhf fcidump to uhf fcidump.
 """
 function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray) 
+  println("Transform integrals...")
   if length(Tl) == 2 && typeof(Tl[1]) <: AbstractArray
     genuhfdump = true
   else
@@ -730,7 +764,9 @@ end
                    Tr::AbstractArray, Tr2::AbstractArray, triang_in, triang_out)
 
   Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
-  <pq|rs> = <p'q'|r's'> * Tl[p',p] * Tl2[q',q] * Tr[r',r] * Tr2[s',s]
+
+  ``v_{pq}^{rs} = v_{p'q'}^{r's'}``* `Tl`[p',p] * `Tl2`[q',q] * `Tr`[r',r] * `Tr2`[s',s]
+
   If `triang`: the last two indices are stored as a single upper triangular index.
 """
 function transform_int2(int2::AbstractArray, Tl::AbstractArray, Tl2::AbstractArray, 
@@ -791,6 +827,49 @@ end
 function transform_int1(int1::AbstractArray, Tl::AbstractArray,  Tr::AbstractArray)
   @tensoropt int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
   return int1t
+end
+
+"""
+    reorder_orbs_int2(int2::AbstractArray, orbs)
+
+  Reorder orbitals in 2-e integrals according to `orbs`.
+
+  `orbs`can be a subset of orbitals or a permutation of orbitals.
+  Return `int2[orbs[p],orbs[q],orbs[r],orbs[s]]` or the triangular version.
+"""
+function reorder_orbs_int2(int2::AbstractArray, orbs)
+  norb = size(int2,1)
+  norbnew = length(orbs)
+  if orbs == 1:norb
+    return int2
+  end
+  if norbnew == 0
+    if ndims(int2) == 3
+      return zeros(0,0,0)
+    else
+      return zeros(0,0,0,0)
+    end
+  end
+  @assert maximum(orbs) <= norb && minimum(orbs) > 0 "Orbital index out of range"
+  if ndims(int2) == 3
+    # triangular
+    int2t = zeros(norbnew, norbnew, norbnew*(norbnew+1)÷2)
+    for s = 1:norbnew
+      for r = 1:s
+        ro = orbs[r]
+        so = orbs[s]
+        if ro <= so
+          int2t[:,:,uppertriangular(r,s)] = int2[orbs,orbs,uppertriangular(ro, so)]
+        else
+          int2t[:,:,uppertriangular(r,s)] = permutedims(int2[orbs,orbs,uppertriangular(so, ro)], [2,1])
+        end
+      end
+    end
+  else
+    int2t = zeros(length(orbs),length(orbs),length(orbs),length(orbs))
+    int2t = int2[orbs,orbs,orbs,orbs]
+  end
+  return int2t
 end
 
 end #module

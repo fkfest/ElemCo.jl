@@ -1,11 +1,11 @@
 
 """
-    test_dressed_ints(EC,T1)
+    test_dressed_ints(EC, T1)
 
   Compare 3-idx dressed integrals to 4-idx dressed integrals.
 """
-function test_dressed_ints(EC,T1)
-  calc_dressed_ints(EC,T1)
+function test_dressed_ints(EC, T1)
+  calc_dressed_ints(EC, T1)
   ooPfile, ooP = mmap(EC,"d_ooP")
   vvPfile, vvP = mmap(EC,"d_vvP")
   @tensoropt abij[a,b,i,j] := vvP[a,b,P] * ooP[i,j,P]
@@ -35,25 +35,26 @@ function test_dressed_ints(EC,T1)
 end
 
 """
-    test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2)
+    test_add_to_singles_and_doubles_residuals(R1, R2, T1, T2)
 
   Test R1(T3) and R2(T3)
 """
-function test_add_to_singles_and_doubles_residuals(R1,R2,T1,T2) 
+function test_add_to_singles_and_doubles_residuals(R1, R2, T1, T2) 
   @tensoropt ETb3 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j]
   println("ETb3: ",ETb3)
-  @tensoropt ETT1 = 2.0*T1[a,i] * R1[a,i]
+  @tensoropt ETT1 = 2.0*(T1[a,i] * R1[a,i])
   println("ETT1: ",ETT1)
 end
 
 """
-    test_calc_pertT_from_T3(EC,T3)
+    test_calc_pertT_from_T3(EC, T3)
 
   Test [T]
 """
 function test_calc_pertT_from_T3(EC::ECInfo, T3)
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])
+  ϵo, ϵv = orbital_energies(EC)
   # test [T]
   Enb3 = 0.0
   for i = 1:nocc
@@ -62,7 +63,7 @@ function test_calc_pertT_from_T3(EC::ECInfo, T3)
         for a = 1:nvirt
           for b = 1:nvirt
             for c = 1:nvirt
-              W = (T3[a,i,b,j,c,k] * (EC.ϵv[a] + EC.ϵv[b] + EC.ϵv[c] - EC.ϵo[i] - EC.ϵo[j] - EC.ϵo[k]))
+              W = (T3[a,i,b,j,c,k] * (ϵv[a] + ϵv[b] + ϵv[c] - ϵo[i] - ϵo[j] - ϵo[k]))
               Enb3 += W*(4/3*T3[a,i,b,j,c,k]-2.0* T3[a,i,b,k,c,j]+2/3*T3[c,i,a,j,b,k])
             end
           end
@@ -74,7 +75,7 @@ function test_calc_pertT_from_T3(EC::ECInfo, T3)
 end
 
 """
-    test_UaiX(EC,UaiX)
+    test_UaiX(EC, UaiX)
 
   Test UaiX
 """
@@ -82,16 +83,17 @@ function test_UaiX(EC::ECInfo, UaiX)
   nocc = length(EC.space['o'])
   nvirt = length(EC.space['v'])
   rescaledU = deepcopy(UaiX)
+  ϵo, ϵv = orbital_energies(EC)
   for a in 1:nvirt
     for i in 1:nocc
-      rescaledU[a,i,:] *= (EC.ϵv[a] - EC.ϵo[i])
+      rescaledU[a,i,:] *= (ϵv[a] - ϵo[i])
     end
   end
 
   @tensoropt begin
     TestIntermediate1[X,Y] := UaiX[a,i,X] * rescaledU[a,i,Y]
   end
-  if TestIntermediate1 ≈ diagm(load(EC,"epsilonX"))
+  if TestIntermediate1 ≈ diagm(load(EC,"e_X"))
     println("UaiX ok")
   else
     println("UaiX not ok")

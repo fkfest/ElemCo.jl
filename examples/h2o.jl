@@ -1,7 +1,8 @@
-#include("ElemCo.jl-devel/src/ElemCo.jl")
-#using .ElemCo
-using ElemCo
+include("ElemCo.jl-devel/src/ElemCo.jl")
+using .ElemCo
+#using ElemCo
 
+function main()
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
      H1     0.000000000    1.489124508    1.033245507
@@ -11,9 +12,10 @@ geometry="bohr
 basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
              "mp2fit"=>"cc-pvdz-rifit")
-#@ECsetup
 #@opt scf thr=1.e-14 maxit=2
 #@run dfhf
 @dfhf
 @dfints
 @cc dcsd
+end
+main()
