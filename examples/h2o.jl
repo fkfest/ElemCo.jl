@@ -16,6 +16,7 @@ basis = Dict("ao"=>"cc-pVDZ",
 #@run dfhf
 @dfhf
 @dfints
-@cc dcsd
+ccmethod="dcsd"
+@cc ccmethod
 end
 main()
