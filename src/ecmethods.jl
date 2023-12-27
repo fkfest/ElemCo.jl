@@ -4,12 +4,14 @@ using DocStringExtensions
 using ..ElemCo.Utils
 
 export ECMethod, method_name, max_full_exc
-export has_spec, set_spec!, is_unrestricted, set_unrestricted!
+export has_prefix, set_prefix!, is_unrestricted, set_unrestricted!
+export has_suffix, set_suffix!
 
 
 const ExcLevels = "SDTQP"
 
-const Specs4Methods = ["EOM-","2D-","FRS-","FRT-","Λ","U","R"]
+const Prefix4Methods = ["EOM-","2D-","FRS-","FRT-","Λ","U","R"]
+const Suffix4Methods = []
 
 """
     ECMethod
@@ -19,12 +21,12 @@ Description of the electron-correlation method
 $(FIELDS)
 """
 mutable struct ECMethod
-  """unrestricted calculation."""
-  unrestricted::Bool
   """theory level: `"MP"`, `"CC"`, `"DC"`."""
   theory::String
-  """specification of the methods, e.g., `"EOM"`, `"U"`, `"R"`, `"2D"`, `"FRS"`, `"FRT"`."""
-  specs::Vector{String}
+  """prefix of the methods, e.g., `"EOM"`, `"U"`, `"R"`, `"2D"`, `"FRS"`, `"FRT"`."""
+  prefix::Vector{String}
+  """suffix of the methods."""
+  suffix::Vector{String}
   """ excitation level for each class (`exclevel[1]` for singles etc.).
       Possible values: `:none`, `:full`, `:pert`, `:pertiter`. """
   exclevel::Array{Symbol,1}
@@ -40,18 +42,14 @@ mutable struct ECMethod
       error("Empty method name!")
     end
     Mname = uppercase(mname)
-    unrestricted = false
     theory = ""
     exclevel = [:none for i in 1:length(ExcLevels)]
     pertlevel = 0
     ipos = 1
-    # check for specs
-    specs, ipos = check_specs(Mname, ipos, Specs4Methods)
-    if "EOM" ∈ specs
+    # check for prefix
+    prefix, ipos = check_specs(Mname, ipos, Prefix4Methods)
+    if "EOM" ∈ prefix
       error("EOM methods not implemented!")
-    end
-    if 'U' ∈ specs
-      unrestricted = true
     end
     # if pure PT: all excitation levels are perturbative, otherwise only the highest
     pure_PT = false
@@ -105,13 +103,19 @@ mutable struct ECMethod
         else
           iexc = findfirst(char,ExcLevels)
           if isnothing(iexc)
-            error("Excitation level $char not recognized")
+            break
+            # error("Excitation level $char not recognized")
           end
           exclevel[iexc] = next_level
         end
       end
+      ipos += 1
     end
-    new(unrestricted,theory,specs,exclevel,pertlevel)
+    suffix, ipos = check_specs(Mname, ipos, Suffix4Methods)
+    if ipos <= length(Mname)
+      error("Method name not recognized: $mname . Remaining: "*substr(mname,ipos))
+    end
+    new(theory,prefix,suffix,exclevel,pertlevel)
   end
 end
 
@@ -129,6 +133,8 @@ function check_specs(mname::AbstractString, pos, specs::Vector)
       if substr(mname, pos, length(spec)) == spec
         if length(spec) > 2 && last(spec) == '-'
           push!(matches, substr(spec,1,length(spec)-1))
+        elseif length(spec) > 2 && first(spec) == '-'
+          push!(matches, substr(spec,2))
         else
           push!(matches, spec)
         end
@@ -140,22 +146,42 @@ function check_specs(mname::AbstractString, pos, specs::Vector)
 end
 
 """
-    has_spec(method::ECMethod, spec::AbstractString)
+    has_prefix(method::ECMethod, spec::AbstractString)
 
-  Return `true` if `method` has specification `spec`, e.g., `"EOM"`.
+  Return `true` if `method` has prefix `spec`, e.g., `"EOM"`.
 """
-function has_spec(method::ECMethod, spec::AbstractString)
-  return spec ∈ method.specs
+function has_prefix(method::ECMethod, spec::AbstractString)
+  return spec ∈ method.prefix
 end
 
 """
-    set_spec!(method::ECMethod, spec::AbstractString)
+    set_prefix!(method::ECMethod, spec::AbstractString)
 
-  Set `method` to have specification `spec`, e.g., `"EOM"`.
+  Set `method` to have prefix `spec`, e.g., `"EOM"`.
 """
-function set_spec!(method::ECMethod, spec::AbstractString)
-  if !has_spec(method, spec)
-    push!(method.specs, spec)
+function set_prefix!(method::ECMethod, spec::AbstractString)
+  if !has_prefix(method, spec)
+    push!(method.prefix, spec)
+  end
+end
+
+"""
+    has_suffix(method::ECMethod, spec::AbstractString)
+
+  Return `true` if `method` has suffix `spec`, e.g., `"F12"`.
+"""
+function has_suffix(method::ECMethod, spec::AbstractString)
+  return spec ∈ method.suffix
+end
+
+"""
+    set_suffix!(method::ECMethod, spec::AbstractString)
+
+  Set `method` to have suffix `spec`, e.g., `"F12"`.
+"""
+function set_suffix!(method::ECMethod, spec::AbstractString)
+  if !has_suffix(method, spec)
+    push!(method.suffix, spec)
   end
 end
 
@@ -165,7 +191,7 @@ end
   Return `true` if `method` is unrestricted.
 """
 function is_unrestricted(method::ECMethod)
-  return has_spec(method, "U")
+  return has_prefix(method, "U")
 end
 
 """
@@ -174,7 +200,7 @@ end
   Set `method` to unrestricted.
 """
 function set_unrestricted!(method::ECMethod)
-  set_spec!(method, "U")
+  set_prefix!(method, "U")
 end
 
 """
@@ -195,7 +221,7 @@ end
 """
 function method_name(method::ECMethod, main::Bool = true)
   name = ""
-  for spec in method.specs
+  for spec in method.prefix
     name *= spec
     if length(spec) > 1
       name *= "-"
@@ -222,6 +248,12 @@ function method_name(method::ECMethod, main::Bool = true)
       end
     end
     name *= level_str
+  end
+  for spec in method.suffix
+    if length(spec) > 1
+      name *= "-"
+    end
+    name *= spec
   end
   return name
 end

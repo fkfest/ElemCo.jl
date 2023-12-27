@@ -646,13 +646,13 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ecmethod = ecmethod_save # restore
 
     if closed_shell_method
-      if has_spec(ecmethod, "Λ")
+      if has_prefix(ecmethod, "Λ")
         calc_lm_cc(EC, ecmethod)
       end
       if ecmethod.exclevel[3] != :none
         do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
         save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        if has_spec(ecmethod, "Λ")
+        if has_prefix(ecmethod, "Λ")
           @assert !save_pert_t3 "Saving perturbative triples not implemented for ΛCCSD(T)"
           ET3, ET3b = calc_ΛpertT(EC)
         else
@@ -674,7 +674,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println()
     flush(stdout)
 
-    if has_spec(ecmethod, "2D")
+    if has_prefix(ecmethod, "2D")
       W = load(EC,"2d_ccsd_W")[1]
       @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
       @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W

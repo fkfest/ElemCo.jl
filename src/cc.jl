@@ -1906,8 +1906,8 @@ end
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC")
-  tworef = has_spec(method, "2D")
-  fixref = (has_spec(method, "FRS") || has_spec(method, "FRT"))
+  tworef = has_prefix(method, "2D")
+  fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   print_info(method_name(method))
   Amps, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
@@ -1936,10 +1936,10 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     NormR2 = calc_doubles_norm(Res[doubles]...)
     Eh = calc_hylleraas(EC, Amps..., Res...)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
-    if has_spec(method, "FRS")
+    if has_prefix(method, "FRS")
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
-    elseif has_spec(method, "FRT")
+    elseif has_prefix(method, "FRT")
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[T2αβ][norba,morbb,morba,norbb] = -1.0
     end

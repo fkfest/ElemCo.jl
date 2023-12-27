@@ -317,7 +317,7 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
   print_info(method_name(method)*" Lagrange multipliers")
   LMs, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
-  if method.unrestricted
+  if is_unrestricted(method)
     @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
   else
     @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
