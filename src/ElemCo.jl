@@ -61,7 +61,7 @@ using .DfDump
 export ECdriver 
 export @mainname
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @reset, @run
+export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
 
@@ -260,6 +260,42 @@ macro run(method, kwargs...)
   end
 end
 
+"""
+    @method2string(method, strmethod="")
+
+  Return string representation of `method`.
+
+  If `method` is a String variable, return the value of the variable.
+  Otherwise, return the string representation of `method` (or `strmethod` if provided).
+
+  # Examples
+```julia
+julia> @method2string(CCSD)
+"CCSD"
+julia> CCSD = "UCCSD";
+julia> @method2string(CCSD)
+"UCCSD"
+```
+"""
+macro method2string(method, strmethod="")
+  if strmethod == ""
+    strmethod = replace("$method", " " => "")
+  end
+  varmethod = :($(esc(method)))
+  return quote
+    isvar = [false]
+    try @assert(typeof($(esc(method))) <: AbstractString)
+      isvar[1] = true
+    catch
+    end
+    if isvar[1]
+      $varmethod
+    else
+      $(esc(strmethod))
+    end
+  end
+end
+
 """ 
     @dfhf()
 
@@ -302,7 +338,9 @@ end
 
   Run coupled cluster calculation.
 
-  The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc)
+  The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc).
+  The method can be specified as a string or as a variable, e.g., 
+  `@cc CCSD` or `@cc "CCSD"` or `ccmethod="CCSD";  @cc ccmethod`.
   
   # Keyword arguments
   - `fcidump::String`: fcidump file (default: "", i.e., use integrals from `EC`).
@@ -327,7 +365,8 @@ macro cc(method, kwargs...)
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
       $(esc(:@tryECinit))
-      ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
+      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+      ECdriver($(esc(:EC)), strmethod; $(ekwa...))
     end
   else
     return quote
@@ -335,7 +374,8 @@ macro cc(method, kwargs...)
       if !fd_exists($(esc(:EC)).fd)
         $(esc(:@dfints))
       end
-      ECdriver($(esc(:EC)), $(esc(strmethod)); fcidump="", $(ekwa...))
+      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+      ECdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
     end
   end
 end
@@ -361,7 +401,8 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit
 macro svdcc(method="dcsd")
   strmethod=replace("$method", " " => "")
   return quote
-    calc_svd_dc($(esc(:EC)), $(esc(strmethod)))
+    strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+    calc_svd_dc($(esc(:EC)), strmethod)
   end
 end
 
@@ -427,12 +468,13 @@ macro transform_ints(type="")
       error("No FCIDump found.")
     end
     CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
-    if $(esc(strtype)) ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
+    strtype = @method2string($(esc(type)), $(esc(strtype)))
+    if strtype ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
       CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
-    elseif $(esc(strtype)) == ""
+    elseif strtype == ""
       CMOl = CMOr
     else
-      error("Unknown type in @transform_ints: ", $(esc(strtype)))
+      error("Unknown type in @transform_ints: ", strtype)
     end
     transform_fcidump($(esc(:EC)).fd, CMOl, CMOr)
   end
