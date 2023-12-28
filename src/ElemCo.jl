@@ -71,7 +71,8 @@ function __init__()
   println("   ElemCo.jl")
   draw_line(15)
   try
-    hash = read(`git rev-parse HEAD`, String)
+    path = @__DIR__
+    hash = read(`git -C $path rev-parse HEAD`, String)
     println("Git hash: ", hash[1:end-1])
   catch
   end
@@ -84,10 +85,12 @@ function __init__()
   println("Date: ", Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
   println("""
    ╭──────────────────────────────╮ 
-   │        ╭─────────────╮       │
-   │ Electron Correlation methods │
-   │        ╰─────────────╯       │
-   ╰──────────────────────────────╯""")
+   │        ╭─────────────╮       ├─╮
+   │ Electron Correlation methods │ │
+   │        ╰─────────────╯       │ │
+   ╰─┬────────────────────────────╯ │
+     ╰──────────────────────────────╯""")
+
 end
 
 """
