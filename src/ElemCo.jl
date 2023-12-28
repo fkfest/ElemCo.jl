@@ -40,6 +40,7 @@ catch
 end
 using LinearAlgebra
 using Printf
+using Dates
 #BLAS.set_num_threads(1)
 using .Utils
 using .ECInfos
@@ -64,6 +65,30 @@ export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
+
+function __init__()
+  draw_line(15)
+  println("   ElemCo.jl")
+  draw_line(15)
+  try
+    hash = read(`git rev-parse HEAD`, String)
+    println("Git hash: ", hash[1:end-1])
+  catch
+  end
+  println("Website: elem.co.il")
+  println("Julia version: ",VERSION)
+  println("BLAS threads: ",BLAS.get_num_threads())
+  println("OpenMP threads: ",Base.Threads.nthreads())
+  println("Hostname: ", gethostname())
+  println("Scratch directory: ", tempdir())
+  println("Date: ", Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
+  println("""
+   ╭──────────────────────────────╮ 
+   │        ╭─────────────╮       │
+   │ Electron Correlation methods │
+   │        ╰─────────────╯       │
+   ╰──────────────────────────────╯""")
+end
 
 """
     @mainname(file)
