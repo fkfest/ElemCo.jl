@@ -956,20 +956,17 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=fals
         trioo = [CartesianIndex(i,j) for j in 1:nocc for i in 1:j]
         D2 = calc_D2(EC, T1, T2)[:,:,trioo]
         # <pq|rs> D^ij_rs
-        @tensoropt R2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
+        @tensoropt K2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
         D2 = nothing
-        Rpqoo = Array{Float64}(undef,norb,norb,nocc,nocc)
-        Rpqoo[:,:,trioo] = R2pqx
+        K2pq = Array{Float64}(undef,norb,norb,nocc,nocc)
+        K2pq[:,:,trioo] = K2pqx
         trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
-        @tensor Rpqoo[:,:,trioor][p,q,x] = R2pqx[q,p,x]
-        R2pqx = nothing
-        #TODO: remove Rpqoo!
-        @tensor R2pq[a,b,i,j] := Rpqoo[a,b,i,j]
-        Rpqoo = nothing
+        @tensor K2pq[:,:,trioor][p,q,x] = K2pqx[q,p,x]
+        K2pqx = nothing
       else
         D2 = calc_D2(EC, T1, T2)
         # <pq|rs> D^ij_rs
-        @tensoropt R2pq[p,r,i,j] := int2[p,r,q,s] * D2[q,s,i,j]
+        @tensoropt K2pq[p,r,i,j] := int2[p,r,q,s] * D2[q,s,i,j]
         D2 = nothing
       end
     else
@@ -977,25 +974,26 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=fals
       tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
       D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
       # <pq|rs> D^ij_rs
-      @tensoropt rR2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
+      @tensoropt rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
       D2 = nothing
       # symmetrize R
-      @tensoropt R2pq[p,r,i,j] := rR2pq[p,r,i,j] + rR2pq[r,p,j,i]
+      @tensoropt K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
+      rK2pq = nothing
     end
-    R2 += R2pq[SP['v'],SP['v'],:,:]
+    R2 += K2pq[SP['v'],SP['v'],:,:]
     if length(T1) > 0
       @tensoropt begin
-        R2[a,b,i,j] -= R2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
-        R2[a,b,i,j] -= R2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
-        R2[a,b,i,j] += R2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k] * T1[b,l]
+        R2[a,b,i,j] -= K2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
+        R2[a,b,i,j] -= K2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
+        R2[a,b,i,j] += K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k] * T1[b,l]
         # singles residual contributions
-        R1[a,i] +=  2.0 * R2pq[SP['v'],SP['o'],:,:][a,k,i,k] - R2pq[SP['v'],SP['o'],:,:][a,k,k,i]
-        x1[k,i] := 2.0 * R2pq[SP['o'],SP['o'],:,:][k,l,i,l] - R2pq[SP['o'],SP['o'],:,:][k,l,l,i]
+        R1[a,i] +=  2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
+        x1[k,i] := 2.0 * K2pq[SP['o'],SP['o'],:,:][k,l,i,l] - K2pq[SP['o'],SP['o'],:,:][k,l,l,i]
         R1[a,i] -= x1[k,i] * T1[a,k]
       end
     end
     x1 = nothing
-    R2pq = nothing
+    K2pq = nothing
     t1 = print_time(EC,t1,"kext",2)
   else
     if !EC.options.cc.calc_d_vvvv
@@ -1417,100 +1415,102 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     if(EC.fd.uhf)
       # αα
       int2a = integ2(EC.fd,:α)
+      @assert ndims(int2a) == 3 "Triangular storage of integrals expected!"
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @tensoropt rR2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
+      @tensoropt rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
       D2a = nothing
       int2a = nothing
       # symmetrize R
-      @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
-      rR2pqa = nothing
-      R2a += R2pqa[SP['v'],SP['v'],:,:]
+      @tensoropt K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
+      rK2pqa = nothing
+      R2a += K2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
         int2b = integ2(EC.fd,:β)
         D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @tensoropt rR2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
+        @tensoropt rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
         int2b = nothing
         # symmetrize R
-        @tensoropt R2pqb[p,r,i,j] := rR2pqb[p,r,i,j] + rR2pqb[r,p,j,i]
-        rR2pqb = nothing
-        R2b += R2pqb[SP['V'],SP['V'],:,:]
+        @tensoropt K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
+        rK2pqb = nothing
+        R2b += K2pqb[SP['V'],SP['V'],:,:]
         # αβ
         int2ab = integ2(EC.fd,:αβ)
         D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
-        @tensoropt R2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
+        @tensoropt K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
         D2ab = nothing
         int2ab = nothing
-        R2ab += R2pqab[SP['v'],SP['V'],:,:]
+        R2ab += K2pqab[SP['v'],SP['V'],:,:]
       end
     else
       int2 = integ2(EC.fd)
+      @assert ndims(int2) == 3 "Triangular storage of integrals expected!"
       # αα
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @tensoropt rR2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
+      @tensoropt rK2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
       D2a = nothing
       # symmetrize R
-      @tensoropt R2pqa[p,r,i,j] := rR2pqa[p,r,i,j] + rR2pqa[r,p,j,i]
-      rR2pqa = nothing
-      R2a += R2pqa[SP['v'],SP['v'],:,:]
+      @tensoropt K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
+      rK2pqa = nothing
+      R2a += K2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
         D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @tensoropt rR2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
+        @tensoropt rK2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
         D2b = nothing
         # symmetrize R
-        @tensoropt R2pqb[p,r,i,j] := rR2pqb[p,r,i,j] + rR2pqb[r,p,j,i]
-        rR2pqb = nothing
-        R2b += R2pqb[SP['V'],SP['V'],:,:]
+        @tensoropt K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
+        rK2pqb = nothing
+        R2b += K2pqb[SP['V'],SP['V'],:,:]
         # αβ
         D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true)
         D2ab = D2ab_full[tripp,:,:] 
         D2abT = permutedims(D2ab_full,(2,1,4,3))[tripp,:,:]
         D2ab_full = nothing
-        @tensoropt R2pqab[p,r,i,j] := int2[p,r,x] * D2ab[x,i,j]
-        @tensoropt R2pqab[p,r,i,j] += int2[r,p,x] * D2abT[x,j,i]
+        @tensoropt K2pqab[p,r,i,j] := int2[p,r,x] * D2ab[x,i,j]
+        @tensoropt K2pqab[p,r,i,j] += int2[r,p,x] * D2abT[x,j,i]
         D2ab = nothing
         D2abT = nothing
-        R2ab += R2pqab[SP['v'],SP['V'],:,:]
+        R2ab += K2pqab[SP['v'],SP['V'],:,:]
       end
     end
     if length(T1a) > 0
       @tensoropt begin
-        R2a[a,b,i,j] -= R2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
-        R2a[a,b,i,j] -= R2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
-        R2a[a,b,i,j] += R2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
+        R2a[a,b,i,j] -= K2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
+        R2a[a,b,i,j] -= K2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
+        R2a[a,b,i,j] += K2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
         # singles residual contributions
-        R1a[a,i] +=  R2pqa[SP['v'],SP['o'],:,:][a,k,i,k] 
-        x1a[k,i] :=  R2pqa[SP['o'],SP['o'],:,:][k,l,i,l]
+        R1a[a,i] +=  K2pqa[SP['v'],SP['o'],:,:][a,k,i,k] 
+        x1a[k,i] :=  K2pqa[SP['o'],SP['o'],:,:][k,l,i,l]
         R1a[a,i] -= x1a[k,i] * T1a[a,k]
       end
     end
     if length(T1b) > 0
       @tensoropt begin
-        R2b[a,b,i,j] -= R2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
-        R2b[a,b,i,j] -= R2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
-        R2b[a,b,i,j] += R2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
+        R2b[a,b,i,j] -= K2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
+        R2b[a,b,i,j] -= K2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+        R2b[a,b,i,j] += K2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
         # singles residual contributions
-        R1b[a,i] += R2pqb[SP['V'],SP['O'],:,:][a,k,i,k]
-        x1b[k,i] := R2pqb[SP['O'],SP['O'],:,:][k,l,i,l]
+        R1b[a,i] += K2pqb[SP['V'],SP['O'],:,:][a,k,i,k]
+        x1b[k,i] := K2pqb[SP['O'],SP['O'],:,:][k,l,i,l]
         R1b[a,i] -= x1b[k,i] * T1b[a,k]
       end
     end
     if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
       @tensoropt begin
-        R2ab[a,b,i,j] -= R2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
-        R2ab[a,b,i,j] -= R2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
-        R2ab[a,b,i,j] += R2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
-        R1a[a,i] += R2pqab[SP['v'],SP['O'],:,:][a,k,i,k] 
-        x1a1[k,i] := R2pqab[SP['o'],SP['O'],:,:][k,l,i,l]
+        R2ab[a,b,i,j] -= K2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
+        R2ab[a,b,i,j] -= K2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+        R2ab[a,b,i,j] += K2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
+        R1a[a,i] += K2pqab[SP['v'],SP['O'],:,:][a,k,i,k] 
+        x1a1[k,i] := K2pqab[SP['o'],SP['O'],:,:][k,l,i,l]
         R1a[a,i] -= x1a1[k,i] * T1a[a,k]
-        R1b[a,i] += R2pqab[SP['o'],SP['V'],:,:][k,a,k,i] 
-        x1b1[k,i] := R2pqab[SP['o'],SP['O'],:,:][l,k,l,i]
+        R1b[a,i] += K2pqab[SP['o'],SP['V'],:,:][k,a,k,i] 
+        x1b1[k,i] := K2pqab[SP['o'],SP['O'],:,:][l,k,l,i]
         R1b[a,i] -= x1b1[k,i] * T1b[a,k]
       end
     end
-    (R2pqa, R2pqb, R2pqab) = (nothing, nothing, nothing)
+    (K2pqa, K2pqb, K2pqab) = (nothing, nothing, nothing)
     (x1a, x1b, x1ab) = (nothing, nothing, nothing)
   else
     d_vvvv = load(EC,"d_vvvv")
