@@ -4,6 +4,7 @@ using Printf
 using ..ElemCo.AbstractEC
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+export subspace_in_space
 export substr
 
 """
@@ -111,6 +112,30 @@ function kwarg_provided_in_macro(kwargs, key::Symbol)
     end
   end
   return false
+end
+
+"""
+    subspace_in_space(subspace, space)
+
+  Return the positions of `subspace` in `space` 
+  (with respect to `space`)
+
+  `subspace` and `space` are lists of indices 
+  with respect to the full space (e.g., `1:norb`).
+
+  # Examples 
+```julia
+julia> get_subspace_of_space([1,3,5], [1,3,4,5])
+3-element Array{Int64,1}:
+  1
+  2 
+  4
+```
+"""
+function subspace_in_space(subspace, space)
+  idx = indexin(subspace, space)
+  @assert all(!isnothing, idx) "Subspace not contained in space."
+  return idx
 end
 
 """

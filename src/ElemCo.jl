@@ -570,76 +570,6 @@ function run_mcscf()
   E,cMO =  dfmcscf(EC,direct=false)
 end
 
-"""
-    is_closed_shell(EC::ECInfo)
-
-  Check if the system is closed-shell 
-  according the to the reference occupation and FCIDump.
-"""
-function is_closed_shell(EC::ECInfo)
-  SP = EC.space
-  SP_changed = false
-  if !haskey(SP, 'o') || !haskey(SP, 'O')
-    SP_save = save_space(EC)
-    setup_space_fd!(EC)
-    SP_changed = true
-    SP = EC.space
-  end
-  cs = (SP['o'] == SP['O'] && !EC.fd.uhf)
-  if SP_changed
-    restore_space!(EC, SP_save)
-  end
-  return cs
-end
-
-""" 
-    calc_fock_matrix(EC::ECInfo, closed_shell)
-
-  Calculate fock matrix from FCIDump
-"""
-function calc_fock_matrix(EC::ECInfo, closed_shell)
-  t1 = time_ns()
-  if closed_shell
-    fock = gen_fock(EC)
-    save!(EC, "f_mm", fock)
-    save!(EC, "f_MM", fock)
-    eps = diag(fock)
-    println("Occupied orbital energies: ", eps[EC.space['o']])
-    save!(EC, "e_m", eps)
-    save!(EC, "e_M", eps)
-  else
-    fock = gen_fock(EC, :α)
-    eps = diag(fock)
-    println("Occupied α orbital energies: ", eps[EC.space['o']])
-    save!(EC, "f_mm", fock)
-    save!(EC, "e_m", eps)
-    fock = gen_fock(EC, :β)
-    eps = diag(fock)
-    println("Occupied β orbital energies: ", eps[EC.space['O']])
-    save!(EC,"f_MM", fock)
-    save!(EC,"e_M", eps)
-  end
-  t1 = print_time(EC,t1,"fock matrix",1)
-end
-
-""" 
-    calc_HF_energy(EC::ECInfo, closed_shell)
-
-  Calculate HF energy from FCIDump and EC info. 
-"""
-function calc_HF_energy(EC::ECInfo, closed_shell)
-  SP = EC.space
-  if closed_shell
-    ϵo = load(EC,"e_m")[SP['o']]
-    EHF = sum(ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
-  else
-    ϵo = load(EC,"e_m")[SP['o']]
-    ϵob = load(EC,"e_M")[SP['O']]
-    EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(integ1(EC.fd, :α))[SP['o']]) + sum(diag(integ1(EC.fd, :β))[SP['O']])) + EC.fd.int0
-  end
-  return EHF
-end
-
 """ 
     ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
 
@@ -681,6 +611,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ecmethod = ECMethod(mname)
     if is_unrestricted(ecmethod)
       closed_shell_method = false
+    elseif has_prefix(ecmethod, "R")
+      closed_shell_method = false
+      @assert !EC.fd.uhf "For restricted methods, the FCIDUMP must not be UHF!"
     else
       closed_shell_method = closed_shell
       if !closed_shell_method
@@ -701,6 +634,14 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       println("$method0 total energy: ",EMp2+EHF)
       t1 = print_time(EC,t1,"MP2",1)
       flush(stdout)
+      if !closed_shell_method && has_prefix(ecmethod, "R")
+        spin_project_amplitudes(EC)
+        EMp2 = calc_UMP2_energy(EC)
+        method0 = "RMP2"
+        println("$method0 correlation energy: ",EMp2)
+        println("$method0 total energy: ",EMp2+EHF)
+        flush(stdout)
+      end
       if ecmethod.theory == "MP"
         continue
       end
@@ -717,6 +658,8 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       ecmethod = ECMethod("CCSD")
       if is_unrestricted(ecmethod_save)
         set_unrestricted!(ecmethod)
+      elseif has_prefix(ecmethod_save, "R")
+        set_prefix!(ecmethod, "R")
       end
     end
     ECC = calc_cc(EC, ecmethod)
