@@ -1,5 +1,17 @@
 @doc raw""" Coupled-cluster methods 
 
+The following coupled-cluster methods are implemented in `ElemCo.jl`:
+* `ccsd` - closed-shell implementation, for open-shell systems defaults to `uccsd`, 
+* `uccsd` - unrestricted implementation,
+* `rccsd` - restricted implementation (for high-spin RHF reference only),
+* `ccsd(t)` - closed-shell implementation,
+* `dcsd` - closed-shell implementation, for open-shell systems defaults to `udcsd`,
+* `udcsd` - unrestricted implementation,
+* `rdcsd` - restricted implementation (for high-spin RHF reference only),
+* `λccsd` - calculation of Lagrange multipliers, closed-shell implementation,
+* `λccsd(t)` - closed-shell implementation,
+* `λdcsd` - calculation of Lagrange multipliers, closed-shell implementation.
+
 The most efficient version of closed-shell CCSD/DCSD in `ElemCo.jl` combines the dressed factorization from [^Kats2013] with 
 the `cckext` type of factorization from [^Hampel1992] and is given by
 ```math
@@ -58,7 +70,8 @@ using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
 
-export calc_MP2, calc_UMP2, calc_cc, calc_pertT, calc_ΛpertT
+export calc_MP2, calc_UMP2, calc_UMP2_energy 
+export calc_cc, calc_pertT, calc_ΛpertT
 export calc_lm_cc
 
 include("cc_lagrange.jl")
@@ -719,22 +732,51 @@ end
 """
 function calc_UMP2(EC::ECInfo, addsingles=true)
   SP = EC.space
-  T2a = update_doubles(EC,ints2(EC,"vvoo"), spincase=:α, antisymmetrize = true, use_shift=false)
-  T2b = update_doubles(EC,ints2(EC,"VVOO"), spincase=:β, antisymmetrize = true, use_shift=false)
-  T2ab = update_doubles(EC,ints2(EC,"vVoO"), spincase=:αβ, use_shift=false)
-  EMp2 = calc_doubles_energy(EC,T2a,T2b,T2ab)
+  T2a = update_doubles(EC, ints2(EC,"vvoo"), spincase=:α, antisymmetrize = true, use_shift=false)
+  T2b = update_doubles(EC, ints2(EC,"VVOO"), spincase=:β, antisymmetrize = true, use_shift=false)
+  T2ab = update_doubles(EC, ints2(EC,"vVoO"), spincase=:αβ, use_shift=false)
+  EMp2 = calc_doubles_energy(EC, T2a, T2b, T2ab)
   save!(EC, "T_vvoo", T2a)
   save!(EC, "T_VVOO", T2b)
   save!(EC, "T_vVoO", T2ab)
   if addsingles
     T1a = update_singles(EC,load(EC,"f_mm")[SP['v'],SP['o']], spincase=:α, use_shift=false)
     T1b = update_singles(EC,load(EC,"f_MM")[SP['V'],SP['O']], spincase=:β, use_shift=false)
-    EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only = true)
+    EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only=true)
     save!(EC, "T_vo", T1a)
     save!(EC, "T_VO", T1b)
   end
   return EMp2
 end
+
+""" 
+    calc_UMP2_energy(EC::ECInfo, addsingles=true)
+
+  Calculate open-shell MP2 energy from precalculated amplitudes. 
+  If `addsingles`: singles energy is also calculated.
+  Return EMp2 
+"""
+function calc_UMP2_energy(EC::ECInfo, addsingles=true)
+  T2a = load(EC,"T_vvoo")
+  T2b = load(EC,"T_VVOO")
+  T2ab = load(EC,"T_vVoO")
+  EMp2 = calc_doubles_energy(EC, T2a, T2b, T2ab)
+  if addsingles
+    T1a = load(EC,"T_vo")
+    T1b = load(EC,"T_VO")
+    EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only=true)
+  end
+  return EMp2
+end
+
+""" 
+    calc_MP2(EC::ECInfo, addsingles=true)
+
+  Calculate closed-shell MP2 energy and amplitudes. 
+  The amplitudes are stored in `T_vvoo` file.
+  If `addsingles`: singles are also calculated and stored in `T_vo` file.
+  Return EMp2 
+"""
 
 """ 
     calc_D2(EC::ECInfo, T1, T2, scalepp=false)
@@ -1908,10 +1950,11 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC")
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
+  restrict = has_prefix(method, "R")
   print_info(method_name(method))
   Amps, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
-  if is_unrestricted(method)
+  if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
   else
     @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
@@ -1931,6 +1974,9 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     Res = calc_ccsd_resid(EC, Amps...; dc, tworef, fixref)
+    if restrict
+      spin_project!(EC, Res...)
+    end
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
     NormR2 = calc_doubles_norm(Res[doubles]...)
@@ -1947,6 +1993,9 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       NormT1 = calc_singles_norm(Amps[singles]...)
       NormR1 = calc_singles_norm(Res[singles]...)
       update_singles!(EC, Amps[singles]..., Res[singles]...)
+    end
+    if restrict
+      spin_project!(EC, Amps...)
     end
     Amps = perform(diis, Amps, Res)
     if do_sing

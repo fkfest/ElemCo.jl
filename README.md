@@ -12,14 +12,16 @@ The integrals are obtained from a FCIDUMP file or calculated using the `Gaussian
 | BO-HF    |:heavy_check_mark:  |                  |                        |
 | MCSCF    |   :x:              |:wrench:          |                        |
 | MP2      |:heavy_check_mark:  |                  |                        |
-| RCCSD    | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
+| CCSD     | :heavy_check_mark: |                  |:heavy_check_mark:      |
+| RCCSD    | :heavy_check_mark: |                  |                        |
 | UCCSD    | :heavy_check_mark: |                  |                        |
 | ΛCCSD    | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
 | CCSD(T)  | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
 | ΛCCSD(T) | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
 | FR-CCSD  | :heavy_check_mark: |                  |                        |
 | 2D-CCSD  | :heavy_check_mark: |                  |                        |
-| RDCSD    | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
+| DCSD     | :heavy_check_mark: |                  |:heavy_check_mark:      |
+| RDCSD    | :heavy_check_mark: |                  |                        |
 | UDCSD    | :heavy_check_mark: |                  |                        |
 | ΛDCSD    | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
 | FR-DCSD  | :heavy_check_mark: |                  |                        |

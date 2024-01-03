@@ -6,6 +6,7 @@ EMP2_test  =     -0.207727619864
 ECCD_test =      -0.213495204514
 ECCSD_test =     -0.232320803220
 EDCSD_test =     -0.243223819179
+ERDCSD_test =    -0.241910345272
 ECCSD_UHF_test = -0.168407943239
 
 fcidump = joinpath(@__DIR__,"H2O_CATION.FCIDUMP")
@@ -20,6 +21,9 @@ EHF, EMP2, ECCSD = ECdriver(EC, "uccsd"; fcidump)
 
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
+
+EHF, EMP2, ERDCSD = @cc rdcsd
+@test abs(ERDCSD-ERDCSD_test) < epsilon
 
 fcidump = joinpath(@__DIR__,"H2OP_UHF.FCIDUMP")
 EHF, EMP2, ECCSD = ECdriver(EC, "uccsd"; fcidump)

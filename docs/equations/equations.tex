@@ -26,6 +26,8 @@
 }
 \DeclareUnicodeCharacter{039B}{\Lambda}
 \DeclareUnicodeCharacter{03B4}{\delta}
+\DeclareUnicodeCharacter{03B1}{\alpha}
+\DeclareUnicodeCharacter{03B2}{\beta}
 \newcommand{\NL}{\nonumber \\}
 \newcommand{\nl}{\nonumber \\ & }
 \newcommand{\op}{\hat}
@@ -41,6 +43,7 @@
 \newcommand{\spb}[1]{\bar{#1}}
 \newcommand{\half}{\frac{1}{2}}
 \newcommand{\ElemCojl}{\textsf{ElemCo.jl} }
+\newcommand{\cmd}[1]{\texttt{#1}}
 % Define \lt and \gt for `less than' and `greater than'
 \mathchardef\lt="313C \mathchardef\gt="313E
 % Set up `<' and `>' as angle brackets
@@ -475,6 +478,56 @@ x_{\spa{a}\spb{l}}^{\spa{i}\spb{d}} &= \half T^{\spa{i}\spb{k}}_{\spa{a}\spb{c}}
 \red{2\times}\frac{1}{2}\left(v_{\spa{k}\spa{l}}^{\spa{c}\spa{d}} T^{\spa{k}\spa{l}}_{\spa{a}\spa{d}}
 +v_{\spa{k}\spb{l}}^{\spa{c}\spb{d}} T^{\spa{k}\spb{l}}_{\spa{a}\spb{d}}\right)
 \\
+\end{aligned}
+\end{equation}
+
+\subsection{Spin-restricted open-shell CCSD/DSCD}
+The spin-restricted versions \cmd{rccsd} and \cmd{rdcsd} are obtained through spin-projection of the
+residuals and amplitudes from the spin-dependent equations in each iteration. 
+
+In this section we use the following notation:
+\begin{equation}
+\begin{aligned}
+  ~^{αα}T^{ij}_{ab} &= T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}, \\
+  ~^{ββ}T^{ij}_{ab} &= T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}}, \\
+  ~^{αβ}T^{ij}_{ab} &= T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}, \\
+\end{aligned}
+\end{equation}
+and the spin-projected amplitudes are denoted by a bar, e.g., $~^{αβ}\bar T^{ij}_{ab}$.
+Moreover, the indices $i,j,\ldots$ run in the following part of the section over the closed-shell part of occupied orbitals, $a,b,\ldots$ over the (doubly) virtual orbitals, 
+and $t,u,\ldots$ over the singly occupied (or singly-virtual) orbitals.
+
+The ``closed-shell'' part of spin-projected $\alpha\beta$ amplitudes is given by
+\begin{equation}
+\begin{aligned}
+~^{αβ}\bar T^{ij}_{ab} = \frac{1}{6} ( ~^{αα}T^{ij}_{ab} + ~^{ββ}T^{ij}_{ab} + 2 ~^{αβ}T^{ij}_{ab} + ~^{αβ}T^{ij}_{ba} +2 ~^{αβ}T^{ji}_{ba} + ~^{αβ}T^{ji}_{ab})
+\end{aligned}
+\end{equation}
+The ``open-shell'' part of spin-projected $\alpha\beta$ amplitudes is given by
+\begin{equation}
+\begin{aligned}
+~^{αβ}\bar T^{ij}_{at} &= \frac{1}{3} ( ~^{ββ}T^{ij}_{at} + 2 ~^{αβ}T^{ij}_{at} + ~^{αβ}T^{ji}_{at})\\
+~^{αβ}\bar T^{tj}_{ab} &= \frac{1}{3} ( ~^{αα}T^{tj}_{ab} + 2 ~^{αβ}T^{tj}_{ab} + ~^{αβ}T^{tj}_{ba})\\
+~^{αβ}\bar T^{tj}_{au} &= ~^{αβ}T^{tj}_{au} + \frac{\delta_{tu}}{2m_s + 2}\left( ~^{β}T^j_a - ~^{α}T^j_a - ~^{αβ}T^{vj}_{av} \right)
+\end{aligned}
+\end{equation}
+The projection corrections for the remaining amplitudes are defined 
+in terms of the new spin-projected $\alpha\beta$ amplitudes as follows.
+For singles amplitudes,
+\begin{equation}
+\begin{aligned}
+~^{α}\bar T^i_a &= \frac{1}{2}\left(~^{α}T^i_a + ~^{β}T^i_a - ~^{αβ}\bar T^{vi}_{av} \right),\\
+~^{β}\bar T^i_a &= \frac{1}{2}\left(~^{α}T^i_a + ~^{β}T^i_a + ~^{αβ}\bar T^{vi}_{av} \right),\\
+~^{α}\bar T^t_a &= ~^{α}T^t_a  \qquad \text{and} \qquad ~^{β}\bar T^i_t = ~^{β} T^i_t.\\
+\end{aligned}
+\end{equation}
+For the $\alpha\alpha$ and $\beta\beta$ amplitudes,
+\begin{equation}
+\begin{aligned}
+~^{\sigma\sigma}\bar T^{ij}_{ab} &= ~^{αβ}\bar T^{ij}_{ab} - ~^{αβ}\bar T^{ij}_{ba},\\
+~^{αα}\bar T^{tj}_{ab} &= ~^{αα}\bar T^{jt}_{ba} = ~^{αβ}\bar T^{tj}_{ab} - ~^{αβ}\bar T^{tj}_{ba},\\
+~^{ββ}\bar T^{ij}_{at} &= ~^{ββ}\bar T^{ji}_{ta} = ~^{αβ}\bar T^{ij}_{at} - ~^{αβ}\bar T^{ji}_{at},\\
+~^{αα}\bar T^{tu}_{ab} &= ~^{αα} T^{tu}_{ab} \qquad \text{and} \qquad ~^{ββ}\bar T^{ij}_{tu} = ~^{ββ} T^{ij}_{tu}.\\
 \end{aligned}
 \end{equation}
 

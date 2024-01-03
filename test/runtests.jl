@@ -12,7 +12,7 @@ end
 
 @testset verbose = true "FCIDUMP Calculations" begin
 
-tests = ["h2o", "h2o_st1", "h2o_cation", "h2o_anion_st1", "2d_cc"]
+tests = ["h2o", "h2o_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]
 for test in tests
   if runall || test in ARGS
     include(test*".jl")
