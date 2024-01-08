@@ -1,14 +1,10 @@
 # example: calculate DCSD/BO-HF/DCSD for all FCIDUMPs in "./*/" folders
-# create a symbolic link in the current directory pointing the ElemCo.jl-devel folder
-# ln -s <path-to-ElemCo.jl-devel-folder> .
-
-include("ElemCo.jl-devel/src/ElemCo.jl")
-using .ElemCo
+using ElemCo
 
 # if non-empty list: calculate only specified folders
 calc_only = []
 # don't calculate the following folders
-dont_calc = ["ElemCo.jl-devel"]
+dont_calc = []
 for dir in readdir()
   if length(calc_only) > 0 && dir ∉ calc_only
     continue
@@ -18,13 +14,15 @@ for dir in readdir()
   end
   println(dir)
   cd(dir)
-  output = "bo-dcsd.out"
-  redirect_stdio(stdout=output) do
-    fcidump="FCIDUMP"
-    @cc dcsd
-    EBOHF = @bohf
-    @transform_ints biorth
-    @cc dcsd
+  if isfile("FCIDUMP")
+    output = "bo-dcsd.out"
+    redirect_stdio(stdout=output) do
+      fcidump="FCIDUMP"
+      @cc dcsd
+      EBOHF = @bohf
+      @transform_ints biorth
+      @cc dcsd
+    end
   end
   cd("..")
 end

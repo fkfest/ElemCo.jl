@@ -1,6 +1,4 @@
-include("ElemCo.jl-devel/src/ElemCo.jl")
-using .ElemCo
-#using ElemCo
+using ElemCo
 
 function main()
 geometry="bohr
