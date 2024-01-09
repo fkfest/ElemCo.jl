@@ -483,7 +483,7 @@ end
   
     Run DF-MCSCF calculation.
   """
-function run_mcscf(moleType::Int=1)  
+function run_mcscf(HessianTypeInt::Int=1, moleType::Int=1)  
   # geometry="bohr 
   #   Fe   -3.179961014   -1.062146647    0.001295974
   #   N    -3.336254970    3.285559098   -0.029463665
@@ -536,15 +536,19 @@ function run_mcscf(moleType::Int=1)
     #  H   -1.0185358   -1.3236265   -2.6592866
     #  H   -2.4963312   -0.6738135   -2.7585987
     #  H   -1.1916622    0.2796750   -2.7122128
-
   basis = Dict("ao"=>"cc-pVTZ",
              "jkfit"=>"cc-pvtz-rifit",
              "mp2fit"=>"cc-pvtz-rifit")
-
   @opt wf ms2=4 charge=2
   to = TimerOutputs.get_defaulttimer()
   TimerOutputs.reset_timer!(to)
-  @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64)
+  if HessianTypeInt == 1
+    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64, HT=SCI)
+  elseif HessianTypeInt == 2
+    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64, HT=SO)
+  elseif HessianTypeInt == 3
+    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64, HT=SO_SCI)
+  end
   display(to)
   TimerOutputs.reset_timer!(to)
 end
