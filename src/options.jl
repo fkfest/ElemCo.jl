@@ -58,6 +58,8 @@ Base.@kwdef mutable struct ScfOptions
   - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
+  """ `⟨0.0⟩` Fermi-Dirac temperature for starting guess (at the moment works only for BO-HF). """
+  temperature_guess::Float64 = 0.0
 end
 
 """ 

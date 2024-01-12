@@ -221,6 +221,8 @@ function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVect
         evecs[:,i+1] = imag.(evecs[:,i+1])
         normalize!(evecs[:,i])
         normalize!(evecs[:,i+1])
+        evals[i] = real(evals[i])
+        evals[i+1] = real(evals[i+1])
         npairs += 1
         skip = true
       else
