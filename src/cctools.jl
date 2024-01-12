@@ -155,15 +155,6 @@ end
 
   if `fock_only` is true, the energy will be calculated using only non-dressed fock matrix.
 """
-
-"""
-    calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
-
-  Calculate coupled-cluster closed-shell singles energy 
-  using dressed fock matrix.
-
-  if `fock_only` is true, the energy will be calculated using only non-dressed fock matrix.
-"""
 function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
