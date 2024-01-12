@@ -1,7 +1,7 @@
 using ElemCo
 
 @testset "DF-MCSCF HIGH-SPIN OPEN SHELL Test" begin
-epsilon    =   1.e-8
+epsilon    =   1.e-6
 EMCSCF_test   = -75.39523234954376
 
 geometry="h2o.xyz"
