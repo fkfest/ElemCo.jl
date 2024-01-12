@@ -4,14 +4,33 @@
 module BOHF
 using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.Utils
+using ..ElemCo.Constants
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
+using ..ElemCo.OrbTools
 using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
 
 export bohf, bouhf
 export guess_boorb
+
+"""
+    left_from_right(cMOr)
+
+  Calculate left BO-MO coefficients from right BO-MO coefficients.
+"""
+function left_from_right(cMOr)
+  if is_unrestricted_MO(cMOr)
+    cMOl = Any[0.0, 0.0]
+    for ispin = 1:2
+      cMOl[ispin] = (inv(cMOr[ispin]))'
+    end
+  else
+    cMOl = (inv(cMOr))'
+  end
+  return cMOl
+end
 
 """
     guess_boorb(EC::ECInfo, guess::Symbol, uhf=false)
@@ -41,14 +60,8 @@ function guess_boorb(EC::ECInfo, guess::Symbol, uhf=false)
   else
     error("Unknown guess for MO coefficients: ", guess)
   end
-  if uhf
-    cMOl = Any[0.0, 0.0]
-    for ispin = 1:2
-      cMOl[ispin] = (inv(cMOr[ispin]))'
-    end
-  else
-    cMOl = (inv(cMOr))'
-  end
+  cMOl = left_from_right(cMOr)
+  cMOl, cMOr = heatup(EC, cMOl, cMOr, EC.options.scf.temperature_guess) 
   return cMOl, cMOr
 end
 
@@ -73,9 +86,9 @@ function guess_bo_hcore(EC::ECInfo, uhf)
     ϵ,cMOr = eigen(hsmall)
     rotate_eigenvectors_to_real!(cMOr,ϵ)
     if uhf
-      CMOr_final[isp] = cMOr
+      CMOr_final[isp] = real.(cMOr)
     else
-      CMOr_final = cMOr
+      CMOr_final = real.(cMOr)
     end
     isp += 1
   end
@@ -100,6 +113,94 @@ function guess_bo_gwh(EC::ECInfo, uhf)
   error("not implemented yet")
 end
 
+"""
+    heatup(EC::ECInfo, cMOl, cMOr, temperature)
+
+  Heat up BO-MO coefficients to `temperature` according to Fermi-Dirac.
+  
+  Returns new BO-MO coefficients `cMOl, cMOr`
+"""
+function heatup(EC::ECInfo, cMOl, cMOr, temperature)
+  if temperature < 1.e-10
+    return cMOl, cMOr
+  end
+  println("Heating up starting guess to ", temperature, " K")
+  if is_unrestricted_MO(cMOr)
+    return unrestricted_heatup(EC, cMOl, cMOr, temperature)
+  else
+    return closed_shell_heatup(EC, cMOl, cMOr, temperature)
+  end
+end
+
+"""
+    closed_shell_heatup(EC::ECInfo, cMOl, cMOr, temperature)
+
+  Heat up closed-shell BO-MO coefficients to `temperature` according to Fermi-Dirac.
+"""
+function closed_shell_heatup(EC::ECInfo, cMOl, cMOr, temperature)
+  fock = gen_fock(EC, cMOl, cMOr)
+  ϵ,cMOr = eigen(fock)
+  rotate_eigenvectors_to_real!(cMOr, ϵ)
+  cMOr = real.(cMOr)
+  nocc = n_occ_orbs(EC)
+  nelec = 2*nocc
+  den4temp = density4temperature(EC, ϵ, cMOr, nocc, nelec, temperature)
+  fock = gen_fock(EC, den4temp)
+  ϵ,cMOr = eigen(fock)
+  rotate_eigenvectors_to_real!(cMOr, ϵ)
+  cMOr = real.(cMOr)
+  cMOl = left_from_right(cMOr)
+  return cMOl, cMOr
+end
+
+function unrestricted_heatup(EC::ECInfo, cMOl, cMOr, temperature)
+  SP = EC.space
+  fock = gen_ufock(EC, cMOl, cMOr)
+  ϵ = Any[0.0, 0.0]
+  den4temp = Any[0.0, 0.0]
+  cMOr_out = Any[0.0, 0.0]
+  cMOl_out = Any[0.0, 0.0]
+  for (ispin, sp) = enumerate(['o', 'O'])
+    ϵ[ispin],cMOr_out[ispin] = eigen(fock[ispin])
+    rotate_eigenvectors_to_real!(cMOr_out[ispin], ϵ[ispin])
+    cMOr_out[ispin] = real.(cMOr_out[ispin])
+    nocc = length(SP[sp])
+    nelec = nocc
+    den4temp[ispin] = density4temperature(EC, ϵ[ispin], cMOr_out[ispin], nocc, nelec, temperature)
+  end
+  fock = gen_ufock(EC, den4temp)
+  for (ispin, sp) = enumerate(['o', 'O'])
+    ϵ[ispin],cMOr_out[ispin] = eigen(fock[ispin])
+    rotate_eigenvectors_to_real!(cMOr_out[ispin], ϵ[ispin])
+    cMOr_out[ispin] = real.(cMOr_out[ispin])
+    cMOl_out[ispin] = left_from_right(cMOr_out[ispin])
+  end
+  return cMOl_out, cMOr_out
+end
+
+"""
+    density4temperature(EC::ECInfo, ϵ, cMOr, nocc, nelec, temperature)
+
+  Calculate density matrix for `temperature` according to Fermi-Dirac.
+"""
+function density4temperature(EC::ECInfo, ϵ, cMOr, nocc, nelec, temperature)
+  cMOl = (inv(cMOr))'
+  fermi = (ϵ[nocc] + ϵ[nocc+1])/2
+  function occfun(eps) 
+    if eps < fermi
+      return 1/(1+exp((eps-fermi)*Constants.HARTREE2K/temperature))
+    else
+      ex = exp(-(eps-fermi)*Constants.HARTREE2K/temperature)
+      return ex/(1+ex) 
+    end
+  end
+  occupation = occfun.(ϵ)
+  occupation .*= nelec / sum(occupation)
+  println("occupation: ", occupation[occupation .> 0.0])
+  return gen_frac_density_matrix(EC, cMOl, cMOr, occupation)
+end
+
+
 """ 
     bohf(EC::ECInfo)
 
@@ -123,7 +224,7 @@ function bohf(EC::ECInfo)
   flush(stdout)
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
-    fock = gen_fock(EC,cMOl,cMOr)
+    fock = gen_fock(EC, cMOl, cMOr)
     den = gen_density_matrix(EC, cMOl, cMOr, SP['o'])
     fhsmall = fock + hsmall
     @tensoropt efhsmall = den[p,q]*fhsmall[p,q]
@@ -179,7 +280,7 @@ function bouhf(EC::ECInfo)
   flush(stdout)
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
-    fock = gen_ufock(EC,cMOl,cMOr)
+    fock = gen_ufock(EC, cMOl, cMOr)
     efhsmall = Any[0.0, 0.0]
     Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
     var = 0.0
