@@ -7,6 +7,7 @@ module ElemCo
 
 include("abstractEC.jl")
 include("utils.jl")
+include("constants.jl")
 include("myio.jl")
 include("mnpy.jl")
 include("dump.jl")

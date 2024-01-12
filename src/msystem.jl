@@ -5,15 +5,13 @@ module MSystem
 using Printf
 using DocStringExtensions
 using ..ElemCo.ECInts
+using ..ElemCo.Constants
 export MSys, ms_exists, Basis, ACenter, genxyz, nuclear_repulsion, bond_length, electron_distribution
 export guess_nelec, guess_norb, guess_ncore
 export generate_basis
 
 include("elements.jl")
 include("minbas.jl")
-
-const BOHR2ANGSTROM = 0.52917721
-const ANGSTROM2BOHR = 1/BOHR2ANGSTROM
 
 """
 Basis set
@@ -105,7 +103,7 @@ function a2b(vals,skip)
   if skip
     return vals
   else
-    return vals*ANGSTROM2BOHR
+    return vals/Constants.BOHR2ANGSTROM
   end
 end
 
@@ -118,7 +116,7 @@ function b2a(vals,skip)
   if skip
     return vals
   else
-    return vals*BOHR2ANGSTROM
+    return vals*Constants.BOHR2ANGSTROM
   end
 end
 
