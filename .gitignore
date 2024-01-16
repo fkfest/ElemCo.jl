@@ -1,3 +1,14 @@
 Manifest.toml
 examples/*.out
 examples/ElemCo.jl-devel
+.DS_Store
+dcsd.out
+src/.DS_Store
+src/cc_original.jl
+src/cc_withforloopsexceptdoubleWITHBUG.jl
+test.out
+test/.DS_Store
+test/DF_H2O.FCIDUMP
+test/Glypep2.FCIDUMP
+test/test.out
+testoutput.out
