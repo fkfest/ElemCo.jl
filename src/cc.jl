@@ -2256,7 +2256,7 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   nvirt = n_virt_orbs(EC)
 
   # first approx for U^iX_a from doubles decomposition
-  tol2 = EC.options.cc.ampsvdtol*0.01
+  tol2 = EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac
   UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nocc*nvirt, nocc*nvirt)), nvirt, nocc, tol2)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX) 
