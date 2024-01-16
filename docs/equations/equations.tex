@@ -3,10 +3,11 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{amsfonts}
-\usepackage{color}
+\usepackage{xcolor}
 \newcommand{\red}[1]{{\color{red} #1}}
 \newcommand{\blue}[1]{{\color{blue} #1}}
 \newcommand{\magenta}[1]{{\color{magenta} #1}}
+\newcommand{\brown}[1]{{\color{brown} #1}}
 \definecolor{pinegreen}{rgb}{0.0, 0.47, 0.44}
 \newcommand{\green}[1]{{\color{pinegreen} #1}}
 \usepackage[utf8]{inputenc}
@@ -539,6 +540,7 @@ Differences because of fixed typos or other reasons are coloured \blue{blue}.
 Terms we have added to ensure energy invariance with respect to the reference choice 
 and which are not explicitly listed in Ref.\cite{szalay94} are coloured \magenta{magenta}.
 Terms we have added to ensure proper antisymmetry and which are not explicitly listed in Ref.\cite{szalay94} are coloured \green{green}.
+IAS terms, which are terms including the all internal singles, are coloured \brown{brown}.
 \begin{align}
 R^i_a &= < {}^A\Phi^i_a |\op H_N e^{\op T_A} | {}^A \Phi >_C - \left( < {}^A\Phi^i_a | e^{\op T_B} | {}^B\Phi ><{}^B\Phi | \op H_N e^{\op T_A} | {}^A \Phi> \right)_C \NL
       &\equiv < {}^A\Phi^i_a | \op H_N e^{\op T_A} | {}^A \Phi >_C + M^i_a W = 0,
@@ -559,33 +561,53 @@ The following intermediates are used:
 The singles $M$ tensor is built as follows,
 \begin{align}
 M^{\spa{i}}_{\spa{u}} &= T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}, \\
+\brown{M^{\spa{i}}_{\spa{u}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{i}}_{\spb{t}}}, \\
 M^{\spa{t}}_{\spa{a}} &= -T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}}, \\
-M^{\spa{i}}_{\spa{a}} &= T^{\spb{u}}_{\spb{a}} T^{t\spb{i}}_{u\spb{t}} + T^{\spb{i}}_{\spb{t}} T^{t\spb{u}}_{u\spb{a}}.
+\brown{M^{\spa{t}}_{\spa{a}}} &= \brown{-T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{a}}}, \\
+M^{\spa{i}}_{\spa{a}} &= T^{\spb{u}}_{\spb{a}} T^{t\spb{i}}_{u\spb{t}} + T^{\spb{i}}_{\spb{t}} T^{t\spb{u}}_{u\spb{a}}, \\
+\brown{M^{\spa{i}}_{\spa{a}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{t}} + T^{\spa{t}}_{\spa{u}} T^{\spb{i}\spb{u}}_{\spb{t}\spb{a}}}, \\
+\brown{M^{\spa{t}}_{\spa{u}}} &= \brown{T^{\spa{t}}_{\spa{u}}}.
 \end{align}
 \begin{align}
 M^{\spb{i}}_{\spb{t}} &= T^{\spa{i}\spb{u}}_{\spa{u}\spb{t}}, \\
+\brown{M^{\spb{i}}_{\spb{t}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{i}}_{\spa{u}}}, \\
 M^{\spb{u}}_{\spb{a}} &= - T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}, \\
-M^{\spb{i}}_{\bar{a}} &= T^{\spa{t}}_{\spa{a}} T^{\spa{i}\spb{u}}_{u\spb{t}} + T^{\spa{i}}_{\spa{u}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}.
+\brown{M^{\spb{u}}_{\spb{a}}} &= \brown{- T^{\spb{u}}_{\spb{t}} T^{\spa{t}}_{\spa{a}}}, \\
+M^{\spb{i}}_{\bar{a}} &= T^{\spa{t}}_{\spa{a}} T^{\spa{i}\spb{u}}_{u\spb{t}} + T^{\spa{i}}_{\spa{u}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}, \\
+\brown{M^{\spb{i}}_{\spb{a}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spa{i}}_{\spa{a}\spa{u}} + T^{\spb{u}}_{\spb{t}} T^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}}, \\
+\brown{M^{\spb{u}}_{\spb{t}}} &= \brown{T^{\spb{u}}_{\spb{t}}}.
 \end{align}
 The all alpha part of the doubles part is built as follows,
 \begin{align}
 M^{\spa{i}\spa{j}}_{\spa{u}\spa{a}} = &\asop{ij} \tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
                                        +\asop{ij} T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}, \\
+\brown{M^{\spa{i}\spa{j}}_{\spa{u}\spa{a}}} = &\brown{T^{\spa{t}}_{\spa{u}} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}}}, \\
 \green{M^{\spa{i}\spa{j}}_{\spa{a}\spa{u}}} = &\green{-\asop{ij} \tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
                                        -\asop{ij} T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}}, \\
+\brown{M^{\spa{i}\spa{j}}_{\spa{a}\spa{u}}} = &\brown{-T^{\spa{t}}_{\spa{u}} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}}}, \\
 M^{\spa{t}\spa{i}}_{\spa{a}\spa{b}} = &\asop{ab} \tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
                                       +\asop{ab} T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} , \\
+\brown{M^{\spa{t}\spa{i}}_{\spa{a}\spa{b}}} = &\brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{b}\spb{a}}}, \\
 \green{M^{\spa{i}\spa{t}}_{\spa{a}\spa{b}}} = &\green{-\asop{ab} \tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
                                       -\asop{ab} T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}} , \\
+\brown{M^{\spa{i}\spa{t}}_{\spa{a}\spa{b}}} = &\brown{-T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{b}\spb{a}}}, \\
 M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} = &-\ASop{ij}{ab} \tau^{\spa{j}}_{\spa{b}} \left( T^{\spb{u}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
                                        +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} \right)
-                                       -\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \left( \tau^{\spb{u}\spb{i}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}} \right) \nonumber \\
-                                      &-\asop{\spa{i}\spa{j}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
+                                       -\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \left( T^{\spb{u}\spb{i}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}} \right) \nonumber \\
+                                      &-\asop{\spb{i}\spb{j}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
                                        -\asop{ab} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{b}}, \\
+\brown{M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}} = &\brown{-\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \tau^{\spb{i}}_{\spb{a}} \left( T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}}
+                                                      +T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{j}}_{\spb{t}\spb{b}}\right)} \nonumber \\ 
+                                              &\brown{-\asop{\spb{i}\spb{j}} T^{\spa{t}}_{\spa{u}} T^{\spb{j}}_{\spb{t}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}}
+                                              -\asop{\spb{a}\spb{b}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{b}} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}}},\\
 M^{\spa{i}\spa{t}}_{\spa{a}\spa{u}}         = &-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}, \\
 \green{M^{\spa{t}\spa{i}}_{\spa{a}\spa{u}}} = &\green{T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
 \green{M^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}} = &\green{T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
-\green{M^{\spa{t}\spa{i}}_{\spa{u}\spa{a}}} = &\green{-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}.
+\green{M^{\spa{t}\spa{i}}_{\spa{u}\spa{a}}} = &\green{-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
+\brown{M^{\spa{i}\spa{t}}_{\spa{a}\spa{u}}} = &\brown{-\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}, \\
+\brown{M^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}} = &\brown{+\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}, \\
+\brown{M^{\spa{t}\spa{i}}_{\spa{a}\spa{u}}} = &\brown{+\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}, \\
+\brown{M^{\spa{t}\spa{i}}_{\spa{u}\spa{a}}} = &\brown{-\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}.
 \end{align}
 The all beta part of the doubles $M$ tensor is obtained from the all alpha part analogously to the presented singles $M$ tensor. \newline
 The alpha beta part is calculated as follows,
@@ -594,18 +616,22 @@ M^{\spa{i}\spb{j}}_{\spa{u}\spb{a}} = &-\tau^{\spb{j}}_{\spb{a}} T^{\spa{t}\spb{
                                        -T^{\spa{j}}_{\spa{u}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
                                        -T^{\spa{t}}_{\spa{a}} \tau^{\spa{j}\spb{i}}_{\spa{u}\spb{t}} 
                                        -T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spa{j}}_{\spa{a}\spa{u}},\\
+\brown{M^{\spa{i}\spb{j}}_{\spa{u}\spb{a}}} = &\brown{T^{\spa{t}}_{\spa{u}} T^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}},\\
 \magenta{M^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}} = &\magenta{-\tau^{\spa{j}}_{\spa{a}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{t}} 
                                                 -T^{\spb{j}}_{\spb{t}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
                                                 -T^{\spb{u}}_{\spb{a}} \tau^{\spa{i}\spb{j}}_{\spa{u}\spb{t}}
                                                 -T^{\spa{i}}_{\spa{u}} T^{\spb{j}\spb{u}}_{\spb{t}\spb{a}}}, \\
+\brown{M^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}} = &\brown{T^{\spb{u}}_{\spb{t}} T^{\spa{i}\spb{j}}_{\spa{u}\spb{a}}},\\
 M^{\spa{t}\spb{i}}_{\spa{a}\spb{b}} = &\tau^{\spb{i}}_{\spb{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
                                       +T^{\spa{t}}_{\spa{b}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
                                       +T^{\spa{i}}_{\spa{u}} \tau^{\spa{t}\spb{u}}_{\spa{b}\spb{a}}
                                       +T^{\spb{u}}_{\spb{a}} T^{\spa{i}\spa{t}}_{\spa{u}\spa{b}},\\
+\brown{M^{\spa{t}\spb{i}}_{\spa{a}\spb{b}}} = &\brown{- T^{\spa{t}}_{\spa{u}} T^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} ,\\
 \magenta{M^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} = &\magenta{\tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}
                                                 +T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
                                                 +T^{\spb{i}}_{\spb{t}} \tau^{\spa{t}\spb{u}}_{\spa{a}\spb{b}}
                                                 +T^{\spa{t}}_{\spa{a}} T^{\spb{i}\spb{u}}_{\spb{t}\spb{b}}},\\
+\brown{M^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} = &\brown{-T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{b}}}, \\
 M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} = &-\tau^{\spb{j}}_{\spb{b}} (T^{\spb{u}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}
                                       +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}})
                                 \blue{-\tau^{\spa{i}}_{\spa{a}}(T^{\spa{j}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{b}}
@@ -622,6 +648,12 @@ M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} = &-\tau^{\spb{j}}_{\spb{b}} (T^{\spb{u}}_{\
                                 \blue{-T^{\spa{t}\spa{j}}_{\spa{u}\spa{b}} T^{\spb{u}\spb{i}}_{\spb{t}\spb{a}}}
                                       -T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} T^{\spa{j}\spb{u}}_{\spa{b}\spb{t}} 
                                       -T^{\spa{j}\spb{u}}_{\spa{u}\spb{a}} T^{\spa{t}\spb{i}}_{\spa{b}\spb{t}},\\
+\brown{M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}} = &\brown{-\tau^{\spb{j}}_{\spb{b}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{t}}
+                                                      -\tau^{\spa{i}}_{\spa{a}} T^{\spb{u}}_{\spb{t}} T^{\spa{j}\spa{t}}_{\spa{u}\spa{b}}
+                                                      +T^{\spa{t}}_{\spa{u}} T^{\spb{i}}_{\spb{t}} T^{\spa{j}\spb{u}}_{\spa{b}\spb{a}}
+                                                      +T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{a}} T^{\spa{j}\spb{i}}_{\spa{b}\spb{t}}} \nonumber \\
+                                              &\brown{+T^{\spb{u}}_{\spb{t}} T^{\spa{t}}_{\spa{b}} T^{\spa{j}\spb{i}}_{\spa{u}\spb{a}}
+                                                      +T^{\spb{u}}_{\spb{t}} T^{\spa{j}}_{\spa{u}} T^{\spa{t}\spb{i}}_{\spa{b}\spb{a}}},\\
 M^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} = &T^{\spa{i}}_{\spa{u}},\\
 \magenta{M^{\spa{i}\spb{u}}_{\spa{u}\spb{t}}} = &\magenta{T^{\spb{i}}_{\spb{t}}}, \\
 M^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} = &\tau^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}, \\
@@ -637,10 +669,13 @@ The effective Hamiltonian $W$ is just the all active part of the residuum,
 \begin{equation}
 W = R^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}.
 \end{equation}
-The all internal singles $T^{\spa{t}}_{\spa{u}}$, $T^{\spb{u}}_{\spb{t}}$ and doubles $T^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}$ coupled cluster amplitude 
+The all internal doubles $T^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}$ coupled cluster amplitude 
 is set to zero at the beginning of every iteration.
-At the end of every iteration the all internal doubles residuum $R^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}$ is set to zero, but \emph{not} the singles residuum.
-
+At the end of every iteration the all internal doubles residuum $R^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}$ is set to zero. \newline
+IAS contribution to the energy,
+\begin{equation}
+\brown{\Delta E_{\mathrm{IAS}}} = \brown{-W^{\spa{t}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{t}}}.
+\end{equation}
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
 \bibliographystyle{naturemag}
