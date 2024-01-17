@@ -565,7 +565,8 @@ M^{\spa{i}}_{\spa{u}} &= T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}, \\
 M^{\spa{t}}_{\spa{a}} &= -T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}}, \\
 \brown{M^{\spa{t}}_{\spa{a}}} &= \brown{-T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{a}}}, \\
 M^{\spa{i}}_{\spa{a}} &= T^{\spb{u}}_{\spb{a}} T^{t\spb{i}}_{u\spb{t}} + T^{\spb{i}}_{\spb{t}} T^{t\spb{u}}_{u\spb{a}}, \\
-\brown{M^{\spa{i}}_{\spa{a}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{t}} + T^{\spa{t}}_{\spa{u}} T^{\spb{i}\spb{u}}_{\spb{t}\spb{a}}}, \\
+\brown{M^{\spa{i}}_{\spa{a}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{t}}}, \\
+\brown{M^{\spa{i}}_{\spa{a}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{a}} T^{\spb{i}}_{\spb{t}}}, \\
 \brown{M^{\spa{t}}_{\spa{u}}} &= \brown{T^{\spa{t}}_{\spa{u}}}.
 \end{align}
 \begin{align}
@@ -574,7 +575,8 @@ M^{\spb{i}}_{\spb{t}} &= T^{\spa{i}\spb{u}}_{\spa{u}\spb{t}}, \\
 M^{\spb{u}}_{\spb{a}} &= - T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}, \\
 \brown{M^{\spb{u}}_{\spb{a}}} &= \brown{- T^{\spb{u}}_{\spb{t}} T^{\spa{t}}_{\spa{a}}}, \\
 M^{\spb{i}}_{\bar{a}} &= T^{\spa{t}}_{\spa{a}} T^{\spa{i}\spb{u}}_{u\spb{t}} + T^{\spa{i}}_{\spa{u}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}, \\
-\brown{M^{\spb{i}}_{\spb{a}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spa{i}}_{\spa{a}\spa{u}} + T^{\spb{u}}_{\spb{t}} T^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}}, \\
+\brown{M^{\spb{i}}_{\spb{a}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spa{i}}_{\spa{a}\spa{u}}}, \\
+\brown{M^{\spb{i}}_{\spb{a}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{t}}_{\spa{a}} T^{\spa{i}}_{\spa{u}}}, \\
 \brown{M^{\spb{u}}_{\spb{t}}} &= \brown{T^{\spb{u}}_{\spb{t}}}.
 \end{align}
 The all alpha part of the doubles part is built as follows,
@@ -595,7 +597,8 @@ M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} = &-\ASop{ij}{ab} \tau^{\spa{j}}_{\spa{b}} \
                                        +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} \right)
                                        -\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \left( T^{\spb{u}\spb{i}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}} \right) \nonumber \\
                                       &-\asop{\spb{i}\spb{j}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
-                                       -\asop{ab} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{b}}, \\
+                                       -\asop{ab} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{b}}
+                                       -\blue{\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} T^{\spb{u}}_{\spb{a}} T^{\spb{j}}_{\spb{t}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{b}}}, \\
 \brown{M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}} = &\brown{-\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \tau^{\spb{i}}_{\spb{a}} \left( T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}}
                                                       +T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{j}}_{\spb{t}\spb{b}}\right)} \nonumber \\ 
                                               &\brown{-\asop{\spb{i}\spb{j}} T^{\spa{t}}_{\spa{u}} T^{\spb{j}}_{\spb{t}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}}

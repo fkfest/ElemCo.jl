@@ -3,7 +3,7 @@ using ElemCo
 @testset "Two-Determinant CCSD CAS" begin
 
 epsilon    =   1.e-6
-td_ccsd_ref = -39.044570270361
+td_ccsd_ref = -39.044570270428
 frt_ccsd_ref = -39.043778623741794
 
 fcidump = joinpath(@__DIR__,"CH2.3B1.DZP.ROHF.FCIDUMP")
@@ -20,7 +20,7 @@ end
 @testset "Two-Determinant CCSD IAS" begin
 
 epsilon    =   1.e-6
-td_ccsd_ref = -113.797112625623
+td_ccsd_ref = -113.797071225874
 
 fcidump = joinpath(@__DIR__,"CH2O.3A1.VDZ.ROHF.FCIDUMP")
 
