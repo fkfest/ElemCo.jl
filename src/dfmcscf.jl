@@ -554,6 +554,90 @@ function calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
   return E
 end
 
+function Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
+  n21 = size(h_2121,1)
+  n22, n31 = size(h_2231)
+  x21 = x[1:n21] 
+  x31 = x[n21+1:n21+n31]
+  x22 = x[n21+n31+1:n21+n31+n22]
+  x32 = x[n21+n31+n22+1:end]
+  @tensoropt σ21[n] := h_2121[n,m] * x21[m]
+  @tensoropt σ21[n] += h_2221[m,n] * x22[m]
+  @tensoropt σ21[n] += h_3221[m,n] * x32[m]
+  @tensoropt σ31[n] := h_2231[m,n] * x22[m]
+  @tensoropt σ22[n] := h_2221[n,m] * x21[m]
+  @tensoropt σ22[n] += h_2231[n,m] * x31[m]
+  @tensoropt σ22[n] += h_2222[n,m] * x22[m]
+  @tensoropt σ22[n] += h_3222[m,n] * x32[m]
+  @tensoropt σ32[n] := h_3221[n,m] * x21[m]
+  @tensoropt σ32[n] += h_3222[n,m] * x22[m]
+  @tensoropt σ32[n] += h_3232[n,m] * x32[m]
+  return [σ21;σ31;σ22;σ32]
+end
+
+function Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
+  n21 = size(h_3121,2)
+  n31 = size(h_3231,2)
+  n_2,n_1o,n_v = num_MO
+  n22 = n_1o * n_1o
+  x21 = x[1:n21] 
+  x31 = x[n21+1:n21+n31]
+  x32 = x[n21+n31+n22+1:end]
+  @tensoropt σ21[n] := h_3121[m,n] * x31[m]
+  @tensoropt σ31[n] := h_3131[n,m] * x31[m]
+  @tensoropt σ31[n] += h_3231[m,n] * x32[m]
+  @tensoropt σ31[n] += h_3121[n,m] * x21[m]
+  σ22 = zeros(n22)
+  @tensoropt σ32[n] := h_3231[n,m] * x31[m]
+  return [σ21;σ31;σ22;σ32]
+end
+
+function Hx_SCI(EC::ECInfo, fock::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Matrix)
+  @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
+  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
+  occ1o = setdiff(EC.space['o'],occ2) # to be modified
+  occv = setdiff(1:size(cMO,1), EC.space['o']) # to be modified
+  Fab = fock_MO[occv,occv]
+  Fij = fock_MO[occ2,occ2]
+  Fiv = fock_MO[occ2,occ1o]
+  Fav = fock_MO[occv,occ1o]
+  Fau = fock_MO[occv,occ1o]
+  n_2,n_1o,n_v = num_MO
+  n21 = n_1o * n_2
+  n31 = n_v * n_2
+  n22 = n_1o * n_1o
+  x21 = x[1:n21] 
+  x31 = x[n21+1:n21+n31]
+  x32 = x[n21+n31+n22+1:end]
+  x31_r = reshape(x31, n_v, n_2)
+  x32_r = reshape(x32, n_v, n_1o)
+  x21_r = reshape(x21, n_1o, n_2)
+  @tensoropt σ21[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
+  σ21 = reshape(σ21, n_2*n_1o)
+  @tensoropt σ31[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
+  @tensoropt σ31[a,i] += -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
+  @tensoropt σ31[a,i] += (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
+  σ31 = reshape(σ31, n_2*n_v)
+  @tensoropt σ32[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
+  σ22 = zeros(n22)
+  σ32 = reshape(σ32, n_1o*n_v)
+  return [σ21;σ31;σ22;σ32]
+end
+
+function H_multiply(EC::ECInfo, fock::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, α::Number, 
+  h_block::NTuple{10, Matrix{Float64}}, HT::HessianType)
+  h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
+  σ = Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, v[2:end])
+  if HT == SO
+    σ += Hx_SO(h_3131, h_3231, h_3121, v[2:end], num_MO)
+  else
+    σ += Hx_SCI(EC, fock, cMO, v[2:end], num_MO, D1)
+  end
+  newσ_hb = [[g'*v[2:end].* α];σ]
+  newσ_hb[2:end] .+= g .* v[1] .*α
+  return newσ_hb
+end
+
 """
     davidson(H::Matrix, N::Integer, n::Integer, thres::Number, convTrack::Bool=false)
 
@@ -564,6 +648,7 @@ n_max is the maximal size of projected matrix,
 thres is the criterion of convergence, 
 convTrack is to decide whether the tracking of eigenvectors is used
 """
+
 function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
   h_block::NTuple{10, Matrix{Float64}}, g::Vector, α::Number, initVecType::InitialVectorType, 
   fock::Matrix, cMO::Matrix, HT::HessianType, D1::Matrix, convTrack::Bool=false)
@@ -580,10 +665,6 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   pick_vec = 6
   converged = false
   n_2, n_1o, n_v = num_MO
-  n21 = n_1o * n_2
-  n31 = n_v * n_2
-  n22 = n_1o * n_1o
-  n32 = n_v * n_1o
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
   @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
   if HT == SO
@@ -597,54 +678,6 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   end
   initGuessIndex = findmax(abs.(H0_hb))[2]
   numInitialVectors = 0 
-
-  function H_multiply(v::Vector, fock, cMO, HT, D1)
-    x21 = v[2:n21+1] 
-    x31 = v[n21+2:n21+n31+1]
-    x22 = v[n21+n31+2:n21+n31+n22+1]
-    x32 = v[n21+n31+n22+2:end]
-    @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
-    Fab = fock_MO[occv,occv]
-    Fij = fock_MO[occ2,occ2]
-    Fiv = fock_MO[occ2,occ1o]
-    Fav = fock_MO[occv,occ1o]
-    Fau = fock_MO[occv,occ1o]
-    @tensoropt newσ_1[n] := h_2121[n,m] * x21[m]
-    @tensoropt newσ_1[n] += h_2221[m,n] * x22[m]
-    @tensoropt newσ_1[n] += h_3221[m,n] * x32[m]
-    @tensoropt newσ_2[n] := h_2231[m,n] * x22[m]
-    @tensoropt newσ_3[n] := h_2221[n,m] * x21[m]
-    @tensoropt newσ_3[n] += h_2231[n,m] * x31[m]
-    @tensoropt newσ_3[n] += h_2222[n,m] * x22[m]
-    @tensoropt newσ_3[n] += h_3222[m,n] * x32[m]
-    @tensoropt newσ_4[n] := h_3221[n,m] * x21[m]
-    @tensoropt newσ_4[n] += h_3222[n,m] * x22[m]
-    @tensoropt newσ_4[n] += h_3232[n,m] * x32[m]
-    if HT == SO
-      @tensoropt newσ_2[n] += h_3131[n,m] * x31[m]
-      @tensoropt newσ_2[n] += h_3231[m,n] * x32[m]
-      @tensoropt newσ_4[n] += h_3231[n,m] * x31[m]
-      @tensoropt newσ_1[n] += h_3121[m,n] * x31[m]
-      @tensoropt newσ_2[n] += h_3121[n,m] * x21[m]
-    else
-      x31_r = reshape(x31, n_v, n_2)
-      x32_r = reshape(x32, n_v, n_1o)
-      x21_r = reshape(x21, n_1o, n_2)
-      @tensoropt newσ_2_add1[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
-      newσ_2 .+= reshape(newσ_2_add1, n_2*n_v)
-      @tensoropt newσ_2_add2[a,i] := -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
-      newσ_2 .+= reshape(newσ_2_add2, n_2*n_v)
-      @tensoropt newσ_4_add[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
-      newσ_4 .+= reshape(newσ_4_add, n_1o*n_v)
-      @tensoropt newσ_1_add[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
-      newσ_1 .+= reshape(newσ_1_add, n_2*n_1o)
-      @tensoropt newσ_2_add3[a,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
-      newσ_2 .+= reshape(newσ_2_add3, n_2*n_v)
-    end
-    newσ_hb = [[g'*v[2:end].* α];newσ_1;newσ_2;newσ_3;newσ_4]
-    newσ_hb[2:end] .+= g .* v[1] .*α
-    return newσ_hb
-  end
 
   if initVecType == RANDOM
     v = rand(size(v,1))
@@ -660,7 +693,7 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(V[:,1], fock, cMO, HT, D1)
+    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, α, h_block, HT)
     numInitialVectors = 2
   elseif initVecType == GRADIENT_SETPLUS
     V[1,1] = 1.0
@@ -668,8 +701,8 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     # g_r = g_r + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(V[:,1], fock, cMO, HT, D1)
-    σ[:,2] = H_multiply(V[:,2], fock, cMO, HT, D1)
+    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, α, h_block, HT)
+    σ[:,2] = H_multiply(EC, fock, cMO, D1, V[:,2], num_MO, g, α, h_block, HT)
     V[initGuessIndex, 3] = 1.0
     v = V[:,3]
     v = v - V[initGuessIndex,2].* V[:,2]
@@ -685,7 +718,7 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   for i in numInitialVectors+1:n_max
     davCounti += 1
     # blockwise H * v
-    newσ_hb = H_multiply(v, fock, cMO, HT, D1)
+    newσ_hb = H_multiply(EC, fock, cMO, D1, v, num_MO, g, α, h_block, HT)
     σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
     h[:,i-1] = newh_hb 
@@ -946,81 +979,11 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
     # calc 2nd order perturbation energy
     h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
 
-    function Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
-      n21 = size(h_2121,1)
-      n22, n31 = size(h_2231)
-      x21 = x[1:n21] 
-      x31 = x[n21+1:n21+n31]
-      x22 = x[n21+n31+1:n21+n31+n22]
-      x32 = x[n21+n31+n22+1:end]
-      @tensoropt σ21[n] := h_2121[n,m] * x21[m]
-      @tensoropt σ21[n] += h_2221[m,n] * x22[m]
-      @tensoropt σ21[n] += h_3221[m,n] * x32[m]
-      @tensoropt σ31[n] := h_2231[m,n] * x22[m]
-      @tensoropt σ22[n] := h_2221[n,m] * x21[m]
-      @tensoropt σ22[n] += h_2231[n,m] * x31[m]
-      @tensoropt σ22[n] += h_2222[n,m] * x22[m]
-      @tensoropt σ22[n] += h_3222[m,n] * x32[m]
-      @tensoropt σ32[n] := h_3221[n,m] * x21[m]
-      @tensoropt σ32[n] += h_3222[n,m] * x22[m]
-      @tensoropt σ32[n] += h_3232[n,m] * x32[m]
-      return [σ21;σ31;σ22;σ32]
-    end
-
-    function Hx_SO(h_3131, h_3231, h_3121, x)
-      n21 = size(h_2121,1)
-      n22, n31 = size(h_2231,)
-      x21 = x[1:n21] 
-      x31 = x[n21+1:n21+n31]
-      x32 = x[n21+n31+n22+1:end]
-      @tensoropt σ21[n] := h_3121[m,n] * x31[m]
-      @tensoropt σ31[n] := h_3131[n,m] * x31[m]
-      @tensoropt σ31[n] += h_3231[m,n] * x32[m]
-      @tensoropt σ31[n] += h_3121[n,m] * x21[m]
-      σ22 = zeros(n22)
-      @tensoropt σ32[n] := h_3231[n,m] * x31[m]
-      return [σ21;σ31;σ22;σ32]
-    end
-
-    function Hx_SCI(EC, fock, cMO, x, num_MO)
-      @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
-      occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
-      occ1o = setdiff(EC.space['o'],occ2) # to be modified
-      occv = setdiff(1:nAO, EC.space['o']) # to be modified
-      Fab = fock_MO[occv,occv]
-      Fij = fock_MO[occ2,occ2]
-      Fiv = fock_MO[occ2,occ1o]
-      Fav = fock_MO[occv,occ1o]
-      Fau = fock_MO[occv,occ1o]
-      n_2,n_1o,n_v = num_MO
-      n21 = n_1o * n_2
-      n31 = n_v * n_2
-      n22 = n_1o * n_1o
-
-      x21 = x[1:n21] 
-      x31 = x[n21+1:n21+n31]
-      x32 = x[n21+n31+n22+1:end]
-
-      x31_r = reshape(x31, n_v, n_2)
-      x32_r = reshape(x32, n_v, n_1o)
-      x21_r = reshape(x21, n_1o, n_2)
-      @tensoropt σ21[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
-      σ21 = reshape(σ21, n_2*n_1o)
-      @tensoropt σ31[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
-      @tensoropt σ31[a,i] += -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
-      @tensoropt σ31[a,i] += (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
-      σ31 = reshape(σ31, n_2*n_v)
-      @tensoropt σ32[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
-      σ22 = zeros(n22)
-      σ32 = reshape(σ32, n_1o*n_v)
-      return [σ21;σ31;σ22;σ32]
-    end
-
     σ = Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
     if HT == SO
-      σ .+= Hx_SO(h_3131, h_3231, h_3121, x)
+      σ .+= Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
     else
-      σ .+= Hx_SCI(EC, fock, cMO, x, num_MO)
+      σ .+= Hx_SCI(EC, fock, cMO, x, num_MO, D1)
     end
     
     E_2o = sum(g .* x) + 0.5*(transpose(x) * σ)
