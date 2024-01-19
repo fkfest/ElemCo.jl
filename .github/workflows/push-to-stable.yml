@@ -11,9 +11,9 @@ on:
 # (this job does not run unless build_and_test is successful)
 env:
   BOT_TOKEN: ${{ secrets.PRIVATE_TO_PUBLIC_PAT }} # PAT for jph-bot
-  TARGET_REPO: e-cojl
+  TARGET_REPO: ElemCo.jl
   TARGET_BRANCH: main
-  SOURCE_REPO: e-cojl-devel
+  SOURCE_REPO: ElemCo.jl-devel
   SOURCE_BRANCH: stable
 
 jobs:
