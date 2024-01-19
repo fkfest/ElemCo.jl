@@ -74,8 +74,8 @@ function dffockCAS(EC::ECInfo, cMO::Matrix, D1::Matrix)
   save!(EC,"AcL",μjL)
   @tensoropt μuL[μ,u,L] := μνL[μ,ν,L] * CMOa[ν,u]
   save!(EC,"AaL",μuL)
-  # @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-  # save!(EC,"vvL", abL)
+  @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
+  save!(EC,"vvL", abL)
 
   # fockClosed
   hsmall = load(EC,"h_AA")
@@ -150,11 +150,7 @@ function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockCl
   index_MO = [occ2,occ1o,occv]
   μjL = load(EC,"AcL")
   μuL = load(EC,"AaL")
-  if HT == SO
-    abL = load(EC,"vvL")
-  else
-    abL = 0
-  end
+  abL = load(EC,"vvL")
   @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
   @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
   A = A + A'
@@ -835,6 +831,18 @@ function checkE_modifyTrust(E, E_former, E_2o, trust)
   return reject, trust
 end
 
+function print_initial(Enuc, HT)
+  println("Enuc ", Enuc)
+  if HT == SO
+    HTstring = "Second Order Approximation"
+  elseif HT == SCI
+    HTstring = "Super CI (First Order Approximation)"
+  elseif HT == SO_SCI
+    HTstring = "Combined Second Order and Super CI Approximation"
+  end  
+  println("Hessian Type: ", HTstring)
+end
+
 """
     dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT=SO)
 
@@ -845,15 +853,9 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
   print_info("DF-MCSCF")
   setup_space_ms!(EC)
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
-  println("Enuc ", Enuc)
-  if HT == SO
-    HTstring = "Second Order Approximation"
-  elseif HT == SCI
-    HTstring = "Super CI (First Order Approximation)"
-  elseif HT == SO_SCI
-    HTstring = "Combined Second Order and Super CI Approximation"
-  end  
-  println("Hessian Type: ", HTstring)
+  print_initial(Enuc, HT)
+
+  #load info
   sao = load(EC,"S_AA")
   nAO = size(sao,2) # number of atomic orbitals
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
@@ -862,8 +864,13 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
   n_2 = size(occ2,1)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
+  n21 = n_1o * n_2
+  n31 = n_v * n_2
+  n22 = n_1o * n_1o
   num_MO = [n_2,n_1o,n_v]
   N_rk = (n_1o+n_v) * (n_2+n_1o)
+
+  # initial guess for inherit initial guess
   vec = rand(N_rk+1)
   vec = vec ./ norm(vec)
   inherit_large = true
@@ -882,20 +889,18 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
   E_former = 0.0
   trust = 0.632
   λ = 500.0
-
-  fock = zeros(nAO,nAO)
-  fockClosed = zeros(nAO,nAO)
-  prev_cMO = deepcopy(cMO)
-  E_2o = 0.0
-  E = 0.0
   t0 = time_ns()
   x = []
   davCount = 0
+  E_2o = 0.0
+  E = 0.0
+  prev_cMO = deepcopy(cMO)
 
   # macro loop, g and h updated
   while iteration_times < IterMax
     # calc energy E with updated cMO
     @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
+    E_former = E
     @timeit "E calc" E = calc_realE(EC, fockClosed, D1, D2, cMO)
     # check if reject the update and tune trust
     if iteration_times > 0
@@ -903,7 +908,6 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
       @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i\n" iteration_times E+Enuc E-E_former norm(g) tt trust sum(x.^2) λ davCount
       reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
       if reject
-        #println("This update failed! With energy: ", E+Enuc)
         iteration_times -= 1
         cMO = prev_cMO
         @timeit "fock calc" fock, fockClosed = dffockCAS(EC,cMO,D1)
@@ -917,15 +921,11 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
       println("Iter     Energy      DE           norm(g)       Time      trust        sumx2        α      microIter")
     end
     iteration_times += 1
-    E_former = E
+
     # calc g and h with updated cMO
     @timeit "A calc" A = dfACAS(EC,cMO,D1,D2,fock,fockClosed)
     @timeit "g calc" g = calc_g(A, EC)
-    n21 = n_1o * n_2
-    n31 = n_v * n_2
-    n22 = n_1o * n_1o
-    #println("norm of g: ", norm(g))
-    if norm(g) < 1e-5 
+    if norm(g) < 1e-5
       break
     end
     if HT == SO
@@ -942,72 +942,89 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
       inherit_large == true
     end
     @timeit "λTuning" λ, x, vec, davCount = λTuning(EC, trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType, fock, cMO, HT, D1)
+
     # calc 2nd order perturbation energy
     h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
 
-    function calc_E_2o(x, fock, cMO, HT, D1)
+    function Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
+      n21 = size(h_2121,1)
+      n22, n31 = size(h_2231)
       x21 = x[1:n21] 
       x31 = x[n21+1:n21+n31]
       x22 = x[n21+n31+1:n21+n31+n22]
       x32 = x[n21+n31+n22+1:end]
+      @tensoropt σ21[n] := h_2121[n,m] * x21[m]
+      @tensoropt σ21[n] += h_2221[m,n] * x22[m]
+      @tensoropt σ21[n] += h_3221[m,n] * x32[m]
+      @tensoropt σ31[n] := h_2231[m,n] * x22[m]
+      @tensoropt σ22[n] := h_2221[n,m] * x21[m]
+      @tensoropt σ22[n] += h_2231[n,m] * x31[m]
+      @tensoropt σ22[n] += h_2222[n,m] * x22[m]
+      @tensoropt σ22[n] += h_3222[m,n] * x32[m]
+      @tensoropt σ32[n] := h_3221[n,m] * x21[m]
+      @tensoropt σ32[n] += h_3222[n,m] * x22[m]
+      @tensoropt σ32[n] += h_3232[n,m] * x32[m]
+      return [σ21;σ31;σ22;σ32]
+    end
+
+    function Hx_SO(h_3131, h_3231, h_3121, x)
+      n21 = size(h_2121,1)
+      n22, n31 = size(h_2231,)
+      x21 = x[1:n21] 
+      x31 = x[n21+1:n21+n31]
+      x32 = x[n21+n31+n22+1:end]
+      @tensoropt σ21[n] := h_3121[m,n] * x31[m]
+      @tensoropt σ31[n] := h_3131[n,m] * x31[m]
+      @tensoropt σ31[n] += h_3231[m,n] * x32[m]
+      @tensoropt σ31[n] += h_3121[n,m] * x21[m]
+      σ22 = zeros(n22)
+      @tensoropt σ32[n] := h_3231[n,m] * x31[m]
+      return [σ21;σ31;σ22;σ32]
+    end
+
+    function Hx_SCI(EC, fock, cMO, x, num_MO)
       @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
+      occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
+      occ1o = setdiff(EC.space['o'],occ2) # to be modified
+      occv = setdiff(1:nAO, EC.space['o']) # to be modified
       Fab = fock_MO[occv,occv]
       Fij = fock_MO[occ2,occ2]
       Fiv = fock_MO[occ2,occ1o]
       Fav = fock_MO[occv,occ1o]
       Fau = fock_MO[occv,occ1o]
-      @tensoropt newσ_1[n] := h_2121[n,m] * x21[m]
-      @tensoropt newσ_1[n] += h_2221[m,n] * x22[m]
-      @tensoropt newσ_1[n] += h_3221[m,n] * x32[m]
-      @tensoropt newσ_2[n] := h_2231[m,n] * x22[m]
-      @tensoropt newσ_3[n] := h_2221[n,m] * x21[m]
-      @tensoropt newσ_3[n] += h_2231[n,m] * x31[m]
-      @tensoropt newσ_3[n] += h_2222[n,m] * x22[m]
-      @tensoropt newσ_3[n] += h_3222[m,n] * x32[m]
-      @tensoropt newσ_4[n] := h_3221[n,m] * x21[m]
-      @tensoropt newσ_4[n] += h_3222[n,m] * x22[m]
-      @tensoropt newσ_4[n] += h_3232[n,m] * x32[m]
-      if HT == SO
-        @tensoropt newσ_2[n] += h_3131[n,m] * x31[m]
-        @tensoropt newσ_2[n] += h_3231[m,n] * x32[m]
-        @tensoropt newσ_4[n] += h_3231[n,m] * x31[m]
-        @tensoropt newσ_1[n] += h_3121[m,n] * x31[m]
-        @tensoropt newσ_2[n] += h_3121[n,m] * x21[m]
-      else
-        x31_r = reshape(x31, n_v, n_2)
-        x32_r = reshape(x32, n_v, n_1o)
-        x21_r = reshape(x21, n_1o, n_2)
-        @tensoropt newσ_2_add1[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
-        newσ_2 .+= reshape(newσ_2_add1, n_2*n_v)
-        @tensoropt newσ_2_add2[a,i] := -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
-        newσ_2 .+= reshape(newσ_2_add2, n_2*n_v)
-        @tensoropt newσ_4_add[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
-        newσ_4 .+= reshape(newσ_4_add, n_1o*n_v)
-        @tensoropt newσ_1_add[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
-        newσ_1 .+= reshape(newσ_1_add, n_2*n_1o)
-        @tensoropt newσ_2_add3[a,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
-        newσ_2 .+= reshape(newσ_2_add3, n_2*n_v)
-      end
-      E_2o = sum(g .* x) + 0.5*(transpose(x) * [newσ_1;newσ_2;newσ_3;newσ_4])
-      return E_2o
+      n_2,n_1o,n_v = num_MO
+      n21 = n_1o * n_2
+      n31 = n_v * n_2
+      n22 = n_1o * n_1o
+
+      x21 = x[1:n21] 
+      x31 = x[n21+1:n21+n31]
+      x32 = x[n21+n31+n22+1:end]
+
+      x31_r = reshape(x31, n_v, n_2)
+      x32_r = reshape(x32, n_v, n_1o)
+      x21_r = reshape(x21, n_1o, n_2)
+      @tensoropt σ21[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
+      σ21 = reshape(σ21, n_2*n_1o)
+      @tensoropt σ31[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
+      @tensoropt σ31[a,i] += -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
+      @tensoropt σ31[a,i] += (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
+      σ31 = reshape(σ31, n_2*n_v)
+      @tensoropt σ32[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
+      σ22 = zeros(n22)
+      σ32 = reshape(σ32, n_1o*n_v)
+      return [σ21;σ31;σ22;σ32]
     end
-    # scale = 1.5
-    # x = x .* 2.0
-    E_2o_c = calc_E_2o(x, fock, cMO, HT, D1)
-    # increase = true
-    # while(increase && scale < 10.0)
-    #   E_2o_trial = calc_E_2o(x.*scale)
-    #   if E_2o_trial > E_2o_c
-    #     x = x .* scale ./ 1.5
-    #     increase = false
-    #   else
-    #     println("scale increased to ", scale)
-    #     scale = scale * 1.5
-    #     E_2o_c = E_2o_trial
-    #   end
-    # end
-    E_2o = E_2o_c
+
+    σ = Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
+    if HT == SO
+      σ .+= Hx_SO(h_3131, h_3231, h_3121, x)
+    else
+      σ .+= Hx_SCI(EC, fock, cMO, x, num_MO)
+    end
     
+    E_2o = sum(g .* x) + 0.5*(transpose(x) * σ)
+
     # calc rotation matrix U
     U = calc_U(EC, nAO, x)
     #println("difference between U and a real unitary matrix: ", sum((U'*U-I).^2))
@@ -1027,6 +1044,6 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
     println("Not Convergent!")
   end
   delete_temporary_files!(EC)
-  return E_former+Enuc, cMO
+  return E+Enuc, cMO
 end
 end #module
