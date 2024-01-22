@@ -44,6 +44,8 @@ const NSHELL4L_MINBAS = Dict(
 )
 
 """ 
+    nshell4l_minbas(nnum, basis::String)
+
   Return the number of shells for each angular momentum in the minimal basis set. 
 """
 function nshell4l_minbas(nnum, basis::String)

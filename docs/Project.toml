@@ -1,0 +1,8 @@
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+ElemCo = "094d408e-8508-40f4-9646-a254980d91ac"
+MKL = "33e6dc65-8f57-5167-99aa-e5a354878fb2"
+
+[compat]
+Documenter = "1.1"
