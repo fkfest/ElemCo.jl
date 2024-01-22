@@ -207,8 +207,69 @@ function G_rtsu_calc(typer::Integer,types::Integer, num_MO, index_MO, DFint_MO, 
   return G_rtsu
 end
 
+function h_calc_fixed(num_MO, index_MO, D1::Matrix, D2, fockClosed_MO::Matrix, A::Matrix, DFint_MO)
+  n_2,n_1o,n_v = num_MO
+  occ2,occ1o,occv = index_MO
+  Itu = 1.0 * Matrix(I,n_1o,n_1o)
 
-function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix, HT::HessianType = SO)
+  # h_2221 --> G2221, G2212 each for twice
+  G_2221 = G_rtsj_calc(2,2, num_MO, DFint_MO, D1)
+  @tensoropt h_2221[t,u,v,i] := G_2221[t,u,v,i] * 2.0 - G_2221[u,t,v,i] * 2.0
+  G_2212 = G_rtsu_calc(2,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
+  @tensoropt h_2221[t,u,v,i] += -2.0 * G_2212[t,u,i,v] + 2.0 * G_2212[u,t,i,v]
+  @tensoropt h_2221[t,u,v,i] += Itu[u,v] * A[occ1o,occ2][t,i]
+  @tensoropt h_2221[t,u,v,i] -= Itu[t,v] * A[occ1o,occ2][u,i]
+  G_2221 = 0
+  G_2212 = 0
+
+  # h_2231 --> G2231 twice
+  G_2231 = G_rtsj_calc(2,3, num_MO, DFint_MO, D1)
+  @tensoropt h_2231[t,u,a,i] := G_2231[t,u,a,i] * 2.0 - G_2231[u,t,a,i] * 2.0
+  G_2231 = 0
+
+  # h_2222 --> G2222
+  G_2222 = G_rtsu_calc(2,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
+  G_2222 .= G_2222 .* 2.0
+  @tensoropt G_2222[t,u,v,w] -= Itu[u,w] * A[occ1o,occ1o][t,v]
+  @tensoropt h_2222[t,u,v,w] := G_2222[t,u,v,w] - G_2222[u,t,v,w] - G_2222[t,u,w,v] + G_2222[u,t,w,v]
+  G_2222 = 0
+
+  # h_3222 --> G3222 twice
+  G_3222 = G_rtsu_calc(3,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
+  G_3222 .= G_3222 .* 2.0
+  @tensoropt G_3222[a,t,u,v] -= Itu[t,v] * A[occv,occ1o][a,u]
+  @tensoropt h_3222[a,t,u,v] := G_3222[a,t,u,v] - G_3222[a,t,v,u]
+  G_3222 = 0 
+  return h_2221, h_2231, h_2222, h_3222
+end
+
+function h_calc_SOpart(num_MO, index_MO, DFint_MO, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+  n_2,n_1o,n_v = num_MO
+  occ2,occ1o,occv = index_MO
+  Iij = 1.0 * Matrix(I,n_2,n_2)
+  Itu = 1.0 * Matrix(I,n_1o,n_1o)
+  h_3221 = G_rtsj_calc(3,2, num_MO, DFint_MO, D1)
+  h_3221 .= h_3221 .* 2
+  G_3212 = G_rtsu_calc(3,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
+  @tensoropt h_3221[a,t,u,i] -= G_3212[a,t,i,u] * 2.0 - Itu[t,u] * A[occv,occ2][a,i]
+  G_3212 = 0
+
+  h_2121 = G_risj_calc(2,2, num_MO, index_MO, fock_MO, DFint_MO)
+  h_2121 .= h_2121 .* 2.0
+  @tensoropt h_2121[t,i,u,j] -= Iij[i,j] * A[occ1o,occ1o][t,u]
+  G_1221 = G_rtsj_calc(1,2, num_MO, DFint_MO, D1)
+  @tensoropt h_2121[t,i,u,j] -= G_1221[i,t,u,j] * 2.0
+  @tensoropt h_2121[t,i,u,j] -= G_1221[j,u,t,i] * 2.0
+  G_1212 = G_rtsu_calc(1,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
+  @tensoropt h_2121[t,i,u,j] += G_1212[i,t,j,u] * 2.0
+  @tensoropt h_2121[t,i,u,j] -= Itu[t,u] * A[occ2,occ2][i,j]
+  G_1221 = 0
+  G_1212 = 0
+
+  return h_3221, h_2121
+end
+
+function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
   occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
@@ -233,115 +294,38 @@ function calc_h_SO(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockCl
 
   DFint_MO = [[ijL,tiL,aiL],[tiL,tuL,atL],[aiL,atL,abL]]
   Iij = 1.0 * Matrix(I,n_2,n_2)
-  Itu = 1.0 * Matrix(I,n_1o,n_1o)
   Iab = 1.0 * Matrix(I,n_v,n_v)
 
+  h_3221, h_2121 = h_calc_SOpart(num_MO, index_MO, DFint_MO, D1, D2, fock_MO, fockClosed_MO, A)
 
   # h_3131 ==> G3131 needed, the largest and most memory consuming part
-  if HT == SO
-    h_3131 = G_risj_calc(3,3, num_MO, index_MO, fock_MO, DFint_MO)
-    h_3131 .= h_3131 .* 2.0
-    @tensoropt h_3131[a,i,b,j] -= Iab[a,b] * A[occ2,occ2][i,j]
-  else
-    h_3131 = zeros(1,1)
-  end
-
-  # h_2121 --> G2121, G1221, G1212 needed
-  if HT == SCI
-    @tensoropt h_2121[t,i,u,j] := (2*D1[t,u] - 4*Itu[t,u]) * fock_MO[occ2,occ2][i,j] 
-    @tensoropt h_2121[t,i,u,j] += 2 * I_ij[i,j] * (2*fock_MO[occ1o,occ1o][t,u] 
-      -(D2[t,u,v,w] - D1[t,u]*D1[v,w]) * fock_MO[occ1o,occ1o][v,w]
-      -D1[t,v] * fock_MO[occ1o,occ1o][v,u] - D1[v,u] * fock_MO[occ1o,occ1o][t,v])    
-  else
-    h_2121 = G_risj_calc(2,2, num_MO, index_MO, fock_MO, DFint_MO)
-    h_2121 .= h_2121 .* 2.0
-    @tensoropt h_2121[t,i,u,j] -= Iij[i,j] * A[occ1o,occ1o][t,u]
-    G_1221 = G_rtsj_calc(1,2, num_MO, DFint_MO, D1)
-    @tensoropt h_2121[t,i,u,j] -= G_1221[i,t,u,j] * 2.0
-    @tensoropt h_2121[t,i,u,j] -= G_1221[j,u,t,i] * 2.0
-    G_1212 = G_rtsu_calc(1,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-    @tensoropt h_2121[t,i,u,j] += G_1212[i,t,j,u] * 2.0
-    @tensoropt h_2121[t,i,u,j] -= Itu[t,u] * A[occ2,occ2][i,j]
-    G_1221 = 0
-    G_1212 = 0
-  end
+  h_3131 = G_risj_calc(3,3, num_MO, index_MO, fock_MO, DFint_MO)
+  h_3131 .= h_3131 .* 2.0
+  @tensoropt h_3131[a,i,b,j] -= Iab[a,b] * A[occ2,occ2][i,j]
 
   # h_3121 --> G3121, G1231 needed
-  if HT == SO
-    h_3121 = G_risj_calc(3,2, num_MO, index_MO, fock_MO, DFint_MO)
-    h_3121 .= h_3121 .* 2.0
-    @tensoropt h_3121[a,i,t,j] -= Iij[i,j] * A[occv,occ1o][a,t]
-    G_1231 = G_rtsj_calc(1,3, num_MO, DFint_MO, D1)
-    @tensoropt h_3121[a,i,t,j] -= G_1231[j,t,a,i] * 2.0
-  else
-    @tensoropt h_3121[a,i,u,j] := I_ij[i,j] * (4.0 * fock_MO[occv,occ1o][a,u] - 2.0 * fock_MO[occv,occ1o][a,v]*D1[v,u])
-  end
-
-  # h_2221 --> G2221, G2212 each for twice
-  G_2221 = G_rtsj_calc(2,2, num_MO, DFint_MO, D1)
-  @tensoropt h_2221[t,u,v,i] := G_2221[t,u,v,i] * 2.0 - G_2221[u,t,v,i] * 2.0
-  G_2212 = G_rtsu_calc(2,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  @tensoropt h_2221[t,u,v,i] += -2.0 * G_2212[t,u,i,v] + 2.0 * G_2212[u,t,i,v]
-  @tensoropt h_2221[t,u,v,i] += Itu[u,v] * A[occ1o,occ2][t,i]
-  @tensoropt h_2221[t,u,v,i] -= Itu[t,v] * A[occ1o,occ2][u,i]
-  G_2221 = 0
-  G_2212 = 0
-
-  # h_2231 --> G2231 twice
-  G_2231 = G_rtsj_calc(2,3, num_MO, DFint_MO, D1)
-  @tensoropt h_2231[t,u,a,i] := G_2231[t,u,a,i] * 2.0 - G_2231[u,t,a,i] * 2.0
-  G_2231 = 0
-
-  # h_2222 --> G2222
-  G_2222 = G_rtsu_calc(2,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  G_2222 .= G_2222 .* 2.0
-  @tensoropt G_2222[t,u,v,w] -= Itu[u,w] * A[occ1o,occ1o][t,v]
-  @tensoropt h_2222[t,u,v,w] := G_2222[t,u,v,w] - G_2222[u,t,v,w] - G_2222[t,u,w,v] + G_2222[u,t,w,v]
-  G_2222 = 0
-
-  # h_3221 --> G3221, G3221
-  if HT == SCI
-    h_3221 = zeros(n_v,n_1o,n_1o,n2)
-  else
-    h_3221 = G_rtsj_calc(3,2, num_MO, DFint_MO, D1)
-    h_3221 .= h_3221 .* 2
-    G_3212 = G_rtsu_calc(3,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-    @tensoropt h_3221[a,t,u,i] -= G_3212[a,t,i,u] * 2.0 - Itu[t,u] * A[occv,occ2][a,i]
-    G_3212 = 0
-  end
+  h_3121 = G_risj_calc(3,2, num_MO, index_MO, fock_MO, DFint_MO)
+  h_3121 .= h_3121 .* 2.0
+  @tensoropt h_3121[a,i,t,j] -= Iij[i,j] * A[occv,occ1o][a,t]
+  G_1231 = G_rtsj_calc(1,3, num_MO, DFint_MO, D1)
+  @tensoropt h_3121[a,i,t,j] -= G_1231[j,t,a,i] * 2.0
 
   # h_3231 --> G3231
-  if HT == SO
-    h_3231 = G_rtsj_calc(3,3, num_MO, DFint_MO, D1)
-    h_3231 .= 2.0 .* h_3231
-    @tensoropt h_3231[a,t,b,i] -= Iab[a,b] * A[occ1o,occ2][t,i]
-  else
-    h_3231 = zeros(1,1)
-  end
-
-  # h_3222 --> G3222 twice
-  G_3222 = G_rtsu_calc(3,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  G_3222 .= G_3222 .* 2.0
-  @tensoropt G_3222[a,t,u,v] -= Itu[t,v] * A[occv,occ1o][a,u]
-  @tensoropt h_3222[a,t,u,v] := G_3222[a,t,u,v] - G_3222[a,t,v,u]
-  G_3222 = 0
+  h_3231 = G_rtsj_calc(3,3, num_MO, DFint_MO, D1)
+  h_3231 .= 2.0 .* h_3231
+  @tensoropt h_3231[a,t,b,i] -= Iab[a,b] * A[occ1o,occ2][t,i]
 
   # h_3232 --> G3232
-  if HT == SCI
-    @tensoropt h_3232[a,t,b,u] := 2.0*Iab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock_MO[occ1o,occ1o][v,w] 
-    @tensoropt h_3232[a,t,b,u] += 2.0 * D1[t,u] * fock_MO[occv,occv][a,b] 
-  else
-    h_3232 = G_rtsu_calc(3,3, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-    h_3232 .= h_3232 .* 2.0
-    @tensoropt h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
-  end
+  h_3232 = G_rtsu_calc(3,3, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
+  h_3232 .= h_3232 .* 2.0
+  @tensoropt h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
+
+  h_2221, h_2231, h_2222, h_3222 = h_calc_fixed(num_MO, index_MO, D1, D2, fockClosed_MO, A, DFint_MO)
 
   h_2121 = reshape(h_2121, num_MO[2]*num_MO[1], num_MO[2]*num_MO[1])
-  if HT == SO
-    h_3121 = reshape(h_3121, num_MO[3]*num_MO[1], num_MO[2]*num_MO[1])
-    h_3131 = reshape(h_3131, num_MO[3]*num_MO[1], num_MO[3]*num_MO[1])
-    h_3231 = reshape(h_3231, num_MO[3]*num_MO[2], num_MO[3]*num_MO[1])
-  end
+  h_3121 = reshape(h_3121, num_MO[3]*num_MO[1], num_MO[2]*num_MO[1])
+  h_3131 = reshape(h_3131, num_MO[3]*num_MO[1], num_MO[3]*num_MO[1])
+  h_3231 = reshape(h_3231, num_MO[3]*num_MO[2], num_MO[3]*num_MO[1])
   h_2221 = reshape(h_2221, num_MO[2]*num_MO[2], num_MO[2]*num_MO[1])
   h_2231 = reshape(h_2231, num_MO[2]*num_MO[2], num_MO[3]*num_MO[1])
   h_2222 = reshape(h_2222, num_MO[2]*num_MO[2], num_MO[2]*num_MO[2])
@@ -362,7 +346,7 @@ function calc_h_SCI(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockC
   index_MO = [occ2,occ1o,occv]
   μjL = load(EC,"AcL")
   μuL = load(EC,"AaL")
-  abL = 0
+  abL = zeros(1,1)
   # abL = load(EC,"vvL")
   @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
   @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
@@ -380,87 +364,25 @@ function calc_h_SCI(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockC
   Itu = 1.0 * Matrix(I,n_1o,n_1o)
   Iab = 1.0 * Matrix(I,n_v,n_v)
 
-  # h_3131 
   h_3131 = zeros(1,1)
+  h_3121 = zeros(1,1)
+  h_3231 = zeros(1,1)
 
-  # h_2121
   if HT == SCI
+    h_3221 = zeros(n_v,n_1o,n_1o,n_2)
     @tensoropt h_2121[t,i,u,j] := (2*D1[t,u] - 4*Itu[t,u]) * fock_MO[occ2,occ2][i,j] 
     @tensoropt h_2121[t,i,u,j] += 2 * Iij[i,j] * (2*fock_MO[occ1o,occ1o][t,u] 
       -(D2[t,u,v,w] - D1[t,u]*D1[v,w]) * fock_MO[occ1o,occ1o][v,w]
       -D1[t,v] * fock_MO[occ1o,occ1o][v,u] - D1[v,u] * fock_MO[occ1o,occ1o][t,v])    
   elseif HT == SO_SCI
-    h_2121 = G_risj_calc(2,2, num_MO, index_MO, fock_MO, DFint_MO)
-    h_2121 .= h_2121 .* 2.0
-    @tensoropt h_2121[t,i,u,j] -= Iij[i,j] * A[occ1o,occ1o][t,u]
-    G_1221 = G_rtsj_calc(1,2, num_MO, DFint_MO, D1)
-    @tensoropt h_2121[t,i,u,j] -= G_1221[i,t,u,j] * 2.0
-    @tensoropt h_2121[t,i,u,j] -= G_1221[j,u,t,i] * 2.0
-    G_1212 = G_rtsu_calc(1,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-    @tensoropt h_2121[t,i,u,j] += G_1212[i,t,j,u] * 2.0
-    @tensoropt h_2121[t,i,u,j] -= Itu[t,u] * A[occ2,occ2][i,j]
-    G_1221 = 0
-    G_1212 = 0
+    h_3221, h_2121 = h_calc_SOpart(num_MO, index_MO, DFint_MO, D1, D2, fock_MO, fockClosed_MO, A)
   end
-
-  # h_3121 
-  h_3121 = zeros(1,1)
-
-  # h_2221 --> G2221, G2212 each for twice
-  G_2221 = G_rtsj_calc(2,2, num_MO, DFint_MO, D1)
-  @tensoropt h_2221[t,u,v,i] := G_2221[t,u,v,i] * 2.0 - G_2221[u,t,v,i] * 2.0
-  G_2212 = G_rtsu_calc(2,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  @tensoropt h_2221[t,u,v,i] += -2.0 * G_2212[t,u,i,v] + 2.0 * G_2212[u,t,i,v]
-  @tensoropt h_2221[t,u,v,i] += Itu[u,v] * A[occ1o,occ2][t,i]
-  @tensoropt h_2221[t,u,v,i] -= Itu[t,v] * A[occ1o,occ2][u,i]
-  G_2221 = 0
-  G_2212 = 0
-
-  # h_2231 --> G2231 twice
-  G_2231 = G_rtsj_calc(2,3, num_MO, DFint_MO, D1)
-  @tensoropt h_2231[t,u,a,i] := G_2231[t,u,a,i] * 2.0 - G_2231[u,t,a,i] * 2.0
-  G_2231 = 0
-
-  # h_2222 --> G2222
-  G_2222 = G_rtsu_calc(2,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  G_2222 .= G_2222 .* 2.0
-  @tensoropt G_2222[t,u,v,w] -= Itu[u,w] * A[occ1o,occ1o][t,v]
-  @tensoropt h_2222[t,u,v,w] := G_2222[t,u,v,w] - G_2222[u,t,v,w] - G_2222[t,u,w,v] + G_2222[u,t,w,v]
-  G_2222 = 0
-
-  # h_3221 --> G3221, G3221
-  if HT == SCI
-    h_3221 = zeros(n_v,n_1o,n_1o,n_2)
-  elseif HT == SO_SCI
-    h_3221 = G_rtsj_calc(3,2, num_MO, DFint_MO, D1)
-    h_3221 .= h_3221 .* 2
-    G_3212 = G_rtsu_calc(3,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-    @tensoropt h_3221[a,t,u,i] -= G_3212[a,t,i,u] * 2.0 - Itu[t,u] * A[occv,occ2][a,i]
-    G_3212 = 0
-  end
-
-  # h_3231
-  h_3231 = zeros(1,1)
-
-  # h_3222 --> G3222 twice
-  G_3222 = G_rtsu_calc(3,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  G_3222 .= G_3222 .* 2.0
-  @tensoropt G_3222[a,t,u,v] -= Itu[t,v] * A[occv,occ1o][a,u]
-  @tensoropt h_3222[a,t,u,v] := G_3222[a,t,u,v] - G_3222[a,t,v,u]
-  G_3222 = 0
 
   # h_3232 --> G3232
-  @tensoropt h_3232[a,t,b,u] := 2.0*Iab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock_MO[occ1o,occ1o][v,w] 
+  @tensoropt h_3232[a,t,b,u] := 2.0 * Iab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock_MO[occ1o,occ1o][v,w] 
   @tensoropt h_3232[a,t,b,u] += 2.0 * D1[t,u] * fock_MO[occv,occv][a,b] 
 
-  # if HT == SCI
-  #   @tensoropt h_3232[a,t,b,u] := 2.0*Iab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock_MO[occ1o,occ1o][v,w] 
-  #   @tensoropt h_3232[a,t,b,u] += 2.0 * D1[t,u] * fock_MO[occv,occv][a,b] 
-  # elseif HT == SO_SCI
-  #   h_3232 = G_rtsu_calc(3,3)
-  #   h_3232 .= h_3232 .* 2.0
-  #   @tensoropt h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
-  # end
+  h_2221, h_2231, h_2222, h_3222 = h_calc_fixed(num_MO, index_MO, D1, D2, fockClosed_MO, A, DFint_MO)
 
   h_2121 = reshape(h_2121, num_MO[2]*num_MO[1], num_MO[2]*num_MO[1])
   h_2221 = reshape(h_2221, num_MO[2]*num_MO[2], num_MO[2]*num_MO[1])
@@ -564,7 +486,7 @@ function Hx_SCI(EC::ECInfo, fock::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Ma
   return [σ21;σ31;σ22;σ32]
 end
 
-function H_multiply(EC::ECInfo, fock::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, α::Number, 
+function H_multiply(EC::ECInfo, fock::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, alpha::Number, 
   h_block::NTuple{10, Matrix{Float64}}, HT::HessianType)
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
   σ = Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, v[2:end])
@@ -573,8 +495,8 @@ function H_multiply(EC::ECInfo, fock::Matrix, cMO::Matrix, D1::Matrix, v::Vector
   else
     σ += Hx_SCI(EC, fock, cMO, v[2:end], num_MO, D1)
   end
-  newσ_hb = [[g'*v[2:end].* α];σ]
-  newσ_hb[2:end] .+= g .* v[1] .*α
+  newσ_hb = [[g'*v[2:end].* alpha];σ]
+  newσ_hb[2:end] .+= g .* v[1] .*alpha
   return newσ_hb
 end
 
@@ -590,7 +512,7 @@ convTrack is to decide whether the tracking of eigenvectors is used
 """
 
 function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
-  h_block::NTuple{10, Matrix{Float64}}, g::Vector, α::Number, initVecType::InitialVectorType, 
+  h_block::NTuple{10, Matrix{Float64}}, g::Vector, alpha::Number, initVecType::InitialVectorType, 
   fock::Matrix, cMO::Matrix, HT::HessianType, D1::Matrix, convTrack::Bool=false)
   V = zeros(N,n_max)
   σ = zeros(N,n_max)
@@ -633,7 +555,7 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, α, h_block, HT)
+    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HT)
     numInitialVectors = 2
   elseif initVecType == GRADIENT_SETPLUS
     V[1,1] = 1.0
@@ -641,8 +563,8 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     # g_r = g_r + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, α, h_block, HT)
-    σ[:,2] = H_multiply(EC, fock, cMO, D1, V[:,2], num_MO, g, α, h_block, HT)
+    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HT)
+    σ[:,2] = H_multiply(EC, fock, cMO, D1, V[:,2], num_MO, g, alpha, h_block, HT)
     V[initGuessIndex, 3] = 1.0
     v = V[:,3]
     v = v - V[initGuessIndex,2].* V[:,2]
@@ -658,7 +580,7 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   for i in numInitialVectors+1:n_max
     davCounti += 1
     # blockwise H * v
-    newσ_hb = H_multiply(EC, fock, cMO, D1, v, num_MO, g, α, h_block, HT)
+    newσ_hb = H_multiply(EC, fock, cMO, D1, v, num_MO, g, alpha, h_block, HT)
     σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
     h[:,i-1] = newh_hb 
@@ -694,67 +616,66 @@ Find the rotation parameters as the vector x in trust region,
 tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
-function λTuning(EC::ECInfo, trust::Number, maxit::Integer, αmax::Number, α::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
+function λTuning(EC::ECInfo, trust::Number, maxit::Integer, alphamax::Number, alpha::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
   h_block::NTuple{10, Matrix{Float64}}, initVecType::InitialVectorType, fock, cMO, HT, D1)
   davCount = 0
   N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
-  g_norm = norm(g)
   x = zeros(N_rk)
-  αl = 1.0
-  αr = αmax
-  xαl = -1.0
-  xαr = -1.0
+  alphal = 1.0
+  alphar = alphamax
+  xalphal = -1.0
+  xalphar = -1.0
   micro_converged = false
   davItMax = 200 # for davidson eigenvalue solving algorithm
   davError = 1e-7
   bisecdamp = EC.options.scf.bisecdamp  
   γ =  0.1 # gradient scaling factor for micro-iteration accuracy
   davError = γ * norm(g)
-  # α tuning loop (micro loop)
+  # alpha tuning loop (micro loop)
   for it=1:maxit
-    #println("α: ", α)
-    @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α, initVecType, fock, cMO, HT, D1)
+    #println("alpha: ", alpha)
+    @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock, cMO, HT, D1)
     davCount += davCounti
     while !converged
       davItMax += 50
       println("Davidson max iteration number increased to ", davItMax)
-      @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, α, initVecType, fock, cMO, HT, D1)
+      @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock, cMO, HT, D1)
       davCount += davCounti
     end
-    x = vec[2:end] ./ (vec[1] * α)
+    x = vec[2:end] ./ (vec[1] * alpha)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
     sumx2 = sqrt(sum(x.^2))
     # sumx2 = sum(x.^2)
     #println("trust: ", trust, " sumx2: ", sumx2)
     if sumx2 > trust
-      αl = α
-      xαl = sumx2
+      alphal = alpha
+      xalphal = sumx2
     elseif sumx2 < 0.8*trust
-      αr = α
-      xαr = sumx2
+      alphar = alpha
+      xalphar = sumx2
     else
       micro_converged = true
       break
     end
-    if αr ≈ αl
-      α = αl
+    if alphar ≈ alphal
+      alpha = alphal
       micro_converged = true
       break
     end
-    if xαl < 0 && α == αr && (αr - αl) < 0.1
-      α = αl
-    elseif xαl > 0 && xαr > 0
+    if xalphal < 0 && alpha == alphar && (alphar - alphal) < 0.1
+      alpha = alphal
+    elseif xalphal > 0 && xalphar > 0
       # line-search
-      α = ((xαl-trust)*αr - (xαr-trust)*αl) / (xαl - xαr)
+      alpha = ((xalphal-trust)*alphar - (xalphar-trust)*alphal) / (xalphal - xalphar)
     else
       # damped geometric mean
-      α = exp(log(αl) + log(αr/αl) * bisecdamp/2)
+      alpha = exp(log(alphal) + log(alphar/alphal) * bisecdamp/2)
     end
   end
   if !micro_converged
     println("micro NOT converged")
   end
-  return α, x, vec, davCount
+  return alpha, x, vec, davCount
 end
 
 """
@@ -915,14 +836,12 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
 
     # calc 2nd order perturbation energy
     h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
-
     σ = Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
     if HT == SO
       σ .+= Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
     else
       σ .+= Hx_SCI(EC, fock, cMO, x, num_MO, D1)
     end
-    
     E_2o = sum(g .* x) + 0.5*(transpose(x) * σ)
 
     # calc rotation matrix U
