@@ -1,12 +1,13 @@
-""" my IO routines
+""" 
+  EC-specific IO routines
 
-    use to store arrays
-
+  Use to store arrays in a file, and to load them back.
+  Use memory-maps to store and load large arrays.
 """
-module MyIO
+module MIO
 using Mmap
 
-export miosave, mioload, miommap
+export miosave, mioload, miommap, mionewmmap, mioclosemmap
 
 const Types = [
   Bool,
@@ -27,14 +28,16 @@ const Types = [
 
 const JuliaT2Int = Dict{DataType, Int}()
 
-function __init__()
+# function __init__()
   for (i,t) in enumerate(Types)
     JuliaT2Int[t] = i
   end
-end
+# end
 
 """ 
-save arrays in a file `fname`
+    miosave(fname::String,arrs::AbstractArray{T}...) where T 
+
+  Save arrays `arrs` in a file `fname`.
 """
 function miosave(fname::String,arrs::AbstractArray{T}...) where T 
   io = open(fname, "w")
@@ -57,13 +60,15 @@ function miosave(fname::String,arrs::AbstractArray{T}...) where T
 end
 
 """
-load arrays from a file `fname`
+    mioload(fname::String; array_of_arrays = false)
 
-return an array of arrays.
-If there is only one array - return array itself
-(unless `array_of_arrays == true`).
+  Load arrays from a file `fname`.
+
+  Return an array of arrays.
+  If there is only one array - return array itself
+  (unless `array_of_arrays` is set to true).
 """
-function mioload(fname::String; array_of_arrays = false)
+function mioload(fname::String; array_of_arrays=false)
   io = open(fname)
   # type of numbers
   itype = read(io, Int)
@@ -89,6 +94,42 @@ function mioload(fname::String; array_of_arrays = false)
   return (narray == 1 && !array_of_arrays) ? arrs[1] : arrs
 end
 
+"""
+    mionewmmap(fname::String, Type, dims::Tuple{Vararg{Int}})
+
+  Create a new memory-map file for writing (overwrites existing file).
+  Return a pointer to the file and the mmaped array.
+"""
+function mionewmmap(fname::String, Type, dims::Tuple{Vararg{Int}})
+  io = open(fname, "w+")
+  # store type of numbers
+  write(io, JuliaT2Int[Type])
+  # number of arrays in the file (1 for mmaps)
+  write(io, 1)
+  # store dimensions of the arrays
+  write(io, length(dims))
+  for dim in dims
+    write(io, dim)
+  end
+  return io, mmap(io, Array{Type,length(dims)}, dims)
+end
+
+"""
+    mioclosemmap(io::IO, array::AbstractArray)
+
+  Close memory-map file and flush to disk.
+"""
+function mioclosemmap(io::IO, array::AbstractArray)
+  Mmap.sync!(array)
+  close(io)
+end
+
+"""
+    miommap(fname::String)
+
+  Memory-map an existing file for reading.
+  Return a pointer to the file and the mmaped array.
+"""
 function miommap(fname::String)
   io = open(fname)
   # type of numbers
@@ -107,7 +148,7 @@ function miommap(fname::String)
   for idim in 1:ndim
     append!(dims, read(io, Int))
   end
-  return mmap(io, Array{T}, Tuple(dims))
+  return io, mmap(io, Array{T,ndim}, Tuple(dims))
 end
 
 end #module
