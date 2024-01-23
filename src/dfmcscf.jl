@@ -81,7 +81,10 @@ function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
   @tensoropt fock[μ,ν] -= 0.5 * μuLD[μ,t,L] * μuL[ν,t,L]
   @tensoropt LD[L] := μuLD[μ,t,L] * CMOa[μ,t]
   @tensoropt fock[μ,ν] += LD[L] * μνL[μ,ν,L]
-  return fock, fockClosed, μjL, μuL
+
+  @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
+  @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
+  return fock_MO, fockClosed_MO, μjL, μuL
 end
 
 """
@@ -90,16 +93,15 @@ end
 Calculate the A-intermediate matrix in molecular orbital basis.
 return matrix A[p,q]
 """
-function dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix)
+function dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2)
   CMO2 = cMO[:,occ2]
   CMOa = cMO[:,occ1o] # to be modified
-  # μuL = load(EC,"AaL")
   # Apj
-  @tensoropt Apj[p,j] := 2 * (fock[μ,ν] * CMO2[ν,j]) * cMO[μ,p]
+  Apj = fock_MO[:, occ2] .* 2.0
   # Apu
-  @tensoropt Apu[p,u] := ((fockClosed[μ,ν] * CMOa[ν,v]) * cMO[μ,p]) * D1[v,u]
+  @tensoropt Apu[p,u] := fockClosed_MO[:,occ1o][p,v] * D1[v,u]
   @tensoropt Apu[p,u] += (((μuL[ν,v,L] * CMOa[ν,w]) * D2[t,u,v,w]) * μuL[μ,t,L]) * cMO[μ,p]
   A = zeros((size(cMO,2),size(cMO,2)))
   A[:,occ2] = Apj
@@ -261,7 +263,7 @@ function h_calc_SOpart(num_MO, index_MO, DFint_MO, D1::Matrix, D2, fock_MO::Matr
   return h_3221, h_2121
 end
 
-function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix)
+function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
   occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
@@ -270,11 +272,6 @@ function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, foc
   n_v = size(occv,1)
   num_MO = [n_2,n_1o,n_v]
   index_MO = [occ2,occ1o,occv]
-  # μjL = load(EC,"AcL")
-  # μuL = load(EC,"AaL")
-  # abL = load(EC,"vvL")
-  @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
-  @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
   A = A + A'
 
   # precalculate the density fitting integrals in molecular orbital basis
@@ -327,7 +324,7 @@ function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, foc
   return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 end
 
-function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix, A::Matrix, HT::HessianType=SCI)
+function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HT::HessianType=SCI)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
   occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
@@ -336,12 +333,7 @@ function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::M
   n_v = size(occv,1)
   num_MO = [n_2,n_1o,n_v]
   index_MO = [occ2,occ1o,occv]
-  # μjL = load(EC,"AcL")
-  # μuL = load(EC,"AaL")
   abL = zeros(1,1)
-  # abL = load(EC,"vvL")
-  @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
-  @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
   A = A + A'
 
   # precalculate the density fitting integrals in molecular orbital basis
@@ -392,16 +384,15 @@ end
 Calculate the energy with the given density matrices and (updated) cMO, 
 ``E = (h_i^i + ^cf_i^i) + ^1D^t_u ^cf_t^u + 0.5 ^2D^{tv}_{uw} v_{tv}^{uw}``.
 """
-function calc_realE(μuL, EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
+function calc_realE(μuL, EC::ECInfo, fockClosed_MO::Matrix, D1::Matrix, D2, cMO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
   hsmall = load(EC,"h_AA")
   CMO2 = cMO[:,occ2] 
-  CMOa = cMO[:,occ1o] 
-  # μuL = load(EC,"AaL")
-  @tensoropt E = CMO2[μ,i]*(hsmall[μ,ν]+fockClosed[μ,ν])*CMO2[ν,i]
-  @tensoropt fockClosed_MO[t,u] := fockClosed[μ,ν] * CMOa[μ,t] *CMOa[ν,u]
-  E += sum(fockClosed_MO .* D1)
+  CMOa = cMO[:,occ1o]
+  @tensoropt E = CMO2[μ,i] * hsmall[μ,ν] * CMO2[ν,i]
+  E += tr(fockClosed_MO[occ2,occ2])
+  E += sum(fockClosed_MO[occ1o, occ1o] .* D1)
   @tensoropt tuL[t,u,L] := μuL[μ,u,L] * CMOa[μ,t]
   @tensoropt tuvw[t,u,v,w] := tuL[t,u,L] * tuL[v,w,L]
   E += 0.5 * sum(D2 .* tuvw)
@@ -446,8 +437,7 @@ function Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
   return [σ21;σ31;σ22;σ32]
 end
 
-function Hx_SCI(EC::ECInfo, fock::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Matrix)
-  @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
+function Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
   occv = setdiff(1:size(cMO,1), EC.space['o']) # to be modified
@@ -478,14 +468,14 @@ function Hx_SCI(EC::ECInfo, fock::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Ma
   return [σ21;σ31;σ22;σ32]
 end
 
-function H_multiply(EC::ECInfo, fock::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, alpha::Number, 
+function H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, alpha::Number, 
   h_block::NTuple{10, Matrix{Float64}}, HT::HessianType)
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
   σ = Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, v[2:end])
   if HT == SO
     σ += Hx_SO(h_3131, h_3231, h_3121, v[2:end], num_MO)
   else
-    σ += Hx_SCI(EC, fock, cMO, v[2:end], num_MO, D1)
+    σ += Hx_SCI(EC, fock_MO, cMO, v[2:end], num_MO, D1)
   end
   newσ_hb = [[g'*v[2:end].* alpha];σ]
   newσ_hb[2:end] .+= g .* v[1] .*alpha
@@ -505,7 +495,7 @@ convTrack is to decide whether the tracking of eigenvectors is used
 
 function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
   h_block::NTuple{10, Matrix{Float64}}, g::Vector, alpha::Number, initVecType::InitialVectorType, 
-  fock::Matrix, cMO::Matrix, HT::HessianType, D1::Matrix, convTrack::Bool=false)
+  fock_MO::Matrix, cMO::Matrix, HT::HessianType, D1::Matrix, convTrack::Bool=false)
   V = zeros(N,n_max)
   σ = zeros(N,n_max)
   h = zeros(n_max,n_max)
@@ -520,7 +510,6 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   converged = false
   n_2, n_1o, n_v = num_MO
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
-  @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
   if HT == SO
     H0_hb = [[0.];diag(h_2121);diag(h_3131);diag(h_2222);diag(h_3232)]
   else
@@ -547,16 +536,15 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HT)
+    σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HT)
     numInitialVectors = 2
   elseif initVecType == GRADIENT_SETPLUS
     V[1,1] = 1.0
     g_r = g 
-    # g_r = g_r + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(EC, fock, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HT)
-    σ[:,2] = H_multiply(EC, fock, cMO, D1, V[:,2], num_MO, g, alpha, h_block, HT)
+    σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HT)
+    σ[:,2] = H_multiply(EC, fock_MO, cMO, D1, V[:,2], num_MO, g, alpha, h_block, HT)
     V[initGuessIndex, 3] = 1.0
     v = V[:,3]
     v = v - V[initGuessIndex,2].* V[:,2]
@@ -572,7 +560,7 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   for i in numInitialVectors+1:n_max
     davCounti += 1
     # blockwise H * v
-    newσ_hb = H_multiply(EC, fock, cMO, D1, v, num_MO, g, alpha, h_block, HT)
+    newσ_hb = H_multiply(EC, fock_MO, cMO, D1, v, num_MO, g, alpha, h_block, HT)
     σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
     h[:,i-1] = newh_hb 
@@ -585,7 +573,6 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     r = σ * ac - λ[eigvec_index] * (V * ac)
     if norm(r) < thres
       converged = true
-      #println("Davidson iter ", i, " converged!")
       break
     end
     v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
@@ -609,7 +596,7 @@ tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
 function λTuning(EC::ECInfo, trust::Number, maxit::Integer, alphamax::Number, alpha::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
-  h_block::NTuple{10, Matrix{Float64}}, initVecType::InitialVectorType, fock, cMO, HT, D1)
+  h_block::NTuple{10, Matrix{Float64}}, initVecType::InitialVectorType, fock_MO, cMO, HT, D1)
   davCount = 0
   N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
   x = zeros(N_rk)
@@ -625,13 +612,12 @@ function λTuning(EC::ECInfo, trust::Number, maxit::Integer, alphamax::Number, a
   davError = γ * norm(g)
   # alpha tuning loop (micro loop)
   for it=1:maxit
-    #println("alpha: ", alpha)
-    @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock, cMO, HT, D1)
+    @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HT, D1)
     davCount += davCounti
     while !converged
       davItMax += 50
       println("Davidson max iteration number increased to ", davItMax)
-      @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock, cMO, HT, D1)
+      @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HT, D1)
       davCount += davCounti
     end
     x = vec[2:end] ./ (vec[1] * alpha)
@@ -779,15 +765,17 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
   E = 0.0
   prev_cMO = deepcopy(cMO)
   μνL = load(EC,"AAL")
+  prev_fock_MO = zeros(nAO,nAO)
+  prev_fockClosed_MO = zeros(nAO,nAO)
 
   # macro loop, g and h updated
   while iteration_times < IterMax
     # calc energy E with updated cMO
     @tensoropt μjL[μ,j,L] := μνL[μ,ν,L] * cMO[:,occ2][ν,j]
     @tensoropt μuL[μ,u,L] := μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
-    @timeit "fock calc" fock, fockClosed= dffockCAS(μνL, μjL, μuL, EC,cMO,D1)
+    @timeit "fock calc" fock_MO, fockClosed_MO= dffockCAS(μνL, μjL, μuL, EC, cMO, D1)
     E_former = E
-    @timeit "E calc" E = calc_realE(μuL, EC, fockClosed, D1, D2, cMO)
+    @timeit "E calc" E = calc_realE(μuL, EC, fockClosed_MO, D1, D2, cMO)
     # check if reject the update and tune trust
     if iteration_times > 0
       tt = (time_ns() - t0)/10^9
@@ -798,7 +786,8 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
         cMO = prev_cMO
         @tensoropt μjL[μ,j,L] := μνL[μ,ν,L] * cMO[:,occ2][ν,j]
         @tensoropt μuL[μ,u,L] := μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
-        @timeit "fock calc" fock, fockClosed= dffockCAS(μνL, μjL, μuL, EC,cMO,D1)
+        fock_MO = deepcopy(prev_fock_MO)
+        fockClosed_MO = deepcopy(prev_fockClosed_MO)
         E = E_former
         inherit_large = false
       elseif E_former - E < 1e-7 && E < E_former && norm(g) < 5e-3
@@ -808,20 +797,22 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
       println("Initial energy: ", E+Enuc)
       println("Iter     Energy      DE           norm(g)       Time      trust        sumx2        α      microIter")
     end
+    prev_fock_MO = deepcopy(fock_MO)
+    prev_fockClosed_MO = deepcopy(fockClosed_MO)
     iteration_times += 1
 
     # calc g and h with updated cMO
-    @timeit "A calc" A = dfACAS(μuL, EC,cMO,D1,D2,fock,fockClosed)
+    @timeit "A calc" A = dfACAS(μuL, EC,cMO,D1,D2,fock_MO,fockClosed_MO)
     @timeit "g calc" g = calc_g(A, EC)
     if norm(g) < 1e-5
       break
     end
     if HT == SO
       @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-      @timeit "h calc new" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock, fockClosed, A)
+      @timeit "h calc new" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     else
-      @timeit "h calc new" h_block = calc_h_SCI(μjL, μuL, EC, cMO, D1, D2, fock, fockClosed, A, HT)
+      @timeit "h calc new" h_block = calc_h_SCI(μjL, μuL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A, HT)
     end
 
     # λ tuning loop (micro loop)
@@ -831,7 +822,7 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
       vec = vec./norm(vec)
       inherit_large == true
     end
-    @timeit "λTuning" λ, x, vec, davCount = λTuning(EC, trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType, fock, cMO, HT, D1)
+    @timeit "λTuning" λ, x, vec, davCount = λTuning(EC, trust, maxit, λmax, λ, g, vec, num_MO, h_block, initVecType, fock_MO, cMO, HT, D1)
 
     # calc 2nd order perturbation energy
     h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
@@ -839,7 +830,7 @@ function dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit=100, HT
     if HT == SO
       σ .+= Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
     else
-      σ .+= Hx_SCI(EC, fock, cMO, x, num_MO, D1)
+      σ .+= Hx_SCI(EC, fock_MO, cMO, x, num_MO, D1)
     end
     E_2o = sum(g .* x) + 0.5*(transpose(x) * σ)
 
