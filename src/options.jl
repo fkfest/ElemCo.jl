@@ -60,6 +60,23 @@ Base.@kwdef mutable struct ScfOptions
   guess::Symbol = :SAD
   """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
   bisecdamp::Float64 = 0.5
+  """`⟨64⟩` maximum number of iterations for Multiconfiguration SCF. """
+  IterMax::Int = 64
+  """`⟨100⟩` maximum number of iterations for searching for alpha value to get a reasonalbe guess within trust radius. """
+  maxit4alpha::Int = 100
+  """`⟨:SO⟩` Hessian Type:
+  - `:SO` Second Order Approximation
+  - `:SCI` Super CI
+  - `:SO-SCI` Second Order Approximation combing Super CI
+  """
+  HessianType::Symbol = :SO
+  """`` Initial Vectors Type:
+  - `:RANDOM` one random vector
+  - `:INHERIT` from last macro/micro iterations
+  - `:GRADIENT_SET` b0 as [1,0,0,...], b1 as gradient
+  - `:GRADIENT_SETPLUS` b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
+  """
+  initVecType::Symbol = :GRADIENT_SETPLUS
 end
 
 """ 

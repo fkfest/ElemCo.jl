@@ -64,7 +64,7 @@ export @mainname
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @opt, @reset, @run
 export @transform_ints, @write_ints, @dfints, @freeze_orbs
-export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
+export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf, @dfmcscf
 
 """
     @mainname(file)
@@ -282,6 +282,16 @@ macro dfuhf()
   return quote
     $(esc(:@tryECinit))
     dfuhf($(esc(:EC)))
+  end
+end
+
+macro dfmcscf()
+  return quote
+    to = TimerOutputs.get_defaulttimer()
+    TimerOutputs.reset_timer!(to)
+    $(esc(:@tryECinit))
+    @timeit "dfmcscf" dfmcscf($(esc(:EC)))
+    display(to)
   end
 end
 
@@ -543,11 +553,11 @@ function run_mcscf(HessianTypeInt::Int=1, moleType::Int=1)
   to = TimerOutputs.get_defaulttimer()
   TimerOutputs.reset_timer!(to)
   if HessianTypeInt == 1
-    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64, HT=SCI)
+    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false)
   elseif HessianTypeInt == 2
-    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64, HT=SO)
+    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false)
   elseif HessianTypeInt == 3
-    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false, IterMax=64, HT=SO_SCI)
+    @timeit "dfmcscf" E,cMO = dfmcscf(EC; direct=false)
   end
   display(to)
   TimerOutputs.reset_timer!(to)
