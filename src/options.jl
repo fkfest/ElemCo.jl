@@ -61,9 +61,9 @@ Base.@kwdef mutable struct ScfOptions
   """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
   bisecdamp::Float64 = 0.5
   """`⟨64⟩` maximum number of iterations for Multiconfiguration SCF. """
-  IterMax::Int = 64
+  IterMax::Int = 100
   """`⟨100⟩` maximum number of iterations for searching for alpha value to get a reasonalbe guess within trust radius. """
-  maxit4alpha::Int = 100
+  maxit4alpha::Int = 3
   """`⟨:SO⟩` Hessian Type:
   - `:SO` Second Order Approximation
   - `:SCI` Super CI

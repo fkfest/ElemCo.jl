@@ -572,7 +572,7 @@ tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
 function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Number, alpha::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
-  h_block::NTuple{10, Matrix{Float64}}, initVecType::Symbol, fock_MO::Matrix, cMO::Matrix, HessianType::Symbol, D1::Matrix)
+  h_block::NTuple{10, Matrix{Float64}}, initVecType::Symbol, fock_MO::Matrix, cMO::Matrix, HessianType::Symbol, D1::Matrix, reject::Bool)
   davCount = 0
   N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
   x = zeros(N_rk)
@@ -586,8 +586,12 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
   bisecdamp = EC.options.scf.bisecdamp
   γ =  0.1 # gradient scaling factor for micro-iteration accuracy
   davError = γ * norm(g)
+  alphaSearchIt = 0
+  alphas = Array{Float64}(undef,0)
+  trustTune = true
   # alpha tuning loop (micro loop)
   for it=1:maxit4alpha
+    push!(alphas, alpha)
     @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HessianType, D1)
     davCount += davCounti
     while !converged
@@ -609,13 +613,18 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
       xalphar = sumx2
     else
       micro_converged = true
+      alphaSearchIt = it
       break
     end
     if alphar ≈ alphal
       alpha = alphal
       micro_converged = true
+      alphaSearchIt = it
       break
     end
+    # it means at the beginning of the search, if the alphal didn't move, as 1.0 
+    # and alpha needs to be smaller, and meanwhile the alpharight is less than alphal + 0.1, as 1.1 
+    # then alpha should be set to 1
     if xalphal < 0 && alpha == alphar && (alphar - alphal) < 0.1
       alpha = alphal
     elseif xalphal > 0 && xalphar > 0
@@ -623,14 +632,19 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
       alpha = ((xalphal-trust)*alphar - (xalphar-trust)*alphal) / (xalphal - xalphar)
     else
       # damped geometric mean
-      alpha = exp(log(alphal) + log(alphar/alphal) * bisecdamp/2)
+      alpha = exp(log(alphal) + log(alphar/alphal) * bisecdamp)
     end
   end
   if !micro_converged
+    alphaSearchIt = maxit4alpha
     println("micro NOT converged")
   end
-  return alpha, x, vec, davCount
-end
+  if alpha ≈ 1.0 && !reject
+    trustTune = false
+  end
+  println(alphas)
+  return alpha, x, vec, davCount, alphaSearchIt, trustTune
+end 
 
 """
     calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
@@ -663,18 +677,24 @@ Check if the energy E is lower than the former energy E_former,
 if not, reject the update of coefficients and modify the trust region.
 Return reject::Bool and trust.
 """
-function checkE_modifyTrust(E, E_former, E_2o, trust)
+function checkE_modifyTrust(E, E_former, E_2o, trust, trustTune::Bool)
   energy_diff = E - E_former
   energy_quotient = energy_diff / E_2o
   # modify the trust region
   reject = false
   if energy_quotient < 0.0 || E_2o > 0.0
-    trust = 0.7 * trust
+    if trustTune
+      trust = 0.7 * trust
+    end
     reject = true
   elseif energy_quotient < 0.25
-    trust = 0.7 * trust
+    if trustTune
+      trust = 0.7 * trust
+    end
   elseif energy_quotient > 0.75
-    trust = 1.2 * trust
+    if trustTune
+      trust = 1.2 * trust
+    end
   end
   return reject, trust
 end
@@ -741,6 +761,8 @@ function dfmcscf(EC::ECInfo; direct=false)
   t0 = time_ns()
   x = []
   davCount = 0
+  alphaSearchIt = 0
+  trustTune = true
   E_2o = 0.0
   E = 0.0
   prev_cMO = deepcopy(cMO)
@@ -760,8 +782,8 @@ function dfmcscf(EC::ECInfo; direct=false)
     # check if reject the update and tune trust
     if iteration_times > 0
       tt = (time_ns() - t0)/10^9
-      @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i\n" iteration_times E+Enuc E-E_former norm(g) tt trust sum(x.^2) λ davCount
-      reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust)
+      @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i %3i \n" iteration_times E+Enuc E-E_former norm(g) tt trust sqrt(sum(x.^2)) λ davCount alphaSearchIt
+      reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust, trustTune)
       if reject
         iteration_times -= 1
         cMO = prev_cMO
@@ -802,7 +824,7 @@ function dfmcscf(EC::ECInfo; direct=false)
       vec = vec./norm(vec)
       inherit_large == true
     end
-    λ, x, vec, davCount = λTuning(EC, trust, maxit4alpha, λmax, λ, g, vec, num_MO, h_block, initVecType, fock_MO, cMO, HessianType, D1)
+    λ, x, vec, davCount, alphaSearchIt, trustTune = λTuning(EC, trust, maxit4alpha, λmax, λ, g, vec, num_MO, h_block, initVecType, fock_MO, cMO, HessianType, D1, reject)
 
     # calc 2nd order perturbation energy
     h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
