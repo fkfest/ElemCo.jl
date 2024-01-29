@@ -23,6 +23,7 @@ makedocs(
       "bohf.md",
       "cc.md",
       "cctools.md",
+      "constants.md",
       "decomptools.md",
       "dfcc.md",
       "dfdump.md",

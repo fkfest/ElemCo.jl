@@ -8,6 +8,7 @@ using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
 export setup_space_fd!, setup_space_ms!, setup_space!, reset_wf_info!
+export is_closed_shell
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
@@ -57,7 +58,9 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
     - `M` for (full) β-MO space
     - `A` for AO basis
     - `a` for active orbitals
-    - `c` for closed-shell (doubly-occupied) orbitals
+    - `d` for doubly-occupied (closed-shell) orbitals
+    - `s` for singly-occupied (open-shell) orbitals
+    - `S` for singly-occupied with β electron (open-shell) orbitals
     - `P` for auxiliary orbitals (fitting basis)
     - `L` for auxiliary orbitals (Cholesky decomposition, orthogonal)
     - `X` for auxiliary orbitals (amplitudes decomposition)
@@ -139,8 +142,33 @@ function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
   SP = EC.space
   println("Number of orbitals: ", norb)
   SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
+  SP['d'] = intersect(SP['o'], SP['O'])
+  SP['s'] = setdiff(SP['o'], SP['d'])
+  SP['S'] = setdiff(SP['O'], SP['d'])
   SP[':'] = SP['m'] = SP['M'] = 1:norb
   return
+end
+
+"""
+    is_closed_shell(EC::ECInfo)
+
+  Check if the system is closed-shell 
+  according the to the reference occupation and FCIDump.
+"""
+function is_closed_shell(EC::ECInfo)
+  SP = EC.space
+  SP_changed = false
+  if !haskey(SP, 'o') || !haskey(SP, 'O')
+    SP_save = save_space(EC)
+    setup_space_fd!(EC)
+    SP_changed = true
+    SP = EC.space
+  end
+  cs = (SP['o'] == SP['O'] && !EC.fd.uhf)
+  if SP_changed
+    restore_space!(EC, SP_save)
+  end
+  return cs
 end
 
 """

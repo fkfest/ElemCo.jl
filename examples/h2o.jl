@@ -1,6 +1,4 @@
-include("ElemCo.jl-devel/src/ElemCo.jl")
-using .ElemCo
-#using ElemCo
+using ElemCo
 
 function main()
 geometry="bohr
@@ -15,7 +13,8 @@ basis = Dict("ao"=>"cc-pVDZ",
 #@opt scf thr=1.e-14 maxit=2
 #@run dfhf
 @dfhf
-@dfints
-@cc dcsd
+#@dfints
+ccmethod="dcsd"
+@cc ccmethod
 end
 main()

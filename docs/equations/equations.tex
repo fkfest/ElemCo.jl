@@ -3,10 +3,11 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{amsfonts}
-\usepackage{color}
+\usepackage{xcolor}
 \newcommand{\red}[1]{{\color{red} #1}}
 \newcommand{\blue}[1]{{\color{blue} #1}}
 \newcommand{\magenta}[1]{{\color{magenta} #1}}
+\newcommand{\brown}[1]{{\color{brown} #1}}
 \definecolor{pinegreen}{rgb}{0.0, 0.47, 0.44}
 \newcommand{\green}[1]{{\color{pinegreen} #1}}
 \usepackage[utf8]{inputenc}
@@ -26,6 +27,8 @@
 }
 \DeclareUnicodeCharacter{039B}{\Lambda}
 \DeclareUnicodeCharacter{03B4}{\delta}
+\DeclareUnicodeCharacter{03B1}{\alpha}
+\DeclareUnicodeCharacter{03B2}{\beta}
 \newcommand{\NL}{\nonumber \\}
 \newcommand{\nl}{\nonumber \\ & }
 \newcommand{\op}{\hat}
@@ -41,6 +44,7 @@
 \newcommand{\spb}[1]{\bar{#1}}
 \newcommand{\half}{\frac{1}{2}}
 \newcommand{\ElemCojl}{\textsf{ElemCo.jl} }
+\newcommand{\cmd}[1]{\texttt{#1}}
 % Define \lt and \gt for `less than' and `greater than'
 \mathchardef\lt="313C \mathchardef\gt="313E
 % Set up `<' and `>' as angle brackets
@@ -478,6 +482,56 @@ x_{\spa{a}\spb{l}}^{\spa{i}\spb{d}} &= \half T^{\spa{i}\spb{k}}_{\spa{a}\spb{c}}
 \end{aligned}
 \end{equation}
 
+\subsection{Spin-restricted open-shell CCSD/DSCD}
+The spin-restricted versions \cmd{rccsd} and \cmd{rdcsd} are obtained through spin-projection of the
+residuals and amplitudes from the spin-dependent equations in each iteration. \cite{knowlesCoupled1993,knowlesErratum2000a} 
+
+In this section we use the following notation:
+\begin{equation}
+\begin{aligned}
+  ~^{αα}T^{ij}_{ab} &= T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}, \\
+  ~^{ββ}T^{ij}_{ab} &= T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}}, \\
+  ~^{αβ}T^{ij}_{ab} &= T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}, \\
+\end{aligned}
+\end{equation}
+and the spin-projected amplitudes are denoted by a bar, e.g., $~^{αβ}\bar T^{ij}_{ab}$.
+Moreover, the indices $i,j,\ldots$ run in the following part of the section over the closed-shell part of occupied orbitals, $a,b,\ldots$ over the (doubly) virtual orbitals, 
+and $t,u,\ldots$ over the singly occupied (or singly-virtual) orbitals.
+
+The ``closed-shell'' part of spin-projected $\alpha\beta$ amplitudes is given by
+\begin{equation}
+\begin{aligned}
+~^{αβ}\bar T^{ij}_{ab} = \frac{1}{6} ( ~^{αα}T^{ij}_{ab} + ~^{ββ}T^{ij}_{ab} + 2 ~^{αβ}T^{ij}_{ab} + ~^{αβ}T^{ij}_{ba} +2 ~^{αβ}T^{ji}_{ba} + ~^{αβ}T^{ji}_{ab})
+\end{aligned}
+\end{equation}
+The ``open-shell'' part of spin-projected $\alpha\beta$ amplitudes is given by
+\begin{equation}
+\begin{aligned}
+~^{αβ}\bar T^{ij}_{at} &= \frac{1}{3} ( ~^{ββ}T^{ij}_{at} + 2 ~^{αβ}T^{ij}_{at} + ~^{αβ}T^{ji}_{at})\\
+~^{αβ}\bar T^{tj}_{ab} &= \frac{1}{3} ( ~^{αα}T^{tj}_{ab} + 2 ~^{αβ}T^{tj}_{ab} + ~^{αβ}T^{tj}_{ba})\\
+~^{αβ}\bar T^{tj}_{au} &= ~^{αβ}T^{tj}_{au} + \frac{\delta_{tu}}{2m_s + 2}\left( ~^{β}T^j_a - ~^{α}T^j_a - ~^{αβ}T^{vj}_{av} \right)
+\end{aligned}
+\end{equation}
+The projection corrections for the remaining amplitudes are defined 
+in terms of the new spin-projected $\alpha\beta$ amplitudes as follows.
+For singles amplitudes,
+\begin{equation}
+\begin{aligned}
+~^{α}\bar T^i_a &= \frac{1}{2}\left(~^{α}T^i_a + ~^{β}T^i_a - ~^{αβ}\bar T^{vi}_{av} \right),\\
+~^{β}\bar T^i_a &= \frac{1}{2}\left(~^{α}T^i_a + ~^{β}T^i_a + ~^{αβ}\bar T^{vi}_{av} \right),\\
+~^{α}\bar T^t_a &= ~^{α}T^t_a  \qquad \text{and} \qquad ~^{β}\bar T^i_t = ~^{β} T^i_t.\\
+\end{aligned}
+\end{equation}
+For the $\alpha\alpha$ and $\beta\beta$ amplitudes,
+\begin{equation}
+\begin{aligned}
+~^{\sigma\sigma}\bar T^{ij}_{ab} &= ~^{αβ}\bar T^{ij}_{ab} - ~^{αβ}\bar T^{ij}_{ba},\\
+~^{αα}\bar T^{tj}_{ab} &= ~^{αα}\bar T^{jt}_{ba} = ~^{αβ}\bar T^{tj}_{ab} - ~^{αβ}\bar T^{tj}_{ba},\\
+~^{ββ}\bar T^{ij}_{at} &= ~^{ββ}\bar T^{ji}_{ta} = ~^{αβ}\bar T^{ij}_{at} - ~^{αβ}\bar T^{ji}_{at},\\
+~^{αα}\bar T^{tu}_{ab} &= ~^{αα} T^{tu}_{ab} \qquad \text{and} \qquad ~^{ββ}\bar T^{ij}_{tu} = ~^{ββ} T^{ij}_{tu}.\\
+\end{aligned}
+\end{equation}
+
 \chapter{Two determinant coupled cluster}
 Amplitudes are normal ordered with respect to the formal reference with two active orbitals $t$ and $\spb{u}$.
 The occupied ($i,j,\ldots$) and virtual ($a,b,\ldots$) spaces do not contain the active orbitals.
@@ -486,6 +540,7 @@ Differences because of fixed typos or other reasons are coloured \blue{blue}.
 Terms we have added to ensure energy invariance with respect to the reference choice 
 and which are not explicitly listed in Ref.\cite{szalay94} are coloured \magenta{magenta}.
 Terms we have added to ensure proper antisymmetry and which are not explicitly listed in Ref.\cite{szalay94} are coloured \green{green}.
+IAS terms, which are terms including the all internal singles, are coloured \brown{brown}.
 \begin{align}
 R^i_a &= < {}^A\Phi^i_a |\op H_N e^{\op T_A} | {}^A \Phi >_C - \left( < {}^A\Phi^i_a | e^{\op T_B} | {}^B\Phi ><{}^B\Phi | \op H_N e^{\op T_A} | {}^A \Phi> \right)_C \NL
       &\equiv < {}^A\Phi^i_a | \op H_N e^{\op T_A} | {}^A \Phi >_C + M^i_a W = 0,
@@ -506,33 +561,56 @@ The following intermediates are used:
 The singles $M$ tensor is built as follows,
 \begin{align}
 M^{\spa{i}}_{\spa{u}} &= T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}, \\
+\brown{M^{\spa{i}}_{\spa{u}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{i}}_{\spb{t}}}, \\
 M^{\spa{t}}_{\spa{a}} &= -T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}}, \\
-M^{\spa{i}}_{\spa{a}} &= T^{\spb{u}}_{\spb{a}} T^{t\spb{i}}_{u\spb{t}} + T^{\spb{i}}_{\spb{t}} T^{t\spb{u}}_{u\spb{a}}.
+\brown{M^{\spa{t}}_{\spa{a}}} &= \brown{-T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{a}}}, \\
+M^{\spa{i}}_{\spa{a}} &= T^{\spb{u}}_{\spb{a}} T^{t\spb{i}}_{u\spb{t}} + T^{\spb{i}}_{\spb{t}} T^{t\spb{u}}_{u\spb{a}}, \\
+\brown{M^{\spa{i}}_{\spa{a}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{t}}}, \\
+\brown{M^{\spa{i}}_{\spa{a}}} &= \brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{a}} T^{\spb{i}}_{\spb{t}}}, \\
+\brown{M^{\spa{t}}_{\spa{u}}} &= \brown{T^{\spa{t}}_{\spa{u}}}.
 \end{align}
 \begin{align}
 M^{\spb{i}}_{\spb{t}} &= T^{\spa{i}\spb{u}}_{\spa{u}\spb{t}}, \\
+\brown{M^{\spb{i}}_{\spb{t}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{i}}_{\spa{u}}}, \\
 M^{\spb{u}}_{\spb{a}} &= - T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}, \\
-M^{\spb{i}}_{\bar{a}} &= T^{\spa{t}}_{\spa{a}} T^{\spa{i}\spb{u}}_{u\spb{t}} + T^{\spa{i}}_{\spa{u}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}.
+\brown{M^{\spb{u}}_{\spb{a}}} &= \brown{- T^{\spb{u}}_{\spb{t}} T^{\spa{t}}_{\spa{a}}}, \\
+M^{\spb{i}}_{\bar{a}} &= T^{\spa{t}}_{\spa{a}} T^{\spa{i}\spb{u}}_{u\spb{t}} + T^{\spa{i}}_{\spa{u}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}, \\
+\brown{M^{\spb{i}}_{\spb{a}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spa{i}}_{\spa{a}\spa{u}}}, \\
+\brown{M^{\spb{i}}_{\spb{a}}} &= \brown{T^{\spb{u}}_{\spb{t}} T^{\spa{t}}_{\spa{a}} T^{\spa{i}}_{\spa{u}}}, \\
+\brown{M^{\spb{u}}_{\spb{t}}} &= \brown{T^{\spb{u}}_{\spb{t}}}.
 \end{align}
 The all alpha part of the doubles part is built as follows,
 \begin{align}
 M^{\spa{i}\spa{j}}_{\spa{u}\spa{a}} = &\asop{ij} \tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
                                        +\asop{ij} T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}, \\
+\brown{M^{\spa{i}\spa{j}}_{\spa{u}\spa{a}}} = &\brown{T^{\spa{t}}_{\spa{u}} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}}}, \\
 \green{M^{\spa{i}\spa{j}}_{\spa{a}\spa{u}}} = &\green{-\asop{ij} \tau^{\spa{i}}_{\spa{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
                                        -\asop{ij} T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{a}}}, \\
+\brown{M^{\spa{i}\spa{j}}_{\spa{a}\spa{u}}} = &\brown{-T^{\spa{t}}_{\spa{u}} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}}}, \\
 M^{\spa{t}\spa{i}}_{\spa{a}\spa{b}} = &\asop{ab} \tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
                                       +\asop{ab} T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} , \\
+\brown{M^{\spa{t}\spa{i}}_{\spa{a}\spa{b}}} = &\brown{T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{b}\spb{a}}}, \\
 \green{M^{\spa{i}\spa{t}}_{\spa{a}\spa{b}}} = &\green{-\asop{ab} \tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
                                       -\asop{ab} T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}} , \\
+\brown{M^{\spa{i}\spa{t}}_{\spa{a}\spa{b}}} = &\brown{-T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{b}\spb{a}}}, \\
 M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} = &-\ASop{ij}{ab} \tau^{\spa{j}}_{\spa{b}} \left( T^{\spb{u}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} 
                                        +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} \right)
-                                       -\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \left( \tau^{\spb{u}\spb{i}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}} \right) \nonumber \\
-                                      &-\asop{\spa{i}\spa{j}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
-                                       -\asop{ab} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{b}}, \\
+                                       -\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \left( T^{\spb{u}\spb{i}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}} \right) \nonumber \\
+                                      &-\asop{\spb{i}\spb{j}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{t}} 
+                                       -\asop{ab} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{b}}
+                                       -\blue{\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} T^{\spb{u}}_{\spb{a}} T^{\spb{j}}_{\spb{t}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{b}}}, \\
+\brown{M^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}} = &\brown{-\ASop{\spb{i}\spb{j}}{\spb{a}\spb{b}} \tau^{\spb{i}}_{\spb{a}} \left( T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spb{j}}_{\spa{u}\spb{b}}
+                                                      +T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{j}}_{\spb{t}\spb{b}}\right)} \nonumber \\ 
+                                              &\brown{-\asop{\spb{i}\spb{j}} T^{\spa{t}}_{\spa{u}} T^{\spb{j}}_{\spb{t}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{b}}
+                                              -\asop{\spb{a}\spb{b}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{b}} T^{\spb{i}\spb{j}}_{\spb{t}\spb{a}}},\\
 M^{\spa{i}\spa{t}}_{\spa{a}\spa{u}}         = &-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}, \\
 \green{M^{\spa{t}\spa{i}}_{\spa{a}\spa{u}}} = &\green{T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
 \green{M^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}} = &\green{T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
-\green{M^{\spa{t}\spa{i}}_{\spa{u}\spa{a}}} = &\green{-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}.
+\green{M^{\spa{t}\spa{i}}_{\spa{u}\spa{a}}} = &\green{-T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}}}, \\
+\brown{M^{\spa{i}\spa{t}}_{\spa{a}\spa{u}}} = &\brown{-\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}, \\
+\brown{M^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}} = &\brown{+\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}, \\
+\brown{M^{\spa{t}\spa{i}}_{\spa{a}\spa{u}}} = &\brown{+\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}, \\
+\brown{M^{\spa{t}\spa{i}}_{\spa{u}\spa{a}}} = &\brown{-\tau^{\spb{i}}_{\spb{a}} T^{\spa{t}}_{\spa{u}}}.
 \end{align}
 The all beta part of the doubles $M$ tensor is obtained from the all alpha part analogously to the presented singles $M$ tensor. \newline
 The alpha beta part is calculated as follows,
@@ -541,18 +619,22 @@ M^{\spa{i}\spb{j}}_{\spa{u}\spb{a}} = &-\tau^{\spb{j}}_{\spb{a}} T^{\spa{t}\spb{
                                        -T^{\spa{j}}_{\spa{u}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
                                        -T^{\spa{t}}_{\spa{a}} \tau^{\spa{j}\spb{i}}_{\spa{u}\spb{t}} 
                                        -T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spa{j}}_{\spa{a}\spa{u}},\\
+\brown{M^{\spa{i}\spb{j}}_{\spa{u}\spb{a}}} = &\brown{T^{\spa{t}}_{\spa{u}} T^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}},\\
 \magenta{M^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}} = &\magenta{-\tau^{\spa{j}}_{\spa{a}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{t}} 
                                                 -T^{\spb{j}}_{\spb{t}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
                                                 -T^{\spb{u}}_{\spb{a}} \tau^{\spa{i}\spb{j}}_{\spa{u}\spb{t}}
                                                 -T^{\spa{i}}_{\spa{u}} T^{\spb{j}\spb{u}}_{\spb{t}\spb{a}}}, \\
+\brown{M^{\spa{j}\spb{i}}_{\spa{a}\spb{t}}} = &\brown{T^{\spb{u}}_{\spb{t}} T^{\spa{i}\spb{j}}_{\spa{u}\spb{a}}},\\
 M^{\spa{t}\spb{i}}_{\spa{a}\spb{b}} = &\tau^{\spb{i}}_{\spb{b}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}} 
                                       +T^{\spa{t}}_{\spa{b}} T^{\spa{i}\spb{u}}_{\spa{u}\spb{a}}
                                       +T^{\spa{i}}_{\spa{u}} \tau^{\spa{t}\spb{u}}_{\spa{b}\spb{a}}
                                       +T^{\spb{u}}_{\spb{a}} T^{\spa{i}\spa{t}}_{\spa{u}\spa{b}},\\
+\brown{M^{\spa{t}\spb{i}}_{\spa{a}\spb{b}}} = &\brown{- T^{\spa{t}}_{\spa{u}} T^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} ,\\
 \magenta{M^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} = &\magenta{\tau^{\spa{i}}_{\spa{b}} T^{\spa{t}\spb{u}}_{\spa{a}\spb{t}}
                                                 +T^{\spb{u}}_{\spb{b}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{t}}
                                                 +T^{\spb{i}}_{\spb{t}} \tau^{\spa{t}\spb{u}}_{\spa{a}\spb{b}}
                                                 +T^{\spa{t}}_{\spa{a}} T^{\spb{i}\spb{u}}_{\spb{t}\spb{b}}},\\
+\brown{M^{\spa{i}\spb{u}}_{\spa{b}\spb{a}}} = &\brown{-T^{\spb{u}}_{\spb{t}} T^{\spa{t}\spb{i}}_{\spa{a}\spb{b}}}, \\
 M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} = &-\tau^{\spb{j}}_{\spb{b}} (T^{\spb{u}}_{\spb{a}} T^{\spa{t}\spb{i}}_{\spa{u}\spb{t}}
                                       +T^{\spb{i}}_{\spb{t}} T^{\spa{t}\spb{u}}_{\spa{u}\spb{a}})
                                 \blue{-\tau^{\spa{i}}_{\spa{a}}(T^{\spa{j}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{b}}
@@ -569,6 +651,12 @@ M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} = &-\tau^{\spb{j}}_{\spb{b}} (T^{\spb{u}}_{\
                                 \blue{-T^{\spa{t}\spa{j}}_{\spa{u}\spa{b}} T^{\spb{u}\spb{i}}_{\spb{t}\spb{a}}}
                                       -T^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} T^{\spa{j}\spb{u}}_{\spa{b}\spb{t}} 
                                       -T^{\spa{j}\spb{u}}_{\spa{u}\spb{a}} T^{\spa{t}\spb{i}}_{\spa{b}\spb{t}},\\
+\brown{M^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}} = &\brown{-\tau^{\spb{j}}_{\spb{b}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}\spb{i}}_{\spb{a}\spb{t}}
+                                                      -\tau^{\spa{i}}_{\spa{a}} T^{\spb{u}}_{\spb{t}} T^{\spa{j}\spa{t}}_{\spa{u}\spa{b}}
+                                                      +T^{\spa{t}}_{\spa{u}} T^{\spb{i}}_{\spb{t}} T^{\spa{j}\spb{u}}_{\spa{b}\spb{a}}
+                                                      +T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{a}} T^{\spa{j}\spb{i}}_{\spa{b}\spb{t}}} \nonumber \\
+                                              &\brown{+T^{\spb{u}}_{\spb{t}} T^{\spa{t}}_{\spa{b}} T^{\spa{j}\spb{i}}_{\spa{u}\spb{a}}
+                                                      +T^{\spb{u}}_{\spb{t}} T^{\spa{j}}_{\spa{u}} T^{\spa{t}\spb{i}}_{\spa{b}\spb{a}}},\\
 M^{\spa{t}\spb{i}}_{\spa{u}\spb{t}} = &T^{\spa{i}}_{\spa{u}},\\
 \magenta{M^{\spa{i}\spb{u}}_{\spa{u}\spb{t}}} = &\magenta{T^{\spb{i}}_{\spb{t}}}, \\
 M^{\spa{t}\spb{i}}_{\spa{u}\spb{a}} = &\tau^{\spa{i}\spa{t}}_{\spa{u}\spa{a}}, \\
@@ -584,7 +672,13 @@ The effective Hamiltonian $W$ is just the all active part of the residuum,
 \begin{equation}
 W = R^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}.
 \end{equation}
-
+The all internal doubles $T^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}$ coupled cluster amplitude 
+is set to zero at the beginning of every iteration.
+At the end of every iteration the all internal doubles residuum $R^{\spa{t}\spb{u}}_{\spa{u}\spb{t}}$ is set to zero. \newline
+IAS contribution to the energy,
+\begin{equation}
+\brown{\Delta E_{\mathrm{IAS}}} = \brown{-W^{\spa{t}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{t}}}.
+\end{equation}
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
 \bibliographystyle{naturemag}

@@ -7,6 +7,7 @@ module ElemCo
 
 include("abstractEC.jl")
 include("utils.jl")
+include("constants.jl")
 include("myio.jl")
 include("mnpy.jl")
 include("dump.jl")
@@ -40,6 +41,7 @@ catch
 end
 using LinearAlgebra
 using Printf
+using Dates
 #BLAS.set_num_threads(1)
 using TimerOutputs, TensorOperations, BenchmarkTools
 using .Utils
@@ -62,9 +64,45 @@ using .DfDump
 export ECdriver 
 export @mainname
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @reset, @run
+export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf, @dfmcscf
+
+function __init__()
+  draw_line(15)
+  println("   ElemCo.jl")
+  draw_line(15)
+  srcpath = @__DIR__
+  try
+    hash = read(`git -C $srcpath rev-parse HEAD`, String)
+    println("Git hash: ", hash[1:end-1])
+  catch
+    # get hash from .git/HEAD
+    try
+      head = read(joinpath(srcpath,"..",".git","HEAD"), String)
+      head = split(head)[2]
+      hash = read(joinpath(srcpath,"..",".git",head), String)
+      println("Git hash: ", hash[1:end-1])
+    catch
+      println("Git hash: unknown")
+    end
+  end
+  println("Website: elem.co.il")
+  println("Julia version: ",VERSION)
+  println("BLAS threads: ",BLAS.get_num_threads())
+  println("OpenMP threads: ",Base.Threads.nthreads())
+  println("Hostname: ", gethostname())
+  println("Scratch directory: ", tempdir())
+  println("Date: ", Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
+  println("""
+   ╭──────────────────────────────╮ 
+   │        ╭─────────────╮       ├─╮
+   │ Electron Correlation methods │ │
+   │        ╰─────────────╯       │ │
+   ╰─┬────────────────────────────╯ │
+     ╰──────────────────────────────╯""")
+
+end
 
 """
     @mainname(file)
@@ -261,6 +299,42 @@ macro run(method, kwargs...)
   end
 end
 
+"""
+    @method2string(method, strmethod="")
+
+  Return string representation of `method`.
+
+  If `method` is a String variable, return the value of the variable.
+  Otherwise, return the string representation of `method` (or `strmethod` if provided).
+
+  # Examples
+```julia
+julia> @method2string(CCSD)
+"CCSD"
+julia> CCSD = "UCCSD";
+julia> @method2string(CCSD)
+"UCCSD"
+```
+"""
+macro method2string(method, strmethod="")
+  if strmethod == ""
+    strmethod = replace("$method", " " => "")
+  end
+  varmethod = :($(esc(method)))
+  return quote
+    isvar = [false]
+    try @assert(typeof($(esc(method))) <: AbstractString)
+      isvar[1] = true
+    catch
+    end
+    if isvar[1]
+      $varmethod
+    else
+      $(esc(strmethod))
+    end
+  end
+end
+
 """ 
     @dfhf()
 
@@ -313,7 +387,9 @@ end
 
   Run coupled cluster calculation.
 
-  The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc)
+  The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc).
+  The method can be specified as a string or as a variable, e.g., 
+  `@cc CCSD` or `@cc "CCSD"` or `ccmethod="CCSD";  @cc ccmethod`.
   
   # Keyword arguments
   - `fcidump::String`: fcidump file (default: "", i.e., use integrals from `EC`).
@@ -338,7 +414,8 @@ macro cc(method, kwargs...)
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
       $(esc(:@tryECinit))
-      ECdriver($(esc(:EC)), $(esc(strmethod)); $(ekwa...))
+      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+      ECdriver($(esc(:EC)), strmethod; $(ekwa...))
     end
   else
     return quote
@@ -346,7 +423,8 @@ macro cc(method, kwargs...)
       if !fd_exists($(esc(:EC)).fd)
         $(esc(:@dfints))
       end
-      ECdriver($(esc(:EC)), $(esc(strmethod)); fcidump="", $(ekwa...))
+      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+      ECdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
     end
   end
 end
@@ -372,7 +450,8 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit
 macro svdcc(method="dcsd")
   strmethod=replace("$method", " " => "")
   return quote
-    calc_svd_dc($(esc(:EC)), $(esc(strmethod)))
+    strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+    calc_svd_dc($(esc(:EC)), strmethod)
   end
 end
 
@@ -438,12 +517,13 @@ macro transform_ints(type="")
       error("No FCIDump found.")
     end
     CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
-    if $(esc(strtype)) ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
+    strtype = @method2string($(esc(type)), $(esc(strtype)))
+    if strtype ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
       CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
-    elseif $(esc(strtype)) == ""
+    elseif strtype == ""
       CMOl = CMOr
     else
-      error("Unknown type in @transform_ints: ", $(esc(strtype)))
+      error("Unknown type in @transform_ints: ", strtype)
     end
     transform_fcidump($(esc(:EC)).fd, CMOl, CMOr)
   end
@@ -488,74 +568,18 @@ macro freeze_orbs(freeze_orbs)
   end
 end
 
-"""
-    is_closed_shell(EC::ECInfo)
+function run_mcscf()
+  geometry="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
 
-  Check if the system is closed-shell 
-  according the to the reference occupation and FCIDump.
-"""
-function is_closed_shell(EC::ECInfo)
-  SP = EC.space
-  SP_changed = false
-  if !haskey(SP, 'o') || !haskey(SP, 'O')
-    SP_save = save_space(EC)
-    setup_space_fd!(EC)
-    SP_changed = true
-    SP = EC.space
-  end
-  cs = (SP['o'] == SP['O'] && !EC.fd.uhf)
-  if SP_changed
-    restore_space!(EC, SP_save)
-  end
-  return cs
-end
+  basis = Dict("ao"=>"cc-pVDZ",
+             "jkfit"=>"cc-pvtz-jkfit",
+             "mp2fit"=>"cc-pvdz-rifit")
 
-""" 
-    calc_fock_matrix(EC::ECInfo, closed_shell)
-
-  Calculate fock matrix from FCIDump
-"""
-function calc_fock_matrix(EC::ECInfo, closed_shell)
-  t1 = time_ns()
-  if closed_shell
-    fock = gen_fock(EC)
-    save!(EC, "f_mm", fock)
-    save!(EC, "f_MM", fock)
-    eps = diag(fock)
-    println("Occupied orbital energies: ", eps[EC.space['o']])
-    save!(EC, "e_m", eps)
-    save!(EC, "e_M", eps)
-  else
-    fock = gen_fock(EC, :α)
-    eps = diag(fock)
-    println("Occupied α orbital energies: ", eps[EC.space['o']])
-    save!(EC, "f_mm", fock)
-    save!(EC, "e_m", eps)
-    fock = gen_fock(EC, :β)
-    eps = diag(fock)
-    println("Occupied β orbital energies: ", eps[EC.space['O']])
-    save!(EC,"f_MM", fock)
-    save!(EC,"e_M", eps)
-  end
-  t1 = print_time(EC,t1,"fock matrix",1)
-end
-
-""" 
-    calc_HF_energy(EC::ECInfo, closed_shell)
-
-  Calculate HF energy from FCIDump and EC info. 
-"""
-function calc_HF_energy(EC::ECInfo, closed_shell)
-  SP = EC.space
-  if closed_shell
-    ϵo = load(EC,"e_m")[SP['o']]
-    EHF = sum(ϵo) + sum(diag(integ1(EC.fd))[SP['o']]) + EC.fd.int0
-  else
-    ϵo = load(EC,"e_m")[SP['o']]
-    ϵob = load(EC,"e_M")[SP['O']]
-    EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(integ1(EC.fd, :α))[SP['o']]) + sum(diag(integ1(EC.fd, :β))[SP['O']])) + EC.fd.int0
-  end
-  return EHF
+  @opt wf ms2=2 charge=-2
+  E,cMO =  dfmcscf(EC,direct=false)
 end
 
 """ 
@@ -599,6 +623,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ecmethod = ECMethod(mname)
     if is_unrestricted(ecmethod)
       closed_shell_method = false
+    elseif has_prefix(ecmethod, "R")
+      closed_shell_method = false
+      @assert !EC.fd.uhf "For restricted methods, the FCIDUMP must not be UHF!"
     else
       closed_shell_method = closed_shell
       if !closed_shell_method
@@ -619,6 +646,14 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       println("$method0 total energy: ",EMp2+EHF)
       t1 = print_time(EC,t1,"MP2",1)
       flush(stdout)
+      if !closed_shell_method && has_prefix(ecmethod, "R")
+        spin_project_amplitudes(EC)
+        EMp2 = calc_UMP2_energy(EC)
+        method0 = "RMP2"
+        println("$method0 correlation energy: ",EMp2)
+        println("$method0 total energy: ",EMp2+EHF)
+        flush(stdout)
+      end
       if ecmethod.theory == "MP"
         continue
       end
@@ -635,6 +670,8 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       ecmethod = ECMethod("CCSD")
       if is_unrestricted(ecmethod_save)
         set_unrestricted!(ecmethod)
+      elseif has_prefix(ecmethod_save, "R")
+        set_prefix!(ecmethod, "R")
       end
     end
     ECC = calc_cc(EC, ecmethod)
@@ -643,13 +680,13 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     ecmethod = ecmethod_save # restore
 
     if closed_shell_method
-      if has_spec(ecmethod, "Λ")
+      if has_prefix(ecmethod, "Λ")
         calc_lm_cc(EC, ecmethod)
       end
       if ecmethod.exclevel[3] != :none
         do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
         save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        if has_spec(ecmethod, "Λ")
+        if has_prefix(ecmethod, "Λ")
           @assert !save_pert_t3 "Saving perturbative triples not implemented for ΛCCSD(T)"
           ET3, ET3b = calc_ΛpertT(EC)
         else
@@ -671,7 +708,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     println()
     flush(stdout)
 
-    if has_spec(ecmethod, "2D")
+    if has_prefix(ecmethod, "2D")
       W = load(EC,"2d_ccsd_W")[1]
       @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
       @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W

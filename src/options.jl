@@ -77,6 +77,8 @@ Base.@kwdef mutable struct ScfOptions
   - `:GRADIENT_SETPLUS` b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
   """
   initVecType::Symbol = :GRADIENT_SETPLUS
+  """ `⟨0.0⟩` Fermi-Dirac temperature for starting guess (at the moment works only for BO-HF). """
+  temperature_guess::Float64 = 0.0
 end
 
 """ 
@@ -99,6 +101,9 @@ Base.@kwdef mutable struct CcOptions
   properties::Bool = false
   """`⟨1.e-3⟩` amplitude decomposition threshold. """
   ampsvdtol::Float64 = 1.e-3
+  """`⟨1.e-2⟩` tightening amplitude decomposition factor 
+      (for the two-step decomposition). """
+  ampsvdfac::Float64 = 1.e-2
   """`⟨true⟩` use kext for doubles residual. """
   use_kext::Bool = true
   """`⟨false⟩` calculate dressed <vv|vv>. """

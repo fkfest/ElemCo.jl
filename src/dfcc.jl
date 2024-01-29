@@ -261,7 +261,7 @@ end
   calculation of ``T^{ij}_{ab}``.
 
   The decomposition is done in two steps:
-  1. ``\\bar U^{i\\bar X}_a`` is calculated from ``v_a^{iL}`` using SVD (with threshold [`CcOptions.ampsvdtol`](@ref ECInfos.CcOptions)×0.01);
+  1. ``\\bar U^{i\\bar X}_a`` is calculated from ``v_a^{iL}`` using SVD (with threshold [`CcOptions.ampsvdtol`](@ref ECInfos.CcOptions)×`CcOptions.ampsvdfac`);
   2. MP2 doubles ``T^{i}_{aX}`` are calculated from ``v_a^{iL}`` and ``U^{iX}_a`` and again decomposed using SVD and threshold [`CcOptions.ampsvdtol`](@ref ECInfos.CcOptions).
   The SVD-basis is rotated to pseudocanonical basis to diagonalize 
   orbital-energy differences, ``ϵ_X = U^{iX}_{a}(ϵ_a-ϵ_i)U^{iX}_a``.
@@ -281,7 +281,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   # TODO: add shifted Laplace transform!
   mmLfile, mmL = mmap(EC, "mmL")
   nL = size(mmL, 3)
-  tol2 = (EC.options.cc.ampsvdtol*0.01)
+  tol2 = (EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
   voL = mmL[SP['v'],SP['o'],:]
   shifti = EC.options.cc.deco_ishiftp
   fullEMP2 = calc_MP2_from_3idx(EC, voL, shifti)
@@ -729,6 +729,7 @@ function additional_info(EC::ECInfo)
             Core type:              $(EC.options.wf.core)
             Level shifts:           $(EC.options.cc.shifts) $(EC.options.cc.shiftp)
             SVD-tolerance:          $(EC.options.cc.ampsvdtol)
+            SVD-factor for 2-step:  $(EC.options.cc.ampsvdfac)
             # occupied orbitals to freeze:    $(EC.options.wf.freeze_nocc)
             # virtual orbitals to freeze:     $(EC.options.wf.freeze_nvirt)
             Projected contravariant exchange: $(EC.options.cc.use_projx)

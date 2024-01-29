@@ -9,8 +9,10 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
+using ..ElemCo.FockFactory
 using ..ElemCo.OrbTools
 
+export calc_fock_matrix, calc_HF_energy
 export calc_singles_energy_using_dfock
 export update_singles, update_doubles, update_singles!, update_doubles!, update_deco_doubles, update_deco_triples
 export calc_singles_norm, calc_doubles_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
@@ -18,6 +20,132 @@ export read_starting_guess4amplitudes, save_current_singles, save_current_double
 export transform_amplitudes2lagrange_multipliers!
 export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
 export contra2covariant
+export spin_project!, spin_project_amplitudes
+
+""" 
+    calc_fock_matrix(EC::ECInfo, closed_shell)
+
+  Calculate fock matrix from FCIDump
+"""
+function calc_fock_matrix(EC::ECInfo, closed_shell)
+  t1 = time_ns()
+  if closed_shell
+    fock = gen_fock(EC)
+    save!(EC, "f_mm", fock)
+    save!(EC, "f_MM", fock)
+    eps = diag(fock)
+    println("Occupied orbital energies: ", eps[EC.space['o']])
+    save!(EC, "e_m", eps)
+    save!(EC, "e_M", eps)
+  else
+    fock = gen_fock(EC, :α)
+    eps = diag(fock)
+    println("Occupied α orbital energies: ", eps[EC.space['o']])
+    save!(EC, "f_mm", fock)
+    save!(EC, "e_m", eps)
+    fock = gen_fock(EC, :β)
+    eps = diag(fock)
+    println("Occupied β orbital energies: ", eps[EC.space['O']])
+    save!(EC,"f_MM", fock)
+    save!(EC,"e_M", eps)
+  end
+  t1 = print_time(EC,t1,"fock matrix",1)
+end
+
+""" 
+    calc_HF_energy(EC::ECInfo, closed_shell)
+
+  Calculate HF energy from FCIDump and EC info. 
+"""
+function calc_HF_energy(EC::ECInfo, closed_shell)
+  SP = EC.space
+  if closed_shell
+    ϵo = load(EC,"e_m")[SP['o']]
+    EHF = sum(ϵo) + sum(diag(ints1(EC,"oo"))) + EC.fd.int0
+  else
+    ϵo = load(EC,"e_m")[SP['o']]
+    ϵob = load(EC,"e_M")[SP['O']]
+    EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(ints1(EC, "oo"))) + sum(diag(ints1(EC, "OO")))) + EC.fd.int0
+  end
+  return EHF
+end
+
+"""
+    spin_project!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
+
+  Spin-project singles and doubles amplitudes/residuals.
+
+  Only possible for high-spin states.
+"""
+function spin_project!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
+  SP = EC.space
+  @assert length(SP['S']) == 0 " Spin-projection only possible for high-spin states!"
+  soa = subspace_in_space(SP['s'], SP['o'])
+  svb = subspace_in_space(SP['s'], SP['V'])
+  @assert length(soa) == length(svb)
+  doa = setdiff(1:length(SP['o']), soa)
+  @assert length(doa) == length(SP['O'])
+  dvb =setdiff(1:length(SP['V']), svb)
+  @assert length(dvb) == length(SP['v'])
+
+  # calc closed-shell part of spin-restricted T2
+  # ``T^{ij}_{ab} = \frac{1}{6} ( ^{αα}T^{ij}_{ab} + ^{ββ}T^{ij}_{ab} + 2 ^{αβ}T^{ij}_{ab} + ^{αβ}T^{ij}_{ba} +2 ^{αβ}T^{ji}_{ba} + ^{αβ}T^{ji}_{ab})``
+  T2abc = T2ab[:,dvb,doa,:]
+  @tensoropt T2ab[:,dvb,doa,:][a,b,i,j] = (1/6) * (T2a[:,:,doa,doa][a,b,i,j] + T2b[dvb,dvb,:,:][a,b,i,j] + 2*T2abc[a,b,i,j] + T2abc[b,a,i,j] + 2*T2abc[b,a,j,i] + T2abc[a,b,j,i])
+  T2abc = nothing
+  # calc ``T^{ij}_{at} = \frac{1}{3} ( ^{ββ}T^{ij}_{at} + 2 ^{αβ}T^{ij}_{at} + ^{αβ}T^{ji}_{at})``
+  Tvsdd = T2ab[:,svb,doa,:]
+  @tensoropt T2ab[:,svb,doa,:][a,t,i,j] = (1/3) * (T2b[dvb,svb,:,:][a,t,i,j] + 2*Tvsdd[a,t,i,j] + Tvsdd[a,t,j,i])
+  Tvsdd = nothing
+  # calc ``T^{tj}_{ab} = \frac{1}{3} ( ^{αα}T^{tj}_{ab} + 2 ^{αβ}T^{tj}_{ab} + ^{αβ}T^{tj}_{ba})``
+  Tvvsd = T2ab[:,dvb,soa,:]
+  @tensoropt T2ab[:,dvb,soa,:][a,b,t,j] = (1/3) * (T2a[:,:,soa,doa][a,b,t,j] + 2*Tvvsd[a,b,t,j] + Tvvsd[b,a,t,j])
+  Tvvsd = nothing
+
+  if length(T1b) > 0
+    ms2 = length(soa)
+    @tensoropt T1add[a,i] := T2ab[:,svb,soa,:][a,t,t,i]
+    T1c = (1/(2+ms2))*(T1b[dvb,:] - T1a[:,doa] - T1add)
+    for i in 1:length(doa)
+      T2ab[:,svb,soa,i] .+= T1c[:,i]
+    end
+    @tensoropt T1add[a,i] = 0.5*T2ab[:,svb,soa,:][a,t,t,i]
+    T1 = 0.5 * (T1a[:,doa] + T1b[dvb,:])
+    T1a[:,doa] .= T1 - T1add
+    T1b[dvb,:] .= T1 + T1add
+  end
+  @tensoropt T2a[:,:,:,doa][a,b,i,j] = T2ab[:,dvb,:,:][a,b,i,j] - T2ab[:,dvb,:,:][b,a,i,j]
+  @tensoropt T2a[:,:,doa,soa][a,b,i,j] = T2a[:,:,soa,doa][b,a,j,i]
+  @tensoropt T2b[dvb,:,:,:][a,b,i,j] = T2ab[:,:,doa,:][a,b,i,j] - T2ab[:,:,doa,:][a,b,j,i]
+  @tensoropt T2b[svb,dvb,:,:][a,b,i,j] = T2b[dvb,svb,:,:][b,a,j,i]
+end
+
+"""
+    spin_project_amplitudes(EC::ECInfo, with_singles=true)
+
+  Spin-project singles (if with_singles) and doubles amplitudes 
+  from files `"T_vo"`, `"T_VO"`, `"T_vvoo"`,
+  `"T_VVOO"` and `"T_vVoO"`.
+"""
+function spin_project_amplitudes(EC::ECInfo, with_singles=true)
+  if with_singles
+    T1a = load(EC, "T_vo")
+    T1b = load(EC, "T_VO")
+  else
+    T1a = T1b = []
+  end
+  T2a = load(EC, "T_vvoo")
+  T2b = load(EC, "T_VVOO")
+  T2ab = load(EC, "T_vVoO")
+  spin_project!(EC, T1a, T1b, T2a, T2b, T2ab)
+  if with_singles
+    save!(EC, "T_vo", T1a)
+    save!(EC, "T_VO", T1b)
+  end
+  save!(EC, "T_vvoo", T2a)
+  save!(EC, "T_VVOO", T2b)
+  save!(EC, "T_vVoO", T2ab)
+end
 
 """
     calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
@@ -498,7 +626,7 @@ function starting_amplitudes(EC::ECInfo, method::ECMethod)
   if highest_full_exc > 3
     error("starting_amplitudes only implemented upto triples")
   end
-  if is_unrestricted(method)
+  if is_unrestricted(method) || has_prefix(method, "R")
     namps = sum([i + 1 for i in 1:highest_full_exc])
     exc_ranges = [1:2, 3:5, 6:9]
     spins = [(:α,), (:β,), (:α, :α), (:β, :β), (:α, :β), (:α, :α, :α), (:β, :β, :β), (:α, :α, :β), (:α, :β, :β)]

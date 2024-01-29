@@ -6,6 +6,7 @@ version = "1.0.0-DEV"
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 GaussianBasis = "9bb1a3dc-0d1c-467e-84f5-0c4ef701360a"
 IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"

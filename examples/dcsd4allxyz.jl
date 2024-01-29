@@ -1,9 +1,5 @@
 # example: calculate DCSD for all xyz files in the current directory
-# create a symbolic link in the current directory pointing the ElemCo.jl-devel folder
-# ln -s <path-to-ElemCo.jl-devel-folder> .
-
-include("ElemCo.jl-devel/src/ElemCo.jl")
-using .ElemCo
+using ElemCo
 
 # if non-empty list: calculate only specified xyz files
 calc_only = []
