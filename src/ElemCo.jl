@@ -53,6 +53,7 @@ using .CoupledCluster
 using .DFCoupledCluster
 using .FciDump
 using .DumpTools
+using .OrbTools
 using .MSystem
 using .BOHF
 using .DFHF
@@ -64,7 +65,7 @@ export ECdriver
 export @mainname
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
-export @transform_ints, @write_ints, @dfints, @freeze_orbs
+export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
 
 function __init__()
@@ -557,6 +558,32 @@ macro freeze_orbs(freeze_orbs)
   end
 end
 
+"""
+    @rotate_orbs(orb1, orb2, angle, kwargs...)
+
+  Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  by `angle` (in degrees). For UHF, `spin` can be `:α` or `:β` (keyword argument).
+  
+  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+
+  # Keyword arguments
+  - `spin::Symbol`: spin of the orbitals (default: `:α`).
+
+  # Examples
+```julia
+@dfhf
+# swap orbitals 1 and 2
+@rotate_orbs 1, 2, 90
+```
+"""
+macro rotate_orbs(orb1, orb2, angle, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECinit))
+    rotate_orbs($(esc(:EC)), $(esc(orb1)), $(esc(orb2)), $(esc(angle)); $(ekwa...))
+  end
+end
+
 function run_mcscf()
   geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -668,10 +695,11 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     main_name = method_name(ecmethod)
     ecmethod = ecmethod_save # restore
 
+    if has_prefix(ecmethod, "Λ")
+      calc_lm_cc(EC, ecmethod)
+    end
+
     if closed_shell_method
-      if has_prefix(ecmethod, "Λ")
-        calc_lm_cc(EC, ecmethod)
-      end
       if ecmethod.exclevel[3] != :none
         do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
         save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
