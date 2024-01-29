@@ -12,7 +12,8 @@ export is_closed_shell
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
-export isalphaspin, space4spin
+export file_description
+export isalphaspin, space4spin, spin4space, flipspin
 
 include("options.jl")
 
@@ -225,6 +226,7 @@ function len_spaces(EC::ECInfo, spaces::String)
   return [length(EC.space[sp]) for sp in spaces]
 end
 
+
 """
     freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
 
@@ -364,6 +366,18 @@ function add_file!(EC::ECInfo, name::String, descr::String; overwrite=false)
 end
 
 """
+    file_description(EC::ECInfo, name::String)
+
+  Return description of file `name` in ECInfo.
+"""
+function file_description(EC::ECInfo, name::String)
+  if !file_exists(EC, name)
+    error("File $name is not registered in ECInfo.")
+  end
+  return EC.files[name]
+end
+
+"""
     copy_file!(EC::ECInfo, from::AbstractString, to::AbstractString; overwrite=false)
 
   Copy file `from` to `to`.
@@ -465,6 +479,24 @@ function space4spin(sp::Char, alpha::Bool)
   else
     return uppercase(sp)
   end
+end
+
+"""
+    spin4space(sp::Char)
+
+  Return spin for a given space character.
+"""
+function spin4space(sp::Char)
+  return islowercase(sp) ? :α : :β
+end
+
+"""
+    flipspin(sp::Char)
+
+  Flip spin for a given space character.
+"""
+function flipspin(sp::Char)
+  return islowercase(sp) ? uppercase(sp) : lowercase(sp)
 end
 
 """

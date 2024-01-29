@@ -1,3 +1,4 @@
+using ElemCo
 @testset "parse_orbstring" begin
 
 orbs = "-3.1+-2.2+1.3"
@@ -6,11 +7,11 @@ orbsym = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
  2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
  3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
 orbs_ref = [1,2,3,53,54,82]
-@test parse_orbstring(orbs;orbsym) == orbs_ref
+@test ElemCo.parse_orbstring(orbs;orbsym) == orbs_ref
 
 orbs = "-5+7-9"
 orbsym = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
  1,1,1,1,1,1,1]
 orbs_ref = [1,2,3,4,5,7,8,9]
-@test parse_orbstring(orbs;orbsym) == orbs_ref
+@test ElemCo.parse_orbstring(orbs;orbsym) == orbs_ref
 end

@@ -72,7 +72,7 @@ using ..ElemCo.CCTools
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy 
 export calc_cc, calc_pertT, calc_ΛpertT
-export calc_lm_cc
+export calc_lm_cc, calc_1RDM
 
 include("cc_lagrange.jl")
 
@@ -245,6 +245,13 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
   # <ik|j \hat l>
   hd_oooo = ints2(EC,o1*o2*o1*o2)
+  if mixed
+    # <ik|\hat j l>
+    hd_oooo2 = deepcopy(hd_oooo)
+    oovo = ints2(EC,o1*o2*v1*o2)
+    @tensoropt hd_oooo2[i,j,k,l] += oovo[i,j,d,l] * T1[d,k]
+    oovo = nothing
+  end
   ooov = ints2(EC,o1*o2*o1*v2)
   @tensoropt hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
   ooov = nothing
@@ -267,16 +274,22 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     hd_vvoo = nothing
     t1 = print_time(EC,t1,"dress hd_"*v1*v2*o1*o2,3)
   end
-  # <\hat a k| \hat j l)
+  # <\hat a k| \hat j l>
   hd_vooo = ints2(EC,v1*o2*o1*o2)
-  vovo = ints2(EC,v1*o2*v1*o2)
-  @tensoropt hd_vooo[a,k,j,l] -= hd_oooo[i,k,j,l] * T1[a,i]
+  if !mixed
+    @tensoropt hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
+  else
+    @tensoropt hd_vooo[a,k,j,l] -= hd_oooo2[i,k,j,l] * T1[a,i]
+    hd_oooo2 = nothing
+  end
   if no2 > 0
+    vovo = ints2(EC,v1*o2*v1*o2)
     @tensoropt hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
+    vovo = nothing
   end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*o1*o2,3)
   if mixed
-    # <k\hat a | l\hat j )
+    # <k\hat a | l\hat j >
     hd_ovoo = ints2(EC,o1*v2*o1*o2)
     ovov = ints2(EC,o1*v2*o1*v2)
     if no1 > 0 && no2 > 0
@@ -1412,9 +1425,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   if EC.options.cc.use_kext
     # last two indices of integrals (apart from αβ) are stored as upper triangular 
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
-    if(EC.fd.uhf)
+    if EC.fd.uhf
       # αα
-      int2a = integ2(EC.fd,:α)
+      int2a = integ2(EC.fd, :α)
       @assert ndims(int2a) == 3 "Triangular storage of integrals expected!"
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
       @tensoropt rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
@@ -1426,7 +1439,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       R2a += K2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
-        int2b = integ2(EC.fd,:β)
+        int2b = integ2(EC.fd, :β)
         D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
         @tensoropt rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
@@ -1436,7 +1449,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
         rK2pqb = nothing
         R2b += K2pqb[SP['V'],SP['V'],:,:]
         # αβ
-        int2ab = integ2(EC.fd,:αβ)
+        int2ab = integ2(EC.fd, :αβ)
         D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
         @tensoropt K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
         D2ab = nothing
