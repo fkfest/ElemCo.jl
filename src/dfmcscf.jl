@@ -34,10 +34,11 @@ end
 """
     dffockCAS(EC::ECInfo, cMO::Matrix, D1::Matrix)
 
-Calculate fock matrices in atomic orbital basis.     
+Calculate fock matrices in molecular orbital basis.     
 Return matrix fock and fockClosed.
 fockClosed[μ,ν] = ``^cf_μ^ν = h_μ^ν + 2v_{μi}^{νi} - v_{μi}^{iν}``, 
 fock[μ,ν] = ``f_μ^ν = ^cf_μ^ν + D^t_u (v_{μt}^{νu} - 0.5 v_{μt}^{uν})``.
+fock_MO and fockClosed_MO are transformed into MO basis with coefficients cMO.
 """
 function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
@@ -72,7 +73,6 @@ return matrix A[p,q]
 function dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2)
-  CMO2 = cMO[:,occ2]
   CMOa = cMO[:,occ1o] # to be modified
   # Apj
   Apj = fock_MO[:, occ2] .* 2.0
@@ -637,12 +637,12 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
   end
   if !micro_converged
     alphaSearchIt = maxit4alpha
-    println("micro NOT converged")
+    # println("micro NOT converged")
   end
   if alpha ≈ 1.0 && !reject
     trustTune = false
   end
-  println(alphas)
+  #println(alphas)
   return alpha, x, vec, davCount, alphaSearchIt, trustTune
 end 
 
