@@ -193,6 +193,7 @@ macro ECinit()
   return quote
     $(esc(:EC)) = ECInfo()
     try
+      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))
       println("Basis: ",$(esc(:basis)))
       $(esc(:EC)).ms = MSys($(esc(:geometry)),$(esc(:basis)))
@@ -200,6 +201,7 @@ macro ECinit()
       isa(err, UndefVarError) || rethrow(err)
     end
     try
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:geometry))
       println("FCIDump: ",$(esc(:fcidump)))
       $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
     catch err
@@ -699,28 +701,21 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       calc_lm_cc(EC, ecmethod)
     end
 
-    if closed_shell_method
-      if ecmethod.exclevel[3] != :none
-        do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
-        save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        if has_prefix(ecmethod, "Λ")
-          @assert !save_pert_t3 "Saving perturbative triples not implemented for ΛCCSD(T)"
-          ET3, ET3b = calc_ΛpertT(EC)
-        else
-          ET3, ET3b = calc_pertT(EC; save_t3 = save_pert_t3)
-        end
-        println()
-        println("$main_name[T] total energy: ",ECC+ET3b+EHF)
-        println("$main_name(T) correlation energy: ",ECC+ET3)
-        println("$main_name(T) total energy: ",ECC+ET3+EHF)
-        if do_full_t3
-          cc3 = (ecmethod.exclevel[3] == :pertiter)
-          ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
-          main_name = method_name(ecmethod)
-          println("$main_name correlation energy: ",ECC)
-          println("$main_name total energy: ",ECC+EHF)
-        end 
-      end
+    if ecmethod.exclevel[3] != :none
+      do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
+      save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
+      ET3, ET3b = calc_pertT(EC, ecmethod; save_t3 = save_pert_t3)
+      println()
+      println("$main_name[T] total energy: ",ECC+ET3b+EHF)
+      println("$main_name(T) correlation energy: ",ECC+ET3)
+      println("$main_name(T) total energy: ",ECC+ET3+EHF)
+      if do_full_t3
+        cc3 = (ecmethod.exclevel[3] == :pertiter)
+        ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
+        main_name = method_name(ecmethod)
+        println("$main_name correlation energy: ",ECC)
+        println("$main_name total energy: ",ECC+EHF)
+      end 
     end
     println()
     flush(stdout)
