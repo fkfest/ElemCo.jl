@@ -25,13 +25,21 @@
     filecolor=magenta,      % color of file links
     urlcolor=cyan           % color of external links
 }
+
 \DeclareUnicodeCharacter{039B}{\Lambda}
 \DeclareUnicodeCharacter{03B4}{\delta}
 \DeclareUnicodeCharacter{03B1}{\alpha}
 \DeclareUnicodeCharacter{03B2}{\beta}
+
+\newcommand{\veryshortarrow}[1][3pt]{\mathrel{%
+   \hbox{\rule[\dimexpr\fontdimen22\textfont2-.2pt\relax]{#1}{.4pt}}%
+   \mkern-4mu\hbox{\usefont{U}{lasy}{m}{n}\symbol{41}}}}
+
 \newcommand{\NL}{\nonumber \\}
 \newcommand{\nl}{\nonumber \\ & }
 \newcommand{\op}{\hat}
+\newcommand{\perm}[1]{{\cal P}\left(#1\right)}
+\newcommand{\Perm}[2]{{\cal P}\left({#1}\veryshortarrow {#2}\right)}
 \newcommand{\sop}[1]{{\cal S}\left(#1\right)}
 \newcommand{\Sop}[2]{{\cal S}\left(#1,#2\right)}
 \newcommand{\asop}[1]{{\cal A}\left(#1\right)}
@@ -79,6 +87,14 @@ and the lower indices correspond to the creation and the upper indices to the an
   \frac{1}{2} v_{pq}^{rs} \left\{\op a^\dagger_p \op a^\dagger_q \op a_s \op a_r\right\}_N,
 \end{equation}
 i.e., $f_p^q = <p|\op f|q>$ and $v_{pq}^{rs} = <pq|rs>$.
+
+Permutation operators:
+\begin{equation}
+\begin{aligned}
+\perm{ab} X^{ij}_{ab} &= X^{ij}_{ba} \\
+\Perm{ab}{ba} X^{ij}_{ab} &= X^{ij}_{ba} \\
+\end{aligned}
+\end{equation}
 
 Symmetrization operators:
 \begin{equation}
@@ -986,6 +1002,128 @@ v_{\spa{m}\spb{n}}^{\spa{e}\spb{f}}
 + Λ_{\spb{n}}^{\spb{f}} \hat f_{\spa{m}}^{\spa{e}}. 
 \end{aligned}
 \end{equation}
+
+\section{Perturbative triples for unrestricted CCSD}
+The perturbative triples equations for unrestricted CCSD are given by
+\begin{equation}
+\begin{aligned}
+E_{[T]} &= \frac{1}{6}\sum_{\spa{i}\lt \spa{j}\lt \spa{k}} K^{\spa{a}\spa{b}\spa{c}}_{\spa{i}\spa{j}\spa{k}} T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}}
++\frac{1}{6}\sum_{\spb{i}\lt \spb{j}\lt \spb{k}} K^{\spb{a}\spb{b}\spb{c}}_{\spb{i}\spb{j}\spb{k}} T_{\spb{a}\spb{b}\spb{c}}^{\spb{i}\spb{j}\spb{k}} 
++\frac{1}{2}\sum_{\spa{i}\lt \spa{j}; \spb{k}} K^{\spa{a}\spa{b}\spb{c}}_{\spa{i}\spa{j}\spb{k}} X_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}}
++\frac{1}{2}\sum_{\spb{i}\lt \spb{j}; \spa{k}} K^{\spb{a}\spb{b}\spa{c}}_{\spb{i}\spb{j}\spa{k}} X_{\spb{a}\spb{b}\spa{c}}^{\spb{i}\spb{j}\spa{k}}.
+\end{aligned}
+\end{equation}
+$K^{\spa{a}\spa{b}\spa{c}}_{\spa{i}\spa{j}\spa{k}}$ and $T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}}$ (and the all-$\beta$-counterparts) 
+are calculated for a triangular set of indices $\spa{i}\lt \spa{j}\lt \spa{k}$ 
+(with $\spa{k}=3:n_\alpha$),
+\begin{equation}
+\begin{aligned}
+K^{\spa{a}\spa{b}\spa{c}}_{\spa{i}\spa{j}\spa{k}} &= K_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}}
+= \asop{\spa{a}\spa{b}\spa{c}} \left\{ 
+  v_{\spa{b}\spa{c}}^{\spa{d}\spa{k}} T^{\spa{i}\spa{j}}_{\spa{a}\spa{d}}
++ v_{\spa{c}\spa{b}}^{\spa{d}\spa{j}} T^{\spa{i}\spa{k}}_{\spa{a}\spa{d}}
++ v_{\spa{b}\spa{a}}^{\spa{d}\spa{i}} T^{\spa{j}\spa{k}}_{\spa{d}\spa{c}}
+- \half\left(\bar v_{\spa{c}\spa{l}}^{\spa{k}\spa{j}} T^{\spa{i}\spa{l}}_{\spa{a}\spa{b}}
++ \bar v_{\spa{c}\spa{l}}^{\spa{k}\spa{i}} T^{\spa{l}\spa{j}}_{\spa{a}\spa{b}}
++ \bar v_{\spa{a}\spa{l}}^{\spa{i}\spa{j}} T^{\spa{k}\spa{l}}_{\spa{c}\spa{b}}
+\right)
+\right\},\\
+\bar v_{\spa{a}\spa{l}}^{\spa{i}\spa{j}} &= v_{\spa{a}\spa{l}}^{\spa{i}\spa{j}} - v_{\spa{a}\spa{l}}^{\spa{j}\spa{i}},\\
+T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}} &= 
+\frac{K_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}}}
+{\epsilon_{\spa{i}} +\epsilon_{\spa{j}} +\epsilon_{\spa{k}} -\epsilon_{\spa{a}} -\epsilon_{\spa{b}} -\epsilon_{\spa{c}}}
+\end{aligned}
+\end{equation}
+$K^{\spa{a}\spa{b}\spb{c}}_{\spa{i}\spa{j}\spb{k}}$ and $T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}}$ (and the spin-flipped counterparts) 
+are calculated for a triangular set of first two indices $\spa{i}\lt \spa{j}$ 
+(with $\spa{j}=2:n_\alpha$),
+\begin{equation}
+\begin{aligned}
+K^{\spa{a}\spa{b}\spb{c}}_{\spa{i}\spa{j}\spb{k}} &= K_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}}
+= \asop{\spa{a}\spa{b}} \left\{ 
+  v_{\spa{b}\spb{c}}^{\spa{d}\spb{k}} T^{\spa{i}\spa{j}}_{\spa{a}\spa{d}}
++ v_{\spa{b}\spa{a}}^{\spa{d}\spa{i}} T^{\spa{j}\spb{k}}_{\spa{d}\spb{c}}
++ v_{\spa{a}\spa{b}}^{\spa{d}\spa{j}} T^{\spa{i}\spb{k}}_{\spa{d}\spb{c}}
++ v_{\spa{a}\spb{c}}^{\spa{i}\spb{d}} T^{\spa{j}\spb{k}}_{\spa{b}\spb{d}}
++ v_{\spa{b}\spb{c}}^{\spa{j}\spb{d}} T^{\spa{i}\spb{k}}_{\spa{a}\spb{d}}
+- \bar v_{\spa{a}\spa{l}}^{\spa{i}\spa{j}} T^{\spa{l}\spb{k}}_{\spa{b}\spb{c}}
+\right.\\
+&\left.
+- v_{\spa{b}\spb{l}}^{\spa{j}\spb{k}} T^{\spa{i}\spb{l}}_{\spa{a}\spb{c}}
+- v_{\spa{a}\spb{l}}^{\spa{i}\spb{k}} T^{\spa{j}\spb{l}}_{\spa{b}\spb{c}}
+\right\}
+- v_{\spa{l}\spb{c}}^{\spa{j}\spb{k}} T^{\spa{i}\spa{l}}_{\spa{a}\spa{b}}
+- v_{\spa{l}\spb{c}}^{\spa{i}\spb{k}} T^{\spa{l}\spa{j}}_{\spa{a}\spa{b}}
+,\\
+T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}} &= 
+\frac{K_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}}}
+{\epsilon_{\spa{i}} +\epsilon_{\spa{j}} +\epsilon_{\spb{k}} -\epsilon_{\spa{a}} -\epsilon_{\spa{b}} -\epsilon_{\spb{c}}}
+\end{aligned}
+\end{equation}
+
+The (T) correction contains additionally the following terms,
+\begin{equation}
+\begin{aligned}
+\label{eq:Euccsd(t)}
+E_{(T)}&=E_{[T]} 
++ \sum_{\spa{i}\lt\spa{j}\lt\spa{k}}\left[ 
+v_{\spa{j}\spa{k}}^{\spa{b}\spa{c}} T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}} T_{\spa{i}}^{\dagger \spa{a}} 
++v_{\spa{i}\spa{k}}^{\spa{a}\spa{c}} T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}} T_{\spa{j}}^{\dagger \spa{b}} 
++v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}} T_{\spa{k}}^{\dagger \spa{c}} 
+\right.\\
+&\left.
+ + \half\left( T_{\spa{j}\spa{k}}^{\dagger \spa{b}\spa{c}} T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}} f_{\spa{i}}^{\spa{a}}
+ + T_{\spa{i}\spa{k}}^{\dagger \spa{a}\spa{c}} T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}} f_{\spa{j}}^{\spa{b}}
+ + T_{\spa{i}\spa{j}}^{\dagger \spa{a}\spa{b}} T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}} f_{\spa{k}}^{\spa{c}}
+ \right)\right]\\
+&+ \sum_{\spa{i}\lt\spa{j}; \spb{k}} \left[
+v_{\spa{j}\spb{k}}^{\spa{b}\spb{c}} T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}} T_{\spa{i}}^{\dagger \spa{a}} 
++v_{\spa{i}\spb{k}}^{\spa{a}\spb{c}} T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}} T_{\spa{j}}^{\dagger \spa{b}} 
+ + v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}} T_{\spb{k}}^{\dagger \spb{c}} 
+\right.\\
+&\left.
+ + T_{\spa{j}\spb{k}}^{\dagger \spa{b}\spb{c}} T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}} f_{\spa{i}}^{\spa{a}} 
+ + T_{\spa{i}\spb{k}}^{\dagger \spa{a}\spb{c}} T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}} f_{\spa{j}}^{\spa{b}} 
+ + \half T_{\spa{i}\spa{j}}^{\dagger \spa{a}\spa{b}} T_{\spa{a}\spa{b}\spb{c}}^{\spa{i}\spa{j}\spb{k}} f_{\spb{k}}^{\spb{c}} 
+ \right] \\
+ &+ \mbox{spin-flipped terms}.
+\end{aligned}
+\end{equation}
+
+In case of \textbf{$\mathbf{\Lambda}$UCCSD(T)}, $K^{\spa{a}\spa{b}\spa{c}}_{\spa{i}\spa{j}\spa{k}}$ and $T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}}$ etc 
+are different from $K^{\spa{a}\spa{b}\spa{c}}_{\spa{i}\spa{j}\spa{k}}$ and $T_{\spa{a}\spa{b}\spa{c}}^{\spa{i}\spa{j}\spa{k}}$
+and can be calculated by replacing amplitudes with Lagrange multipliers (and integrals with transpose integrals) in the above equations,
+\begin{equation}
+\begin{aligned}
+K^{\spa{a}\spa{b}\spa{c}}_{\spa{i}\spa{j}\spa{k}} 
+&= \asop{\spa{a}\spa{b}\spa{c}} \left\{ 
+  v_{\spa{d}\spa{k}}^{\spa{b}\spa{c}} \Lambda_{\spa{i}\spa{j}}^{\spa{a}\spa{d}}
++ v_{\spa{d}\spa{j}}^{\spa{c}\spa{b}} \Lambda_{\spa{i}\spa{k}}^{\spa{a}\spa{d}}
++ v_{\spa{d}\spa{i}}^{\spa{b}\spa{a}} \Lambda_{\spa{j}\spa{k}}^{\spa{d}\spa{c}}
+- \half\left(\bar v_{\spa{k}\spa{j}}^{\spa{c}\spa{l}} \Lambda_{\spa{i}\spa{l}}^{\spa{a}\spa{b}}
++ \bar v_{\spa{k}\spa{i}}^{\spa{c}\spa{l}} \Lambda_{\spa{l}\spa{j}}^{\spa{a}\spa{b}}
++ \bar v_{\spa{i}\spa{j}}^{\spa{a}\spa{l}} \Lambda_{\spa{k}\spa{l}}^{\spa{c}\spa{b}}
+\right)
+\right\},\\
+K^{\spa{a}\spa{b}\spb{c}}_{\spa{i}\spa{j}\spb{k}} 
+&= \asop{\spa{a}\spa{b}} \left\{ 
+  v_{\spa{d}\spb{k}}^{\spa{b}\spb{c}} \Lambda_{\spa{i}\spa{j}}^{\spa{a}\spa{d}}
++ v_{\spa{d}\spa{i}}^{\spa{b}\spa{a}} \Lambda_{\spa{j}\spb{k}}^{\spa{d}\spb{c}}
++ v_{\spa{d}\spa{j}}^{\spa{a}\spa{b}} \Lambda_{\spa{i}\spb{k}}^{\spa{d}\spb{c}}
++ v_{\spa{i}\spb{d}}^{\spa{a}\spb{c}} \Lambda_{\spa{j}\spb{k}}^{\spa{b}\spb{d}}
++ v_{\spa{j}\spb{d}}^{\spa{b}\spb{c}} \Lambda_{\spa{i}\spb{k}}^{\spa{a}\spb{d}}
+- \bar v_{\spa{i}\spa{j}}^{\spa{a}\spa{l}} \Lambda_{\spa{l}\spb{k}}^{\spa{b}\spb{c}}
+\right.\\
+&\left.
+- v_{\spa{j}\spb{k}}^{\spa{b}\spb{l}} \Lambda_{\spa{i}\spb{l}}^{\spa{a}\spb{c}}
+- v_{\spa{i}\spb{k}}^{\spa{a}\spb{l}} \Lambda_{\spa{j}\spb{l}}^{\spa{b}\spb{c}}
+\right\}
+- v_{\spa{j}\spb{k}}^{\spa{l}\spb{c}} \Lambda_{\spa{i}\spa{l}}^{\spa{a}\spa{b}}
+- v_{\spa{i}\spb{k}}^{\spa{l}\spb{c}} \Lambda_{\spa{l}\spa{j}}^{\spa{a}\spa{b}}
+,\\
+\end{aligned}
+\end{equation}
+and the conjugate-transpose of the amplitudes in \eq{eq:Euccsd(t)} are replaced with the Lagrange multipliers.
 
 
 \chapter{Two determinant coupled cluster}
