@@ -60,6 +60,10 @@ Base.@kwdef mutable struct ScfOptions
   guess::Symbol = :SAD
   """ `⟨0.0⟩` Fermi-Dirac temperature for starting guess (at the moment works only for BO-HF). """
   temperature_guess::Float64 = 0.0
+  """`⟨false⟩` Generate pseudo-canonical basis instead of solving the SCF problem,
+  i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
+  At the moment, it works only for BO-HF."""
+  pseudo::Bool = false
 end
 
 """ 
