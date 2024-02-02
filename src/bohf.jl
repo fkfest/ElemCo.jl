@@ -207,7 +207,12 @@ end
   Perform BO-HF using integrals from fcidump EC.fd.
 """
 function bohf(EC::ECInfo)
-  print_info("Bi-orthogonal Hartree-Fock")
+  pseudo = EC.options.scf.pseudo
+  if pseudo
+    print_info("Bi-orthogonal pseudo-canonicalization")
+  else
+    print_info("Bi-orthogonal Hartree-Fock")
+  end
   setup_space_fd!(EC)
   flush(stdout)
   SP = EC.space
@@ -220,10 +225,16 @@ function bohf(EC::ECInfo)
   hsmall = integ1(EC.fd,:α)
   EHF = 0.0
   previousEHF = 0.0
-  println("Iter     Energy      DE          Res         Time")
+  if pseudo
+    println("   Energy       Res         Time")
+    maxit = 1
+  else
+    println("Iter     Energy      DE          Res         Time")
+    maxit = EC.options.scf.maxit
+  end
   flush(stdout)
   t0 = time_ns()
-  for it=1:EC.options.scf.maxit
+  for it=1:maxit
     fock = gen_fock(EC, cMOl, cMOr)
     den = gen_density_matrix(EC, cMOl, cMOr, SP['o'])
     fhsmall = fock + hsmall
@@ -234,13 +245,25 @@ function bohf(EC::ECInfo)
     Δfock = den'*fock - fock*den'
     var = sum(abs2,Δfock)
     tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    if pseudo
+      @printf "%12.8f %10.2e %8.2f \n" EHF var tt
+    else
+      @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    end
     flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
-    fock, = perform(diis,[fock],[Δfock])
-    ϵ,cMOr = eigen(fock)
+    if pseudo
+      occ = SP['o']
+      vir = SP['v']
+      cMOr .= 0.0
+      ϵ[occ],cMOr[occ,occ] = eigen(fock[occ,occ])
+      ϵ[vir],cMOr[vir,vir] = eigen(fock[vir,vir])
+    else
+      fock, = perform(diis,[fock],[Δfock])
+      ϵ,cMOr = eigen(fock)
+    end
     cMOl = (inv(cMOr))'
     # display(ϵ)
   end
@@ -262,7 +285,12 @@ end
   Perform BO-UHF using integrals from fcidump EC.fd.
 """
 function bouhf(EC::ECInfo)
-  print_info("Bi-orthogonal unrestricted Hartree-Fock")
+  pseudo = EC.options.scf.pseudo
+  if pseudo
+    print_info("Bi-orthogonal unrestricted pseudo-canonicalization")
+  else
+    print_info("Bi-orthogonal unrestricted Hartree-Fock")
+  end
   setup_space_fd!(EC)
   flush(stdout)
   SP = EC.space
@@ -276,10 +304,16 @@ function bouhf(EC::ECInfo)
   hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
   EHF = 0.0
   previousEHF = 0.0
-  println("Iter     Energy      DE          Res         Time")
+  if pseudo
+    println("   Energy       Res         Time")
+    maxit = 1
+  else
+    println("Iter     Energy      DE          Res         Time")
+    maxit = EC.options.scf.maxit
+  end
   flush(stdout)
   t0 = time_ns()
-  for it=1:EC.options.scf.maxit
+  for it=1:maxit
     fock = gen_ufock(EC, cMOl, cMOr)
     efhsmall = Any[0.0, 0.0]
     Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
@@ -296,14 +330,28 @@ function bouhf(EC::ECInfo)
     ΔE = EHF - previousEHF 
     previousEHF = EHF
     tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    if pseudo
+      @printf "%12.8f %10.2e %8.2f \n" EHF var tt
+    else
+      @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    end
     flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
-    fock = perform(diis, fock, Δfock)
-    for ispin = 1:2
-      ϵ[ispin],cMOr[ispin] = eigen(fock[ispin])
+    if !pseudo
+      fock = perform(diis, fock, Δfock)
+    end
+    for (ispin, ov) = enumerate(["ov", "OV"])
+      if pseudo
+        occ = SP[ov[1]]
+        vir = SP[ov[2]]
+        cMOr[ispin] .= 0.0
+        ϵ[ispin][occ],cMOr[ispin][occ,occ] = eigen(fock[ispin][occ,occ])
+        ϵ[ispin][vir],cMOr[ispin][vir,vir] = eigen(fock[ispin][vir,vir])
+      else
+        ϵ[ispin],cMOr[ispin] = eigen(fock[ispin])
+      end
       cMOl[ispin] = (inv(cMOr[ispin]))'
     end
     # display(ϵ)
