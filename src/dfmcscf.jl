@@ -1,5 +1,5 @@
 module DFMCSCF
-using LinearAlgebra, TensorOperations, Printf, TimerOutputs
+using LinearAlgebra, TensorOperations, Printf, TimerOutputs, JLD2
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
@@ -47,7 +47,7 @@ function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
   CMOa = cMO[:,occ1o] # to be modified
 
   # fockClosed
-  hsmall = load(EC,"h_AA")
+  hsmall = TensorTools.load(EC,"h_AA")
   @tensoropt L[L] := μjL[μ,j,L] * CMO2[μ,j]
   @tensoropt fockClosed[μ,ν] := hsmall[μ,ν] - μjL[μ,j,L]*μjL[ν,j,L]
   @tensoropt fockClosed[μ,ν] += 2.0*L[L]*μνL[μ,ν,L]
@@ -363,7 +363,7 @@ Calculate the energy with the given density matrices and (updated) cMO,
 function calc_realE(μuL, EC::ECInfo, fockClosed_MO::Matrix, D1::Matrix, D2, cMO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
-  hsmall = load(EC,"h_AA")
+  hsmall = TensorTools.load(EC,"h_AA")
   CMO2 = cMO[:,occ2] 
   CMOa = cMO[:,occ1o]
   @tensoropt E = CMO2[μ,i] * hsmall[μ,ν] * CMO2[ν,i]
@@ -582,9 +582,8 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
   xalphar = -1.0
   micro_converged = false
   davItMax = 200 # for davidson eigenvalue solving algorithm
-  davError = 1e-7
   bisecdamp = EC.options.scf.bisecdamp
-  γ =  0.1 # gradient scaling factor for micro-iteration accuracy
+  γ = EC.options.scf.gamaDavScale # gradient scaling factor for micro-iteration accuracy
   davError = γ * norm(g)
   alphaSearchIt = 0
   alphas = Array{Float64}(undef,0)
@@ -722,13 +721,14 @@ function dfmcscf(EC::ECInfo; direct=false)
   maxit4alpha = EC.options.scf.maxit4alpha
   HessianType = EC.options.scf.HessianType
   initVecType = EC.options.scf.initVecType
+  println(EC.options.scf.bisecdamp, "  ", maxit4alpha)
   print_info("DF-MCSCF")
   setup_space_ms!(EC)
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   print_initial(Enuc, HessianType)
 
   #load info
-  sao = load(EC,"S_AA")
+  sao = TensorTools.load(EC,"S_AA")
   nAO = size(sao,2) # number of atomic orbitals
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
@@ -766,9 +766,11 @@ function dfmcscf(EC::ECInfo; direct=false)
   E_2o = 0.0
   E = 0.0
   prev_cMO = deepcopy(cMO)
-  μνL = load(EC,"AAL")
+  μνL = TensorTools.load(EC,"AAL")
   prev_fock_MO = zeros(nAO,nAO)
   prev_fockClosed_MO = zeros(nAO,nAO)
+  Es = Array{Float64}(undef,0)
+  davidsonSteps = Array{Int}(undef,0)
   μjL = zeros(nAO,n_2,size(μνL,3))
   μuL = zeros(nAO,n_1o,size(μνL,3))
   # macro loop, g and h updated
@@ -779,6 +781,8 @@ function dfmcscf(EC::ECInfo; direct=false)
     @timeit "fock calc" fock_MO, fockClosed_MO= dffockCAS(μνL, μjL, μuL, EC, cMO, D1)
     E_former = E
     E = calc_realE(μuL, EC, fockClosed_MO, D1, D2, cMO)
+    push!(Es, E+Enuc)
+    push!(davidsonSteps, davCount)
     # check if reject the update and tune trust
     if iteration_times > 0
       tt = (time_ns() - t0)/10^9
@@ -848,6 +852,7 @@ function dfmcscf(EC::ECInfo; direct=false)
     smo = cMO' * sao * cMO
     cMO = cMO * Hermitian(smo)^(-1/2)
   end
+  @save "output_"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*".jld2" Es davidsonSteps
   if iteration_times < IterMax
     println("Convergent!")
   else

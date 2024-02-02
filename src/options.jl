@@ -62,15 +62,15 @@ Base.@kwdef mutable struct ScfOptions
   bisecdamp::Float64 = 0.5
   """`⟨64⟩` maximum number of iterations for Multiconfiguration SCF. """
   IterMax::Int = 100
-  """`⟨100⟩` maximum number of iterations for searching for alpha value to get a reasonalbe guess within trust radius. """
+  """`⟨100⟩` maximum number of iterations for searching for alpha value to get a reasonalbe guess within trust radius for MCSCF. """
   maxit4alpha::Int = 3
-  """`⟨:SO⟩` Hessian Type:
+  """`⟨:SO⟩` Hessian Type for MCSCF:
   - `:SO` Second Order Approximation
   - `:SCI` Super CI
   - `:SO-SCI` Second Order Approximation combing Super CI
   """
-  HessianType::Symbol = :SO
-  """`` Initial Vectors Type:
+  HessianType::Symbol = :SO_SCI
+  """`` Initial Vectors Type for MCSCF:
   - `:RANDOM` one random vector
   - `:INHERIT` from last macro/micro iterations
   - `:GRADIENT_SET` b0 as [1,0,0,...], b1 as gradient
@@ -79,6 +79,8 @@ Base.@kwdef mutable struct ScfOptions
   initVecType::Symbol = :GRADIENT_SETPLUS
   """ `⟨0.0⟩` Fermi-Dirac temperature for starting guess (at the moment works only for BO-HF). """
   temperature_guess::Float64 = 0.0
+  """ `⟨0.8⟩` the threshold of davidson convergence residure norm scaled to norm of g the gradient, for MCSCF. """
+  gamaDavScale::Float64 = 0.8
 end
 
 """ 
