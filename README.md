@@ -15,15 +15,19 @@ The integrals are obtained from a FCIDUMP file or calculated using the `Gaussian
 | CCSD     | :heavy_check_mark: |                  |:heavy_check_mark:      |
 | RCCSD    | :heavy_check_mark: |                  |                        |
 | UCCSD    | :heavy_check_mark: |                  |                        |
-| ΛCCSD    | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
-| CCSD(T)  | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
-| ΛCCSD(T) | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
+| ΛCCSD    | :heavy_check_mark: |                  |:heavy_check_mark:      |
+| ΛUCCSD   | :heavy_check_mark: |                  |                        |
+| CCSD(T)  | :heavy_check_mark: |                  |:heavy_check_mark:      |
+| UCCSD(T) | :heavy_check_mark: |                  |                        |
+| ΛCCSD(T) | :heavy_check_mark: |                  |:heavy_check_mark:      |
+| ΛUCCSD(T)| :heavy_check_mark: |                  |                        |
 | FR-CCSD  | :heavy_check_mark: |                  |                        |
 | 2D-CCSD  | :heavy_check_mark: |                  |                        |
 | DCSD     | :heavy_check_mark: |                  |:heavy_check_mark:      |
 | RDCSD    | :heavy_check_mark: |                  |                        |
 | UDCSD    | :heavy_check_mark: |                  |                        |
-| ΛDCSD    | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
+| ΛDCSD    | :heavy_check_mark: |                  |:heavy_check_mark:|
+| ΛUDCSD   | :heavy_check_mark: |                  |                        |
 | FR-DCSD  | :heavy_check_mark: |                  |                        |
 | 2D-DCSD  | :heavy_check_mark: |                  |                        |
 | SVD-DCSD | :heavy_check_mark: |:heavy_check_mark:|:heavy_exclamation_mark:|
