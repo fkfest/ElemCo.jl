@@ -257,7 +257,7 @@ function bohf(EC::ECInfo)
     if pseudo
       occ = SP['o']
       vir = SP['v']
-      cMOr .= 0.0
+      cMOr = zeros(Complex{Float64}, norb, norb)
       ϵ[occ],cMOr[occ,occ] = eigen(fock[occ,occ])
       ϵ[vir],cMOr[vir,vir] = eigen(fock[vir,vir])
     else
@@ -346,7 +346,7 @@ function bouhf(EC::ECInfo)
       if pseudo
         occ = SP[ov[1]]
         vir = SP[ov[2]]
-        cMOr[ispin] .= 0.0
+        cMOr[ispin] = zeros(Complex{Float64}, norb, norb)
         ϵ[ispin][occ],cMOr[ispin][occ,occ] = eigen(fock[ispin][occ,occ])
         ϵ[ispin][vir],cMOr[ispin][vir,vir] = eigen(fock[ispin][vir,vir])
       else
