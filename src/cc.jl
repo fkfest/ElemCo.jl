@@ -455,7 +455,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
       save!(EC,"d_"*v1*v2*v1*o2,d_vvvo)
       d_vvvo = nothing
       d_vvov = load(EC,"hd_"*v1*v2*o1*v2)
-      @tensoropt d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T1[c,i]
+      @tensoropt d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T12[c,i]
       save!(EC,"d_"*v1*v2*o1*v2,d_vvov)
       d_vvov = nothing
     end
@@ -1092,9 +1092,6 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   end
 
   if ndims(T1a) == 2
-    if !EC.options.cc.use_kext
-      error("open-shell CCSD only implemented with kext")
-    end
     calc_dressed_ints(EC,T1a,T1b)
     t1 = print_time(EC,t1,"dressing",2)
   else
