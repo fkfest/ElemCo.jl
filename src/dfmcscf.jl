@@ -773,8 +773,16 @@ function dfmcscf(EC::ECInfo; direct=false)
   davidsonSteps = Array{Int}(undef,0)
   μjL = zeros(nAO,n_2,size(μνL,3))
   μuL = zeros(nAO,n_1o,size(μνL,3))
+  convIter = IterMax
+  converged = false
+  energyThreshold = 1e-8
+  eThreg = 1e-4
+  if HessianType == :SO
+    energyThreshold = 1e-6
+    eThreg = 1e-2
+  end
   # macro loop, g and h updated
-  while iteration_times < IterMax
+  while iteration_times < IterMax && iteration_times < convIter
     # calc energy E with updated cMO
     @timeit "μjL" @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
     @timeit "μuL" @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
@@ -788,6 +796,7 @@ function dfmcscf(EC::ECInfo; direct=false)
       tt = (time_ns() - t0)/10^9
       @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i %3i \n" iteration_times E+Enuc E-E_former norm(g) tt trust sqrt(sum(x.^2)) λ davCount alphaSearchIt
       reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust, trustTune)
+      iteration_times += 1
       if reject
         iteration_times -= 1
         cMO = prev_cMO
@@ -797,21 +806,23 @@ function dfmcscf(EC::ECInfo; direct=false)
         fockClosed_MO = deepcopy(prev_fockClosed_MO)
         E = E_former
         inherit_large = false
-      elseif E_former - E < 1e-7 && E < E_former && norm(g) < 5e-3
-        break
+      elseif E_former - E < energyThreshold && E < E_former && norm(g) < eThreg && !converged
+        convIter = iteration_times+1
+        converged = true
       end
     else
+      iteration_times += 1
       println("Initial energy: ", E+Enuc)
       println("Iter     Energy      DE           norm(g)       Time      trust        sumx2        α      microIter")
     end
     prev_fock_MO = deepcopy(fock_MO)
     prev_fockClosed_MO = deepcopy(fockClosed_MO)
-    iteration_times += 1
     # calc g and h with updated cMO
     A = dfACAS(μuL, EC,cMO,D1,D2,fock_MO,fockClosed_MO)
     g = calc_g(A, EC)
-    if norm(g) < 1e-5
-      break
+    if norm(g) < 1e-5 && !converged
+      convIter = iteration_times+1
+      converged = true
     end
     if HessianType == :SO
       @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
