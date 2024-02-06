@@ -300,6 +300,49 @@ function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, foc
   return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 end
 
+function calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
+  occ1o = setdiff(EC.space['o'],occ2) # to be modified
+  occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
+  n_2 = size(occ2,1)
+  n_1o = size(occ1o, 1)
+  n_v = size(occv,1)
+  num_MO = [n_2,n_1o,n_v]
+  index_MO = [occ2,occ1o,occv]
+  A = A + A'
+
+  # precalculate the density fitting integrals in molecular orbital basis
+  @tensoropt ijL[i,j,L] := μjL[μ,j,L] * cMO[:,occ2][μ,i]
+  @tensoropt tiL[t,i,L] := μjL[μ,i,L] * cMO[:,occ1o][μ,t]
+  @tensoropt aiL[a,i,L] := μjL[μ,i,L] * cMO[:,occv][μ,a]
+  @tensoropt tuL[t,u,L] := μuL[μ,u,L] * cMO[:,occ1o][μ,t]
+  @tensoropt atL[a,t,L] := μuL[μ,t,L] * cMO[:,occv][μ,a]
+
+  DFint_MO = [[ijL,tiL,aiL],[tiL,tuL,atL],[aiL,atL,abL]]
+  Iab = 1.0 * Matrix(I,n_v,n_v)
+
+  h_3131 = zeros(1,1)
+  h_3121 = zeros(1,1)
+  h_3231 = zeros(1,1)
+
+  # h_3232 --> G3232
+  h_3232 = G_rtsu_calc(3,3, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
+  h_3232 .= h_3232 .* 2.0
+  @tensoropt h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
+  
+  h_3221, h_2121 = h_calc_SOpart(num_MO, index_MO, DFint_MO, D1, D2, fock_MO, fockClosed_MO, A)
+  h_2221, h_2231, h_2222, h_3222 = h_calc_fixed(num_MO, index_MO, D1, D2, fockClosed_MO, A, DFint_MO)
+
+  h_2121 = reshape(h_2121, num_MO[2]*num_MO[1], num_MO[2]*num_MO[1])
+  h_2221 = reshape(h_2221, num_MO[2]*num_MO[2], num_MO[2]*num_MO[1])
+  h_2231 = reshape(h_2231, num_MO[2]*num_MO[2], num_MO[3]*num_MO[1])
+  h_2222 = reshape(h_2222, num_MO[2]*num_MO[2], num_MO[2]*num_MO[2])
+  h_3221 = reshape(h_3221, num_MO[3]*num_MO[2], num_MO[2]*num_MO[1])
+  h_3222 = reshape(h_3222, num_MO[3]*num_MO[2], num_MO[2]*num_MO[2])
+  h_3232 = reshape(h_3232, num_MO[3]*num_MO[2], num_MO[3]*num_MO[2])
+  return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
+end
+
 function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
@@ -338,9 +381,9 @@ function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO
     h_3221, h_2121 = h_calc_SOpart(num_MO, index_MO, DFint_MO, D1, D2, fock_MO, fockClosed_MO, A)
   end
 
-  # h_3232 --> G3232
+  # h_3232
   @tensoropt h_3232[a,t,b,u] := 2.0 * Iab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock_MO[occ1o,occ1o][v,w] 
-  @tensoropt h_3232[a,t,b,u] += 2.0 * D1[t,u] * fock_MO[occv,occv][a,b] 
+  @tensoropt h_3232[a,t,b,u] += 2.0 * D1[t,u] * fock_MO[occv,occv][a,b]
 
   h_2221, h_2231, h_2222, h_3222 = h_calc_fixed(num_MO, index_MO, D1, D2, fockClosed_MO, A, DFint_MO)
 
@@ -432,12 +475,15 @@ function Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1:
   x31_r = reshape(x31, n_v, n_2)
   x32_r = reshape(x32, n_v, n_1o)
   x21_r = reshape(x21, n_1o, n_2)
+  # σ21 = H_2131 * x31
   @tensoropt σ21[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
   σ21 = reshape(σ21, n_2*n_1o)
+  # σ31 = H_3131 * x31 + H_3231 * x32 + H_3121 * x21
   @tensoropt σ31[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
   @tensoropt σ31[a,i] += -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
   @tensoropt σ31[a,i] += (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
   σ31 = reshape(σ31, n_2*n_v)
+  # σ32 = H_3231 * x31
   @tensoropt σ32[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
   σ22 = zeros(n22)
   σ32 = reshape(σ32, n_1o*n_v)
@@ -827,6 +873,10 @@ function dfmcscf(EC::ECInfo; direct=false)
     if HessianType == :SO
       @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
       @timeit "h calc new" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
+      abL = 0
+    elseif HessianType == :SO_SCI && EC.options.scf.SO_SCI_origin== true
+      @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
+      @timeit "h calc new" h_block = calc_h_SO_SCI_original(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     else
       @timeit "h calc new" h_block = calc_h_SCI(μjL, μuL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A, HessianType)
