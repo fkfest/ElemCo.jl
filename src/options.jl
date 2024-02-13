@@ -83,6 +83,8 @@ Base.@kwdef mutable struct ScfOptions
   gamaDavScale::Float64 = 0.8
   """ `⟨false⟩` if true then use the original SO_SCI Hessian"""
   SO_SCI_origin = false
+  """ '⟨0.8⟩` the trust region of sqrt(sum(x.^2)) should be [trustScale,1] * trust"""
+  trustScale = 0.8
 end
 
 """ 

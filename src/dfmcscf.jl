@@ -598,6 +598,8 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
       break
     end
     v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
+    v[isnan.(v)] .= 0
+    v[isinf.(v)] .= 1e8
     c = transpose(v) * V
     v = v - V * transpose(c)
     v = v./norm(v)
@@ -631,6 +633,9 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
   bisecdamp = EC.options.scf.bisecdamp
   γ = EC.options.scf.gamaDavScale # gradient scaling factor for micro-iteration accuracy
   davError = γ * norm(g)
+  if davError < 1e-6
+    davError = 1e-6
+  end
   alphaSearchIt = 0
   alphas = Array{Float64}(undef,0)
   trustTune = true
@@ -639,12 +644,12 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
     push!(alphas, alpha)
     @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HessianType, D1)
     davCount += davCounti
-    while !converged
-      davItMax += 50
-      println("Davidson max iteration number increased to ", davItMax)
-      @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HessianType, D1)
-      davCount += davCounti
-    end
+    # while !converged
+    #   davItMax += 50
+    #   println("Davidson max iteration number increased to ", davItMax)
+    #   @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HessianType, D1)
+    #   davCount += davCounti
+    # end
     x = vec[2:end] ./ (vec[1] * alpha)
     # check if square of norm of x in trust region (0.8*trust ~ trust)
     sumx2 = sqrt(sum(x.^2))
@@ -653,7 +658,7 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
     if sumx2 > trust
       alphal = alpha
       xalphal = sumx2
-    elseif sumx2 < 0.8*trust
+    elseif sumx2 < EC.options.scf.trustScale*trust
       alphar = alpha
       xalphar = sumx2
     else
@@ -767,7 +772,9 @@ function dfmcscf(EC::ECInfo; direct=false)
   maxit4alpha = EC.options.scf.maxit4alpha
   HessianType = EC.options.scf.HessianType
   initVecType = EC.options.scf.initVecType
-  println(EC.options.scf.bisecdamp, "  ", maxit4alpha)
+  println("bisecdam = ", EC.options.scf.bisecdamp)
+  println("maxit = ", maxit4alpha)
+  println("gamaDavScale = ", EC.options.scf.gamaDavScale)
   print_info("DF-MCSCF")
   setup_space_ms!(EC)
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
@@ -812,21 +819,31 @@ function dfmcscf(EC::ECInfo; direct=false)
   E_2o = 0.0
   E = 0.0
   prev_cMO = deepcopy(cMO)
+  prev_A = zeros(N_rk,N_rk)
+  prev_g = zeros(N_rk)
   μνL = TensorTools.load(EC,"AAL")
   prev_fock_MO = zeros(nAO,nAO)
   prev_fockClosed_MO = zeros(nAO,nAO)
   Es = Array{Float64}(undef,0)
   davidsonSteps = Array{Int}(undef,0)
+  gnorms = Array{Float64}(undef,0)
+  tts = [0.0]
   μjL = zeros(nAO,n_2,size(μνL,3))
   μuL = zeros(nAO,n_1o,size(μνL,3))
   convIter = IterMax
   converged = false
   energyThreshold = 1e-8
-  eThreg = 1e-4
+  eThreg = 1e-6
   if HessianType == :SO
-    energyThreshold = 1e-6
-    eThreg = 1e-2
+    energyThreshold = 1e-8
+    eThreg = 1e-5
   end
+  preDE = presumx2 = preλ = 0.0
+  λmax = 1000.0
+  convergeIssue = false
+  convAccumu = false
+  convCount = 0
+
   # macro loop, g and h updated
   while iteration_times < IterMax && iteration_times < convIter
     # calc energy E with updated cMO
@@ -835,12 +852,28 @@ function dfmcscf(EC::ECInfo; direct=false)
     @timeit "fock calc" fock_MO, fockClosed_MO= dffockCAS(μνL, μjL, μuL, EC, cMO, D1)
     E_former = E
     E = calc_realE(μuL, EC, fockClosed_MO, D1, D2, cMO)
+    A = dfACAS(μuL, EC,cMO,D1,D2,fock_MO,fockClosed_MO)
+    g = calc_g(A, EC)
     push!(Es, E+Enuc)
     push!(davidsonSteps, davCount)
+    push!(gnorms, norm(g))
     # check if reject the update and tune trust
     if iteration_times > 0
       tt = (time_ns() - t0)/10^9
+      push!(tts, tt)
       @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i %3i \n" iteration_times E+Enuc E-E_former norm(g) tt trust sqrt(sum(x.^2)) λ davCount alphaSearchIt
+      if preDE ≈ E-E_former && presumx2 ≈ sqrt(sum(x.^2)) && (λ ≈ λmax || λ ≈ 1) && preλ ≈ λ && 
+        (sqrt(sum(x.^2)) < EC.options.scf.trustScale*trust || sqrt(sum(x.^2)) > trust) && (E-E_former) < energyThreshold * 100.0
+        if convergeIssue
+          println("convergence issue!")
+          break
+        else
+          convergeIssue = true
+        end
+      else
+        convergeIssue = false
+      end
+      preDE, presumx2, preλ = E-E_former , sqrt(sum(x.^2)), λ
       reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust, trustTune)
       iteration_times += 1
       if reject
@@ -848,28 +881,39 @@ function dfmcscf(EC::ECInfo; direct=false)
         cMO = prev_cMO
         @timeit "μjL" @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
         @timeit "μuL" @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
+        g = deepcopy(prev_g)
+        A = deepcopy(prev_A)
+        E = E_former
         fock_MO = deepcopy(prev_fock_MO)
         fockClosed_MO = deepcopy(prev_fockClosed_MO)
-        E = E_former
         inherit_large = false
       elseif E_former - E < energyThreshold && E < E_former && norm(g) < eThreg && !converged
         convIter = iteration_times+1
         converged = true
+      elseif E_former - E < energyThreshold && E < E_former
+        convAccumu = true
+        convCount += 1
+      elseif E_former - E > energyThreshold
+        convAccumu = false
+        convCount = 0
       end
     else
       iteration_times += 1
       println("Initial energy: ", E+Enuc)
+      println("Initial norm of g: ", norm(g))
       println("Iter     Energy      DE           norm(g)       Time      trust        sumx2        α      microIter")
     end
+    if convCount == 10
+      break
+    end
+    prev_g = deepcopy(g)
+    prev_A = deepcopy(A)
     prev_fock_MO = deepcopy(fock_MO)
     prev_fockClosed_MO = deepcopy(fockClosed_MO)
-    # calc g and h with updated cMO
-    A = dfACAS(μuL, EC,cMO,D1,D2,fock_MO,fockClosed_MO)
-    g = calc_g(A, EC)
-    if norm(g) < 1e-5 && !converged
-      convIter = iteration_times+1
-      converged = true
+    if norm(g) < 1e-5 && HessianType == :SO
+      break
     end
+    # calc h with updated cMO
     if HessianType == :SO
       @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
       @timeit "h calc new" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
@@ -883,7 +927,6 @@ function dfmcscf(EC::ECInfo; direct=false)
     end
 
     # λ tuning loop (micro loop)
-    λmax = 1000.0
     if inherit_large == false
       vec = rand(N_rk+1)
       vec = vec./norm(vec)
@@ -913,7 +956,7 @@ function dfmcscf(EC::ECInfo; direct=false)
     smo = cMO' * sao * cMO
     cMO = cMO * Hermitian(smo)^(-1/2)
   end
-  @save "output_"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*".jld2" Es davidsonSteps
+  @save "output_"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".jld2" Es davidsonSteps tts gnorms cMO
   if iteration_times < IterMax
     println("Convergent!")
   else
