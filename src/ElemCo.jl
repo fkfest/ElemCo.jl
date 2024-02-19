@@ -684,7 +684,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     end
 
     ecmethod_save = ecmethod
-    if ecmethod.exclevel[3] in [:full, :pertiter]
+    if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
       ecmethod = ECMethod("CCSD")
       if is_unrestricted(ecmethod_save)
         set_unrestricted!(ecmethod)
@@ -701,7 +701,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       calc_lm_cc(EC, ecmethod)
     end
 
-    if ecmethod.exclevel[3] != :none
+    if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
       do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
       save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
       ET3, ET3b = calc_pertT(EC, ecmethod; save_t3 = save_pert_t3)
@@ -740,7 +740,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       delete_temporary_files!(EC)
       draw_endline()
       if length(method_names) == 1
-        if ecmethod.exclevel[3] != :none
+        if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
           return EHF, EMp2, ECC, ET3
         else
           return EHF, EMp2, ECC
