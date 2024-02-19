@@ -80,6 +80,10 @@ include("cc_lagrange.jl")
 
 include("cc_tests.jl")
 
+include("algo/uccsdt_singles.jl")
+include("algo/uccsdt_doubles.jl")
+include("algo/uccsdt_triples.jl")
+include("algo/udcccsdt_triples.jl")
 
 """
     calc_singles_energy(EC::ECInfo, T1; fock_only=false)
@@ -1489,6 +1493,69 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   return R1a, R1b, R2a, R2b, R2ab
 end
 
+"""
+    calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3aaa, T3bbb, T3abb, T3aab; dc=false)
+
+  Calculate UCCSDT or UDC-CCSDT residual.
+"""
+function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb; dc=false, tworef=false, fixref=false)
+  EC.options.cc.use_kext = false
+  EC.options.cc.calc_d_vvvv = true
+  EC.options.cc.calc_d_vvvo = true
+  EC.options.cc.calc_d_vovv = true
+  EC.options.cc.calc_d_vvoo = true
+  EC.options.cc.triangular_kext = false
+
+  t1 = time_ns()
+  SP = EC.space
+  nocc = n_occ_orbs(EC)
+  noccb = n_occb_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nvirtb = n_virtb_orbs(EC)
+  if ndims(T1a) == 2
+    calc_dressed_ints(EC,T1a,T1b)
+    t1 = print_time(EC,t1,"dressing",2)
+  else
+    pseudo_dressed_ints(EC,true)
+  end
+
+  R1a = zeros(nvirt,nocc)
+  R1b = zeros(nvirtb,noccb)
+
+  dfock = load(EC,"df_mm")
+  dfockb = load(EC,"df_MM")
+
+  fij = dfock[SP['o'],SP['o']]
+  fab = dfock[SP['v'],SP['v']]
+  fIJ = dfockb[SP['O'],SP['O']]
+  fAB = dfockb[SP['V'],SP['V']]
+  fai = dfock[SP['v'],SP['o']]
+  fAI = dfockb[SP['V'],SP['O']]
+  fia = dfock[SP['o'],SP['v']]
+  fIA = dfockb[SP['O'],SP['V']]
+
+  if length(T1a) > 0
+    ccsdt_singles!(EC, R1a, R1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  end
+
+  R2a = zeros(nvirt, nvirt, nocc, nocc)
+  R2b = zeros(nvirtb, nvirtb, noccb, noccb)
+  R2ab = zeros(nvirt, nvirtb, nocc, noccb)
+  ccsdt_doubles!(EC, R2a, R2b, R2ab, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+
+  R3a = zeros(nvirt, nvirt, nvirt, nocc, nocc, nocc)
+  R3b = zeros(nvirtb, nvirtb, nvirtb, noccb, noccb, noccb)
+  R3abb = zeros(nvirt, nvirtb, nvirtb, nocc, noccb, noccb)
+  R3aab = zeros(nvirt, nvirt, nvirtb, nocc, nocc, noccb)
+  if dc
+    dcccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  else
+    ccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  end
+
+  return R1a, R1b, R2a, R2b, R2ab, R3a, R3b, R3aab, R3abb
+end
+
 function active_orbitals(EC::ECInfo)
   SP = EC.space
   @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "Assumed two open-shell alpha beta orbitals here."
@@ -1805,7 +1872,7 @@ end
   Exact specification of the method is given by `method`.
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC")
+  dc = (method.theory[1:2] == "DC")
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
@@ -1823,6 +1890,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
+  NormT3 = 0.0
   do_sing = (method.exclevel[1] == :full)
   Eh = 0.0
   En1 = 0.0
@@ -1839,8 +1907,13 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
     NormR2 = calc_doubles_norm(Res[doubles]...)
-    Eh = calc_hylleraas(EC, Amps..., Res...)
+    Eh = calc_hylleraas(EC, Amps[singles]..., Amps[doubles]..., Res[singles]..., Res[doubles]...)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
+    if method.exclevel[3] == :full
+      NormT3 = calc_triples_norm(Amps[triples]...)
+      NormR3 = calc_triples_norm(Res[triples]...)
+      update_triples!(EC, Amps[triples]..., Res[triples]...)
+    end
     if has_prefix(method, "FRS")
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
@@ -1870,9 +1943,13 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     save_current_doubles(EC, Amps[doubles]...)
     En2 = calc_doubles_energy(EC, Amps[doubles]...)
     En = En1 + En2
-    ΔE = En - Eh  
+    ΔE = En - Eh
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
+    if method.exclevel[3] == :full
+      NormR += NormR3
+      NormT += NormT3
+    end
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
     flush(stdout)
@@ -1889,7 +1966,11 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   end
   try2save_doubles!(EC, Amps[doubles]...)
   println()
-  @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
+  if method.exclevel[3] == :full
+    @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f Sq.Norm of T3: %12.8f \n" NormT1 NormT2 NormT3
+  else
+    @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
+  end
   println()
   flush(stdout)
   if has_prefix(method, "2D") && do_sing

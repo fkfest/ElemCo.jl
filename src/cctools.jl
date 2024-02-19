@@ -14,8 +14,8 @@ using ..ElemCo.OrbTools
 
 export calc_fock_matrix, calc_HF_energy
 export calc_singles_energy_using_dfock
-export update_singles, update_doubles, update_singles!, update_doubles!, update_deco_doubles, update_deco_triples
-export calc_singles_norm, calc_doubles_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
+export update_singles, update_doubles, update_singles!, update_doubles!, update_triples!, update_deco_doubles, update_deco_triples
+export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles, starting_amplitudes
 export transform_amplitudes2lagrange_multipliers!
 export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
@@ -279,6 +279,59 @@ function update_doubles!(EC::ECInfo, T2a, T2b, T2ab, R2a, R2b, R2ab)
 end
 
 """
+    update_triples!(EC::ECInfo, T3a, T3b, T3aab, T3abb, R3a, R3b, R3aab, R3abb)
+
+  Update triples amplitudes in `T3a`, `T3b`, `T3aab` and `T3abb` with `R3a`, `R3b`, `R3aab` and `R3abb`.
+"""
+function update_triples!(EC::ECInfo, T3a, T3b, T3aab, T3abb, R3a, R3b, R3aab, R3abb)
+  T3a .+= update_triples(EC, R3a; spincase=:α)
+  T3b .+= update_triples(EC, R3b; spincase=:β)
+  T3aab .+= update_triples(EC, R3aab; spincase=:ααβ)
+  T3abb .+= update_triples(EC, R3abb; spincase=:αββ)
+end
+
+"""
+    update_triples(EC::ECInfo, R3; spincase::Symbol=:α, antisymmetrize=false, use_shift=true)
+
+  Calculate update for triples amplitudes for a given `spincase`∈{`:α`,`:β`,`:ααβ`,`:αββ`}.
+"""
+function update_triples(EC::ECInfo, R3; spincase::Symbol=:α, use_shift=true)
+  shift = use_shift ? EC.options.cc.shiftp : 0.0
+  if spincase == :α
+    ϵo, ϵv = orbital_energies(EC)
+    return update_triples(R3, ϵo, ϵv, ϵo, ϵv, ϵo, ϵv, shift)
+  elseif spincase == :β
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_triples(R3, ϵob, ϵvb, ϵob, ϵvb, ϵob, ϵvb, shift)
+  elseif spincase == :ααβ
+    ϵo, ϵv = orbital_energies(EC)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_triples(R3, ϵo, ϵv, ϵo, ϵv, ϵob, ϵvb, shift)
+  elseif spincase == :αββ
+    ϵo, ϵv = orbital_energies(EC)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_triples(R3, ϵo, ϵv, ϵob, ϵvb, ϵob, ϵvb, shift)
+  else
+    error("Unexpected spin case $spincase.")
+  end
+end
+
+"""
+    update_triples(R3, ϵo1, ϵv1, ϵo2, ϵv2, ϵo3, ϵv3, shift)
+
+  Calculate update for triples amplitudes.
+"""
+function update_triples(R3, ϵo1, ϵv1, ϵo2, ϵv2, ϵo3, ϵv3, shift)
+  ΔT3 = deepcopy(R3)
+  for I ∈ CartesianIndices(ΔT3)
+    a,b,c,i,j,k = Tuple(I)
+    ΔT3[I] /= -(ϵv1[a] + ϵv2[b] + ϵv3[c] - ϵo1[i] - ϵo2[j] - ϵo3[k] + shift)
+  end
+  return ΔT3
+end
+
+
+"""
     update_deco_doubles(EC, R2; use_shift=true)
 
   Update decomposed doubles amplitudes.
@@ -397,6 +450,21 @@ function calc_doubles_norm(T2a, T2b, T2ab)
     NormT2 += T2ab[a,b,i,j]*T2ab[a,b,i,j]
   end
   return NormT2
+end
+
+"""
+    calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
+
+  Calculate squared norm of unrestricted triples amplitudes.
+"""
+function calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
+  @tensoropt begin
+    NormT3 = 0.125*(T3aaa[a,b,c,i,j,k]*T3aaa[a,b,c,i,j,k])
+    NormT3 += 0.125*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
+    NormT3 += 0.25*(T3abb[a,b,c,i,j,k]*T3abb[a,b,c,i,j,k])
+    NormT3 += 0.25*(T3aab[a,b,c,i,j,k]*T3aab[a,b,c,i,j,k])
+  end
+  return NormT3
 end
 
 """
