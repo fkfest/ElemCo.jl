@@ -1943,7 +1943,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     save_current_doubles(EC, Amps[doubles]...)
     En2 = calc_doubles_energy(EC, Amps[doubles]...)
     En = En1 + En2
-    ΔE = Eh - En  
+    ΔE = En - Eh
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
     if method.exclevel[3] == :full
