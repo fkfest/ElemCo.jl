@@ -80,9 +80,10 @@ include("cc_lagrange.jl")
 
 include("cc_tests.jl")
 
-include("algo/ccsdt_singles.jl")
-include("algo/ccsdt_doubles.jl")
-include("algo/ccsdt_triples.jl")
+include("algo/uccsdt_singles.jl")
+include("algo/uccsdt_doubles.jl")
+include("algo/uccsdt_triples.jl")
+include("algo/udcccsdt_triples.jl")
 
 """
     calc_singles_energy(EC::ECInfo, T1; fock_only=false)
@@ -1546,7 +1547,11 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, 
   R3b = zeros(nvirtb, nvirtb, nvirtb, noccb, noccb, noccb)
   R3abb = zeros(nvirt, nvirtb, nvirtb, nocc, noccb, noccb)
   R3aab = zeros(nvirt, nvirt, nvirtb, nocc, nocc, noccb)
-  ccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  if dc
+    dcccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  else
+    ccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  end
 
   return R1a, R1b, R2a, R2b, R2ab, R3a, R3b, R3aab, R3abb
 end
@@ -1867,7 +1872,7 @@ end
   Exact specification of the method is given by `method`.
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC")
+  dc = (method.theory[1:2] == "DC")
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
