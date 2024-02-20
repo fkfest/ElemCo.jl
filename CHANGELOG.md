@@ -5,6 +5,7 @@
 ### Breaking
 
 * Cholesky threshold `thr` is used for integral decomposition only. Threshold for elimination of redundancies is now called `thred`.
+* Files for amplitudes and multipliers are now called `..._1`, `..._2`,... for singles, doubles, etc.
 
 ### Changed
 
