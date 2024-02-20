@@ -12,12 +12,26 @@ julia> using Pkg
 julia> Pkg.add("ElemCo")
 ```
 
+For a development version of ElemCo.jl, clone the repository and create an alias to set the project to the `ElemCo.jl` directory,
+
+```
+alias jlm='julia --project=<path_to_ElemCo.jl>'
+```
+
+Now the command `jlm` can be used to start the calculations,
+
+```
+jlm input.jl
+```
+
 ## Usage
 
 ### Computing density-fitted Hartree-Fock and Coupled Cluster methods
 
 To compute density-fitted Hartree-Fock (DF-HF) using ElemCo.jl, you can use the [`@dfhf`](@ref) macro. In order to run post-HF calculations, the integrals have to be transformed to the MO basis (using the [`@dfints`](@ref) macro), and
-the coupled cluster calculations can be performed using [`@cc`](@ref) macro. Here's an example of how you can use these macros:
+the coupled cluster calculations can be performed using [`@cc`](@ref) macro. 
+The `@dfints` macro is optional, `@cc` macro will automatically call `@dfints` if it has not been called before.
+Here's an example of how you can use these macros:
 
 ```julia
 using ElemCo
@@ -35,7 +49,7 @@ basis = Dict("ao"=>"cc-pVDZ",
 
 # Compute DF-HF 
 @dfhf
-# Calculate MO integrals 
+# Calculate MO integrals (optional)
 @dfints
 # Run CCSD(T) calculation
 @cc ccsd(t)
