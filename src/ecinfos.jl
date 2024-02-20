@@ -73,9 +73,6 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   e.g., `d_XX` contains ``\\hat v_{XY}`` and `d_^XX` contains ``\\hat v^{XY}`` integrals.
   """
   files::Dict{String,String} = Dict{String,String}()
-
-  """`⟨false⟩` ignore various errors. """
-  ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
   space::Dict{Char,Any} = Dict{Char,Any}()
 end
@@ -591,8 +588,8 @@ function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=
     else
       occb = parse_orbstring(occbs; orbsym)
     end
-    if length(occa)+length(occb) != nelec && !EC.ignore_error
-      error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error (-f) to ignore.")
+    if length(occa)+length(occb) != nelec && !EC.options.wf.ignore_error
+      error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error wf option to ignore.")
     end
   else 
     occa = [1:(nelec+ms2)÷2;]

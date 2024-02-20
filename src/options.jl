@@ -32,6 +32,8 @@ Base.@kwdef mutable struct WfOptions
   """`⟨"-"⟩` occupied β orbitals. 
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
   occb::String = "-"
+  """`⟨false⟩` ignore various errors in sanity checks. """
+  ignore_error::Bool = false
 end
 
 

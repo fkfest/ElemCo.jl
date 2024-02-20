@@ -244,7 +244,7 @@ macro tryECinit()
   return quote
     runECinit = [false]
     try
-      $(esc(:EC)).ignore_error
+      $(esc(:EC)).verbosity
     catch
       runECinit[1] = true
     end
