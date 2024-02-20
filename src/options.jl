@@ -152,8 +152,10 @@ end
   $(TYPEDFIELDS)
 """
 Base.@kwdef mutable struct CholeskyOptions
-  """`⟨1.e-6⟩` cholesky threshold. """
-  thr::Float64 = 1.e-6
+  """`⟨1.e-6⟩` threshold for elimination of redundancies in the auxiliary basis. """
+  thred::Float64 = 1.e-6
+  """`⟨1.e-4⟩` threshold for integral decomposition. """
+  thr::Float64 = 1.e-4
 end
 
 """

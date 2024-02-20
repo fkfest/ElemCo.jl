@@ -4,6 +4,8 @@
 
 ### Breaking
 
+* Cholesky threshold `thr` is used for integral decomposition only. Threshold for elimination of redundancies is now called `thred`.
+
 ### Changed
 
 ### Added
