@@ -62,7 +62,7 @@ using .DfDump
 
 
 export ECdriver 
-export @mainname
+export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
@@ -119,6 +119,23 @@ julia> @mainname("~/test.xyz")
 macro mainname(file)
   return quote
     mainname($(esc(file)))
+  end
+end
+
+"""
+    @print_input()
+
+  Print the input file content. 
+
+  Can be used to print the input file content to the output.
+"""
+macro print_input()
+  return quote
+    try
+      print_info(read($(string(__source__.file)), String))
+    catch
+      print_info("No input file found.")
+    end
   end
 end
 

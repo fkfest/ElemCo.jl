@@ -41,10 +41,13 @@ Requirements: julia (>1.8)
 Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, IterativeSolvers, GaussianBasis, DocStringExtensions, MKL(optional)
 
 ## Usage
-For a development version of `ElemCo.jl`, clone the repository and create a symbolic link in the working directory to the `ElemCo.jl` directory:
+For a development version of `ElemCo.jl`, clone the repository and create an alias to set the project to the `ElemCo.jl` directory,
 ```
-cd <working dir>
-ln -s <path_to_ElemCo.jl> .
+alias jlm='julia --project=<path_to_ElemCo.jl>'
+```
+Now the command `jlm` can be used to start the calculations,
+```
+jlm input.jl
 ```
 
 Default scratch directory path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`. 
@@ -57,17 +60,16 @@ Variable names `fcidump`, `geometry` and `basis` are reserved for the file name 
 #### DCSD calculation using integrals from a FCIDUMP file
 The ground state energy can be calculated using the DCSD method with the following script:
 ```julia
-include("ElemCo.jl/src/ElemCo.jl")
-using .ElemCo
-
+using ElemCo
+@print_input
 fcidump = "../test/H2O.FCIDUMP"
 @cc dcsd
 ```
 #### DCSD calculation of the water molecule using density-fitted integrals
 In order to calculate the ground state energy of the water molecule using the DCSD method, the following script can be used:
 ```julia
-include("ElemCo.jl/src/ElemCo.jl")
-using .ElemCo
+using ElemCo
+@print_input
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
      H1     0.000000000    1.489124508    1.033245507

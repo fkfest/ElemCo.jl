@@ -17,6 +17,7 @@ for dir in readdir()
   if isfile("FCIDUMP")
     output = "dcsd.out"
     redirect_stdio(stdout=output) do
+      @print_input
       @cc dcsd fcidump="FCIDUMP"
     end
   end
