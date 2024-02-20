@@ -61,7 +61,7 @@ Variable names `fcidump`, `geometry` and `basis` are reserved for the file name 
 The ground state energy can be calculated using the DCSD method with the following script:
 ```julia
 using ElemCo
-
+@print_input
 fcidump = "../test/H2O.FCIDUMP"
 @cc dcsd
 ```
@@ -69,6 +69,7 @@ fcidump = "../test/H2O.FCIDUMP"
 In order to calculate the ground state energy of the water molecule using the DCSD method, the following script can be used:
 ```julia
 using ElemCo
+@print_input
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
      H1     0.000000000    1.489124508    1.033245507

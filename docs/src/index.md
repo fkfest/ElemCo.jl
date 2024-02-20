@@ -36,6 +36,8 @@ Here's an example of how you can use these macros:
 ```julia
 using ElemCo
 
+# Print input to the output file
+@print_input
 # Define the molecule
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
