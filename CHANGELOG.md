@@ -10,6 +10,8 @@
 
 * `UCCSD(T)`, `ΛUCCSD(T)`, `ΛUDCSD` have been implemented.
 * Pseudo-canonicalization of the FCIDUMP file (instead of full SCF calculation).
+* generated `UCCSDT` and `UDC-CCSDT` methods.
+* macro `@print_input` to print the source of the input file to the output.
 
 ### Fixed
 

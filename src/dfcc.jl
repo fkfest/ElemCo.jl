@@ -272,6 +272,7 @@ end
   Return full MP2 correlation energy (using the imaginary shift).
 """
 function calc_doubles_decomposition_without_doubles(EC::ECInfo)
+  t1 = time_ns()
   println("Decomposition without doubles using threshold ", EC.options.cc.ampsvdtol)
   flush(stdout)
   nocc = n_occ_orbs(EC)
@@ -291,6 +292,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     println("MP2 imaginary shift for decomposition: ", shifti)
     println("MP2 imaginary shifted correlation energy: ", fullEMP2)
   end
+  t1 = print_time(EC, t1, "MP2 from 3idx", 2)
   flush(stdout)
   if EC.options.cc.use_full_t2
     T2 = try2start_doubles(EC)
@@ -301,6 +303,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     T2 = nothing
   end
   UaiX = svd_decompose(reshape(voL, (nvirt*nocc,nL)), nvirt, nocc, tol2)
+  t1 = print_time(EC, t1, "SVD decomposition", 2)
   # UaiX = calc_3idx_svd_decomposition(EC, voL) 
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   # calculate rhs: v_{aX}^{i} = v_a^{iL} 𝟙_{LL} v_b^{jL} (U_b^{jX})^† 
@@ -314,9 +317,11 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     den = ϵX[X] + ϵv[a] - ϵo[i]
     voX[I] *= -den/(den^2 + shifti)
   end
+  t1 = print_time(EC, t1, "half-decomposed MP2", 2)
   naux = size(voX, 3)
   # decompose T^i_{aX}
   UaiX = svd_decompose(reshape(voX, (nvirt*nocc,naux)), nvirt, nocc, EC.options.cc.ampsvdtol)
+  t1 = print_time(EC, t1, "T^i_{aX} SVD decomposition", 2)
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -332,6 +337,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   end
   save!(EC, "T_XX", v_XX)
   # save!(EC, "T_XX", zeros(size(v_XX)))
+  t1 = print_time(EC, t1, "starting guess T_{XY}", 2)
   return fullEMP2
 end
 
@@ -341,6 +347,7 @@ end
   Decompose ``T^{ij}_{ab}=U^{iX}_a U^{jY}_b T_{XY}`` using explicit doubles amplitudes ``T^{ij}_{ab}``.
 """
 function calc_doubles_decomposition_with_doubles(EC::ECInfo)
+  t1 = time_ns()
   println("Decomposition with doubles using threshold ", EC.options.cc.ampsvdtol)
   flush(stdout)
   nocc = n_occ_orbs(EC)
@@ -359,9 +366,11 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   if EC.options.cc.use_full_t2
     save!(EC, "T_vvoo", T2)
   end
+  t1 = print_time(EC, t1, "MP2 from 3idx", 2)
   println("decompose full doubles (can be slow!)")
   flush(stdout)
   UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, EC.options.cc.ampsvdtol)
+  t1 = print_time(EC, t1, "SVD decomposition", 2)
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -378,6 +387,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
     end
     save!(EC, "T_XX", v_XX)
     # save!(EC, "T_XX", zeros(size(v_XX)))
+    t1 = print_time(EC, t1, "starting guess T_{XY}", 2)
   end
   return 0.0
 end
@@ -543,8 +553,9 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   if length(T1) > 0
     #get dressed integrals
     calc_dressed_3idx(EC, T1)
-    dress_df_fock(EC, T1)
     t1 = print_time(EC, t1, "dressed 3-idx integrals", 2)
+    dress_df_fock(EC, T1)
+    t1 = print_time(EC, t1, "dressed fock", 2)
   end
   UvoX = load(EC, "C_voX")
   use_projected_exchange = EC.options.cc.use_projx
@@ -598,9 +609,11 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     if full_tt2
       # ``R^i_a += f_k^c \tilde T^{ik}_{ac}``
       @tensoropt R1[a,i] += f_ov[k,c] * tT2[a,c,i,k]
+      t1 = print_time(EC, t1, "``R^i_a += f_k^c \\tilde T^{ik}_{ac}``", 2)
     else
       # ``R^i_a += f_k^c U^{kX}_c \tilde T_{XY} U^{iY}_{a}``
       @tensoropt R1[a,i] += (f_ov[k,c] * UvoX[c,k,X]) * tT2[X,Y] * UvoX[a,i,Y]
+      t1 = print_time(EC, t1, "``R^i_a += f_k^c U^{kX}_c \\tilde T_{XY} U^{iY}_{a}``", 2)
     end
   end
   f_ov = nothing
@@ -613,20 +626,26 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     if full_tt2
       # ``Y_a^{iL} = v_k^{cL} \tilde T^{ik}_{ac}``
       @tensoropt Y_voL[a,i,L] := V_ovL[k,c,L] * tT2[a,c,i,k] 
+      t1 = print_time(EC, t1, "``Y_a^{iL} = v_k^{cL} \\tilde T^{ik}_{ac}``", 2)
       if !full_t2
         # ``Y_X^L = Y_a^{iL} U^{†a}_{iX}`` 
         @tensoropt W_XL[X,L] := Y_voL[a,i,L] * UvoX[a,i,X]
+        t1 = print_time(EC, t1, "``Y_X^L = Y_a^{iL} U^{†a}_{iX}``", 2)
       end
     else
       # ``Y_X^L = (v_k^{cL} U^{kY}_c) \tilde T_{XY}``) 
-      @tensoropt W_XL[X,L] := (UvoX[b,j,Y] * V_ovL[j,b,L]) * tT2[X,Y] 
+      @tensoropt W_XL[X,L] := (UvoX[b,j,Y] * V_ovL[j,b,L]) * tT2[X,Y]
+      t1 = print_time(EC, t1, "``Y_X^L = (v_k^{cL} U^{kY}_c) \\tilde T_{XY}``", 2)
       # ``Y_a^{kL} = Y_X^L U^{kX}_a``
       @tensoropt Y_voL[a,k,L] := UvoX[a,k,X] * W_XL[X,L]
+      t1 = print_time(EC, t1, "``Y_a^{kL} = Y_X^L U^{kX}_a``", 2)
     end
     # ``x_a^c -= 0.5 Y_a^{kL} v_k^{cL}``
     @tensoropt x_vv[a,c] -= 0.5 * Y_voL[a,k,L] * V_ovL[k,c,L]
+    t1 = print_time(EC, t1, "``x_a^c -= 0.5 Y_a^{kL} v_k^{cL}``", 2)
     # ``x_k^i += 0.5 Y_c^{iL} v_k^{cL}``
     @tensoropt x_oo[k,i] += 0.5 * Y_voL[c,i,L] * V_ovL[k,c,L]
+    t1 = print_time(EC, t1, "``x_k^i += 0.5 Y_c^{iL} v_k^{cL}``", 2)
     # ``v_X^L = U^{†a}_{iX} v_a^{iL}``
     V_voL = @view voL[:,:,L]
     if full_t2
@@ -634,10 +653,12 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
       # ``R^{ij}_{ab} += (v+Y)_a^{iL} (v+Y)_b^{jL'}_Y δ_{LL'}``
       @tensoropt R2[a,b,i,j] += vY_voL[a,i,L] * vY_voL[b,j,L]
       vY_voL = nothing
+      t1 = print_time(EC, t1, "``R^{ij}_{ab} += (v+Y)_a^{iL} (v+Y)_b^{jL'}_Y δ_{LL'}``", 2)
     else
       @tensoropt W_XL[X,L] += V_voL[a,i,L] * UvoX[a,i,X]
       # ``R_{XY} += (v+Y)^L_X (v+Y)^{L'}_Y δ_{LL'}``
       @tensoropt R2[X,Y] += W_XL[X,L] * W_XL[Y,L]
+      t1 = print_time(EC, t1, "``R_{XY} += (v+Y)^L_X (v+Y)^{L'}_Y δ_{LL'}``", 2)
     end
 
     V_vvL = @view vvL[:,:,L]
@@ -645,8 +666,10 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     if length(R1) > 0
       # ``R^i_a += v_a^{cL} Y_c^{iL}``
       @tensoropt R1[a,i] += V_vvL[a,c,L] * Y_voL[c,i,L]
+      t1 = print_time(EC, t1, "``R^i_a += v_a^{cL} Y_c^{iL}``", 2)
       # ``R^i_a -= v_k^{iL} Y_a^{kL}``
       @tensoropt R1[a,i] -= V_ooL[k,i,L] * Y_voL[a,k,L]
+      t1 = print_time(EC, t1, "``R^i_a -= v_k^{iL} Y_a^{kL}``", 2)
     end
     v_XLX = zeros(nX,length(L),nX)
     if project_amps_vovo_t2
@@ -663,6 +686,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
         @tensoropt V_v_XLX[X',L,X] = (v_voXL[a,i,X,L] - V_ooL[k,i,L] * V_UvoX[a,k,X]) * UvoX[a,i,X'] 
       end
       @tensoropt dR2[X,Y] += v_XLX[X,L,X'] * (dT2[X',Y'] * v_XLX[Y,L,Y'])
+      t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{LX'} T_{X'Y'} v_{Y}^{LY'}``", 2)
     else
       # ``v_X^{X'L}`` as v[X',L,X]
       for X in XBlks
@@ -677,6 +701,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
         @tensoropt V_v_XLX[X',L,X] = (v_oXvL[k,X,c,L] - V_ooL[k,i,L] * V_UvoX[c,i,X]) * UvoX[c,k,X']
       end
       @tensoropt dR2[X,Y] += v_XLX[X',L,X] * (dT2[X',Y'] * v_XLX[Y',L,Y])
+      t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{LX'} T_{X'Y'} v_{Y}^{LY'}``", 2)
     end
   end
   close(voLfile)
@@ -685,39 +710,50 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   close(ooLfile)
   if full_t2
     @tensoropt RR2[a,b,i,j] := x_vv[a,c] * T2[c,b,i,j] - x_oo[k,i] * T2[a,b,k,j]
+    t1 = print_time(EC, t1, "``R_{ab}^{ij} += x_a^c T_{cb}^{ij} - x_k^i T_{ab}^{kj}``", 2)
     if project_amps_vovo_t2
       if EC.options.cc.project_vovo_t2 == 0
         # project both sides
         @tensoropt W_XX[X,X'] := v_voX[a,i,X'] * UvoX[a,i,X]
         @tensoropt dR2[X,Y] -= W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
+        t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'} T_{X'Y} + T_{XY'} v_{Y}^{Y'}``", 2)
       else
         @tensoropt RR2[a,b,i,j] -= v_voX[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
+        t1 = print_time(EC, t1, "``R_{ab}^{ij} -= v_a^{iX} T_{cb}^{kj} U^{c}_{kX}``", 2)
       end
     else
       @tensoropt RR2[a,b,i,j] -= UvoX[a,i,X] * (T2[c,b,k,j] * v_voX[c,k,X]) 
+      t1 = print_time(EC, t1, "``R_{ab}^{ij} -= U^{iX}_a T_{cb}^{kj} v_{kX}^{c}``", 2)
       if EC.options.cc.project_vovo_t2 == 3
         # robust fitting
         @tensoropt W_XX[X,X'] := v_voX[c,k,X] * UvoX[c,k,X']
         @tensoropt dR2[X,Y] += W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
+        t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'} T_{X'Y} + T_{XY'} v_{Y}^{Y'}``", 2)
         v_voX = calc_vᵥᵒˣ(EC) 
+        t1 = print_time(EC, t1, "calc v_a^{kX}", 2)
         @tensoropt RR2[a,b,i,j] -= v_voX[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
+        t1 = print_time(EC, t1, "``R_{ab}^{ij} -= v_a^{iX} T_{cb}^{kj} U^{c}_{kX}``", 2)
       end
     end
     @tensoropt R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
     # project dR2 to full basis
     @tensoropt R2[a,b,i,j] += (dR2[X,Y] * UvoX[a,i,X]) * UvoX[b,j,Y]
+    t1 = print_time(EC, t1, "project R2 to full basis", 2)
   else
     if project_amps_vovo_t2
       # ``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``
       @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[c,i,X'] - x_oo[k,i] * UvoX[a,k,X'] - v_voX[a,i,X']) * UvoX[a,i,X]
+      t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``", 2)
     else
       # ``W_X^{X'} = (x_a^c U^{†a}_{kX} - x_k^i U^{†c}_{iX} - v_{kX}^c) U^{kX'}_c``
       @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[a,k,X] - x_oo[k,i] * UvoX[c,i,X] - v_voX[c,k,X]) * UvoX[c,k,X']
+      t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{†a}_{kX} - x_k^i U^{†c}_{iX} - v_{kX}^c) U^{kX'}_c``", 2)
     end
     v_voX = nothing
     # ``R_{XY} += W_X^{X'} T_{X'Y} + T_{XY'} W_{Y}^{Y'}``
     @tensoropt R2[X,Y] += W_XX[X,X'] * T2[X',Y] + T2[X,Y'] * W_XX[Y,Y']
     W_XX = nothing
+    t1 = print_time(EC, t1, "``R_{XY} += W_X^{X'} T_{X'Y} + T_{XY'} W_{Y}^{Y'}``", 2)
   end
 
   return R1, R2
@@ -771,6 +807,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   # integrals
   cMO = load_orbitals(EC, EC.options.wf.orb)
   ERef = generate_DF_integrals(EC, cMO)
+  t1 = print_time(EC, t1, "generate DF integrals", 2)
   cMO = nothing
   println("Reference energy: ", ERef)
   println()
@@ -778,9 +815,11 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   space_save = save_space(EC)
   freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
   freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
+  t1 = print_time(EC, t1, "freeze core and virt", 2)
 
   # decomposition and starting guess
   fullEMP2 = calc_doubles_decomposition(EC)
+  t1 = print_time(EC, t1, "doubles decomposition", 2)
   if do_sing
     T1 = read_starting_guess4amplitudes(EC, 1)
   else
@@ -788,6 +827,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   end
   save_pseudodressed_3idx(EC)
   save_pseudo_dress_df_fock(EC)
+  t1 = print_time(EC, t1, "save pseudodressed 3-idx and fock", 2)
   diis = Diis(EC)
 
   NormR1 = 0.0
@@ -803,6 +843,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   end
   # calc starting guess energy 
   truncEMP2 = calc_deco_doubles_energy(EC, T2)
+  t1 = print_time(EC, t1, "calc starting guess energy", 2)
   println("Starting guess energy: ", truncEMP2)
   println()
   converged = false
@@ -812,8 +853,9 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
     R1, R2 = calc_svd_dcsd_residual(EC, T1, T2)
     # println("R1: ", norm(R1))
     # println("R2: ", norm(R2))
-    t1 = print_time(EC,t1,"ccsd residual",2)
+    t1 = print_time(EC,t1,"dcsd residual",2)
     Eh = calc_deco_hylleraas(EC, T1, T2, R1, R2)
+    t1 = print_time(EC,t1,"calc hylleraas",2)
     NormT2 = calc_deco_doubles_norm(T2)
     NormR2 = calc_deco_doubles_norm(R2)
     if do_sing
@@ -822,7 +864,9 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
       T1 += update_singles(EC, R1)
     end
     T2 += update_deco_doubles(EC, R2)
+    t1 = print_time(EC,t1,"update amplitudes",2)
     T1, T2 = perform(diis, [T1,T2], [R1,R2])
+    t1 = print_time(EC,t1,"DIIS",2)
     En = calc_deco_doubles_energy(EC, T2)
     if do_sing
       En += calc_singles_energy_using_dfock(EC, T1)

@@ -207,6 +207,7 @@ end
   Perform BO-HF using integrals from fcidump EC.fd.
 """
 function bohf(EC::ECInfo)
+  t1 = time_ns()
   pseudo = EC.options.scf.pseudo
   if pseudo
     print_info("Bi-orthogonal pseudo-canonicalization")
@@ -221,6 +222,7 @@ function bohf(EC::ECInfo)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = EC.fd.int0
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, false)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
   ϵ = zeros(norb)
   hsmall = integ1(EC.fd,:α)
   EHF = 0.0
@@ -236,6 +238,7 @@ function bohf(EC::ECInfo)
   t0 = time_ns()
   for it=1:maxit
     fock = gen_fock(EC, cMOl, cMOr)
+    t1 = print_time(EC, t1, "generate Fock matrix", 2)
     den = gen_density_matrix(EC, cMOl, cMOr, SP['o'])
     fhsmall = fock + hsmall
     @tensoropt efhsmall = den[p,q]*fhsmall[p,q]
@@ -254,6 +257,7 @@ function bohf(EC::ECInfo)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
+    t1 = print_time(EC, t1, "HF residual", 2)
     if pseudo
       occ = SP['o']
       vir = SP['v']
@@ -263,8 +267,10 @@ function bohf(EC::ECInfo)
       ϵ[vir],cMOr[vir,vir] = eigen(fock[vir,vir])
     else
       fock, = perform(diis,[fock],[Δfock])
+      t1 = print_time(EC, t1, "DIIS", 2)
       ϵ,cMOr = eigen(fock)
     end
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     cMOl = (inv(cMOr))'
     # display(ϵ)
   end
@@ -286,6 +292,7 @@ end
   Perform BO-UHF using integrals from fcidump EC.fd.
 """
 function bouhf(EC::ECInfo)
+  t1 = time_ns()
   pseudo = EC.options.scf.pseudo
   if pseudo
     print_info("Bi-orthogonal unrestricted pseudo-canonicalization")
@@ -301,6 +308,7 @@ function bouhf(EC::ECInfo)
   Enuc = EC.fd.int0
   # 1: alpha, 2: beta (cMOs can become complex(?))
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, true)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
   ϵ = Any[zeros(norb), zeros(norb)]
   hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
   EHF = 0.0
@@ -316,6 +324,7 @@ function bouhf(EC::ECInfo)
   t0 = time_ns()
   for it=1:maxit
     fock = gen_ufock(EC, cMOl, cMOr)
+    t1 = print_time(EC, t1, "generate Fock matrix", 2)
     efhsmall = Any[0.0, 0.0]
     Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
     var = 0.0
@@ -340,8 +349,10 @@ function bouhf(EC::ECInfo)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
+    t1 = print_time(EC, t1, "HF residual", 2)
     if !pseudo
       fock = perform(diis, fock, Δfock)
+      t1 = print_time(EC, t1, "DIIS", 2)
     end
     for (ispin, ov) = enumerate(["ov", "OV"])
       if pseudo
@@ -356,6 +367,7 @@ function bouhf(EC::ECInfo)
       end
       cMOl[ispin] = (inv(cMOr[ispin]))'
     end
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
   end
   # check MOs to be real
