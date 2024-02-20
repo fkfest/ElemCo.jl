@@ -4,12 +4,19 @@
 
 ### Breaking
 
+* Cholesky threshold `thr` is used for integral decomposition only. Threshold for elimination of redundancies is now called `thred`.
+* Files for amplitudes and multipliers are now called `..._1`, `..._2`,... for singles, doubles, etc.
+
 ### Changed
+
+* Option `ignore_error` is moved from ECInfo structure to `wf` options.
 
 ### Added
 
 * `UCCSD(T)`, `ΛUCCSD(T)`, `ΛUDCSD` have been implemented.
 * Pseudo-canonicalization of the FCIDUMP file (instead of full SCF calculation).
+* Generated `UCCSDT` and `UDC-CCSDT` methods.
+* Macro `@print_input` to print the source of the input file to the output.
 
 ### Fixed
 

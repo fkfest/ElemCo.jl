@@ -31,7 +31,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO, full_spaces)
   wocore = setdiff(1:size(cMO,2), core_orbs)
 
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   PQ = nothing
   μνP = ERI_2e3c(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
@@ -99,7 +99,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMOa, cMOb, full_spaces)
   wocore = setdiff(1:size(cMOa,2), core_orbs)
 
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   PQ = nothing
   μνP = ERI_2e3c(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]

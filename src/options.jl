@@ -32,6 +32,8 @@ Base.@kwdef mutable struct WfOptions
   """`⟨"-"⟩` occupied β orbitals. 
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
   occb::String = "-"
+  """`⟨false⟩` ignore various errors in sanity checks. """
+  ignore_error::Bool = false
 end
 
 
@@ -119,16 +121,16 @@ Base.@kwdef mutable struct CcOptions
   """`⟨false⟩` decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
   """`⟨"cc_amplitudes"⟩` main part of filename for start amplitudes. 
-      For example, the singles amplitudes are read from `start*"_singles"` """
+      For example, the singles amplitudes are read from `start*"_1"` """
   start::String = "cc_amplitudes"
   """`⟨"cc_amplitudes"⟩` main part of filename to save amplitudes.
-      For example, the singles amplitudes are saved to `save*"_singles"` """
+      For example, the singles amplitudes are saved to `save*"_1"` """
   save::String = "cc_amplitudes"
   """`⟨"cc_multipliers"⟩` main part of filename for start Lagrange multipliers. 
-      For example, the singles Lagrange multipliers are read from `start_lm*"_singles"` """
+      For example, the singles Lagrange multipliers are read from `start_lm*"_1"` """
   start_lm::String = "cc_multipliers"
   """`⟨"cc_multipliers"⟩` main part of filename to save Lagrange multipliers.
-      For example, the singles Lagrange multipliers are saved to `save_lm*"_singles"` """
+      For example, the singles Lagrange multipliers are saved to `save_lm*"_1"` """
   save_lm::String = "cc_multipliers"
   """`⟨0⟩` Don't use MP2 amplitudes as starting guess for the CC amplitudes """
   nomp2::Int = 0
@@ -152,8 +154,10 @@ end
   $(TYPEDFIELDS)
 """
 Base.@kwdef mutable struct CholeskyOptions
-  """`⟨1.e-6⟩` cholesky threshold. """
-  thr::Float64 = 1.e-6
+  """`⟨1.e-6⟩` threshold for elimination of redundancies in the auxiliary basis. """
+  thred::Float64 = 1.e-6
+  """`⟨1.e-4⟩` threshold for integral decomposition. """
+  thr::Float64 = 1.e-4
 end
 
 """

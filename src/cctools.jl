@@ -511,20 +511,22 @@ function calc_deco_triples_norm(T3)
 end
 
 """
-    save_or_start_file(EC::ECInfo, type, save=true)
+    save_or_start_file(EC::ECInfo, type, excitation_level, save=true)
 
   Return filename and description for saving or starting amplitudes/lagrange multipliers.
 
   `type` is either `"T"` for amplitudes or `"LM"` for Lagrange multipliers.
+  `excitation_level` is the excitation level of the amplitudes (1, 2 etc.)
   If `save` is true, the filename for saving is returned, otherwise the filename for starting.
 """
-function save_or_start_file(EC::ECInfo, type, save=true)
+function save_or_start_file(EC::ECInfo, type, excitation_level, save=true)
   mainfilename = descr = ""
+  descr = ["singles", "doubles", "triples", "quadruples"][excitation_level]
   if type == "T"
-    descr = "amplitudes"
+    descr *= " amplitudes"
     mainfilename = save ? EC.options.cc.save : EC.options.cc.start
   elseif type == "LM"
-    descr = "Lagrange multipliers"
+    descr *= " Lagrange multipliers"
     mainfilename = save ? EC.options.cc.save_lm : EC.options.cc.start_lm
   else
     error("unknown type $type")
@@ -533,32 +535,32 @@ function save_or_start_file(EC::ECInfo, type, save=true)
 end
 
 """
-    try2save_amps!(EC::ECInfo, excitation_level::AbstractString, amps...; type="T")
+    try2save_amps!(EC::ECInfo, excitation_level, amps...; type="T")
 
   Save amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  to file `EC.options.cc.save[_lm]*"_"*excitation_level`.
+  to file `EC.options.cc.save[_lm]*"_excitation_level"`.
 """
-function try2save_amps!(EC::ECInfo, excitation_level::AbstractString, amps...; type="T")
-  mainfilename, descr = save_or_start_file(EC, type)
+function try2save_amps!(EC::ECInfo, excitation_level, amps...; type="T")
+  mainfilename, descr = save_or_start_file(EC, type, excitation_level)
   if mainfilename != ""
-    filename = mainfilename*"_"*excitation_level
-    println("Save $excitation_level $descr to file $filename")
-    save!(EC, filename, amps..., description=excitation_level*" "*descr)
+    filename = mainfilename*"_$excitation_level"
+    println("Save $descr to file $filename")
+    save!(EC, filename, amps..., description=descr)
   end
 end
 
 """
-    try2start_amps(EC::ECInfo, excitation_level::AbstractString; type="T")
+    try2start_amps(EC::ECInfo, excitation_level; type="T")
 
   Read amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  from file `EC.options.cc.start[_lm]*"_"*excitation_level`.
+  from file `EC.options.cc.start[_lm]*"_excitation_level"`.
 """
-function try2start_amps(EC::ECInfo, excitation_level::AbstractString; type="T")
-  mainfilename, descr = save_or_start_file(EC, type)
+function try2start_amps(EC::ECInfo, excitation_level; type="T")
+  mainfilename, descr = save_or_start_file(EC, type, excitation_level, false)
   if mainfilename != ""
-    filename = mainfilename*"_"*excitation_level
+    filename = mainfilename*"_$excitation_level"
     if file_exists(EC, filename)
-      println("Read $excitation_level $descr from file $filename")
+      println("Read $descr from file $filename")
       return load(EC, filename)
     end
   end
@@ -569,40 +571,40 @@ end
     try2save_singles!(EC::ECInfo, singles...; type="T")
 
   Save singles amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  to file `EC.options.cc.save[_lm]*"_singles"`.
+  to file `EC.options.cc.save[_lm]*"_1"`.
 """
 function try2save_singles!(EC::ECInfo, singles...; type="T")
-  try2save_amps!(EC, "singles", singles...; type)
+  try2save_amps!(EC, 1, singles...; type)
 end
 
 """
     try2save_doubles!(EC::ECInfo, doubles...; type="T")
 
   Save doubles amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  to file `EC.options.cc.save[_lm]*"_doubles"`.
+  to file `EC.options.cc.save[_lm]*"_2"`.
 """
 function try2save_doubles!(EC::ECInfo, doubles...; type="T")
-  try2save_amps!(EC, "doubles", doubles...; type)
+  try2save_amps!(EC, 2, doubles...; type)
 end
 
 """
     try2start_singles(EC::ECInfo; type="T")
 
   Read singles amplitudes (type="T") or Lagrange multipliers (type="LM")
-  from file `EC.options.cc.start[_lm]*"_singles"`.
+  from file `EC.options.cc.start[_lm]*"_1"`.
 """
 function try2start_singles(EC::ECInfo; type="T")
-  return try2start_amps(EC, "singles"; type)
+  return try2start_amps(EC, 1; type)
 end
 
 """
     try2start_doubles(EC::ECInfo; type="T")
 
   Read doubles amplitudes (type="T") or Lagrange multipliers (type="LM")
-  from file `EC.options.cc.start[_lm]*"_doubles"`.
+  from file `EC.options.cc.start[_lm]*"_2"`.
 """
 function try2start_doubles(EC::ECInfo; type="T")
-  return try2start_amps(EC, "doubles"; type)
+  return try2start_amps(EC, 2; type)
 end
 
 """
