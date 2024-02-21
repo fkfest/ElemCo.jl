@@ -68,7 +68,7 @@ export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
 
-const __VERSION__ = "0.9.0+"
+const __VERSION__ = "0.10.0"
 
 """
     __init__()

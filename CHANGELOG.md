@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## Version [v0.10.0] - 2024.02.21
 
 ### Breaking
 
@@ -20,7 +20,7 @@
 
 ### Fixed
 
-* Fix dressing of a three-internal integral (which could have slightly affected the energy of CCSD/DCSD).
+* Fix dressing of a three-internal integral (which slightly affected the energy of CCSD/DCSD with `use_kext=false`).
 
 ## Version [v0.9.0] - 2024.01.20
 
