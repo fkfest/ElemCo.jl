@@ -1,5 +1,15 @@
 # Release notes
 
+## Unreleased
+
+### Breaking
+
+### Changed
+
+### Added
+
+### Fixed
+
 ## Version [v0.10.0] - 2024.02.21
 
 ### Breaking
