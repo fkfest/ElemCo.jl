@@ -53,6 +53,7 @@ using .CoupledCluster
 using .DFCoupledCluster
 using .FciDump
 using .DumpTools
+using .OrbTools
 using .MSystem
 using .BOHF
 using .DFHF
@@ -61,16 +62,24 @@ using .DfDump
 
 
 export ECdriver 
-export @mainname
+export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
-export @transform_ints, @write_ints, @dfints, @freeze_orbs
+export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
 
+const __VERSION__ = "0.10.0"
+
+"""
+    __init__()
+
+  Print the header with the version and the git hash of the current commit.
+"""
 function __init__()
   draw_line(15)
   println("   ElemCo.jl")
   draw_line(15)
+  println("Version: ", __VERSION__)
   srcpath = @__DIR__
   try
     hash = read(`git -C $srcpath rev-parse HEAD`, String)
@@ -118,6 +127,23 @@ julia> @mainname("~/test.xyz")
 macro mainname(file)
   return quote
     mainname($(esc(file)))
+  end
+end
+
+"""
+    @print_input()
+
+  Print the input file content. 
+
+  Can be used to print the input file content to the output.
+"""
+macro print_input()
+  return quote
+    try
+      print_info(read($(string(__source__.file)), String))
+    catch
+      print_info("No input file found.")
+    end
   end
 end
 
@@ -192,6 +218,7 @@ macro ECinit()
   return quote
     $(esc(:EC)) = ECInfo()
     try
+      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))
       println("Basis: ",$(esc(:basis)))
       $(esc(:EC)).ms = MSys($(esc(:geometry)),$(esc(:basis)))
@@ -199,6 +226,7 @@ macro ECinit()
       isa(err, UndefVarError) || rethrow(err)
     end
     try
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:geometry))
       println("FCIDump: ",$(esc(:fcidump)))
       $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
     catch err
@@ -216,7 +244,7 @@ macro tryECinit()
   return quote
     runECinit = [false]
     try
-      $(esc(:EC)).ignore_error
+      $(esc(:EC)).verbosity
     catch
       runECinit[1] = true
     end
@@ -557,6 +585,32 @@ macro freeze_orbs(freeze_orbs)
   end
 end
 
+"""
+    @rotate_orbs(orb1, orb2, angle, kwargs...)
+
+  Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  by `angle` (in degrees). For UHF, `spin` can be `:α` or `:β` (keyword argument).
+  
+  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+
+  # Keyword arguments
+  - `spin::Symbol`: spin of the orbitals (default: `:α`).
+
+  # Examples
+```julia
+@dfhf
+# swap orbitals 1 and 2
+@rotate_orbs 1, 2, 90
+```
+"""
+macro rotate_orbs(orb1, orb2, angle, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECinit))
+    rotate_orbs($(esc(:EC)), $(esc(orb1)), $(esc(orb2)), $(esc(angle)); $(ekwa...))
+  end
+end
+
 function run_mcscf()
   geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -655,7 +709,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     end
 
     ecmethod_save = ecmethod
-    if ecmethod.exclevel[3] in [:full, :pertiter]
+    if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
       ecmethod = ECMethod("CCSD")
       if is_unrestricted(ecmethod_save)
         set_unrestricted!(ecmethod)
@@ -668,31 +722,25 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
     main_name = method_name(ecmethod)
     ecmethod = ecmethod_save # restore
 
-    if closed_shell_method
-      if has_prefix(ecmethod, "Λ")
-        calc_lm_cc(EC, ecmethod)
-      end
-      if ecmethod.exclevel[3] != :none
-        do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
-        save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        if has_prefix(ecmethod, "Λ")
-          @assert !save_pert_t3 "Saving perturbative triples not implemented for ΛCCSD(T)"
-          ET3, ET3b = calc_ΛpertT(EC)
-        else
-          ET3, ET3b = calc_pertT(EC; save_t3 = save_pert_t3)
-        end
-        println()
-        println("$main_name[T] total energy: ",ECC+ET3b+EHF)
-        println("$main_name(T) correlation energy: ",ECC+ET3)
-        println("$main_name(T) total energy: ",ECC+ET3+EHF)
-        if do_full_t3
-          cc3 = (ecmethod.exclevel[3] == :pertiter)
-          ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
-          main_name = method_name(ecmethod)
-          println("$main_name correlation energy: ",ECC)
-          println("$main_name total energy: ",ECC+EHF)
-        end 
-      end
+    if has_prefix(ecmethod, "Λ")
+      calc_lm_cc(EC, ecmethod)
+    end
+
+    if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
+      do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
+      save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
+      ET3, ET3b = calc_pertT(EC, ecmethod; save_t3 = save_pert_t3)
+      println()
+      println("$main_name[T] total energy: ",ECC+ET3b+EHF)
+      println("$main_name(T) correlation energy: ",ECC+ET3)
+      println("$main_name(T) total energy: ",ECC+ET3+EHF)
+      if do_full_t3
+        cc3 = (ecmethod.exclevel[3] == :pertiter)
+        ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
+        main_name = method_name(ecmethod)
+        println("$main_name correlation energy: ",ECC)
+        println("$main_name total energy: ",ECC+EHF)
+      end 
     end
     println()
     flush(stdout)
@@ -717,7 +765,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       delete_temporary_files!(EC)
       draw_endline()
       if length(method_names) == 1
-        if ecmethod.exclevel[3] != :none
+        if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
           return EHF, EMp2, ECC, ET3
         else
           return EHF, EMp2, ECC

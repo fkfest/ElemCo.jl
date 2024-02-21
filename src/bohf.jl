@@ -207,7 +207,13 @@ end
   Perform BO-HF using integrals from fcidump EC.fd.
 """
 function bohf(EC::ECInfo)
-  print_info("Bi-orthogonal Hartree-Fock")
+  t1 = time_ns()
+  pseudo = EC.options.scf.pseudo
+  if pseudo
+    print_info("Bi-orthogonal pseudo-canonicalization")
+  else
+    print_info("Bi-orthogonal Hartree-Fock")
+  end
   setup_space_fd!(EC)
   flush(stdout)
   SP = EC.space
@@ -216,15 +222,23 @@ function bohf(EC::ECInfo)
   thren = sqrt(EC.options.scf.thr)*0.1
   Enuc = EC.fd.int0
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, false)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
   ϵ = zeros(norb)
   hsmall = integ1(EC.fd,:α)
   EHF = 0.0
   previousEHF = 0.0
-  println("Iter     Energy      DE          Res         Time")
+  if pseudo
+    println("   Energy       Res         Time")
+    maxit = 1
+  else
+    println("Iter     Energy      DE          Res         Time")
+    maxit = EC.options.scf.maxit
+  end
   flush(stdout)
   t0 = time_ns()
-  for it=1:EC.options.scf.maxit
+  for it=1:maxit
     fock = gen_fock(EC, cMOl, cMOr)
+    t1 = print_time(EC, t1, "generate Fock matrix", 2)
     den = gen_density_matrix(EC, cMOl, cMOr, SP['o'])
     fhsmall = fock + hsmall
     @tensoropt efhsmall = den[p,q]*fhsmall[p,q]
@@ -234,13 +248,29 @@ function bohf(EC::ECInfo)
     Δfock = den'*fock - fock*den'
     var = sum(abs2,Δfock)
     tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    if pseudo
+      @printf "%12.8f %10.2e %8.2f \n" EHF var tt
+    else
+      @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    end
     flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
-    fock, = perform(diis,[fock],[Δfock])
-    ϵ,cMOr = eigen(fock)
+    t1 = print_time(EC, t1, "HF residual", 2)
+    if pseudo
+      occ = SP['o']
+      vir = SP['v']
+      ϵ = zeros(Complex{Float64}, norb)
+      cMOr = zeros(Complex{Float64}, norb, norb)
+      ϵ[occ],cMOr[occ,occ] = eigen(fock[occ,occ])
+      ϵ[vir],cMOr[vir,vir] = eigen(fock[vir,vir])
+    else
+      fock, = perform(diis,[fock],[Δfock])
+      t1 = print_time(EC, t1, "DIIS", 2)
+      ϵ,cMOr = eigen(fock)
+    end
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     cMOl = (inv(cMOr))'
     # display(ϵ)
   end
@@ -262,7 +292,13 @@ end
   Perform BO-UHF using integrals from fcidump EC.fd.
 """
 function bouhf(EC::ECInfo)
-  print_info("Bi-orthogonal unrestricted Hartree-Fock")
+  t1 = time_ns()
+  pseudo = EC.options.scf.pseudo
+  if pseudo
+    print_info("Bi-orthogonal unrestricted pseudo-canonicalization")
+  else
+    print_info("Bi-orthogonal unrestricted Hartree-Fock")
+  end
   setup_space_fd!(EC)
   flush(stdout)
   SP = EC.space
@@ -272,15 +308,23 @@ function bouhf(EC::ECInfo)
   Enuc = EC.fd.int0
   # 1: alpha, 2: beta (cMOs can become complex(?))
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, true)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
   ϵ = Any[zeros(norb), zeros(norb)]
   hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
   EHF = 0.0
   previousEHF = 0.0
-  println("Iter     Energy      DE          Res         Time")
+  if pseudo
+    println("   Energy       Res         Time")
+    maxit = 1
+  else
+    println("Iter     Energy      DE          Res         Time")
+    maxit = EC.options.scf.maxit
+  end
   flush(stdout)
   t0 = time_ns()
-  for it=1:EC.options.scf.maxit
+  for it=1:maxit
     fock = gen_ufock(EC, cMOl, cMOr)
+    t1 = print_time(EC, t1, "generate Fock matrix", 2)
     efhsmall = Any[0.0, 0.0]
     Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
     var = 0.0
@@ -296,16 +340,34 @@ function bouhf(EC::ECInfo)
     ΔE = EHF - previousEHF 
     previousEHF = EHF
     tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    if pseudo
+      @printf "%12.8f %10.2e %8.2f \n" EHF var tt
+    else
+      @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+    end
     flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
-    fock = perform(diis, fock, Δfock)
-    for ispin = 1:2
-      ϵ[ispin],cMOr[ispin] = eigen(fock[ispin])
+    t1 = print_time(EC, t1, "HF residual", 2)
+    if !pseudo
+      fock = perform(diis, fock, Δfock)
+      t1 = print_time(EC, t1, "DIIS", 2)
+    end
+    for (ispin, ov) = enumerate(["ov", "OV"])
+      if pseudo
+        occ = SP[ov[1]]
+        vir = SP[ov[2]]
+        ϵ[ispin] = zeros(Complex{Float64}, norb)
+        cMOr[ispin] = zeros(Complex{Float64}, norb, norb)
+        ϵ[ispin][occ],cMOr[ispin][occ,occ] = eigen(fock[ispin][occ,occ])
+        ϵ[ispin][vir],cMOr[ispin][vir,vir] = eigen(fock[ispin][vir,vir])
+      else
+        ϵ[ispin],cMOr[ispin] = eigen(fock[ispin])
+      end
       cMOl[ispin] = (inv(cMOr[ispin]))'
     end
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
   end
   # check MOs to be real

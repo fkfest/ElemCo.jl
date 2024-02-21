@@ -55,7 +55,7 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
   save!(EC,"S_AA",overlap(bao))
   save!(EC,"h_AA",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   if save3idx
     pqP = ERI_2e3c(bao,bfit)
     @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
@@ -79,7 +79,7 @@ function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
   bfit = generate_basis(EC.ms, fitbasis)
 
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   μνP = ERI_2e3c(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
   μνP = nothing
