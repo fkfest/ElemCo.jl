@@ -1,5 +1,7 @@
 using ElemCo
 
+@print_input
+
 function main()
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067

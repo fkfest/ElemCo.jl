@@ -71,13 +71,19 @@ using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy 
-export calc_cc, calc_pertT, calc_ΛpertT
-export calc_lm_cc
+export calc_cc, calc_pertT
+export calc_lm_cc, calc_1RDM
+
+include("cc_triples.jl")
 
 include("cc_lagrange.jl")
 
 include("cc_tests.jl")
 
+include("algo/uccsdt_singles.jl")
+include("algo/uccsdt_doubles.jl")
+include("algo/uccsdt_triples.jl")
+include("algo/udcccsdt_triples.jl")
 
 """
     calc_singles_energy(EC::ECInfo, T1; fock_only=false)
@@ -245,6 +251,13 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
   # <ik|j \hat l>
   hd_oooo = ints2(EC,o1*o2*o1*o2)
+  if mixed
+    # <ik|\hat j l>
+    hd_oooo2 = deepcopy(hd_oooo)
+    oovo = ints2(EC,o1*o2*v1*o2)
+    @tensoropt hd_oooo2[i,j,k,l] += oovo[i,j,d,l] * T1[d,k]
+    oovo = nothing
+  end
   ooov = ints2(EC,o1*o2*o1*v2)
   @tensoropt hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
   ooov = nothing
@@ -267,16 +280,22 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     hd_vvoo = nothing
     t1 = print_time(EC,t1,"dress hd_"*v1*v2*o1*o2,3)
   end
-  # <\hat a k| \hat j l)
+  # <\hat a k| \hat j l>
   hd_vooo = ints2(EC,v1*o2*o1*o2)
-  vovo = ints2(EC,v1*o2*v1*o2)
-  @tensoropt hd_vooo[a,k,j,l] -= hd_oooo[i,k,j,l] * T1[a,i]
+  if !mixed
+    @tensoropt hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
+  else
+    @tensoropt hd_vooo[a,k,j,l] -= hd_oooo2[i,k,j,l] * T1[a,i]
+    hd_oooo2 = nothing
+  end
   if no2 > 0
+    vovo = ints2(EC,v1*o2*v1*o2)
     @tensoropt hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
+    vovo = nothing
   end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*o1*o2,3)
   if mixed
-    # <k\hat a | l\hat j )
+    # <k\hat a | l\hat j >
     hd_ovoo = ints2(EC,o1*v2*o1*o2)
     ovov = ints2(EC,o1*v2*o1*v2)
     if no1 > 0 && no2 > 0
@@ -440,7 +459,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
       save!(EC,"d_"*v1*v2*v1*o2,d_vvvo)
       d_vvvo = nothing
       d_vvov = load(EC,"hd_"*v1*v2*o1*v2)
-      @tensoropt d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T1[c,i]
+      @tensoropt d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T12[c,i]
       save!(EC,"d_"*v1*v2*o1*v2,d_vvov)
       d_vvov = nothing
     end
@@ -1057,249 +1076,6 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=fals
 end
 
 """
-    calc_pertT(EC::ECInfo; save_t3=false)
-
-  Calculate (T) correction for closed-shell CCSD.
-
-  Return ( (T)-energy, [T]-energy))
-"""
-function calc_pertT(EC::ECInfo; save_t3=false)
-  T1 = load(EC,"T_vo")
-  T2 = load(EC,"T_vvoo")
-  # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
-  # ``v_{ab}^{ck}``
-  vvvo = ints2(EC,"vvvo")
-  # ``v_{ia}^{jk}``
-  ovoo = ints2(EC,"ovoo")
-  nocc = n_occ_orbs(EC)
-  nvir = n_virt_orbs(EC)
-  ϵo, ϵv = orbital_energies(EC)
-  Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
-  if save_t3
-    t3file, T3 = newmmap(EC,"T_vvvooo",Float64,(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
-  end
-  for k = 1:nocc 
-    for j = 1:k
-      prefac = (j == k) ? 1.0 : 2.0
-      for i = 1:j
-        fac = prefac 
-        if i == j 
-          if j == k
-            continue
-          end 
-          fac = 1.0
-        end
-        T2ij = @view T2[:,:,i,j]
-        T2ik = @view T2[:,:,i,k]
-        T2jk = @view T2[:,:,j,k]
-        T2i = @view T2[:,:,:,i]
-        T2j = @view T2[:,:,:,j]
-        T2k = @view T2[:,:,:,k]
-        vvvk = @view vvvo[:,:,:,k]
-        vvvj = @view vvvo[:,:,:,j]
-        vvvi = @view vvvo[:,:,:,i]
-        ovjk = @view ovoo[:,:,j,k]
-        ovkj = @view ovoo[:,:,k,j]
-        ovik = @view ovoo[:,:,i,k]
-        ovki = @view ovoo[:,:,k,i]
-        ovij = @view ovoo[:,:,i,j]
-        ovji = @view ovoo[:,:,j,i]
-        @tensoropt begin
-          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
-          Kijk[a,b,c] := T2ij[a,d] * vvvk[b,c,d]
-          Kijk[a,b,c] += T2ij[d,b] * vvvk[a,c,d]
-          Kijk[a,b,c] += T2ik[a,d] * vvvj[c,b,d]
-          Kijk[a,b,c] += T2ik[d,c] * vvvj[a,b,d]
-          Kijk[a,b,c] += T2jk[b,d] * vvvi[c,a,d]
-          Kijk[a,b,c] += T2jk[d,c] * vvvi[b,a,d]
-
-          Kijk[a,b,c] -= T2i[b,a,l] * ovjk[l,c]
-          Kijk[a,b,c] -= T2j[a,b,l] * ovik[l,c]
-          Kijk[a,b,c] -= T2i[c,a,l] * ovkj[l,b]
-          Kijk[a,b,c] -= T2k[a,c,l] * ovij[l,b]
-          Kijk[a,b,c] -= T2j[c,b,l] * ovki[l,a]
-          Kijk[a,b,c] -= T2k[b,c,l] * ovji[l,a]
-        end
-        if save_t3
-          ijk = uppertriangular(i,j,k)
-          T3[:,:,:,ijk] = Kijk
-          for abc ∈ CartesianIndices(Kijk)
-            a,b,c = Tuple(abc)
-            T3[abc,ijk] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
-          end
-        end
-        @tensoropt  X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
-        for abc ∈ CartesianIndices(X)
-          a,b,c = Tuple(abc)
-          X[abc] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
-        end
-
-        @tensoropt Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
-        
-        vv_jk = @view vv_oo[:,:,j,k]
-        vv_ik = @view vv_oo[:,:,i,k]
-        vv_ij = @view vv_oo[:,:,i,j]
-        # julia 1.9 r1: cannot use @tensoropt begin/end here, since 
-        # IntX[:,j] overwrites IntX[:,i] if j == i
-        @tensoropt IntX[:,i][a] += fac * X[a,b,c] * vv_jk[b,c]
-        @tensoropt IntX[:,j][b] += fac * X[a,b,c] * vv_ik[a,c]
-        @tensoropt IntX[:,k][c] += fac * X[a,b,c] * vv_ij[a,b]
-        @tensoropt IntY[:,i][a] += fac * X[a,b,c] * T2jk[b,c]
-        @tensoropt IntY[:,j][b] += fac * X[a,b,c] * T2ik[a,c]
-        @tensoropt IntY[:,k][c] += fac * X[a,b,c] * T2ij[a,b]
-      end 
-    end
-  end
-  if save_t3
-    closemmap(EC,t3file,T3)
-  end
-  # singles contribution
-  @tensoropt En3 = T1[a,i] * IntX[a,i]
-  # fock contribution
-  fov = load(EC,"f_mm")[EC.space['o'],EC.space['v']]
-  @tensoropt En3 += fov[i,a] * IntY[a,i]
-  En3 += Enb3
-  return En3, Enb3
-end
-
-"""
-    calc_ΛpertT(EC::ECInfo)
-
-  Calculate (T) correction for closed-shell ΛCCSD(T).
-
-  The amplitudes are stored in `T_vvoo` file, 
-  and the Lagrangian multipliers are stored in `U_vvoo` file.
-  Return ( (T) energy, [T] energy)
-"""
-function calc_ΛpertT(EC::ECInfo)
-  T1 = load(EC,"T_vo")
-  T2 = load(EC,"T_vvoo")
-  U1 = load(EC,"U_vo")
-  U2 = contra2covariant(load(EC,"U_vvoo"))
-  # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
-  # ``v_{ab}^{ck}``
-  vvvo = ints2(EC,"vvvo")
-  # ``v_{ia}^{jk}``
-  ovoo = ints2(EC,"ovoo")
-  # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
-  vv_vo = permutedims(ints2(EC,"vovv"),[3,4,1,2])
-  # ``v_{jk}^{ia}``, reordered to ``v^{ia}_{jk}``
-  ov_oo = permutedims(ints2(EC,"ooov"),[3,4,1,2])
-  nocc = n_occ_orbs(EC)
-  nvir = n_virt_orbs(EC)
-  ϵo, ϵv = orbital_energies(EC)
-  Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
-  for k = 1:nocc 
-    for j = 1:k
-      prefac = (j == k) ? 1.0 : 2.0
-      for i = 1:j
-        fac = prefac 
-        if i == j 
-          if j == k
-            continue
-          end 
-          fac = 1.0
-        end
-        T2ij = @view T2[:,:,i,j]
-        T2ik = @view T2[:,:,i,k]
-        T2jk = @view T2[:,:,j,k]
-        T2i = @view T2[:,:,:,i]
-        T2j = @view T2[:,:,:,j]
-        T2k = @view T2[:,:,:,k]
-        vvvk = @view vvvo[:,:,:,k]
-        vvvj = @view vvvo[:,:,:,j]
-        vvvi = @view vvvo[:,:,:,i]
-        ovjk = @view ovoo[:,:,j,k]
-        ovkj = @view ovoo[:,:,k,j]
-        ovik = @view ovoo[:,:,i,k]
-        ovki = @view ovoo[:,:,k,i]
-        ovij = @view ovoo[:,:,i,j]
-        ovji = @view ovoo[:,:,j,i]
-        @tensoropt begin
-          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
-          Kijk[a,b,c] := T2ij[a,d] * vvvk[b,c,d]
-          Kijk[a,b,c] += T2ij[d,b] * vvvk[a,c,d]
-          Kijk[a,b,c] += T2ik[a,d] * vvvj[c,b,d]
-          Kijk[a,b,c] += T2ik[d,c] * vvvj[a,b,d]
-          Kijk[a,b,c] += T2jk[b,d] * vvvi[c,a,d]
-          Kijk[a,b,c] += T2jk[d,c] * vvvi[b,a,d]
-
-          Kijk[a,b,c] -= T2i[b,a,l] * ovjk[l,c]
-          Kijk[a,b,c] -= T2j[a,b,l] * ovik[l,c]
-          Kijk[a,b,c] -= T2i[c,a,l] * ovkj[l,b]
-          Kijk[a,b,c] -= T2k[a,c,l] * ovij[l,b]
-          Kijk[a,b,c] -= T2j[c,b,l] * ovki[l,a]
-          Kijk[a,b,c] -= T2k[b,c,l] * ovji[l,a]
-        end
-        @tensoropt  X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
-        for abc ∈ CartesianIndices(X)
-          a,b,c = Tuple(abc)
-          X[abc] /= ϵo[i] + ϵo[j] + ϵo[k] - ϵv[a] - ϵv[b] - ϵv[c]
-        end
-
-        U2ij = @view U2[:,:,i,j]
-        U2ik = @view U2[:,:,i,k]
-        U2jk = @view U2[:,:,j,k]
-        U2i = @view U2[:,:,:,i]
-        U2j = @view U2[:,:,:,j]
-        U2k = @view U2[:,:,:,k]
-        vv_vk = @view vv_vo[:,:,:,k]
-        vv_vj = @view vv_vo[:,:,:,j]
-        vv_vi = @view vv_vo[:,:,:,i]
-        ov_jk = @view ov_oo[:,:,j,k]
-        ov_kj = @view ov_oo[:,:,k,j]
-        ov_ik = @view ov_oo[:,:,i,k]
-        ov_ki = @view ov_oo[:,:,k,i]
-        ov_ij = @view ov_oo[:,:,i,j]
-        ov_ji = @view ov_oo[:,:,j,i]
-        @tensoropt begin
-          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
-          Kijk[a,b,c] = U2ij[a,d] * vv_vk[b,c,d]
-          Kijk[a,b,c] += U2ij[d,b] * vv_vk[a,c,d]
-          Kijk[a,b,c] += U2ik[a,d] * vv_vj[c,b,d]
-          Kijk[a,b,c] += U2ik[d,c] * vv_vj[a,b,d]
-          Kijk[a,b,c] += U2jk[b,d] * vv_vi[c,a,d]
-          Kijk[a,b,c] += U2jk[d,c] * vv_vi[b,a,d]
-
-          Kijk[a,b,c] -= U2i[b,a,l] * ov_jk[l,c]
-          Kijk[a,b,c] -= U2j[a,b,l] * ov_ik[l,c]
-          Kijk[a,b,c] -= U2i[c,a,l] * ov_kj[l,b]
-          Kijk[a,b,c] -= U2k[a,c,l] * ov_ij[l,b]
-          Kijk[a,b,c] -= U2j[c,b,l] * ov_ki[l,a]
-          Kijk[a,b,c] -= U2k[b,c,l] * ov_ji[l,a]
-        end
-        @tensoropt Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
-        
-        vv_jk = @view vv_oo[:,:,j,k]
-        vv_ik = @view vv_oo[:,:,i,k]
-        vv_ij = @view vv_oo[:,:,i,j]
-        # julia 1.9 r1: cannot use @tensoropt begin/end here, since 
-        # IntX[:,j] overwrites IntX[:,i] if j == i
-        @tensoropt IntX[:,i][a] += fac * X[a,b,c] * vv_jk[b,c]
-        @tensoropt IntX[:,j][b] += fac * X[a,b,c] * vv_ik[a,c]
-        @tensoropt IntX[:,k][c] += fac * X[a,b,c] * vv_ij[a,b]
-        @tensoropt IntY[:,i][a] += fac * X[a,b,c] * U2jk[b,c]
-        @tensoropt IntY[:,j][b] += fac * X[a,b,c] * U2ik[a,c]
-        @tensoropt IntY[:,k][c] += fac * X[a,b,c] * U2ij[a,b]
-      end 
-    end
-  end
-  # singles contribution
-  @tensoropt En3 = 0.5 * (U1[a,i] * IntX[a,i])
-  # fock contribution
-  fov = load(EC,"f_mm")[EC.space['o'],EC.space['v']]
-  @tensoropt En3 += fov[i,a] * IntY[a,i]
-  En3 += Enb3
-  return En3, Enb3
-end
-
-"""
     calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
 
   Calculate UCCSD or UDCSD residual.
@@ -1320,9 +1096,6 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   end
 
   if ndims(T1a) == 2
-    if !EC.options.cc.use_kext
-      error("open-shell CCSD only implemented with kext")
-    end
     calc_dressed_ints(EC,T1a,T1b)
     t1 = print_time(EC,t1,"dressing",2)
   else
@@ -1365,6 +1138,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       d_oVvV = load(EC,"d_oVvV")
       @tensoropt R1b[A,I] += d_oVvV[k,A,d,B] * T2ab[d,B,k,I]
       d_oVvV = nothing
+      t1 = print_time(EC,t1,"``R_a^i += v_{ak}^{bd} T_{bd}^{ik}``",2)
     end
     fia = dfock[SP['o'],SP['v']]
     fIA = dfockb[SP['O'],SP['V']]
@@ -1374,6 +1148,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       R1a[a,i] += fIA[J,B] * T2ab[a,B,i,J]
       R1b[A,I] += fia[j,b] * T2ab[b,A,j,I]
     end
+    t1 = print_time(EC,t1,"``R_a^i += f_j^b T_{ab}^{ij}``",2)
     if n_occ_orbs(EC) > 0 
       d_oovo = load(EC,"d_oovo")
       @tensoropt R1a[a,i] -= d_oovo[k,j,d,i] * T2a[a,d,j,k]
@@ -1389,6 +1164,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       d_oOvO = load(EC,"d_oOvO")
       @tensoropt R1b[A,I] -= d_oOvO[k,J,d,I] * T2ab[d,A,k,J]
     end
+    t1 = print_time(EC,t1,"``R_a^i -= v_{kj}^{di} T_{ad}^{jk}``",2)
   end
 
   #driver terms
@@ -1412,9 +1188,9 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   if EC.options.cc.use_kext
     # last two indices of integrals (apart from αβ) are stored as upper triangular 
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
-    if(EC.fd.uhf)
+    if EC.fd.uhf
       # αα
-      int2a = integ2(EC.fd,:α)
+      int2a = integ2(EC.fd, :α)
       @assert ndims(int2a) == 3 "Triangular storage of integrals expected!"
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
       @tensoropt rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
@@ -1426,7 +1202,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       R2a += K2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
-        int2b = integ2(EC.fd,:β)
+        int2b = integ2(EC.fd, :β)
         D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
         @tensoropt rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
@@ -1436,7 +1212,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
         rK2pqb = nothing
         R2b += K2pqb[SP['V'],SP['V'],:,:]
         # αβ
-        int2ab = integ2(EC.fd,:αβ)
+        int2ab = integ2(EC.fd, :αβ)
         D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
         @tensoropt K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
         D2ab = nothing
@@ -1512,6 +1288,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     end
     (K2pqa, K2pqb, K2pqab) = (nothing, nothing, nothing)
     (x1a, x1b, x1ab) = (nothing, nothing, nothing)
+    t1 = print_time(EC,t1,"kext",2)
   else
     d_vvvv = load(EC,"d_vvvv")
     @tensoropt R2a[a,b,i,j] += d_vvvv[a,b,c,d] * T2a[c,d,i,j]
@@ -1522,6 +1299,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     d_vVvV = load(EC,"d_vVvV")
     @tensoropt R2ab[a,B,i,J] += d_vVvV[a,B,c,D] * T2ab[c,D,i,J]
     d_vVvV = nothing
+    t1 = print_time(EC,t1,"``R_{ab}^{ij} += v_{ab}^{cd} T_{cd}^{ij}``",2)
   end
 
   @tensoropt begin
@@ -1540,6 +1318,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       xij[i,j] += dcfac * oovv[i,k,b,d] * T2a[b,d,j,k]
       xab[a,b] -= dcfac * oovv[i,k,b,d] * T2a[a,d,i,k]
     end
+    t1 = print_time(EC,t1,"``x_i^j and x_a^b``",2)
     !dc && @tensoropt x_klij[k,l,i,j] += 0.5 * oovv[k,l,c,d] * T2a[c,d,i,j]
     if n_occb_orbs(EC) > 0
       @tensoropt x_dAlI[d,A,l,I] := oovv[k,l,c,d] * T2ab[c,A,k,I]
@@ -1549,21 +1328,25 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
         R2b[A,B,I,J] += rR2b[A,B,I,J] - rR2b[A,B,J,I]
       end
       x_dAlI, rR2b = nothing, nothing
+      t1 = print_time(EC,t1,"``R_{AB}^{IJ} += x_{dA}^{lI} T_{dB}^{lJ}``",2)
     end
     @tensoropt x_adil[a,d,i,l] := 0.5 * oovv[k,l,c,d] *  T2a[a,c,i,k]
     !dc && @tensoropt x_adil[a,d,i,l] -= 0.5 * oovv[k,l,d,c] * T2a[a,c,i,k]
     @tensoropt R2ab[a,B,i,J] += x_adil[a,d,i,l] * T2ab[d,B,l,J]
     oovv = nothing
+    t1 = print_time(EC,t1,"``R_{aB}^{iJ} += x_{ad}^{il} T_{dB}^{lJ}``",2)
     if n_occb_orbs(EC) > 0
       OOVV = ints2(EC,"OOVV")
       @tensoropt begin
         xIJ[I,J] += dcfac * OOVV[I,K,B,D] * T2b[B,D,J,K]
         xAB[A,B] -= dcfac * OOVV[I,K,B,D] * T2b[A,D,I,K]
       end
+      t1 = print_time(EC,t1,"``x_I^J and x_A^B``",2)
       !dc && @tensoropt x_KLIJ[K,L,I,J] += 0.5 * OOVV[K,L,C,D] * T2b[C,D,I,J]
       @tensoropt x_ADIL[A,D,I,L] := 0.5 * OOVV[K,L,C,D] * T2b[A,C,I,K]
       !dc && @tensoropt x_ADIL[A,D,I,L] -= 0.5 * OOVV[K,L,D,C] * T2b[A,C,I,K]
       @tensoropt R2ab[b,A,j,I] += 2.0 * x_ADIL[A,D,I,L] * T2ab[b,D,j,L]
+      t1 = print_time(EC,t1,"``R_{bA}^{jI} += 2 x_{AD}^{IL} T_{bD}^{jL}``",2)
       @tensoropt x_vVoO[a,D,i,L] := OOVV[K,L,C,D] * T2ab[a,C,i,K]
       !dc && @tensoropt x_vVoO[a,D,i,L] -= OOVV[K,L,D,C] * T2ab[a,C,i,K]
       @tensoropt begin      
@@ -1571,6 +1354,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
         R2a[a,b,i,j] += rR2a[a,b,i,j] - rR2a[a,b,j,i] 
       end
       OOVV, x_vVoO, rR2a = nothing, nothing, nothing
+      t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{aL}^{Di} T_{bD}^{jL}``",2)
       oOvV = ints2(EC,"oOvV")
       @tensoropt begin
         xij[i,j] += dcfac * oOvV[i,K,b,D] * T2ab[b,D,j,K]
@@ -1578,6 +1362,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
         xIJ[I,J] += dcfac * oOvV[k,I,d,B] * T2ab[d,B,k,J]
         xAB[A,B] -= dcfac * oOvV[k,I,d,B] * T2ab[d,A,k,I]
       end
+      t1 = print_time(EC,t1,"``opposite spin for x_i^j, x_a^b, x_I^J, x_A^B``",2)
       !dc && @tensoropt x_kLiJ[k,L,i,J] += oOvV[k,L,c,D] * T2ab[c,D,i,J]
       @tensoropt begin
         x_adil[a,d,i,l] += oOvV[l,K,d,C] * T2ab[a,C,i,K]
@@ -1586,23 +1371,27 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
         R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
       end
       x_adil, rR2a = nothing, nothing
+      t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{al}^{id} T_{db}^{lj}``",2)
       @tensoropt begin
         x_ADIL[A,D,I,L] += oOvV[k,L,c,D] * T2ab[c,A,k,I]
         rR2b[A,B,I,J] := x_ADIL[A,D,I,L] * T2b[B,D,J,L]
         R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
       end 
       X_ADIL, rR2b = nothing, nothing
+      t1 = print_time(EC,t1,"``R_{AB}^{IJ} += x_{AL}^{ID} T_{BD}^{JL}``",2)
       @tensoropt begin
         x_vVoO[a,D,i,L] := oOvV[k,L,c,D] * T2a[a,c,i,k]
         R2ab[a,B,i,J] += x_vVoO[a,D,i,L] * T2b[B,D,J,L]
       end
       x_vVoO = nothing
+      t1 = print_time(EC,t1,"``R_{aB}^{iJ} += x_{aL}^{iD} T_{BD}^{JL}``",2)
       if !dc
         @tensoropt begin
           x_DBik[D,B,i,k] := oOvV[k,L,c,D] * T2ab[c,B,i,L]
           R2ab[a,B,i,J] += x_DBik[D,B,i,k] * T2ab[a,D,k,J]
         end
         x_DBik = nothing
+        t1 = print_time(EC,t1,"``R_{aB}^{iJ} += x_{DB}^{ik} T_{aD}^{kJ}``",2)
       end
       oOvV = nothing
     end
@@ -1616,6 +1405,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     end
   end
   x_klij, x_KLIJ, x_kLiJ = nothing, nothing, nothing
+  t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{kl}^{ij} T_{ab}^{kl}``",2)
 
   @tensoropt begin
     rR2a[a,b,i,j] := xab[a,c] * T2a[c,b,i,j]
@@ -1638,6 +1428,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     end
   end
   xij, xIJ, xab, xAB = nothing, nothing, nothing, nothing
+  t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_a^c T_{cb}^{ij} - x_k^i T_{ab}^{kj}``",2)
   #ph-ab-ladder
   if n_occb_orbs(EC) > 0
     d_vOvO = load(EC,"d_vOvO")
@@ -1646,6 +1437,7 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     d_oVoV = load(EC,"d_oVoV")
     @tensoropt R2ab[a,B,i,J] -= d_oVoV[k,B,i,C] * T2ab[a,C,k,J]
     d_oVoV = nothing
+    t1 = print_time(EC,t1,"``R_{aB}^{iJ} -= v_{aK}^{cJ} T_{cB}^{iK}``",2)
   end
 
   #ring terms
@@ -1655,12 +1447,14 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
     R2ab[a,B,i,J] += A_d_voov[a,k,i,c] * T2ab[c,B,k,J]
   end
   A_d_voov = nothing
+  t1 = print_time(EC,t1,"``R_{ab}^{ij} += \\bar v_{bk}^{jc} T_{ac}^{ik}``",2)
   d_vOoV = load(EC,"d_vOoV")
   @tensoropt begin
     rR2a[a,b,i,j] += d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
     R2ab[a,B,i,J] += d_vOoV[a,K,i,C] * T2b[B,C,J,K]
   end
   d_vOoV = nothing
+  t1 = print_time(EC,t1,"``R_{ab}^{ij} += v_{bK}^{jC} T_{aC}^{iK}``",2)
   @tensoropt R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
   rR2a = nothing
   if n_occb_orbs(EC) > 0
@@ -1670,12 +1464,14 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       R2ab[a,B,i,J] += A_d_VOOV[B,K,J,C] * T2ab[a,C,i,K]
     end
     A_d_VOOV = nothing
+    t1 = print_time(EC,t1,"``R_{AB}^{IJ} += \\bar v_{BK}^{JC} T_{AC}^{IK}``",2)
     d_oVvO = load(EC,"d_oVvO")
     @tensoropt begin
       rR2b[A,B,I,J] += d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
       R2ab[a,B,i,J] += d_oVvO[k,B,c,J] * T2a[a,c,i,k]
     end
     d_oVvO = nothing
+    t1 = print_time(EC,t1,"``R_{AB}^{IJ} += v_{kB}^{cJ} T_{cA}^{kI}``",2)
     @tensoropt R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
     rR2b = nothing
   end
@@ -1713,11 +1509,78 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       M2ab = calc_M2ab(occcore, virtuals, T1a, T1b, T2a, T2b, T2ab, activeorbs)
       @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
       save!(EC,"2d_ccsd_W",[W])
+      t1 = print_time(EC,t1,"``2D-CCSD additional terms``",2)
     elseif fixref
       R2ab[norba,morbb,morba,norbb] = 0
     end
   end
   return R1a, R1b, R2a, R2b, R2ab
+end
+
+"""
+    calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3aaa, T3bbb, T3abb, T3aab; dc=false)
+
+  Calculate UCCSDT or UDC-CCSDT residual.
+"""
+function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb; dc=false, tworef=false, fixref=false)
+  EC.options.cc.use_kext = false
+  EC.options.cc.calc_d_vvvv = true
+  EC.options.cc.calc_d_vvvo = true
+  EC.options.cc.calc_d_vovv = true
+  EC.options.cc.calc_d_vvoo = true
+  EC.options.cc.triangular_kext = false
+
+  t1 = time_ns()
+  SP = EC.space
+  nocc = n_occ_orbs(EC)
+  noccb = n_occb_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nvirtb = n_virtb_orbs(EC)
+  if ndims(T1a) == 2
+    calc_dressed_ints(EC,T1a,T1b)
+    t1 = print_time(EC,t1,"dressing",2)
+  else
+    pseudo_dressed_ints(EC,true)
+  end
+
+  R1a = zeros(nvirt,nocc)
+  R1b = zeros(nvirtb,noccb)
+
+  dfock = load(EC,"df_mm")
+  dfockb = load(EC,"df_MM")
+
+  fij = dfock[SP['o'],SP['o']]
+  fab = dfock[SP['v'],SP['v']]
+  fIJ = dfockb[SP['O'],SP['O']]
+  fAB = dfockb[SP['V'],SP['V']]
+  fai = dfock[SP['v'],SP['o']]
+  fAI = dfockb[SP['V'],SP['O']]
+  fia = dfock[SP['o'],SP['v']]
+  fIA = dfockb[SP['O'],SP['V']]
+
+  if length(T1a) > 0
+    ccsdt_singles!(EC, R1a, R1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+    t1 = print_time(EC,t1,"ccsdt singles",2)
+  end
+
+  R2a = zeros(nvirt, nvirt, nocc, nocc)
+  R2b = zeros(nvirtb, nvirtb, noccb, noccb)
+  R2ab = zeros(nvirt, nvirtb, nocc, noccb)
+  ccsdt_doubles!(EC, R2a, R2b, R2ab, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  t1 = print_time(EC,t1,"ccsdt doubles",2)
+
+  R3a = zeros(nvirt, nvirt, nvirt, nocc, nocc, nocc)
+  R3b = zeros(nvirtb, nvirtb, nvirtb, noccb, noccb, noccb)
+  R3abb = zeros(nvirt, nvirtb, nvirtb, nocc, noccb, noccb)
+  R3aab = zeros(nvirt, nvirt, nvirtb, nocc, nocc, noccb)
+  if dc
+    dcccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  else
+    ccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  end
+  t1 = print_time(EC,t1,"ccsdt triples",2)
+
+  return R1a, R1b, R2a, R2b, R2ab, R3a, R3b, R3aab, R3abb
 end
 
 function active_orbitals(EC::ECInfo)
@@ -2036,7 +1899,7 @@ end
   Exact specification of the method is given by `method`.
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC")
+  dc = (method.theory[1:2] == "DC")
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
@@ -2054,6 +1917,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
+  NormT3 = 0.0
   do_sing = (method.exclevel[1] == :full)
   Eh = 0.0
   En1 = 0.0
@@ -2070,8 +1934,13 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
     NormR2 = calc_doubles_norm(Res[doubles]...)
-    Eh = calc_hylleraas(EC, Amps..., Res...)
+    Eh = calc_hylleraas(EC, Amps[singles]..., Amps[doubles]..., Res[singles]..., Res[doubles]...)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
+    if method.exclevel[3] == :full
+      NormT3 = calc_triples_norm(Amps[triples]...)
+      NormR3 = calc_triples_norm(Res[triples]...)
+      update_triples!(EC, Amps[triples]..., Res[triples]...)
+    end
     if has_prefix(method, "FRS")
       morba, norbb, morbb, norba = active_orbitals(EC)
       Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
@@ -2101,9 +1970,13 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     save_current_doubles(EC, Amps[doubles]...)
     En2 = calc_doubles_energy(EC, Amps[doubles]...)
     En = En1 + En2
-    ΔE = En - Eh  
+    ΔE = En - Eh
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
+    if method.exclevel[3] == :full
+      NormR += NormR3
+      NormT += NormT3
+    end
     tt = (time_ns() - t0)/10^9
     @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
     flush(stdout)
@@ -2120,7 +1993,11 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   end
   try2save_doubles!(EC, Amps[doubles]...)
   println()
-  @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
+  if method.exclevel[3] == :full
+    @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f Sq.Norm of T3: %12.8f \n" NormT1 NormT2 NormT3
+  else
+    @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
+  end
   println()
   flush(stdout)
   if has_prefix(method, "2D") && do_sing

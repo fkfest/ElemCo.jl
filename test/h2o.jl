@@ -11,6 +11,8 @@ EDCSD_test =  -0.328754956597
 EDC_CCSDT_useT3_test = -0.330054209137
 EDC_CCSDT_test = -0.33024914396392
 
+@print_input
+
 fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
 
 EC = ECInfo()

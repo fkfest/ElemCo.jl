@@ -18,6 +18,7 @@ export dfhf, dfuhf
   Perform closed-shell DF-HF calculation.
 """
 function dfhf(EC::ECInfo)
+  t1 = time_ns()
   print_info("DF-HF")
   setup_space_ms!(EC)
   SP = EC.space
@@ -34,7 +35,9 @@ function dfhf(EC::ECInfo)
     bao = generate_basis(EC.ms, "ao")
     bfit = generate_basis(EC.ms, "jkfit")
   end
+  t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC,guess)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
   @assert !is_unrestricted_MO(cMO) "DF-HF only implemented for closed-shell"
   ϵ = zeros(norb)
   hsmall = load(EC, "h_AA")
@@ -51,6 +54,7 @@ function dfhf(EC::ECInfo)
     else
       fock = gen_dffock(EC,cMO)
     end
+    t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
     @tensoropt efhsmall = cMO2[p,i]*fhsmall[p,q]*cMO2[q,i]
@@ -67,9 +71,12 @@ function dfhf(EC::ECInfo)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
+    t1 = print_time(EC, t1, "HF residual", 2)
     fock, = perform(diis,[fock],[Δfock])
+    t1 = print_time(EC, t1, "DIIS", 2)
     # use Hermitian to ensure real eigenvalues and normalized orbitals
     ϵ,cMO = eigen(Hermitian(fock),Hermitian(sao))
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
   end
   println("DF-HF energy: ", EHF)
@@ -85,6 +92,7 @@ end
   Perform DF-UHF calculation.
 """
 function dfuhf(EC::ECInfo)
+  t1 = time_ns()
   print_info("DF-UHF")
   setup_space_ms!(EC)
   SP = EC.space
@@ -101,7 +109,9 @@ function dfuhf(EC::ECInfo)
     bao = generate_basis(EC.ms, "ao")
     bfit = generate_basis(EC.ms, "jkfit")
   end
+  t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC,guess)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
   if !is_unrestricted_MO(cMO)
     cMO = Any[cMO, cMO]
   end
@@ -120,6 +130,7 @@ function dfuhf(EC::ECInfo)
     else
       fock = gen_dffock(EC,cMO)
     end
+    t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
     efhsmall = Any[0.0, 0.0]
     Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
     var = 0.0
@@ -140,11 +151,14 @@ function dfuhf(EC::ECInfo)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
+    t1 = print_time(EC, t1, "HF residual", 2)
     fock = perform(diis, fock, Δfock)
+    t1 = print_time(EC, t1, "DIIS", 2)
     for ispin = 1:2
       # use Hermitian to ensure real eigenvalues and normalized orbitals
       ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]), Hermitian(sao))
     end
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
   end
   println("DF-UHF energy: ", EHF)

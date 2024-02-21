@@ -28,4 +28,9 @@ EHF, EMP2, ERDCSD = @cc rdcsd
 fcidump = joinpath(@__DIR__,"H2OP_UHF.FCIDUMP")
 EHF, EMP2, ECCSD = ECdriver(EC, "uccsd"; fcidump)
 @test abs(ECCSD-ECCSD_UHF_test) < epsilon
+
+@opt cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true triangular_kext = false 
+EHF, EMP2, ECCSD_nokext = ECdriver(EC, "uccsd"; fcidump)
+@test abs(ECCSD_nokext-ECCSD_UHF_test) < epsilon
+
 end
