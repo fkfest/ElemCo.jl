@@ -1281,7 +1281,7 @@ Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schrai
 The \quantwo inputs are listed below.
 \begin{itemize}
   \item UCCSDT \quantwo input file:
-\lstset{language=[LaTeX]Tex, frame=shadowbox, rulesepcolor=\color{gray}, basicstyle=\ttfamily\scriptsize, breaklines=true}
+\lstset{language=[LaTeX]Tex, frame=shadowbox, rulesepcolor=\color{gray}, basicstyle=\ttfamily\scriptsize, columns=fullflexible, breaklines=true}
 \begin{lstlisting}
 prog,spinintegr=0,nobrafac=1,explspin=1,algo=2
 output,level=1,maxlenline=70
@@ -1293,8 +1293,7 @@ output,level=1,maxlenline=70
 <\Phi^{ab}_{ij}| \op H (1 + \op T_2 + \half \op T_2 \op T_2 + \op T_3) |0>_C
 \eeq
 \beq
-<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \half \op T_2 \op T_2 
-+ \op T_2 \op T_3) |0>_C
+<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \half \op T_2 \op T_2 + \op T_2 \op T_3) |0>_C
 \end{lstlisting}
 \item UDC-CCSDT \quantwo input file:
 \begin{lstlisting}
@@ -1307,19 +1306,19 @@ output,level=1,maxlenline=70
 \beq
 <\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \frac{1}{2} \op T_2 \op T_2 
 + \op T_2 \op T_3) |0>_C 
-+ (1-\Perm{IJ}{JI}-\Perm{IK}{KI})(1-\Perm{AB}{BA}-\Perm{AC}{CA})
++ (1 - \Perm{IJ}{JI} - \Perm{IK}{KI})(1 - \Perm{AB}{BA} - \Perm{AC}{CA})
 (\sum_{LMDE} \tnsr \intg{LE}{MD} \tnsr T^{IL}_{AD} \tnsr T^{MJK}_{EBC}) 
-- \frac{1}{2}(1-\Perm{KI}{IK}-\Perm{KJ}{JK}) 
+- \frac{1}{2}(1 - \Perm{KI}{IK} - \Perm{KJ}{JK}) 
 \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{DE} \tnsr T^{LMK}_{ABC} 
-- \frac{1}{2}(1-\Perm{CA}{AC}-\Perm{CB}{BC}) 
+- \frac{1}{2}(1 - \Perm{CA}{AC} - \Perm{CB}{BC}) 
 \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{AB} \tnsr T^{IJK}_{DEC} 
-+ \frac{1}{2}(1-\Perm{IJ}{JI}-\Perm{IK}{KI} ) 
++ \frac{1}{2}(1 - \Perm{IJ}{JI} - \Perm{IK}{KI}) 
 \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LI}_{DE} \tnsr T^{MJK}_{ABC} 
-+ \frac{1}{2}(1-\Perm{AB}{BA}-\Perm{AC}{CA}) 
++ \frac{1}{2}(1 - \Perm{AB}{BA} - \Perm{AC}{CA}) 
 \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{DA} \tnsr T^{IJK}_{EBC} 
-+ \frac{1}{2}(1-\Perm{KI}{IK}-\Perm{KJ}{JK})(1-\Perm{AB}{BA}-\Perm{AC}{CA}) 
++ \frac{1}{2}(1 - \Perm{KI}{IK} - \Perm{KJ}{JK})(1 - \Perm{AB}{BA} - \Perm{AC}{CA}) 
 \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{AD} \tnsr T^{LMK}_{BEC} 
-+ \frac{1}{2}(1-\Perm{IJ}{JI}-\Perm{IK}{KI})(1-\Perm{CA}{AC}-\Perm{CB}{BC}) 
++ \frac{1}{2}(1 - \Perm{IJ}{JI} - \Perm{IK}{KI})(1 - \Perm{CA}{AC} - \Perm{CB}{BC}) 
 \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IL}_{AB} \tnsr T^{JMK}_{DEC}
 \eeq
 \end{lstlisting}
