@@ -1278,44 +1278,52 @@ IAS contribution to the energy,
 
 \chapter{Automatically generated UCCSDT and UDC-CCSDT}
 Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} were generated with version 1.0.0 of the \quantwo program\cite{quantwo}.
-The \quantwo inputs are listed below. Linebreaks within an equation environment are introduced for readability, but should be avoided in the actual input files. \newline
-\hspace{0pt} \newline
-UCCSDT \quantwo input file:
-\begin{lstlisting}[breaklines]
-prog,spinintegr=0
-prog,nobrafac=1
-prog,explspin=1
-prog,algo=2
-output,level=1
-output,maxlenline=70
+The \quantwo inputs are listed below.
+\begin{itemize}
+  \item UCCSDT \quantwo input file:
+\lstset{language=[LaTeX]Tex, frame=shadowbox, rulesepcolor=\color{gray}, basicstyle=\ttfamily\scriptsize, breaklines=true}
+\begin{lstlisting}
+prog,spinintegr=0,nobrafac=1,explspin=1,algo=2
+output,level=1,maxlenline=70
 
 \beq
-<\Phi^{a}_{i}| \op H (1 + \op T_2 + \op T_3 ) |0>_C
+<\Phi^{a}_{i}| \op H (1 + \op T_2 + \op T_3) |0>_C
 \eeq
 \beq
-<\Phi^{ab}_{ij}| \op H (1 + \op T_2 + \half \op T_2 \op T_2 + \op T_3 ) |0>_C
+<\Phi^{ab}_{ij}| \op H (1 + \op T_2 + \half \op T_2 \op T_2 + \op T_3) |0>_C
 \eeq
 \beq
-<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \half \op T_2 \op T_2 + \op T_2 \op T_3 ) |0>_C
+<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \half \op T_2 \op T_2 
++ \op T_2 \op T_3) |0>_C
 \end{lstlisting}
-\hspace{0pt} \newline
-UDC-CCSDT \quantwo input file:
-\begin{lstlisting}[breaklines]
+\item UDC-CCSDT \quantwo input file:
+\begin{lstlisting}
 %singles and doubles amplitude equations from UCCSDT
 %we only modify the triples amplitude equation
 
-prog,spinintegr=0
-prog,nobrafac=1
-prog,explspin=1
-prog,algo=2
-output,level=1
-output,maxlenline=70
+prog,spinintegr=0,nobrafac=1,explspin=1,algo=2
+output,level=1,maxlenline=70
 
 \beq
-<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \frac{1}{2} \op T_2 \op T_2 + \op T_2 \op T_3) |0>_C + (1 - \Perm{IJ}{JI} - \Perm{IK}{KI})(1 - \Perm{AB}{BA} - \Perm{AC}{CA})( \sum_{LMDE} \tnsr \intg{LE}{MD} \tnsr T^{IL}_{AD} \tnsr T^{MJK}_{EBC}) - \frac{1}{2} (1 - \Perm{KI}{IK} - \Perm{KJ}{JK} ) \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{DE} \tnsr T^{LMK}_{ABC} - \frac{1}{2} (1 - \Perm{CA}{AC} - \Perm{CB}{BC}) \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{AB} \tnsr T^{IJK}_{DEC} + \frac{1}{2} ( 1 - \Perm{IJ}{JI} - \Perm{IK}{KI} ) \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LI}_{DE} \tnsr T^{MJK}_{ABC} + \frac{1}{2} (1 - \Perm{AB}{BA} - \Perm{AC}{CA}) \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{DA} \tnsr T^{IJK}_{EBC} + \frac{1}{2} (1 - \Perm{KI}{IK} - \Perm{KJ}{JK}) (1 - \Perm{AB}{BA} - \Perm{AC}{CA}) \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{AD} \tnsr T^{LMK}_{BEC} + \frac{1}{2} (1 - \Perm{IJ}{JI} - \Perm{IK}{KI}) (1 - \Perm{CA}{AC} - \Perm{CB}{BC}) \sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IL}_{AB} \tnsr T^{JMK}_{DEC}
+<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \frac{1}{2} \op T_2 \op T_2 
++ \op T_2 \op T_3) |0>_C 
++ (1-\Perm{IJ}{JI}-\Perm{IK}{KI})(1-\Perm{AB}{BA}-\Perm{AC}{CA})
+(\sum_{LMDE} \tnsr \intg{LE}{MD} \tnsr T^{IL}_{AD} \tnsr T^{MJK}_{EBC}) 
+- \frac{1}{2}(1-\Perm{KI}{IK}-\Perm{KJ}{JK}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{DE} \tnsr T^{LMK}_{ABC} 
+- \frac{1}{2}(1-\Perm{CA}{AC}-\Perm{CB}{BC}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{AB} \tnsr T^{IJK}_{DEC} 
++ \frac{1}{2}(1-\Perm{IJ}{JI}-\Perm{IK}{KI} ) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LI}_{DE} \tnsr T^{MJK}_{ABC} 
++ \frac{1}{2}(1-\Perm{AB}{BA}-\Perm{AC}{CA}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{DA} \tnsr T^{IJK}_{EBC} 
++ \frac{1}{2}(1-\Perm{KI}{IK}-\Perm{KJ}{JK})(1-\Perm{AB}{BA}-\Perm{AC}{CA}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{AD} \tnsr T^{LMK}_{BEC} 
++ \frac{1}{2}(1-\Perm{IJ}{JI}-\Perm{IK}{KI})(1-\Perm{CA}{AC}-\Perm{CB}{BC}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IL}_{AB} \tnsr T^{JMK}_{DEC}
 \eeq
 \end{lstlisting}
-\hspace{0pt} \newline
+\end{itemize}
 \noindent The program generates \textsf{TensorOperations} code.
 The generated code  used by \ElemCojl is located in the \texttt{src/algo} directory. 
 \addcontentsline{toc}{chapter}{Bibliography}
