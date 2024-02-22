@@ -8,6 +8,8 @@
 
 ### Added
 
+* The automatically generated `UCCSDT` and `UDC-CCSDT` methods have been added to the docs.
+
 ### Fixed
 
 ## Version [v0.10.0] - 2024.02.21
