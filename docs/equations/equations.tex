@@ -45,6 +45,7 @@
 \newcommand{\asop}[1]{{\cal A}\left(#1\right)}
 \newcommand{\ASop}[2]{{\cal A}\left(#1;#2\right)}
 \newcommand{\mat}{\mathbf}
+\newcommand{\vect}{\mathbf}
 \newcommand{\eq}[1]{Eq.~(\ref{#1})}
 \newcommand{\eqs}[2]{Eqs.~(\ref{#1},~\ref{#2})}
 \newcommand{\sect}[1]{Sec.~\ref{#1}}
@@ -112,6 +113,68 @@ Antisymmetrization operators:
 \ASop{ab}{ij} X^{ij}_{ab} &= X^{ij}_{ab} - X^{ji}_{ab} - X^{ij}_{ba} + X^{ji}_{ba}\\
 \end{aligned}
 \end{equation}
+
+
+\chapter{Integrals}
+\section{Density fitting and Cholesky decomposition}
+The electron-repulsion integrals in \ElemCojl are obtained either from an external program 
+through an FCIDUMP \cite{knowlesDeterminant1989} interface, 
+or are calculated using the density-fitting approximation using the \texttt{GaussianBasis.jl} 
+interface\cite{aroeiraFermi2022} to the \texttt{libcint}\cite{libcint} library.
+
+In the density-fitting approximation, the electron-repulsion integrals are approximated by
+\begin{equation}
+  v_{pq}^{rs} \approx v_{p}^{rP} \left[v^{-1}\right]_{PQ} v_{q}^{sQ},
+\end{equation}
+where $v_{p}^{rP}$ and $v_{q}^{sQ}$ are density-fitted 3-index integrals with auxiliary 
+basis functions $P,Q$, 
+\begin{equation}
+v_{p}^{rP} = \int d\vect{r}_1 d\vect{r}_2 \frac{\phi^*_p(\vect{r}_1) \phi^r(\vect{r}_1) \phi^P(\vect{r}_2)}{|\vect{r}_1-\vect{r}_2|},
+\end{equation}
+and $v^{PQ}$ is the Coulomb metric matrix,
+\begin{equation}
+  v^{PQ} = \int d\vect{r}_1 d\vect{r}_2 \frac{\phi^P(\vect{r}_1)\phi^Q(\vect{r}_2)}{|\vect{r}_1-\vect{r}_2|}.
+\end{equation}
+
+The Coulomb metric matrix is decomposed using the Cholesky factorization,
+\begin{equation}
+  v^{PQ} = \sum_L L^{PL} L^{QL},
+\end{equation}
+where $L^{PL}$ is a lower triangular matrix.
+Thereafter, a non-symmetric square root of the inverse of the Cholesky factorization $M_P^L$ is 
+calculated by solving the equation
+\begin{equation}
+  L^{PL'} M_{P}^{L} = \delta^{LL'},
+\end{equation}
+with $\delta^{KL}$ being the Kronecker delta. 
+If $L^{PL}$ is low-rank, the equation is solved using the QR decomposition,
+otherwise it can be solved by simple back-substitution.
+
+The transformed density-fitted integrals which are used throughout \ElemCojl 
+are then calculated by multiplying the density-fitted 3-index 
+integrals with the non-symmetric square root of the inverse of the Cholesky factorization,
+\begin{equation}
+  v_{p}^{rL} = v_{p}^{rP} M_P^L,
+\end{equation}
+and the density-fitted 4-index integrals can be calculated by
+\begin{equation}
+  v_{pq}^{rs} \approx \sum_L v_{p}^{rL} v_{q}^{sL}.
+\end{equation}
+
+\section{Frozen-core approximation}
+
+\chapter{Hartree-Fock}
+\section{Density-fitted Hartree-Fock}
+The density-fitted Hartree-Fock equations are given by
+\begin{equation}
+\begin{aligned}
+f_p^q C_q^i &= \epsilon_i C_p^i\\
+f_p^q &= h_p^q + v_{pr}^{qs} D_s^r\\
+D_s^r &= C_s^i C_i^r\\
+\end{aligned}
+\end{equation}
+
+\section{(Bi-orthogonal) Hartree-Fock}
 
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
 \section{Closed-shell CCSD/DCSD Lagrangian} \label{sec:cs-ccsd}
