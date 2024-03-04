@@ -752,7 +752,7 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       t1 = print_time(EC, t1,"CC",1)
       delete_temporary_files!(EC)
       draw_endline()
-      return EHF, EMp2, ECC, W
+      return (HF=EHF, MP2=EMp2, CC=ECC, W=W)
     else
       println("$main_name correlation energy: ",ECC)
       println("$main_name total energy: ",ECC+EHF)
@@ -766,9 +766,9 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
       draw_endline()
       if length(method_names) == 1
         if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
-          return EHF, EMp2, ECC, ET3
+          return (HF=EHF, MP2=EMp2, CC=ECC, T3=ET3)
         else
-          return EHF, EMp2, ECC
+          return (HF=EHF, MP2=EMp2, CC=ECC)
         end
       end
     end

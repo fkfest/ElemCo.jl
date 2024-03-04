@@ -907,11 +907,11 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1076,11 +1076,11 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=fals
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
+    calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1091,8 +1091,8 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   linearized::Bool = false
 
   if tworef
-    morba, norbb, morbb, norba = active_orbitals(EC)
-    T2ab[norba,morbb,morba,norbb] = 0.0
+    active = oss_active_orbitals(EC)
+    T2ab[active.ua,active.tb,active.ta,active.ub] = 0.0
   end
 
   if ndims(T1a) == 2
@@ -1477,23 +1477,22 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   end
 
   if tworef || fixref
-    # 2D-CC assumes open-shell singlet reference morba and norbb occupied in Φ^A and morbb and norba in Φ^B.
+    # 2D-CC assumes open-shell singlet reference torba and uorbb occupied in Φ^A and torbb and uorba in Φ^B.
     @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "2D-CCSD needs two open-shell alpha beta orbitals"
-    morba, norbb, morbb, norba = active_orbitals(EC)
+    activeorbs = oss_active_orbitals(EC)
     if tworef
-      activeorbs = (morba, norbb, morbb, norba)
       occcorea = collect(1:length(SP['o']))
       occcoreb = collect(1:length(SP['O']))
-      filter!(x -> x != morba, occcorea)
-      filter!(x -> x != norbb, occcoreb)
+      filter!(x -> x != activeorbs.ta, occcorea)
+      filter!(x -> x != activeorbs.ub, occcoreb)
       occcore = (occcorea, occcoreb)
       virtualsa = collect(1:length(SP['v']))
       virtualsb = collect(1:length(SP['V']))
-      filter!(x -> x != norba, virtualsa)
-      filter!(x -> x != morbb, virtualsb)
+      filter!(x -> x != activeorbs.ua, virtualsa)
+      filter!(x -> x != activeorbs.tb, virtualsb)
       virtuals = (virtualsa, virtualsb)
-      W = R2ab[norba,morbb,morba,norbb]
-      R2ab[norba,morbb,morba,norbb] = 0.0
+      W = R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub]
+      R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub] = 0.0
       if length(T1a) > 0
         M1a = calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
         M1b = calc_M1b(occcore, virtuals, T1a, T1b, T2a, T2ab, activeorbs)
@@ -1511,18 +1510,18 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       save!(EC,"2d_ccsd_W",[W])
       t1 = print_time(EC,t1,"``2D-CCSD additional terms``",2)
     elseif fixref
-      R2ab[norba,morbb,morba,norbb] = 0
+      R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub] = 0
     end
   end
   return R1a, R1b, R2a, R2b, R2ab
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3aaa, T3bbb, T3abb, T3aab; dc=false)
+    calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3aaa, T3bbb, T3abb, T3aab; dc=false)
 
   Calculate UCCSDT or UDC-CCSDT residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb; dc=false, tworef=false, fixref=false)
   EC.options.cc.use_kext = false
   EC.options.cc.calc_d_vvvv = true
   EC.options.cc.calc_d_vvvo = true
@@ -1583,16 +1582,21 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, 
   return R1a, R1b, R2a, R2b, R2ab, R3a, R3b, R3aab, R3abb
 end
 
-function active_orbitals(EC::ECInfo)
+"""
+    oss_active_orbitals(EC::ECInfo)
+
+  Return the four active orbitals of an (2e,2o) open-shell singlet problem based on a single determinant reference.
+"""
+function oss_active_orbitals(EC::ECInfo)
   SP = EC.space
   @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "Assumed two open-shell alpha beta orbitals here."
-  morb = setdiff(SP['o'],SP['O'])[1]
-  norb = setdiff(SP['O'],SP['o'])[1]
-  morba = findfirst(isequal(morb),SP['o'])
-  norbb = findfirst(isequal(norb),SP['O'])
-  morbb = findfirst(isequal(morb),SP['V'])
-  norba = findfirst(isequal(norb),SP['v'])
-  return morba,norbb,morbb,norba
+  torb = setdiff(SP['o'],SP['O'])[1]
+  uorb = setdiff(SP['O'],SP['o'])[1]
+  torba = findfirst(isequal(torb),SP['o'])
+  uorbb = findfirst(isequal(uorb),SP['O'])
+  torbb = findfirst(isequal(torb),SP['V'])
+  uorba = findfirst(isequal(uorb),SP['v'])
+  return (ta=torba,ub=uorbb,tb=torbb,ua=uorba)
 end
 
 function calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
@@ -1927,7 +1931,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    Res = calc_ccsd_resid(EC, Amps...; dc, tworef, fixref)
+    Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
     if restrict
       spin_project!(EC, Res...)
     end
@@ -1942,17 +1946,17 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       update_triples!(EC, Amps[triples]..., Res[triples]...)
     end
     if has_prefix(method, "FRS")
-      morba, norbb, morbb, norba = active_orbitals(EC)
-      Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
+      active = oss_active_orbitals(EC)
+      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = 1.0
     elseif has_prefix(method, "FRT")
-      morba, norbb, morbb, norba = active_orbitals(EC)
-      Amps[T2αβ][norba,morbb,morba,norbb] = -1.0
+      active = oss_active_orbitals(EC)
+      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = -1.0
     elseif has_prefix(method, "2D") && do_sing
-      morba, norbb, morbb, norba = active_orbitals(EC)
+      active = oss_active_orbitals(EC)
       T1α = first(singles)
       T1β = last(singles)
       W = load(EC,"2d_ccsd_W")[1]
-      Eias = - W * Amps[T1α][norba,morba] * Amps[T1β][morbb,norbb]
+      Eias = - W * Amps[T1α][active.ua,active.ta] * Amps[T1β][active.tb,active.ub]
     end
     if do_sing
       NormT1 = calc_singles_norm(Amps[singles]...)
@@ -2047,7 +2051,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     calc_dressed_3idx(EC, T1)
     # test_dressed_ints(EC,T1) #DEBUG
     t1 = print_time(EC, t1, "dressed 3-idx integrals", 2)
-    R1, R2 = calc_ccsd_resid(EC, T1, T2)
+    R1, R2 = calc_cc_resid(EC, T1, T2)
     t1 = print_time(EC, t1, "ccsd residual", 2)
     R1, R2 = add_to_singles_and_doubles_residuals(EC, R1, R2)
     t1 = print_time(EC, t1, "R1(T3) and R2(T3)", 2)

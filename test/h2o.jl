@@ -16,10 +16,10 @@ EDC_CCSDT_test = -0.33024914396392
 fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
 
 EC = ECInfo()
-EHF, EMP2, ECCSD, ET3 = ECdriver(EC, "ccsd(t)"; fcidump)
-@test abs(EHF-EHF_test) < epsilon
-@test abs(EMP2-EMP2_test) < epsilon
-@test abs(ECCSD+ET3-ECCSD_T_test) < epsilon
+energies = ECdriver(EC, "ccsd(t)"; fcidump)
+@test abs(energies.HF-EHF_test) < epsilon
+@test abs(energies.MP2-EMP2_test) < epsilon
+@test abs(energies.CC+energies.T3-ECCSD_T_test) < epsilon
 
 EHF, EMP2, ECCSD, ET3 = @cc λccsd(t)
 @test abs(ECCSD+ET3-EΛCCSD_T_test) < epsilon
