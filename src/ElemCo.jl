@@ -413,6 +413,9 @@ end
   - `occa::String`: occupied α orbitals (default: "-").
   - `occb::String`: occupied β orbitals (default: "-").
 
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+
   # Examples
 ```julia
 geometry="bohr
@@ -635,6 +638,8 @@ end
   The occupied α orbitals are given by `occa::String` (default: "-").
   The occupied β orbitals are given by `occb::String` (default: "-").
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
 """
 function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
   t1 = time_ns()
