@@ -27,7 +27,9 @@ Base.@kwdef mutable struct WfOptions
   freeze_nocc::Int = -1
   """`⟨0⟩` number of virtual (highest) orbitals to freeze. """
   freeze_nvirt::Int = 0
-  """`⟨"-"⟩` occupied α (or closed-shell) orbitals. """
+  """`⟨"-"⟩` occupied α (or closed-shell) orbitals. 
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`. """
   occa::String = "-"
   """`⟨"-"⟩` occupied β orbitals. 
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""

@@ -9,6 +9,7 @@
 * renamed function active_orbitals to oss_active_orbitals.
 * renamed function calc_ccsd_resid to calc_cc_resid.
 * ECdriver and oss_active_orbitals now return named tuples.
+* improved documentation of occupation strings syntax.
 
 ### Added
 
