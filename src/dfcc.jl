@@ -53,6 +53,38 @@ function get_tildevˣˣ(EC::ECInfo)
 end
 
 """
+    gen_vₓˣᴸ(EC::ECInfo)
+
+  Generate ``v_X^{X'L} = v_a^{cL} U^{†a}_{kX} U^{kX'}_c`` using bare integrals.
+
+  The integrals and the SVD-coefficients are read from files `mmL` and `C_voX`,
+  and the result is stored in file `X^XL`.
+"""
+function gen_vₓˣᴸ(EC::ECInfo)
+  t1 = time_ns()
+  UvoX = load(EC, "C_voX")
+  mmLfile, mmL = mmap(EC, "mmL")
+  SP = EC.space
+  nL = size(mmL, 3)
+  nX = size(UvoX, 3)
+  # create mmap for the v_X^{X'L} intermediate
+  vXLXfile, v_XXL = newmmap(EC, "X^XL", Float64, (nX,nX,nL))
+  LBlks = get_auxblks(nL)
+  XBlks = get_auxblks(nX)
+  for L in LBlks
+    vvL = mmL[SP['v'],SP['v'],L]
+    for X in XBlks
+      V_UvoX = @view UvoX[:,:,X]
+      # ``v_{X'}^{XL} = (v_a^{cL} U^{kX}_{c}) U^{†a}_{kX'}``
+      @tensoropt v_XXL[:,X,L][X',X,L] = (vvL[a,c,L] * V_UvoX[c,k,X]) * UvoX[a,k,X'] 
+    end
+  end
+  closemmap(EC, vXLXfile, v_XXL)
+  close(mmLfile)
+  t1 = print_time(EC, t1, "v_X^{X'L}", 2)
+end
+
+"""
     calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
 
   Calculate closed-shell singles and doubles Hylleraas energy
@@ -507,13 +539,16 @@ function contravariant_deco_doubles(EC::ECInfo, T2, projx=false)
 end
 
 """
-    calc_vᵥᵒˣ(EC::ECInfo)
+    calc_voX(EC::ECInfo; calc_vᵥᵒˣ=false, calc_vᵛₒₓ=false)
 
   Calculate ``\\hat v_a^{iX} = \\hat v_{ak}^{ci} U^{kX}_c`` 
+  and/or ``\\hat v^c_{kX} = \\hat v_{ak}^{ci} U^{†a}_{kX}``
   with ``\\hat v_{ak}^{ci} = \\hat v_a^{cL} \\hat v_k^{iL}`` 
   and ``U^{kX}_c`` from file `C_voX`.
+
+  Return a tuple (vᵥᵒˣ, vᵛₒₓ) (not calculated intermediates are empty arrays).
 """
-function calc_vᵥᵒˣ(EC::ECInfo)
+function calc_voX(EC::ECInfo; calc_vᵥᵒˣ=false, calc_vᵛₒₓ=false)
   if !file_exists(EC, "C_voX")
     error("File C_voX does not exist!")
   end
@@ -533,10 +568,17 @@ function calc_vᵥᵒˣ(EC::ECInfo)
   close(vvLfile)
   close(ooLfile)
   UvoX = load(EC, "C_voX")
-  @tensoropt v_voX[a,i,X] := vvoo[a,c,k,i] * UvoX[c,k,X]
-  return v_voX
+  v_voX = v_voX2 = similar(UvoX, 0)
+  if calc_vᵥᵒˣ
+    # ``v_a^{iX} = v_{ac}^{ki} U^{kX}_c``
+    @tensoropt v_voX[a,i,X] := vvoo[a,c,k,i] * UvoX[c,k,X]
+  end
+  if calc_vᵛₒₓ
+    # ``v_{kX}^{c} = v_{ak}^{ci} U^{†a}_{kX}``
+    @tensoropt v_voX2[c,k,X] := vvoo[a,c,k,i] * UvoX[a,i,X]
+  end
+  return (v_voX, v_voX2)
 end
-
 
 """
     calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
@@ -599,9 +641,6 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   x_oo = dfock[SP['o'],SP['o']]
   voLfile, voL = mmap(EC, "d_voL")
   ovLfile, ovL = mmap(EC, "d_ovL")
-  # if project_amps_vovo_t2: ``v_a^{iX} = v_a^{kXL} v_{k}^{iL}``
-  # otherwise: ``v_{kX}^{c} = v_{iX}^{cL} v_{k}^{iL}``    
-  v_voX = zeros(size(UvoX))
   vvLfile, vvL = mmap(EC, "d_vvL")
   ooLfile, ooL = mmap(EC, "d_ooL")
   f_ov = dfock[SP['o'],SP['v']]
@@ -620,7 +659,6 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   nL = size(voL, 3)
   nX = size(UvoX, 3)
   LBlks = get_auxblks(nL)
-  XBlks = get_auxblks(nX)
   for L in LBlks
     V_ovL = @view ovL[:,:,L]
     if full_tt2
@@ -671,67 +709,71 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
       @tensoropt R1[a,i] -= V_ooL[k,i,L] * Y_voL[a,k,L]
       t1 = print_time(EC, t1, "``R^i_a -= v_k^{iL} Y_a^{kL}``", 2)
     end
-    v_XLX = zeros(nX,length(L),nX)
-    if project_amps_vovo_t2
-      # ``v_{X'}^{XL}`` as v[X',L,X]
-      for X in XBlks
-        V_UvoX = @view UvoX[:,:,X]
-        V_v_voX = @view v_voX[:,:,X]
-        V_v_XLX = @view v_XLX[:,:,X]
-        # ``v_a^{kXL} = v_a^{cL} U^{kX}_{c}``
-        @tensoropt v_voXL[a,k,X,L] := V_vvL[a,c,L] * V_UvoX[c,k,X]
-        # ``v_a^{iX} = v_a^{kXL} v_{k}^{iL}``    
-        @tensoropt V_v_voX[a,i,X] += v_voXL[a,k,X,L] * V_ooL[k,i,L]
-        # ``v_{X'}^{XL} = (v_a^{iXL} - v_k^{iL} U^{kX}_a) U^{†a}_{iX'}``
-        @tensoropt V_v_XLX[X',L,X] = (v_voXL[a,i,X,L] - V_ooL[k,i,L] * V_UvoX[a,k,X]) * UvoX[a,i,X'] 
-      end
-      @tensoropt dR2[X,Y] += v_XLX[X,L,X'] * (dT2[X',Y'] * v_XLX[Y,L,Y'])
-      t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{LX'} T_{X'Y'} v_{Y}^{LY'}``", 2)
-    else
-      # ``v_X^{X'L}`` as v[X',L,X]
-      for X in XBlks
-        V_UvoX = @view UvoX[:,:,X]
-        V_v_voX = @view v_voX[:,:,X]
-        V_v_XLX = @view v_XLX[:,:,X]
-        # ``v_{kX}^{cL} = v_a^{cL} U^{†a}_{kX}``
-        @tensoropt v_oXvL[k,X,c,L] := V_vvL[a,c,L] * V_UvoX[a,k,X]
-        # ``v_{kX}^{c} = v_{iX}^{cL} v_{k}^{iL}``    
-        @tensoropt V_v_voX[c,k,X] += v_oXvL[i,X,c,L] * V_ooL[k,i,L]
-        # ``v_X^{X'L} = (v_{kX}^{cL} - v_k^{iL} U^{†c}_{iX}) U^{kX'}_c``
-        @tensoropt V_v_XLX[X',L,X] = (v_oXvL[k,X,c,L] - V_ooL[k,i,L] * V_UvoX[c,i,X]) * UvoX[c,k,X']
-      end
-      @tensoropt dR2[X,Y] += v_XLX[X',L,X] * (dT2[X',Y'] * v_XLX[Y',L,Y])
-      t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{LX'} T_{X'Y'} v_{Y}^{LY'}``", 2)
-    end
   end
+  voL = nothing
   close(voLfile)
-  close(ovLfile)
+  vvL = nothing
   close(vvLfile)
+  # ``U^{i}_{jX} = U^{†b}_{jX} T^i_b``
+  @tensoropt UTooX[i,j,X] := UvoX[b,j,X] * T1[b,i]
+  t1 = print_time(EC, t1, "``U^{i}_{jX} = U^{†b}_{jX} T^i_b``", 2)
+  LBigBlks = get_auxblks(nL, 500)
+  XBlks = get_auxblks(nX)
+  XXLfile, XXL = mmap(EC, "X^XL")
+  for L in LBigBlks
+    V_ooL = @view ooL[:,:,L]
+    V_ovL = @view ovL[:,:,L]
+    v_XLX = permutedims(XXL[:,:,L], (1,3,2))
+    for X in XBlks
+      V_v_XLX = @view v_XLX[:,:,X]
+      V_UvoX = @view UvoX[:,:,X]
+      # ``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``
+      @tensoropt UUooXX[i,j,X,Y] := UvoX[c,i,X] * V_UvoX[c,j,Y]
+      t1 = print_time(EC, t1, "``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``", 2)
+      # ``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``
+      @tensoropt V_v_XLX[X,L,Y] -= (V_ovL[l,c,L] * V_UvoX[c,k,Y]) * UTooX[l,k,X]
+      t1 = print_time(EC, t1, "``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``", 2)
+      # ``v_X^{YL} -= \hat v_{j}^{iL} U_{iX}^{jY}``
+      @tensoropt V_v_XLX[X,L,Y] -= V_ooL[j,i,L] * UUooXX[i,j,X,Y]
+      t1 = print_time(EC, t1, "``v_X^{YL} -= \\hat v_{j}^{iL} U_{iX}^{jY}``", 2)
+    end
+    # ``R_{XY} += v_X^{X'L} T_{X'Y'} v_Y^{Y'L}``
+    @tensoropt dR2[X,Y] += v_XLX[X,L,X'] * (dT2[X',Y'] * v_XLX[Y,L,Y'])
+    t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'L} T_{X'Y'} v_{Y}^{Y'L}``", 2)
+  end
+  ovL = nothing
+  close(ovLfile)
+  ooL = nothing
   close(ooLfile)
+  XXL = nothing
+  close(XXLfile)
+  UTooX = nothing
+  calc_vᵥᵒˣ = !full_t2 || project_amps_vovo_t2
+  calc_vᵛₒₓ = full_t2 && !project_amps_vovo_t2
+  vᵥᵒˣ, vᵛₒₓ = calc_voX(EC; calc_vᵥᵒˣ, calc_vᵛₒₓ) 
+  t1 = print_time(EC, t1, "calc v_a^{iX}", 2)
   if full_t2
     @tensoropt RR2[a,b,i,j] := x_vv[a,c] * T2[c,b,i,j] - x_oo[k,i] * T2[a,b,k,j]
     t1 = print_time(EC, t1, "``R_{ab}^{ij} += x_a^c T_{cb}^{ij} - x_k^i T_{ab}^{kj}``", 2)
     if project_amps_vovo_t2
       if EC.options.cc.project_vovo_t2 == 0
         # project both sides
-        @tensoropt W_XX[X,X'] := v_voX[a,i,X'] * UvoX[a,i,X]
+        @tensoropt W_XX[X,X'] := vᵥᵒˣ[a,i,X'] * UvoX[a,i,X]
         @tensoropt dR2[X,Y] -= W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
         t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'} T_{X'Y} + T_{XY'} v_{Y}^{Y'}``", 2)
       else
-        @tensoropt RR2[a,b,i,j] -= v_voX[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
+        @tensoropt RR2[a,b,i,j] -= vᵥᵒˣ[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
         t1 = print_time(EC, t1, "``R_{ab}^{ij} -= v_a^{iX} T_{cb}^{kj} U^{c}_{kX}``", 2)
       end
     else
-      @tensoropt RR2[a,b,i,j] -= UvoX[a,i,X] * (T2[c,b,k,j] * v_voX[c,k,X]) 
+      @tensoropt RR2[a,b,i,j] -= UvoX[a,i,X] * (T2[c,b,k,j] * vᵛₒₓ[c,k,X]) 
       t1 = print_time(EC, t1, "``R_{ab}^{ij} -= U^{iX}_a T_{cb}^{kj} v_{kX}^{c}``", 2)
       if EC.options.cc.project_vovo_t2 == 3
         # robust fitting
-        @tensoropt W_XX[X,X'] := v_voX[c,k,X] * UvoX[c,k,X']
+        @tensoropt W_XX[X,X'] := vᵛₒₓ[c,k,X] * UvoX[c,k,X']
         @tensoropt dR2[X,Y] += W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
         t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'} T_{X'Y} + T_{XY'} v_{Y}^{Y'}``", 2)
-        v_voX = calc_vᵥᵒˣ(EC) 
-        t1 = print_time(EC, t1, "calc v_a^{kX}", 2)
-        @tensoropt RR2[a,b,i,j] -= v_voX[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
+        @tensoropt RR2[a,b,i,j] -= vᵥᵒˣ[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
         t1 = print_time(EC, t1, "``R_{ab}^{ij} -= v_a^{iX} T_{cb}^{kj} U^{c}_{kX}``", 2)
       end
     end
@@ -740,16 +782,9 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     @tensoropt R2[a,b,i,j] += (dR2[X,Y] * UvoX[a,i,X]) * UvoX[b,j,Y]
     t1 = print_time(EC, t1, "project R2 to full basis", 2)
   else
-    if project_amps_vovo_t2
-      # ``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``
-      @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[c,i,X'] - x_oo[k,i] * UvoX[a,k,X'] - v_voX[a,i,X']) * UvoX[a,i,X]
-      t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``", 2)
-    else
-      # ``W_X^{X'} = (x_a^c U^{†a}_{kX} - x_k^i U^{†c}_{iX} - v_{kX}^c) U^{kX'}_c``
-      @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[a,k,X] - x_oo[k,i] * UvoX[c,i,X] - v_voX[c,k,X]) * UvoX[c,k,X']
-      t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{†a}_{kX} - x_k^i U^{†c}_{iX} - v_{kX}^c) U^{kX'}_c``", 2)
-    end
-    v_voX = nothing
+    # ``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``
+    @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[c,i,X'] - x_oo[k,i] * UvoX[a,k,X'] - vᵥᵒˣ[a,i,X']) * UvoX[a,i,X]
+    t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``", 2)
     # ``R_{XY} += W_X^{X'} T_{X'Y} + T_{XY'} W_{Y}^{Y'}``
     @tensoropt R2[X,Y] += W_XX[X,X'] * T2[X',Y] + T2[X,Y'] * W_XX[Y,Y']
     W_XX = nothing
@@ -828,6 +863,10 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   save_pseudodressed_3idx(EC)
   save_pseudo_dress_df_fock(EC)
   t1 = print_time(EC, t1, "save pseudodressed 3-idx and fock", 2)
+
+  # calc intermediates
+  gen_vₓˣᴸ(EC)
+
   diis = Diis(EC)
 
   NormR1 = 0.0
