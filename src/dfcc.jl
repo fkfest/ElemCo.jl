@@ -68,7 +68,7 @@ function gen_vₓˣᴸ(EC::ECInfo)
   nL = size(mmL, 3)
   nX = size(UvoX, 3)
   # create mmap for the v_X^{X'L} intermediate
-  vXLXfile, v_XXL = newmmap(EC, "X^XL", Float64, (nX,nX,nL))
+  vXXLfile, v_XXL = newmmap(EC, "X^XL", Float64, (nX,nX,nL))
   LBlks = get_auxblks(nL)
   XBlks = get_auxblks(nX)
   for L in LBlks
@@ -79,7 +79,7 @@ function gen_vₓˣᴸ(EC::ECInfo)
       @tensoropt v_XXL[:,X,L][X',X,L] = (vvL[a,c,L] * V_UvoX[c,k,X]) * UvoX[a,k,X'] 
     end
   end
-  closemmap(EC, vXLXfile, v_XXL)
+  closemmap(EC, vXXLfile, v_XXL)
   close(mmLfile)
   t1 = print_time(EC, t1, "v_X^{X'L}", 2)
 end
@@ -717,30 +717,28 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   # ``U^{i}_{jX} = U^{†b}_{jX} T^i_b``
   @tensoropt UTooX[i,j,X] := UvoX[b,j,X] * T1[b,i]
   t1 = print_time(EC, t1, "``U^{i}_{jX} = U^{†b}_{jX} T^i_b``", 2)
-  LBigBlks = get_auxblks(nL, 500)
-  XBlks = get_auxblks(nX)
+  XBigBlks = get_auxblks(nX, 512)
   XXLfile, XXL = mmap(EC, "X^XL")
-  for L in LBigBlks
-    V_ooL = @view ooL[:,:,L]
-    V_ovL = @view ovL[:,:,L]
-    v_XLX = permutedims(XXL[:,:,L], (1,3,2))
-    for X in XBlks
-      V_v_XLX = @view v_XLX[:,:,X]
-      V_UvoX = @view UvoX[:,:,X]
-      # ``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``
-      @tensoropt UUooXX[i,j,X,Y] := UvoX[c,i,X] * V_UvoX[c,j,Y]
-      t1 = print_time(EC, t1, "``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``", 2)
+  d_XXLfile, d_XXL = newmmap(EC, "d_X^XL", Float64, (nX,nX,nL))
+  for X in XBigBlks
+    V_UvoX = @view UvoX[:,:,X]
+    # ``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``
+    @tensoropt UUooXX[i,j,X,Y] := UvoX[c,i,X] * V_UvoX[c,j,Y]
+    t1 = print_time(EC, t1, "``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``", 2)
+    for L in LBlks
+      V_ooL = @view ooL[:,:,L]
+      V_ovL = @view ovL[:,:,L]
+      v_XXL = deepcopy(XXL[:,X,L])
       # ``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``
-      @tensoropt V_v_XLX[X,L,Y] -= (V_ovL[l,c,L] * V_UvoX[c,k,Y]) * UTooX[l,k,X]
+      @tensoropt v_XXL[X,Y,L] -= (V_ovL[l,c,L] * V_UvoX[c,k,Y]) * UTooX[l,k,X]
       t1 = print_time(EC, t1, "``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``", 2)
       # ``v_X^{YL} -= \hat v_{j}^{iL} U_{iX}^{jY}``
-      @tensoropt V_v_XLX[X,L,Y] -= V_ooL[j,i,L] * UUooXX[i,j,X,Y]
+      @tensoropt v_XXL[X,Y,L] -= V_ooL[j,i,L] * UUooXX[i,j,X,Y]
       t1 = print_time(EC, t1, "``v_X^{YL} -= \\hat v_{j}^{iL} U_{iX}^{jY}``", 2)
+      d_XXL[:,X,L] = v_XXL
     end
-    # ``R_{XY} += v_X^{X'L} T_{X'Y'} v_Y^{Y'L}``
-    @tensoropt dR2[X,Y] += v_XLX[X,L,X'] * (dT2[X',Y'] * v_XLX[Y,L,Y'])
-    t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'L} T_{X'Y'} v_{Y}^{Y'L}``", 2)
   end
+  closemmap(EC, d_XXLfile, d_XXL)
   ovL = nothing
   close(ovLfile)
   ooL = nothing
@@ -748,6 +746,15 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   XXL = nothing
   close(XXLfile)
   UTooX = nothing
+  d_XXLfile, d_XXL = mmap(EC, "d_X^XL")
+  for L in LBlks
+    v_XXL = @view d_XXL[:,:,L]
+    # ``R_{XY} += v_X^{X'L} T_{X'Y'} v_Y^{Y'L}``
+    @tensoropt dR2[X,Y] += v_XXL[X,X',L] * (dT2[X',Y'] * v_XXL[Y,Y',L])
+    t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'L} T_{X'Y'} v_{Y}^{Y'L}``", 2)
+  end
+  d_XXL = nothing
+  close(d_XXLfile)
   calc_vᵥᵒˣ = !full_t2 || project_amps_vovo_t2
   calc_vᵛₒₓ = full_t2 && !project_amps_vovo_t2
   vᵥᵒˣ, vᵛₒₓ = calc_voX(EC; calc_vᵥᵒˣ, calc_vᵛₒₓ) 
