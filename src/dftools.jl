@@ -14,7 +14,7 @@ using ..ElemCo.TensorTools
 export get_auxblks, generate_AO_DF_integrals, generate_DF_integrals
 
 """
-    get_auxblks(naux, maxblocksize=100, strict=false)
+    get_auxblks(naux, maxblocksize=128, strict=false)
 
   Generate ranges for block indices for auxiliary basis (for loop over blocks).
 
@@ -22,7 +22,7 @@ export get_auxblks, generate_AO_DF_integrals, generate_DF_integrals
   Otherwise the actual block size will be as close as possible to `blocksize` such that
   the resulting blocks are of similar size.
 """
-function get_auxblks(naux, maxblocksize=100, strict=false)
+function get_auxblks(naux, maxblocksize=128, strict=false)
   nauxblks = naux ÷ maxblocksize
   if nauxblks*maxblocksize < naux
     nauxblks += 1
