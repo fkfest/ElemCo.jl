@@ -871,8 +871,9 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   save_pseudo_dress_df_fock(EC)
   t1 = print_time(EC, t1, "save pseudodressed 3-idx and fock", 2)
 
-  # calc intermediates
+  println("Calculating intermediates...")
   gen_vₓˣᴸ(EC)
+  t1 = print_time(EC, t1, "intermediates", 2)
 
   diis = Diis(EC)
 
