@@ -57,9 +57,17 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
   PQ = ERI_2e2c(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   if save3idx
-    pqP = ERI_2e3c(bao,bfit)
-    @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
-    save!(EC,"AAL",pqL)
+    AAP = ERI_2e3c(bao,bfit)
+    nA = size(AAP,1)
+    nL = size(M,2)
+    AALfile, AAL = newmmap(EC, "AAL", Float64, (nA,nA,nL))
+    LBlks = get_auxblks(nL)
+    for L in LBlks
+      V_M = @view M[:,L]
+      V_AAL = @view AAL[:,:,L]
+      @tensoropt V_AAL[p,q,L] = AAP[p,q,P] * V_M[P,L]
+    end
+    closemmap(EC, AALfile, AAL)
   else
     save!(EC,"C_PL",M)
   end
@@ -81,12 +89,17 @@ function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
   PQ = ERI_2e2c(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   μνP = ERI_2e3c(bao,bfit)
-  @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
-  μνP = nothing
-  M = nothing
-  @tensoropt pqL[p,q,L] := cMO[μ,p] * μνL[μ,ν,L] * cMO[ν,q]
-  μνL = nothing
-  save!(EC,"mmL",pqL)
+  nm = size(cMO,2)
+  nL = size(M,2)
+  mmLfile, mmL = newmmap(EC, "mmL", Float64, (nm,nm,nL))
+  LBlks = get_auxblks(nL)
+  for L in LBlks
+    V_M = @view M[:,L]
+    V_mmL = @view mmL[:,:,L]
+    @tensoropt μνL[μ,ν,L] := μνP[μ,ν,P] * V_M[P,L]
+    @tensoropt V_mmL[p,q,L] = cMO[μ,p] * μνL[μ,ν,L] * cMO[ν,q]
+  end
+  closemmap(EC, mmLfile, mmL)
 end
 
 """
