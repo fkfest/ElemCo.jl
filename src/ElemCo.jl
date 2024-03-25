@@ -221,7 +221,7 @@ macro ECinit()
       (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))
       println("Basis: ",$(esc(:basis)))
-      $(esc(:EC)).ms = MSys($(esc(:geometry)),$(esc(:basis)))
+      $(esc(:EC)).system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end

@@ -840,7 +840,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   t1 = time_ns()
   methodname = "SVD-"*method_name(method)
   print_info(methodname, additional_info(EC))
-  setup_space_ms!(EC)
+  setup_space_system!(EC)
   flush(stdout)
   if method.theory != "DC"
     error("Only DC methods are supported in SVD!")

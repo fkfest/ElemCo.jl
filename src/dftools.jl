@@ -50,8 +50,8 @@ end
   otherwise save pseudo-square-root-inverse Cholesky decomposition.
 """
 function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, fitbasis)
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, fitbasis)
   save!(EC,"S_AA",overlap(bao))
   save!(EC,"h_AA",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
@@ -71,7 +71,7 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
   else
     save!(EC,"C_PL",M)
   end
-  return nuclear_repulsion(EC.ms)
+  return nuclear_repulsion(EC.system)
 end
 
 """
@@ -83,8 +83,8 @@ end
 """
 function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
   @assert ndims(cMO) == 2 "unrestricted not implemented yet"
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, fitbasis)
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, fitbasis)
 
   PQ = ERI_2e2c(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
@@ -115,13 +115,13 @@ end
 """
 function generate_DF_integrals(EC::ECInfo, cMO)
   @assert ndims(cMO) == 2 "unrestricted not implemented yet"
-  if !ms_exists(EC.ms)
+  if !system_exists(EC.system)
     error("Molecular system not specified!")
   end
   # calculate fock matrix in AO basis (integral direct)
   generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, "jkfit")
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, "jkfit")
   fock = gen_dffock(EC, cMO, bao, bfit)
   fock_MO = cMO' * fock * cMO
   save!(EC,"f_mm",fock_MO)
@@ -131,7 +131,7 @@ function generate_DF_integrals(EC::ECInfo, cMO)
   save!(EC, "e_M", eps)
   occ = EC.space['o']
   hsmall = cMO' * load(EC,"h_AA") * cMO
-  EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.ms)
+  EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.system)
   # calculate 3-index integrals
   generate_3idx_integrals(EC, cMO, "mp2fit")
   return EHF
