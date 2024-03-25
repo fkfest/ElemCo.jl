@@ -19,7 +19,7 @@ basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
              "mp2fit"=>"cc-pvdz-rifit")
 
-EC = ElemCo.ECInfo(ms=ElemCo.MSys(xyz,basis))
+EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz,basis))
 
 @opt scf direct=true
 @dfhf

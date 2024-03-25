@@ -4,12 +4,16 @@
 
 ### Breaking
 
+* `EC.ms` (previously of type `MSys`) in `ECInfo` is renamed to `EC.system` (of type `AbstractSystem`).
+
 ### Changed
 
 * renamed function active_orbitals to oss_active_orbitals.
 * renamed function calc_ccsd_resid to calc_cc_resid.
 * ECdriver and oss_active_orbitals now return named tuples.
 * improved documentation of occupation strings syntax.
+* switched to `Atom` and `FlexibleSystem` from `AtomsBase` as the internal representation of the molecular system. The basis set is stored for each atom as `:basis` property (as `Dict{String,String}`, e.g., `system[1][:basis]["ao"]`). One can also set `:basis` property for the whole system. 
+
 
 ### Added
 

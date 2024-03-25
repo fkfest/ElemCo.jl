@@ -20,7 +20,7 @@ export dfhf, dfuhf
 function dfhf(EC::ECInfo)
   t1 = time_ns()
   print_info("DF-HF")
-  setup_space_ms!(EC)
+  setup_space_system!(EC)
   SP = EC.space
   norb = length(SP[':'])
   diis = Diis(EC)
@@ -32,8 +32,8 @@ function dfhf(EC::ECInfo)
   guess = EC.options.scf.guess
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   if direct
-    bao = generate_basis(EC.ms, "ao")
-    bfit = generate_basis(EC.ms, "jkfit")
+    bao = generate_basis(EC.system, "ao")
+    bfit = generate_basis(EC.system, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC,guess)
@@ -94,7 +94,7 @@ end
 function dfuhf(EC::ECInfo)
   t1 = time_ns()
   print_info("DF-UHF")
-  setup_space_ms!(EC)
+  setup_space_system!(EC)
   SP = EC.space
   norb = length(SP[':'])
   diis = Diis(EC)
@@ -106,8 +106,8 @@ function dfuhf(EC::ECInfo)
   guess = EC.options.scf.guess
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   if direct
-    bao = generate_basis(EC.ms, "ao")
-    bfit = generate_basis(EC.ms, "jkfit")
+    bao = generate_basis(EC.system, "ao")
+    bfit = generate_basis(EC.system, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC,guess)

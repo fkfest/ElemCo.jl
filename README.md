@@ -38,8 +38,6 @@ The integrals are obtained from a FCIDUMP file or calculated using the `Gaussian
 
 Requirements: julia (>1.8)
 
-Packages: LinearAlgebra, NPZ, Mmap, TensorOperations, Printf, IterativeSolvers, GaussianBasis, DocStringExtensions, MKL(optional)
-
 ## Usage
 For a development version of `ElemCo.jl`, clone the repository and create an alias to set the project to the `ElemCo.jl` directory,
 ```
