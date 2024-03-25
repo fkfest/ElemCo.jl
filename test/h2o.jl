@@ -27,12 +27,12 @@ EHF, EMP2, ECCSD, ET3 = @cc λccsd(t)
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
 @test abs(EDCSD-EDCSD_test) < epsilon
 
-@opt cholesky thr = 1.e-4
-@opt cc ampsvdtol = 1.e-2
+@set cholesky thr = 1.e-4
+@set cc ampsvdtol = 1.e-2
 EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump="")
 @test abs(EDC_CCSDT-EDC_CCSDT_test) < epsilon
 
-@opt cc calc_t3_for_decomposition = true
+@set cc calc_t3_for_decomposition = true
 EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump="")
 @test abs(EDC_CCSDT-EDC_CCSDT_useT3_test) < epsilon
 
