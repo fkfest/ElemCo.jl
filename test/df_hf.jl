@@ -21,10 +21,10 @@ basis = Dict("ao"=>"cc-pVDZ",
 
 EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz,basis))
 
-@opt scf direct=true
+@set scf direct=true
 @dfhf
 fcidump = "DF_HF_TEST.FCIDUMP"
-@opt int fcidump=fcidump
+@set int fcidump=fcidump
 @dfints
 
 EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
@@ -36,12 +36,12 @@ rm(fcidump)
 
 ESVDDCSD = @svdcc dcsd
 @test abs(ESVDDCSD-ESVDDCSD_test) < epsilon
-@opt cc use_full_t2=true
+@set cc use_full_t2=true
 ESVDDCSD_ft = @svdcc dcsd
 @test abs(ESVDDCSD_ft-ESVDDCSD_ft_test) < epsilon
 
-@opt scf direct=false
-@opt wf ms2=2
+@set scf direct=false
+@set wf ms2=2
 EUHF = @dfuhf
 @test abs(EUHF-EUHF_test) < epsilon
 end

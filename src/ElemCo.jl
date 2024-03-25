@@ -64,7 +64,7 @@ using .DfDump
 export ECdriver 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
+export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
 export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
 
@@ -255,51 +255,58 @@ macro tryECinit()
 end
 
 """ 
-    @opt(what, kwargs...)
+    @set(opt, kwargs...)
 
   Set options for `EC::ECInfo`. 
     
-  The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
+  The first argument `opt` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
   The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
-  The current state of the options can be stored in a variable, e.g., `opt_cc = @opt cc`.
-  The state can then be restored by `@opt cc opt_cc`.
+  The current state of the options can be stored in a variable, e.g., `opt_cc = @set cc`.
+  The state can then be restored by `@set cc opt_cc`.
   If `EC` is not already initialized, it will be done. 
 
 
   # Examples
 ```julia
-optscf = @opt scf thr=1.e-14 maxit=10
-@opt cc maxit=100
+optscf = @set scf thr=1.e-14 maxit=10
+@set cc maxit=100
 ...
-@opt scf optscf
+@set scf optscf
 ```
 """
-macro opt(what, kwargs...)
-  strwhat="$what"
+macro set(opt, kwargs...)
+  stropt="$opt"
   ekwa = [esc(a) for a in kwargs]
   if length(kwargs) == 1 && (typeof(kwargs[1]) != Expr || kwargs[1].head != :(=)) 
     # if only one argument is provided and it is not a keyword argument
     # then set the option to the value of the argument
     return quote
       $(esc(:@tryECinit))
-      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
-        typeof($(ekwa[1])) == typeof($(esc(:EC)).options.$what) || error("Wrong type of argument in @opt")
-        $(esc(:EC)).options.$what = deepcopy($(ekwa[1]))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
+        typeof($(ekwa[1])) == typeof($(esc(:EC)).options.$opt) || error("Wrong type of argument in @set")
+        $(esc(:EC)).options.$opt = deepcopy($(ekwa[1]))
       else
-        error("no such option: ",$(esc(strwhat)))
+        error("no such option: ",$(esc(stropt)))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
-        deepcopy(set_options!($(esc(:EC)).options.$what; $(ekwa...)))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
+        deepcopy(set_options!($(esc(:EC)).options.$opt; $(ekwa...)))
       else
-        error("no such option: ",$(esc(strwhat)))
+        error("no such option: ",$(esc(stropt)))
       end
     end
   end
 end
+
+"""
+    @opt(opt, kwargs...)
+
+  Alias for [`@set`](@ref).
+"""
+var"@opt" = var"@set"
 
 """ 
     @reset(opt)
