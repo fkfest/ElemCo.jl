@@ -1,3 +1,8 @@
+"""
+    CCDriver
+
+Module for coupled-cluster drivers.
+"""
 module CCDriver
 using Printf
 using ..ElemCo.Utils
