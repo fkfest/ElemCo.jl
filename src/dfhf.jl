@@ -16,6 +16,7 @@ export dfhf, dfuhf
     dfhf(EC::ECInfo)
 
   Perform closed-shell DF-HF calculation.
+  Returns the energy as the `:HF` field in a named tuple.
 """
 function dfhf(EC::ECInfo)
   t1 = time_ns()
@@ -83,13 +84,14 @@ function dfhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
-  return EHF
+  return (HF=EHF,)
 end
 
 """
     dfuhf(EC::ECInfo)
 
   Perform DF-UHF calculation.
+  Returns the energy as the `:UHF` and `:HF` field in a named tuple.
 """
 function dfuhf(EC::ECInfo)
   t1 = time_ns()
@@ -165,7 +167,7 @@ function dfuhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
-  return EHF
+  return (UHF=EHF, HF=EHF)
 end
 
 end #module

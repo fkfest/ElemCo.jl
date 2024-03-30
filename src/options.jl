@@ -115,7 +115,7 @@ Base.@kwdef mutable struct CcOptions
   ``\\tilde T_{XY} = U^{†a}_{iX} U^{†b}_{jY} \\tilde T^{ij}_{ab}``. """
   use_projx::Bool = false
   """`⟨false⟩` use full doubles amplitudes in SVD-DCSD. 
-  The decomposition is used only for ``N^6`` scaling terms.  """
+  The decomposition is used only for ``N^6`` scaling terms. """
   use_full_t2::Bool = false
   """`⟨2⟩` what to project in ``v_{ak}^{ci} T^{kj}_{cb}`` in SVD-DCSD:
   0: both, 1: amplitudes, 2: residual, 3: robust fit. """
@@ -123,19 +123,37 @@ Base.@kwdef mutable struct CcOptions
   """`⟨false⟩` decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
   """`⟨"cc_amplitudes"⟩` main part of filename for start amplitudes. 
-      For example, the singles amplitudes are read from `start*"_1"` """
+      For example, the singles amplitudes are read from `start*"_1"`. """
   start::String = "cc_amplitudes"
   """`⟨"cc_amplitudes"⟩` main part of filename to save amplitudes.
-      For example, the singles amplitudes are saved to `save*"_1"` """
+      For example, the singles amplitudes are saved to `save*"_1"`. """
   save::String = "cc_amplitudes"
   """`⟨"cc_multipliers"⟩` main part of filename for start Lagrange multipliers. 
-      For example, the singles Lagrange multipliers are read from `start_lm*"_1"` """
+      For example, the singles Lagrange multipliers are read from `start_lm*"_1"`. """
   start_lm::String = "cc_multipliers"
   """`⟨"cc_multipliers"⟩` main part of filename to save Lagrange multipliers.
-      For example, the singles Lagrange multipliers are saved to `save_lm*"_1"` """
+      For example, the singles Lagrange multipliers are saved to `save_lm*"_1"`. """
   save_lm::String = "cc_multipliers"
-  """`⟨0⟩` Don't use MP2 amplitudes as starting guess for the CC amplitudes """
+  """`⟨0⟩` Don't use MP2 amplitudes as starting guess for the CC amplitudes. """
   nomp2::Int = 0
+  """`⟨0.33⟩` Factor for same-spin component in SCS-MP2. """
+  mp2_ssfac::Float64 = 0.33
+  """`⟨1.2⟩` Factor for opposite-spin component in SCS-MP2. """
+  mp2_osfac::Float64 = 1.2
+  """`⟨0.0⟩` Factor for open-shell component in SCS-MP2. """
+  mp2_ofac::Float64 = 0.0
+  """`⟨1.13⟩` Factor for same-spin component in SCS-CCSD. """
+  ccsd_ssfac::Float64 = 1.13
+  """`⟨1.27⟩` Factor for opposite-spin component in SCS-CCSD. """
+  ccsd_osfac::Float64 = 1.27
+  """`⟨0.0⟩` Factor for open-shell component in SCS-CCSD. """
+  ccsd_ofac::Float64 = 0.0
+  """`⟨1.15⟩` Factor for same-spin component in SCS-DCSD. """
+  dcsd_ssfac::Float64 = 1.15
+  """`⟨1.05⟩` Factor for opposite-spin component in SCS-DCSD. """
+  dcsd_osfac::Float64 = 1.05
+  """`⟨0.15⟩` Factor for open-shell component in SCS-DCSD. """
+  dcsd_ofac::Float64 = 0.15
 end
 
 """

@@ -26,6 +26,7 @@ include("decomptools.jl")
 include("cctools.jl")
 include("dfcc.jl")
 include("cc.jl")
+include("ccdriver.jl")
 
 include("bohf.jl")
 
@@ -50,6 +51,7 @@ using .TensorTools
 using .FockFactory
 using .CCTools
 using .CoupledCluster
+using .CCDriver
 using .DFCoupledCluster
 using .FciDump
 using .DumpTools
@@ -61,7 +63,6 @@ using .DFMCSCF
 using .DfDump
 
 
-export ECdriver 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
@@ -442,7 +443,7 @@ macro cc(method, kwargs...)
     return quote
       $(esc(:@tryECinit))
       strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-      ECdriver($(esc(:EC)), strmethod; $(ekwa...))
+      ccdriver($(esc(:EC)), strmethod; $(ekwa...))
     end
   else
     return quote
@@ -451,7 +452,7 @@ macro cc(method, kwargs...)
         $(esc(:@dfints))
       end
       strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-      ECdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+      ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
     end
   end
 end
@@ -633,158 +634,6 @@ function run_mcscf()
 
   @opt wf ms2=2 charge=-2
   E,cMO =  dfmcscf(EC,direct=false)
-end
-
-""" 
-    ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
-
-  Run electronic structure calculation for `EC::ECInfo` using methods `methods::String`.
-
-  The integrals are read from `fcidump::String` (default: "FCIDUMP").
-  If `fcidump::String` is empty, the integrals from `EC.fd` are used.
-  The occupied α orbitals are given by `occa::String` (default: "-").
-  The occupied β orbitals are given by `occb::String` (default: "-").
-  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
-  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
-  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
-"""
-function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
-  t1 = time_ns()
-  method_names = split(methods)
-  if occa != "-"
-    EC.options.wf.occa = occa
-  end
-  if occb != "-"
-    EC.options.wf.occb = occb
-  end
-  if fcidump != ""
-    # read fcidump intergrals
-    EC.fd = read_fcidump(fcidump)
-    t1 = print_time(EC,t1,"read fcidump",1)
-  end
-  setup_space_fd!(EC)
-
-  closed_shell = is_closed_shell(EC)
-
-  calc_fock_matrix(EC, closed_shell)
-  EHF = calc_HF_energy(EC, closed_shell)
-  hfname = closed_shell ? "HF" : "UHF"
-  println("$hfname energy: ",EHF)
-  flush(stdout)
-
-  for mname in method_names
-    println()
-    println("Next method: ",mname)
-    ecmethod = ECMethod(mname)
-    if is_unrestricted(ecmethod)
-      closed_shell_method = false
-    elseif has_prefix(ecmethod, "R")
-      closed_shell_method = false
-      @assert !EC.fd.uhf "For restricted methods, the FCIDUMP must not be UHF!"
-    else
-      closed_shell_method = closed_shell
-      if !closed_shell_method
-        set_unrestricted!(ecmethod)
-      end
-    end
-    # at the moment we always calculate MP2 first
-    # calculate MP2
-    if EC.options.cc.nomp2 != 1
-      if closed_shell_method
-        EMp2 = calc_MP2(EC)
-        method0 = "MP2"
-      else
-        EMp2 = calc_UMP2(EC)
-        method0 = "UMP2"
-      end
-      println("$method0 correlation energy: ",EMp2)
-      println("$method0 total energy: ",EMp2+EHF)
-      t1 = print_time(EC,t1,"MP2",1)
-      flush(stdout)
-      if !closed_shell_method && has_prefix(ecmethod, "R")
-        spin_project_amplitudes(EC)
-        EMp2 = calc_UMP2_energy(EC)
-        method0 = "RMP2"
-        println("$method0 correlation energy: ",EMp2)
-        println("$method0 total energy: ",EMp2+EHF)
-        flush(stdout)
-      end
-      if ecmethod.theory == "MP"
-        continue
-      end
-    else
-      EMp2 = 0.0
-    end
-
-    if ecmethod.exclevel[4] != :none
-      error("no quadruples implemented yet...")
-    end
-
-    ecmethod_save = ecmethod
-    if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
-      ecmethod = ECMethod("CCSD")
-      if is_unrestricted(ecmethod_save)
-        set_unrestricted!(ecmethod)
-      elseif has_prefix(ecmethod_save, "R")
-        set_prefix!(ecmethod, "R")
-      end
-    end
-    ECC = calc_cc(EC, ecmethod)
-
-    main_name = method_name(ecmethod)
-    ecmethod = ecmethod_save # restore
-
-    if has_prefix(ecmethod, "Λ")
-      calc_lm_cc(EC, ecmethod)
-    end
-
-    if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
-      do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
-      save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-      ET3, ET3b = calc_pertT(EC, ecmethod; save_t3 = save_pert_t3)
-      println()
-      println("$main_name[T] total energy: ",ECC+ET3b+EHF)
-      println("$main_name(T) correlation energy: ",ECC+ET3)
-      println("$main_name(T) total energy: ",ECC+ET3+EHF)
-      if do_full_t3
-        cc3 = (ecmethod.exclevel[3] == :pertiter)
-        ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
-        main_name = method_name(ecmethod)
-        println("$main_name correlation energy: ",ECC)
-        println("$main_name total energy: ",ECC+EHF)
-      end 
-    end
-    println()
-    flush(stdout)
-
-    if has_prefix(ecmethod, "2D")
-      W = load(EC,"2d_ccsd_W")[1]
-      @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
-      @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W
-      t1 = print_time(EC, t1,"CC",1)
-      delete_temporary_files!(EC)
-      draw_endline()
-      return (HF=EHF, MP2=EMp2, CC=ECC, W=W)
-    else
-      println("$main_name correlation energy: ",ECC)
-      println("$main_name total energy: ",ECC+EHF)
-      t1 = print_time(EC, t1,"CC",1)
-
-      if EC.options.cc.properties
-        calc_lm_cc(EC, ecmethod)
-      end
-
-      delete_temporary_files!(EC)
-      draw_endline()
-      if length(method_names) == 1
-        if ecmethod.exclevel[3] ∈ [ :pert, :pertiter] || (ecmethod.exclevel[3] == :full && closed_shell_method)
-          return (HF=EHF, MP2=EMp2, CC=ECC, T3=ET3)
-        else
-          return (HF=EHF, MP2=EMp2, CC=ECC)
-        end
-      end
-    end
-  end
 end
 
 end #module

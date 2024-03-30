@@ -3,8 +3,8 @@ using ElemCo
 @testset "DF-HF Closed-Shell Test" begin
 epsilon    =  1.e-6
 EHF_test   =      -76.02145513971418
-EMP2_test  =      -0.204723138509385
-EDCSD_test =      -0.219150244853825
+EMP2_test  =      -0.204723138509385 + EHF_test
+EDCSD_test =      -0.219150244853825 + EHF_test
 ESVDDCSD_test =   -0.220331906783324
 ESVDDCSD_ft_test =-0.219961375476643
 EUHF_test  =      -75.79199546193901
@@ -27,10 +27,10 @@ fcidump = "DF_HF_TEST.FCIDUMP"
 @set int fcidump=fcidump
 @dfints
 
-EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
-@test abs(EHF-EHF_test) < epsilon
-@test abs(EMP2-EMP2_test) < epsilon
-@test abs(EDCSD-EDCSD_test) < epsilon
+energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
+@test abs(energies.HF-EHF_test) < epsilon
+@test abs(energies.MP2-EMP2_test) < epsilon
+@test abs(energies.DCSD-EDCSD_test) < epsilon
 
 rm(fcidump)
 
@@ -43,5 +43,5 @@ ESVDDCSD_ft = @svdcc dcsd
 @set scf direct=false
 @set wf ms2=2
 EUHF = @dfuhf
-@test abs(EUHF-EUHF_test) < epsilon
+@test abs(EUHF.HF-EUHF_test) < epsilon
 end

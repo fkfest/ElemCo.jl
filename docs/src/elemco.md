@@ -20,6 +20,24 @@ Various macros are defined and exported to simplify running calculations. The ma
 | `basis::Dict` | Basis set information, see [`ElemCo.MSystem`](@ref) |
 | `fcidump::String` | File containing the integrals in the FCIDUMP format, see [`ElemCo.FciDump`](@ref). |
 
+The driver routines and macros return energies as `NamedTuple`. The last energy is always the total energy (can be accessed using `last(energies)`). The following table lists the keys and their meanings.
+
+----------------------
+| Key | Meaning |
+|:---:|:--------|
+| `:HF` | Hartree-Fock energy |
+| `:MP2` | MP2 energy |
+| `:CCSD` | CCSD energy |
+| `:DCSD` | DCSD energy |
+| `:SING2D_DCSD` | singlet 2D-DCSD energy |
+| `:TRIP2D_DCSD` | triplet 2D-DCSD energy |
+| etc. ||
+
+One can print the keys of the returned `NamedTuple` to see all the available keys:
+
+```julia
+julia> println(keys(energies))
+```
 
 ## Macros
 

@@ -5,6 +5,8 @@
 ### Breaking
 
 * `EC.ms` (previously of type `MSys`) in `ECInfo` is renamed to `EC.system` (of type `AbstractSystem`).
+* `ECdriver` routine is moved to `CCDriver` module and renamed to `ccdriver`. The `fcidump` keyword-argument is now empty by default. It doesn't accept list of methods anymore, only one method at a time. 
+* The driver routines and macros return energies as `NamedTuple`.
 
 ### Changed
 
@@ -19,6 +21,7 @@
 ### Added
 
 * The automatically generated `UCCSDT` and `UDC-CCSDT` methods have been added to the docs.
+* SCS-MP2, SCS-CCSD and SCS-DCSD
 
 ### Fixed
 
