@@ -1,5 +1,5 @@
 module DFMCSCF
-using LinearAlgebra, TensorOperations, Printf, TimerOutputs, JLD2
+using LinearAlgebra, TensorOperations, Printf, TimerOutputs, CSV, DataFrames
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
@@ -956,7 +956,9 @@ function dfmcscf(EC::ECInfo; direct=false)
     smo = cMO' * sao * cMO
     cMO = cMO * Hermitian(smo)^(-1/2)
   end
-  @save "output_"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".jld2" Es davidsonSteps tts gnorms cMO
+  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".csv",
+    DataFrame(:energy=>Es, :davidsonSteps=>davidsonSteps, :time=>tts, :g_norm=>gnorms))
+  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*"_cMO.csv", DataFrame(cMO,:auto))
   if iteration_times < IterMax
     println("Convergent!")
   else

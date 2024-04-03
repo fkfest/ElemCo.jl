@@ -81,8 +81,8 @@ Base.@kwdef mutable struct ScfOptions
   temperature_guess::Float64 = 0.0
   """ `⟨0.8⟩` the threshold of davidson convergence residure norm scaled to norm of g the gradient, for MCSCF. """
   gamaDavScale::Float64 = 0.8
-  """ `⟨false⟩` if true then use the original SO_SCI Hessian"""
-  SO_SCI_origin = false
+  """ `⟨true⟩` if true then use the original SO_SCI Hessian"""
+  SO_SCI_origin = true
   """ '⟨0.8⟩` the trust region of sqrt(sum(x.^2)) should be [trustScale,1] * trust"""
   trustScale = 0.8
 end
