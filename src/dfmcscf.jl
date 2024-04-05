@@ -629,12 +629,13 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
   xalphal = -1.0
   xalphar = -1.0
   micro_converged = false
-  davItMax = 200 # for davidson eigenvalue solving algorithm
+  davItMax = EC.options.scf.iniDavMatSize # for davidson eigenvalue solving algorithm
   bisecdamp = EC.options.scf.bisecdamp
   γ = EC.options.scf.gamaDavScale # gradient scaling factor for micro-iteration accuracy
+  davErrorMin = EC.options.scf.davErrorMin  
   davError = γ * norm(g)
-  if davError < 1e-6
-    davError = 1e-6
+  if davError < davErrorMin
+    davError = davErrorMin
   end
   alphaSearchIt = 0
   alphas = Array{Float64}(undef,0)
@@ -654,7 +655,6 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
     # check if square of norm of x in trust region (0.8*trust ~ trust)
     sumx2 = sqrt(sum(x.^2))
     # sumx2 = sum(x.^2)
-    #println("trust: ", trust, " sumx2: ", sumx2)
     if sumx2 > trust
       alphal = alpha
       xalphal = sumx2
@@ -727,23 +727,23 @@ Check if the energy E is lower than the former energy E_former,
 if not, reject the update of coefficients and modify the trust region.
 Return reject::Bool and trust.
 """
-function checkE_modifyTrust(E, E_former, E_2o, trust, trustTune::Bool)
+function checkE_modifyTrust(EC::ECInfo, E::Number, E_former::Number, E_2o::Number, trust::Number, trustTune::Bool)
   energy_diff = E - E_former
   energy_quotient = energy_diff / E_2o
   # modify the trust region
   reject = false
   if energy_quotient < 0.0 || E_2o > 0.0
-    if trustTune
-      trust = 0.7 * trust
-    end
     reject = true
-  elseif energy_quotient < 0.25
-    if trustTune
-      trust = 0.7 * trust
-    end
-  elseif energy_quotient > 0.75
-    if trustTune
-      trust = 1.2 * trust
+  end
+  trustShrinkScale = EC.options.scf.trustShrinkScale
+  trustExpandScale = EC.options.scf.trustExpandScale
+  enerQuotientLowerBound = EC.options.scf.enerQuotientLowerBound
+  enerQuotientUpperBound = EC.options.scf.enerQuotientUpperBound
+  if trustTune
+    if energy_quotient < enerQuotientLowerBound || E_2o > 0.0
+      trust = trustShrinkScale * trust
+    elseif energy_quotient > enerQuotientUpperBound
+      trust = trustExpandScale * trust
     end
   end
   return reject, trust
@@ -810,7 +810,7 @@ function dfmcscf(EC::ECInfo; direct=false)
   g = [1]
   E_former = 0.0
   trust = 0.632
-  λ = 500.0
+  λ = 0.5 * EC.options.scf.lambdaMax
   t0 = time_ns()
   x = []
   davCount = 0
@@ -839,7 +839,7 @@ function dfmcscf(EC::ECInfo; direct=false)
     eThreg = 1e-5
   end
   preDE = presumx2 = preλ = 0.0
-  λmax = 1000.0
+  λmax = EC.options.scf.lambdaMax
   convergeIssue = false
   convAccumu = false
   convCount = 0
@@ -874,7 +874,7 @@ function dfmcscf(EC::ECInfo; direct=false)
         convergeIssue = false
       end
       preDE, presumx2, preλ = E-E_former , sqrt(sum(x.^2)), λ
-      reject, trust = checkE_modifyTrust(E, E_former, E_2o, trust, trustTune)
+      reject, trust = checkE_modifyTrust(EC, E, E_former, E_2o, trust, trustTune)
       iteration_times += 1
       if reject
         iteration_times -= 1

@@ -70,7 +70,7 @@ Base.@kwdef mutable struct ScfOptions
   - `:SO-SCI` Second Order Approximation combing Super CI
   """
   HessianType::Symbol = :SO_SCI
-  """`` Initial Vectors Type for MCSCF:
+  """`⟨:GRADIENT_SETPLUS⟩` Initial Vectors Type for MCSCF:
   - `:RANDOM` one random vector
   - `:INHERIT` from last macro/micro iterations
   - `:GRADIENT_SET` b0 as [1,0,0,...], b1 as gradient
@@ -79,14 +79,28 @@ Base.@kwdef mutable struct ScfOptions
   initVecType::Symbol = :GRADIENT_SETPLUS
   """ `⟨0.0⟩` Fermi-Dirac temperature for starting guess (at the moment works only for BO-HF). """
   temperature_guess::Float64 = 0.0
-  """ `⟨0.8⟩` the threshold of davidson convergence residure norm scaled to norm of g the gradient, for MCSCF. """
-  gamaDavScale::Float64 = 0.8
+  """ `⟨0.1⟩` the threshold of davidson convergence residure norm scaled to norm of g the gradient, for MCSCF. """
+  gamaDavScale::Float64 = 0.1
   """ `⟨true⟩` if true then use the original SO_SCI Hessian"""
   SO_SCI_origin = true
-  """ '⟨0.8⟩` the trust region of sqrt(sum(x.^2)) should be [trustScale,1] * trust"""
+  """ `⟨0.8⟩` the trust region of sqrt(sum(x.^2)) should be [trustScale,1] * trust"""
   trustScale = 0.8
+  """ `⟨1000.0⟩` the maximum number of lambda when adjusting the level shift"""
+  lambdaMax = 1000.0
+  """ `⟨1e-6⟩` the minmum convergence threshold for davidson algorithm"""
+  davErrorMin = 1e-6
+  """ `⟨200⟩` the size of initial Davidson projected matrix"""
+  iniDavMatSize = 200
+  """ `⟨0.7⟩` the shrink scale of trust region"""
+  trustShrinkScale = 0.7
+  """ `⟨1.2⟩` the expand scale of trust region"""
+  trustExpandScale = 1.2
+  """ `⟨0.25⟩` when energy quotient is lower than this value, the trust value should be smaller"""
+  enerQuotientLowerBound = 0.25
+  """ `⟨0.75⟩` when energy quotient is higher than this value, the trust value should be larger"""
+  enerQuotientUpperBound = 0.75
 end
-
+  
 """ 
   Options for Coupled-Cluster calculation.
 
