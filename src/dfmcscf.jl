@@ -24,7 +24,7 @@ Return D1 and D2.
 """
 function denMatCreate(EC::ECInfo)
   SP = EC.space
-  nact = length(SP['o'])- length(SP['O']) # to be modified
+  nact = length(SP['o'])- length(SP['O']) 
   D1 = 1.0 * Matrix(I, nact, nact)
   @tensoropt D2[t,u,v,w] := (D1[t,u]*D1[v,w] - D1[t,w]*D1[v,u]) * 0.5
   @tensoropt D2[t,u,v,w] += (D1[u,t]*D1[v,w] - D1[u,w]*D1[v,t]) * 0.5
@@ -41,8 +41,8 @@ fock_MO and fockClosed_MO are fock and fockClosed transformed into MO basis with
 Return matrix fock_MO and fockClosed_MO.
 """
 function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
-  occ1o = setdiff(EC.space['o'],occ2) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O']) 
+  occ1o = setdiff(EC.space['o'],occ2)
   CMO2 = cMO[:,occ2]
   CMOa = cMO[:,occ1o] 
 
@@ -71,9 +71,9 @@ Calculate the A-intermediate matrix in molecular orbital basis.
 return matrix A[p,q]
 """
 function dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
-  CMOa = cMO[:,occ1o] # to be modified
+  CMOa = cMO[:,occ1o] 
   # Apj
   Apj = fock_MO[:, occ2] .* 2.0
   # Apu
@@ -81,7 +81,7 @@ function dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, 
   @tensoropt Apu[p,u] += (((μuL[ν,v,L] * CMOa[ν,w]) * D2[t,u,v,w]) * μuL[μ,t,L]) * cMO[μ,p]
   A = zeros((size(cMO,2),size(cMO,2)))
   A[:,occ2] = Apj
-  A[:,occ1o] = Apu # to be modified
+  A[:,occ1o] = Apu
   return A
 end
 
@@ -95,9 +95,9 @@ return vector g_blockwise
 """
 function calc_g(A::Matrix, EC::ECInfo)
   @tensoropt g[r,s] := A[r,s] - A[s,r]
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
-  occv = setdiff(1:size(A,1), EC.space['o']) # to be modified
+  occv = setdiff(1:size(A,1), EC.space['o'])
   n_1o = size(occ1o, 1)
   n_2 = size(occ2,1)
   n_v = size(occv,1)
@@ -145,7 +145,7 @@ function G_rtsj_calc(typer::Integer,types::Integer, num_MO, DFint_MO, D1::Matrix
   sjL = DFint_MO[types][1] #2,3
   svL = DFint_MO[types][2] #2,3
   rjL = DFint_MO[typer][1] #1,2,3
-  rsL = DFint_MO[typer][types] #12,13,22,23,32,33 might need reverse
+  rsL = DFint_MO[typer][types] #12,13,22,23,32,33 
   vjL = DFint_MO[2][1]
   if typer < 2
     @tensoropt G_rvsj[r,v,s,j] += rvL[v,r,L] * sjL[s,j,L] * 4.0
@@ -175,8 +175,8 @@ function G_rtsu_calc(typer::Integer,types::Integer, num_MO, index_MO, DFint_MO, 
   fockClosed_rs = fockClosed_MO[index_MO[typer], index_MO[types]]
   rsL = DFint_MO[typer][types] #11,21,22,31,32,33
   vwL = DFint_MO[2][2]
-  swL = DFint_MO[types][2] #1,2,3 might need reverse
-  rvL = DFint_MO[typer][2] #1,2,3 might need reverse
+  swL = DFint_MO[types][2] #1,2,3 
+  rvL = DFint_MO[typer][2] #1,2,3 
   @tensoropt G_rtsu[r,t,s,u] += fockClosed_rs[r,s] * D1[t,u]
   @tensoropt G_rtsu[r,t,s,u] += rsL[r,s,L] * vwL[v,w,L] * D2[t,u,v,w]
   if types < 2
@@ -280,9 +280,9 @@ Second Order Hessian includes fixed part 4 blocks,  2 SO part blocks, the rest 4
 Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 """
 function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
-  occ1o = setdiff(EC.space['o'],occ2) # to be modified
-  occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O'])  
+  occ1o = setdiff(EC.space['o'],occ2)
+  occv = setdiff(1:size(cMO,2), EC.space['o'])
   n_2 = size(occ2,1)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
@@ -349,9 +349,9 @@ These 3 SCI blocks are returned as [1,1] zero matrix in this function, the calcu
 Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 """
 function calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
-  occ1o = setdiff(EC.space['o'],occ2) # to be modified
-  occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O'])
+  occ1o = setdiff(EC.space['o'],occ2)
+  occv = setdiff(1:size(cMO,2), EC.space['o'])
   n_2 = size(occ2,1)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
@@ -400,9 +400,9 @@ SCI Hessian includes fixed part 4 blocks, SCI special part 6 blocks, among which
 Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 """
 function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
-  occ1o = setdiff(EC.space['o'],occ2) # to be modified
-  occv = setdiff(1:size(cMO,2), EC.space['o']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O'])
+  occ1o = setdiff(EC.space['o'],occ2)
+  occv = setdiff(1:size(cMO,2), EC.space['o']) 
   n_2 = size(occ2,1)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
@@ -460,8 +460,8 @@ Calculate the energy with the given density matrices and (updated) cMO,
 ``E = (h_i^i + ^cf_i^i) + ^1D^t_u ^cf_t^u + 0.5 ^2D^{tv}_{uw} v_{tv}^{uw}``.
 """
 function calc_realE(μuL, EC::ECInfo, fockClosed_MO::Matrix, D1::Matrix, D2, cMO::Matrix)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
-  occ1o = setdiff(EC.space['o'],occ2) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O'])
+  occ1o = setdiff(EC.space['o'],occ2)
   hsmall = TensorTools.load(EC,"h_AA")
   CMO2 = cMO[:,occ2] 
   CMOa = cMO[:,occ1o]
@@ -532,9 +532,9 @@ SO_SCI, SO_SCI_original, SCI Hessians need this function
 Return vector σ in the order of [σ21;σ31;σ22;σ32]
 """
 function Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Matrix)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
-  occ1o = setdiff(EC.space['o'],occ2) # to be modified
-  occv = setdiff(1:size(cMO,1), EC.space['o']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O'])
+  occ1o = setdiff(EC.space['o'],occ2)
+  occv = setdiff(1:size(cMO,1), EC.space['o'])
   Fab = fock_MO[occv,occv]
   Fij = fock_MO[occ2,occ2]
   Fiv = fock_MO[occ2,occ1o]
@@ -566,20 +566,20 @@ function Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1:
 end 
 
 """
-    H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, alpha::Number, h_block::NTuple{10, Matrix{Float64}}, HessianType::Symbol)
+    H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, λ::Number, h_block::NTuple{10, Matrix{Float64}}, HessianType::Symbol)
 
 Do the H * x calculation
 Depending on the Hessian type, do the calculation from unsimplified and simplified parts of blocks seperatly
 Calculate the first element of H*v vector, and the part of H*v from the multiplying of first element of v and g vector(first column of Hessian Matrix)
 Assembly the matrix
-the Hessian Matrix is  | 0           g_21'*alpha   g_31'*alpha   g_22'*alpha   g_32'*alpha |               
-                       | g_21*alpha  h_2121        h_2131        h_2122        h_2132      |
-                       | g_31*alpha  h_3121        h_3131        h_3122        h_3132      |
-                       | g_22*alpha  h_2221        h_2231        h_2222        h_2232      |
-                       | g_32*alpha  h_3221        h_3231        h_3222        h_3232      |
+the Hessian Matrix is  | 0           g_21'*λ   g_31'*λ   g_22'*λ   g_32'*λ |               
+                       | g_21*λ  h_2121        h_2131        h_2122        h_2132      |
+                       | g_31*λ  h_3121        h_3131        h_3122        h_3132      |
+                       | g_22*λ  h_2221        h_2231        h_2222        h_2232      |
+                       | g_32*λ  h_3221        h_3231        h_3222        h_3232      |
 Return vector σ in the order of [σ[1];σ21;σ31;σ22;σ32]
 """
-function H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, alpha::Number, 
+function H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, λ::Number, 
   h_block::NTuple{10, Matrix{Float64}}, HessianType::Symbol)
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
   σ = Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, v[2:end])
@@ -588,8 +588,8 @@ function H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vec
   else
     σ += Hx_SCI(EC, fock_MO, cMO, v[2:end], num_MO, D1)
   end
-  σ_hb = [[g'*v[2:end].* alpha];σ]
-  σ_hb[2:end] .+= g .* v[1] .*alpha # should be g * 1.0
+  σ_hb = [[g'*v[2:end].* λ];σ]
+  σ_hb[2:end] .+= g .* v[1] .*λ # should be g * 1.0
   return σ_hb
 end
 
@@ -605,17 +605,17 @@ convTrack is to decide whether the tracking of eigenvectors is used
 """
 
 function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
-  h_block::NTuple{10, Matrix{Float64}}, g::Vector, alpha::Number, initVecType::Symbol, 
+  h_block::NTuple{10, Matrix{Float64}}, g::Vector, λ::Number, initVecType::Symbol, 
   fock_MO::Matrix, cMO::Matrix, HessianType::Symbol, D1::Matrix, convTrack::Bool=false)
   V = zeros(N,n_max)
   σ = zeros(N,n_max)
   h = zeros(n_max,n_max)
   ac = zeros(n_max)
-  λ = zeros(n_max)
+  ε = zeros(n_max)
   n_MO = size(cMO,2)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O']) 
   occ1o = setdiff(EC.space['o'],occ2)
-  occv = setdiff(1:n_MO, EC.space['o']) # to be modified
+  occv = setdiff(1:n_MO, EC.space['o'])
   eigvec_index = 1
   pick_vec = 6
   converged = false
@@ -647,15 +647,15 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HessianType)
+    σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, λ, h_block, HessianType)
     numInitialVectors = 2
   elseif initVecType == :GRADIENT_SETPLUS
     V[1,1] = 1.0
     g_r = g 
     v = [[0.];g_r] ./ norm(g_r)
     V[:,2] = v
-    σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, alpha, h_block, HessianType)
-    σ[:,2] = H_multiply(EC, fock_MO, cMO, D1, V[:,2], num_MO, g, alpha, h_block, HessianType)
+    σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, λ, h_block, HessianType)
+    σ[:,2] = H_multiply(EC, fock_MO, cMO, D1, V[:,2], num_MO, g, λ, h_block, HessianType)
     V[initGuessIndex, 3] = 1.0
     v = V[:,3]
     v = v - V[initGuessIndex,2].* V[:,2]
@@ -671,22 +671,22 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   for i in numInitialVectors+1:n_max
     davCounti += 1
     # blockwise H * v
-    newσ_hb = H_multiply(EC, fock_MO, cMO, D1, v, num_MO, g, alpha, h_block, HessianType)
+    newσ_hb = H_multiply(EC, fock_MO, cMO, D1, v, num_MO, g, λ, h_block, HessianType)
     σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
     h[:,i-1] = newh_hb 
     h[i-1,:] = newh_hb
-    λ, a = eigen(Hermitian(h[1:i-1,1:i-1]))
+    ε, a = eigen(Hermitian(h[1:i-1,1:i-1]))
     if convTrack && i > pick_vec
       eigvec_index = findmax(abs.(ac[1:i-1]' * a[:,1:pick_vec]))[2][2]
     end
     ac[1:i-1] = a[:,eigvec_index]
-    r = σ * ac - λ[eigvec_index] * (V * ac)
+    r = σ * ac - ε[eigvec_index] * (V * ac)
     if norm(r) < thres
       converged = true
       break
     end
-    v = -1.0 ./ (H0_hb .- λ[eigvec_index]) .* r
+    v = -1.0 ./ (H0_hb .- ε[eigvec_index]) .* r
     v[isnan.(v)] .= 0
     v[isinf.(v)] .= 1e8
     c = transpose(v) * V
@@ -698,25 +698,25 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
     println("davidson algorithm not converged!")
   end
   v = V * ac
-  return λ[eigvec_index], v, converged, davCounti
+  return ε[eigvec_index], v, converged, davCounti
 end
 
 """
-    λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector)
+    λTuning(EC::ECInfo, trust::Number, maxit4λ::Integer, λmax::Number, λ::Number, h::Matrix, g::Vector)
 
 Find the rotation parameters as the vector x in trust region,
 tuning λ with the norm of x in the iterations.
 Return λ and x.
 """
-function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Number, alpha::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
+function λTuning(EC::ECInfo, trust::Number, maxit4λ::Integer, λmax::Number, λ::Number, g::Vector, vec::Vector, num_MO::Vector{Int64}, 
   h_block::NTuple{10, Matrix{Float64}}, initVecType::Symbol, fock_MO::Matrix, cMO::Matrix, HessianType::Symbol, D1::Matrix, reject::Bool)
   davCount = 0
   N_rk = (num_MO[2]+num_MO[3]) * (num_MO[1]+num_MO[2])
   x = zeros(N_rk)
-  alphal = 1.0
-  alphar = alphamax
-  xalphal = -1.0
-  xalphar = -1.0
+  λl = 1.0
+  λr = λmax
+  xλl = -1.0
+  xλr = -1.0
   micro_converged = false
   davItMax = EC.options.scf.iniDavMatSize # for davidson eigenvalue solving algorithm
   bisecdamp = EC.options.scf.bisecdamp
@@ -726,63 +726,63 @@ function λTuning(EC::ECInfo, trust::Number, maxit4alpha::Integer, alphamax::Num
   if davError < davErrorMin
     davError = davErrorMin
   end
-  alphaSearchIt = 0
-  alphas = Array{Float64}(undef,0)
+  λSearchIt = 0
+  λs = Array{Float64}(undef,0)
   trustTune = true
-  # alpha tuning loop (micro loop)
-  for it=1:maxit4alpha
-    push!(alphas, alpha)
-    @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HessianType, D1)
+  # λ tuning loop (micro loop)
+  for it=1:maxit4λ
+    push!(λs, λ)
+    @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
     davCount += davCounti
     # while !converged
     #   davItMax += 50
     #   println("Davidson max iteration number increased to ", davItMax)
-    #   @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, alpha, initVecType, fock_MO, cMO, HessianType, D1)
+    #   @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
     #   davCount += davCounti
     # end
-    x = vec[2:end] ./ (vec[1] * alpha)
-    # check if square of norm of x in trust region (0.8*trust ~ trust)
+    x = vec[2:end] ./ (vec[1] * λ)
+    # check if square of norm of x in trust region (trustScale*trust ~ trust)
     sumx2 = sqrt(sum(x.^2))
     # sumx2 = sum(x.^2)
     if sumx2 > trust
-      alphal = alpha
-      xalphal = sumx2
+      λl = λ
+      xλl = sumx2
     elseif sumx2 < EC.options.scf.trustScale*trust
-      alphar = alpha
-      xalphar = sumx2
+      λr = λ
+      xλr = sumx2
     else
       micro_converged = true
-      alphaSearchIt = it
+      λSearchIt = it
       break
     end
-    if alphar ≈ alphal
-      alpha = alphal
+    if λr ≈ λl
+      λ = λl
       micro_converged = true
-      alphaSearchIt = it
+      λSearchIt = it
       break
     end
-    # it means at the beginning of the search, if the alphal didn't move, as 1.0 
-    # and alpha needs to be smaller, and meanwhile the alpharight is less than alphal + 0.1, as 1.1 
-    # then alpha should be set to 1
-    if xalphal < 0 && alpha == alphar && (alphar - alphal) < 0.1
-      alpha = alphal
-    elseif xalphal > 0 && xalphar > 0
+    # it means at the beginning of the search, if the λl didn't move, as 1.0 
+    # and λ needs to be smaller, and meanwhile the λright is less than λl + 0.1, as 1.1 
+    # then λ should be set to 1
+    if xλl < 0 && λ == λr && (λr - λl) < 0.1
+      λ = λl
+    elseif xλl > 0 && xλr > 0
       # line-search
-      alpha = ((xalphal-trust)*alphar - (xalphar-trust)*alphal) / (xalphal - xalphar)
+      λ = ((xλl-trust)*λr - (xλr-trust)*λl) / (xλl - xλr)
     else
       # damped geometric mean
-      alpha = exp(log(alphal) + log(alphar/alphal) * bisecdamp)
+      λ = exp(log(λl) + log(λr/λl) * bisecdamp)
     end
   end
   if !micro_converged
-    alphaSearchIt = maxit4alpha
+    λSearchIt = maxit4λ
     # println("micro NOT converged")
   end
-  if alpha ≈ 1.0 && !reject
+  if λ ≈ 1.0 && !reject
     trustTune = false
   end
-  #println(alphas)
-  return alpha, x, vec, davCount, alphaSearchIt, trustTune
+  #println(λs)
+  return λ, x, vec, davCount, λSearchIt, trustTune
 end 
 
 """
@@ -792,9 +792,9 @@ calculate orbital-rotational matrix U (approximately unitary because of the anti
 which is constructed from `x`).
 """
 function calc_U(EC::ECInfo, N_MO::Integer, x::Vector)
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O']) 
   occ1o = setdiff(EC.space['o'],occ2)
-  occv = setdiff(1:N_MO, EC.space['o']) # to be modified
+  occv = setdiff(1:N_MO, EC.space['o'])
   n_2 = size(occ2,1)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
@@ -856,18 +856,18 @@ function print_initial(Enuc::Float64, HessianType::Symbol)
 end
 
 """
-    dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit4alpha=100, HessianType=:SO)
+    dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit4λ=100, HessianType=:SO)
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
 function dfmcscf(EC::ECInfo; direct=false)
   guess = EC.options.scf.guess
   IterMax = EC.options.scf.IterMax
-  maxit4alpha = EC.options.scf.maxit4alpha
+  maxit4λ = EC.options.scf.maxit4λ
   HessianType = EC.options.scf.HessianType
   initVecType = EC.options.scf.initVecType
   println("bisecdam = ", EC.options.scf.bisecdamp)
-  println("maxit = ", maxit4alpha)
+  println("maxit = ", maxit4λ)
   println("gamaDavScale = ", EC.options.scf.gamaDavScale)
   print_info("DF-MCSCF")
   setup_space_ms!(EC)
@@ -877,9 +877,9 @@ function dfmcscf(EC::ECInfo; direct=false)
   #load info
   sao = TensorTools.load(EC,"S_AA")
   nAO = size(sao,2) # number of atomic orbitals
-  occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
-  occ1o = setdiff(EC.space['o'],occ2) # to be modified
-  occv = setdiff(1:nAO, EC.space['o']) # to be modified
+  occ2 = intersect(EC.space['o'],EC.space['O']) 
+  occ1o = setdiff(EC.space['o'],occ2) 
+  occv = setdiff(1:nAO, EC.space['o'])
   n_2 = size(occ2,1)
   n_1o = size(occ1o, 1)
   n_v = size(occv,1)
@@ -899,7 +899,7 @@ function dfmcscf(EC::ECInfo; direct=false)
   cMO = guess_orb(EC,guess)
   D1, D2 = denMatCreate(EC)
 
-  # macro loop parameters
+  # macro loop parameters initialisation
   iteration_times = 0
   g = [1]
   E_former = 0.0
@@ -908,7 +908,7 @@ function dfmcscf(EC::ECInfo; direct=false)
   t0 = time_ns()
   x = []
   davCount = 0
-  alphaSearchIt = 0
+  λSearchIt = 0
   trustTune = true
   E_2o = 0.0
   E = 0.0
@@ -955,7 +955,7 @@ function dfmcscf(EC::ECInfo; direct=false)
     if iteration_times > 0
       tt = (time_ns() - t0)/10^9
       push!(tts, tt)
-      @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i %3i \n" iteration_times E+Enuc E-E_former norm(g) tt trust sqrt(sum(x.^2)) λ davCount alphaSearchIt
+      @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i %3i \n" iteration_times E+Enuc E-E_former norm(g) tt trust sqrt(sum(x.^2)) λ davCount λSearchIt
       if preDE ≈ E-E_former && presumx2 ≈ sqrt(sum(x.^2)) && (λ ≈ λmax || λ ≈ 1) && preλ ≈ λ && 
         (sqrt(sum(x.^2)) < EC.options.scf.trustScale*trust || sqrt(sum(x.^2)) > trust) && (E-E_former) < energyThreshold * 100.0
         if convergeIssue
@@ -1007,7 +1007,7 @@ function dfmcscf(EC::ECInfo; direct=false)
     if norm(g) < 1e-5 && HessianType == :SO
       break
     end
-    # calc h with updated cMO
+    # calculate h with updated cMO
     if HessianType == :SO
       @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
       @timeit "h calc new" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
@@ -1026,7 +1026,7 @@ function dfmcscf(EC::ECInfo; direct=false)
       vec = vec./norm(vec)
       inherit_large == true
     end
-    λ, x, vec, davCount, alphaSearchIt, trustTune = λTuning(EC, trust, maxit4alpha, λmax, λ, g, vec, num_MO, h_block, initVecType, fock_MO, cMO, HessianType, D1, reject)
+    λ, x, vec, davCount, λSearchIt, trustTune = λTuning(EC, trust, maxit4λ, λmax, λ, g, vec, num_MO, h_block, initVecType, fock_MO, cMO, HessianType, D1, reject)
 
     # calc 2nd order perturbation energy
     h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
@@ -1050,9 +1050,9 @@ function dfmcscf(EC::ECInfo; direct=false)
     smo = cMO' * sao * cMO
     cMO = cMO * Hermitian(smo)^(-1/2)
   end
-  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".csv",
+  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".csv",
     DataFrame(:energy=>Es, :davidsonSteps=>davidsonSteps, :time=>tts, :g_norm=>gnorms))
-  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4alpha)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*"_cMO.csv", DataFrame(cMO,:auto))
+  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*"_cMO.csv", DataFrame(cMO,:auto))
   if iteration_times < IterMax
     println("Convergent!")
   else
