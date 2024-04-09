@@ -32,19 +32,19 @@ function denMatCreate(EC::ECInfo)
 end
 
 """
-    dffockCAS(EC::ECInfo, cMO::Matrix, D1::Matrix)
+    dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
 
-Calculate fock matrices in molecular orbital basis.     
-Return matrix fock and fockClosed.
+Calculate fock matrices in molecular orbital basis.
 fockClosed[μ,ν] = ``^cf_μ^ν = h_μ^ν + 2v_{μi}^{νi} - v_{μi}^{iν}``, 
 fock[μ,ν] = ``f_μ^ν = ^cf_μ^ν + D^t_u (v_{μt}^{νu} - 0.5 v_{μt}^{uν})``.
-fock_MO and fockClosed_MO are transformed into MO basis with coefficients cMO.
+fock_MO and fockClosed_MO are fock and fockClosed transformed into MO basis with coefficients cMO.
+Return matrix fock_MO and fockClosed_MO.
 """
 function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified
-  occ1o = setdiff(EC.space['o'],occ2)
+  occ1o = setdiff(EC.space['o'],occ2) # to be modified
   CMO2 = cMO[:,occ2]
-  CMOa = cMO[:,occ1o] # to be modified
+  CMOa = cMO[:,occ1o] 
 
   # fockClosed
   hsmall = TensorTools.load(EC,"h_AA")
@@ -61,11 +61,11 @@ function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
 
   @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
   @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
-  return fock_MO, fockClosed_MO, μjL, μuL
+  return fock_MO, fockClosed_MO
 end
 
 """
-    dfACAS(EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock::Matrix, fockClosed::Matrix)
+    dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
 
 Calculate the A-intermediate matrix in molecular orbital basis.
 return matrix A[p,q]
@@ -88,9 +88,10 @@ end
 """
     calc_g(A::Matrix, EC::ECInfo)
 
-Calculate the orbital gradient g by antisymmetrizing the matrix A
-and rearranging the elements.
-The order of the elements in g[r,k] is (active|virtual) × (closed-shell|active) 
+Calculate the orbital gradient g by antisymmetrizing the matrix A and rearranging the elements.
+The order of the elements in vector g_blockwise is vectorized g21, g31, g22, g32,
+among which g21 = g[occ1o,occ2], g31 = g[occv,occ2], g22 = g[occ1o,occ1o], g32 = g[occv,occ1o]
+return vector g_blockwise
 """
 function calc_g(A::Matrix, EC::ECInfo)
   @tensoropt g[r,s] := A[r,s] - A[s,r]
@@ -109,6 +110,12 @@ function calc_g(A::Matrix, EC::ECInfo)
   return g_blockwise
 end
 
+"""
+    G_risj_calc(typer::Integer, types::Integer, num_MO, index_MO, fock_MO::Matrix, DFint_MO)
+
+Calculate the G_risj tensor for the given type of indices r and s.
+Return G_risj tensor.
+"""
 function G_risj_calc(typer::Integer, types::Integer, num_MO, index_MO, fock_MO::Matrix, DFint_MO)
   n_2,n_1o,n_v = num_MO
   Iij = 1.0 * Matrix(I,n_2,n_2)
@@ -125,6 +132,12 @@ function G_risj_calc(typer::Integer, types::Integer, num_MO, index_MO, fock_MO::
   return G_risj
 end
 
+"""
+    function G_rtsj_calc(typer::Integer,types::Integer, num_MO, DFint_MO, D1::Matrix)
+
+Calculate the G_rtsj tensor for the given type of indices r and s.
+Return G_rtsj tensor.
+"""
 function G_rtsj_calc(typer::Integer,types::Integer, num_MO, DFint_MO, D1::Matrix)
   n_2,n_1o,n_v = num_MO
   G_rvsj = zeros(num_MO[typer],n_1o,num_MO[types],n_2)
@@ -150,6 +163,12 @@ function G_rtsj_calc(typer::Integer,types::Integer, num_MO, DFint_MO, D1::Matrix
   return G_rtsj
 end  
 
+"""
+    G_rtsu_calc(typer::Integer,types::Integer, num_MO, index_MO, DFint_MO, D1::Matrix, D2, fockClosed_MO::Matrix)
+
+Calculate the G_rtsu tensor for the given type of indices r and s.
+Return G_rtsu tensor.
+"""
 function G_rtsu_calc(typer::Integer,types::Integer, num_MO, index_MO, DFint_MO, D1::Matrix, D2, fockClosed_MO::Matrix)
   n_2,n_1o,n_v = num_MO
   G_rtsu = zeros(num_MO[typer],n_1o,num_MO[types],n_1o)
@@ -177,6 +196,13 @@ function G_rtsu_calc(typer::Integer,types::Integer, num_MO, index_MO, DFint_MO, 
   return G_rtsu
 end
 
+"""
+    h_calc_fixed(num_MO, index_MO, D1::Matrix, D2, fockClosed_MO::Matrix, A::Matrix, DFint_MO)
+
+Calculate the fixed part of the h tensor, including h_2221, h_2231, h_2222, h_3222.
+This function is used in all the Hessian calculation.
+Return h_2221, h_2231, h_2222, h_3222.
+"""
 function h_calc_fixed(num_MO, index_MO, D1::Matrix, D2, fockClosed_MO::Matrix, A::Matrix, DFint_MO)
   n_2,n_1o,n_v = num_MO
   occ2,occ1o,occv = index_MO
@@ -213,6 +239,13 @@ function h_calc_fixed(num_MO, index_MO, D1::Matrix, D2, fockClosed_MO::Matrix, A
   return h_2221, h_2231, h_2222, h_3222
 end
 
+"""
+    h_calc_SOpart(num_MO, index_MO, DFint_MO, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+
+Calculate the SO version of the h tensor, including h_3221, h_2121.
+This function is used in SO, SO_SCI_origin, SO_SCI Hessian calculation.
+Return h_3221, h_2121.
+"""
 function h_calc_SOpart(num_MO, index_MO, DFint_MO, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
   n_2,n_1o,n_v = num_MO
   occ2,occ1o,occv = index_MO
@@ -239,6 +272,13 @@ function h_calc_SOpart(num_MO, index_MO, DFint_MO, D1::Matrix, D2, fock_MO::Matr
   return h_3221, h_2121
 end
 
+"""
+    calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+
+Calculate the Second Order Hessian.
+Second Order Hessian includes fixed part 4 blocks,  2 SO part blocks, the rest 4 blocks (including H_3232) are calculated as SO special part, which are implemented in this function.
+Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
+"""
 function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
@@ -300,6 +340,14 @@ function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, foc
   return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 end
 
+"""
+    calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+
+Calculate the original SO_SCI Hessian.
+Original SO_SCI Hessian includes fixed part 4 blocks, the SO part 3 blocks (including h_3232), and the 3 SCI blocks.
+These 3 SCI blocks are returned as [1,1] zero matrix in this function, the calculation is done in the H_multiply function.
+Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
+"""
 function calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
@@ -343,6 +391,14 @@ function calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Ma
   return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 end
 
+"""
+    calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
+
+Calculate the SCI Hessian and modified SO_SCI Hessian.
+Modified SO_SCI method includes fixed part 4 blocks, the SO part 2 blocks, the SCI version of the rest 4 blocks(including h_3232), among which 3(except h_3232) are caculated in H_multiply
+SCI Hessian includes fixed part 4 blocks, SCI special part 6 blocks, among which 3 blocks are caculated in this function, and 3 are caculated in H_multiply
+Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
+"""
 function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
@@ -418,6 +474,12 @@ function calc_realE(μuL, EC::ECInfo, fockClosed_MO::Matrix, D1::Matrix, D2, cMO
   return E
 end
 
+"""
+    Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
+
+Calculate the common part of the σ which are from the 7 non-zero blocks for both SO and other simplified Hessian.
+Return vector σ in the order of [σ21;σ31;σ22;σ32]
+"""
 function Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
   n21 = size(h_2121,1)
   n22, n31 = size(h_2231)
@@ -439,6 +501,12 @@ function Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
   return [σ21;σ31;σ22;σ32]
 end
 
+"""
+    Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
+
+Calculate the SO part of σ which are from the 3 non-zero blocks of SO Hessian.
+Return vector σ in the order of [σ21;σ31;σ22;σ32]
+"""
 function Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
   n21 = size(h_3121,2)
   n31 = size(h_3231,2)
@@ -456,6 +524,13 @@ function Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
   return [σ21;σ31;σ22;σ32]
 end
 
+"""
+    Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Matrix)
+  
+Calculate the SCI part of σ which are from 3 blocks which are zero from the Hessian caclulation funcion.
+SO_SCI, SO_SCI_original, SCI Hessians need this function
+Return vector σ in the order of [σ21;σ31;σ22;σ32]
+"""
 function Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) # to be modified  
   occ1o = setdiff(EC.space['o'],occ2) # to be modified
@@ -488,8 +563,22 @@ function Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1:
   σ22 = zeros(n22)
   σ32 = reshape(σ32, n_1o*n_v)
   return [σ21;σ31;σ22;σ32]
-end
+end 
 
+"""
+    H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, alpha::Number, h_block::NTuple{10, Matrix{Float64}}, HessianType::Symbol)
+
+Do the H * x calculation
+Depending on the Hessian type, do the calculation from unsimplified and simplified parts of blocks seperatly
+Calculate the first element of H*v vector, and the part of H*v from the multiplying of first element of v and g vector(first column of Hessian Matrix)
+Assembly the matrix
+the Hessian Matrix is  | 0           g_21'*alpha   g_31'*alpha   g_22'*alpha   g_32'*alpha |               
+                       | g_21*alpha  h_2121        h_2131        h_2122        h_2132      |
+                       | g_31*alpha  h_3121        h_3131        h_3122        h_3132      |
+                       | g_22*alpha  h_2221        h_2231        h_2222        h_2232      |
+                       | g_32*alpha  h_3221        h_3231        h_3222        h_3232      |
+Return vector σ in the order of [σ[1];σ21;σ31;σ22;σ32]
+"""
 function H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vector, num_MO, g::Vector, alpha::Number, 
   h_block::NTuple{10, Matrix{Float64}}, HessianType::Symbol)
   h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
@@ -499,9 +588,9 @@ function H_multiply(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, D1::Matrix, v::Vec
   else
     σ += Hx_SCI(EC, fock_MO, cMO, v[2:end], num_MO, D1)
   end
-  newσ_hb = [[g'*v[2:end].* alpha];σ]
-  newσ_hb[2:end] .+= g .* v[1] .*alpha
-  return newσ_hb
+  σ_hb = [[g'*v[2:end].* alpha];σ]
+  σ_hb[2:end] .+= g .* v[1] .*alpha # should be g * 1.0
+  return σ_hb
 end
 
 """
@@ -749,6 +838,11 @@ function checkE_modifyTrust(EC::ECInfo, E::Number, E_former::Number, E_2o::Numbe
   return reject, trust
 end
 
+"""
+    print_initial(Enuc::Float64, HessianType::Symbol)
+
+Print the information of the Hessian type
+"""
 function print_initial(Enuc::Float64, HessianType::Symbol)
   println("Enuc ", Enuc)
   if HessianType == :SO
