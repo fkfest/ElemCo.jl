@@ -7,6 +7,8 @@
 * `EC.ms` (previously of type `MSys`) in `ECInfo` is renamed to `EC.system` (of type `AbstractSystem`).
 * `ECdriver` routine is moved to `CCDriver` module and renamed to `ccdriver`. The `fcidump` keyword-argument is now empty by default. It doesn't accept list of methods anymore, only one method at a time. 
 * The driver routines and macros return energies as `NamedTuple`.
+* The SVD methods have to be called now as `SVD-<methodname>`, e.g., `svd-dcsd`.
+* The `@svdcc` macro is renamed to `@dfcc` macro and calls the `dfccdriver` routine, which is intended as a driver routine for all DF-based correlation methods (i.e., methods which don't use the `EC.fd` integrals).
 
 ### Changed
 

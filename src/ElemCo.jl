@@ -67,7 +67,7 @@ export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
-export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
+export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf
 
 const __VERSION__ = "0.10.0+"
 
@@ -458,11 +458,13 @@ macro cc(method, kwargs...)
 end
 
 """
-    @svdcc(method="dcsd")
+    @dfcc(method="svd-dcsd")
 
-  Run coupled cluster calculation with SVD decomposition of the amplitudes.
+  Run coupled cluster calculation using density fitted integrals.
 
-  The type of the method is determined by the first argument (dcsd/dcd)
+  The type of the method is determined by the first argument.
+  The method can be specified as a string or as a variable, e.g., 
+  `@dfcc SVD-DCSD` or `@dfcc "SVD-DCSD"` or `ccmethod="SVD-DCSD";  @dfcc ccmethod`.
   
   # Examples
 ```julia
@@ -472,14 +474,15 @@ H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
 @dfhf
-@svdcc
+@dfcc svd-dcsd
 ```
 """
-macro svdcc(method="dcsd")
+macro dfcc(method="svd-dcsd")
   strmethod=replace("$method", " " => "")
   return quote
+    $(esc(:@tryECinit))
     strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-    calc_svd_dc($(esc(:EC)), strmethod)
+    dfccdriver($(esc(:EC)), strmethod)
   end
 end
 

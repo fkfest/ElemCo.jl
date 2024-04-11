@@ -5,8 +5,8 @@ epsilon    =  1.e-6
 EHF_test   =      -76.02145513971418
 EMP2_test  =      -0.204723138509385 + EHF_test
 EDCSD_test =      -0.219150244853825 + EHF_test
-ESVDDCSD_test =   -0.220331906783324
-ESVDDCSD_ft_test =-0.219961375476643
+ESVDDCSD_test =   -0.220331906783324 + EHF_test
+ESVDDCSD_ft_test =-0.219961375476643 + EHF_test
 EUHF_test  =      -75.79199546193901
 
 xyz="bohr
@@ -34,11 +34,11 @@ energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
 
 rm(fcidump)
 
-ESVDDCSD = @svdcc dcsd
-@test abs(ESVDDCSD-ESVDDCSD_test) < epsilon
+energies = @dfcc svd-dcsd
+@test abs(energies.SVD_DCSD-ESVDDCSD_test) < epsilon
 @set cc use_full_t2=true
-ESVDDCSD_ft = @svdcc dcsd
-@test abs(ESVDDCSD_ft-ESVDDCSD_ft_test) < epsilon
+energies = @dfcc svd-dcsd
+@test abs(energies.SVD_DCSD-ESVDDCSD_ft_test) < epsilon
 
 @set scf direct=false
 @set wf ms2=2
