@@ -9,11 +9,14 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
+using ..ElemCo.DFTools
 using ..ElemCo.CCTools
 using ..ElemCo.CoupledCluster
+using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDump
+using ..ElemCo.OrbTools
 
-export ccdriver
+export ccdriver, dfccdriver
 
 """ 
     ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
@@ -38,7 +41,8 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   energies = eval_hf_energy(EC, energies, closed_shell)
 
   ecmethod = ECMethod(method)
-  closed_shell_method = checkset_unrestricted_closedshell!(EC, ecmethod, closed_shell)
+  unrestricted_orbs = EC.fd.uhf
+  closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
   # calculate MP2
   if EC.options.cc.nomp2 == 0
     energies = eval_mp2_energy(EC, energies, closed_shell_method, has_prefix(ecmethod, "R"))
@@ -55,6 +59,47 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   draw_endline()
   # restore occs
   EC.options.wf.occa, EC.options.wf.occb = save_occs
+  return energies
+end
+
+"""
+    dfccdriver(EC::ECInfo, method)
+
+  Run electronic structure calculation for `EC::ECInfo` using `method::String`.
+  
+  The integrals are calculated using density fitting.
+"""
+function dfccdriver(EC::ECInfo, method)
+  setup_space_system!(EC)
+  closed_shell = (EC.space['o'] == EC.space['O'])
+  
+  energies = NamedTuple()
+  energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies)
+  t1 = time_ns()
+  space_save = save_space(EC)
+  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
+  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
+  t1 = print_time(EC, t1, "freeze core and virt", 2)
+
+  ecmethod = ECMethod(method)
+  closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
+
+  if !closed_shell_method
+    error("Only closed-shell density fitting methods implemented!")
+  end
+
+  main_name = method_name(ecmethod)
+  if has_prefix(ecmethod, "SVD")
+    @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
+    ECC = calc_svd_dc(EC, ecmethod)
+    energies = output_energy(EC, ECC, energies, main_name)
+  else
+    error("Only SVD DF methods implemented!")
+  end
+
+  delete_temporary_files!(EC)
+  restore_space!(EC, space_save)
+  draw_endline()
   return energies
 end
 
@@ -110,18 +155,18 @@ function eval_hf_energy(EC::ECInfo, energies::NamedTuple, closed_shell)
 end
 
 """
-    checkset_unrestricted_closedshell!(EC::ECInfo, ecmethod::ECMethod, closed_shell)
+    checkset_unrestricted_closedshell!(ecmethod::ECMethod, closed_shell, unrestricted)
 
   Check if the method is unrestricted/closed-shell and if necessary set 
   the corresponding options in [`ECMethod`](@ref ECMethod).
   Return `closed_shell_method::Bool`.
 """
-function checkset_unrestricted_closedshell!(EC::ECInfo, ecmethod::ECMethod, closed_shell)
+function checkset_unrestricted_closedshell!(ecmethod::ECMethod, closed_shell, unrestricted)
   if is_unrestricted(ecmethod)
     closed_shell_method = false
   elseif has_prefix(ecmethod, "R")
     closed_shell_method = false
-    @assert !EC.fd.uhf "For restricted methods, the FCIDUMP must not be UHF!"
+    @assert !unrestricted "For restricted methods, the orbitals must not be UHF!"
   else
     closed_shell_method = closed_shell
     if !closed_shell_method
@@ -135,6 +180,7 @@ end
     output_energy(EC::ECInfo, En::NamedTuple, energies::NamedTuple, mname; print=true)
 
   Print the energy components and return the updated `energies::NamedTuple` with 
+  correction to the correlation energy (`mname*"correction"`, e.g., ΔMP2, if available),
   same-spin(`mname*"SS"`), opposite-spin(`mname*"OS"`), open-shell(`mname*"O"`) components, 
   SCS energy (`"SCS"*mname`), correlation energy (`mname*"c"`) and 
   the total energy (field `mname`) (with `-` in `mname` replaced by `_`).
@@ -149,6 +195,16 @@ function output_energy(EC::ECInfo, En::NamedTuple, energies::NamedTuple, mname; 
     println()
     flush(stdout)
   end
+  if haskey(En, :Ecorrection)
+    ecorrect = En.E + En.Ecorrection
+    ecorrectot = En.E + En.Ecorrection + energies.HF
+    if print
+      @printf "%s corrected correlation energy: \t%16.12f \n" mname ecorrect
+      @printf "%s corrected total energy:       \t%16.12f \n" mname ecorrectot
+      println()
+    end
+    energies = (; energies..., Symbol(meth*"correction")=>En.Ecorrection) 
+  end
   energies = (; energies..., Symbol(meth*"SS")=>En.ESS, Symbol(meth*"OS")=>En.EOS, Symbol(meth*"O")=>En.EO) 
   methodroot = replace(method_name(ECMethod(mname), root=true), "-" => "_")
   # calc SCS energy (if available)
@@ -157,7 +213,8 @@ function output_energy(EC::ECInfo, En::NamedTuple, energies::NamedTuple, mname; 
     ssfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ssfac"))
     osfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_osfac"))
     ofac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ofac"))
-    enescs = energies.HF + En.ESS*ssfac + En.EOS*osfac + En.EO*ofac
+    ΔE = En.E - En.ESS - En.EOS
+    enescs = energies.HF + ΔE + En.ESS*ssfac + En.EOS*osfac + En.EO*ofac
     if print
       @printf "SCS-%s total energy: \t%16.12f \n" mname enescs
       println()
@@ -255,9 +312,9 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTupl
   if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
     ET3, ET3b = calc_pertT(EC, ecmethod; save_t3=save_pert_t3)
     println()
-    @printf "%s[T] total energy: %16.12f \n" main_name ECC.E+ET3b+EHF
-    @printf "%s(T) correlation energy: %16.12f \n" main_name ECC.E+ET3
-    @printf "%s(T) total energy: %16.12f \n" main_name ECC.E+ET3+EHF
+    @printf "%s[T] total energy:       \t%16.12f \n" main_name ECC.E+ET3b+EHF
+    @printf "%s(T) correlation energy: \t%16.12f \n" main_name ECC.E+ET3
+    @printf "%s(T) total energy:       \t%16.12f \n" main_name ECC.E+ET3+EHF
     println()
     energies = (; energies..., T3b=ET3b, T3=ET3, 
           Symbol(main_name*"_Tc")=>ECC.E+ET3, Symbol(main_name*"_T")=>ECC.E+ET3+EHF)
@@ -286,12 +343,61 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
   t1 = time_ns()
   cc3 = (ecmethod.exclevel[3] == :pertiter)
   ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
-  @printf "%s correlation energy: %16.12f \n" main_name ECC.E
-  @printf "%s total energy: %16.12f \n" main_name ECC.E+EHF
+  @printf "%s correlation energy: \t%16.12f \n" main_name ECC.E
+  @printf "%s total energy:       \t%16.12f \n" main_name ECC.E+EHF
   t1 = print_time(EC, t1,"SVD-T",1)
   println()
   meth = replace(main_name, "-" => "_")
   return (; energies..., Symbol(meth*"c")=>ECC.E, Symbol(meth)=>ECC.E+EHF)
+end
+
+"""
+    eval_df_mo_integrals(EC::ECInfo, energies::NamedTuple)
+
+  Evaluate the density-fitted integrals in MO basis 
+  and store in the correct file.
+
+  Return the reference energy as `HF` field in NamedTuple and 
+  `true` if the integrals are calculated using unresctricted orbitals.
+"""
+function eval_df_mo_integrals(EC::ECInfo, energies::NamedTuple)
+  t1 = time_ns()
+  cMO = load_orbitals(EC, EC.options.wf.orb)
+  unrestricted = is_unrestricted_MO(cMO)
+  ERef = generate_DF_integrals(EC, cMO)
+  t1 = print_time(EC, t1, "generate DF integrals", 2)
+  cMO = nothing
+  @printf "Reference energy: \t%16.12f \n" ERef
+  println()
+  return (; energies..., HF=ERef), unrestricted
+end
+
+"""
+    eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
+
+  Evaluate the coupled-cluster ground-state energy for the DF integrals,
+  which have to be calculated before.
+  Return the updated `energies::NamedTuple` with the correlation energy (`method*"c"`) and 
+  the total energy (field `method`) (with `-` in `method` replaced by `_`).
+"""
+function eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
+  t1 = time_ns()
+  if ecmethod.exclevel[3] != :none
+    error("no triples implemented yet...")
+  end
+  if ecmethod.exclevel[4] != :none
+    error("no quadruples implemented yet...")
+  end
+  main_name = method_name(ecmethod)
+  if has_prefix(ecmethod, "SVD")
+    @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
+    ECC = calc_svd_dc(EC, ECMethod(main_name))
+    energies = output_energy(EC, ECC, energies, main_name)
+  else
+    error("Only SVD DF methods implemented!")
+  end
+  t1 = print_time(EC, t1,"CC",1)
+  return energies
 end
 
 end #module
