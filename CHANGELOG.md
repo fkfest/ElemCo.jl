@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## Version [v0.11.0] - 2024.04.12
 
 ### Breaking
 
@@ -12,20 +12,17 @@
 
 ### Changed
 
-* renamed function `active_orbitals` to `oss_active_orbitals`.
-* renamed function `calc_ccsd_resid` to `calc_cc_resid`.
+* Renamed function `active_orbitals` to `oss_active_orbitals`.
+* Renamed function `calc_ccsd_resid` to `calc_cc_resid`.
 * `ECdriver` and `oss_active_orbitals` now return named tuples.
-* improved documentation of occupation strings syntax.
-* switched to `Atom` and `FlexibleSystem` from `AtomsBase` as the internal representation of the molecular system. The basis set is stored for each atom as `:basis` property (as `Dict{String,String}`, e.g., `system[1][:basis]["ao"]`). One can also set `:basis` property for the whole system. 
-* rename macro `@opt` to `@set`. `@opt` is now an alias of `@set`.
-
+* Improved documentation of occupation strings syntax.
+* Switched to `Atom` and `FlexibleSystem` from `AtomsBase` as the internal representation of the molecular system. The basis set is stored for each atom as `:basis` property (as `Dict{String,String}`, e.g., `system[1][:basis]["ao"]`). One can also set `:basis` property for the whole system. 
+* Renamed macro `@opt` to `@set`. `@opt` is now an alias of `@set`.
 
 ### Added
 
 * The automatically generated `UCCSDT` and `UDC-CCSDT` methods have been added to the docs.
 * SCS-MP2, SCS-CCSD and SCS-DCSD
-
-### Fixed
 
 ## Version [v0.10.0] - 2024.02.21
 
