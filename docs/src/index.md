@@ -61,17 +61,17 @@ This code defines a water molecule, computes DF-HF using the cc-pVDZ basis set, 
 
 ### Setting options
 
-To set options ([`ElemCo.ECInfos.Options`](@ref)) for the DF-HF, CC, etc calculations, you can use the [`@opt`](@ref) macro. Here's an example of how you can use this macro:
+To set options ([`ElemCo.ECInfos.Options`](@ref)) for the DF-HF, CC, etc calculations, you can use the [`@set`](@ref) macro. Here's an example of how you can use this macro:
 
 ```julia
 # Set the maximum number of iterations to 10
-@opt scf maxit=10
+@set scf maxit=10
 
 # Compute DF-HF using the new options
 @dfhf
 ```
 
-This code sets the maximum number of iterations for the SCF procedure to 10 using the [`@opt`](@ref) macro, and then computes DF-HF using the new options using the [`@dfhf`](@ref) macro.
+This code sets the maximum number of iterations for the SCF procedure to 10 using the [`@set`](@ref) macro, and then computes DF-HF using the new options using the [`@dfhf`](@ref) macro.
 
 ## Documentation
 

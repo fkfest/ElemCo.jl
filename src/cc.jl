@@ -89,35 +89,46 @@ include("algo/udcccsdt_triples.jl")
     calc_singles_energy(EC::ECInfo, T1; fock_only=false)
 
   Calculate coupled-cluster closed-shell singles energy.
+  Returns total energy, SS, OS and Openshell (0.0) contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
-  ET1 = 0.0
+  ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
     if !fock_only
-      @tensoropt ET1 += (2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*ints2(EC,"oovv")[i,j,a,b]
+      oovv = ints2(EC,"oovv")
+      @tensoropt begin
+        ET1d = T1[a,i] * T1[b,j] * oovv[i,j,a,b]
+        ET1ex = T1[b,i] * T1[a,j] * oovv[i,j,a,b]
+      end
+      ET1SS = ET1d - ET1ex
+      ET1OS = ET1d
+      ET1 = ET1SS + ET1OS
     end
     @tensoropt ET1 += 2.0*(T1[a,i] * load(EC,"f_mm")[SP['o'],SP['v']][i,a])
   end
-  return ET1
+  return (E=ET1, ESS=ET1SS, EOS=ET1OS, EO=0.0)
 end
 
 """
     calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
 
   Calculate energy for α (T1a) and β (T1b) singles amplitudes.
+  Returns total energy, SS, OS and Openshell contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   SP = EC.space
-  ET1 = 0.0
+  ET1 = ET1aa = ET1bb = ET1ab = 0.0
   if !fock_only
     if length(T1a) > 0
-      @tensoropt ET1 += 0.5*((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b])
+      @tensoropt ET1aa = 0.5*((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b])
     end
     if length(T1b) > 0
-      @tensoropt ET1 += 0.5*((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b])
+      @tensoropt ET1bb = 0.5*((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b])
       if length(T1a) > 0
-        @tensoropt ET1 += T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
+        @tensoropt ET1ab = T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
       end
     end
   end
@@ -127,97 +138,138 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   if length(T1b) > 0
     @tensoropt ET1 += T1b[a,i] * load(EC,"f_MM")[SP['O'],SP['V']][i,a]
   end
-  return ET1
+  ET1 += ET1aa + ET1bb + ET1ab
+  ET1SS = ET1aa + ET1bb
+  ET1OS = ET1ab
+  ET1O = ET1aa - ET1bb
+  return (E=ET1, ESS=ET1SS, EOS=ET1OS, EO=ET1O)
 end
 
 """
-    calc_doubles_energy(EC::ECInfo, T2; fock_only=false)
+    calc_doubles_energy(EC::ECInfo, T2)
 
   Calculate coupled-cluster closed-shell doubles energy.
+  Returns total energy, SS, OS and Openshell (0.0) contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2)
-  @tensoropt ET2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * ints2(EC,"oovv")[i,j,a,b]
-  return ET2
+  oovv = ints2(EC,"oovv")
+  @tensoropt begin
+    ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
+    ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
+  end
+  ET2SS = ET2d - ET2ex
+  ET2OS = ET2d
+  ET2 = ET2SS + ET2OS
+  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
 end
 
 """
-    calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab; fock_only=false)
+    calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
 
   Calculate energy for αα (T2a), ββ (T2b) and αβ (T2ab) doubles amplitudes.
+  Returns total energy, SS, OS and Openshell contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
   @tensoropt begin
-    ET2 = 0.5*(T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b])
-    ET2 += 0.5*(T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b])
-    ET2 += T2ab[a,b,i,j] * ints2(EC,"oOvV")[i,j,a,b]
+    ET2aa = 0.5*(T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b])
+    ET2bb = 0.5*(T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b])
+    ET2OS = T2ab[a,b,i,j] * ints2(EC,"oOvV")[i,j,a,b]
   end
-  return ET2
+  ET2SS = ET2aa + ET2bb
+  ET2O = ET2aa - ET2bb
+  ET2 = ET2SS + ET2OS
+  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=ET2O)
 end
 
 """
     calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
 
-  Calculate closed-shell singles and doubles Hylleraas energy
+  Calculate closed-shell singles and doubles Hylleraas energy.
+  Returns total energy, SS, OS and Openshell (0.0) contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
   int2 = ints2(EC,"oovv")
+  ET1 = ET1SS = ET1OS = 0.0
+  if length(T1) > 0
+    @tensoropt begin
+      ET1d = T1[a,i] * T1[b,j] * int2[i,j,a,b]
+      ET1ex = T1[b,i] * T1[a,j] * int2[i,j,a,b]
+    end
+    ET1SS = ET1d - ET1ex
+    ET1OS = ET1d
+    ET1 = ET1SS + ET1OS
+  end
   @tensoropt begin
     int2[i,j,a,b] += R2[a,b,i,j]
-    ET2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * int2[i,j,a,b]
+    ET2d = T2[a,b,i,j] * int2[i,j,a,b]
+    ET2ex = T2[b,a,i,j] * int2[i,j,a,b]
   end
+  ET2SS = ET2d - ET2ex
+  ET2OS = ET2d
+  ET2 = ET2SS + ET2OS
   if length(T1) > 0
-    mo = 'm'
-    dfock = load(EC,"df_"*mo*mo)
-    fov = dfock[SP['o'],SP['v']] + load(EC,"f_mm")[SP['o'],SP['v']] # undressed part should be with factor two
-    @tensoropt ET1 = (fov[i,a] + 2.0 * R1[a,i])*T1[a,i]
-    # ET1 = scalar(2.0*(load(EC,"f_mm")[SP['o'],SP['v']][i,a] + R1[a,i])*T1[a,i])
-    # ET1 += scalar((2.0*T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j])*int2[i,j,a,b])
-    ET2 += ET1
+    fov = load(EC,"f_mm")[SP['o'],SP['v']] 
+    @tensoropt ET1 += 2.0*((fov[i,a] + R1[a,i]) * T1[a,i])
   end
-  return ET2
+  ET2 += ET1
+  ET2SS += ET1SS
+  ET2OS += ET1OS
+  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
 end
 
 """
-    calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov)
+    calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R2, fov)
 
   Calculate singles and doubles Hylleraas energy for one spin case.
 """
-function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T2, R1, R2, fov)
-  SP = EC.space
+function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R2, fov)
   int2 = ints2(EC,o1*o2*v1*v2)
   if o1 == o2
     fac = 0.5
   else
     fac = 1.0
   end
+  ET1 = ET1_2 = 0.0
+  if length(T1) > 0
+    if o1 == o2
+      @tensoropt ET1_2 = 0.5*((T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j]) * int2[i,j,a,b])
+    else
+      @tensoropt ET1_2 = T1[a,i] * T1OS[b,j] * int2[i,j,a,b]
+    end
+  end
   @tensoropt begin
     int2[i,j,a,b] += fac*R2[a,b,i,j]
     ET2 = fac*(T2[a,b,i,j] * int2[i,j,a,b])
   end
-  if length(T1) > 0
-    mo = space4spin('m', isalphaspin(o1,o1))
-    dfock = load(EC,"df_"*mo*mo)
-    dfov = dfock[SP[o1],SP[v1]] + fov # undressed part should be with factor two
-    @tensoropt ET1 = (0.5*dfov[i,a] + R1[a,i])*T1[a,i]
-    ET2 += ET1
+  if length(R1) > 0
+    @tensoropt ET1 = (fov[i,a] + R1[a,i]) * T1[a,i]
   end
-  return ET2
+  return ET2, ET1, ET1_2
 end
 
 """
     calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
 
   Calculate singles and doubles Hylleraas energy.
+  Returns total energy, SS, OS and Openshell contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
   SP = EC.space
-  Eh = calc_hylleraas4spincase(EC, "ovov"..., T1a, T2a, R1a, R2a, load(EC,"f_mm")[SP['o'],SP['v']])
+  Eh2SSa, Eh1a, Eh1SSa = calc_hylleraas4spincase(EC, "ovov"..., T1a, T1b, T2a, R1a, R2a, load(EC,"f_mm")[SP['o'],SP['v']])
   if n_occb_orbs(EC) > 0
-    Eh += calc_hylleraas4spincase(EC, "OVOV"..., T1b, T2b, R1b, R2b, load(EC,"f_MM")[SP['O'],SP['V']])
-    Eh += calc_hylleraas4spincase(EC, "ovOV"..., Float64[], T2ab, Float64[], R2ab, Float64[])
+    Eh2SSb, Eh1b, Eh1SSb = calc_hylleraas4spincase(EC, "OVOV"..., T1b, T1a, T2b, R1b, R2b, load(EC,"f_MM")[SP['O'],SP['V']])
+    Eh2OS, Eh1, Eh1OS = calc_hylleraas4spincase(EC, "ovOV"..., T1a, T1b, T2ab, Float64[], R2ab, Float64[])
   end
-  return Eh
+  Eh = Eh2SSa + Eh2SSb + Eh2OS + Eh1a + Eh1b + Eh1SSa + Eh1SSb + Eh1 + Eh1OS
+  EhSS = Eh2SSa + Eh2SSb + Eh1SSa + Eh1SSb
+  EhOS = Eh2OS + Eh1OS
+  EhO = Eh2SSa - Eh2SSb + Eh1SSa - Eh1SSb
+  return (E=Eh, ESS=EhSS, EOS=EhOS, EO=EhO)
 end
 
 """ 
@@ -726,17 +778,19 @@ end
   Calculate closed-shell MP2 energy and amplitudes. 
   The amplitudes are stored in `T_vvoo` file.
   If `addsingles`: singles are also calculated and stored in `T_vo` file.
-  Return EMp2 
+  Return EMp2 `NamedTuple` (`E`, `ESS`, `EOS`, `EO`).
 """
 function calc_MP2(EC::ECInfo, addsingles=true)
-  T2 = update_doubles(EC,ints2(EC,"vvoo"), use_shift=false)
-  EMp2 = calc_doubles_energy(EC,T2)
+  T2 = update_doubles(EC, ints2(EC,"vvoo"), use_shift=false)
+  EMp2 = calc_doubles_energy(EC, T2)
   save!(EC, "T_vvoo", T2)
   if addsingles
     ϵo, ϵv = orbital_energies(EC)
     T1 = update_singles(load(EC,"f_mm")[EC.space['v'],EC.space['o']], ϵo, ϵv, 0.0)
-    EMp2 += calc_singles_energy(EC,T1,fock_only=true)
+    EMp2s = calc_singles_energy(EC, T1, fock_only=true)
     save!(EC, "T_vo", T1)
+    # add singles energies to MP2 energies
+    EMp2 = (; [k => EMp2[k] + EMp2s[k] for k in keys(EMp2)]...)
   end
   return EMp2
 end
@@ -747,7 +801,7 @@ end
   Calculate unrestricted MP2 energy and amplitudes. 
   The amplitudes are stored in `T_vvoo`, `T_VVOO`, and `T_vVoO` files.
   If `addsingles`: singles are also calculated and stored in `T_vo` and `T_VO` files.
-  Return EMp2
+  Return EMp2 `NamedTuple` (`E`, `ESS`, `EOS`, `EO`).
 """
 function calc_UMP2(EC::ECInfo, addsingles=true)
   SP = EC.space
@@ -759,11 +813,13 @@ function calc_UMP2(EC::ECInfo, addsingles=true)
   save!(EC, "T_VVOO", T2b)
   save!(EC, "T_vVoO", T2ab)
   if addsingles
-    T1a = update_singles(EC,load(EC,"f_mm")[SP['v'],SP['o']], spincase=:α, use_shift=false)
-    T1b = update_singles(EC,load(EC,"f_MM")[SP['V'],SP['O']], spincase=:β, use_shift=false)
-    EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only=true)
+    T1a = update_singles(EC, load(EC,"f_mm")[SP['v'],SP['o']], spincase=:α, use_shift=false)
+    T1b = update_singles(EC, load(EC,"f_MM")[SP['V'],SP['O']], spincase=:β, use_shift=false)
+    EMp2s = calc_singles_energy(EC, T1a, T1b, fock_only=true)
     save!(EC, "T_vo", T1a)
     save!(EC, "T_VO", T1b)
+    # add singles energies to MP2 energies
+    EMp2 = (; [k => EMp2[k] + EMp2s[k] for k in keys(EMp2)]...)
   end
   return EMp2
 end
@@ -773,7 +829,7 @@ end
 
   Calculate open-shell MP2 energy from precalculated amplitudes. 
   If `addsingles`: singles energy is also calculated.
-  Return EMp2 
+  Return EMp2 `NamedTuple` (`E`, `ESS`, `EOS`, `EO`).
 """
 function calc_UMP2_energy(EC::ECInfo, addsingles=true)
   T2a = load(EC,"T_vvoo")
@@ -783,19 +839,12 @@ function calc_UMP2_energy(EC::ECInfo, addsingles=true)
   if addsingles
     T1a = load(EC,"T_vo")
     T1b = load(EC,"T_VO")
-    EMp2 += calc_singles_energy(EC, T1a, T1b, fock_only=true)
+    EMp2s = calc_singles_energy(EC, T1a, T1b, fock_only=true)
+    # add singles energies to MP2 energies
+    EMp2 = (; [k => EMp2[k] + EMp2s[k] for k in keys(EMp2)]...)
   end
   return EMp2
 end
-
-""" 
-    calc_MP2(EC::ECInfo, addsingles=true)
-
-  Calculate closed-shell MP2 energy and amplitudes. 
-  The amplitudes are stored in `T_vvoo` file.
-  If `addsingles`: singles are also calculated and stored in `T_vo` file.
-  Return EMp2 
-"""
 
 """ 
     calc_D2(EC::ECInfo, T1, T2, scalepp=false)
@@ -907,11 +956,11 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1076,11 +1125,11 @@ function calc_ccsd_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=fals
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
+    calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1091,8 +1140,8 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   linearized::Bool = false
 
   if tworef
-    morba, norbb, morbb, norba = active_orbitals(EC)
-    T2ab[norba,morbb,morba,norbb] = 0.0
+    active = oss_active_orbitals(EC)
+    T2ab[active.ua,active.tb,active.ta,active.ub] = 0.0
   end
 
   if ndims(T1a) == 2
@@ -1477,23 +1526,22 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
   end
 
   if tworef || fixref
-    # 2D-CC assumes open-shell singlet reference morba and norbb occupied in Φ^A and morbb and norba in Φ^B.
+    # 2D-CC assumes open-shell singlet reference torba and uorbb occupied in Φ^A and torbb and uorba in Φ^B.
     @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "2D-CCSD needs two open-shell alpha beta orbitals"
-    morba, norbb, morbb, norba = active_orbitals(EC)
+    activeorbs = oss_active_orbitals(EC)
     if tworef
-      activeorbs = (morba, norbb, morbb, norba)
       occcorea = collect(1:length(SP['o']))
       occcoreb = collect(1:length(SP['O']))
-      filter!(x -> x != morba, occcorea)
-      filter!(x -> x != norbb, occcoreb)
+      filter!(x -> x != activeorbs.ta, occcorea)
+      filter!(x -> x != activeorbs.ub, occcoreb)
       occcore = (occcorea, occcoreb)
       virtualsa = collect(1:length(SP['v']))
       virtualsb = collect(1:length(SP['V']))
-      filter!(x -> x != norba, virtualsa)
-      filter!(x -> x != morbb, virtualsb)
+      filter!(x -> x != activeorbs.ua, virtualsa)
+      filter!(x -> x != activeorbs.tb, virtualsb)
       virtuals = (virtualsa, virtualsb)
-      W = R2ab[norba,morbb,morba,norbb]
-      R2ab[norba,morbb,morba,norbb] = 0.0
+      W = R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub]
+      R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub] = 0.0
       if length(T1a) > 0
         M1a = calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
         M1b = calc_M1b(occcore, virtuals, T1a, T1b, T2a, T2ab, activeorbs)
@@ -1511,18 +1559,18 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=
       save!(EC,"2d_ccsd_W",[W])
       t1 = print_time(EC,t1,"``2D-CCSD additional terms``",2)
     elseif fixref
-      R2ab[norba,morbb,morba,norbb] = 0
+      R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub] = 0
     end
   end
   return R1a, R1b, R2a, R2b, R2ab
 end
 
 """
-    calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3aaa, T3bbb, T3abb, T3aab; dc=false)
+    calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3aaa, T3bbb, T3abb, T3aab; dc=false)
 
   Calculate UCCSDT or UDC-CCSDT residual.
 """
-function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb; dc=false, tworef=false, fixref=false)
   EC.options.cc.use_kext = false
   EC.options.cc.calc_d_vvvv = true
   EC.options.cc.calc_d_vvvo = true
@@ -1583,16 +1631,21 @@ function calc_ccsd_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, 
   return R1a, R1b, R2a, R2b, R2ab, R3a, R3b, R3aab, R3abb
 end
 
-function active_orbitals(EC::ECInfo)
+"""
+    oss_active_orbitals(EC::ECInfo)
+
+  Return the four active orbitals of an (2e,2o) open-shell singlet problem based on a single determinant reference.
+"""
+function oss_active_orbitals(EC::ECInfo)
   SP = EC.space
   @assert length(setdiff(SP['o'],SP['O'])) == 1 && length(setdiff(SP['O'],SP['o'])) == 1 "Assumed two open-shell alpha beta orbitals here."
-  morb = setdiff(SP['o'],SP['O'])[1]
-  norb = setdiff(SP['O'],SP['o'])[1]
-  morba = findfirst(isequal(morb),SP['o'])
-  norbb = findfirst(isequal(norb),SP['O'])
-  morbb = findfirst(isequal(morb),SP['V'])
-  norba = findfirst(isequal(norb),SP['v'])
-  return morba,norbb,morbb,norba
+  torb = setdiff(SP['o'],SP['O'])[1]
+  uorb = setdiff(SP['O'],SP['o'])[1]
+  torba = findfirst(isequal(torb),SP['o'])
+  uorbb = findfirst(isequal(uorb),SP['O'])
+  torbb = findfirst(isequal(torb),SP['V'])
+  uorba = findfirst(isequal(uorb),SP['v'])
+  return (ta=torba,ub=uorbb,tb=torbb,ua=uorba)
 end
 
 function calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
@@ -1897,6 +1950,13 @@ end
   Calculate coupled cluster amplitudes.
 
   Exact specification of the method is given by `method`.
+  Returns an energies `NamedTuple` with the following fields:
+  - `E` - correlation energy
+  - `ESS` - same-spin component
+  - `EOS` - opposite-spin component
+  - `EO` - open-shell component (defined as ``E_{αα} - E_{ββ}``)
+  - `EIAS` - internal-active singles (for 2D methods)
+  - `EW` - singlet/triplet energy contribution (for 2D methods)
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
   dc = (method.theory[1:2] == "DC")
@@ -1927,7 +1987,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    Res = calc_ccsd_resid(EC, Amps...; dc, tworef, fixref)
+    Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
     if restrict
       spin_project!(EC, Res...)
     end
@@ -1942,17 +2002,17 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       update_triples!(EC, Amps[triples]..., Res[triples]...)
     end
     if has_prefix(method, "FRS")
-      morba, norbb, morbb, norba = active_orbitals(EC)
-      Amps[T2αβ][norba,morbb,morba,norbb] = 1.0
+      active = oss_active_orbitals(EC)
+      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = 1.0
     elseif has_prefix(method, "FRT")
-      morba, norbb, morbb, norba = active_orbitals(EC)
-      Amps[T2αβ][norba,morbb,morba,norbb] = -1.0
+      active = oss_active_orbitals(EC)
+      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = -1.0
     elseif has_prefix(method, "2D") && do_sing
-      morba, norbb, morbb, norba = active_orbitals(EC)
+      active = oss_active_orbitals(EC)
       T1α = first(singles)
       T1β = last(singles)
       W = load(EC,"2d_ccsd_W")[1]
-      Eias = - W * Amps[T1α][norba,morba] * Amps[T1β][morbb,norbb]
+      Eias = - W * Amps[T1α][active.ua,active.ta] * Amps[T1β][active.tb,active.ub]
     end
     if do_sing
       NormT1 = calc_singles_norm(Amps[singles]...)
@@ -1963,14 +2023,15 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       spin_project!(EC, Amps...)
     end
     Amps = perform(diis, Amps, Res)
+    save_current_doubles(EC, Amps[doubles]...)
+    En2 = calc_doubles_energy(EC, Amps[doubles]...)
+    En = En2.E
     if do_sing
       save_current_singles(EC, Amps[singles]...)
       En1 = calc_singles_energy(EC, Amps[singles]...)
+      En += En1.E
     end
-    save_current_doubles(EC, Amps[doubles]...)
-    En2 = calc_doubles_energy(EC, Amps[doubles]...)
-    En = En1 + En2
-    ΔE = En - Eh
+    ΔE = En - Eh.E
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
     if method.exclevel[3] == :full
@@ -1978,7 +2039,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       NormT += NormT3
     end
     tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh.E ΔE NormR tt
     flush(stdout)
     if NormR < EC.options.cc.thr
       converged = true
@@ -2000,11 +2061,12 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   end
   println()
   flush(stdout)
-  if has_prefix(method, "2D") && do_sing
-    return Eh+Eias
-  else
-    return Eh
+  if has_prefix(method, "2D")
+    ene = Eh.E + Eias
+    W = load(EC,"2d_ccsd_W")[1]
+    Eh = (; Eh..., E=ene, EIAS=Eias, EW=W)
   end
+  return Eh
 end
 
 """ 
@@ -2047,7 +2109,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     calc_dressed_3idx(EC, T1)
     # test_dressed_ints(EC,T1) #DEBUG
     t1 = print_time(EC, t1, "dressed 3-idx integrals", 2)
-    R1, R2 = calc_ccsd_resid(EC, T1, T2)
+    R1, R2 = calc_cc_resid(EC, T1, T2)
     t1 = print_time(EC, t1, "ccsd residual", 2)
     R1, R2 = add_to_singles_and_doubles_residuals(EC, R1, R2)
     t1 = print_time(EC, t1, "R1(T3) and R2(T3)", 2)
@@ -2067,13 +2129,14 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     T3 += update_deco_triples(EC, R3)
     T1, T2, T3 = perform(diis, [T1,T2,T3], [R1,R2,R3])
     save!(EC, "T_XXX", T3)
-    En = calc_singles_energy(EC, T1)
-    En += calc_doubles_energy(EC, T2)
-    ΔE = En - Eh
+    En1 = calc_singles_energy(EC, T1)
+    En2 = calc_doubles_energy(EC, T2)
+    En = En1.E + En2.E
+    ΔE = En - Eh.E
     NormR = NormR1 + NormR2 + NormR3
     NormT = 1.0 + NormT1 + NormT2 + NormT3
     tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh.E ΔE NormR tt
     flush(stdout)
     if NormR < EC.options.cc.thr
       break

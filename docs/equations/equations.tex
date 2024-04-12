@@ -37,23 +37,39 @@
 
 \newcommand{\NL}{\nonumber \\}
 \newcommand{\nl}{\nonumber \\ & }
+\newcommand{\beq}{\begin{equation}\begin{aligned}}
+\newcommand{\eeq}{\end{aligned}\end{equation}}
+\newcommand{\half}{\frac{1}{2}}
+\newcommand{\quart}{\frac{1}{4}}
 \newcommand{\op}{\hat}
+\newcommand{\mat}{\mathbf}
+\newcommand{\vect}{\mathbf}
+\newcommand{\tnsr}{}
+\newcommand{\snam}[1]{{\rm #1}}
+\DeclareMathOperator{\sgn}{sgn}
+\DeclareMathOperator{\trace}{tr}
+\newcommand{\tbra}{\texttt{bra}}
+\newcommand{\tket}{\texttt{ket}}
 \newcommand{\perm}[1]{{\cal P}\left(#1\right)}
 \newcommand{\Perm}[2]{{\cal P}\left({#1}\veryshortarrow {#2}\right)}
 \newcommand{\sop}[1]{{\cal S}\left(#1\right)}
 \newcommand{\Sop}[2]{{\cal S}\left(#1,#2\right)}
 \newcommand{\asop}[1]{{\cal A}\left(#1\right)}
 \newcommand{\ASop}[2]{{\cal A}\left(#1;#2\right)}
-\newcommand{\mat}{\mathbf}
 \newcommand{\eq}[1]{Eq.~(\ref{#1})}
 \newcommand{\eqs}[2]{Eqs.~(\ref{#1},~\ref{#2})}
 \newcommand{\sect}[1]{Sec.~\ref{#1}}
 \newcommand{\spa}[1]{{#1}}
 \newcommand{\spb}[1]{\bar{#1}}
-\newcommand{\half}{\frac{1}{2}}
-\newcommand{\quart}{\frac{1}{4}}
+\newcommand{\dg}{\dagger}
+\newcommand{\lk}{\left}
+\newcommand{\rk}{\right}
+\newcommand{\ieq}{\stackrel{!}{=}}
 \newcommand{\ElemCojl}{\textsf{ElemCo.jl} }
+\newcommand{\quantwo}{\textsf{Quantwo} }
 \newcommand{\cmd}[1]{\texttt{#1}}
+% for presubscripts and presuperscripts (e.g., \pre{^x}U_a)
+\newcommand{\pre}[1]{\,#1\!}
 % Define \lt and \gt for `less than' and `greater than'
 \mathchardef\lt="313C \mathchardef\gt="313E
 % Set up `<' and `>' as angle brackets
@@ -83,10 +99,15 @@ The $\alpha$ and $\beta$ spin orbitals are denoted by $\spa{p}$ and $\spb{p}$.
 The integrals are \textbf{not antisymmetrized} and denoted by $v_{pq}^{rs}$, where $p,q,r,s$ are indices of orbitals,
 and the lower indices correspond to the creation and the upper indices to the annihilation operators in the Hamiltonian,
 \begin{equation}
+  \op H = E_0 + h_p^q \op a^\dagger_p \op a_q + 
+  \frac{1}{2} v_{pq}^{rs} \op a^\dagger_p \op a^\dagger_q \op a_s \op a_r,
+\end{equation}
+or for the normal-ordered Hamiltonian,
+\begin{equation}
   \op H_N = f_p^q \left\{\op a^\dagger_p \op a_q\right\}_N + 
   \frac{1}{2} v_{pq}^{rs} \left\{\op a^\dagger_p \op a^\dagger_q \op a_s \op a_r\right\}_N,
 \end{equation}
-i.e., $f_p^q = <p|\op f|q>$ and $v_{pq}^{rs} = <pq|rs>$.
+i.e., $h_p^q = <p|\op h|q>$, $f_p^q = <p|\op f|q>$ and $v_{pq}^{rs} = <pq|rs>$.
 
 Permutation operators:
 \begin{equation}
@@ -111,6 +132,191 @@ Antisymmetrization operators:
 \ASop{ab}{ij} X^{ij}_{ab} &= X^{ij}_{ab} - X^{ji}_{ab} - X^{ij}_{ba} + X^{ji}_{ba}\\
 \end{aligned}
 \end{equation}
+
+
+\chapter{Integrals}
+\section{Density fitting and Cholesky decomposition}
+\label{sec:df}
+The electron-repulsion integrals in \ElemCojl are obtained either from an external program 
+through an FCIDUMP \cite{knowlesDeterminant1989} interface, 
+or are calculated using the density-fitting approximation using the \texttt{GaussianBasis.jl} 
+interface\cite{aroeiraFermi2022} to the \texttt{libcint}\cite{libcint} library.
+
+In the density-fitting approximation, the electron-repulsion integrals are approximated by
+\begin{equation}
+  v_{pq}^{rs} \approx v_{p}^{rP} \left[v^{-1}\right]_{PQ} v_{q}^{sQ},
+\end{equation}
+where $v_{p}^{rP}$ and $v_{q}^{sQ}$ are density-fitted 3-index integrals with auxiliary 
+basis functions $P,Q$, 
+\begin{equation}
+v_{p}^{rP} = \int d\vect{r}_1 d\vect{r}_2 \frac{\phi^*_p(\vect{r}_1) \phi^r(\vect{r}_1) \phi^P(\vect{r}_2)}{|\vect{r}_1-\vect{r}_2|},
+\end{equation}
+and $v^{PQ}$ is the Coulomb metric matrix,
+\begin{equation}
+  v^{PQ} = \int d\vect{r}_1 d\vect{r}_2 \frac{\phi^P(\vect{r}_1)\phi^Q(\vect{r}_2)}{|\vect{r}_1-\vect{r}_2|}.
+\end{equation}
+
+The Coulomb metric matrix is decomposed using the Cholesky factorization,
+\begin{equation}
+  v^{PQ} = \sum_L L^{P}_{L} L^{Q}_{L},
+\end{equation}
+where $L^{P}_{L}$ is a lower triangular matrix.
+Thereafter, a non-symmetric square root of the inverse, $C_P^L$, is 
+calculated by solving the equations
+\begin{equation}
+  L^{P}_{L'} C_{P}^{L} = \delta^{L}_{L'},
+\end{equation}
+with $\delta^{K}_{L}$ being the Kronecker delta. 
+If $L^{P}_{L}$ is low-rank, the equation is solved using the QR decomposition,
+otherwise it can be solved by simple back-substitution.
+
+The transformed density-fitted integrals which are used throughout \ElemCojl 
+are then calculated by multiplying the density-fitted 3-index 
+integrals with the non-symmetric square root of the inverse,
+\begin{equation}
+  v_{p}^{rL} = v_{p}^{rP} C_P^L,
+\end{equation}
+and the density-fitted 4-index integrals can be calculated by
+\begin{equation}
+  v_{pq}^{rs} \approx \sum_L v_{p}^{rL} v_{q}^{sL}.
+\end{equation}
+
+If all integrals are calculated using the density-fitting approximation using \textit{mp2fit}
+fitting basis in \ElemCojl,
+the correction terms are added using the \textit{jkfit} fitting basis
+to the one-body and zero-body terms of the Hamiltonian in order to ensure that the 
+reference energy and the Fock matrix from DF-HF is not changed by the density-fitting approximation,
+\begin{equation}
+  \begin{aligned}
+    \tilde h_p^q &= \tilde f_p^q 
+    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL}\right)\\
+    \tilde E_0 &= E_0 + h_i^i - \tilde h_i^i + \tilde f_I^I, 
+  \end{aligned} 
+\end{equation}
+where 
+\begin{equation}
+  \begin{aligned}
+    \tilde f_p^q &= h_p^q + \sum_{\tilde L} \left(2v_{p}^{q\tilde L} v_{\tilde i}^{\tilde i\tilde L} 
+    - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L}\right),
+  \end{aligned} 
+\end{equation}
+and $I$ denotes the core orbitals (cf. \sect{sec:frozen-core}), 
+$\tilde i$ denote all occupied orbitals (including core)
+and other indices do not include the core orbitals.
+$\tilde L$ corresponds to the \textit{jkfit} density-fitting basis functions,
+and $L$ corresponds to the \textit{mp2fit} density-fitting basis functions.
+\section{Frozen-core approximation}
+\label{sec:frozen-core}
+The frozen-core approximation is used to reduce the number of orbitals in the correlated 
+calculation. The frozen-core approximation is implemented in \ElemCojl by
+setting the corresponding integrals to zero and adding their contribution to the
+one-particle and zero-particle part of the Hamiltonian,
+\begin{equation}
+  \begin{aligned}
+    \tilde h_p^q &= h_p^q + 2 v_{pI}^{qI} - v_{pI}^{Iq}\\
+    \tilde E_0 &= E_0 + 2 h_I^I + 2 v_{IJ}^{IJ} - v_{IJ}^{JI},
+  \end{aligned}
+\end{equation}
+where $I, J$ denote the core orbitals, and other indices do not include the core orbitals.
+For the UHF Hamiltonian, the frozen-core approximation is implemented as
+\begin{equation}
+  \begin{aligned}
+    \tilde h_{\spa p}^{\spa q} &= h_{\spa p}^{\spa q} + v_{\spa p \spa I}^{\spa q\spa I} + 
+    v_{\spa p \spb I}^{\spa q\spb I} - v_{\spa p\spa I}^{\spa I\spa q}\\
+    \tilde h_{\spb p}^{\spb q} &= h_{\spb p}^{\spb q} + v_{\spb p \spb I}^{\spb q\spb I} + 
+    v_{\spb p \spa I}^{\spb q\spa I} - v_{\spb p\spb I}^{\spb I\spb q}\\
+    \tilde E_0 &= E_0 + h_{\spa I}^{\spa I} + h_{\spb I}^{\spb I} + 
+    \half\left(v_{\spa I\spa J}^{\spa I\spa J} + v_{\spb I\spb J}^{\spb I\spb J} 
+    + 2 v_{\spa I\spb J}^{\spa I\spb J}
+    - v_{\spa I\spa J}^{\spa J\spa I} - v_{\spb I\spb J}^{\spb J\spb I}
+    \right).
+  \end{aligned}
+\end{equation}
+
+If the frozen-core approximation is used in combination with the density-fitting approximation,
+\textit{jkfit} correction terms are added to the one-body and zero-body terms of the Hamiltonian in order to ensure that the
+reference energy and the Fock matrix from DF-HF is not changed by the frozen-core approximation,
+cf. \sect{sec:df}.
+
+\chapter{Hartree-Fock}
+\section{Density-fitted Hartree-Fock}
+The density-fitted Hartree-Fock equations are given by
+\begin{equation}
+\begin{aligned}
+f_\mu^\nu C_\nu^p &= S_\mu^\nu C_\nu^p \epsilon_p\\
+f_\mu^\nu &= h_\mu^\nu + 2\sum_L\left(v_{\mu'}^{iL} C^{\dagger\mu'}_i\right) C_{P}^{L} v_{\mu}^{\nu P}
+- v_{\mu}^{iL} v^{\dagger\nu}_{iL}\\
+v_{\mu}^{iL} &= \left(v_{\mu}^{\nu P} C_{\nu}^i\right) C_P^L.
+\end{aligned}
+\end{equation}
+Alternatively, the $v_{\mu}^{\nu L}$ integrals can be precomputed and the Fock matrix can be calculated as
+\begin{equation}
+\begin{aligned}
+f_\mu^\nu &= h_\mu^\nu + 2\sum_L\left(v_{\mu'}^{iL} C^{\dagger\mu'}_i\right) v_{\mu}^{\nu L}
+- v_{\mu}^{iL} v^{\dagger\nu}_{iL}\\
+v_{\mu}^{iL} &= v_{\mu}^{\nu L} C_{\nu}^i.
+\end{aligned}
+\end{equation}
+Note that our orbitals are real, and therefore $v^{\dagger\mu}_{iL} = v_{\mu}^{iL}$, 
+and $C^{\dagger\mu}_i = C_{\mu}^i$.
+
+The unrestricted Hartree-Fock equations are given (for $\alpha$ spin) by
+\begin{equation}
+\begin{aligned}
+\pre{^\alpha}f_{\mu}^{\nu} C_{\nu}^{\spa p} &= S_{\mu}^{\nu} C_{\nu}^{\spa p} \epsilon_{\spa p}\\
+\pre{^\alpha}f_{\mu}^{\nu} &= h_{\mu}^{\nu} + \sum_L\left(v_{\mu'}^{\spa i L} C^{\dagger\mu'}_{\spa i}
++v_{\mu'}^{\spb i L} C^{\dagger\mu'}_{\spb i}\right) C_{P}^{L} v_{\mu}^{\nu P}
+- v_{\mu}^{\spa i L} v^{\dagger\nu}_{\spa i L}\\
+v_{\mu}^{\spa i L} &= \left(v_{\mu}^{\nu P} C_{\nu}^{\spa i}\right) C_{P}^L,
+\end{aligned}
+\end{equation}
+and equations for $\beta$ spin can be obtained by swapping the spins.
+
+The residual of the Hartree-Fock equations, which can be used in DIIS, is given by 
+\begin{equation}
+\begin{aligned}
+  \label{eq:hf-residual}
+  \Delta f_{\mu}^{\nu} = S_{\mu}^{\nu'} D_{\nu'}^{\rho}f_{\rho}^{\nu} - f_{\mu}^{\nu'} D_{\nu'}^{\rho}S_{\rho}^{\nu},
+  \quad \mbox{ with } \quad D_{\mu}^{\nu} = C_{\mu}^i C_i^{\dagger\nu}.
+\end{aligned}
+\end{equation}
+
+\section{(Bi-orthogonal) Hartree-Fock}
+The closed-shell Hartree-Fock on top of the FCIDUMP integrals (including the case of similarity-transformed 
+Hamiltonians) is given by
+\begin{equation}
+\begin{aligned}
+f_{\tilde p}^{\tilde q} C_{\tilde q}^p &= C_{\tilde p}^p \epsilon_p,\\
+f_{\tilde p}^{\tilde q} &= h_{\tilde p}^{\tilde q} + 
+\gamma^{\tilde r}_{\tilde s} \left(V_{\tilde p\tilde r}^{\tilde q\tilde s} 
+- \half V_{\tilde p\tilde r}^{\tilde s\tilde q}\right),\\
+  \gamma^{\tilde r}_{\tilde s} &= 2\sum_{i \in \rm occ} \bar C^{\dg \tilde r}_{i} C_{\tilde s}^i,
+\end{aligned}
+\end{equation}
+where tilde indices correspond to the original orbitals.
+If the FCIDUMP is similarity-transformed, $\bar C^{\dg \tilde r}_{p} \neq C_{\tilde r}^p$,
+and $\bar C^{\dg \tilde r}_{p}$ are obtained as an inverse of $C_{\tilde r}^p$ such that
+$\bar C^{\dg \tilde r}_{p} C_{\tilde r}^r = \delta^{r}_{p}$.
+
+The unrestricted Hartree-Fock equations are given (for $\alpha$ case) by
+\begin{equation}
+\begin{aligned}
+\pre{^\alpha}f_{\tilde p}^{\tilde q} C_{\tilde q}^{\spa p} &= C_{\tilde p}^{\spa p} \epsilon_{\spa p},\\
+\pre{^\alpha}f_{\tilde p}^{\tilde q} &= h_{\tilde p}^{\tilde q} +
+\left(\pre{^\alpha}\gamma^{\tilde r}_{\tilde s} + \pre{^\beta}\gamma^{\tilde r}_{\tilde s}\right) 
+V_{\tilde p\tilde r}^{\tilde q\tilde s}
+- \pre{^\alpha}\gamma^{\tilde r}_{\tilde s}V_{\tilde p\tilde r}^{\tilde s\tilde q},\\
+\pre{^\alpha}\gamma^{\tilde r}_{\tilde s} &= \sum_{\spa i \in \rm occ} \bar C^{\dg \tilde r}_{\spa i} C_{\tilde s}^{\spa i},\\
+\pre{^\beta}\gamma^{\tilde r}_{\tilde s} &=  \sum_{\spb i \in \rm occ} \bar C^{\dg \tilde r}_{\spb i} C_{\tilde s}^{\spb i},
+\end{aligned}
+\end{equation}
+and equations for $\beta$ spin can be obtained by swapping the spins.
+Note that if the FCIDUMP is of UHF type, the original indices and integrals are spin-dependent,
+which has to be taken into account in the equations.
+
+The residual of the Hartree-Fock equations, which can be used in DIIS, is equivalent to
+\eq{eq:hf-residual}, with the overlap matrix $S_{\mu}^{\nu}$ removed.
+
 
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
 \section{Closed-shell CCSD/DCSD Lagrangian} \label{sec:cs-ccsd}
@@ -1273,6 +1479,58 @@ IAS contribution to the energy,
 \begin{equation}
 \brown{\Delta E_{\mathrm{IAS}}} = \brown{-W^{\spa{t}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{t}}}.
 \end{equation}
+
+
+\chapter{Automatically generated UCCSDT and UDC-CCSDT}
+Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} were generated with version 1.0.1 of the \quantwo program\cite{quantwo}.
+The \quantwo inputs are listed below.
+\begin{itemize}
+  \item UCCSDT \quantwo input file:
+\lstset{language=[LaTeX]Tex, frame=shadowbox, rulesepcolor=\color{gray}, basicstyle=\ttfamily\scriptsize, columns=fullflexible, breaklines=true}
+\begin{lstlisting}
+prog,spinintegr=0,nobrafac=1,explspin=1,algo=2
+output,level=1,maxlenline=70
+
+\beq
+<\Phi^{a}_{i}| \op H (1 + \op T_2 + \op T_3) |0>_C
+\eeq
+\beq
+<\Phi^{ab}_{ij}| \op H (1 + \op T_2 + \half \op T_2 \op T_2 + \op T_3) |0>_C
+\eeq
+\beq
+<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \half \op T_2 \op T_2 + \op T_2 \op T_3) |0>_C
+\eeq
+\end{lstlisting}
+\item UDC-CCSDT \quantwo input file:
+\begin{lstlisting}
+%singles and doubles amplitude equations from UCCSDT
+%we only modify the triples amplitude equation
+
+prog,spinintegr=0,nobrafac=1,explspin=1,algo=2
+output,level=1,maxlenline=70
+
+\beq
+<\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \frac{1}{2} \op T_2 \op T_2 
++ \op T_2 \op T_3) |0>_C 
++ (1 - \Perm{IJ}{JI} - \Perm{IK}{KI})(1 - \Perm{AB}{BA} - \Perm{AC}{CA})
+(\sum_{LMDE} \tnsr \intg{LE}{MD} \tnsr T^{IL}_{AD} \tnsr T^{MJK}_{EBC}) 
+- \frac{1}{2}(1 - \Perm{KI}{IK} - \Perm{KJ}{JK}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{DE} \tnsr T^{LMK}_{ABC} 
+- \frac{1}{2}(1 - \Perm{CA}{AC} - \Perm{CB}{BC}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{AB} \tnsr T^{IJK}_{DEC} 
++ \frac{1}{2}(1 - \Perm{IJ}{JI} - \Perm{IK}{KI}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LI}_{DE} \tnsr T^{MJK}_{ABC} 
++ \frac{1}{2}(1 - \Perm{AB}{BA} - \Perm{AC}{CA}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{LM}_{DA} \tnsr T^{IJK}_{EBC} 
++ \frac{1}{2}(1 - \Perm{KI}{IK} - \Perm{KJ}{JK})(1 - \Perm{AB}{BA} - \Perm{AC}{CA}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IJ}_{AD} \tnsr T^{LMK}_{BEC} 
++ \frac{1}{2}(1 - \Perm{IJ}{JI} - \Perm{IK}{KI})(1 - \Perm{CA}{AC} - \Perm{CB}{BC}) 
+\sum_{LMDE} \tnsr \intg{LD}{ME} \tnsr T^{IL}_{AB} \tnsr T^{JMK}_{DEC}
+\eeq
+\end{lstlisting}
+\end{itemize}
+\noindent The program generates \textsf{TensorOperations} code.
+The generated code  used by \ElemCojl is located in the \texttt{src/algo} directory. 
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
 \bibliographystyle{naturemag}
