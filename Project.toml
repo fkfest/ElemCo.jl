@@ -1,7 +1,7 @@
 name = "ElemCo"
 uuid = "094d408e-8508-40f4-9646-a254980d91ac"
 authors = ["Daniel Kats <d.kats@fkf.mpg.de> and contributors"]
-version = "0.11.0"
+version = "0.11.0+"
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
