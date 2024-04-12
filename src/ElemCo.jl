@@ -568,20 +568,6 @@ macro freeze_orbs(freeze_orbs)
   end
 end
 
-function run_mcscf()
-  geometry="bohr
-     O      0.000000000    0.000000000   -0.130186067
-     H1     0.000000000    1.489124508    1.033245507
-     H2     0.000000000   -1.489124508    1.033245507"
-
-  basis = Dict("ao"=>"cc-pVDZ",
-             "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
-
-  @opt wf ms2=2 charge=-2
-  E,cMO =  dfmcscf(EC,direct=false)
-end
-
 """ 
     ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
 

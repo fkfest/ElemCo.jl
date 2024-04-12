@@ -63,7 +63,7 @@ Base.@kwdef mutable struct ScfOptions
   """`⟨64⟩` maximum number of iterations for Multiconfiguration SCF. """
   IterMax::Int = 100
   """`⟨100⟩` maximum number of iterations for searching for alpha value to get a reasonalbe guess within trust radius for MCSCF. """
-  maxit4alpha::Int = 3
+  maxit4lambda::Int = 3
   """`⟨:SO⟩` Hessian Type for MCSCF:
   - `:SO` Second Order Approximation
   - `:SCI` Super CI

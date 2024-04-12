@@ -863,7 +863,7 @@ Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 function dfmcscf(EC::ECInfo; direct=false)
   guess = EC.options.scf.guess
   IterMax = EC.options.scf.IterMax
-  maxit4λ = EC.options.scf.maxit4λ
+  maxit4λ = EC.options.scf.maxit4lambda
   HessianType = EC.options.scf.HessianType
   initVecType = EC.options.scf.initVecType
   println("bisecdam = ", EC.options.scf.bisecdamp)

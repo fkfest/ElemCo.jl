@@ -12,7 +12,7 @@ basis = Dict("ao"=>"cc-pVDZ",
 
 @opt wf ms2=2 charge=-2
 
-E,cMO =  ElemCo.dfmcscf(EC,direct=false)
+@dfmcscf(EC,direct=false)
 
 @test abs(E-EMCSCF_test) < epsilon
 
