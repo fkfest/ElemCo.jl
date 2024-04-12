@@ -26,6 +26,7 @@ include("decomptools.jl")
 include("cctools.jl")
 include("dfcc.jl")
 include("cc.jl")
+include("ccdriver.jl")
 
 include("bohf.jl")
 
@@ -51,9 +52,11 @@ using .TensorTools
 using .FockFactory
 using .CCTools
 using .CoupledCluster
+using .CCDriver
 using .DFCoupledCluster
 using .FciDump
 using .DumpTools
+using .OrbTools
 using .MSystem
 using .BOHF
 using .DFHF
@@ -61,17 +64,24 @@ using .DFMCSCF
 using .DfDump
 
 
-export ECdriver 
-export @mainname
+export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
-export @transform_ints, @write_ints, @dfints, @freeze_orbs
-export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf, @dfmcscf
+export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
+export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
+export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 
+const __VERSION__ = "0.11.1"
+
+"""
+    __init__()
+
+  Print the header with the version and the git hash of the current commit.
+"""
 function __init__()
   draw_line(15)
   println("   ElemCo.jl")
   draw_line(15)
+  println("Version: ", __VERSION__)
   srcpath = @__DIR__
   try
     hash = read(`git -C $srcpath rev-parse HEAD`, String)
@@ -119,6 +129,23 @@ julia> @mainname("~/test.xyz")
 macro mainname(file)
   return quote
     mainname($(esc(file)))
+  end
+end
+
+"""
+    @print_input()
+
+  Print the input file content. 
+
+  Can be used to print the input file content to the output.
+"""
+macro print_input()
+  return quote
+    try
+      print_info(read($(string(__source__.file)), String))
+    catch
+      print_info("No input file found.")
+    end
   end
 end
 
@@ -193,13 +220,15 @@ macro ECinit()
   return quote
     $(esc(:EC)) = ECInfo()
     try
+      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))
       println("Basis: ",$(esc(:basis)))
-      $(esc(:EC)).ms = MSys($(esc(:geometry)),$(esc(:basis)))
+      $(esc(:EC)).system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
     try
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:geometry))
       println("FCIDump: ",$(esc(:fcidump)))
       $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
     catch err
@@ -217,7 +246,7 @@ macro tryECinit()
   return quote
     runECinit = [false]
     try
-      $(esc(:EC)).ignore_error
+      $(esc(:EC)).verbosity
     catch
       runECinit[1] = true
     end
@@ -228,51 +257,58 @@ macro tryECinit()
 end
 
 """ 
-    @opt(what, kwargs...)
+    @set(opt, kwargs...)
 
   Set options for `EC::ECInfo`. 
     
-  The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
+  The first argument `opt` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
   The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
-  The current state of the options can be stored in a variable, e.g., `opt_cc = @opt cc`.
-  The state can then be restored by `@opt cc opt_cc`.
+  The current state of the options can be stored in a variable, e.g., `opt_cc = @set cc`.
+  The state can then be restored by `@set cc opt_cc`.
   If `EC` is not already initialized, it will be done. 
 
 
   # Examples
 ```julia
-optscf = @opt scf thr=1.e-14 maxit=10
-@opt cc maxit=100
+optscf = @set scf thr=1.e-14 maxit=10
+@set cc maxit=100
 ...
-@opt scf optscf
+@set scf optscf
 ```
 """
-macro opt(what, kwargs...)
-  strwhat="$what"
+macro set(opt, kwargs...)
+  stropt="$opt"
   ekwa = [esc(a) for a in kwargs]
   if length(kwargs) == 1 && (typeof(kwargs[1]) != Expr || kwargs[1].head != :(=)) 
     # if only one argument is provided and it is not a keyword argument
     # then set the option to the value of the argument
     return quote
       $(esc(:@tryECinit))
-      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
-        typeof($(ekwa[1])) == typeof($(esc(:EC)).options.$what) || error("Wrong type of argument in @opt")
-        $(esc(:EC)).options.$what = deepcopy($(ekwa[1]))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
+        typeof($(ekwa[1])) == typeof($(esc(:EC)).options.$opt) || error("Wrong type of argument in @set")
+        $(esc(:EC)).options.$opt = deepcopy($(ekwa[1]))
       else
-        error("no such option: ",$(esc(strwhat)))
+        error("no such option: ",$(esc(stropt)))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
-        deepcopy(set_options!($(esc(:EC)).options.$what; $(ekwa...)))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
+        deepcopy(set_options!($(esc(:EC)).options.$opt; $(ekwa...)))
       else
-        error("no such option: ",$(esc(strwhat)))
+        error("no such option: ",$(esc(stropt)))
       end
     end
   end
 end
+
+"""
+    @opt(opt, kwargs...)
+
+  Alias for [`@set`](@ref).
+"""
+var"@opt" = var"@set"
 
 """ 
     @reset(opt)
@@ -396,6 +432,9 @@ end
   - `occa::String`: occupied α orbitals (default: "-").
   - `occb::String`: occupied β orbitals (default: "-").
 
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+
   # Examples
 ```julia
 geometry="bohr
@@ -415,7 +454,7 @@ macro cc(method, kwargs...)
     return quote
       $(esc(:@tryECinit))
       strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-      ECdriver($(esc(:EC)), strmethod; $(ekwa...))
+      ccdriver($(esc(:EC)), strmethod; $(ekwa...))
     end
   else
     return quote
@@ -424,17 +463,19 @@ macro cc(method, kwargs...)
         $(esc(:@dfints))
       end
       strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-      ECdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+      ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
     end
   end
 end
 
 """
-    @svdcc(method="dcsd")
+    @dfcc(method="svd-dcsd")
 
-  Run coupled cluster calculation with SVD decomposition of the amplitudes.
+  Run coupled cluster calculation using density fitted integrals.
 
-  The type of the method is determined by the first argument (dcsd/dcd)
+  The type of the method is determined by the first argument.
+  The method can be specified as a string or as a variable, e.g., 
+  `@dfcc SVD-DCSD` or `@dfcc "SVD-DCSD"` or `ccmethod="SVD-DCSD";  @dfcc ccmethod`.
   
   # Examples
 ```julia
@@ -444,14 +485,15 @@ H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
 @dfhf
-@svdcc
+@dfcc svd-dcsd
 ```
 """
-macro svdcc(method="dcsd")
+macro dfcc(method="svd-dcsd")
   strmethod=replace("$method", " " => "")
   return quote
+    $(esc(:@tryECinit))
     strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-    calc_svd_dc($(esc(:EC)), strmethod)
+    dfccdriver($(esc(:EC)), strmethod)
   end
 end
 
@@ -721,6 +763,31 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
         end
       end
     end
+  end
+end
+"""
+    @rotate_orbs(orb1, orb2, angle, kwargs...)
+
+  Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  by `angle` (in degrees). For UHF, `spin` can be `:α` or `:β` (keyword argument).
+  
+  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+
+  # Keyword arguments
+  - `spin::Symbol`: spin of the orbitals (default: `:α`).
+
+  # Examples
+```julia
+@dfhf
+# swap orbitals 1 and 2
+@rotate_orbs 1, 2, 90
+```
+"""
+macro rotate_orbs(orb1, orb2, angle, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECinit))
+    rotate_orbs($(esc(:EC)), $(esc(orb1)), $(esc(orb2)), $(esc(angle)); $(ekwa...))
   end
 end
 

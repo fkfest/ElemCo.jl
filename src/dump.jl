@@ -237,7 +237,7 @@ function read_header(fdfile)
           if isnothing(elem)
             elem = tryparse(Float64,prev_el)
             if isnothing(elem)
-              elem = prev_el
+              elem = strip(prev_el, ['"','\''])
             end 
           end
           push!(elements, elem)
@@ -553,6 +553,10 @@ function write_header(fd::FDump, fdf)
     end
     if key in FDUMP_OPTIONAL && val[1] == 0
       continue
+    end
+    if typeof(val[1]) <: AbstractString
+      # add quotes around each element
+      val = ["\"$v\"" for v in val]
     end
     println(fdf, " ", key, "=", join(val, ","), ",")
   end

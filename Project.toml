@@ -1,13 +1,14 @@
 name = "ElemCo"
 uuid = "094d408e-8508-40f4-9646-a254980d91ac"
 authors = ["Daniel Kats <d.kats@fkf.mpg.de> and contributors"]
-version = "1.0.0-DEV"
+version = "0.11.1"
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 GaussianBasis = "9bb1a3dc-0d1c-467e-84f5-0c4ef701360a"
@@ -21,10 +22,21 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 TensorOperations = "6aa20fa7-93e2-5fca-9bc0-fbd0db3c71a2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+UnitfulAtomic = "a7773ee8-282e-5fa2-be4e-bd808c38a91a"
 
 [compat]
-TensorOperations = ">=3.2.5"
 julia = "1.8.5"
+AtomsBase = "0.3.5 - 0.3"
+DocStringExtensions = "0.9"
+GaussianBasis = "0.4"
+IterativeSolvers = "0.9"
+MKL = "0.6"
+NPZ = "0.4"
+TensorOperations = "3.2.5 - 4"
+Unitful = "1"
+UnitfulAtomic = "1"
+
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

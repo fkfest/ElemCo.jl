@@ -24,14 +24,14 @@ export dfdump
 """
 function generate_integrals(EC::ECInfo, fdump::FDump, cMO, full_spaces)
   @assert !fdump.uhf "Use generate_integrals(EC, fdump, cMOa, cMOb, full_spaces) for UHF"
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, "mp2fit")
-  jkfit = generate_basis(EC.ms, "jkfit")
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, "mp2fit")
+  jkfit = generate_basis(EC.system, "jkfit")
   core_orbs = setdiff(full_spaces['o'], EC.space['o'])
   wocore = setdiff(1:size(cMO,2), core_orbs)
 
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   PQ = nothing
   μνP = ERI_2e3c(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
@@ -71,7 +71,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO, full_spaces)
   restore_space!(EC, space_save)
   fock_jkfitMO = cMO' * fock_jkfit * cMO
   fdump.int1 = fock_jkfitMO[wocore,wocore] - fock
-  Enuc = nuclear_repulsion(EC.ms)
+  Enuc = nuclear_repulsion(EC.system)
   fdump.int0 = Enuc + hii + sum(diag(fock_jkfitMO)[core_orbs]) - sum(diag(fdump.int1)[spo])
 
   # reference energy
@@ -91,15 +91,15 @@ end
 function generate_integrals(EC::ECInfo, fdump::FDump, cMOa, cMOb, full_spaces)
   @assert fdump.uhf "Use generate_integrals(EC, fdump, cMO, full_spaces) for RHF"
   @assert size(cMOa) == size(cMOb) "cMOa and cMOb must have the same size"
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, "mp2fit")
-  jkfit = generate_basis(EC.ms, "jkfit")
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, "mp2fit")
+  jkfit = generate_basis(EC.system, "jkfit")
   core_orbs = setdiff(full_spaces['o'], EC.space['o'])
   @assert core_orbs == setdiff(full_spaces['O'], EC.space['O']) "Core space must be the same for α and β orbitals"
   wocore = setdiff(1:size(cMOa,2), core_orbs)
 
   PQ = ERI_2e2c(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thr, verbose = true)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   PQ = nothing
   μνP = ERI_2e3c(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
@@ -159,7 +159,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMOa, cMOb, full_spaces)
   fock_jkfitMOb = cMOb' * fock_jkfit[2] * cMOb
   fdump.int1a = fock_jkfitMOa[wocore,wocore] - focka
   fdump.int1b = fock_jkfitMOb[wocore,wocore] - fockb
-  Enuc = nuclear_repulsion(EC.ms)
+  Enuc = nuclear_repulsion(EC.system)
   fdump.int0 = Enuc + 0.5*(haii + sum(diag(fock_jkfitMOa)[core_orbs]) - sum(diag(fdump.int1a)[spo]) 
                          + hbii + sum(diag(fock_jkfitMOb)[core_orbs]) - sum(diag(fdump.int1b)[spO]))
 
@@ -177,7 +177,7 @@ end
 """
 function dfdump(EC::ECInfo)
   println("Generating integrals")
-  setup_space_ms!(EC)
+  setup_space_system!(EC)
   dumpfile = EC.options.int.fcidump 
   if !EC.options.int.df
     error("Only density-fitted integrals implemented")
@@ -189,7 +189,7 @@ function dfdump(EC::ECInfo)
   ncore_orbs = freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
   nfrozvirt = freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
 
-  nelec = guess_nelec(EC.ms) - 2*ncore_orbs
+  nelec = guess_nelec(EC.system) - 2*ncore_orbs
   norbs -= ncore_orbs + nfrozvirt
   ms2 = EC.options.wf.ms2
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2

@@ -1,5 +1,6 @@
 """ Various global infos """
 module ECInfos
+using AtomsBase
 using DocStringExtensions
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
@@ -7,12 +8,13 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
-export setup_space_fd!, setup_space_ms!, setup_space!, reset_wf_info!
+export setup_space_fd!, setup_space_system!, setup_space!, reset_wf_info!
 export is_closed_shell
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
-export isalphaspin, space4spin
+export file_description
+export isalphaspin, space4spin, spin4space, flipspin
 
 include("options.jl")
 
@@ -33,7 +35,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  ms::MSys = MSys()
+  system::AbstractSystem = FlexibleSystem(Atom[], infinite_box(3), fill(DirichletZero(), 3))
   """ fcidump. """
   fd::FDump = FDump()
   """ information about (temporary) files. 
@@ -72,9 +74,6 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   e.g., `d_XX` contains ``\\hat v_{XY}`` and `d_^XX` contains ``\\hat v^{XY}`` integrals.
   """
   files::Dict{String,String} = Dict{String,String}()
-
-  """`⟨false⟩` ignore various errors. """
-  ignore_error::Bool = false
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
   space::Dict{Char,Any} = Dict{Char,Any}()
 end
@@ -110,18 +109,18 @@ function setup_space_fd!(EC::ECInfo)
 end
 
 """
-    setup_space_ms!(EC::ECInfo)
+    setup_space_system(EC::ECInfo)
 
-  Setup EC.space from molecular system EC.ms.
+  Setup EC.space from molecular system EC.system.
 """
-function setup_space_ms!(EC::ECInfo)
-  @assert ms_exists(EC.ms) "EC.ms is not set up!"
+function setup_space_system!(EC::ECInfo)
+  @assert system_exists(EC.system) "EC.system is not set up!"
   nelec = EC.options.wf.nelec
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
-  norb = guess_norb(EC.ms) 
-  nelec = (nelec < 0) ? guess_nelec(EC.ms) : nelec
+  norb = guess_norb(EC.system) 
+  nelec = (nelec < 0) ? guess_nelec(EC.system) : nelec
   nelec -= charge
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
   orbsym = ones(Int,norb)
@@ -225,6 +224,7 @@ function len_spaces(EC::ECInfo, spaces::String)
   return [length(EC.space[sp]) for sp in spaces]
 end
 
+
 """
     freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
 
@@ -235,7 +235,7 @@ end
 """
 function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
   if freeze_nocc < 0 && isempty(freeze_orbs)
-    freeze_orbs = 1:guess_ncore(EC.ms, core)
+    freeze_orbs = 1:guess_ncore(EC.system, core)
   elseif freeze_nocc >= 0 && isempty(freeze_orbs)
     freeze_orbs = 1:freeze_nocc
   elseif freeze_nocc >= 0 && !isempty(freeze_orbs)
@@ -364,6 +364,18 @@ function add_file!(EC::ECInfo, name::String, descr::String; overwrite=false)
 end
 
 """
+    file_description(EC::ECInfo, name::String)
+
+  Return description of file `name` in ECInfo.
+"""
+function file_description(EC::ECInfo, name::String)
+  if !file_exists(EC, name)
+    error("File $name is not registered in ECInfo.")
+  end
+  return EC.files[name]
+end
+
+"""
     copy_file!(EC::ECInfo, from::AbstractString, to::AbstractString; overwrite=false)
 
   Copy file `from` to `to`.
@@ -468,6 +480,24 @@ function space4spin(sp::Char, alpha::Bool)
 end
 
 """
+    spin4space(sp::Char)
+
+  Return spin for a given space character.
+"""
+function spin4space(sp::Char)
+  return islowercase(sp) ? :α : :β
+end
+
+"""
+    flipspin(sp::Char)
+
+  Flip spin for a given space character.
+"""
+function flipspin(sp::Char)
+  return islowercase(sp) ? uppercase(sp) : lowercase(sp)
+end
+
+"""
     parse_orbstring(orbs::String; orbsym=Vector{Int})
 
   Parse a string specifying some list of orbitals, e.g., 
@@ -559,8 +589,8 @@ function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=
     else
       occb = parse_orbstring(occbs; orbsym)
     end
-    if length(occa)+length(occb) != nelec && !EC.ignore_error
-      error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error (-f) to ignore.")
+    if length(occa)+length(occb) != nelec && !EC.options.wf.ignore_error
+      error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error wf option to ignore.")
     end
   else 
     occa = [1:(nelec+ms2)÷2;]

@@ -870,7 +870,7 @@ function dfmcscf(EC::ECInfo; direct=false)
   println("maxit = ", maxit4λ)
   println("gamaDavScale = ", EC.options.scf.gamaDavScale)
   print_info("DF-MCSCF")
-  setup_space_ms!(EC)
+  setup_space_system!(EC)
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   print_initial(Enuc, HessianType)
 

@@ -14,8 +14,8 @@ using ..ElemCo.OrbTools
 
 export calc_fock_matrix, calc_HF_energy
 export calc_singles_energy_using_dfock
-export update_singles, update_doubles, update_singles!, update_doubles!, update_deco_doubles, update_deco_triples
-export calc_singles_norm, calc_doubles_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
+export update_singles, update_doubles, update_singles!, update_doubles!, update_triples!, update_deco_doubles, update_deco_triples
+export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles, starting_amplitudes
 export transform_amplitudes2lagrange_multipliers!
 export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
@@ -154,21 +154,33 @@ end
   using dressed fock matrix.
 
   if `fock_only` is true, the energy will be calculated using only non-dressed fock matrix.
+  Returns total energy, SS, OS, and Openshell (0.0) contributions
+  as a NamedTuple (`E`, `ESS`, `EOS`, `EO`).
 """
 function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if length(T1) > 0
-    fock = load(EC, "f_mm")
     if fock_only
-      dfock = fock
+      ET1SS = ET1OS = ET1 = 0.0
     else
-      dfock = load(EC, "df_mm")
+      if !file_exists(EC, "dfc_ov") || !file_exists(EC, "dfe_ov")
+        error("Files dfc_ov and dfe_ov are required in calc_singles_energy_using_dfock!")
+      end
+      dfockc_ov = load(EC, "dfc_ov")
+      dfocke_ov = load(EC, "dfe_ov")
+      @tensoropt begin
+        ET1d = T1[a,i] * dfockc_ov[i,a] 
+        ET1ex = T1[a,i] * dfocke_ov[i,a]
+      end
+      ET1SS = ET1d - ET1ex
+      ET1OS = ET1d
+      ET1 = ET1SS + ET1OS
     end
-    fov = dfock[SP['o'],SP['v']] + fock[SP['o'],SP['v']] # undressed part should be with factor two
-    @tensoropt ET1 = fov[i,a] * T1[a,i]
+    fov = load(EC,"f_mm")[SP['o'],SP['v']] 
+    @tensoropt ET1 += 2.0*(fov[i,a] * T1[a,i])
   end
-  return ET1
+  return (E=ET1, ESS=ET1SS, EOS=ET1OS, EO=0.0)
 end
 
 
@@ -277,6 +289,59 @@ function update_doubles!(EC::ECInfo, T2a, T2b, T2ab, R2a, R2b, R2ab)
   T2b .+= update_doubles(EC, R2b; spincase=:β)
   T2ab .+= update_doubles(EC, R2ab; spincase=:αβ)
 end
+
+"""
+    update_triples!(EC::ECInfo, T3a, T3b, T3aab, T3abb, R3a, R3b, R3aab, R3abb)
+
+  Update triples amplitudes in `T3a`, `T3b`, `T3aab` and `T3abb` with `R3a`, `R3b`, `R3aab` and `R3abb`.
+"""
+function update_triples!(EC::ECInfo, T3a, T3b, T3aab, T3abb, R3a, R3b, R3aab, R3abb)
+  T3a .+= update_triples(EC, R3a; spincase=:α)
+  T3b .+= update_triples(EC, R3b; spincase=:β)
+  T3aab .+= update_triples(EC, R3aab; spincase=:ααβ)
+  T3abb .+= update_triples(EC, R3abb; spincase=:αββ)
+end
+
+"""
+    update_triples(EC::ECInfo, R3; spincase::Symbol=:α, antisymmetrize=false, use_shift=true)
+
+  Calculate update for triples amplitudes for a given `spincase`∈{`:α`,`:β`,`:ααβ`,`:αββ`}.
+"""
+function update_triples(EC::ECInfo, R3; spincase::Symbol=:α, use_shift=true)
+  shift = use_shift ? EC.options.cc.shiftp : 0.0
+  if spincase == :α
+    ϵo, ϵv = orbital_energies(EC)
+    return update_triples(R3, ϵo, ϵv, ϵo, ϵv, ϵo, ϵv, shift)
+  elseif spincase == :β
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_triples(R3, ϵob, ϵvb, ϵob, ϵvb, ϵob, ϵvb, shift)
+  elseif spincase == :ααβ
+    ϵo, ϵv = orbital_energies(EC)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_triples(R3, ϵo, ϵv, ϵo, ϵv, ϵob, ϵvb, shift)
+  elseif spincase == :αββ
+    ϵo, ϵv = orbital_energies(EC)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    return update_triples(R3, ϵo, ϵv, ϵob, ϵvb, ϵob, ϵvb, shift)
+  else
+    error("Unexpected spin case $spincase.")
+  end
+end
+
+"""
+    update_triples(R3, ϵo1, ϵv1, ϵo2, ϵv2, ϵo3, ϵv3, shift)
+
+  Calculate update for triples amplitudes.
+"""
+function update_triples(R3, ϵo1, ϵv1, ϵo2, ϵv2, ϵo3, ϵv3, shift)
+  ΔT3 = deepcopy(R3)
+  for I ∈ CartesianIndices(ΔT3)
+    a,b,c,i,j,k = Tuple(I)
+    ΔT3[I] /= -(ϵv1[a] + ϵv2[b] + ϵv3[c] - ϵo1[i] - ϵo2[j] - ϵo3[k] + shift)
+  end
+  return ΔT3
+end
+
 
 """
     update_deco_doubles(EC, R2; use_shift=true)
@@ -400,6 +465,21 @@ function calc_doubles_norm(T2a, T2b, T2ab)
 end
 
 """
+    calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
+
+  Calculate squared norm of unrestricted triples amplitudes.
+"""
+function calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
+  @tensoropt begin
+    NormT3 = 0.125*(T3aaa[a,b,c,i,j,k]*T3aaa[a,b,c,i,j,k])
+    NormT3 += 0.125*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
+    NormT3 += 0.25*(T3abb[a,b,c,i,j,k]*T3abb[a,b,c,i,j,k])
+    NormT3 += 0.25*(T3aab[a,b,c,i,j,k]*T3aab[a,b,c,i,j,k])
+  end
+  return NormT3
+end
+
+"""
     calc_contra_doubles_norm(T2a, T2b, T2ab)
 
   Calculate squared norm of unrestricted doubles amplitudes
@@ -443,20 +523,22 @@ function calc_deco_triples_norm(T3)
 end
 
 """
-    save_or_start_file(EC::ECInfo, type, save=true)
+    save_or_start_file(EC::ECInfo, type, excitation_level, save=true)
 
   Return filename and description for saving or starting amplitudes/lagrange multipliers.
 
   `type` is either `"T"` for amplitudes or `"LM"` for Lagrange multipliers.
+  `excitation_level` is the excitation level of the amplitudes (1, 2 etc.)
   If `save` is true, the filename for saving is returned, otherwise the filename for starting.
 """
-function save_or_start_file(EC::ECInfo, type, save=true)
+function save_or_start_file(EC::ECInfo, type, excitation_level, save=true)
   mainfilename = descr = ""
+  descr = ["singles", "doubles", "triples", "quadruples"][excitation_level]
   if type == "T"
-    descr = "amplitudes"
+    descr *= " amplitudes"
     mainfilename = save ? EC.options.cc.save : EC.options.cc.start
   elseif type == "LM"
-    descr = "Lagrange multipliers"
+    descr *= " Lagrange multipliers"
     mainfilename = save ? EC.options.cc.save_lm : EC.options.cc.start_lm
   else
     error("unknown type $type")
@@ -465,32 +547,32 @@ function save_or_start_file(EC::ECInfo, type, save=true)
 end
 
 """
-    try2save_amps!(EC::ECInfo, excitation_level::AbstractString, amps...; type="T")
+    try2save_amps!(EC::ECInfo, excitation_level, amps...; type="T")
 
   Save amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  to file `EC.options.cc.save[_lm]*"_"*excitation_level`.
+  to file `EC.options.cc.save[_lm]*"_excitation_level"`.
 """
-function try2save_amps!(EC::ECInfo, excitation_level::AbstractString, amps...; type="T")
-  mainfilename, descr = save_or_start_file(EC, type)
+function try2save_amps!(EC::ECInfo, excitation_level, amps...; type="T")
+  mainfilename, descr = save_or_start_file(EC, type, excitation_level)
   if mainfilename != ""
-    filename = mainfilename*"_"*excitation_level
-    println("Save $excitation_level $descr to file $filename")
-    save!(EC, filename, amps..., description=excitation_level*" "*descr)
+    filename = mainfilename*"_$excitation_level"
+    println("Save $descr to file $filename")
+    save!(EC, filename, amps..., description=descr)
   end
 end
 
 """
-    try2start_amps(EC::ECInfo, excitation_level::AbstractString; type="T")
+    try2start_amps(EC::ECInfo, excitation_level; type="T")
 
   Read amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  from file `EC.options.cc.start[_lm]*"_"*excitation_level`.
+  from file `EC.options.cc.start[_lm]*"_excitation_level"`.
 """
-function try2start_amps(EC::ECInfo, excitation_level::AbstractString; type="T")
-  mainfilename, descr = save_or_start_file(EC, type)
+function try2start_amps(EC::ECInfo, excitation_level; type="T")
+  mainfilename, descr = save_or_start_file(EC, type, excitation_level, false)
   if mainfilename != ""
-    filename = mainfilename*"_"*excitation_level
+    filename = mainfilename*"_$excitation_level"
     if file_exists(EC, filename)
-      println("Read $excitation_level $descr from file $filename")
+      println("Read $descr from file $filename")
       return load(EC, filename)
     end
   end
@@ -501,40 +583,40 @@ end
     try2save_singles!(EC::ECInfo, singles...; type="T")
 
   Save singles amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  to file `EC.options.cc.save[_lm]*"_singles"`.
+  to file `EC.options.cc.save[_lm]*"_1"`.
 """
 function try2save_singles!(EC::ECInfo, singles...; type="T")
-  try2save_amps!(EC, "singles", singles...; type)
+  try2save_amps!(EC, 1, singles...; type)
 end
 
 """
     try2save_doubles!(EC::ECInfo, doubles...; type="T")
 
   Save doubles amplitudes (type="T") or Lagrange multipliers (type="LM") 
-  to file `EC.options.cc.save[_lm]*"_doubles"`.
+  to file `EC.options.cc.save[_lm]*"_2"`.
 """
 function try2save_doubles!(EC::ECInfo, doubles...; type="T")
-  try2save_amps!(EC, "doubles", doubles...; type)
+  try2save_amps!(EC, 2, doubles...; type)
 end
 
 """
     try2start_singles(EC::ECInfo; type="T")
 
   Read singles amplitudes (type="T") or Lagrange multipliers (type="LM")
-  from file `EC.options.cc.start[_lm]*"_singles"`.
+  from file `EC.options.cc.start[_lm]*"_1"`.
 """
 function try2start_singles(EC::ECInfo; type="T")
-  return try2start_amps(EC, "singles"; type)
+  return try2start_amps(EC, 1; type)
 end
 
 """
     try2start_doubles(EC::ECInfo; type="T")
 
   Read doubles amplitudes (type="T") or Lagrange multipliers (type="LM")
-  from file `EC.options.cc.start[_lm]*"_doubles"`.
+  from file `EC.options.cc.start[_lm]*"_2"`.
 """
 function try2start_doubles(EC::ECInfo; type="T")
-  return try2start_amps(EC, "doubles"; type)
+  return try2start_amps(EC, 2; type)
 end
 
 """

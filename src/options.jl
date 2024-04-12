@@ -27,11 +27,15 @@ Base.@kwdef mutable struct WfOptions
   freeze_nocc::Int = -1
   """`⟨0⟩` number of virtual (highest) orbitals to freeze. """
   freeze_nvirt::Int = 0
-  """`⟨"-"⟩` occupied α (or closed-shell) orbitals. """
+  """`⟨"-"⟩` occupied α (or closed-shell) orbitals. 
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`. """
   occa::String = "-"
   """`⟨"-"⟩` occupied β orbitals. 
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
   occb::String = "-"
+  """`⟨false⟩` ignore various errors in sanity checks. """
+  ignore_error::Bool = false
 end
 
 
@@ -99,6 +103,10 @@ Base.@kwdef mutable struct ScfOptions
   enerQuotientLowerBound = 0.25
   """ `⟨0.75⟩` when energy quotient is higher than this value, the trust value should be larger"""
   enerQuotientUpperBound = 0.75
+  """`⟨false⟩` Generate pseudo-canonical basis instead of solving the SCF problem,
+  i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
+  At the moment, it works only for BO-HF."""
+  pseudo::Bool = false
 end
   
 """ 
@@ -146,7 +154,7 @@ Base.@kwdef mutable struct CcOptions
   ``\\tilde T_{XY} = U^{†a}_{iX} U^{†b}_{jY} \\tilde T^{ij}_{ab}``. """
   use_projx::Bool = false
   """`⟨false⟩` use full doubles amplitudes in SVD-DCSD. 
-  The decomposition is used only for ``N^6`` scaling terms.  """
+  The decomposition is used only for ``N^6`` scaling terms. """
   use_full_t2::Bool = false
   """`⟨2⟩` what to project in ``v_{ak}^{ci} T^{kj}_{cb}`` in SVD-DCSD:
   0: both, 1: amplitudes, 2: residual, 3: robust fit. """
@@ -154,19 +162,37 @@ Base.@kwdef mutable struct CcOptions
   """`⟨false⟩` decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
   """`⟨"cc_amplitudes"⟩` main part of filename for start amplitudes. 
-      For example, the singles amplitudes are read from `start*"_singles"` """
+      For example, the singles amplitudes are read from `start*"_1"`. """
   start::String = "cc_amplitudes"
   """`⟨"cc_amplitudes"⟩` main part of filename to save amplitudes.
-      For example, the singles amplitudes are saved to `save*"_singles"` """
+      For example, the singles amplitudes are saved to `save*"_1"`. """
   save::String = "cc_amplitudes"
   """`⟨"cc_multipliers"⟩` main part of filename for start Lagrange multipliers. 
-      For example, the singles Lagrange multipliers are read from `start_lm*"_singles"` """
+      For example, the singles Lagrange multipliers are read from `start_lm*"_1"`. """
   start_lm::String = "cc_multipliers"
   """`⟨"cc_multipliers"⟩` main part of filename to save Lagrange multipliers.
-      For example, the singles Lagrange multipliers are saved to `save_lm*"_singles"` """
+      For example, the singles Lagrange multipliers are saved to `save_lm*"_1"`. """
   save_lm::String = "cc_multipliers"
-  """`⟨0⟩` Don't use MP2 amplitudes as starting guess for the CC amplitudes """
+  """`⟨0⟩` Don't use MP2 amplitudes as starting guess for the CC amplitudes. """
   nomp2::Int = 0
+  """`⟨0.33⟩` Factor for same-spin component in SCS-MP2. """
+  mp2_ssfac::Float64 = 0.33
+  """`⟨1.2⟩` Factor for opposite-spin component in SCS-MP2. """
+  mp2_osfac::Float64 = 1.2
+  """`⟨0.0⟩` Factor for open-shell component in SCS-MP2. """
+  mp2_ofac::Float64 = 0.0
+  """`⟨1.13⟩` Factor for same-spin component in SCS-CCSD. """
+  ccsd_ssfac::Float64 = 1.13
+  """`⟨1.27⟩` Factor for opposite-spin component in SCS-CCSD. """
+  ccsd_osfac::Float64 = 1.27
+  """`⟨0.0⟩` Factor for open-shell component in SCS-CCSD. """
+  ccsd_ofac::Float64 = 0.0
+  """`⟨1.15⟩` Factor for same-spin component in SCS-DCSD. """
+  dcsd_ssfac::Float64 = 1.15
+  """`⟨1.05⟩` Factor for opposite-spin component in SCS-DCSD. """
+  dcsd_osfac::Float64 = 1.05
+  """`⟨0.15⟩` Factor for open-shell component in SCS-DCSD. """
+  dcsd_ofac::Float64 = 0.15
 end
 
 """
@@ -187,8 +213,10 @@ end
   $(TYPEDFIELDS)
 """
 Base.@kwdef mutable struct CholeskyOptions
-  """`⟨1.e-6⟩` cholesky threshold. """
-  thr::Float64 = 1.e-6
+  """`⟨1.e-6⟩` threshold for elimination of redundancies in the auxiliary basis. """
+  thred::Float64 = 1.e-6
+  """`⟨1.e-4⟩` threshold for integral decomposition. """
+  thr::Float64 = 1.e-4
 end
 
 """
