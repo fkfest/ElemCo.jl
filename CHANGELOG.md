@@ -1,14 +1,10 @@
 # Release notes
 
-## Unreleased
-
-### Breaking
+## Version [v0.11.1] - 2024.04.12
 
 ### Changed
 
-### Added
-
-### Fixed
+* Remove `ArgParse` dependency and set `[compat]` section in `Project.toml`.
 
 ## Version [v0.11.0] - 2024.04.12
 
