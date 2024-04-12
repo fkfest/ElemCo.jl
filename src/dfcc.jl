@@ -19,19 +19,20 @@ using ..ElemCo.DIIS
 export calc_dressed_3idx, calc_svd_dc
 
 """
-    get_tildevˣˣ(EC::ECInfo)
+    get_ssv_osvˣˣ(EC::ECInfo)
 
-  Return ``\\tilde v^{XY} = U^{kX}_c U^{lX}_d (2 v_{kl}^{cd} - v_{lk}^{cd} )``
+  Return ``ssv^{XY} = U^{kX}_c U^{lX}_d (v_{kl}^{cd} - v_{lk}^{cd} )``
+  and ``osv^{XY} = U^{kX}_c U^{lX}_d v_{kl}^{cd}``
   with ``v_{kl}^{cd} = v_k^{cL} v_l^{dL'}δ_{LL'}``. 
 
-  The integrals will be read from file `td_^XX`. 
-  If the file does not exist, the integrals will be calculated
-  and stored in file `td_^XX`. 
+  The integrals will be read from files `ssd_^XX` and `osd_^XX`. 
+  If the files do not exist, the integrals will be calculated
+  and stored in files `ssd_^XX` and `osd_^XX`.
   v_k^{cL} and U^{kX}_c are read from files `d_ovL` and `C_voX`.
 """
-function get_tildevˣˣ(EC::ECInfo)
-  if file_exists(EC, "td_^XX") 
-    return load(EC, "td_^XX")
+function get_ssv_osvˣˣ(EC::ECInfo)
+  if file_exists(EC, "ssd_^XX") 
+    return load(EC, "ssd_^XX"), load(EC, "osd_^XX")
   end
   if !file_exists(EC, "d_ovL") || !file_exists(EC, "C_voX")
     error("Files d_ovL or C_voX do not exist!")
@@ -47,9 +48,45 @@ function get_tildevˣˣ(EC::ECInfo)
     @tensoropt vdagger_vvoo[a,b,i,j] += V_ovL[i,a,L] * V_ovL[j,b,L]
   end
   close(ovLfile)
-  @tensoropt vxx[X,Y] := (2.0*vdagger_vvoo[a,b,i,j] - vdagger_vvoo[a,b,j,i]) * UvoX[a,i,X] * UvoX[b,j,Y]
-  save!(EC, "td_^XX", vxx)
-  return vxx
+  @tensoropt begin
+    ssvxx[X,Y] := (vdagger_vvoo[a,b,i,j] - vdagger_vvoo[a,b,j,i]) * UvoX[a,i,X] * UvoX[b,j,Y]
+    osvxx[X,Y] := vdagger_vvoo[a,b,i,j] * UvoX[a,i,X] * UvoX[b,j,Y]
+  end
+  save!(EC, "ssd_^XX", ssvxx)
+  save!(EC, "osd_^XX", osvxx)
+  return ssvxx, osvxx
+end
+
+"""
+    gen_vₓˣᴸ(EC::ECInfo)
+
+  Generate ``v_X^{X'L} = v_a^{cL} U^{†a}_{kX} U^{kX'}_c`` using bare integrals.
+
+  The integrals and the SVD-coefficients are read from files `mmL` and `C_voX`,
+  and the result is stored in file `X^XL`.
+"""
+function gen_vₓˣᴸ(EC::ECInfo)
+  t1 = time_ns()
+  UvoX = load(EC, "C_voX")
+  mmLfile, mmL = mmap(EC, "mmL")
+  SP = EC.space
+  nL = size(mmL, 3)
+  nX = size(UvoX, 3)
+  # create mmap for the v_X^{X'L} intermediate
+  vXXLfile, v_XXL = newmmap(EC, "X^XL", Float64, (nX,nX,nL))
+  LBlks = get_auxblks(nL)
+  XBlks = get_auxblks(nX)
+  for L in LBlks
+    vvL = mmL[SP['v'],SP['v'],L]
+    for X in XBlks
+      V_UvoX = @view UvoX[:,:,X]
+      # ``v_{X'}^{XL} = (v_a^{cL} U^{kX}_{c}) U^{†a}_{kX'}``
+      @tensoropt v_XXL[:,X,L][X',X,L] = (vvL[a,c,L] * V_UvoX[c,k,X]) * UvoX[a,k,X'] 
+    end
+  end
+  closemmap(EC, vXXLfile, v_XXL)
+  close(mmLfile)
+  t1 = print_time(EC, t1, "v_X^{X'L}", 2)
 end
 
 """
@@ -58,6 +95,9 @@ end
   Calculate closed-shell singles and doubles Hylleraas energy
   using contravariant decomposed doubles amplitudes `T2`=``T_{XY}``
   or full contravariant doubles amplitude `T2`=``T^{ij}_{ab}``.
+
+  Returns total energy, SS, OS and Openshell (0.0) contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
@@ -69,22 +109,43 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   end
   if full_t2
     ovL = load(EC, "d_ovL")
-    @tensoropt ET2 = (2.0 * T2[a,b,i,j] - T2[a,b,j,i]) * (R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L])
+    @tensoropt begin
+      int2[a,b,i,j] := R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L]
+      ET2d = T2[a,b,i,j] * int2[a,b,i,j]
+      ET2ex = T2[a,b,j,i] * int2[a,b,i,j]
+    end
+    ET2SS = ET2d - ET2ex
+    ET2OS = ET2d
+    ET2 = ET2SS + ET2OS
     ovL = nothing
   else
-    vxx = get_tildevˣˣ(EC)
-    @tensoropt ET2 = T2[X,Y] * (vxx[X,Y] + 2.0*R2[X,Y])
+    ssvxx, osvxx = get_ssv_osvˣˣ(EC)
+    @tensoropt begin
+      ET2OS = T2[X,Y] * (osvxx[X,Y] + R2[X,Y])
+      ET2SS = T2[Y,X] * (ssvxx[X,Y] + R2[X,Y])
+    end
     UvoX = load(EC, "C_voX")
-    @tensoropt ET2 -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
+    @tensoropt ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
     UvoX = nothing
+    ET2 = ET2SS + ET2OS
   end
   if length(T1) > 0
-    dfock = load(EC, "df_mm")
-    fov = dfock[SP['o'],SP['v']] + load(EC,"f_mm")[SP['o'],SP['v']] # undressed part should be with factor two
-    @tensoropt ET1 = (fov[i,a] + 2.0 * R1[a,i])*T1[a,i]
+    dfockc_ov = load(EC, "dfc_ov")
+    dfocke_ov = load(EC, "dfe_ov")
+    @tensoropt begin
+      ET1d = T1[a,i] * dfockc_ov[i,a] 
+      ET1ex = T1[a,i] * dfocke_ov[i,a]
+    end
+    ET1SS = ET1d - ET1ex
+    ET1OS = ET1d
+    ET1 = ET1SS + ET1OS
+    fov = load(EC,"f_mm")[SP['o'],SP['v']] 
+    @tensoropt ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
     ET2 += ET1
+    ET2SS += ET1SS
+    ET2OS += ET1OS
   end
-  return ET2
+  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
 end
 
 """
@@ -93,14 +154,21 @@ end
   Calculate closed-shell doubles energy
   using decomposed doubles amplitudes `T2`=``T_{XY}``
   or `T2`=``T^{ij}_{ab}`` using density-fitted integrals.
+
+  Returns total energy, SS, OS and Openshell (0.0) contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_deco_doubles_energy(EC::ECInfo, T2)
   if ndims(T2) == 4
     return calc_df_doubles_energy(EC, T2)
   elseif ndims(T2) == 2
-    tvxx = get_tildevˣˣ(EC)
-    @tensoropt ET2 = T2[X,Y] * tvxx[X,Y]
-    return ET2
+    ssvxx, osvxx = get_ssv_osvˣˣ(EC)
+    @tensoropt begin
+      ET2OS = T2[X,Y] * osvxx[X,Y] 
+      ET2SS = T2[Y,X] * ssvxx[X,Y]
+    end
+    ET2 = ET2SS + ET2OS
+    return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
   else
     error("Wrong dimensionality of T2: ", ndims(T2))
   end
@@ -111,22 +179,32 @@ end
 
   Calculate closed-shell doubles energy using DF integrals 
   and `T2[a,b,i,j]` = ``T^{ij}_{ab}``.
+
+  Returns total energy, SS, OS and Openshell (0.0) contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_df_doubles_energy(EC::ECInfo, T2)
   if !file_exists(EC, "d_ovL")
     error("File d_ovL does not exist!")
   end
   ovL = load(EC, "d_ovL")
-  @tensoropt ET2 = (2.0*T2[a,b,i,j] - T2[a,b,j,i]) * (ovL[i,a,L] * ovL[j,b,L])
-  return ET2
+  @tensoropt begin
+    int2[a,b,i,j] := ovL[i,a,L] * ovL[j,b,L]
+    ET2d = T2[a,b,i,j] * int2[a,b,i,j]
+    ET2ex = T2[b,a,i,j] * int2[a,b,i,j]
+  end
+  ET2SS = ET2d - ET2ex
+  ET2OS = ET2d
+  ET2 = ET2SS + ET2OS
+  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
 end
 
 """
-    calc_dressed_3idx(EC, T1)
+    calc_dressed_3idx(EC::ECInfo, T1)
 
   Calculate dressed integrals for 3-index integrals from file `mmL`.
 """
-function calc_dressed_3idx(EC, T1)
+function calc_dressed_3idx(EC::ECInfo, T1)
   mmLfile, mmL = mmap(EC, "mmL")
   # println(size(mmL))
   SP = EC.space
@@ -162,11 +240,11 @@ function calc_dressed_3idx(EC, T1)
 end
 
 """
-    save_pseudodressed_3idx(EC)
+    save_pseudodressed_3idx(EC::ECInfo)
 
   Save non-dressed 3-index integrals from file `mmL` to dressed files.
 """
-function save_pseudodressed_3idx(EC)
+function save_pseudodressed_3idx(EC::ECInfo)
   mmLfile, mmL = mmap(EC, "mmL")
   # println(size(mmL))
   SP = EC.space
@@ -194,14 +272,16 @@ function save_pseudodressed_3idx(EC)
 end
 
 """
-    dress_df_fock(EC, T1)
+    dress_df_fock(EC::ECInfo, T1)
 
   Dress DF fock matrix with DF 3-index integrals.
 
   The dress-contribution is added to the original fock matrix
   from file `f_mm`. The dressed fock matrix is stored in file `df_mm`.
+  Additionally, the coulomb and exchange dressing contributions to ``\\hat f_k^c`` 
+  are stored in files `dfc_ov` and `dfe_ov`.
 """
-function dress_df_fock(EC, T1)
+function dress_df_fock(EC::ECInfo, T1)
   dfock = load(EC, "f_mm")
   mmLfile, mmL = mmap(EC, "mmL")
   nL = size(mmL, 3)
@@ -209,6 +289,8 @@ function dress_df_fock(EC, T1)
   virt = EC.space['v']
 
   LBlks = get_auxblks(nL)
+  dfockc = zeros(size(dfock))
+  dfocke = zeros(size(dfock))
   for L in LBlks
     V_mmL = @view mmL[:,:,L]
     mvL = V_mmL[:,virt,:]
@@ -217,12 +299,15 @@ function dress_df_fock(EC, T1)
     @tensoropt vt_L[L] := vt_moL[occ,:,:][i,i,L]
     # exchange
     omL = V_mmL[occ,:,:]
-    @tensoropt dfock[p,q] -= vt_moL[p,i,L]*omL[i,q,L]
+    @tensoropt dfocke[p,q] += vt_moL[p,i,L]*omL[i,q,L]
     omL = nothing
     # coulomb
-    @tensoropt dfock[p,q] += 2.0*V_mmL[p,q,L]*vt_L[L]
+    @tensoropt dfockc[p,q] += V_mmL[p,q,L]*vt_L[L]
   end
   close(mmLfile)
+  dfock += 2.0*dfockc - dfocke
+  save!(EC, "dfc_ov", dfockc[occ,virt], description="tmp Coulomb-Dressed-Part-Fock")
+  save!(EC, "dfe_ov", dfocke[occ,virt], description="tmp Exchange-Dressed-Part-Fock")
   # dress external indices
   dinter = dfock[:,virt]
   @tensoropt dfock[:,occ][p,j] += dinter[p,b] * T1[b,j]
@@ -232,12 +317,17 @@ function dress_df_fock(EC, T1)
 end
 
 """
-    save_pseudo_dress_df_fock(EC)
+    save_pseudo_dress_df_fock(EC::ECInfo)
 
   Save non-dressed DF fock matrix from file `f_mm` to dressed file `df_mm`.
 """
-function save_pseudo_dress_df_fock(EC)
+function save_pseudo_dress_df_fock(EC::ECInfo)
   dfock = load(EC, "f_mm")
+  dfc = zeros(size(dfock))
+  occ = EC.space['o']
+  virt = EC.space['v']
+  save!(EC, "dfc_ov", dfc[occ,virt])
+  save!(EC, "dfe_ov", dfc[occ,virt])
   save!(EC, "df_mm", dfock)
 end
 
@@ -269,7 +359,8 @@ end
   The orbital energy differences are saved in file `e_X`.
   The SVD-coefficients ``U^{iX}_a`` are saved in file `C_voX`.
   The starting guess for doubles ``T_{XY}`` is saved in file `T_XX`.
-  Return full MP2 correlation energy (using the imaginary shift).
+  Return full MP2 correlation energy, SS, OS, and Openshell(0.0) (using the imaginary shift)
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   t1 = time_ns()
@@ -287,10 +378,10 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   shifti = EC.options.cc.deco_ishiftp
   fullEMP2 = calc_MP2_from_3idx(EC, voL, shifti)
   if shifti ≈ 0.0
-    println("MP2 correlation energy: ", fullEMP2)
+    println("MP2 correlation energy: ", fullEMP2.E)
   else
     println("MP2 imaginary shift for decomposition: ", shifti)
-    println("MP2 imaginary shifted correlation energy: ", fullEMP2)
+    println("MP2 imaginary shifted correlation energy: ", fullEMP2.E)
   end
   t1 = print_time(EC, t1, "MP2 from 3idx", 2)
   flush(stdout)
@@ -389,7 +480,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
     # save!(EC, "T_XX", zeros(size(v_XX)))
     t1 = print_time(EC, t1, "starting guess T_{XY}", 2)
   end
-  return 0.0
+  return (E=0.0,)
 end
 
 """
@@ -429,13 +520,16 @@ end
   Calculate MP2 energy from ``v_a^{iL}``.
   
   The imaginary shift ishift is used in the denominator in the calculation of the MP2 amplitudes.
+  Returns total energy, SS, OS and Openshell (0.0) contributions
+  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_MP2_from_3idx(EC::ECInfo, voL::AbstractArray, ishift)
   @tensoropt vvoo[a,b,i,j] := voL[a,i,L] * voL[b,j,L]
   ϵo, ϵv = orbital_energies(EC)
   nocc = length(ϵo)
   nvirt = length(ϵv)
-  EMP2 = 0.0
+  ET2d = 0.0
+  ET2ex = 0.0
   t_vvo = zeros(nvirt,nvirt,nocc)
   for j = 1:nocc
     vvo = @view vvoo[:,:,:,j]
@@ -452,9 +546,15 @@ function calc_MP2_from_3idx(EC::ECInfo, voL::AbstractArray, ishift)
         t_vvo[I] = vvo[I] * den/(den^2 + ishift)
       end
     end
-    @tensoropt EMP2 += vvo[a,b,i] * (2.0*t_vvo[a,b,i]-t_vvo[b,a,i])
+    @tensoropt begin
+      ET2d += vvo[a,b,i] * t_vvo[a,b,i]
+      ET2ex += vvo[a,b,i] * t_vvo[b,a,i]
+    end
   end
-  return EMP2
+  ET2SS = ET2d - ET2ex
+  ET2OS = ET2d
+  ET2 = ET2SS + ET2OS
+  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
 end
 
 """
@@ -507,13 +607,16 @@ function contravariant_deco_doubles(EC::ECInfo, T2, projx=false)
 end
 
 """
-    calc_vᵥᵒˣ(EC::ECInfo)
+    calc_voX(EC::ECInfo; calc_vᵥᵒˣ=false, calc_vᵛₒₓ=false)
 
   Calculate ``\\hat v_a^{iX} = \\hat v_{ak}^{ci} U^{kX}_c`` 
+  and/or ``\\hat v^c_{kX} = \\hat v_{ak}^{ci} U^{†a}_{kX}``
   with ``\\hat v_{ak}^{ci} = \\hat v_a^{cL} \\hat v_k^{iL}`` 
   and ``U^{kX}_c`` from file `C_voX`.
+
+  Return a tuple (vᵥᵒˣ, vᵛₒₓ) (not calculated intermediates are empty arrays).
 """
-function calc_vᵥᵒˣ(EC::ECInfo)
+function calc_voX(EC::ECInfo; calc_vᵥᵒˣ=false, calc_vᵛₒₓ=false)
   if !file_exists(EC, "C_voX")
     error("File C_voX does not exist!")
   end
@@ -533,10 +636,17 @@ function calc_vᵥᵒˣ(EC::ECInfo)
   close(vvLfile)
   close(ooLfile)
   UvoX = load(EC, "C_voX")
-  @tensoropt v_voX[a,i,X] := vvoo[a,c,k,i] * UvoX[c,k,X]
-  return v_voX
+  v_voX = v_voX2 = similar(UvoX, 0)
+  if calc_vᵥᵒˣ
+    # ``v_a^{iX} = v_{ac}^{ki} U^{kX}_c``
+    @tensoropt v_voX[a,i,X] := vvoo[a,c,k,i] * UvoX[c,k,X]
+  end
+  if calc_vᵛₒₓ
+    # ``v_{kX}^{c} = v_{ak}^{ci} U^{†a}_{kX}``
+    @tensoropt v_voX2[c,k,X] := vvoo[a,c,k,i] * UvoX[a,i,X]
+  end
+  return (v_voX, v_voX2)
 end
-
 
 """
     calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
@@ -559,7 +669,8 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   end
   UvoX = load(EC, "C_voX")
   use_projected_exchange = EC.options.cc.use_projx
-  project_amps_vovo_t2 = EC.options.cc.project_vovo_t2 < 2
+  project_amps_vovo_t2 = EC.options.cc.project_vovo_t2 != 2
+  project_resid_vovo_t2 = EC.options.cc.project_vovo_t2 >= 2
 
   if ndims(T2) == 4
     # T2 and R2 are full amplitudes/residuals ``T/R^{ij}_{ab}``
@@ -599,9 +710,6 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   x_oo = dfock[SP['o'],SP['o']]
   voLfile, voL = mmap(EC, "d_voL")
   ovLfile, ovL = mmap(EC, "d_ovL")
-  # if project_amps_vovo_t2: ``v_a^{iX} = v_a^{kXL} v_{k}^{iL}``
-  # otherwise: ``v_{kX}^{c} = v_{iX}^{cL} v_{k}^{iL}``    
-  v_voX = zeros(size(UvoX))
   vvLfile, vvL = mmap(EC, "d_vvL")
   ooLfile, ooL = mmap(EC, "d_ooL")
   f_ov = dfock[SP['o'],SP['v']]
@@ -620,7 +728,6 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   nL = size(voL, 3)
   nX = size(UvoX, 3)
   LBlks = get_auxblks(nL)
-  XBlks = get_auxblks(nX)
   for L in LBlks
     V_ovL = @view ovL[:,:,L]
     if full_tt2
@@ -671,67 +778,82 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
       @tensoropt R1[a,i] -= V_ooL[k,i,L] * Y_voL[a,k,L]
       t1 = print_time(EC, t1, "``R^i_a -= v_k^{iL} Y_a^{kL}``", 2)
     end
-    v_XLX = zeros(nX,length(L),nX)
-    if project_amps_vovo_t2
-      # ``v_{X'}^{XL}`` as v[X',L,X]
-      for X in XBlks
-        V_UvoX = @view UvoX[:,:,X]
-        V_v_voX = @view v_voX[:,:,X]
-        V_v_XLX = @view v_XLX[:,:,X]
-        # ``v_a^{kXL} = v_a^{cL} U^{kX}_{c}``
-        @tensoropt v_voXL[a,k,X,L] := V_vvL[a,c,L] * V_UvoX[c,k,X]
-        # ``v_a^{iX} = v_a^{kXL} v_{k}^{iL}``    
-        @tensoropt V_v_voX[a,i,X] += v_voXL[a,k,X,L] * V_ooL[k,i,L]
-        # ``v_{X'}^{XL} = (v_a^{iXL} - v_k^{iL} U^{kX}_a) U^{†a}_{iX'}``
-        @tensoropt V_v_XLX[X',L,X] = (v_voXL[a,i,X,L] - V_ooL[k,i,L] * V_UvoX[a,k,X]) * UvoX[a,i,X'] 
+  end
+  voL = nothing
+  close(voLfile)
+  vvL = nothing
+  close(vvLfile)
+  if length(T1) > 0
+    # ``U^{i}_{jX} = U^{†b}_{jX} T^i_b``
+    @tensoropt UTooX[i,j,X] := UvoX[b,j,X] * T1[b,i]
+    t1 = print_time(EC, t1, "``U^{i}_{jX} = U^{†b}_{jX} T^i_b``", 2)
+  end
+  XBigBlks = get_auxblks(nX, 512)
+  XXLfile, XXL = mmap(EC, "X^XL")
+  d_XXLfile, d_XXL = newmmap(EC, "d_X^XL", Float64, (nX,nX,nL))
+  for X in XBigBlks
+    V_UvoX = @view UvoX[:,:,X]
+    # ``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``
+    @tensoropt UUooXX[i,j,X,Y] := UvoX[c,i,X] * V_UvoX[c,j,Y]
+    t1 = print_time(EC, t1, "``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``", 2)
+    for L in LBlks
+      V_ooL = @view ooL[:,:,L]
+      V_ovL = @view ovL[:,:,L]
+      v_XXL = deepcopy(XXL[:,X,L])
+      if length(T1) > 0
+        # ``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``
+        @tensoropt v_XXL[X,Y,L] -= (V_ovL[l,c,L] * V_UvoX[c,k,Y]) * UTooX[l,k,X]
+        t1 = print_time(EC, t1, "``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``", 2)
       end
-      @tensoropt dR2[X,Y] += v_XLX[X,L,X'] * (dT2[X',Y'] * v_XLX[Y,L,Y'])
-      t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{LX'} T_{X'Y'} v_{Y}^{LY'}``", 2)
-    else
-      # ``v_X^{X'L}`` as v[X',L,X]
-      for X in XBlks
-        V_UvoX = @view UvoX[:,:,X]
-        V_v_voX = @view v_voX[:,:,X]
-        V_v_XLX = @view v_XLX[:,:,X]
-        # ``v_{kX}^{cL} = v_a^{cL} U^{†a}_{kX}``
-        @tensoropt v_oXvL[k,X,c,L] := V_vvL[a,c,L] * V_UvoX[a,k,X]
-        # ``v_{kX}^{c} = v_{iX}^{cL} v_{k}^{iL}``    
-        @tensoropt V_v_voX[c,k,X] += v_oXvL[i,X,c,L] * V_ooL[k,i,L]
-        # ``v_X^{X'L} = (v_{kX}^{cL} - v_k^{iL} U^{†c}_{iX}) U^{kX'}_c``
-        @tensoropt V_v_XLX[X',L,X] = (v_oXvL[k,X,c,L] - V_ooL[k,i,L] * V_UvoX[c,i,X]) * UvoX[c,k,X']
-      end
-      @tensoropt dR2[X,Y] += v_XLX[X',L,X] * (dT2[X',Y'] * v_XLX[Y',L,Y])
-      t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{LX'} T_{X'Y'} v_{Y}^{LY'}``", 2)
+      # ``v_X^{YL} -= \hat v_{j}^{iL} U_{iX}^{jY}``
+      @tensoropt v_XXL[X,Y,L] -= V_ooL[j,i,L] * UUooXX[i,j,X,Y]
+      t1 = print_time(EC, t1, "``v_X^{YL} -= \\hat v_{j}^{iL} U_{iX}^{jY}``", 2)
+      d_XXL[:,X,L] = v_XXL
     end
   end
-  close(voLfile)
+  closemmap(EC, d_XXLfile, d_XXL)
+  ovL = nothing
   close(ovLfile)
-  close(vvLfile)
+  ooL = nothing
   close(ooLfile)
+  XXL = nothing
+  close(XXLfile)
+  UTooX = nothing
+  d_XXLfile, d_XXL = mmap(EC, "d_X^XL")
+  for L in LBlks
+    v_XXL = @view d_XXL[:,:,L]
+    # ``R_{XY} += v_X^{X'L} T_{X'Y'} v_Y^{Y'L}``
+    @tensoropt dR2[X,Y] += v_XXL[X,X',L] * (dT2[X',Y'] * v_XXL[Y,Y',L])
+    t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'L} T_{X'Y'} v_{Y}^{Y'L}``", 2)
+  end
+  d_XXL = nothing
+  close(d_XXLfile)
+  calc_vᵥᵒˣ = !full_t2 || project_amps_vovo_t2
+  calc_vᵛₒₓ = full_t2 && project_resid_vovo_t2
+  vᵥᵒˣ, vᵛₒₓ = calc_voX(EC; calc_vᵥᵒˣ, calc_vᵛₒₓ) 
+  t1 = print_time(EC, t1, "calc v_a^{iX}", 2)
   if full_t2
     @tensoropt RR2[a,b,i,j] := x_vv[a,c] * T2[c,b,i,j] - x_oo[k,i] * T2[a,b,k,j]
     t1 = print_time(EC, t1, "``R_{ab}^{ij} += x_a^c T_{cb}^{ij} - x_k^i T_{ab}^{kj}``", 2)
-    if project_amps_vovo_t2
-      if EC.options.cc.project_vovo_t2 == 0
-        # project both sides
-        @tensoropt W_XX[X,X'] := v_voX[a,i,X'] * UvoX[a,i,X]
-        @tensoropt dR2[X,Y] -= W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
+    if project_resid_vovo_t2
+      @tensoropt RR2[a,b,i,j] -= UvoX[a,i,X] * (T2[c,b,k,j] * vᵛₒₓ[c,k,X]) 
+      t1 = print_time(EC, t1, "``R_{ab}^{ij} -= U^{iX}_a T_{cb}^{kj} v_{kX}^{c}``", 2)
+      if project_amps_vovo_t2
+        # robust fitting
+        @tensoropt W_XX[X,X'] := vᵛₒₓ[c,k,X] * UvoX[c,k,X']
+        @tensoropt dR2[X,Y] += W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
         t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'} T_{X'Y} + T_{XY'} v_{Y}^{Y'}``", 2)
-      else
-        @tensoropt RR2[a,b,i,j] -= v_voX[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
+        @tensoropt RR2[a,b,i,j] -= vᵥᵒˣ[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
         t1 = print_time(EC, t1, "``R_{ab}^{ij} -= v_a^{iX} T_{cb}^{kj} U^{c}_{kX}``", 2)
       end
     else
-      @tensoropt RR2[a,b,i,j] -= UvoX[a,i,X] * (T2[c,b,k,j] * v_voX[c,k,X]) 
-      t1 = print_time(EC, t1, "``R_{ab}^{ij} -= U^{iX}_a T_{cb}^{kj} v_{kX}^{c}``", 2)
-      if EC.options.cc.project_vovo_t2 == 3
-        # robust fitting
-        @tensoropt W_XX[X,X'] := v_voX[c,k,X] * UvoX[c,k,X']
-        @tensoropt dR2[X,Y] += W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
+      if EC.options.cc.project_vovo_t2 == 0
+        # project both sides
+        @tensoropt W_XX[X,X'] := vᵥᵒˣ[a,i,X'] * UvoX[a,i,X]
+        @tensoropt dR2[X,Y] -= W_XX[X,X'] * dT2[X',Y] + dT2[X,Y'] * W_XX[Y,Y']
         t1 = print_time(EC, t1, "``R_{XY} += v_{X}^{X'} T_{X'Y} + T_{XY'} v_{Y}^{Y'}``", 2)
-        v_voX = calc_vᵥᵒˣ(EC) 
-        t1 = print_time(EC, t1, "calc v_a^{kX}", 2)
-        @tensoropt RR2[a,b,i,j] -= v_voX[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
+      else
+        @tensoropt RR2[a,b,i,j] -= vᵥᵒˣ[a,i,X] * (T2[c,b,k,j] * UvoX[c,k,X]) 
         t1 = print_time(EC, t1, "``R_{ab}^{ij} -= v_a^{iX} T_{cb}^{kj} U^{c}_{kX}``", 2)
       end
     end
@@ -740,16 +862,9 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     @tensoropt R2[a,b,i,j] += (dR2[X,Y] * UvoX[a,i,X]) * UvoX[b,j,Y]
     t1 = print_time(EC, t1, "project R2 to full basis", 2)
   else
-    if project_amps_vovo_t2
-      # ``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``
-      @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[c,i,X'] - x_oo[k,i] * UvoX[a,k,X'] - v_voX[a,i,X']) * UvoX[a,i,X]
-      t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``", 2)
-    else
-      # ``W_X^{X'} = (x_a^c U^{†a}_{kX} - x_k^i U^{†c}_{iX} - v_{kX}^c) U^{kX'}_c``
-      @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[a,k,X] - x_oo[k,i] * UvoX[c,i,X] - v_voX[c,k,X]) * UvoX[c,k,X']
-      t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{†a}_{kX} - x_k^i U^{†c}_{iX} - v_{kX}^c) U^{kX'}_c``", 2)
-    end
-    v_voX = nothing
+    # ``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``
+    @tensoropt W_XX[X,X'] := (x_vv[a,c] * UvoX[c,i,X'] - x_oo[k,i] * UvoX[a,k,X'] - vᵥᵒˣ[a,i,X']) * UvoX[a,i,X]
+    t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``", 2)
     # ``R_{XY} += W_X^{X'} T_{X'Y} + T_{XY'} W_{Y}^{Y'}``
     @tensoropt R2[X,Y] += W_XX[X,X'] * T2[X',Y] + T2[X,Y'] * W_XX[Y,Y']
     W_XX = nothing
@@ -790,32 +905,17 @@ end
   ``T^{ij}_{ab}=U^{iX}_a U^{jY}_b T_{XY}``.
 
   Currently only DC methods are supported. 
-  The integrals are calculated using density fitting.
+  DF integrals are used (have to be calculated before).
   The starting guess for SVD-coefficients is calculated without doubles,
   see [`calc_doubles_decomposition_without_doubles`](@ref).
 """
 function calc_svd_dc(EC::ECInfo, method::ECMethod)
   t1 = time_ns()
-  methodname = "SVD-"*method_name(method)
-  print_info(methodname, additional_info(EC))
-  setup_space_ms!(EC)
-  flush(stdout)
+  print_info(method_name(method), additional_info(EC))
   if method.theory != "DC"
     error("Only DC methods are supported in SVD!")
   end
   do_sing = (method.exclevel[1] == :full)
-  # integrals
-  cMO = load_orbitals(EC, EC.options.wf.orb)
-  ERef = generate_DF_integrals(EC, cMO)
-  t1 = print_time(EC, t1, "generate DF integrals", 2)
-  cMO = nothing
-  println("Reference energy: ", ERef)
-  println()
-
-  space_save = save_space(EC)
-  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
-  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
-  t1 = print_time(EC, t1, "freeze core and virt", 2)
 
   # decomposition and starting guess
   fullEMP2 = calc_doubles_decomposition(EC)
@@ -828,6 +928,11 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   save_pseudodressed_3idx(EC)
   save_pseudo_dress_df_fock(EC)
   t1 = print_time(EC, t1, "save pseudodressed 3-idx and fock", 2)
+
+  println("Calculating intermediates...")
+  gen_vₓˣᴸ(EC)
+  t1 = print_time(EC, t1, "intermediates", 2)
+
   diis = Diis(EC)
 
   NormR1 = 0.0
@@ -844,7 +949,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   # calc starting guess energy 
   truncEMP2 = calc_deco_doubles_energy(EC, T2)
   t1 = print_time(EC, t1, "calc starting guess energy", 2)
-  println("Starting guess energy: ", truncEMP2)
+  println("Starting guess energy: ", truncEMP2.E)
   println()
   converged = false
   println("Iter     SqNorm      Energy      DE          Res         Time")
@@ -867,15 +972,17 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
     t1 = print_time(EC,t1,"update amplitudes",2)
     T1, T2 = perform(diis, [T1,T2], [R1,R2])
     t1 = print_time(EC,t1,"DIIS",2)
-    En = calc_deco_doubles_energy(EC, T2)
+    En2 = calc_deco_doubles_energy(EC, T2)
+    En = En2.E
     if do_sing
-      En += calc_singles_energy_using_dfock(EC, T1)
+      En1 = calc_singles_energy_using_dfock(EC, T1)
+      En += En1.E
     end
-    ΔE = En - Eh
+    ΔE = En - Eh.E
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
     tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh ΔE NormR tt
+    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh.E ΔE NormR tt
     flush(stdout)
     if NormR < EC.options.cc.thr
       converged = true
@@ -890,20 +997,12 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   println()
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
   println()
-  println("$methodname correlation energy: ", Eh)
-  println("$methodname total energy: ", Eh + ERef)
-  println()
-  if !EC.options.cc.use_full_t2
-    println("$methodname corrected correlation energy: ", Eh + fullEMP2 - truncEMP2)
-    println("$methodname corrected total energy: ", Eh + ERef + fullEMP2 - truncEMP2)
-    println()
-  end
   flush(stdout)
-  delete_temporary_files!(EC)
-  restore_space!(EC, space_save)
-  draw_endline()
+  if !EC.options.cc.use_full_t2
+    # ΔMP2 correction
+    Eh = (; Eh..., Ecorrection=fullEMP2.E - truncEMP2.E)
+  end
   return Eh
-
 end
 
 end # module DFCoupledCluster

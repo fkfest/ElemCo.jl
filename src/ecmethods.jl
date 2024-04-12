@@ -10,7 +10,7 @@ export has_suffix, set_suffix!
 
 const ExcLevels = "SDTQP"
 
-const Prefix4Methods = ["EOM-","2D-","FRS-","FRT-","Λ","U","R"]
+const Prefix4Methods = ["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R"]
 const Suffix4Methods = []
 
 """
@@ -213,18 +213,22 @@ function Base.show(io::IO, method::ECMethod)
 end
 
 """
-    method_name(method::ECMethod, main::Bool = true)
+    method_name(method::ECMethod; main::Bool = true, root::Bool = false)
 
   Return string representation of `method`.
   If `main` is true, return only the main part of the name, i.e., without
   perturbative corrections.
+  If `root` is true, return the root name of the method, i.e., without any
+  prefixes or suffixes.
 """
-function method_name(method::ECMethod, main::Bool = true)
+function method_name(method::ECMethod; main::Bool = true, root::Bool = false)
   name = ""
-  for spec in method.prefix
-    name *= spec
-    if length(spec) > 1
-      name *= "-"
+  if !root
+    for spec in method.prefix
+      name *= spec
+      if length(spec) > 1
+        name *= "-"
+      end
     end
   end
   name *= method.theory
@@ -249,11 +253,13 @@ function method_name(method::ECMethod, main::Bool = true)
     end
     name *= level_str
   end
-  for spec in method.suffix
-    if length(spec) > 1
-      name *= "-"
+  if !root
+    for spec in method.suffix
+      if length(spec) > 1
+        name *= "-"
+      end
+      name *= spec
     end
-    name *= spec
   end
   return name
 end

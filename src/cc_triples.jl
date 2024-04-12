@@ -5,8 +5,8 @@
 
   Calculate (T) correction for [Λ][U]CCSD(T)
 
-  Return ( (T)-energy, [T]-energy)). If `save_t3` is true, the T3 amplitudes
-  are saved in `T_vvvooo` file (only for closed-shell).
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`. 
+  If `save_t3` is true, the T3 amplitudes are saved in `T_vvvooo` file (only for closed-shell).
 """
 function calc_pertT(EC::ECInfo, method::ECMethod; save_t3=false)
   if is_unrestricted(method) || has_prefix(method, "R")
@@ -34,7 +34,7 @@ end
 
   Calculate (T) correction for closed-shell CCSD.
 
-  Return ( (T)-energy, [T]-energy))
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`.
 """
 function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   T1 = load(EC,"T_vo")
@@ -140,7 +140,7 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   fov = load(EC,"f_mm")[EC.space['o'],EC.space['v']]
   @tensoropt En3 += fov[i,a] * IntY[a,i]
   En3 += Enb3
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end
 
 """
@@ -150,7 +150,7 @@ end
 
   The amplitudes are stored in `T_vvoo` file, 
   and the Lagrangian multipliers are stored in `U_vvoo` file.
-  Return ( (T) energy, [T] energy)
+  Return ( `ET3`=(T) energy, `ET3b`=[T] energy) `NamedTuple`.
 """
 function calc_ΛpertT_closed_shell(EC::ECInfo)
   T1 = load(EC,"T_vo")
@@ -276,7 +276,7 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
   fov = load(EC,"f_mm")[EC.space['o'],EC.space['v']]
   @tensoropt En3 += fov[i,a] * IntY[a,i]
   En3 += Enb3
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end
 
 """
@@ -284,7 +284,7 @@ end
 
   Calculate (T) correction for UCCSD.
 
-  Return ( (T)-energy, [T]-energy))
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`.
 """
 function calc_pertT_unrestricted(EC::ECInfo)
   T1a = load(EC,"T_vo")
@@ -304,7 +304,7 @@ function calc_pertT_unrestricted(EC::ECInfo)
 
   En3 = En3a + En3b + En3ab + En3ba 
   Enb3 = Enb3a + Enb3b + Enb3ab + Enb3ba
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end
 
 """
@@ -312,7 +312,7 @@ end
 
   Calculate (T) correction for ΛUCCSD(T).
 
-  Return ( (T)-energy, [T]-energy))
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`.
 """
 function calc_ΛpertT_unrestricted(EC::ECInfo)
   U1a = load(EC,"U_vo")
@@ -337,7 +337,7 @@ function calc_ΛpertT_unrestricted(EC::ECInfo)
 
   En3 = En3a + En3b + En3ab + En3ba 
   Enb3 = Enb3a + Enb3b + Enb3ab + Enb3ba
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end
 
 """
@@ -346,7 +346,7 @@ end
   Calculate same-spin (T) correction for UCCSD(T) (i.e., ααα or βββ).
   `spin` ∈ (:α,:β)
 
-  Return ( (T)-energy, [T]-energy))
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`.
 """
 function calc_pertT_samespin(EC::ECInfo, T1, T2, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
@@ -426,7 +426,7 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, spin::Symbol)
   fov = load(EC,"f_"*m*m)[SP[o],SP[v]]
   @tensoropt En3 += 0.5 * (fov[i,a] * IntY[a,i])
   En3 += Enb3
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end
 
 """
@@ -438,7 +438,7 @@ end
   `T1` and `T2` are same-`spin` amplitudes, `T1os` are opposite-`spin` amplitudes,
   and `T2mix` are mixed-spin amplitudes with the *second* electron being `spin`,
   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
-  Return ( (T)-energy, [T]-energy))
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`.
 """
 function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
@@ -564,7 +564,7 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, spin::Symbol)
   fOV = load(EC,"f_"*M*M)[SP[O],SP[V]]
   @tensoropt En3 += 0.5 * (fOV[I,A] * IntYos[A,I])
   En3 += Enb3
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end
 
 """
@@ -573,7 +573,7 @@ end
   Calculate same-spin (T) correction for ΛUCCSD(T) (i.e., ααα or βββ).
   `spin` ∈ (:α,:β)
 
-  Return ( (T)-energy, [T]-energy))
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`.
 """
 function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
@@ -684,22 +684,22 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, spin::Symbol)
   fov = load(EC,"f_"*m*m)[SP[o],SP[v]]
   @tensoropt En3 += 0.5 * (fov[i,a] * IntY[a,i])
   En3 += Enb3
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end
 
-# """
-#     calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin::Symbol)
+"""
+    calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin::Symbol)
 
-#   Calculate mixed-spin (T) correction for ΛUCCSD(T) (i.e., ααβ or ββα).
+  Calculate mixed-spin (T) correction for ΛUCCSD(T) (i.e., ααβ or ββα).
 
-#   `spin` ∈ (:α,:β)
-#   `U1` and `U2`/`T2` are same-`spin` Lagrange multipliers/amplitudes,
-#   `U1os` are opposite-`spin` Lagrange multipliers,
-#   and `U2mix`/`T2mix` are mixed-spin Lagrange multipliers/amplitudes 
-#   with the *second* electron being `spin`,
-#   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
-#   Return ( (T)-energy, [T]-energy))
-# """
+  `spin` ∈ (:α,:β)
+  `U1` and `U2`/`T2` are same-`spin` Lagrange multipliers/amplitudes,
+  `U1os` are opposite-`spin` Lagrange multipliers,
+  and `U2mix`/`T2mix` are mixed-spin Lagrange multipliers/amplitudes 
+  with the *second* electron being `spin`,
+  i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
+  Return ( `ET3`=(T)-energy, `ET3b`=[T]-energy)) `NamedTuple`.
+"""
 function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
@@ -881,5 +881,5 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin
   fOV = load(EC,"f_"*M*M)[SP[O],SP[V]]
   @tensoropt En3 += 0.5 * (fOV[I,A] * IntYos[A,I])
   En3 += Enb3
-  return En3, Enb3
+  return (ET3=En3, ET3b=Enb3)
 end

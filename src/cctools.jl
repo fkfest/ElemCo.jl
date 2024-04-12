@@ -154,21 +154,33 @@ end
   using dressed fock matrix.
 
   if `fock_only` is true, the energy will be calculated using only non-dressed fock matrix.
+  Returns total energy, SS, OS, and Openshell (0.0) contributions
+  as a NamedTuple (`E`, `ESS`, `EOS`, `EO`).
 """
 function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if length(T1) > 0
-    fock = load(EC, "f_mm")
     if fock_only
-      dfock = fock
+      ET1SS = ET1OS = ET1 = 0.0
     else
-      dfock = load(EC, "df_mm")
+      if !file_exists(EC, "dfc_ov") || !file_exists(EC, "dfe_ov")
+        error("Files dfc_ov and dfe_ov are required in calc_singles_energy_using_dfock!")
+      end
+      dfockc_ov = load(EC, "dfc_ov")
+      dfocke_ov = load(EC, "dfe_ov")
+      @tensoropt begin
+        ET1d = T1[a,i] * dfockc_ov[i,a] 
+        ET1ex = T1[a,i] * dfocke_ov[i,a]
+      end
+      ET1SS = ET1d - ET1ex
+      ET1OS = ET1d
+      ET1 = ET1SS + ET1OS
     end
-    fov = dfock[SP['o'],SP['v']] + fock[SP['o'],SP['v']] # undressed part should be with factor two
-    @tensoropt ET1 = fov[i,a] * T1[a,i]
+    fov = load(EC,"f_mm")[SP['o'],SP['v']] 
+    @tensoropt ET1 += 2.0*(fov[i,a] * T1[a,i])
   end
-  return ET1
+  return (E=ET1, ESS=ET1SS, EOS=ET1OS, EO=0.0)
 end
 
 

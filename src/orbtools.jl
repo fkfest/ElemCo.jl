@@ -35,11 +35,11 @@ function guess_sad(EC::ECInfo)
   # minao = "ano-rcc-mb"
   minao = "ano-r0"
   # minao = "sto-6g"
-  bminao = BasisSet(minao,genxyz(EC.ms,bohr=false))
-  bao = generate_basis(EC.ms, "ao")
+  bminao = BasisSet(minao,genxyz(EC.system))
+  bao = generate_basis(EC.system, "ao")
   smin2ao = overlap(bminao,bao)
   smin = overlap(bminao)
-  eldist = electron_distribution(EC.ms,minao)
+  eldist = electron_distribution(EC.system,minao)
   sao = load(EC,"S_AA")
   denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
   eigs,cMO = eigen(Hermitian(-denao),Hermitian(sao))

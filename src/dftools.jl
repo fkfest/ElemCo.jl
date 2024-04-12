@@ -14,7 +14,7 @@ using ..ElemCo.TensorTools
 export get_auxblks, generate_AO_DF_integrals, generate_DF_integrals
 
 """
-    get_auxblks(naux, maxblocksize=100, strict=false)
+    get_auxblks(naux, maxblocksize=128, strict=false)
 
   Generate ranges for block indices for auxiliary basis (for loop over blocks).
 
@@ -22,7 +22,7 @@ export get_auxblks, generate_AO_DF_integrals, generate_DF_integrals
   Otherwise the actual block size will be as close as possible to `blocksize` such that
   the resulting blocks are of similar size.
 """
-function get_auxblks(naux, maxblocksize=100, strict=false)
+function get_auxblks(naux, maxblocksize=128, strict=false)
   nauxblks = naux ÷ maxblocksize
   if nauxblks*maxblocksize < naux
     nauxblks += 1
@@ -50,20 +50,28 @@ end
   otherwise save pseudo-square-root-inverse Cholesky decomposition.
 """
 function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, fitbasis)
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, fitbasis)
   save!(EC,"S_AA",overlap(bao))
   save!(EC,"h_AA",kinetic(bao) + nuclear(bao))
   PQ = ERI_2e2c(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   if save3idx
-    pqP = ERI_2e3c(bao,bfit)
-    @tensoropt pqL[p,q,L] := pqP[p,q,P] * M[P,L]
-    save!(EC,"AAL",pqL)
+    AAP = ERI_2e3c(bao,bfit)
+    nA = size(AAP,1)
+    nL = size(M,2)
+    AALfile, AAL = newmmap(EC, "AAL", Float64, (nA,nA,nL))
+    LBlks = get_auxblks(nL)
+    for L in LBlks
+      V_M = @view M[:,L]
+      V_AAL = @view AAL[:,:,L]
+      @tensoropt V_AAL[p,q,L] = AAP[p,q,P] * V_M[P,L]
+    end
+    closemmap(EC, AALfile, AAL)
   else
     save!(EC,"C_PL",M)
   end
-  return nuclear_repulsion(EC.ms)
+  return nuclear_repulsion(EC.system)
 end
 
 """
@@ -75,18 +83,23 @@ end
 """
 function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
   @assert ndims(cMO) == 2 "unrestricted not implemented yet"
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, fitbasis)
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, fitbasis)
 
   PQ = ERI_2e2c(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   μνP = ERI_2e3c(bao,bfit)
-  @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
-  μνP = nothing
-  M = nothing
-  @tensoropt pqL[p,q,L] := cMO[μ,p] * μνL[μ,ν,L] * cMO[ν,q]
-  μνL = nothing
-  save!(EC,"mmL",pqL)
+  nm = size(cMO,2)
+  nL = size(M,2)
+  mmLfile, mmL = newmmap(EC, "mmL", Float64, (nm,nm,nL))
+  LBlks = get_auxblks(nL)
+  for L in LBlks
+    V_M = @view M[:,L]
+    V_mmL = @view mmL[:,:,L]
+    @tensoropt μνL[μ,ν,L] := μνP[μ,ν,P] * V_M[P,L]
+    @tensoropt V_mmL[p,q,L] = cMO[μ,p] * μνL[μ,ν,L] * cMO[ν,q]
+  end
+  closemmap(EC, mmLfile, mmL)
 end
 
 """
@@ -102,13 +115,13 @@ end
 """
 function generate_DF_integrals(EC::ECInfo, cMO)
   @assert ndims(cMO) == 2 "unrestricted not implemented yet"
-  if !ms_exists(EC.ms)
+  if !system_exists(EC.system)
     error("Molecular system not specified!")
   end
   # calculate fock matrix in AO basis (integral direct)
   generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
-  bao = generate_basis(EC.ms, "ao")
-  bfit = generate_basis(EC.ms, "jkfit")
+  bao = generate_basis(EC.system, "ao")
+  bfit = generate_basis(EC.system, "jkfit")
   fock = gen_dffock(EC, cMO, bao, bfit)
   fock_MO = cMO' * fock * cMO
   save!(EC,"f_mm",fock_MO)
@@ -118,7 +131,7 @@ function generate_DF_integrals(EC::ECInfo, cMO)
   save!(EC, "e_M", eps)
   occ = EC.space['o']
   hsmall = cMO' * load(EC,"h_AA") * cMO
-  EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.ms)
+  EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.system)
   # calculate 3-index integrals
   generate_3idx_integrals(EC, cMO, "mp2fit")
   return EHF

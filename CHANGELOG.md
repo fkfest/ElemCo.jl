@@ -1,5 +1,29 @@
 # Release notes
 
+## Version [v0.11.0] - 2024.04.12
+
+### Breaking
+
+* `EC.ms` (previously of type `MSys`) in `ECInfo` is renamed to `EC.system` (of type `AbstractSystem`).
+* `ECdriver` routine is moved to `CCDriver` module and renamed to `ccdriver`. The `fcidump` keyword-argument is now empty by default. It doesn't accept list of methods anymore, only one method at a time. 
+* The driver routines and macros return energies as `NamedTuple`.
+* The SVD methods have to be called now as `SVD-<methodname>`, e.g., `svd-dcsd`.
+* The `@svdcc` macro is renamed to `@dfcc` macro and calls the `dfccdriver` routine, which is intended as a driver routine for all DF-based correlation methods (i.e., methods which don't use the `EC.fd` integrals).
+
+### Changed
+
+* Renamed function `active_orbitals` to `oss_active_orbitals`.
+* Renamed function `calc_ccsd_resid` to `calc_cc_resid`.
+* `ECdriver` and `oss_active_orbitals` now return named tuples.
+* Improved documentation of occupation strings syntax.
+* Switched to `Atom` and `FlexibleSystem` from `AtomsBase` as the internal representation of the molecular system. The basis set is stored for each atom as `:basis` property (as `Dict{String,String}`, e.g., `system[1][:basis]["ao"]`). One can also set `:basis` property for the whole system. 
+* Renamed macro `@opt` to `@set`. `@opt` is now an alias of `@set`.
+
+### Added
+
+* The automatically generated `UCCSDT` and `UDC-CCSDT` methods have been added to the docs.
+* SCS-MP2, SCS-CCSD and SCS-DCSD
+
 ## Version [v0.10.0] - 2024.02.21
 
 ### Breaking

@@ -1,4 +1,4 @@
-Manifest.toml
+Manifest*.toml
 docs/build
 examples/*.out
 examples/ElemCo.jl-devel
