@@ -1,5 +1,6 @@
 """ Various global infos """
 module ECInfos
+using AtomsBase
 using DocStringExtensions
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
@@ -7,7 +8,7 @@ using ..ElemCo.FciDump
 using ..ElemCo.MSystem
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
-export setup_space_fd!, setup_space_ms!, setup_space!, reset_wf_info!
+export setup_space_fd!, setup_space_system!, setup_space!, reset_wf_info!
 export is_closed_shell
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
@@ -34,7 +35,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  ms::MSys = MSys()
+  system::AbstractSystem = FlexibleSystem(Atom[], infinite_box(3), fill(DirichletZero(), 3))
   """ fcidump. """
   fd::FDump = FDump()
   """ information about (temporary) files. 
@@ -108,18 +109,18 @@ function setup_space_fd!(EC::ECInfo)
 end
 
 """
-    setup_space_ms!(EC::ECInfo)
+    setup_space_system(EC::ECInfo)
 
-  Setup EC.space from molecular system EC.ms.
+  Setup EC.space from molecular system EC.system.
 """
-function setup_space_ms!(EC::ECInfo)
-  @assert ms_exists(EC.ms) "EC.ms is not set up!"
+function setup_space_system!(EC::ECInfo)
+  @assert system_exists(EC.system) "EC.system is not set up!"
   nelec = EC.options.wf.nelec
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
-  norb = guess_norb(EC.ms) 
-  nelec = (nelec < 0) ? guess_nelec(EC.ms) : nelec
+  norb = guess_norb(EC.system) 
+  nelec = (nelec < 0) ? guess_nelec(EC.system) : nelec
   nelec -= charge
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
   orbsym = ones(Int,norb)
@@ -234,7 +235,7 @@ end
 """
 function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
   if freeze_nocc < 0 && isempty(freeze_orbs)
-    freeze_orbs = 1:guess_ncore(EC.ms, core)
+    freeze_orbs = 1:guess_ncore(EC.system, core)
   elseif freeze_nocc >= 0 && isempty(freeze_orbs)
     freeze_orbs = 1:freeze_nocc
   elseif freeze_nocc >= 0 && !isempty(freeze_orbs)

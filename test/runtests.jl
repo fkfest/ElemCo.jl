@@ -23,6 +23,7 @@ end
 TESTS = [
 ("FCIDUMP", ["h2o", "h2o_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]),
 ("DF", ["df_hf", "df_uhf", "df_mcscf"]),
+("SVD", ["svd_dc"]),
 ("Unit-tests", ["unit_tests"])
 ]
 
