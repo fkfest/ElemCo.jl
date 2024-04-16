@@ -844,7 +844,7 @@ end
 Print the information of the Hessian type
 """
 function print_initial(Enuc::Float64, HessianType::Symbol)
-  println("Enuc ", Enuc)
+  println("Nuclear Electronic Energy: ", Enuc)
   if HessianType == :SO
     HessianTypeString = "Second Order Approximation"
   elseif HessianType == :SCI
@@ -866,9 +866,9 @@ function dfmcscf(EC::ECInfo; direct=false)
   maxit4λ = EC.options.scf.maxit4lambda
   HessianType = EC.options.scf.HessianType
   initVecType = EC.options.scf.initVecType
-  println("bisecdam = ", EC.options.scf.bisecdamp)
-  println("maxit = ", maxit4λ)
-  println("gamaDavScale = ", EC.options.scf.gamaDavScale)
+  # println("bisecdam = ", EC.options.scf.bisecdamp)
+  # println("maxit = ", maxit4λ)
+  # println("gamaDavScale = ", EC.options.scf.gamaDavScale)
   print_info("DF-MCSCF")
   setup_space_system!(EC)
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
@@ -943,7 +943,7 @@ function dfmcscf(EC::ECInfo; direct=false)
     # calc energy E with updated cMO
     @timeit "μjL" @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
     @timeit "μuL" @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
-    @timeit "fock calc" fock_MO, fockClosed_MO= dffockCAS(μνL, μjL, μuL, EC, cMO, D1)
+    @timeit "calc_fock" fock_MO, fockClosed_MO= dffockCAS(μνL, μjL, μuL, EC, cMO, D1)
     E_former = E
     E = calc_realE(μuL, EC, fockClosed_MO, D1, D2, cMO)
     A = dfACAS(μuL, EC,cMO,D1,D2,fock_MO,fockClosed_MO)
@@ -1010,14 +1010,14 @@ function dfmcscf(EC::ECInfo; direct=false)
     # calculate h with updated cMO
     if HessianType == :SO
       @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-      @timeit "h calc new" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
+      @timeit "calc_Hessian" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     elseif HessianType == :SO_SCI && EC.options.scf.SO_SCI_origin== true
       @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-      @timeit "h calc new" h_block = calc_h_SO_SCI_original(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
+      @timeit "calc_Hessian" h_block = calc_h_SO_SCI_original(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     else
-      @timeit "h calc new" h_block = calc_h_SCI(μjL, μuL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A, HessianType)
+      @timeit "calc_Hessian" h_block = calc_h_SCI(μjL, μuL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A, HessianType)
     end
 
     # λ tuning loop (micro loop)
@@ -1050,9 +1050,11 @@ function dfmcscf(EC::ECInfo; direct=false)
     smo = cMO' * sao * cMO
     cMO = cMO * Hermitian(smo)^(-1/2)
   end
-  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".csv",
-    DataFrame(:energy=>Es, :davidsonSteps=>davidsonSteps, :time=>tts, :g_norm=>gnorms))
-  CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*"_cMO.csv", DataFrame(cMO,:auto))
+  if EC.options.scf.dfmcscf_verbose>0
+    CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".csv",
+      DataFrame(:energy=>Es, :davidsonSteps=>davidsonSteps, :time=>tts, :g_norm=>gnorms))
+    CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*"_cMO.csv", DataFrame(cMO,:auto))
+  end
   if iteration_times < IterMax
     println("Convergent!")
   else

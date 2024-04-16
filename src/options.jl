@@ -103,6 +103,8 @@ Base.@kwdef mutable struct ScfOptions
   enerQuotientLowerBound = 0.25
   """ `⟨0.75⟩` when energy quotient is higher than this value, the trust value should be larger"""
   enerQuotientUpperBound = 0.75
+  """`⟨0⟩` the verbosity of dfmcscf output"""
+  dfmcscf_verbose = 0
   """`⟨false⟩` Generate pseudo-canonical basis instead of solving the SCF problem,
   i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
   At the moment, it works only for BO-HF."""

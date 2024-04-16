@@ -44,7 +44,7 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
-using TimerOutputs, TensorOperations, BenchmarkTools
+using TimerOutputs, TensorOperations
 using .Utils
 using .ECInfos
 using .ECMethods
@@ -401,7 +401,9 @@ macro dfmcscf()
     TimerOutputs.reset_timer!(to)
     $(esc(:@tryECinit))
     @timeit "dfmcscf" dfmcscf($(esc(:EC)))
-    display(to)
+    if $(esc(:EC)).options.scf.dfmcscf_verbose > 0
+      display(to)
+    end
   end
 end
 
