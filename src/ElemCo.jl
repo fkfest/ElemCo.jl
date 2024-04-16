@@ -397,13 +397,8 @@ end
 
 macro dfmcscf()
   return quote
-    to = TimerOutputs.get_defaulttimer()
-    TimerOutputs.reset_timer!(to)
     $(esc(:@tryECinit))
-    @timeit "dfmcscf" dfmcscf($(esc(:EC)))
-    if $(esc(:EC)).options.scf.dfmcscf_verbose > 0
-      display(to)
-    end
+    dfmcscf($(esc(:EC)))
   end
 end
 

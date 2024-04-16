@@ -861,6 +861,8 @@ end
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
 function dfmcscf(EC::ECInfo; direct=false)
+  to = TimerOutputs.get_defaulttimer()
+  TimerOutputs.reset_timer!(to)
   guess = EC.options.scf.guess
   IterMax = EC.options.scf.IterMax
   maxit4λ = EC.options.scf.maxit4lambda
@@ -1061,6 +1063,9 @@ function dfmcscf(EC::ECInfo; direct=false)
     println("Not Convergent!")
   end
   delete_temporary_files!(EC)
-  return E+Enuc, cMO
+  if EC.options.scf.dfmcscf_verbose > 0
+    display(to)
+  end
+  return E+Enuc
 end
 end #module
