@@ -64,9 +64,7 @@ Base.@kwdef mutable struct ScfOptions
   guess::Symbol = :SAD
   """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
   bisecdamp::Float64 = 0.5
-  """`⟨64⟩` maximum number of iterations for Multiconfiguration SCF. """
-  IterMax::Int = 100
-  """`⟨100⟩` maximum number of iterations for searching for alpha value to get a reasonalbe guess within trust radius for MCSCF. """
+  """`⟨3⟩` maximum number of iterations for searching for lambda value to get a reasonalbe guess within trust radius for MCSCF. """
   maxit4lambda::Int = 3
   """`⟨:SO⟩` Hessian Type for MCSCF:
   - `:SO` Second Order Approximation
@@ -103,8 +101,6 @@ Base.@kwdef mutable struct ScfOptions
   enerQuotientLowerBound = 0.25
   """ `⟨0.75⟩` when energy quotient is higher than this value, the trust value should be larger"""
   enerQuotientUpperBound = 0.75
-  """`⟨0⟩` the verbosity of dfmcscf output"""
-  dfmcscf_verbose = 0
   """`⟨false⟩` Generate pseudo-canonical basis instead of solving the SCF problem,
   i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
   At the moment, it works only for BO-HF."""

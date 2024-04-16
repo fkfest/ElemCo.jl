@@ -1,5 +1,5 @@
 module DFMCSCF
-using LinearAlgebra, TensorOperations, Printf, TimerOutputs, CSV, DataFrames
+using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECInts
@@ -32,7 +32,7 @@ function denMatCreate(EC::ECInfo)
 end
 
 """
-    dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
+    dffockCAS(EC::ECInfo, μνL, μjL, μuL, cMO::Matrix, D1::Matrix)
 
 Calculate fock matrices in molecular orbital basis.
 fockClosed[μ,ν] = ``^cf_μ^ν = h_μ^ν + 2v_{μi}^{νi} - v_{μi}^{iν}``, 
@@ -40,7 +40,7 @@ fock[μ,ν] = ``f_μ^ν = ^cf_μ^ν + D^t_u (v_{μt}^{νu} - 0.5 v_{μt}^{uν})`
 fock_MO and fockClosed_MO are fock and fockClosed transformed into MO basis with coefficients cMO.
 Return matrix fock_MO and fockClosed_MO.
 """
-function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
+function dffockCAS(EC::ECInfo, μνL, μjL, μuL, cMO::Matrix, D1::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O']) 
   occ1o = setdiff(EC.space['o'],occ2)
   CMO2 = cMO[:,occ2]
@@ -65,12 +65,12 @@ function dffockCAS(μνL, μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix)
 end
 
 """
-    dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
+    dfACAS(EC::ECInfo, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
 
 Calculate the A-intermediate matrix in molecular orbital basis.
 return matrix A[p,q]
 """
-function dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
+function dfACAS(EC::ECInfo, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
   CMOa = cMO[:,occ1o] 
@@ -86,14 +86,14 @@ function dfACAS(μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, 
 end
 
 """
-    calc_g(A::Matrix, EC::ECInfo)
+    calc_g(EC::ECInfo, A::Matrix)
 
 Calculate the orbital gradient g by antisymmetrizing the matrix A and rearranging the elements.
 The order of the elements in vector g_blockwise is vectorized g21, g31, g22, g32,
 among which g21 = g[occ1o,occ2], g31 = g[occv,occ2], g22 = g[occ1o,occ1o], g32 = g[occv,occ1o]
 return vector g_blockwise
 """
-function calc_g(A::Matrix, EC::ECInfo)
+function calc_g(EC::ECInfo, A::Matrix)
   @tensoropt g[r,s] := A[r,s] - A[s,r]
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
@@ -114,6 +114,9 @@ end
     G_risj_calc(typer::Integer, types::Integer, num_MO, index_MO, fock_MO::Matrix, DFint_MO)
 
 Calculate the G_risj tensor for the given type of indices r and s.
+Typer and types are the type of indices r and s, respectively: 1 for doubly occupied orbitals, 2 for singly occupied orbitals, 3 for virtual orbitals.
+index_MO is the index of the given type of orbitals.
+DFint_MO is the density fitting integrals in molecular orbital basis.
 Return G_risj tensor.
 """
 function G_risj_calc(typer::Integer, types::Integer, num_MO, index_MO, fock_MO::Matrix, DFint_MO)
@@ -273,13 +276,13 @@ function h_calc_SOpart(num_MO, index_MO, DFint_MO, D1::Matrix, D2, fock_MO::Matr
 end
 
 """
-    calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+    calc_h_SO(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
 
 Calculate the Second Order Hessian.
 Second Order Hessian includes fixed part 4 blocks,  2 SO part blocks, the rest 4 blocks (including H_3232) are calculated as SO special part, which are implemented in this function.
 Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 """
-function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+function calc_h_SO(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O'])  
   occ1o = setdiff(EC.space['o'],occ2)
   occv = setdiff(1:size(cMO,2), EC.space['o'])
@@ -341,14 +344,14 @@ function calc_h_SO(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, foc
 end
 
 """
-    calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+    calc_h_SO_SCI_original(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
 
 Calculate the original SO_SCI Hessian.
 Original SO_SCI Hessian includes fixed part 4 blocks, the SO part 3 blocks (including h_3232), and the 3 SCI blocks.
 These 3 SCI blocks are returned as [1,1] zero matrix in this function, the calculation is done in the H_multiply function.
 Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 """
-function calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
+function calc_h_SO_SCI_original(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
   occv = setdiff(1:size(cMO,2), EC.space['o'])
@@ -392,14 +395,14 @@ function calc_h_SO_SCI_original(μjL, μuL, abL, EC::ECInfo, cMO::Matrix, D1::Ma
 end
 
 """
-    calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
+    calc_h_SCI(EC::ECInfo, μjL, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
 
 Calculate the SCI Hessian and modified SO_SCI Hessian.
 Modified SO_SCI method includes fixed part 4 blocks, the SO part 2 blocks, the SCI version of the rest 4 blocks(including h_3232), among which 3(except h_3232) are caculated in H_multiply
 SCI Hessian includes fixed part 4 blocks, SCI special part 6 blocks, among which 3 blocks are caculated in this function, and 3 are caculated in H_multiply
 Return h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232
 """
-function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
+function calc_h_SCI(EC::ECInfo, μjL, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, fockClosed_MO::Matrix, A::Matrix, HessianType::Symbol=:SCI)
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
   occv = setdiff(1:size(cMO,2), EC.space['o']) 
@@ -454,12 +457,12 @@ function calc_h_SCI(μjL, μuL, EC::ECInfo, cMO::Matrix, D1::Matrix, D2, fock_MO
 end
 
 """
-    calc_realE(EC::ECInfo, fockClosed::Matrix, D1::Matrix, D2, cMO::Matrix)
+    calc_realE(EC::ECInfo, μuL, fockClosed_MO::Matrix, D1::Matrix, D2, cMO::Matrix)
 
 Calculate the energy with the given density matrices and (updated) cMO, 
 ``E = (h_i^i + ^cf_i^i) + ^1D^t_u ^cf_t^u + 0.5 ^2D^{tv}_{uw} v_{tv}^{uw}``.
 """
-function calc_realE(μuL, EC::ECInfo, fockClosed_MO::Matrix, D1::Matrix, D2, cMO::Matrix)
+function calc_realE(EC::ECInfo, μuL, fockClosed_MO::Matrix, D1::Matrix, D2, cMO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
   hsmall = TensorTools.load(EC,"h_AA")
@@ -732,12 +735,12 @@ function λTuning(EC::ECInfo, trust::Number, maxit4λ::Integer, λmax::Number, �
   # λ tuning loop (micro loop)
   for it=1:maxit4λ
     push!(λs, λ)
-    @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
+    val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
     davCount += davCounti
     # while !converged
     #   davItMax += 50
     #   println("Davidson max iteration number increased to ", davItMax)
-    #   @timeit "davidson" val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
+    #   val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
     #   davCount += davCounti
     # end
     x = vec[2:end] ./ (vec[1] * λ)
@@ -856,20 +859,18 @@ function print_initial(Enuc::Float64, HessianType::Symbol)
 end
 
 """
-    dfmcscf(EC::ECInfo; direct=false, guess=:SAD, IterMax=64, maxit4λ=100, HessianType=:SO)
+    dfmcscf(EC::ECInfo; direct=false)
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
 function dfmcscf(EC::ECInfo; direct=false)
-  to = TimerOutputs.get_defaulttimer()
-  TimerOutputs.reset_timer!(to)
   guess = EC.options.scf.guess
-  IterMax = EC.options.scf.IterMax
+  maxit = EC.options.scf.maxit
   maxit4λ = EC.options.scf.maxit4lambda
   HessianType = EC.options.scf.HessianType
   initVecType = EC.options.scf.initVecType
   # println("bisecdam = ", EC.options.scf.bisecdamp)
-  # println("maxit = ", maxit4λ)
+  # println("maxit4λ = ", maxit4λ)
   # println("gamaDavScale = ", EC.options.scf.gamaDavScale)
   print_info("DF-MCSCF")
   setup_space_system!(EC)
@@ -926,7 +927,7 @@ function dfmcscf(EC::ECInfo; direct=false)
   tts = [0.0]
   μjL = zeros(nAO,n_2,size(μνL,3))
   μuL = zeros(nAO,n_1o,size(μνL,3))
-  convIter = IterMax
+  convIter = maxit
   converged = false
   energyThreshold = 1e-8
   eThreg = 1e-6
@@ -941,15 +942,15 @@ function dfmcscf(EC::ECInfo; direct=false)
   convCount = 0
 
   # macro loop, g and h updated
-  while iteration_times < IterMax && iteration_times < convIter
+  while iteration_times < maxit && iteration_times < convIter
     # calc energy E with updated cMO
-    @timeit "μjL" @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
-    @timeit "μuL" @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
-    @timeit "calc_fock" fock_MO, fockClosed_MO= dffockCAS(μνL, μjL, μuL, EC, cMO, D1)
+    @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
+    @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
+    fock_MO, fockClosed_MO= dffockCAS(EC, μνL, μjL, μuL, cMO, D1)
     E_former = E
-    E = calc_realE(μuL, EC, fockClosed_MO, D1, D2, cMO)
-    A = dfACAS(μuL, EC,cMO,D1,D2,fock_MO,fockClosed_MO)
-    g = calc_g(A, EC)
+    E = calc_realE(EC, μuL, fockClosed_MO, D1, D2, cMO)
+    A = dfACAS(EC, μuL, cMO, D1, D2, fock_MO, fockClosed_MO)
+    g = calc_g(EC, A)
     push!(Es, E+Enuc)
     push!(davidsonSteps, davCount)
     push!(gnorms, norm(g))
@@ -975,8 +976,8 @@ function dfmcscf(EC::ECInfo; direct=false)
       if reject
         iteration_times -= 1
         cMO = prev_cMO
-        @timeit "μjL" @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
-        @timeit "μuL" @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
+        @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
+        @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
         g = deepcopy(prev_g)
         A = deepcopy(prev_A)
         E = E_former
@@ -1011,15 +1012,15 @@ function dfmcscf(EC::ECInfo; direct=false)
     end
     # calculate h with updated cMO
     if HessianType == :SO
-      @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-      @timeit "calc_Hessian" h_block = calc_h_SO(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
+      @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
+      h_block = calc_h_SO(EC, μjL, μuL, abL, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     elseif HessianType == :SO_SCI && EC.options.scf.SO_SCI_origin== true
-      @timeit "abL" @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
-      @timeit "calc_Hessian" h_block = calc_h_SO_SCI_original(μjL, μuL, abL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A)
+      @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
+      h_block = calc_h_SO_SCI_original(EC, μjL, μuL, abL, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     else
-      @timeit "calc_Hessian" h_block = calc_h_SCI(μjL, μuL, EC, cMO, D1, D2, fock_MO, fockClosed_MO, A, HessianType)
+      h_block = calc_h_SCI(EC, μjL, μuL, cMO, D1, D2, fock_MO, fockClosed_MO, A, HessianType)
     end
 
     # λ tuning loop (micro loop)
@@ -1052,20 +1053,12 @@ function dfmcscf(EC::ECInfo; direct=false)
     smo = cMO' * sao * cMO
     cMO = cMO * Hermitian(smo)^(-1/2)
   end
-  if EC.options.scf.dfmcscf_verbose>0
-    CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*".csv",
-      DataFrame(:energy=>Es, :davidsonSteps=>davidsonSteps, :time=>tts, :g_norm=>gnorms))
-    CSV.write("output"*string(@sprintf("%.2f",EC.options.scf.bisecdamp))*"_"*string(maxit4λ)*"_"*string(@sprintf("%.2f",EC.options.scf.gamaDavScale))*"_cMO.csv", DataFrame(cMO,:auto))
-  end
-  if iteration_times < IterMax
+  if iteration_times < maxit
     println("Convergent!")
   else
     println("Not Convergent!")
   end
   delete_temporary_files!(EC)
-  if EC.options.scf.dfmcscf_verbose > 0
-    display(to)
-  end
   return E+Enuc
 end
 end #module

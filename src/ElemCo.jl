@@ -44,7 +44,7 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
-using TimerOutputs, TensorOperations
+using TensorOperations
 using .Utils
 using .ECInfos
 using .ECMethods
