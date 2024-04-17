@@ -1,30 +1,58 @@
 # ElemCo.jl Documentation
 
 
-ElemCo.jl is a Julia package for computing electronic structure properties of molecules and materials. It provides a set of tools for performing quantum chemical calculations, including Hartree-Fock and post-HF methods.
+`ElemCo.jl` is a Julia package for computing electronic structure properties of molecules and materials. It provides a set of tools for performing quantum chemical calculations, including Hartree-Fock and post-HF methods.
 
 ## Installation
 
-You can install ElemCo.jl using the Julia package manager:
+You can install `ElemCo.jl` using the Julia package manager:
 
 ```julia
 julia> using Pkg
 julia> Pkg.add("ElemCo")
 ```
 
-For a development version of ElemCo.jl, clone the repository and create an alias to set the project to the `ElemCo.jl` directory,
+For a development version of `ElemCo.jl`, clone the [ElemCo.jl-devel](https://github.com/fkfest/ElemCo.jl-devel) repository and create an alias to set the project to the `ElemCo.jl` directory,
 
-```
+```bash
 alias jlm='julia --project=<path_to_ElemCo.jl>'
 ```
 
 Now the command `jlm` can be used to start the calculations,
 
-```
+```bash
 jlm input.jl
 ```
 
 ## Usage
+
+### Input file
+
+The input file is a Julia script that contains the calculation details. The script should start with the following lines,
+
+```julia
+using ElemCo
+@print_input
+```
+
+The `@print_input` macro prints the input file to the standard output. The calculation details are specified using the macros provided by `ElemCo.jl`.
+
+### Macros
+
+The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](@ref list_of_macros)),
+
+- [`@dfhf`](@ref) - Performs a density-fitted Hartree-Fock calculation.
+- [`@cc`](@ref)` <method>` - Performs a coupled cluster calculation.
+- [`@dfcc`](@ref)` <method>` - Performs a coupled cluster calculation using density fitting.
+- [`@set`](@ref)` <option> <setting>` - Sets the options([`ElemCo.ECInfos.Options`](@ref)) for the calculation.
+
+etc.
+
+Default scratch directory path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`.
+On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none of these are found, the path `/tmp` is used.
+Default scratch folder name is `elemcojlscr`.
+
+Variable names `fcidump`, `geometry` and `basis` are reserved for the file name of FCIDUMP, geometry specification and basis sets, respectively.
 
 ### Computing density-fitted Hartree-Fock and Coupled Cluster methods
 

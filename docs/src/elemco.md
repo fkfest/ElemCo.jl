@@ -39,7 +39,7 @@ One can print the keys of the returned `NamedTuple` to see all the available key
 julia> println(keys(energies))
 ```
 
-## Macros
+## [Macros](@id list_of_macros)
 
 ```@autodocs
 Modules = [ElemCo]
