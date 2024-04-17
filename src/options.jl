@@ -62,14 +62,51 @@ Base.@kwdef mutable struct ScfOptions
   - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
+  """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
+  bisecdamp::Float64 = 0.5
+  """`⟨3⟩` maximum number of iterations for searching for lambda value to get a reasonalbe guess within trust radius for MCSCF. """
+  maxit4lambda::Int = 3
+  """`⟨:SO_SCI⟩` Hessian Type for MCSCF:
+  - `:SO` Second Order Approximation
+  - `:SCI` Super CI
+  - `:SO_SCI` Second Order Approximation combing Super CI
+  """
+  HessianType::Symbol = :SO_SCI
+  """`⟨:GRADIENT_SETPLUS⟩` Initial Vectors Type for MCSCF:
+  - `:RANDOM` one random vector
+  - `:INHERIT` from last macro/micro iterations
+  - `:GRADIENT_SET` b0 as [1,0,0,...], b1 as gradient
+  - `:GRADIENT_SETPLUS` b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
+  """
+  initVecType::Symbol = :GRADIENT_SETPLUS
   """ `⟨0.0⟩` Fermi-Dirac temperature for starting guess (at the moment works only for BO-HF). """
   temperature_guess::Float64 = 0.0
+  """ `⟨0.1⟩` the threshold of davidson convergence residure norm scaled to norm of g the gradient, for MCSCF. """
+  gamaDavScale::Float64 = 0.1
+  """ `⟨true⟩` if true then use the original SO_SCI Hessian"""
+  SO_SCI_origin = true
+  """ `⟨0.8⟩` the trust region of sqrt(sum(x.^2)) should be [trustScale,1] * trust"""
+  trustScale = 0.8
+  """ `⟨1000.0⟩` the maximum number of lambda when adjusting the level shift"""
+  lambdaMax = 1000.0
+  """ `⟨1e-6⟩` the minmum convergence threshold for davidson algorithm"""
+  davErrorMin = 1e-6
+  """ `⟨200⟩` the size of initial Davidson projected matrix"""
+  iniDavMatSize = 200
+  """ `⟨0.7⟩` the shrink scale of trust region"""
+  trustShrinkScale = 0.7
+  """ `⟨1.2⟩` the expand scale of trust region"""
+  trustExpandScale = 1.2
+  """ `⟨0.25⟩` when energy quotient is lower than this value, the trust value should be smaller"""
+  enerQuotientLowerBound = 0.25
+  """ `⟨0.75⟩` when energy quotient is higher than this value, the trust value should be larger"""
+  enerQuotientUpperBound = 0.75
   """`⟨false⟩` Generate pseudo-canonical basis instead of solving the SCF problem,
   i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
   At the moment, it works only for BO-HF."""
   pseudo::Bool = false
 end
-
+  
 """ 
   Options for Coupled-Cluster calculation.
 
