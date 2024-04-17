@@ -39,7 +39,7 @@ The `@print_input` macro prints the input file to the standard output. The calcu
 
 ### Macros
 
-The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](elemco)),
+The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](@ref list_of_macros)),
 
 - [`@dfhf`](@ref) - Performs a density-fitted Hartree-Fock calculation.
 - [`@cc`](@ref)` <method>` - Performs a coupled cluster calculation.
