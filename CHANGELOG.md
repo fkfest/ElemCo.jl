@@ -12,6 +12,8 @@
 
 ### Fixed
 
+* Get rid of error message from git if .git is not available (e.g., in the case of the released version).
+
 ## Version [v0.11.1] - 2024.04.12
 
 ### Changed
