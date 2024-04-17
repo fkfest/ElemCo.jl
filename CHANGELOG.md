@@ -8,6 +8,8 @@
 
 ### Added
 
+* Expand README
+
 ### Fixed
 
 ## Version [v0.11.1] - 2024.04.12
