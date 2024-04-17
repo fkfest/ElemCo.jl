@@ -264,6 +264,9 @@ function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b
   if n_occb_orbs(EC) > 0
     Eh2SSb, Eh1b, Eh1SSb = calc_hylleraas4spincase(EC, "OVOV"..., T1b, T1a, T2b, R1b, R2b, load(EC,"f_MM")[SP['O'],SP['V']])
     Eh2OS, Eh1, Eh1OS = calc_hylleraas4spincase(EC, "ovOV"..., T1a, T1b, T2ab, Float64[], R2ab, Float64[])
+  else
+    Eh2SSb = Eh1b = Eh1SSb = 0.0
+    Eh2OS = Eh1 = Eh1OS = 0.0
   end
   Eh = Eh2SSa + Eh2SSb + Eh2OS + Eh1a + Eh1b + Eh1SSa + Eh1SSb + Eh1 + Eh1OS
   EhSS = Eh2SSa + Eh2SSb + Eh1SSa + Eh1SSb
