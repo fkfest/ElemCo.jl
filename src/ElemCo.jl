@@ -44,6 +44,7 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
+using TensorOperations
 using .Utils
 using .ECInfos
 using .ECMethods
@@ -67,7 +68,7 @@ export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
-export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf
+export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 
 const __VERSION__ = "0.11.1+"
 
@@ -397,6 +398,13 @@ macro dfuhf()
   end
 end
 
+macro dfmcscf()
+  return quote
+    $(esc(:@tryECinit))
+    dfmcscf($(esc(:EC)))
+  end
+end
+
 """
     @dfints()
 
@@ -626,20 +634,6 @@ macro rotate_orbs(orb1, orb2, angle, kwargs...)
     $(esc(:@tryECinit))
     rotate_orbs($(esc(:EC)), $(esc(orb1)), $(esc(orb2)), $(esc(angle)); $(ekwa...))
   end
-end
-
-function run_mcscf()
-  geometry="bohr
-     O      0.000000000    0.000000000   -0.130186067
-     H1     0.000000000    1.489124508    1.033245507
-     H2     0.000000000   -1.489124508    1.033245507"
-
-  basis = Dict("ao"=>"cc-pVDZ",
-             "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
-
-  @opt wf ms2=2 charge=-2
-  E,cMO =  dfmcscf(EC,direct=false)
 end
 
 end #module
