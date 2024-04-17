@@ -33,38 +33,78 @@ The integrals are obtained from a FCIDUMP file or calculated using the `Gaussian
 | SVD-DCSD | :heavy_check_mark: |:heavy_check_mark:|:heavy_exclamation_mark:|
 | SVD-DC-CCSDT|:heavy_check_mark:|:heavy_check_mark:|:heavy_exclamation_mark:|
 
-
 ## Getting started
 
 Requirements: julia (>1.8)
 
 ## Usage
-For a development version of `ElemCo.jl`, clone the repository and create an alias to set the project to the `ElemCo.jl` directory,
+
+### Installation
+
+To install `ElemCo.jl`, run the following command in the Julia REPL,
+
+```julia
+julia> using Pkg
+julia> Pkg.add("ElemCo")
 ```
+
+For a development version of `ElemCo.jl`, clone the [ElemCo.jl-devel](https://github.com/fkfest/ElemCo.jl-devel) repository and create an alias to set the project to the `ElemCo.jl` directory,
+
+```bash
 alias jlm='julia --project=<path_to_ElemCo.jl>'
 ```
+
 Now the command `jlm` can be used to start the calculations,
-```
+
+```bash
 jlm input.jl
 ```
 
-Default scratch directory path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`. 
-On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none of these are found, the path `/tmp` is used. 
-Default scratch folder name is `elemcojlscr`. 
+### Input file
+
+The input file is a Julia script that contains the calculation details. The script should start with the following lines,
+
+```julia
+using ElemCo
+@print_input
+```
+
+The `@print_input` macro prints the input file to the standard output. The calculation details are specified using the macros provided by `ElemCo.jl`.
+
+### Macros
+
+The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](https://elem.co.il/stable/elemco/)),
+
+- `@dfhf` - Performs a density-fitted Hartree-Fock calculation.
+- `@cc <method>` - Performs a coupled cluster calculation.
+- `@dfcc <method>` - Performs a coupled cluster calculation using density fitting.
+- `@set <option> <setting>` - Sets the options for the calculation.
+
+etc.
+
+Default scratch directory path on Windows is the first environment variable found in the ordered list `TMP`, `TEMP`, `USERPROFILE`.
+On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none of these are found, the path `/tmp` is used.
+Default scratch folder name is `elemcojlscr`.
 
 Variable names `fcidump`, `geometry` and `basis` are reserved for the file name of FCIDUMP, geometry specification and basis sets, respectively.
 
 ### Example
+
 #### DCSD calculation using integrals from a FCIDUMP file
+
 The ground state energy can be calculated using the DCSD method with the following script:
+
 ```julia
 using ElemCo
 @print_input
 fcidump = "../test/H2O.FCIDUMP"
 @cc dcsd
 ```
+
 #### DCSD calculation of the water molecule using density-fitted integrals
+
 In order to calculate the ground state energy of the water molecule using the DCSD method, the following script can be used:
+
 ```julia
 using ElemCo
 @print_input
@@ -79,12 +119,13 @@ basis = Dict("ao"=>"cc-pVDZ",
 @dfhf
 @cc dcsd
 ```
+
 The `@dfhf` macro calculates the density-fitted Hartree-Fock energy and orbitals 
 and then DCSD calculation is performed using density-fitted integrals.
 
 Further example scripts are provided in the `examples` directory.
 
-Documentation is available at https://elem.co.il.
+Documentation is available at <https://elem.co.il>.
 
 ```
 Electron coil
