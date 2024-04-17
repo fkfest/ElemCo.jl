@@ -82,18 +82,21 @@ function __init__()
   draw_line(15)
   println("Version: ", __VERSION__)
   srcpath = @__DIR__
-  try
-    hash = read(`git -C $srcpath rev-parse HEAD`, String)
-    println("Git hash: ", hash[1:end-1])
-  catch
-    # get hash from .git/HEAD
+  if isdir(joinpath(srcpath,"..",".git"))
+    # get hash from git
     try
-      head = read(joinpath(srcpath,"..",".git","HEAD"), String)
-      head = split(head)[2]
-      hash = read(joinpath(srcpath,"..",".git",head), String)
+      hash = read(`git -C $srcpath rev-parse HEAD`, String)
       println("Git hash: ", hash[1:end-1])
     catch
-      println("Git hash: unknown")
+      # get hash from .git/HEAD
+      try
+        head = read(joinpath(srcpath,"..",".git","HEAD"), String)
+        head = split(head)[2]
+        hash = read(joinpath(srcpath,"..",".git",head), String)
+        println("Git hash: ", hash[1:end-1])
+      catch
+        println("Git hash: unknown")
+      end
     end
   end
   println("Website: elem.co.il")
