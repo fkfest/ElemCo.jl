@@ -66,10 +66,10 @@ Base.@kwdef mutable struct ScfOptions
   bisecdamp::Float64 = 0.5
   """`⟨3⟩` maximum number of iterations for searching for lambda value to get a reasonalbe guess within trust radius for MCSCF. """
   maxit4lambda::Int = 3
-  """`⟨:SO⟩` Hessian Type for MCSCF:
+  """`⟨:SO_SCI⟩` Hessian Type for MCSCF:
   - `:SO` Second Order Approximation
   - `:SCI` Super CI
-  - `:SO-SCI` Second Order Approximation combing Super CI
+  - `:SO_SCI` Second Order Approximation combing Super CI
   """
   HessianType::Symbol = :SO_SCI
   """`⟨:GRADIENT_SETPLUS⟩` Initial Vectors Type for MCSCF:
