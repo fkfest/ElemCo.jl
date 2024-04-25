@@ -9,6 +9,7 @@
 ### Added
 
 * Expand README
+* `amdmkl()` function to speed up MKL on AMD machines.
 
 ### Fixed
 

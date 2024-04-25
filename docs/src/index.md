@@ -101,6 +101,31 @@ To set options ([`ElemCo.ECInfos.Options`](@ref)) for the DF-HF, CC, etc calcula
 
 This code sets the maximum number of iterations for the SCF procedure to 10 using the [`@set`](@ref) macro, and then computes DF-HF using the new options using the [`@dfhf`](@ref) macro.
 
+### Using AVX2 instructions on AMD "Zen" machines
+
+MKL tends to be rather slow on AMD "Zen" machines (stand 2024).
+To use AVX2 instructions in MKL on AMD "Zen" machines, you can slightly modify the `mkl` libraries by running the [`ElemCo.amdmkl`](@ref) function,
+which will replace two symbolic links with compiled libraries that enforce the AVX2 instructions,
+
+```julia
+using ElemCo
+ElemCo.amdmkl()
+```
+
+Note: this function has to be called in a separate script (separate Julia session) before running the calculations, i.e., your workflow can look like this:
+
+```bash
+> julia -e 'using ElemCo; ElemCo.amdmkl()'
+> julia input.jl
+```
+
+One can revert the changes by running the function with the argument `true`,
+
+```julia
+using ElemCo
+ElemCo.amdmkl(true)
+```
+
 ## Documentation
 
 [Equations](./assets/equations.pdf) for the methods implemented in ElemCo.jl.
