@@ -1,11 +1,13 @@
 """ various utilities """
 module Utils
+using MKL
 using Printf
 using ..ElemCo.AbstractEC
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space
 export substr
+export amdmkl
 
 """
     mainname(file::String)
@@ -172,6 +174,45 @@ end
 """
 function substr(string::AbstractString, range::UnitRange{Int})
   return substr(string, range.start, range.stop-range.start+1)
+end
+
+"""
+    amdmkl(reset::Bool=false)
+
+  Create a modified `libmkl_rt.so` and `libmkl_core.so` to make MKL work
+  fast on "Zen" AMD machines (e.g., Ryzen series). Solution is based on
+  [this forum post](https://discourse.julialang.org/t/how-to-circumvent-intels-amd-discrimination-in-mkl-from-v1-7-onwards).
+
+  This function is only needed on AMD machines. In order to execute it,
+  call `amdmkl()` in a separate Julia session (not in the same session
+  where you want to run calculations).
+  For example, your workflow could look like this:
+
+```bash
+> julia -e 'using ElemCo; ElemCo.amdmkl()'
+> julia input.jl
+```
+
+  where `input.jl` is your script that uses `ElemCo.jl`.
+  The changes can be reverted by calling `amdmkl(true)`.
+"""
+function amdmkl(reset::Bool=false)
+  mklpath = dirname(MKL.MKL_jll.libmkl_rt_path)
+
+  cd(mklpath)
+
+  rm("libmkl_rt.so")
+  rm("libmkl_core.so")
+  
+  if reset
+    symlink("libmkl_core.so.2","libmkl_core.so")
+    symlink("libmkl_rt.so.2","libmkl_rt.so")
+  else
+    write("libamdmkl.c","int mkl_serv_intel_cpu_true() {return 1;}")
+    run(`gcc -shared -o libmkl_core.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_core.so.2`)
+    run(`gcc -shared -o libmkl_rt.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_rt.so.2`)
+    rm("libamdmkl.c")
+  end
 end
 
 end #module
