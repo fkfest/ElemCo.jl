@@ -575,7 +575,7 @@ Do the H * x calculation
 Depending on the Hessian type, do the calculation from unsimplified and simplified parts of blocks seperatly
 Calculate the first element of H*v vector, and the part of H*v from the multiplying of first element of v and g vector(first column of Hessian Matrix)
 Assembly the matrix
-the Hessian Matrix is  | 0           g_21'*λ   g_31'*λ   g_22'*λ   g_32'*λ |               
+the Hessian Matrix is  | 0       g_21'*λ       g_31'*λ       g_22'*λ       g_32'*λ     |               
                        | g_21*λ  h_2121        h_2131        h_2122        h_2132      |
                        | g_31*λ  h_3121        h_3131        h_3122        h_3132      |
                        | g_22*λ  h_2221        h_2231        h_2222        h_2232      |
@@ -723,6 +723,7 @@ function λTuning(EC::ECInfo, trust::Number, maxit4λ::Integer, λmax::Number, �
   micro_converged = false
   davItMax = EC.options.scf.iniDavMatSize # for davidson eigenvalue solving algorithm
   bisecdamp = EC.options.scf.bisecdamp
+  trustScale = EC.options.scf.trustScale
   γ = EC.options.scf.gamaDavScale # gradient scaling factor for micro-iteration accuracy
   davErrorMin = EC.options.scf.davErrorMin  
   davError = γ * norm(g)
@@ -745,12 +746,12 @@ function λTuning(EC::ECInfo, trust::Number, maxit4λ::Integer, λmax::Number, �
     # end
     x = vec[2:end] ./ (vec[1] * λ)
     # check if square of norm of x in trust region (trustScale*trust ~ trust)
-    sumx2 = sqrt(sum(x.^2))
+    sumx2 = sqrt(sum(x.^2)) # norm(x)
     # sumx2 = sum(x.^2)
     if sumx2 > trust
       λl = λ
       xλl = sumx2
-    elseif sumx2 < EC.options.scf.trustScale*trust
+    elseif sumx2 < trustScale*trust
       λr = λ
       xλr = sumx2
     else
@@ -849,11 +850,11 @@ Print the information of the Hessian type
 function print_initial(Enuc::Float64, HessianType::Symbol)
   println("Nuclear Electronic Energy: ", Enuc)
   if HessianType == :SO
-    HessianTypeString = "Second Order Approximation"
+    HessianTypeString = "Second-Order Approximation"
   elseif HessianType == :SCI
-    HessianTypeString = "Super CI (First Order Approximation)"
+    HessianTypeString = "Super-CI (First-Order Approximation)"
   elseif HessianType == :SO_SCI
-    HessianTypeString = "Combined Second Order and Super CI Approximation"
+    HessianTypeString = "Combined Second-Order and Super-CI Approximation"
   end  
   println("Hessian Type: ", HessianTypeString)
 end
