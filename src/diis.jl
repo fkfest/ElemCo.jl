@@ -153,8 +153,7 @@ function perform(diis::Diis, Amps, Res)
   bmat = diis.bmat[1:nDim+1,1:nDim+1]
   # display(bmat)
   # display(rhs)
-  # TODO use svd?
-  coeffs = bmat\rhs
+  coeffs = svd(bmat)\rhs
   # print("coeffs: ")
   # display(coeffs)
 
