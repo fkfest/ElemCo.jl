@@ -6,6 +6,8 @@
 
 ### Changed
 
+* use SVD in DIIS
+
 ### Added
 
 * Expand README
