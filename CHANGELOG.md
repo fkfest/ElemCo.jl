@@ -6,7 +6,8 @@
 
 ### Changed
 
-* use SVD in DIIS
+* use SVD in DIIS.
+* increase number of iterations in 2D-CCSD IAS test.
 
 ### Added
 
@@ -16,6 +17,7 @@
 ### Fixed
 
 * Get rid of error message from git if .git is not available (e.g., in the case of the released version).
+* Sort orblist, which fixes issues if user occupations are not provided in a sorted list.
 
 ## Version [v0.11.1] - 2024.04.12
 
