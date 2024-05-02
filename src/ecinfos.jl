@@ -551,6 +551,7 @@ function parse_orbstring(orbs::String; orbsym=Vector{Int}())
     end
   end
   allunique(orblist) || error("Repeated orbitals found in orbstring $orbs")
+  sort!(orblist)
   return orblist
 end
 
