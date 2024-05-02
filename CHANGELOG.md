@@ -7,11 +7,13 @@
 ### Changed
 
 * use SVD in DIIS
+* Save the memory using in Hessian matrix caclulation in dfmcscf function
 
 ### Added
 
 * Expand README
 * `amdmkl()` function to speed up MKL on AMD machines.
+* Add dfmcscf part in documentation
 
 ### Fixed
 
