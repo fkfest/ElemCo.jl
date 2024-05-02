@@ -321,23 +321,23 @@ The residual of the Hartree-Fock equations, which can be used in DIIS, is equiva
 \section{Orbital Rotation}
 The orbital transformed wavefunction can be expressed by
 \begin{equation}
-  |\Psi> = exp(\hat{R})|0>,
+  |\Psi> = \exp(\hat{R})|0>,
 \end{equation}
 where
 \begin{equation}
 \begin{aligned}
   \exp(\hat{R}) &= 1+\hat{R}+\frac{1}{2!}\hat{R}^2+ \cdots=\hat{U}, \\
-  \forall \hat{R} &= \sum_{r\mathchar"313E k}R_{rk}(\hat{E}_{rk}-\hat{E}_{kr}),  \bf{R}=-\bf{R}^{\dagger},\\
+  \forall \hat{R} &= \sum_{r\mathchar"313E k}R_r^k(\hat{E}_r^k-\hat{E}_k^r),  \bf{R}=-\bf{R}^{\dagger},\\
 \end{aligned}
 \end{equation}
-In which $\hat{E}_{rk}$ is the singlet excitation operator. $R_{rk}$ is the element of matrix $\bf{R}$, here we let it be real, thus $\bf{R}$ matrix is an antisymmetric matrix, with $R_{rk}=-R_{kr}$. Mathemetically it can be proved that the transforming matrix $\bf{U}$ is unitary.
+In which $\hat{E}_r^k$ is the singlet excitation operator. $R_r^k$ is the element of matrix $\bf{R}$, here we let it be real, thus $\bf{R}$ matrix is an antisymmetric matrix, with $R_r^k=-R_k^r$. Mathemetically it can be proved that the transforming matrix $\bf{U}$ is unitary.
 
 \section{MCSCF}
 The energy expectation value of the wavefunction is be given by
 \begin{equation}
 \begin{aligned}
 E(\bf{R}) &= <\Psi|\hat{H}|\Psi> \\
-&= <0|\exp(-\hat{R})\hat{H}exp(\hat{R})|0> \\
+&= <0|\exp(-\hat{R})\hat{H}\exp(\hat{R})|0> \\
 &= <0|\hat{H}|0> + <0|[\hat{H},\hat{R}]|0> + \frac{1}{2!}< 0|[[\hat{H},\hat{R}], \hat{R}]|0> + \cdots\\
 &= E_0+\bf{g}^T\bf{x} +\frac{1}{2} \bf{x}^T\bf{hx}+ \cdots.\\
 \end{aligned}
@@ -348,23 +348,23 @@ Here, the orbital transformation parameters $\bf{R}$ is expressed as vector $\bf
 \end{equation}
 In the end, expectation energy $E$ is calculated with transformed orbital coefficients and active orbital one- and two-particle density matrices
 \begin{equation}
-E=\sum_{tu}{}^{c}F_{tu}D_{tu}+\frac{1}{2}\sum_{tuvw}v^{uw}_{tv}D_{tu,vw}+E_c+E_{nuc},
+E=\sum_{tu}{}^{c}F_t^uD_t^u+\frac{1}{2}\sum_{tuvw}v^{uw}_{tv}D_{tv}^{uw}+E_c+E_{nuc},
 \end{equation}
 with
 \begin{equation}
 \begin{aligned}
-  E_c=&\sum_j[h^j_j+{}^cF_{jj}],\\
-  {}^cF_{rs} =& h^s_r+\sum_j[(2v^{sj}_{rj}-v^{js}_{rj})], 
+  E_c=&\sum_j[h^j_j+{}^cF_j^j],\\
+  {}^cF_r^s =& h^s_r+\sum_j[(2v^{sj}_{rj}-v^{js}_{rj})], 
 \end{aligned}
 \end{equation}
-$E_c$ is the closed shell electronic energy, $\bf{{}^cF}$ is the closed shell part of Fock matrix, and 1-particle density matrix $\bf{D}_{tu}$ and symmetrized  2-particle density matrix $\bf{D}_{tu,vw}$ are defined as 
+$E_c$ is the closed shell electronic energy, $\bf{{}^cF}$ is the closed shell part of Fock matrix, and 1-particle density matrix $\bf{{}^1D}$ and symmetrized  2-particle density matrix $\bf{{}^2D}$ are defined as 
 \begin{equation}
 \begin{aligned}
-  D_{tu} =& \sum_{IJ} c_Ic_J<\Phi_I|\hat{E}_{tu}|\Phi_J>,\\
-  D_{tu,vw} =& \sum_{IJ} c_Ic_J<\Phi_I|\frac{1}{2}[\hat{E}_{tu,vw}+\hat{E}_{ut,vw}]|\Phi_J>.
+  {}^1D_t^u =& \sum_{IJ} c_Ic_J<\Phi_I|\hat{E}_t^u|\Phi_J>,\\
+  {}^2D_{tv}^{uw} =& \sum_{IJ} c_Ic_J<\Phi_I|\frac{1}{2}[\hat{E}_{tv}^{uw}+\hat{E}_{uv}^{tw}]|\Phi_J>,
 \end{aligned}
 \end{equation}
-Here, the 4-index integral $v^{uw}_{tv}$ is calculated as the density fitted integrals, as mentioned in previous chapter,
+with $\hat{E}_{tv}^{uw}$ as the 2-electron excitation operator. In order to simplify the expression, the ${}^1D_v^u$ is written as $D_v^u$, and ${}^2D_{tv}^{uw}$ is written as $D_{tv}^{uw}$ in follow. Here, the 4-index integral $v^{uw}_{tv}$ is calculated as the density fitted integrals, as mentioned in previous chapter,
 \begin{equation}
 \begin{aligned}
   v^{uw}_{tv} =& v^{uL}_t v^{wL}_v,\\
@@ -400,21 +400,21 @@ in which
 \end{equation}
 Here, $\bf{g}$ is calculated from
 \begin{equation}
-  g_{rk} = (\frac{\partial E}{\partial R_{rk}})_{\bf{R = \bf{0}}} = 2(A_{rk}-A_{kr}) = 0,
+  g_r^k = (\frac{\partial E}{\partial R_r^k})_{\bf{R = \bf{0}}} = 2(A_r^k-A_k^r) = 0,
 \end{equation}
-where $\bf{A}_{rk}$ is defined as
+where $\bf{A}_r^k$ is defined as 
 \begin{equation}
 \begin{aligned}
-  A_{ri}=&2F_{ri},\\
-  A_{ru}=&\sum_v {}^cF_{rv}D_{vu} + \sum_{tvw}v^{tw}_{rv}D_{tu,vw},\\
-  A_{ra}=&0,\\
+  A_r^i=&2F_r^i,\\
+  A_r^u=&\sum_v {}^cF_r^v D_v^u + \sum_{tvw}v^{tw}_{rv}D_{tv}^{uw},\\
+  A_r^a=&0,\\
 \end{aligned}
 \end{equation}
 with
 \begin{equation}
-  F_{rs} = {}^cF_{rs} + \sum_{tu}D_{tu}[v^{su}_{rt}-\frac{1}{2}v^{ts}_{ru}].
+  F_r^s = {}^cF_r^s + \sum_{tu}D_t^u[v^{su}_{rt}-\frac{1}{2}v^{ts}_{ru}].
 \end{equation}
-Since matrix $\bf{g}$ is asymmetric, $g_{rk}=-g_{kr}$, and we don't need the internal rotation parts of doubly occupied orbitals and virtual orbitals, we exclude the redundant parts of $\bf{g}$ and $\bf{h}$. Thus $\bf{g}$ is a combination of only $[\bf{g}_{tj},\bf{g}_{aj},\bf{g}_{tu}, \bf{g}_{au} ]$.
+Since matrix $\bf{g}$ is asymmetric, $g_{rk}=-g_{kr}$, and we don't need the internal rotation parts of doubly occupied orbitals and virtual orbitals, we exclude the redundant parts of $\bf{g}$ and $\bf{h}$. Thus $\bf{g}$ is a combination of only $[\bf{g}_t^j,\bf{g}_a^j,\bf{g}_t^u, \bf{g}_a^u ]$.
 
 We search for the value of $\lambda$ with a combination method of linear search and logarithmic bisection search:
 \begin{equation}
@@ -431,39 +431,39 @@ If there are both tested smallest and biggest limits in one iteration search for
 \subsection{First Order Approximation}
 We adopt the Super-CI optimization approximation\cite{SCI1989}, in which 
 \begin{equation}
-\hat{H}^{eff}=\sum_{pq}F_{pq}\hat{E}_{pq},
+\hat{H}^{eff}=\sum_{pq}F_p^q \hat{E}_p^q,
 \end{equation}
 \begin{equation}
 E^{(0)}=<0|\hat{H}^{eff}|0>,
 \end{equation}
 \begin{equation}
-{}^{SCI}H_{rk,sl}=2<rk|\hat{H}^{eff} - E^{(0)}|sl>.
+{}^{SCI}H_{rs}^{kl}=2<rk|\hat{H}^{eff} - E^{(0)}|sl>.
 \end{equation}
 More specifically,
 \begin{equation}
 \begin{aligned}
-  {}^{SCI}H_{ai,bj} =& 4(\delta_{ij}F_{ab}-\delta_{ab}F_{ij}),\\
-  {}^{SCI}H_{ai,bu} =& -2\delta_{ab}F_{iv}D_{vu},\\
-  {}^{SCI}H_{ai,uj} =& \delta_{ij}(4F_{au}-2F_{av}D_{vu}),\\
-  {}^{SCI}H_{ti,bu} =& 0,\\
-  {}^{SCI}H_{ti,uj} =& (2D_{tu}-4\delta_{tu}) F_{ij}\\
-                   &+2\delta_{ij}[2F_{tu}-(D_{tu,vw}-D_{tu}D_{vw})F_{vw}\\
-                   &-D_{tv}F_{vu}-F_{tv}D_{vu}],\\
-  {}^{SCI}H_{at,bu} =&2\delta_{ab}(D_{tu,vw}-D_{tu}D_{vw})F_{vw} + 2D_{tu}F_{ab}.
+  {}^{SCI}H_{ab}^{ij} =& 4(\delta_{ij}F_a^b-\delta_{ab}F_i^j),\\
+  {}^{SCI}H_{ab}^{iu} =& -2\delta_{ab}F_i^vD_v^u,\\
+  {}^{SCI}H_{au}^{ij} =& \delta_{ij}(4F_a^u-2F_a^vD_v^u),\\
+  {}^{SCI}H_{tb}^{iu} =& 0,\\
+  {}^{SCI}H_{tu}^{ij} =& (2D_t^u-4\delta_{tu}) F_i^j\\
+                   &+2\delta_{ij}[2F_t^u-(D_{tv}^{uw}-D_t^uD_v^w)F_v^w\\
+                   &-D_t^vF_v^u-F_t^vD_v^u],\\
+  {}^{SCI}H_{ab}^{tu} =&2\delta_{ab}(D_{tv}^{uw}-D_t^uD_v^w)F_v^w + 2D_t^uF_a^b.
 \end{aligned}
 \end{equation}
 
 \subsection{Second Order Approximation}
 In general, the second-order Hessian matrix elements are calculated as
 \begin{equation}
-  {}^{SO}H_{rk,sl} = (1-\tau_{rk})(1-\tau_{sl})[2G^{kl}_{rs}-\delta_{kl}(A_{rs}+A_{sr})],
+  {}^{SO}H_{rs}^{kl} = (1-\tau_{rk})(1-\tau_{sl})[2G^{kl}_{rs}-\delta_{kl}(A_r^s+A_s^r)],
 \end{equation}
 in which $\tau_{rk}, \tau_{sl}$  is the permutation operator, matrices $\bf{G}$ are
 \begin{equation}
 \begin{aligned}
-G^{ij}_{rs} =& 2[F_{rs}\delta_{ij}+L^{ij}_{rs}],\\
-G^{tj}_{rs} =& D_{tv}L^{vj}_{rs} = G^{jt}_{sr},\\
-G^{tu}_{rs} =& {}^cF_{rs}D_{tu} + [v^{sw}_{rv}D_{tu,vw}+2v^{vw}_{rs}D_{tv,uw}],\\
+G^{ij}_{rs} =& 2[F_r^s\delta_{ij}+L^{ij}_{rs}],\\
+G^{tj}_{rs} =& D_t^vL^{vj}_{rs} = G^{jt}_{sr},\\
+G^{tu}_{rs} =& {}^cF_r^sD_t^u + [v^{sw}_{rv}D_{tv}^{uw}+2v^{vw}_{rs}D_{tu}^{vw}],\\
 \end{aligned}
 \end{equation}
 where
@@ -475,17 +475,17 @@ where
 By default, the SO-SCI Hessian matrix \cite{kreplinMCSCF2020} is approximated as below:
 \begin{equation}
 \begin{aligned}
-{}^{SO-SCI}H_{ai,bj} =& {}^{SCI}H_{ai,bj},\\
-{}^{SO-SCI}H_{ai,bu} =& {}^{SCI}H_{ai,bu},\\
-{}^{SO-SCI}H_{ai,uj} =& {}^{SCI}H_{ai,uj},\\
-{}^{SO-SCI}H_{ti,bu} =& {}^{SO}H_{ti,bu},\\
-{}^{SO-SCI}H_{ti,uj} =& {}^{SO}H_{ti,uj},\\
-{}^{SO-SCI}H_{at,bu} =& {}^{SO}H_{at,bu}.\\
+{}^{SO-SCI}H_{ab}^{ij} =& {}^{SCI}H_{ab}^{ij},\\
+{}^{SO-SCI}H_{ab}^{iu} =& {}^{SCI}H_{ab}^{iu},\\
+{}^{SO-SCI}H_{au}^{ij} =& {}^{SCI}H_{au}^{ij},\\
+{}^{SO-SCI}H_{tb}^{iu} =& {}^{SO}H_{tb}^{iu},\\
+{}^{SO-SCI}H_{tu}^{ij} =& {}^{SO}H_{tu}^{ij},\\
+{}^{SO-SCI}H_{ab}^{tu} =& {}^{SO}H_{ab}^{tu}.\\
 \end{aligned}
 \end{equation}
 If the $\bf{SO\_SCI\_origin}$ option is set to be $false$, 
 \begin{equation}
-  {}^{SO-SCI}H_{at,bu} = {}^{SCI}H_{at,bu},
+  {}^{SO-SCI}H_{ab}^{tu} = {}^{SCI}H_{ab}^{tu},
 \end{equation}
 and the rest blocks of Hessian matrix remain the same.
 
