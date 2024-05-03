@@ -227,6 +227,11 @@ Base.@kwdef mutable struct DiisOptions
   maxdiis::Int = 6
   """`⟨10.0⟩` DIIS residual threshold. """
   resthr::Float64 = 10.0
+  """`⟨false⟩` CROP-DIIS (see [JCTC 11, 1518 (2015)](https://doi.org/10.1021/ct501114q)).
+  Usually the DIIS dimension `maxcrop=3` is sufficient. """
+  crop::Bool = false
+  """`⟨3⟩` DIIS dimension for CROP-DIIS. """
+  maxcrop::Int = 3
 end
 
 """ 
