@@ -12,6 +12,7 @@
 
 * Expand README
 * `amdmkl()` function to speed up MKL on AMD machines.
+* CROP-DIIS option (JCTC 11, 1518 (2015)) which is less sensitive to the DIIS dimension. To activate, set `diis` option `crop=true`, the DIIS dimension can be changed using `maxcrop` (default is 3).
 
 ### Fixed
 

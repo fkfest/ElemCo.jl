@@ -16,6 +16,8 @@ mutable struct Diis
   maxdiis::Int
   """ threshold for residual norm to start DIIS """
   resthr::Float64
+  """ use CROP-DIIS instead of the standard DIIS """
+  cropdiis::Bool
   """ files for DIIS vectors """
   ampfiles::Array{String}
   """ files for DIIS residuals """
@@ -33,14 +35,19 @@ mutable struct Diis
   
   Create DIIS object. `weights` is an array of square weights for DIIS residuals components.
   """
-  function Diis(EC::ECInfo, weights = Float64[]; maxdiis::Int = EC.options.diis.maxdiis, resthr::Float64 = EC.options.diis.resthr)
+  function Diis(EC::ECInfo, weights = Float64[]; 
+                maxdiis::Int = -1, resthr::Float64 = EC.options.diis.resthr,
+                cropdiis::Bool = EC.options.diis.crop)
+    if maxdiis < 0
+      maxdiis = cropdiis ? EC.options.diis.maxcrop : EC.options.diis.maxdiis
+    end
     ampfiles = [ joinpath(EC.scr, "amp"*string(i)*EC.ext) for i in 1:maxdiis ]
     resfiles = [ joinpath(EC.scr, "res"*string(i)*EC.ext) for i in 1:maxdiis ]
     for i in 1:maxdiis
       add_file!(EC, "amp"*string(i), "tmp", overwrite=true)
       add_file!(EC, "res"*string(i), "tmp", overwrite=true)
     end
-    new(maxdiis,resthr,ampfiles,resfiles,weights,1,0,zeros(maxdiis+1,maxdiis+1))
+    new(maxdiis,resthr,cropdiis,ampfiles,resfiles,weights,1,0,zeros(maxdiis+1,maxdiis+1))
   end
 end
 
@@ -119,6 +126,41 @@ function weighted_dot(diis::Diis, vecs1, vecs2)
   return dot
 end
 
+@doc raw"""
+    update_Bmat(diis::Diis, nDim, Res, ithis)
+
+  Update B matrix with new residual (at the position `ithis`).
+
+  B matrix is defined as:
+```math
+{\bf B} = \begin{pmatrix}
+\langle {\bf R}_1, {\bf R}_1 \rangle & \langle {\bf R}_1, {\bf R}_2 \rangle & \cdots & \langle {\bf R}_1, {\bf R}_{\rm nDim} \rangle & -1 \\
+\langle {\bf R}_2, {\bf R}_1 \rangle & \langle {\bf R}_2, {\bf R}_2 \rangle & \cdots & \langle {\bf R}_2, {\bf R}_{\rm nDim} \rangle & -1 \\
+\vdots & \vdots & \ddots & \vdots & \vdots \\
+\langle {\bf R}_{\rm nDim}, {\bf R}_1 \rangle & \langle {\bf R}_{\rm nDim}, {\bf R}_2 \rangle & \cdots & \langle {\bf R}_{\rm nDim}, {\bf R}_{\rm nDim} \rangle & -1 \\
+-1 & -1 & \cdots & -1 & 0
+\end{pmatrix}
+```
+  Returns the dot product of the new residual with itself, ``\langle {\bf R}_{\rm ithis}, {\bf R}_{\rm ithis} \rangle``.
+"""
+function update_Bmat(diis::Diis, nDim, Res, ithis)
+  thisResDot = weighted_dot(diis, Res, Res)
+  for i in 1:nDim
+    if i != ithis
+      resi = loadres(diis, i)
+      dot = weighted_dot(diis, Res, resi)
+      diis.bmat[i,ithis] = dot
+      diis.bmat[ithis,i] = dot
+    else
+      diis.bmat[ithis,ithis] = thisResDot
+    end
+    diis.bmat[i,nDim+1] = -1.0
+    diis.bmat[nDim+1,i] = -1.0
+  end
+  diis.bmat[nDim+1,nDim+1] = 0.0
+  return thisResDot
+end
+
 """
     perform(diis::Diis, Amps, Res)
 
@@ -130,23 +172,9 @@ function perform(diis::Diis, Amps, Res)
   end
   ithis = diis.next
   nDim = diis.nDim
-  saveamps(diis,Amps,ithis)
-  saveres(diis,Res,ithis)
-  thisResDot = weighted_dot(diis, Res, Res)
-  # update B matrix
-  for i in 1:nDim
-    if i != ithis
-      resi = loadres(diis,i)
-      dot = weighted_dot(diis, Res, resi)
-      diis.bmat[i,ithis] = dot
-      diis.bmat[ithis,i] = dot
-    else
-      diis.bmat[ithis,ithis] = thisResDot
-    end
-    diis.bmat[i,nDim+1] = -1.0
-    diis.bmat[nDim+1,i] = -1.0
-  end
-  diis.bmat[nDim+1,nDim+1] = 0.0
+  saveamps(diis, Amps, ithis)
+  saveres(diis, Res, ithis)
+  thisResDot = update_Bmat(diis, nDim, Res, ithis)
   rhs = zeros(nDim+1)
   rhs[nDim+1] = -1.0
 
@@ -163,6 +191,12 @@ function perform(diis::Diis, Amps, Res)
     return Amps
   elseif nDim < diis.maxdiis
     diis.next = nDim+1
+  elseif diis.cropdiis
+    # the oldest vector is replaced
+    diis.next += 1
+    if diis.next > diis.maxdiis
+      diis.next = 1
+    end
   else
     # vector with the smallest coef
     coefmin = 1.e10
@@ -173,7 +207,17 @@ function perform(diis::Diis, Amps, Res)
       end
     end
   end
-  return combine(diis,diis.ampfiles,coeffs)
+  if diis.cropdiis
+    Opt = combine(diis, diis.resfiles, coeffs)
+    saveres(diis, Opt, ithis)
+    optres2 = update_Bmat(diis, nDim, Opt, ithis)
+    # println("DIIS: ", thisResDot, " -> ", optres2)
+    Opt = combine(diis, diis.ampfiles, coeffs)
+    saveamps(diis, Opt, ithis)
+    return Opt
+  else
+    return combine(diis, diis.ampfiles, coeffs)
+  end
 end
 
 end
