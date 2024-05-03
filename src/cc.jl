@@ -1983,7 +1983,6 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   NormT3 = 0.0
   do_sing = (method.exclevel[1] == :full)
   Eh = 0.0
-  En = 0.0
   En1 = 0.0
   Eias = 0.0
   converged = false
