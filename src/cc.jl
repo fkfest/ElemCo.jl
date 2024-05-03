@@ -1998,6 +1998,13 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps[doubles]...)
     NormR2 = calc_doubles_norm(Res[doubles]...)
+    if has_prefix(method, "FRS")
+      active = oss_active_orbitals(EC)
+      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = 1.0
+    elseif has_prefix(method, "FRT")
+      active = oss_active_orbitals(EC)
+      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = -1.0
+    end
     Eh = calc_hylleraas(EC, Amps[singles]..., Amps[doubles]..., Res[singles]..., Res[doubles]...)
     update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
     if method.exclevel[3] == :full
@@ -2005,23 +2012,17 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       NormR3 = calc_triples_norm(Res[triples]...)
       update_triples!(EC, Amps[triples]..., Res[triples]...)
     end
-    if has_prefix(method, "FRS")
-      active = oss_active_orbitals(EC)
-      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = 1.0
-    elseif has_prefix(method, "FRT")
-      active = oss_active_orbitals(EC)
-      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = -1.0
-    elseif has_prefix(method, "2D") && do_sing
-      active = oss_active_orbitals(EC)
-      T1α = first(singles)
-      T1β = last(singles)
-      W = load(EC,"2d_ccsd_W")[1]
-      Eias = - W * Amps[T1α][active.ua,active.ta] * Amps[T1β][active.tb,active.ub]
-    end
     if do_sing
       NormT1 = calc_singles_norm(Amps[singles]...)
       NormR1 = calc_singles_norm(Res[singles]...)
       update_singles!(EC, Amps[singles]..., Res[singles]...)
+      if has_prefix(method, "2D")
+        active = oss_active_orbitals(EC)
+        T1α = first(singles)
+        T1β = last(singles)
+        W = load(EC,"2d_ccsd_W")[1]
+        Eias = - W * Amps[T1α][active.ua,active.ta] * Amps[T1β][active.tb,active.ub]
+      end
     end
     if restrict
       spin_project!(EC, Amps...)
@@ -2069,8 +2070,6 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     ene = Eh.E + Eias
     W = load(EC,"2d_ccsd_W")[1]
     Eh = (; Eh..., E=ene, EIAS=Eias, EW=W)
-  elseif has_prefix(method, "FRS") || has_prefix(method, "FRT")
-    Eh = (; Eh..., E=En)
   end
   return Eh
 end
