@@ -1983,6 +1983,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   NormT3 = 0.0
   do_sing = (method.exclevel[1] == :full)
   Eh = 0.0
+  En = 0.0
   En1 = 0.0
   Eias = 0.0
   converged = false
@@ -2068,6 +2069,8 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     ene = Eh.E + Eias
     W = load(EC,"2d_ccsd_W")[1]
     Eh = (; Eh..., E=ene, EIAS=Eias, EW=W)
+  elseif has_prefix(method, "FRS") || has_prefix(method, "FRT")
+    Eh = (; Eh..., E=En)
   end
   return Eh
 end

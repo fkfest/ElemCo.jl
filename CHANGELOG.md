@@ -18,6 +18,7 @@
 
 * Get rid of error message from git if .git is not available (e.g., in the case of the released version).
 * Sort orblist, which fixes issues if user occupations are not provided in a sorted list.
+* Pass En instead of Hylleraas energy for FR-CC, which will properly report the energy in a (2,2) (single iteration) calculation.
 
 ## Version [v0.11.1] - 2024.04.12
 
