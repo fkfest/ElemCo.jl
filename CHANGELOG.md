@@ -8,16 +8,21 @@
 
 * use SVD in DIIS
 * Save the memory using in Hessian matrix caclulation in dfmcscf function
+* use SVD in DIIS.
+* increase number of iterations in 2D-CCSD IAS test.
 
 ### Added
 
 * Expand README
 * `amdmkl()` function to speed up MKL on AMD machines.
 * Add dfmcscf part in documentation
+* CROP-DIIS option (JCTC 11, 1518 (2015)) which is less sensitive to the DIIS dimension. To activate, set `diis` option `crop=true`, the DIIS dimension can be changed using `maxcrop` (default is 3).
 
 ### Fixed
 
 * Get rid of error message from git if .git is not available (e.g., in the case of the released version).
+* Sort orblist, which fixes issues if user occupations are not provided in a sorted list.
+* Fix amplitudes before Hylleraas energy calculation for FR-CC, which will properly report the energy in a (2,2) (single iteration) calculation.
 
 ## Version [v0.11.1] - 2024.04.12
 
