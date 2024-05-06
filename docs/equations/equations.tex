@@ -327,10 +327,15 @@ where
 \begin{equation}
 \begin{aligned}
   \exp(\hat{R}) &= 1+\hat{R}+\frac{1}{2!}\hat{R}^2+ \cdots=\hat{U}, \\
-  \forall \hat{R} &= \sum_{r\mathchar"313E k}R_r^k(\hat{E}_r^k-\hat{E}_k^r),  \bf{R}=-\bf{R}^{\dagger},\\
+  \hat{R} &= \sum_{r\mathchar"313E k}R_r^k(\hat{E}_k^r-\hat{E}_r^k), \\
+  \hat{U} &= \sum U_r^s\hat{E}_s^r, \\
+  \bf{U} \bf{U}^\dagger &= \bf{I}, \forall  \bf{R}=-\bf{R}^{\dagger},\\
 \end{aligned}
 \end{equation}
-In which $\hat{E}_r^k$ is the singlet excitation operator. $R_r^k$ is the element of matrix $\bf{R}$, here we let it be real, thus $\bf{R}$ matrix is an antisymmetric matrix, with $R_r^k=-R_k^r$. Mathemetically it can be proved that the transforming matrix $\bf{U}$ is unitary.
+In which $\hat{E}_k^r$ is the singlet excitation operator $(\hat{a}_{r\alpha}^{\dagger}\hat{a}_{k\alpha}+\hat{a}_{r\beta}^{\dagger}\hat{a}_{k\beta} )$. 
+$R_r^k$ is the element of matrix $\bf{R}$, $U_r^s$ is the element of matrix $\bf{U}$, 
+here we let it be real, thus $\bf{R}$ matrix is an antisymmetric matrix, with $R_r^k=-R_k^r$. 
+Mathemetically it can be proved that the transforming matrix $\bf{U}$ is unitary.
 
 \section{MCSCF}
 The energy expectation value of the wavefunction is be given by
@@ -342,40 +347,47 @@ E(\bf{R}) &= <\Psi|\hat{H}|\Psi> \\
 &= E_0+\bf{g}^T\bf{x} +\frac{1}{2} \bf{x}^T\bf{hx}+ \cdots.\\
 \end{aligned}
 \end{equation}
-Here, the orbital transformation parameters $\bf{R}$ is expressed as vector $\bf{x}$, the linear coefficients as gradient vector $\bf{g}$, the quadratic coefficients as matrix $\bf{h}$. When terms after the quadratic terms truncated, to minimize the energy expectation value, the Lagrangian equation as known as the Newton-Raphson equation is
+Here, the orbital transformation parameters $\bf{R}$ is expressed as vector $\bf{x}$, 
+the linear coefficients as gradient vector $\bf{g}$, 
+the quadratic coefficients as matrix $\bf{h}$. When terms after the quadratic terms truncated, 
+to minimize the energy expectation value, the Lagrangian equation as known as the Newton-Raphson equation is
 \begin{equation}
 \frac{\partial}{\partial \bf{x}}(\bf{g}^T\bf{x}+\frac{1}{2}\bf{x}^T\bf{hx})= \bf{g}+\bf{hx} =0.
 \end{equation}
 In the end, expectation energy $E$ is calculated with transformed orbital coefficients and active orbital one- and two-particle density matrices
 \begin{equation}
-E=\sum_{tu}{}^{c}F_t^uD_t^u+\frac{1}{2}\sum_{tuvw}v^{uw}_{tv}D_{tv}^{uw}+E_c+E_{nuc},
+E=\pre{^c}F_t^uD_t^u+\frac{1}{2}v^{uw}_{tv}D_{tv}^{uw}+E_c+E_{nuc},
 \end{equation}
 with
 \begin{equation}
 \begin{aligned}
-  E_c=&\sum_j[h^j_j+{}^cF_j^j],\\
-  {}^cF_r^s =& h^s_r+\sum_j[(2v^{sj}_{rj}-v^{js}_{rj})], 
+  E_c=&h^j_j+\pre{^c}F_j^j,\\
+  \pre{^c}F_r^s =& h^s_r+(2v^{sj}_{rj}-v^{js}_{rj}), 
 \end{aligned}
 \end{equation}
-$E_c$ is the closed shell electronic energy, $\bf{{}^cF}$ is the closed shell part of Fock matrix, and 1-particle density matrix $\bf{{}^1D}$ and symmetrized  2-particle density matrix $\bf{{}^2D}$ are defined as 
+$E_c$ is the closed shell electronic energy, $\bf{\pre{^c}F}$ is the closed shell part of Fock matrix, 
+and 1-particle density matrix $\bf{\pre{^1}D}$ and symmetrized  2-particle density matrix $\bf{\pre{^2}D}$ are defined as 
 \begin{equation}
 \begin{aligned}
-  {}^1D_t^u =& \sum_{IJ} c_Ic_J<\Phi_I|\hat{E}_t^u|\Phi_J>,\\
-  {}^2D_{tv}^{uw} =& \sum_{IJ} c_Ic_J<\Phi_I|\frac{1}{2}[\hat{E}_{tv}^{uw}+\hat{E}_{uv}^{tw}]|\Phi_J>,
+  \pre{^1}D_t^u =& c_Ic_J<\Phi_I|\hat{E}^t_u|\Phi_J>,\\
+  \pre{^2}D_{tv}^{uw} =& c_Ic_J<\Phi_I|\frac{1}{2}[\hat{E}^{tv}_{uw}+\hat{E}^{uv}_{tw}]|\Phi_J>,
 \end{aligned}
 \end{equation}
-with $\hat{E}_{tv}^{uw}$ as the 2-electron excitation operator. In order to simplify the expression, the ${}^1D_v^u$ is written as $D_v^u$, and ${}^2D_{tv}^{uw}$ is written as $D_{tv}^{uw}$ in follow. Here, the 4-index integral $v^{uw}_{tv}$ is calculated as the density fitted integrals, as mentioned in previous chapter,
+with $\hat{E}_{tv}^{uw}$ as the 2-electron excitation operator. In order to simplify the expression, 
+the $\pre{^1}D_v^u$ is written as $D_v^u$, and $\pre{^2}D_{tv}^{uw}$ is written as $D_{tv}^{uw}$ in follow. 
+Here, the 4-index integral $v^{uw}_{tv}$ is calculated as the density fitted integrals, as mentioned in previous chapter,
 \begin{equation}
 \begin{aligned}
   v^{uw}_{tv} =& v^{uL}_t v^{wL}_v,\\
-  v^{uL}_t =& v^{\nu L}_{\mu} C^t_{\mu} C^u_{\nu}.\\
+  v^{uL}_t =& v^{\nu L}_{\mu} C_t^{\dagger \mu} C^u_{\nu}.\\
 \end{aligned}
 \end{equation}
 Likewise, other four-index integrals in this chapter are calculated in the same way.
 
 
 \section{Augmented Hessian}
-In order to make the coefficients transforming step smaller and more robust, a level-shift $\epsilon$ is introduced to control the step $\bf{x}$ \cite{augmentedHessian1981}
+In order to make the coefficients transforming step smaller and more robust, 
+a level-shift $\epsilon$ is introduced to control the step $\bf{x}$ \cite{augmentedHessian1981}
 \begin{equation}
 \bf{g}+(\bf{h}+\epsilon \bf{I})\bf{x}=0,
 \end{equation}
@@ -406,15 +418,18 @@ where $\bf{A}_r^k$ is defined as
 \begin{equation}
 \begin{aligned}
   A_r^i=&2F_r^i,\\
-  A_r^u=&\sum_v {}^cF_r^v D_v^u + \sum_{tvw}v^{tw}_{rv}D_{tv}^{uw},\\
+  A_r^u=& \pre{^c}F_r^v D_v^u + v^{tw}_{rv}D_{tv}^{uw},\\
   A_r^a=&0,\\
 \end{aligned}
 \end{equation}
 with
 \begin{equation}
-  F_r^s = {}^cF_r^s + \sum_{tu}D_t^u[v^{su}_{rt}-\frac{1}{2}v^{ts}_{ru}].
+  F_r^s = \pre{^c}F_r^s + D_t^u[v^{su}_{rt}-\frac{1}{2}v^{ts}_{ru}],
 \end{equation}
-Since matrix $\bf{g}$ is asymmetric, $g_{rk}=-g_{kr}$, and we don't need the internal rotation parts of doubly occupied orbitals and virtual orbitals, we exclude the redundant parts of $\bf{g}$ and $\bf{h}$. Thus $\bf{g}$ is a combination of only $[\bf{g}_t^j,\bf{g}_a^j,\bf{g}_t^u, \bf{g}_a^u ]$.
+the $\bf{F}$ matrix denotes the generalized Fock matrix calculated with density matrices.
+Since matrix $\bf{g}$ is asymmetric, $g_{rk}=-g_{kr}$, and we don't need the internal rotation parts of doubly occupied orbitals and virtual orbitals,
+we exclude the redundant parts of $\bf{g}$ and $\bf{h}$. 
+ Thus $\bf{g}$ is a combination of only $[\bf{g}_t^j,\bf{g}_a^j,\bf{g}_t^u, \bf{g}_a^u ]$.
 
 We search for the value of $\lambda$ with a combination method of linear search and logarithmic bisection search:
 \begin{equation}
@@ -423,7 +438,8 @@ We search for the value of $\lambda$ with a combination method of linear search 
   \lambda=&\exp{(\ln{small\lambda}+(\ln{big\lambda}-\ln{small\lambda}) * bisecdamp)}.
 \end{aligned}
 \end{equation}
-If there are both tested smallest and biggest limits in one iteration search for $\lambda$, we adopt the linear search with the norm of both limit $\bf{x}$, otherwise, we use either the upper and lower boundaries value(by default set to be 1000 and 1) and the tested $\lambda$ to do the logarithmic bisection search.
+If there are both tested smallest and biggest limits in one iteration search for $\lambda$, we adopt the linear search with the norm of both limit $\bf{x}$,
+otherwise, we use either the upper and lower boundaries value(by default set to be 1000 and 1) and the tested $\lambda$ to do the logarithmic bisection search.
 
 
 \section{Hessian Approximation}
@@ -437,33 +453,33 @@ We adopt the Super-CI optimization approximation\cite{SCI1989}, in which
 E^{(0)}=<0|\hat{H}^{eff}|0>,
 \end{equation}
 \begin{equation}
-{}^{SCI}H_{rs}^{kl}=2<rk|\hat{H}^{eff} - E^{(0)}|sl>.
+\pre{^{SCI}}H_{rs}^{kl}=2<rk|\hat{H}^{eff} - E^{(0)}|sl>.
 \end{equation}
 More specifically,
 \begin{equation}
 \begin{aligned}
-  {}^{SCI}H_{ab}^{ij} =& 4(\delta_{ij}F_a^b-\delta_{ab}F_i^j),\\
-  {}^{SCI}H_{ab}^{iu} =& -2\delta_{ab}F_i^vD_v^u,\\
-  {}^{SCI}H_{au}^{ij} =& \delta_{ij}(4F_a^u-2F_a^vD_v^u),\\
-  {}^{SCI}H_{tb}^{iu} =& 0,\\
-  {}^{SCI}H_{tu}^{ij} =& (2D_t^u-4\delta_{tu}) F_i^j\\
+  \pre{^{SCI}}H_{ab}^{ij} =& 4(\delta_{ij}F_a^b-\delta_{ab}F_i^j),\\
+  \pre{^{SCI}}H_{ab}^{iu} =& -2\delta_{ab}F_i^vD_v^u,\\
+  \pre{^{SCI}}H_{au}^{ij} =& \delta_{ij}(4F_a^u-2F_a^vD_v^u),\\
+  \pre{^{SCI}}H_{tb}^{iu} =& 0,\\
+  \pre{^{SCI}}H_{tu}^{ij} =& (2D_t^u-4\delta_{tu}) F_i^j\\
                    &+2\delta_{ij}[2F_t^u-(D_{tv}^{uw}-D_t^uD_v^w)F_v^w\\
                    &-D_t^vF_v^u-F_t^vD_v^u],\\
-  {}^{SCI}H_{ab}^{tu} =&2\delta_{ab}(D_{tv}^{uw}-D_t^uD_v^w)F_v^w + 2D_t^uF_a^b.
+  \pre{^{SCI}}H_{ab}^{tu} =&2\delta_{ab}(D_{tv}^{uw}-D_t^uD_v^w)F_v^w + 2D_t^uF_a^b.
 \end{aligned}
 \end{equation}
 
 \subsection{Second Order Approximation}
 In general, the second-order Hessian matrix elements are calculated as
 \begin{equation}
-  {}^{SO}H_{rs}^{kl} = (1-\tau_{rk})(1-\tau_{sl})[2G^{kl}_{rs}-\delta_{kl}(A_r^s+A_s^r)],
+  \pre{^{SO}}H_{rs}^{kl} = (1-\perm{rk})(1-\perm{sl})[2G^{kl}_{rs}-\delta_{kl}(A_r^s+A_s^r)],
 \end{equation}
-in which $\tau_{rk}, \tau_{sl}$  is the permutation operator, matrices $\bf{G}$ are
+matrices $\bf{G}$ are defined as
 \begin{equation}
 \begin{aligned}
 G^{ij}_{rs} =& 2[F_r^s\delta_{ij}+L^{ij}_{rs}],\\
 G^{tj}_{rs} =& D_t^vL^{vj}_{rs} = G^{jt}_{sr},\\
-G^{tu}_{rs} =& {}^cF_r^sD_t^u + [v^{sw}_{rv}D_{tv}^{uw}+2v^{vw}_{rs}D_{tu}^{vw}],\\
+G^{tu}_{rs} =& \pre{^c}F_r^sD_t^u + [v^{sw}_{rv}D_{tv}^{uw}+2v^{vw}_{rs}D_{tu}^{vw}],\\
 \end{aligned}
 \end{equation}
 where
@@ -475,17 +491,17 @@ where
 By default, the SO-SCI Hessian matrix \cite{kreplinMCSCF2020} is approximated as below:
 \begin{equation}
 \begin{aligned}
-{}^{SO-SCI}H_{ab}^{ij} =& {}^{SCI}H_{ab}^{ij},\\
-{}^{SO-SCI}H_{ab}^{iu} =& {}^{SCI}H_{ab}^{iu},\\
-{}^{SO-SCI}H_{au}^{ij} =& {}^{SCI}H_{au}^{ij},\\
-{}^{SO-SCI}H_{tb}^{iu} =& {}^{SO}H_{tb}^{iu},\\
-{}^{SO-SCI}H_{tu}^{ij} =& {}^{SO}H_{tu}^{ij},\\
-{}^{SO-SCI}H_{ab}^{tu} =& {}^{SO}H_{ab}^{tu}.\\
+\pre{^{SO-SCI}}H_{ab}^{ij} =& \pre{^{SCI}}H_{ab}^{ij},\\
+\pre{^{SO-SCI}}H_{ab}^{iu} =& \pre{^{SCI}}H_{ab}^{iu},\\
+\pre{^{SO-SCI}}H_{au}^{ij} =& \pre{^{SCI}}H_{au}^{ij},\\
+\pre{^{SO-SCI}}H_{tb}^{iu} =& \pre{^{SO}}H_{tb}^{iu},\\
+\pre{^{SO-SCI}}H_{tu}^{ij} =& \pre{^{SO}}H_{tu}^{ij},\\
+\pre{^{SO-SCI}}H_{ab}^{tu} =& \pre{^{SO}}H_{ab}^{tu}.\\
 \end{aligned}
 \end{equation}
 If the $\bf{SO\_SCI\_origin}$ option is set to be $false$, 
 \begin{equation}
-  {}^{SO-SCI}H_{ab}^{tu} = {}^{SCI}H_{ab}^{tu},
+  \pre{^{SO-SCI}}H_{ab}^{tu} = \pre{^{SCI}}H_{ab}^{tu},
 \end{equation}
 and the rest blocks of Hessian matrix remain the same.
 
