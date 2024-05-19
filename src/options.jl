@@ -203,6 +203,8 @@ Base.@kwdef mutable struct IntOptions
   df::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """
   fcidump::String = ""
+  """`⟨false⟩` use Cartesian subshells instead of Spherical. """
+  cartesian::Bool = false
 end
 
 """ 

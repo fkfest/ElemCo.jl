@@ -6,7 +6,7 @@ using ..ElemCo.AbstractEC
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space
-export substr
+export substr, reshape_buf
 export amdmkl
 
 """
@@ -141,6 +141,29 @@ function subspace_in_space(subspace, space)
 end
 
 """
+    subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
+
+  Return the positions of `subspace` in `space` 
+  (with respect to `space`)
+
+  `subspace` and `space` are ranges of indices 
+  with respect to the full space (e.g., `1:norb`).
+
+  # Examples 
+```julia
+julia> get_subspace_of_space(4:6, 2:7)
+3:5
+```
+"""
+function subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
+  start = subspace.start - space.start + 1
+  stop = subspace.stop - space.start + 1
+  @assert start > 0 && start <= stop <= length(space) "Subspace not contained in space."
+  return start:stop
+end
+
+
+"""
     substr(string::AbstractString, start::Int, len::Int=-1)
 
   Return substring of `string`  starting at `start` spanning `len` characters 
@@ -174,6 +197,28 @@ end
 """
 function substr(string::AbstractString, range::UnitRange{Int})
   return substr(string, range.start, range.stop-range.start+1)
+end
+
+"""
+    reshape_buf(buf::Array, dims...; start=1)
+
+  Reshape (part of) a buffer to given dimensions (without copying),
+  starting at `start`.
+
+  It can be used, e.g., for itermediates in tensor contractions.
+
+# Example
+```julia
+julia> buf = Array{Float64}(undef, 100000)
+julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor
+julia> B = reshape_buf(buf, 10, 10, 10, start=2001) # 10x10x10 tensor starting at 2001
+julia> B = rand(10,10,10)
+julia> C = rand(10,20)
+julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
+```
+"""
+function reshape_buf(buf::Array, dims...; start=1)
+  return reshape(view(buf, 1:prod(dims)), dims)
 end
 
 """

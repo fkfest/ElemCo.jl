@@ -28,6 +28,7 @@ makedocs(
       "Options" => "options.md" 
       ],
     "Internals" => [
+      "basisset.md",
       "bohf.md",
       "cc.md",
       "ccdriver.md",
@@ -42,9 +43,11 @@ makedocs(
       "diis.md",
       "dump.md",
       "dumptools.md",
+      "elements.md",
       "ecinfos.md",
       "ecmethod.md",
       "fockfactory.md",
+      "integrals.md",
       "mio.md",
       "mnpy.md",
       "msystem.md",
