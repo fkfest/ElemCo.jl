@@ -113,9 +113,7 @@ geometry="bohr
      H1     0.000000000    1.489124508    1.033245507
      H2     0.000000000   -1.489124508    1.033245507"
 
-basis = Dict("ao"=>"cc-pVDZ",
-             "jkfit"=>"cc-pvtz-jkfit",
-             "mpfit"=>"cc-pvdz-rifit")
+basis = "vdz"
 @dfhf
 @cc dcsd
 ```
