@@ -2,7 +2,7 @@ module DFHF
 using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
-using ..ElemCo.ECInts
+using ..ElemCo.Integrals
 using ..ElemCo.MSystem
 using ..ElemCo.OrbTools
 using ..ElemCo.DFTools
@@ -33,8 +33,8 @@ function dfhf(EC::ECInfo)
   guess = EC.options.scf.guess
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   if direct
-    bao = generate_basis(EC.system, "ao")
-    bfit = generate_basis(EC.system, "jkfit")
+    bao = generate_basis(EC, "ao")
+    bfit = generate_basis(EC, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC,guess)
@@ -108,8 +108,8 @@ function dfuhf(EC::ECInfo)
   guess = EC.options.scf.guess
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   if direct
-    bao = generate_basis(EC.system, "ao")
-    bfit = generate_basis(EC.system, "jkfit")
+    bao = generate_basis(EC, "ao")
+    bfit = generate_basis(EC, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC,guess)

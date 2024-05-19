@@ -51,13 +51,13 @@ water molecule:
 ```julia
 basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+             "mpfit"=>"cc-pvdz-rifit")
 ```
 
 The basis set dictionary contains three keys: `ao`, `jkfit`, and
-`mp2fit`. The `ao` key contains the basis set for the AO integrals, the
+`mpfit`. The `ao` key contains the basis set for the AO integrals, the
 `jkfit` key contains the basis set for the density fitting integrals in the Hartree-Fock calculations,
-and the `mp2fit` key contains the fitting basis set for the correlated calculations.
+and the `mpfit` key contains the fitting basis set for the correlated calculations.
 
 ## Exported functions and types
 ```@autodocs

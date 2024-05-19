@@ -1,7 +1,7 @@
 # ElemCo.jl <img align="right" src="files/coil.png" height=74> <br/><br/>
 
 Julia implementation of various electron-correlation methods (main focus on coupled cluster methods).
-The integrals are obtained from a FCIDUMP file or calculated using the `GaussianBasis` package.
+The integrals are obtained from a FCIDUMP file or calculated using an interface to [libcint](https://github.com/sunqm/libcint).
 
 ## Capabilities
 
@@ -115,7 +115,7 @@ geometry="bohr
 
 basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+             "mpfit"=>"cc-pvdz-rifit")
 @dfhf
 @cc dcsd
 ```

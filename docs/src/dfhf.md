@@ -20,7 +20,7 @@ geometry="bohr
 
 basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+             "mpfit"=>"cc-pvdz-rifit")
 
 # Compute DF-HF
 @dfhf

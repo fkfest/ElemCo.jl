@@ -7,7 +7,8 @@ module OrbTools
 using LinearAlgebra, TensorOperations
 
 using ..ElemCo.ECInfos
-using ..ElemCo.ECInts
+using ..ElemCo.BasisSets
+using ..ElemCo.Integrals
 using ..ElemCo.MSystem
 using ..ElemCo.TensorTools
 
@@ -35,8 +36,8 @@ function guess_sad(EC::ECInfo)
   # minao = "ano-rcc-mb"
   minao = "ano-r0"
   # minao = "sto-6g"
-  bminao = BasisSet(minao,genxyz(EC.system))
-  bao = generate_basis(EC.system, "ao")
+  bminao = generate_basis(EC, basisset=minao)
+  bao = generate_basis(EC, "ao")
   smin2ao = overlap(bminao,bao)
   smin = overlap(bminao)
   eldist = electron_distribution(EC.system,minao)

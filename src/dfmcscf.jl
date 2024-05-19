@@ -2,7 +2,7 @@ module DFMCSCF
 using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
-using ..ElemCo.ECInts
+using ..ElemCo.Integrals
 using ..ElemCo.MSystem
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools

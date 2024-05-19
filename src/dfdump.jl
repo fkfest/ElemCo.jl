@@ -2,7 +2,8 @@
 module DfDump
 using LinearAlgebra, TensorOperations
 using ..ElemCo.ECInfos
-using ..ElemCo.ECInts
+using ..ElemCo.BasisSets
+using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
 using ..ElemCo.MSystem
 using ..ElemCo.FockFactory
@@ -18,22 +19,22 @@ export dfdump
 
   Generate `int2`, `int1` and `int0` integrals for fcidump using density fitting.
 
-  `mp2fit` basis is used for `int2` integrals, and `jkfit` basis-correction is
+  `mpfit` basis is used for `int2` integrals, and `jkfit` basis-correction is
   used for `int1` and `int0` integrals. 
   `full_spaces` is a dictionary with spaces without frozen orbitals.
 """
 function generate_integrals(EC::ECInfo, fdump::FDump, cMO, full_spaces)
   @assert !fdump.uhf "Use generate_integrals(EC, fdump, cMOa, cMOb, full_spaces) for UHF"
-  bao = generate_basis(EC.system, "ao")
-  bfit = generate_basis(EC.system, "mp2fit")
-  jkfit = generate_basis(EC.system, "jkfit")
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, "mpfit")
+  jkfit = generate_basis(EC, "jkfit")
   core_orbs = setdiff(full_spaces['o'], EC.space['o'])
   wocore = setdiff(1:size(cMO,2), core_orbs)
 
-  PQ = ERI_2e2c(bfit)
+  PQ = eri_2e2idx(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   PQ = nothing
-  μνP = ERI_2e3c(bao,bfit)
+  μνP = eri_2e3idx(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
   μνP = nothing
   M = nothing
@@ -84,24 +85,24 @@ end
 
   Generate `int2aa`, `int2bb`, `int2ab`, `int1a`, `int1b` and `int0` integrals for fcidump using density fitting.
 
-  `mp2fit` basis is used for `int2` integrals, and `jkfit` basis-correction is
+  `mpfit` basis is used for `int2` integrals, and `jkfit` basis-correction is
   used for `int1` and `int0` integrals. 
   `full_spaces` is a dictionary with spaces without frozen orbitals.
 """
 function generate_integrals(EC::ECInfo, fdump::FDump, cMOa, cMOb, full_spaces)
   @assert fdump.uhf "Use generate_integrals(EC, fdump, cMO, full_spaces) for RHF"
   @assert size(cMOa) == size(cMOb) "cMOa and cMOb must have the same size"
-  bao = generate_basis(EC.system, "ao")
-  bfit = generate_basis(EC.system, "mp2fit")
-  jkfit = generate_basis(EC.system, "jkfit")
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, "mpfit")
+  jkfit = generate_basis(EC, "jkfit")
   core_orbs = setdiff(full_spaces['o'], EC.space['o'])
   @assert core_orbs == setdiff(full_spaces['O'], EC.space['O']) "Core space must be the same for α and β orbitals"
   wocore = setdiff(1:size(cMOa,2), core_orbs)
 
-  PQ = ERI_2e2c(bfit)
+  PQ = eri_2e2idx(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   PQ = nothing
-  μνP = ERI_2e3c(bao,bfit)
+  μνP = eri_2e3idx(bao,bfit)
   @tensoropt μνL[p,q,L] := μνP[p,q,P] * M[P,L]
   μνP = nothing
   M = nothing

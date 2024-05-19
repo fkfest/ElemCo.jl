@@ -11,8 +11,10 @@ include("constants.jl")
 include("myio.jl")
 include("mnpy.jl")
 include("dump.jl")
-include("integrals.jl")
-include("msystem.jl")
+include("system/elements.jl")
+include("system/msystem.jl")
+include("system/basisset.jl")
+include("system/integrals.jl")
 
 include("ecinfos.jl")
 include("ecmethods.jl")
@@ -58,6 +60,7 @@ using .FciDump
 using .DumpTools
 using .OrbTools
 using .MSystem
+using .BasisSets
 using .BOHF
 using .DFHF
 using .DFMCSCF
@@ -136,14 +139,17 @@ macro mainname(file)
 end
 
 """
-    @print_input()
+    @print_input(print_init=false)
 
   Print the input file content. 
 
   Can be used to print the input file content to the output.
 """
-macro print_input()
+macro print_input(print_init=false)
   return quote
+    if $(esc(print_init))
+      __init__()
+    end
     try
       print_info(read($(string(__source__.file)), String))
     catch
@@ -212,7 +218,7 @@ end
   # Examples
 ```julia
 geometry="He 0.0 0.0 0.0"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-rifit")
 @ECinit
 # output
 Occupied orbitals:[1]
@@ -441,7 +447,7 @@ geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-rifit")
 @dfhf
 @dfints
 @cc ccsd
@@ -483,7 +489,7 @@ geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-rifit")
 @dfhf
 @dfcc svd-dcsd
 ```

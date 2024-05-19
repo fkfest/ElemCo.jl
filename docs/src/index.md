@@ -75,7 +75,7 @@ geometry="bohr
 
 basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+             "mpfit"=>"cc-pvdz-rifit")
 
 # Compute DF-HF 
 @dfhf
@@ -85,7 +85,7 @@ basis = Dict("ao"=>"cc-pVDZ",
 @cc ccsd(t)
 ```
 
-This code defines a water molecule, computes DF-HF using the cc-pVDZ basis set, calculates integrals using density fitting (mp2fit basis) and computes CCSD(T) energy.
+This code defines a water molecule, computes DF-HF using the cc-pVDZ basis set, calculates integrals using density fitting (`mpfit` basis) and computes CCSD(T) energy.
 
 ### Setting options
 
