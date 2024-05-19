@@ -281,16 +281,24 @@ end
     coefficients_1mat(ashell::AbstractAngularShell)
 
   Return a single contraction matrix of the coefficients in the angular shell 
-  (nprimitives × nsubshells).
+  (nprimitives × nsubshells). The contractions are normalized.
 
   The missing coefficients are set to zero in the matrix.
 """
-function coefficients_1mat(ashell::AbstractAngularShell)
-  nprim = n_primitives(ashell)
-  nsub = n_subshells(ashell)
-  coefs = zeros(nprim, nsub)
+function coefficients_1mat end
+
+function coefficients_1mat(ashell::CartesianAngularShell)
+  coefs = zeros(n_primitives(ashell), n_subshells(ashell))
   for (i, subshell) in enumerate(ashell.subshells)
-    coefs[subshell.exprange, i] .= subshell.coefs
+    coefs[subshell.exprange, i] .= normalize_cartesian_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
+  end
+  return coefs
+end
+
+function coefficients_1mat(ashell::SphericalAngularShell)
+  coefs = zeros(n_primitives(ashell), n_subshells(ashell))
+  for (i, subshell) in enumerate(ashell.subshells)
+    coefs[subshell.exprange, i] .= normalize_spherical_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
   end
   return coefs
 end
@@ -349,30 +357,12 @@ function generate_angularshell(elem, l, exponents; cartesian=false)
 end
 
 """
-    add_subshell!(ashell::AbstractAngularShell, exprange, contraction; normalize=true)
+    add_subshell!(ashell::AbstractAngularShell, exprange, contraction)
 
   Add a subshell to the angular shell.
 """
-function add_subshell!(ashell::AbstractAngularShell, exprange, contraction; normalize=true)
-  error("add_subshell! not implemented for $(typeof(ashell))")
-end
-
-function add_subshell!(ashell::SphericalAngularShell, exprange, contraction; normalize=true)
-  if normalize
-    contra = normalize_spherical_contraction(contraction, ashell.exponents[exprange], ashell.l)
-  else
-    contra = contraction
-  end
-  push!(ashell.subshells, BasisContraction(exprange, SVector{length(contra)}(contra)))
-end
-
-function add_subshell!(ashell::CartesianAngularShell, exprange, contraction; normalize=true)
-  if normalize
-    contra = normalize_cartesian_contraction(contraction, ashell.exponents[exprange], ashell.l)
-  else
-    contra = contraction
-  end
-  push!(ashell.subshells, BasisContraction(exprange, SVector{length(contra)}(contra)))
+function add_subshell!(ashell::AbstractAngularShell, exprange, contraction)
+  push!(ashell.subshells, BasisContraction(exprange, SVector{length(contraction)}(contraction)))
 end
 
 function set_id!(ashell::AbstractAngularShell, id)
