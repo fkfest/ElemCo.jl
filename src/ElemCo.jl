@@ -59,6 +59,7 @@ using .DFCoupledCluster
 using .FciDump
 using .DumpTools
 using .OrbTools
+using .Elements
 using .MSystem
 using .BasisSets
 using .BOHF
@@ -218,7 +219,7 @@ end
   # Examples
 ```julia
 geometry="He 0.0 0.0 0.0"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @ECinit
 # output
 Occupied orbitals:[1]
@@ -447,7 +448,7 @@ geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
 @dfints
 @cc ccsd
@@ -489,7 +490,7 @@ geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
 @dfcc svd-dcsd
 ```

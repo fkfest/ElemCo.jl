@@ -1,12 +1,15 @@
 # 2-electron 3-index integrals
 # adapted from GaussianBasis.jl
 
-const INTEGRAL_NAMES_2E3IDX = (("eri_2e3idx","_"),)
+const INTEGRAL_NAMES_2E3IDX = (
+  ("eri_2e3idx", "_", "two-electron three-index electron-repulsion"),
+                              )
 
 # automatically generate functions for the 2-electron 3-index integrals
-for (jname_str, type) in INTEGRAL_NAMES_2E3IDX
+for (jname_str, type, descr_str) in INTEGRAL_NAMES_2E3IDX
   jname = Symbol(jname_str)
   jname_ex = Symbol(jname_str*"!")
+  descr = Symbol(descr_str)
   for (TAS, suffix) in ((SphericalAngularShell, "sph"), (CartesianAngularShell, "cart"))
     jname_sfx = Symbol(jname_str*"_$(suffix)")
     jname_sfx_ex = Symbol(jname_str*"_$(suffix)!")
@@ -14,21 +17,21 @@ for (jname_str, type) in INTEGRAL_NAMES_2E3IDX
     docstr = """
           $jname(ash1ao::$TAS, ash2ao::$TAS, ashfit::$TAS, basis::BasisSet)
 
-        Compute the $jname_str integral ``v_1^{2 P}`` for given angular shells.
-        `basis` has to contain ao and fit basis.
+        Compute the $descr integral ``v_{a_1}^{a_2 P}`` for given angular shells.
+        `basis` has to contain ao and fit bases.
       """
     docstr_ex = """
           $jname_ex(out, ash1ao::$TAS, ash2ao::$TAS, ashfit::$TAS, basis::BasisSet)
 
-        Compute the $jname_str integral ``v_1^{2 P}`` for given angular shells.
-        `basis` has to contain ao and fit basis.
+        Compute the $descr integral ``v_{a_1}^{a_2 P}`` for given angular shells.
+        `basis` has to contain ao and fit bases.
         The result is stored in `out`. 
       """
     docstr_sfx_ex = """
           $jname_sfx_ex(out, i::Int, j::Int, P::Int, basis::BasisSet)
 
-        Compute the $jname_str integral ``v_i^{j P}`` for given angular shells.
-        `basis` has to contain ao and fit basis.
+        Compute the $descr integral ``v_i^{j P}`` for given angular shells.
+        `basis` has to contain ao and fit bases.
         The result is stored in `out`. 
       """
     @eval begin
@@ -55,12 +58,12 @@ for (jname_str, type) in INTEGRAL_NAMES_2E3IDX
   docstr = """
         $jname(ao_basis::BasisSet, fit_basis::BasisSet)
 
-      Compute the $jname_str integral.
+      Compute the $descr integral.
     """
   docstr_ex = """
         $jname_ex(out, ao_basis::BasisSet, fit_basis::BasisSet)
 
-      Compute the $jname_str integral.
+      Compute the $descr integral.
       The result is stored in `out`. 
     """
   @eval begin

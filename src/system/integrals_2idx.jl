@@ -1,15 +1,18 @@
 # 2-index integrals (1-electron and 2-electron)
 # adapted from GaussianBasis.jl
 
-const INTEGRAL_NAMES_2IDX = ( ("overlap","1e_ovlp"), 
-                            ("kinetic","1e_kin"), 
-                            ("nuclear","1e_nuc"),
-                            ("eri_2e2idx", "2c2e") )
+const INTEGRAL_NAMES_2IDX = ( 
+  ("overlap", "1e_ovlp", "overlap"),
+  ("kinetic", "1e_kin", "kinetic"),
+  ("nuclear", "1e_nuc", "nuclear"),
+  ("eri_2e2idx", "2c2e", "two-electron 2-index electron-repulsion") 
+                            )
 
 # automatically generate functions for the 1-electron integrals
-for (jname_str, type) in INTEGRAL_NAMES_2IDX
+for (jname_str, type, descr_str) in INTEGRAL_NAMES_2IDX
   jname = Symbol(jname_str)
   jname_ex = Symbol(jname_str*"!")
+  descr = Symbol(descr_str)
   for (TAS, suffix) in ((SphericalAngularShell, "sph"), (CartesianAngularShell, "cart"))
     jname_sfx = Symbol(jname_str*"_$(suffix)")
     jname_sfx_ex = Symbol(jname_str*"_$(suffix)!")
@@ -17,18 +20,18 @@ for (jname_str, type) in INTEGRAL_NAMES_2IDX
     docstr = """
           $jname(ash1::$TAS, ash2::$TAS, basis::BasisSet)
 
-        Compute the $jname_str integral between two angular shells.
+        Compute the $descr integral between two angular shells.
       """
     docstr_ex = """
           $jname_ex(out, ash1::$TAS, ash2::$TAS, basis::BasisSet)
 
-        Compute the $jname_str integral between two angular shells.
+        Compute the $descr integral between two angular shells.
         The result is stored in `out`. 
       """
     docstr_sfx_ex = """
           $jname_sfx_ex(out, i::Int, j::Int, basis::BasisSet)
 
-        Compute the $jname_str integral between two angular shells.
+        Compute the $descr integral between two angular shells.
         The result is stored in `out`. 
       """
     @eval begin
@@ -55,12 +58,12 @@ for (jname_str, type) in INTEGRAL_NAMES_2IDX
   docstr = """
         $jname(basis::BasisSet)
 
-      Compute the $jname_str integral matrix.
+      Compute the $descr integral matrix.
     """
   docstr_ex = """
         $jname_ex(out, basis::BasisSet)
 
-      Compute the $jname_str integral matrix.
+      Compute the $descr integral matrix.
       The result is stored in `out`. 
     """
   @eval begin

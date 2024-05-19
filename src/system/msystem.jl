@@ -362,7 +362,7 @@ end
 
   Guess the number of core orbitals in the system.
 
-  `coretype` as in [`ncoreorbs`](@ref).
+  `coretype` as in [`Elements.ncoreorbs`](@ref Elements.ncoreorbs).
 """
 function guess_ncore(ms::AbstractSystem, coretype::Symbol=:large)
   return sum([ncoreorbs(element_SYMBOL(at),coretype) for at in ms if !is_dummy(at)])

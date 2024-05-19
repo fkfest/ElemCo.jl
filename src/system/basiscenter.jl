@@ -24,19 +24,53 @@ end
 """
 abstract type AbstractAngularShell end
 
+"""
+    SphericalAngularShell
+
+  Type for spherical angular shells, i.e, subshells with the same angular momentum.
+  For general contracted basis sets, the angular shell is a collection of all subshells 
+  with the same l quantum number. 
+  For some other basis sets (e.g., the def2-family), the angular shell can be a
+  single subshell with a specific l quantum number.
+  `id` is the index of the angular shell in the basis set.
+
+  $(TYPEDFIELDS)
+"""
 mutable struct SphericalAngularShell{N, T} <: AbstractAngularShell
+  """ element symbol (e.g., "H")"""
   element::String
+  """ angular momentum"""
   l::Int
+  """ array of exponents"""
   exponents::SVector{N, T}
+  """ array of subshells (contractions)"""
   subshells::Vector{BasisContraction}
+  """ index of the angular shell in the basis set"""
   id::Int
 end
 
+"""
+    CartesianAngularShell
+
+  Type for cartesian angular shells, i.e, subshells with the same angular momentum.
+  For general contracted basis sets, the angular shell is a collection of all subshells 
+  with the same l quantum number. 
+  For some other basis sets (e.g., the def2-family), the angular shell can be a
+  single subshell with a specific l quantum number.
+  `id` is the index of the angular shell in the basis set.
+
+  $(TYPEDFIELDS)
+"""
 mutable struct CartesianAngularShell{N, T} <: AbstractAngularShell
+  """ element symbol (e.g., "H")"""
   element::String
+  """ angular momentum"""
   l::Int
+  """ array of exponents"""
   exponents::SVector{N, T}
+  """ array of subshells (contractions)"""
   subshells::Vector{BasisContraction}
+  """ index of the angular shell in the basis set"""
   id::Int
 end
 

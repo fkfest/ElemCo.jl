@@ -3,9 +3,8 @@
 
   Module for working with basis sets.
 
-  The basis set is stored in the `:basisfunctions` field of each atom in `::AbstractSystem`.
+  The basis set is stored in the [`BasisSet`](@ref) instance.
   The basis set can be generated using the [`generate_basis`](@ref) function.
-  The auxiliary information for integral calculations is stored in the `:ILib` field of `::AbstractSystem`.
 """
 module BasisSets
 using Unitful, UnitfulAtomic
