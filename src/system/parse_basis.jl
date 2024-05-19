@@ -63,7 +63,7 @@ function full_basis_name(basis_name::AbstractString)
   end
   if occursin(r"^[a]?w?c?v[dtq5-9]z", basis_name)
     # expand [a][wc/c]vNz* basis names
-    basis_name = basis_name[1] == 'a' ? "aug-cc-p$basis_name" : "cc-p$basis_name"
+    basis_name = basis_name[1] == 'a' ? "aug-cc-p$(basis_name[2:end])" : "cc-p$basis_name"
   elseif occursin(r"^[dtq]zvp", basis_name)
     # expand def2 basis names
     basis_name = "def2-$basis_name"
@@ -144,6 +144,19 @@ c, 4.4, 1.0000000
 p, H , 0.7270000
 c, 1.1, 1.0000000
 ```
+
+  For generally-contracted basis sets (like the one above), one angular shell
+  is created for each angular momentum type `s,p,d,f,g,h` with the corresponding
+  exponents and contraction coefficients. For other basis sets, like the def2-SVP,
+  each contraction is a separate angular shell:
+```
+! hydrogen             (4s,1p) -> [2s,1p]
+s, H , 13.0107010, 1.9622572, 0.44453796, 0.12194962
+c, 1.3, 0.19682158E-01, 0.13796524, 0.47831935
+c, 4.4, 1.0000000
+p, H , 0.8000000
+c, 1.1, 1.0000000
+```
 """
 function parse_basis_block(basisblock::AbstractString, atom::Atom; cartesian=false)
   elem = element_SYMBOL(atom)
@@ -180,7 +193,12 @@ function parse_basis_block(basisblock::AbstractString, atom::Atom; cartesian=fal
       end
     end
   end
-  return ashells
+  # split angular shells if necessary
+  ashells_split = AbstractAngularShell[]
+  for ashell in ashells
+    append!(ashells_split, split_angular_shell(ashell; cartesian))
+  end
+  return ashells_split
 end
 
 """
@@ -226,4 +244,38 @@ function parse_contraction(conline::AbstractString)
     error("Number of contraction coefficients does not match the number of exponents in the range!")
   end
   return exprange, contraction
+end
+
+"""
+    split_angular_shell(ashell::AbstractAngularShell; cartesian=false)
+
+  If the ranges of exponents do not overlap, split the angular shell
+  into separate angular shells for each subshell.
+  The shells are kept together only if one is a subset of the other.
+"""
+function split_angular_shell(ashell::AbstractAngularShell; cartesian=false)
+  ers = [sh.exprange for sh in ashell.subshells]
+  # intersection matrix for ranges of exponents (true if one is a subset of the other)
+  imat = [length(intersect(r1, r2)) == min(length(r1),length(r2)) for r1 in ers, r2 in ers]
+  # find ranges of block-diagonal blocks in the intersection matrix
+  blocks = UnitRange[]
+  start = 1
+  for i in 1:length(ers)
+    if !any(imat[start:i,i+1:end])
+      push!(blocks, start:i)
+      start = i+1
+    end
+  end
+  # split the angular shell
+  ashells = AbstractAngularShell[]
+  for block in blocks
+    # total exponent range for this block
+    totexprange = minimum(ers[block]).start:maximum(ers[block]).stop
+    push!(ashells, generate_angularshell(ashell.element, ashell.l, ashell.exponents[totexprange]; cartesian))
+    for i in block
+      exprange = subspace_in_space(ashell.subshells[i].exprange, totexprange)
+      add_subshell!(last(ashells), exprange, ashell.subshells[i].coefs)
+    end
+  end
+  return ashells
 end

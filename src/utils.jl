@@ -141,6 +141,29 @@ function subspace_in_space(subspace, space)
 end
 
 """
+    subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
+
+  Return the positions of `subspace` in `space` 
+  (with respect to `space`)
+
+  `subspace` and `space` are ranges of indices 
+  with respect to the full space (e.g., `1:norb`).
+
+  # Examples 
+```julia
+julia> get_subspace_of_space(4:6, 2:7)
+3:5
+```
+"""
+function subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
+  start = subspace.start - space.start + 1
+  stop = subspace.stop - space.start + 1
+  @assert start > 0 && start <= stop <= length(space) "Subspace not contained in space."
+  return start:stop
+end
+
+
+"""
     substr(string::AbstractString, start::Int, len::Int=-1)
 
   Return substring of `string`  starting at `start` spanning `len` characters 

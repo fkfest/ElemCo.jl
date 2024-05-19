@@ -12,6 +12,7 @@ using AtomsBase
 using StaticArrays
 using Printf
 using DocStringExtensions
+using ..ElemCo.Utils
 using ..ElemCo.Elements
 using ..ElemCo.MSystem
 using ..ElemCo.AbstractEC
