@@ -28,6 +28,7 @@ include("decomptools.jl")
 include("cctools.jl")
 include("dfcc.jl")
 include("cc.jl")
+include("dmrg.jl")
 include("ccdriver.jl")
 
 include("bohf.jl")
@@ -66,6 +67,7 @@ using .BOHF
 using .DFHF
 using .DFMCSCF
 using .DfDump
+using .DMRG
 
 
 export @mainname, @print_input

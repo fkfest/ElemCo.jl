@@ -12,6 +12,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.DFTools
 using ..ElemCo.CCTools
 using ..ElemCo.CoupledCluster
+using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDump
 using ..ElemCo.OrbTools
@@ -48,7 +49,11 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     energies = eval_mp2_energy(EC, energies, closed_shell_method, has_prefix(ecmethod, "R"))
   end
 
-  if ecmethod.theory != "MP"
+  if ecmethod.theory == "MP"
+    # do nothing
+  elseif ecmethod.theory == "DMRG"
+    energies = eval_dmrg_groundstate(EC, energies)
+  else
     energies = eval_cc_groundstate(EC, ecmethod, energies)
   end
 
@@ -205,22 +210,36 @@ function output_energy(EC::ECInfo, En::NamedTuple, energies::NamedTuple, mname; 
     end
     energies = (; energies..., Symbol(meth*"correction")=>En.Ecorrection) 
   end
-  energies = (; energies..., Symbol(meth*"SS")=>En.ESS, Symbol(meth*"OS")=>En.EOS, Symbol(meth*"O")=>En.EO) 
-  methodroot = replace(method_name(ECMethod(mname), root=true), "-" => "_")
-  # calc SCS energy (if available)
-  if hasfield(ECInfos.CcOptions, Symbol(lowercase(methodroot)*"_ssfac"))
-    # get SCS factors (e.g., mp2_ssfac, ccsd_ssfac, dcsd_ssfac)
-    ssfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ssfac"))
-    osfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_osfac"))
-    ofac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ofac"))
-    ΔE = En.E - En.ESS - En.EOS
-    enescs = energies.HF + ΔE + En.ESS*ssfac + En.EOS*osfac + En.EO*ofac
+  if haskey(En, :Expect)
+    enecor = En.Expect
+    enetot = En.Expect+energies.HF
     if print
-      @printf "SCS-%s total energy: \t%16.12f \n" mname enescs
+      @printf "%s correlation expectation energy: \t%16.12f \n" mname enecor
+      @printf "%s total expectation energy:       \t%16.12f \n" mname enetot
       println()
       flush(stdout)
     end
-    energies = (; energies..., Symbol("SCS"*meth)=>enescs)
+    energies = (; energies..., Symbol(meth*"expect")=>En.Expect) 
+  end
+  if haskey(En, :ESS) && haskey(En, :EOS) && haskey(En, :EO)
+    # SCS
+    energies = (; energies..., Symbol(meth*"SS")=>En.ESS, Symbol(meth*"OS")=>En.EOS, Symbol(meth*"O")=>En.EO) 
+    methodroot = replace(method_name(ECMethod(mname), root=true), "-" => "_")
+    # calc SCS energy (if available)
+    if hasfield(ECInfos.CcOptions, Symbol(lowercase(methodroot)*"_ssfac"))
+      # get SCS factors (e.g., mp2_ssfac, ccsd_ssfac, dcsd_ssfac)
+      ssfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ssfac"))
+      osfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_osfac"))
+      ofac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ofac"))
+      ΔE = En.E - En.ESS - En.EOS
+      enescs = energies.HF + ΔE + En.ESS*ssfac + En.EOS*osfac + En.EO*ofac
+      if print
+        @printf "SCS-%s total energy: \t%16.12f \n" mname enescs
+        println()
+        flush(stdout)
+      end
+      energies = (; energies..., Symbol("SCS"*meth)=>enescs)
+    end
   end
   return (; energies..., Symbol(meth*"c")=>enecor, Symbol(meth)=>enetot)
 end
@@ -397,6 +416,22 @@ function eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTu
     error("Only SVD DF methods implemented!")
   end
   t1 = print_time(EC, t1,"CC",1)
+  return energies
+end
+
+"""
+    eval_dmrg_groundstate(EC::ECInfo, energies::NamedTuple)
+
+  Evaluate the DMRG ground-state energy for the integrals in `EC.fd`.
+  HF energy must be calculated before.
+  Return the updated `energies::NamedTuple` with the correlation energy (`"DMRGc"`) and 
+  the total energy (field `DMRG`).
+"""
+function eval_dmrg_groundstate(EC::ECInfo, energies::NamedTuple)
+  t1 = time_ns()
+  ECC = calc_dmrg(EC)
+  energies = output_energy(EC, ECC, energies, "DMRG")
+  t1 = print_time(EC, t1,"DMRG",1)
   return energies
 end
 

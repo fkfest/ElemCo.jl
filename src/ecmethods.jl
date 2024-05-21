@@ -68,6 +68,9 @@ mutable struct ECMethod
       theory = "MP"
       ipos += 2
       pure_PT = true
+    elseif substr(Mname, ipos, 4) == "DMRG"
+      theory = "DMRG"
+      ipos += 4
     else
       error("Theory not recognized in "*mname*": "*substr(Mname,ipos,2))
     end
