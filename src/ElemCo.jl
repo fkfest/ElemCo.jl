@@ -67,6 +67,7 @@ using .BOHF
 using .DFHF
 using .DFMCSCF
 using .DfDump
+using .DMRG
 
 
 export @mainname, @print_input
