@@ -193,6 +193,22 @@ Base.@kwdef mutable struct CcOptions
   dcsd_ofac::Float64 = 0.15
 end
 
+""" 
+  Options for DMRG calculation.
+
+  $(TYPEDFIELDS)
+"""
+Base.@kwdef mutable struct DmrgOptions
+  """`⟨10⟩` number of sweeps. """
+  nsweeps::Int = 10
+  """`⟨[100, 200]⟩` maximum size for the bond dimension. """
+  maxdim::Vector{Int} = [100, 200]
+  """`⟨1e-6⟩` cutoff for the singular value decomposition. """
+  cutoff::Float64 = 1e-6
+  """`⟨[1e-6, 1e-7, 1e-8, 0.0]⟩` strength of the noise term used to aid convergence. """
+  noise::Vector{Float64} = [1e-6, 1e-7, 1e-8, 0.0]
+end
+
 """
   Options for integral calculation.
 
@@ -250,6 +266,8 @@ Base.@kwdef mutable struct Options
   int::IntOptions = IntOptions()
   """ Coupled-Cluster options ([`CcOptions`](@ref)). """
   cc::CcOptions = CcOptions()
+  """ DMRG options ([`DmrgOptions`](@ref)). """
+  dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """
   cholesky::CholeskyOptions = CholeskyOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
