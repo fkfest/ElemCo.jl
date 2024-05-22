@@ -12,8 +12,11 @@ using ..ElemCo.BasisSets
 
 export CINTcgtos_spheric, CINTcgtos_cart
 export cint1e_kin_sph!, cint1e_nuc_sph!, cint1e_ovlp_sph!, cint2c2e_sph!, cint2e_sph!, cint3c2e_sph!
+export cint1e_kin_cart!, cint1e_nuc_cart!, cint1e_ovlp_cart!, cint2c2e_cart!, cint2e_cart!, cint3c2e_cart!
 export cint1e_ipkin_sph!, cint1e_ipnuc_sph!, cint1e_ipovlp_sph!, cint2e_ip1_sph!, cint1e_r_sph!
+export cint1e_ipkin_cart!, cint1e_ipnuc_cart!, cint1e_ipovlp_cart!, cint2e_ip1_cart!, cint1e_r_cart!
 export cint1e_r_sph!, cint1e_rr_sph!, cint1e_rrr_sph!, cint1e_rrrr_sph!
+export cint1e_r_cart!, cint1e_rr_cart!, cint1e_rrr_cart!, cint1e_rrrr_cart!
 
 using libcint_jll
 
