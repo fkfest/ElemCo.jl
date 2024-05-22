@@ -82,8 +82,8 @@ end
   $(TYPEDFIELDS)
 """
 struct BasisCenter
-  """ element symbol (e.g., "H")"""
-  element::String
+  """ basis center name (e.g., "H1")"""
+  name::String
   """ atomic position in Bohr (3D vector)"""
   position::SVector{3, Float64}
   """ atomic number"""
@@ -95,7 +95,7 @@ struct BasisCenter
 end
 
 function BasisCenter(atom::Atom, basis="", basisfunctions=[])
-  return BasisCenter(element_SYMBOL(atom), uconvert.(u"bohr", atom.position)/u"bohr", 
+  return BasisCenter(string(atomic_symbol(atom)), uconvert.(u"bohr", atom.position)/u"bohr", 
                     atom.atomic_number, basis, basisfunctions)
 end
 
@@ -168,7 +168,7 @@ function Base.show(io::IO, ashs::Vector{<:AbstractAngularShell})
 end
 
 function Base.show(io::IO, bc::BasisCenter)
-  println(io, "! ", bc.element, " (", bc.atomic_number, ") ", bc.basis, " at ", bc.position)
+  println(io, "! ", bc.name, " (", bc.atomic_number, ") ", bc.basis, " at ", bc.position)
   for shell in bc.shells
     println(io, shell)
   end
@@ -303,8 +303,8 @@ function coefficients_1mat(ashell::SphericalAngularShell)
   return coefs
 end
 
-# DOUBLEFACTORIAL[l+1] = (2l-1)!! = 1*3*5*...*(2l-1) for s, p, d, f, g, h, i, k, l, m
-const DOUBLEFACTORIAL = [1, 1, 3, 15, 105, 945, 10395, 135135, 2027025, 34459425]
+# DOUBLEFACTORIAL[l+1] = (2l+1)!! = 1*3*5*...*(2l+1) for s, p, d, f, g, h, i, k, l
+const DOUBLEFACTORIAL = [1, 3, 15, 105, 945, 10395, 135135, 2027025, 34459425]
 
 """
     normalize_spherical_contraction(contraction, exponents, l)
@@ -314,9 +314,22 @@ const DOUBLEFACTORIAL = [1, 1, 3, 15, 105, 945, 10395, 135135, 2027025, 34459425
   Return the normalized contraction.
 """
 function normalize_spherical_contraction(contraction, exponents, l)
-  ff = factorial(l+1) / factorial(2*l+2)
-  return map((c,e) -> c * sqrt(sqrt((8*e)^(2*l+3)/π) * ff), contraction, exponents)
+  contra = map((c,e) -> c * e^((2l+3)/4), contraction, exponents)
+  norm = 0.0
+  for i in eachindex(contra)
+    ci, ei = contra[i], exponents[i]
+    for j in eachindex(contra)
+      cj, ej = contra[j], exponents[j]
+      norm += ci*cj/sqrt((ei+ej)^(2l+3))
+    end
+  end
+  norm *= sqrt(π) * DOUBLEFACTORIAL[l+1]/2^(l+2)
+  return contra/sqrt(norm)
 end
+# function normalize_spherical_contraction(contraction, exponents, l)
+#   ff = factorial(l+1) / factorial(2*l+2)
+#   return map((c,e) -> c * sqrt(sqrt((8*e)^(2*l+3)/π) * ff), contraction, exponents)
+# end
 
 """
     normalize_cartesian_contraction(contraction, exponents, l)
@@ -326,18 +339,21 @@ end
   Return the normalized contraction.
 """
 function normalize_cartesian_contraction(contraction, exponents, l)
-  contra = map((c,e) -> c * sqrt((2*e)^(l+1.5)), contraction, exponents)
+  contra = map((c,e) -> c * e^((2l+3)/4), contraction, exponents)
   norm = 0.0
   for i in eachindex(contra)
     ci, ei = contra[i], exponents[i]
     for j in eachindex(contra)
       cj, ej = contra[j], exponents[j]
-      norm += ci*cj/(ei+ej)^(l+1.5)
+      norm += ci*cj/sqrt((ei+ej)^(2l+3))
     end
   end
-  norm *= (π^1.5) * DOUBLEFACTORIAL[l+1]/2^l
-  contra .*= 1/sqrt(norm)
-  return contra
+  if l < 2
+    norm *= sqrt(π) * DOUBLEFACTORIAL[l+1]/2^(l+2) 
+  else
+    norm *= π^(3/2) * DOUBLEFACTORIAL[l]/2^l 
+  end
+  return contra/sqrt(norm)
 end
 
 """
