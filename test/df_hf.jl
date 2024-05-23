@@ -9,9 +9,7 @@ ESVDDCSD_test =   -0.220331906783324 + EHF_test
 ESVDDCSD_ft_test =-0.219961375476643 + EHF_test
 EUHF_test  =      -75.79199546193901
 
-orbital_printout_test = "4:5 orbitals from DFHF orbitals
-4: -0.788(O[1]1p{z}) -0.353(H2[3]1s) -0.353(H1[2]1s)  0.290(O[1]2s)  0.170(O[1]3s) 
-5: -0.922(O[1]1p{x}) \n"
+orbital_printout_test = "4:5 orbitals from DFHF orbitals\n4:  0.788(O[1]1p{z})  0.353(H1[2]1s)  0.353(H2[3]1s) -0.290(O[1]2s) -0.170(O[1]3s) \n5:  0.922(O[1]1p{x}) \n"
 
 xyz="bohr
      O      0.000000000    0.000000000   -0.130186067

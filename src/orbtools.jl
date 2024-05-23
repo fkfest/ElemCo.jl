@@ -15,7 +15,7 @@ using ..ElemCo.TensorTools
 
 export guess_orb, load_orbitals, orbital_energies, is_unrestricted_MO
 export show_orbitals
-export rotate_orbs, rotate_orbs!
+export rotate_orbs, rotate_orbs!, normalize_phase!
 
 """
     guess_hcore(EC::ECInfo)
@@ -215,8 +215,8 @@ function show_orbitals(EC::ECInfo, cMO::AbstractArray, basis::BasisSet, range=1:
   for imo in range
     @assert imo in 1:size(cMO,2) "Wrong range of orbitals: $(range). Number of orbitals: $(nmo)"
     print("$imo: ")
-    # get nlargest coefficients
-    idx = argmaxN(cMO[:,imo], nlargest, by=abs)
+    # get nlargest coefficients (round to 4 digits to avoid numerical noise)
+    idx = argmaxN(cMO[:,imo], nlargest, by=x->round(abs(x),digits=4))
     for iao in idx
       if abs(cMO[iao,imo]) < thr
         continue
@@ -227,6 +227,23 @@ function show_orbitals(EC::ECInfo, cMO::AbstractArray, basis::BasisSet, range=1:
       print(") ")
     end
     println()
+  end
+end
+
+"""
+    normalize_phase!(cMO)
+
+  Normalize the phase of the MO coefficients in `cMO`.
+
+  The phase is chosen such that the first largest coefficient is positive.
+"""
+function normalize_phase!(cMO)
+  nmo = size(cMO,2)
+  for imo in 1:nmo
+    maxao = argmaxN(cMO[:,imo], 1, by=x->round(abs(x),digits=4))[1]
+    if cMO[maxao,imo] < 0
+      cMO[:,imo] .= -cMO[:,imo]
+    end
   end
 end
 

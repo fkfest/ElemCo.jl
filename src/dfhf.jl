@@ -80,6 +80,7 @@ function dfhf(EC::ECInfo)
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
   end
+  normalize_phase!(cMO)
   println("DF-HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
@@ -162,6 +163,9 @@ function dfuhf(EC::ECInfo)
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
+  end
+  for ispin = 1:2
+    normalize_phase!(cMO[ispin])
   end
   println("DF-UHF energy: ", EHF)
   draw_endline()

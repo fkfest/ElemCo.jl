@@ -226,21 +226,27 @@ end
 
   Return the indices of the `N` largest elements in `vals`.
 
+  The order of equal elements is preserved.
   The keyword argument `by` can be used to specify a function to compare the elements, i.e.,
   the function is applied to the elements before comparison.
 
   # Example
   ```julia
   julia> argmaxN([1,2,3,4,5,6,7,8,9,10], 3)
-  3-element Array{Int64,1}:
+  3-element Vector{Int64}:
    10
     9
     8
   julia> argmaxN([1,2,3,4,5,-6,-7,-8,-9,-10], 3; by=abs)
-  3-element Array{Int64,1}:
+  3-element Vector{Int64}:
    10
     9
     8
+  julia> argmaxN([1.0, 1.10, 1.112, -1.113, 1.09], 3; by=x->round(abs(x),digits=2))
+  3-element Vector{Int64}:
+   3
+   4
+   2
   ```
 """
 function argmaxN(vals, N; by::Function=identity)
