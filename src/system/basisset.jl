@@ -23,12 +23,14 @@ export shell_range, center_range, is_cartesian, combine
 export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao
 export coefficients_1mat, n_coefficients_1mat
 export basis_name, generate_basis, guess_norb
+export ao_list, print_ao
 
 export ILibcint5
 
 include("basiscenter.jl")  
 include("parse_basis.jl")
 include("intlibs.jl")
+include("aos.jl")
 
 """
     BasisSet
@@ -241,6 +243,54 @@ n_primitives(atoms) = sum(n_primitives, atoms)
 """
 n_ao(atoms::BasisSet) = sum(n_ao, atoms.centers)
 n_ao(atoms) = sum(n_ao, atoms)
+
+
+"""
+    ao_list(basis::BasisSet, ibas=1)
+
+  Return the list of atomic orbitals in the basis set.
+
+  For a combined basis set, use `ibas` to select the basis set.
+"""
+function ao_list(basis::BasisSet, ibas=1)
+  out = AbstractAtomicOrbital[]
+  if is_cartesian(basis)
+    AtomicOrbital = CartesianAtomicOrbital
+  else
+    AtomicOrbital = SphericalAtomicOrbital
+  end
+  nnumber = zeros(Int, length(SUBSHELL2L))
+  for ic in center_range(basis, ibas)
+    nnumber .= 0
+    for ash in basis.centers[ic].shells
+      for (isubshell, con) in enumerate(ash.subshells)
+        nnumber[ash.l+1] += 1
+        for iao in 1:n_ao4subshell(ash)
+          ml = iao - 1 - ash.l
+          push!(out, AtomicOrbital(ic, ash.id, isubshell, nnumber[ash.l+1], ash.l, ml))
+        end
+      end
+    end
+  end
+  return out
+end
+
+"""
+  print_ao(ao::AbstractAtomicOrbital, basis::BasisSet)
+
+  Print the atomic orbital.
+"""
+function print_ao(ao::AbstractAtomicOrbital, basis::BasisSet)
+  @assert ao.icenter <= length(basis.centers) "AO center index out of range! Use the same basis in print_ao as in ao_list!" 
+  icen = 0
+  for r in basis.center_ranges
+    if ao.icenter in r
+      icen = ao.icenter - r.start + 1
+      break
+    end
+  end
+  print(basis.centers[ao.icenter].name, "[", icen, "]", ao)
+end
 
 """
     guess_basis_name(atom::Atom, type)

@@ -36,6 +36,10 @@ Base.@kwdef mutable struct WfOptions
   occb::String = "-"
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
+  """`⟨5⟩` number of largest orbitals to print. """
+  print_nlargest::Int = 5
+  """`⟨0.1⟩` threshold for orbital coefficients to print. """
+  print_thr::Float64 = 0.1
 end
 
 

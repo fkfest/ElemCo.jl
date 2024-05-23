@@ -120,7 +120,7 @@ function read_basis_block(basisfile::AbstractString, atom::Atom)
     end
   end
   if isempty(basisblock)
-    error("Basis block for $elem not found in $basisfile!")
+    error("Basis block for $elem not found in $(basisfile)!")
   end
   return basisblock
 end

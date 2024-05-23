@@ -73,7 +73,7 @@ using .DMRG
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
-export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
+export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 
 const __VERSION__ = "0.11.1+"
@@ -642,6 +642,25 @@ macro rotate_orbs(orb1, orb2, angle, kwargs...)
   return quote
     $(esc(:@tryECinit))
     rotate_orbs($(esc(:EC)), $(esc(orb1)), $(esc(orb2)), $(esc(angle)); $(ekwa...))
+  end
+end
+
+"""
+    @show_orbs(range=nothing)
+
+  Show orbitals in the integrals according to an array or range 
+  `range`.
+
+  # Examples
+```julia
+@dfhf
+@show_orbs 1:5
+```
+"""
+macro show_orbs(range=nothing)
+  return quote
+    $(esc(:@tryECinit))
+    show_orbitals($(esc(:EC)), $(esc(range)))
   end
 end
 
