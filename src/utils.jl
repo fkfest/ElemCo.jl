@@ -5,7 +5,7 @@ using Printf
 using ..ElemCo.AbstractEC
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
-export subspace_in_space
+export subspace_in_space, argmaxN
 export substr, reshape_buf
 export amdmkl
 
@@ -219,6 +219,53 @@ julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
 """
 function reshape_buf(buf::Array, dims...; start=1)
   return reshape(view(buf, 1:prod(dims)), dims)
+end
+
+"""
+    argmaxN(vals, N; by::Function=identity)
+
+  Return the indices of the `N` largest elements in `vals`.
+
+  The order of equal elements is preserved.
+  The keyword argument `by` can be used to specify a function to compare the elements, i.e.,
+  the function is applied to the elements before comparison.
+
+  # Example
+  ```julia
+  julia> argmaxN([1,2,3,4,5,6,7,8,9,10], 3)
+  3-element Vector{Int64}:
+   10
+    9
+    8
+  julia> argmaxN([1,2,3,4,5,-6,-7,-8,-9,-10], 3; by=abs)
+  3-element Vector{Int64}:
+   10
+    9
+    8
+  julia> argmaxN([1.0, 1.10, 1.112, -1.113, 1.09], 3; by=x->round(abs(x),digits=2))
+  3-element Vector{Int64}:
+   3
+   4
+   2
+  ```
+"""
+function argmaxN(vals, N; by::Function=identity)
+  perm = sortperm(vals[1:N]; by, rev=true)
+  smallest = by(vals[perm[N]])
+  @inbounds for i in N+1:length(vals)
+    el = by(vals[i])
+    if smallest < el
+      for j in 1:N
+        if by(vals[perm[j]]) < el
+          perm[j+1:end] = perm[j:end-1]
+          perm[j] = i
+          break
+        end
+      end
+      smallest = by(vals[perm[N]])
+    end
+  end
+  return perm
 end
 
 """
