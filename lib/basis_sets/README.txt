@@ -1,8 +1,8 @@
 Basis set exchange: Basis set bundle
 ==========================================
 
-Basis Set Exchange: v0.9.1+0.gf37c40cc.dirty
-Created 2023-05-17 20:45:20 UTC
+Basis Set Exchange: 0.11.dev0+g978980f4.d20240526
+Created 2024-05-27 10:19:28 
 Format: molpro
 Reference format: bib
 
