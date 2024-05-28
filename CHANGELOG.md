@@ -20,6 +20,7 @@
 * CROP-DIIS option (JCTC 11, 1518 (2015)) which is less sensitive to the DIIS dimension. To activate, set `diis` option `crop=true`, the DIIS dimension can be changed using `maxcrop` (default is 3).
 * An option `print_init` is added to the `@print_input` macro (default is `false`). If set to `true`, the `ElemCo.jl` info is printed again (useful if the output is redirected in julia to a file).
 * A simple DMRG routine is added based on `ITensors` (adapted from `ITensorChemistry.jl`).
+* A Molpro interface to import matrop matrices (orbitals or overlap).
 
 ### Fixed
 

@@ -38,6 +38,9 @@ include("dfdump.jl")
 
 include("dfmcscf.jl")
 
+include("interfaces/molpro.jl")
+include("interfaces/interfaces.jl")
+
 try
   using MKL
 catch
@@ -68,6 +71,7 @@ using .DFHF
 using .DFMCSCF
 using .DfDump
 using .DMRG
+using .Interfaces
 
 
 export @mainname, @print_input
@@ -75,6 +79,7 @@ export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @import_matrix
 
 const __VERSION__ = "0.11.1+"
 
@@ -664,4 +669,17 @@ macro show_orbs(range=nothing)
   end
 end
 
+"""
+    @import_matrix(file)
+
+  Import matrix from file `file`.
+
+  The type of the matrix is determined automatically.
+"""
+macro import_matrix(file)
+  return quote
+    $(esc(:@tryECinit))
+    import_matrix($(esc(:EC)), $(esc(file)))
+  end
+end
 end #module
