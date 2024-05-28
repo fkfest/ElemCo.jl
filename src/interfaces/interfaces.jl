@@ -8,7 +8,7 @@ See also: [MolproInterface](@ref)
 module Interfaces
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
-using ..ElemCo.MolproInterface, only: is_matrop_file
+using ..ElemCo.MolproInterface: MolproInterface, is_matrop_file
 
 export import_matrix
 
