@@ -81,7 +81,7 @@ export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_
 export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 export @import_matrix
 
-const __VERSION__ = "0.12.0"
+const __VERSION__ = "0.12.0+"
 
 """
     __init__()
