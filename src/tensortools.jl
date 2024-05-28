@@ -9,7 +9,7 @@ using ..ElemCo.MIO
 
 export save!, load, mmap, newmmap, closemmap
 export ints1, ints2, detri_int2
-export sqrtinvchol, invchol, rotate_eigenvectors_to_real!
+export sqrtinvchol, invchol, rotate_eigenvectors_to_real!, svd_thr
 export get_spaceblocks
 export print_nonzeros
 
@@ -172,7 +172,7 @@ end
   Return `M`.
 """
 function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
-  CA = cholesky(A, RowMaximum(), check = false, tol = tol)
+  CA = cholesky(Symmetric(A), RowMaximum(), check = false, tol = tol)
   if CA.rank < size(A,1)
     if verbose
       redund = size(A,1) - CA.rank
@@ -313,6 +313,17 @@ function print_nonzeros(tensor::AbstractArray; ϵ=1.e-12, fname::String="")
       println()
     end
   end
+end
+
+""" 
+    svd_thr(Amat::AbstractMatrix, thr=1.e-12)
+
+  Return SVD of a matrix with singular values below `thr` set to zero.
+"""
+function svd_thr(Amat::AbstractMatrix, thr=1.e-12)
+  sA = svd(Amat)
+  sA.S[sA.S .< thr] .= 0.0
+  return sA
 end
 
 end #module

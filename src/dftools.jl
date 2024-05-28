@@ -6,7 +6,7 @@ using LinearAlgebra, TensorOperations
 # using TSVD
 using IterativeSolvers
 using ..ElemCo.ECInfos
-using ..ElemCo.ECInts
+using ..ElemCo.Integrals
 using ..ElemCo.MSystem
 using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
@@ -43,21 +43,21 @@ function get_auxblks(naux, maxblocksize=128, strict=false)
 end
 
 """
-    generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
+    generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
 
   Generate AO integrals using DF + Cholesky.
   If save3idx is true, save Cholesky-decomposed 3-index integrals, 
   otherwise save pseudo-square-root-inverse Cholesky decomposition.
 """
-function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
-  bao = generate_basis(EC.system, "ao")
-  bfit = generate_basis(EC.system, fitbasis)
+function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, fitbasis)
   save!(EC,"S_AA",overlap(bao))
   save!(EC,"h_AA",kinetic(bao) + nuclear(bao))
-  PQ = ERI_2e2c(bfit)
+  PQ = eri_2e2idx(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   if save3idx
-    AAP = ERI_2e3c(bao,bfit)
+    AAP = eri_2e3idx(bao,bfit)
     nA = size(AAP,1)
     nL = size(M,2)
     AALfile, AAL = newmmap(EC, "AAL", Float64, (nA,nA,nL))
@@ -75,20 +75,20 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mp2fit"; save3idx=true)
 end
 
 """
-    generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
+    generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mpfit")
 
   Generate ``v_p^{qL}`` with
   ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``
   and store in file `mmL`.
 """
-function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mp2fit")
+function generate_3idx_integrals(EC::ECInfo, cMO, fitbasis="mpfit")
   @assert ndims(cMO) == 2 "unrestricted not implemented yet"
-  bao = generate_basis(EC.system, "ao")
-  bfit = generate_basis(EC.system, fitbasis)
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, fitbasis)
 
-  PQ = ERI_2e2c(bfit)
+  PQ = eri_2e2idx(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
-  μνP = ERI_2e3c(bao,bfit)
+  μνP = eri_2e3idx(bao,bfit)
   nm = size(cMO,2)
   nL = size(M,2)
   mmLfile, mmL = newmmap(EC, "mmL", Float64, (nm,nm,nL))
@@ -107,7 +107,7 @@ end
 
   Generate ``v_p^{qL}`` and ``f_p^q`` with
   ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``.
-  The ``v_p^{qL}`` are generated using `mp2fit` fitting basis, and
+  The ``v_p^{qL}`` are generated using `mpfit` fitting basis, and
   the ``f_p^q`` are generated using `jkfit` fitting basis.
   The integrals are stored in files `mmL` and `f_mm`.
 
@@ -120,8 +120,8 @@ function generate_DF_integrals(EC::ECInfo, cMO)
   end
   # calculate fock matrix in AO basis (integral direct)
   generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
-  bao = generate_basis(EC.system, "ao")
-  bfit = generate_basis(EC.system, "jkfit")
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, "jkfit")
   fock = gen_dffock(EC, cMO, bao, bfit)
   fock_MO = cMO' * fock * cMO
   save!(EC,"f_mm",fock_MO)
@@ -133,7 +133,7 @@ function generate_DF_integrals(EC::ECInfo, cMO)
   hsmall = cMO' * load(EC,"h_AA") * cMO
   EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.system)
   # calculate 3-index integrals
-  generate_3idx_integrals(EC, cMO, "mp2fit")
+  generate_3idx_integrals(EC, cMO, "mpfit")
   return EHF
 end
 

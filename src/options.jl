@@ -36,6 +36,10 @@ Base.@kwdef mutable struct WfOptions
   occb::String = "-"
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
+  """`⟨5⟩` number of largest orbitals to print. """
+  print_nlargest::Int = 5
+  """`⟨0.1⟩` threshold for orbital coefficients to print. """
+  print_thr::Float64 = 0.1
 end
 
 
@@ -62,14 +66,51 @@ Base.@kwdef mutable struct ScfOptions
   - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
+  """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
+  bisecdamp::Float64 = 0.5
+  """`⟨3⟩` maximum number of iterations for searching for lambda value to get a reasonalbe guess within trust radius for MCSCF. """
+  maxit4lambda::Int = 3
+  """`⟨:SO_SCI⟩` Hessian Type for MCSCF:
+  - `:SO` Second Order Approximation
+  - `:SCI` Super CI
+  - `:SO_SCI` Second Order Approximation combing Super CI
+  """
+  HessianType::Symbol = :SO_SCI
+  """`⟨:GRADIENT_SETPLUS⟩` Initial Vectors Type for MCSCF:
+  - `:RANDOM` one random vector
+  - `:INHERIT` from last macro/micro iterations
+  - `:GRADIENT_SET` b0 as [1,0,0,...], b1 as gradient
+  - `:GRADIENT_SETPLUS` b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
+  """
+  initVecType::Symbol = :GRADIENT_SETPLUS
   """ `⟨0.0⟩` Fermi-Dirac temperature for starting guess (at the moment works only for BO-HF). """
   temperature_guess::Float64 = 0.0
+  """ `⟨0.1⟩` the threshold of davidson convergence residure norm scaled to norm of g the gradient, for MCSCF. """
+  gamaDavScale::Float64 = 0.1
+  """ `⟨true⟩` if true then use the original SO_SCI Hessian"""
+  SO_SCI_origin = true
+  """ `⟨0.8⟩` the trust region of sqrt(sum(x.^2)) should be [trustScale,1] * trust"""
+  trustScale = 0.8
+  """ `⟨1000.0⟩` the maximum number of lambda when adjusting the level shift"""
+  lambdaMax = 1000.0
+  """ `⟨1e-6⟩` the minmum convergence threshold for davidson algorithm"""
+  davErrorMin = 1e-6
+  """ `⟨200⟩` the size of initial Davidson projected matrix"""
+  iniDavMatSize = 200
+  """ `⟨0.7⟩` the shrink scale of trust region"""
+  trustShrinkScale = 0.7
+  """ `⟨1.2⟩` the expand scale of trust region"""
+  trustExpandScale = 1.2
+  """ `⟨0.25⟩` when energy quotient is lower than this value, the trust value should be smaller"""
+  enerQuotientLowerBound = 0.25
+  """ `⟨0.75⟩` when energy quotient is higher than this value, the trust value should be larger"""
+  enerQuotientUpperBound = 0.75
   """`⟨false⟩` Generate pseudo-canonical basis instead of solving the SCF problem,
   i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
   At the moment, it works only for BO-HF."""
   pseudo::Bool = false
 end
-
+  
 """ 
   Options for Coupled-Cluster calculation.
 
@@ -156,6 +197,22 @@ Base.@kwdef mutable struct CcOptions
   dcsd_ofac::Float64 = 0.15
 end
 
+""" 
+  Options for DMRG calculation.
+
+  $(TYPEDFIELDS)
+"""
+Base.@kwdef mutable struct DmrgOptions
+  """`⟨10⟩` number of sweeps. """
+  nsweeps::Int = 10
+  """`⟨[100, 200]⟩` maximum size for the bond dimension. """
+  maxdim::Vector{Int} = [100, 200]
+  """`⟨1e-6⟩` cutoff for the singular value decomposition. """
+  cutoff::Float64 = 1e-6
+  """`⟨[1e-6, 1e-7, 1e-8, 0.0]⟩` strength of the noise term used to aid convergence. """
+  noise::Vector{Float64} = [1e-6, 1e-7, 1e-8, 0.0]
+end
+
 """
   Options for integral calculation.
 
@@ -166,6 +223,8 @@ Base.@kwdef mutable struct IntOptions
   df::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """
   fcidump::String = ""
+  """`⟨false⟩` use Cartesian subshells instead of Spherical. """
+  cartesian::Bool = false
 end
 
 """ 
@@ -190,6 +249,11 @@ Base.@kwdef mutable struct DiisOptions
   maxdiis::Int = 6
   """`⟨10.0⟩` DIIS residual threshold. """
   resthr::Float64 = 10.0
+  """`⟨false⟩` CROP-DIIS (see [JCTC 11, 1518 (2015)](https://doi.org/10.1021/ct501114q)).
+  Usually the DIIS dimension `maxcrop=3` is sufficient. """
+  crop::Bool = false
+  """`⟨3⟩` DIIS dimension for CROP-DIIS. """
+  maxcrop::Int = 3
 end
 
 """ 
@@ -206,6 +270,8 @@ Base.@kwdef mutable struct Options
   int::IntOptions = IntOptions()
   """ Coupled-Cluster options ([`CcOptions`](@ref)). """
   cc::CcOptions = CcOptions()
+  """ DMRG options ([`DmrgOptions`](@ref)). """
+  dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """
   cholesky::CholeskyOptions = CholeskyOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """

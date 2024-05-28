@@ -1,5 +1,33 @@
 # Release notes
 
+## Version [v0.12.0] - 2024.05.28
+
+### Breaking
+
+* the `mp2fit` (`rifit`) basis sets have been renamed to `mpfit`. 
+* `ERI_?e?c` routines have been renamed to `eri_?e?idx`.
+
+### Changed
+
+* use SVD in DIIS.
+* increase number of iterations in 2D-CCSD IAS test.
+* interface to `libcint_jll` has been implemented. The basis set library is added (in Molpro format), and basis sets are parsed to a `BasisSet` object. `GaussianBasis.jl` dependency is removed.
+
+### Added
+
+* Expand README
+* `amdmkl()` function to speed up MKL on AMD machines.
+* CROP-DIIS option (JCTC 11, 1518 (2015)) which is less sensitive to the DIIS dimension. To activate, set `diis` option `crop=true`, the DIIS dimension can be changed using `maxcrop` (default is 3).
+* An option `print_init` is added to the `@print_input` macro (default is `false`). If set to `true`, the `ElemCo.jl` info is printed again (useful if the output is redirected in julia to a file).
+* A simple DMRG routine is added based on `ITensors` (adapted from `ITensorChemistry.jl`).
+* A Molpro interface to import matrop matrices (orbitals or overlap).
+
+### Fixed
+
+* Get rid of error message from git if .git is not available (e.g., in the case of the released version).
+* Sort orblist, which fixes issues if user occupations are not provided in a sorted list.
+* Fix amplitudes before Hylleraas energy calculation for FR-CC, which will properly report the energy in a (2,2) (single iteration) calculation.
+
 ## Version [v0.11.1] - 2024.04.12
 
 ### Changed
