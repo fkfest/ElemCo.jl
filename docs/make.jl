@@ -54,7 +54,9 @@ makedocs(
       "msystem.md",
       "orbtools.md",
       "tensortools.md",
-      "utils.md"
+      "utils.md",
+      "interfaces.md",
+      "molpro.md"
     ],
     "release-notes.md", 
   ],

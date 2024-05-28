@@ -26,6 +26,7 @@ TESTS = [
 ("DMRG", ["h2o_dmrg"]),
 ("DF", ["df_hf", "df_uhf", "df_mcscf"]),
 ("SVD", ["svd_dc"]),
+("Interface", ["h2o_matrop"]),
 ("Unit-tests", ["unit_tests"])
 ]
 
