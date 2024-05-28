@@ -32,6 +32,7 @@ The integrals are obtained from a FCIDUMP file or calculated using an interface 
 | 2D-DCSD  | :heavy_check_mark: |                  |                        |
 | SVD-DCSD | :heavy_check_mark: |:heavy_check_mark:|:heavy_exclamation_mark:|
 | SVD-DC-CCSDT|:heavy_check_mark:|:heavy_check_mark:|:heavy_exclamation_mark:|
+| DMRG     | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
 
 ## Getting started
 
