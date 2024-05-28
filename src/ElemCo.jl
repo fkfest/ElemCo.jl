@@ -11,8 +11,10 @@ include("constants.jl")
 include("myio.jl")
 include("mnpy.jl")
 include("dump.jl")
-include("integrals.jl")
-include("msystem.jl")
+include("system/elements.jl")
+include("system/msystem.jl")
+include("system/basisset.jl")
+include("system/integrals.jl")
 
 include("ecinfos.jl")
 include("ecmethods.jl")
@@ -26,6 +28,7 @@ include("decomptools.jl")
 include("cctools.jl")
 include("dfcc.jl")
 include("cc.jl")
+include("dmrg.jl")
 include("ccdriver.jl")
 
 include("bohf.jl")
@@ -34,6 +37,9 @@ include("dfhf.jl")
 include("dfdump.jl")
 
 include("dfmcscf.jl")
+
+include("interfaces/molpro.jl")
+include("interfaces/interfaces.jl")
 
 try
   using MKL
@@ -44,6 +50,7 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
+using TensorOperations
 using .Utils
 using .ECInfos
 using .ECMethods
@@ -56,20 +63,25 @@ using .DFCoupledCluster
 using .FciDump
 using .DumpTools
 using .OrbTools
+using .Elements
 using .MSystem
+using .BasisSets
 using .BOHF
 using .DFHF
 using .DFMCSCF
 using .DfDump
+using .DMRG
+using .Interfaces
 
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
-export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs
-export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf
+export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
+export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @import_matrix
 
-const __VERSION__ = "0.11.1"
+const __VERSION__ = "0.12.0"
 
 """
     __init__()
@@ -82,18 +94,21 @@ function __init__()
   draw_line(15)
   println("Version: ", __VERSION__)
   srcpath = @__DIR__
-  try
-    hash = read(`git -C $srcpath rev-parse HEAD`, String)
-    println("Git hash: ", hash[1:end-1])
-  catch
-    # get hash from .git/HEAD
+  if isdir(joinpath(srcpath,"..",".git"))
+    # get hash from git
     try
-      head = read(joinpath(srcpath,"..",".git","HEAD"), String)
-      head = split(head)[2]
-      hash = read(joinpath(srcpath,"..",".git",head), String)
+      hash = read(`git -C $srcpath rev-parse HEAD`, String)
       println("Git hash: ", hash[1:end-1])
     catch
-      println("Git hash: unknown")
+      # get hash from .git/HEAD
+      try
+        head = read(joinpath(srcpath,"..",".git","HEAD"), String)
+        head = split(head)[2]
+        hash = read(joinpath(srcpath,"..",".git",head), String)
+        println("Git hash: ", hash[1:end-1])
+      catch
+        println("Git hash: unknown")
+      end
     end
   end
   println("Website: elem.co.il")
@@ -132,14 +147,17 @@ macro mainname(file)
 end
 
 """
-    @print_input()
+    @print_input(print_init=false)
 
   Print the input file content. 
 
   Can be used to print the input file content to the output.
 """
-macro print_input()
+macro print_input(print_init=false)
   return quote
+    if $(esc(print_init))
+      __init__()
+    end
     try
       print_info(read($(string(__source__.file)), String))
     catch
@@ -208,7 +226,7 @@ end
   # Examples
 ```julia
 geometry="He 0.0 0.0 0.0"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @ECinit
 # output
 Occupied orbitals:[1]
@@ -394,6 +412,13 @@ macro dfuhf()
   end
 end
 
+macro dfmcscf()
+  return quote
+    $(esc(:@tryECinit))
+    dfmcscf($(esc(:EC)))
+  end
+end
+
 """
     @dfints()
 
@@ -430,7 +455,7 @@ geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
 @dfints
 @cc ccsd
@@ -472,7 +497,7 @@ geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
 @dfcc svd-dcsd
 ```
@@ -625,18 +650,36 @@ macro rotate_orbs(orb1, orb2, angle, kwargs...)
   end
 end
 
-function run_mcscf()
-  geometry="bohr
-     O      0.000000000    0.000000000   -0.130186067
-     H1     0.000000000    1.489124508    1.033245507
-     H2     0.000000000   -1.489124508    1.033245507"
+"""
+    @show_orbs(range=nothing)
 
-  basis = Dict("ao"=>"cc-pVDZ",
-             "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+  Show orbitals in the integrals according to an array or range 
+  `range`.
 
-  @opt wf ms2=2 charge=-2
-  E,cMO =  dfmcscf(EC,direct=false)
+  # Examples
+```julia
+@dfhf
+@show_orbs 1:5
+```
+"""
+macro show_orbs(range=nothing)
+  return quote
+    $(esc(:@tryECinit))
+    show_orbitals($(esc(:EC)), $(esc(range)))
+  end
 end
 
+"""
+    @import_matrix(file)
+
+  Import matrix from file `file`.
+
+  The type of the matrix is determined automatically.
+"""
+macro import_matrix(file)
+  return quote
+    $(esc(:@tryECinit))
+    import_matrix($(esc(:EC)), $(esc(file)))
+  end
+end
 end #module

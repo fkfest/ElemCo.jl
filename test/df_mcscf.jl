@@ -8,12 +8,11 @@ geometry="h2o.xyz"
 
 basis = Dict("ao"=>"cc-pVDZ",
             "jkfit"=>"cc-pvtz-jkfit",
-            "mp2fit"=>"cc-pvdz-rifit")
+            "mpfit"=>"cc-pvdz-rifit")
 
 @opt wf ms2=2 charge=-2
 
-E,cMO =  ElemCo.dfmcscf(EC,direct=false)
-
+E = @dfmcscf
 @test abs(E-EMCSCF_test) < epsilon
 
 end

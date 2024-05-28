@@ -26,7 +26,7 @@ td_dcsd_ref = -113.824157087033
 fcidump = joinpath(@__DIR__,"CH2O.3A1.VDZ.ROHF.FCIDUMP")
 
 EC = ElemCo.ECInfo()
-@opt cc nomp2=1
+@opt cc nomp2=1 maxit=200
 energies = ElemCo.ccdriver(EC, "2d-dcsd"; fcidump, occa = "-3.1+1.2+-2.3", occb = "-3.1+2.2+-2.3")
 @test abs(energies[:SING2D_UDCSD]-td_dcsd_ref) < epsilon
 

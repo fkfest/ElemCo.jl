@@ -6,6 +6,7 @@ using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDump
 using ..ElemCo.MSystem
+using ..ElemCo.BasisSets
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
 export setup_space_fd!, setup_space_system!, setup_space!, reset_wf_info!
@@ -119,7 +120,7 @@ function setup_space_system!(EC::ECInfo)
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
-  norb = guess_norb(EC.system) 
+  norb = guess_norb(EC) 
   nelec = (nelec < 0) ? guess_nelec(EC.system) : nelec
   nelec -= charge
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
@@ -551,6 +552,7 @@ function parse_orbstring(orbs::String; orbsym=Vector{Int}())
     end
   end
   allunique(orblist) || error("Repeated orbitals found in orbstring $orbs")
+  sort!(orblist)
   return orblist
 end
 
