@@ -8,6 +8,8 @@
 
 ### Added
 
+* Export of molden files (`@export_molden`). At the moment the orbital energies and occupations are not exported.
+
 ### Fixed
 
 ## Version [v0.12.0] - 2024.05.28

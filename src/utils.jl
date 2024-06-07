@@ -171,10 +171,10 @@ end
   If `len` is not given, the substring spans to the end of `string`.
 
   Example:
-  ```julia
-  julia> substr("λabδcd", 2, 3)
-  "abδ"
-  ```
+```julia
+julia> substr("λabδcd", 2, 3)
+"abδ"
+```
 """
 function substr(string::AbstractString, start::Int, len::Int=-1)
   tail = length(string)-start-len+1
@@ -190,10 +190,10 @@ end
   Return substring of `string` defined by `range` (including unicode).
 
   Example:
-  ```julia
-  julia> substr("λabδcd", 2:4)
-  "abδ"
-  ```
+```julia
+julia> substr("λabδcd", 2:4)
+"abδ"
+```
 """
 function substr(string::AbstractString, range::UnitRange{Int})
   return substr(string, range.start, range.stop-range.start+1)
@@ -212,7 +212,7 @@ end
 julia> buf = Array{Float64}(undef, 100000)
 julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor
 julia> B = reshape_buf(buf, 10, 10, 10, start=2001) # 10x10x10 tensor starting at 2001
-julia> B = rand(10,10,10)
+julia> B .= rand(10,10,10)
 julia> C = rand(10,20)
 julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
 ```
@@ -231,23 +231,23 @@ end
   the function is applied to the elements before comparison.
 
   # Example
-  ```julia
-  julia> argmaxN([1,2,3,4,5,6,7,8,9,10], 3)
-  3-element Vector{Int64}:
-   10
-    9
-    8
-  julia> argmaxN([1,2,3,4,5,-6,-7,-8,-9,-10], 3; by=abs)
-  3-element Vector{Int64}:
-   10
-    9
-    8
-  julia> argmaxN([1.0, 1.10, 1.112, -1.113, 1.09], 3; by=x->round(abs(x),digits=2))
-  3-element Vector{Int64}:
-   3
-   4
-   2
-  ```
+```julia
+julia> argmaxN([1,2,3,4,5,6,7,8,9,10], 3)
+3-element Vector{Int64}:
+ 10
+  9
+  8
+julia> argmaxN([1,2,3,4,5,-6,-7,-8,-9,-10], 3; by=abs)
+3-element Vector{Int64}:
+ 10
+  9
+  8
+julia> argmaxN([1.0, 1.10, 1.112, -1.113, 1.09], 3; by=x->round(abs(x),digits=2))
+3-element Vector{Int64}:
+ 3
+ 4
+ 2
+```
 """
 function argmaxN(vals, N; by::Function=identity)
   perm = sortperm(vals[1:N]; by, rev=true)

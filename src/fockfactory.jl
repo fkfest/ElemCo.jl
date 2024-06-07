@@ -261,7 +261,7 @@ function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
   occa = EC.space['o']
   occb = EC.space['O']
   CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
-  fock = Any[zeros(size(hsmall)), zeros(size(hsmall))]
+  fock = Array{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
   cL = zeros(size(PL,2))
   for isp = 1:2 # loop over [α, β]
     @tensoropt begin 
@@ -314,7 +314,7 @@ function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray)
   occb = EC.space['O']
   CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
   hsmall = load(EC,"h_AA")
-  fock = Any[zeros(size(hsmall)), zeros(size(hsmall))]
+  fock = Array{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
   μνL = load(EC,"AAL")
   L = zeros(size(μνL,3))
   for isp = 1:2 # loop over [α, β]

@@ -22,7 +22,7 @@ export guess_boorb
 """
 function left_from_right(cMOr)
   if is_unrestricted_MO(cMOr)
-    cMOl = Any[0.0, 0.0]
+    cMOl = AbstractArray[[], []]
     for ispin = 1:2
       cMOl[ispin] = (inv(cMOr[ispin]))'
     end
@@ -76,7 +76,7 @@ function guess_bo_hcore(EC::ECInfo, uhf)
     if !EC.fd.uhf
       spins = [:α, :α]
     end
-    CMOr_final = Any[0.0, 0.0]
+    CMOr_final = AbstractArray[[], []]
   else
     spins = [:α]
   end
@@ -103,7 +103,7 @@ end
 function guess_bo_identity(EC::ECInfo, uhf)
   norb = length(EC.space[':'])
   if uhf
-    return Any[Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb)]
+    return AbstractArray[Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb)]
   else
     return Matrix{Float64}(I, norb, norb)
   end
@@ -156,10 +156,10 @@ end
 function unrestricted_heatup(EC::ECInfo, cMOl, cMOr, temperature)
   SP = EC.space
   fock = gen_ufock(EC, cMOl, cMOr)
-  ϵ = Any[0.0, 0.0]
-  den4temp = Any[0.0, 0.0]
-  cMOr_out = Any[0.0, 0.0]
-  cMOl_out = Any[0.0, 0.0]
+  ϵ = AbstractArray[[], []]
+  den4temp = AbstractArray[[], []]
+  cMOr_out = AbstractArray[[], []]
+  cMOl_out = AbstractArray[[], []]
   for (ispin, sp) = enumerate(['o', 'O'])
     ϵ[ispin],cMOr_out[ispin] = eigen(fock[ispin])
     rotate_eigenvectors_to_real!(cMOr_out[ispin], ϵ[ispin])
@@ -309,7 +309,7 @@ function bouhf(EC::ECInfo)
   # 1: alpha, 2: beta (cMOs can become complex(?))
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, true)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  ϵ = Any[zeros(norb), zeros(norb)]
+  ϵ = AbstractArray[zeros(norb), zeros(norb)]
   hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
   EHF = 0.0
   previousEHF = 0.0
@@ -325,8 +325,8 @@ function bouhf(EC::ECInfo)
   for it=1:maxit
     fock = gen_ufock(EC, cMOl, cMOr)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
-    efhsmall = Any[0.0, 0.0]
-    Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
+    efhsmall = Number[0.0, 0.0]
+    Δfock = AbstractArray[zeros(norb,norb), zeros(norb,norb)]
     var = 0.0
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMOl[ispin], cMOr[ispin], SP[sp])

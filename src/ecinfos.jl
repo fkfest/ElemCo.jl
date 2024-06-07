@@ -19,6 +19,8 @@ export isalphaspin, space4spin, spin4space, flipspin
 
 include("options.jl")
 
+RangeOrVector = Union{UnitRange{Int},Vector{Int}}
+
 """
     ECInfo
 
@@ -76,7 +78,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
-  space::Dict{Char,Any} = Dict{Char,Any}()
+  space::Dict{Char,RangeOrVector} = Dict{Char,RangeOrVector}()
 end
 
 """

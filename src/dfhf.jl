@@ -116,7 +116,7 @@ function dfuhf(EC::ECInfo)
   cMO = guess_orb(EC,guess)
   t1 = print_time(EC, t1, "guess orbitals", 2)
   if !is_unrestricted_MO(cMO)
-    cMO = Any[cMO, cMO]
+    cMO = Array{Float64}[cMO, cMO]
   end
   ϵ = [zeros(norb), zeros(norb)] 
   hsmall = load(EC, "h_AA")
@@ -134,8 +134,8 @@ function dfuhf(EC::ECInfo)
       fock = gen_dffock(EC,cMO)
     end
     t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
-    efhsmall = Any[0.0, 0.0]
-    Δfock = Any[zeros(norb,norb), zeros(norb,norb)]
+    efhsmall = Float64[0.0, 0.0]
+    Δfock = Array{Float64}[zeros(norb,norb), zeros(norb,norb)]
     var = 0.0
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])

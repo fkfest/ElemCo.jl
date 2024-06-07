@@ -51,7 +51,7 @@ Base.@kwdef mutable struct FDump
   """ core energy """
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
-  head::Dict = Dict()
+  head::Dict{String,AbstractArray} = Dict{String,AbstractArray}()
   """`⟨true⟩` use an upper triangular index for last two indices of 2e⁻ integrals.""" 
   triang::Bool = true
   """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
@@ -59,17 +59,17 @@ Base.@kwdef mutable struct FDump
 end
 
 """
-    FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict)
+    FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict{String,AbstractArray})
 
   Spin-free fcidump
 """
-FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict) = FDump(int2,[],[],[],int1,[],[],int0,head)
+FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict{String,AbstractArray}) = FDump(int2,[],[],[],int1,[],[],int0,head)
 """
-    FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict)
+    FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict{String,AbstractArray})
 
   Spin-polarized fcidump
 """
-FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1a::Array{Float64},int1b::Array{Float64},int0::Float64,head::Dict) = FDump([],int2aa,int2bb,int2ab,[],int1a,int1b,int0,head)
+FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1a::Array{Float64},int1b::Array{Float64},int0::Float64,head::Dict{String,AbstractArray}) = FDump([],int2aa,int2bb,int2ab,[],int1a,int1b,int0,head)
 
 """
     FDump(norb,nelec;ms2=0,isym=1,orbsym=[],uhf=false,simtra=false,triang=true)
@@ -192,7 +192,7 @@ end
 """
 function read_header(fdfile)
   # put some defaults...
-  head = Dict()
+  head = Dict{String,AbstractArray}()
   head["IUHF"] = [0]
   head["ST"] = [0]
   variable_name = ""
@@ -478,12 +478,12 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
 end
 
 """
-    headvar(head::Dict, key::String)
+    headvar(head::Dict{String,AbstractArray}, key::String)
 
   Check header for `key`, return value if a list, 
   or the element or nothing if not there.
 """
-function headvar(head::Dict, key::String)
+function headvar(head::Dict{String,AbstractArray}, key::String)
   val = get(head, key, nothing)
   if isnothing(val)
     return val
