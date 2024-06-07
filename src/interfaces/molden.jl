@@ -87,10 +87,8 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       for ash in basisset.centers[ic].shells
         for con in ash.subshells
           println(f, " ", subshell_char(ash.l), " ", length(con.exprange))
-          # normalize the coefficients
-          coefs = normalize_contraction(con, ash)
           for (i, iex) in enumerate(con.exprange)
-            @printf(f, "%.10E %.10E\n", ash.exponents[iex], coefs[i])
+            @printf(f, "%.10E %.10E\n", ash.exponents[iex], con.coefs[i])
           end
         end
       end
