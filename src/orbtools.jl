@@ -23,9 +23,9 @@ export rotate_orbs, rotate_orbs!, normalize_phase!
   Guess MO coefficients from core Hamiltonian.
 """
 function guess_hcore(EC::ECInfo)
-  hsmall = load(EC,"h_AA")
-  sao = load(EC,"S_AA")
-  ϵ,cMO = eigen(Hermitian(hsmall),Hermitian(sao))
+  hsmall = load(EC, "h_AA", Val(2))
+  sao = load(EC, "S_AA", Val(2))
+  ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
   return cMO
 end
   
@@ -40,12 +40,12 @@ function guess_sad(EC::ECInfo)
   # minao = "sto-6g"
   bminao = generate_basis(EC, basisset=minao)
   bao = generate_basis(EC, "ao")
-  smin2ao = overlap(bminao,bao)
+  smin2ao = overlap(bminao, bao)
   smin = overlap(bminao)
-  eldist = electron_distribution(EC.system,minao)
-  sao = load(EC,"S_AA")
+  eldist = electron_distribution(EC.system, minao)
+  sao = load(EC, "S_AA", Val(2))
   denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
-  eigs,cMO = eigen(Hermitian(-denao),Hermitian(sao))
+  eigs, cMO = eigen(Hermitian(-denao), Hermitian(sao))
   return cMO
 end
 

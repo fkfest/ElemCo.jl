@@ -60,6 +60,40 @@ function miosave(fname::String,arrs::AbstractArray{T}...) where T
 end
 
 """
+    mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
+
+  Type-stable load arrays from a file `fname`.
+
+  Return an array of arrays. All arrays have the same type `T` and have `N` dimensions.
+"""
+function mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
+  io = open(fname)
+  # type of numbers
+  itype = read(io, Int)
+  if itype > length(Types)
+    error("Inconsistency in reading type of data!")
+  end
+  @assert T == Types[itype] "Inconsistency in reading type of data!"
+  arrs = Array{T,N}[]
+  # number of arrays in the file
+  narray = read(io, Int)
+  for ia in 1:narray
+    ndim = read(io, Int)
+    dims = Int[]
+    for idim in 1:ndim
+      append!(dims, read(io, Int))
+    end
+    @assert N == length(dims) "Inconsistency in reading dimensions of data!"
+    push!(arrs, Array{T,N}(undef, (dims...)))
+  end
+  for ia in 1:narray
+    read!(io, arrs[ia])
+  end
+  close(io)
+  return arrs
+end
+
+"""
     mioload(fname::String; array_of_arrays = false)
 
   Load arrays from a file `fname`.

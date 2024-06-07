@@ -1,4 +1,8 @@
 
+BVector = Vector{Float64}
+# const MAXBSIZE = 40
+# BVector = SVector{MAXBSIZE, Float64}
+
 
 """
     BasisContraction{N, T}
@@ -17,7 +21,7 @@ end
   Abstract type for angular shells, i.e, subshells with the same angular momentum.
   For general contracted basis sets, the angular shell is a collection of all subshells 
   with the same l quantum number. 
-  TODO For some other basis sets (e.g., the def2-family), the angular shell can be a
+  For some other basis sets (e.g., the def2-family), the angular shell can be a
   single subshell with a specific l quantum number.
   See [`SphericalAngularShell`](@ref) and [`CartesianAngularShell`](@ref).
   `id` is the index of the angular shell in the basis set.

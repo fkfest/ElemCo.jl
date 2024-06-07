@@ -104,10 +104,10 @@ function read_basis_block(basisfile::AbstractString, atom::Atom)
   # search for `! $elem  ....`
   reg_start = Regex("^!\\s$elem\\s+")
   reg_end = Regex("^\\s*[!}]\\s*")
-  basisblock = ""
+  basisblock::String = ""
   open(basisfile) do f
     elemfound = false
-    for line in eachline(f)
+    for line::String in eachline(f)
       if elemfound
         if occursin(reg_end, line)
           break

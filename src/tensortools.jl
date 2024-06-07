@@ -7,7 +7,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MIO
 
-export save!, load, mmap, newmmap, closemmap
+export save!, load, loads, mmap, newmmap, closemmap
 export ints1, ints2, detri_int2
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real!, svd_thr
 export get_spaceblocks
@@ -31,6 +31,28 @@ end
 """
 function load(EC::ECInfo, fname::String)
   return mioload(joinpath(EC.scr, fname*EC.ext))
+end
+
+"""
+    load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64 ) where {N}
+
+  Type-stable load array from file `fname` in EC.scr directory.
+
+  The type `T` and dimensions `N` are given explicitly.
+"""
+function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
+  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T)[1]
+end
+
+"""
+    loads(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64 ) where {N}
+
+  Type-stable load arrays from file `fname` in EC.scr directory.
+
+  The type `T` and dimensions `N` are given explicitly.
+"""
+function loads(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
+  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T)
 end
 
 """
