@@ -151,7 +151,7 @@ function Base.show(io::IO, bc::BasisContraction)
 end
 
 function Base.show(io::IO, ashell::AbstractAngularShell)
-  print(io, SUBSHELLS_NAMES[ashell.l+1], ", ", ashell.element)
+  print(io, subshell_char(ashell.l), ", ", ashell.element)
   for exp in ashell.exponents
     print(io, ", ", exp)
   end
@@ -307,6 +307,22 @@ end
 const DOUBLEFACTORIAL = [1, 3, 15, 105, 945, 10395, 135135, 2027025, 34459425]
 
 """
+    normalize_contraction(subshell::BasisContraction, ashell::AbstractAngularShell)
+
+  Normalize the contraction coefficients in `subshell`. 
+  
+  The subshell has to be part of the angular shell `ashell`.
+  Return the normalized contraction.
+"""
+function normalize_contraction(subshell::BasisContraction, ashell::AbstractAngularShell)
+  if isa(ashell, CartesianAngularShell)
+    return normalize_cartesian_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
+  else
+    return normalize_spherical_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
+  end
+end
+
+"""
     normalize_spherical_contraction(contraction, exponents, l)
 
   Normalize the spherical subshell.
@@ -413,3 +429,10 @@ function set_id!(centers::AbstractArray{BasisCenter}, start_id)
   end
   return id
 end
+
+"""
+    subshell_char(l)
+
+  Return the character for the subshell with angular momentum `l`.
+"""
+subshell_char(l::Int) = SUBSHELLS_NAMES[l+1]

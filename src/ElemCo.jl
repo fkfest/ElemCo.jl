@@ -39,6 +39,7 @@ include("dfdump.jl")
 include("dfmcscf.jl")
 
 include("interfaces/molpro.jl")
+include("interfaces/molden.jl")
 include("interfaces/interfaces.jl")
 
 try
@@ -76,10 +77,10 @@ using .Interfaces
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @set, @opt, @reset, @run, @method2string
+export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
-export @import_matrix
+export @import_matrix, @export_molden
 
 const __VERSION__ = "0.12.0+"
 
@@ -178,8 +179,10 @@ orbs = @loadfile("C_Am")
 ```
 """
 macro loadfile(filename)
+  strfilename=replace("$filename", " " => "")
   return quote
-    load($(esc(:EC)), $(esc(filename)))
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    load($(esc(:EC)), strfilename)
   end
 end
 
@@ -194,8 +197,10 @@ end
 """
 macro savefile(filename, arr, kwargs...)
   ekwa = [esc(a) for a in kwargs]
+  strfilename=replace("$filename", " " => "")
   return quote
-    save!($(esc(:EC)), $(esc(filename)), $(esc(arr)); $(ekwa...))
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    save!($(esc(:EC)), strfilename, $(esc(arr)); $(ekwa...))
   end
 end
 
@@ -209,8 +214,12 @@ end
 """
 macro copyfile(from_file, to_file, kwargs...)
   ekwa = [esc(a) for a in kwargs]
+  strfrom=replace("$from_file", " " => "")
+  strto=replace("$to_file", " " => "")
   return quote
-    copy_file!($(esc(:EC)), $(esc(from_file)), $(esc(to_file)); $(ekwa...))
+    strfrom = @var2string($(esc(from_file)), $(esc(strfrom)))
+    strto = @var2string($(esc(to_file)), $(esc(strto)))
+    copy_file!($(esc(:EC)), strfrom, strto; $(ekwa...))
   end
 end
 
@@ -353,37 +362,37 @@ macro run(method, kwargs...)
 end
 
 """
-    @method2string(method, strmethod="")
+    @var2string(var, strvar="")
 
-  Return string representation of `method`.
+  Return string representation of `var`.
 
-  If `method` is a String variable, return the value of the variable.
-  Otherwise, return the string representation of `method` (or `strmethod` if provided).
+  If `var` is a String variable, return the value of the variable.
+  Otherwise, return the string representation of `var` (or `strvar` if provided).
 
   # Examples
 ```julia
-julia> @method2string(CCSD)
+julia> @var2string(CCSD)
 "CCSD"
 julia> CCSD = "UCCSD";
-julia> @method2string(CCSD)
+julia> @var2string(CCSD)
 "UCCSD"
 ```
 """
-macro method2string(method, strmethod="")
-  if strmethod == ""
-    strmethod = replace("$method", " " => "")
+macro var2string(var, strvar="")
+  if strvar == ""
+    strvar = replace("$var", " " => "")
   end
-  varmethod = :($(esc(method)))
+  valvar = :($(esc(var)))
   return quote
     isvar = [false]
-    try @assert(typeof($(esc(method))) <: AbstractString)
+    try @assert(typeof($(esc(var))) <: AbstractString)
       isvar[1] = true
     catch
     end
     if isvar[1]
-      $varmethod
+      $valvar
     else
-      $(esc(strmethod))
+      $(esc(strvar))
     end
   end
 end
@@ -467,7 +476,7 @@ macro cc(method, kwargs...)
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
       $(esc(:@tryECinit))
-      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
       ccdriver($(esc(:EC)), strmethod; $(ekwa...))
     end
   else
@@ -476,7 +485,7 @@ macro cc(method, kwargs...)
       if !fd_exists($(esc(:EC)).fd)
         $(esc(:@dfints))
       end
-      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
       ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
     end
   end
@@ -506,7 +515,7 @@ macro dfcc(method="svd-dcsd")
   strmethod=replace("$method", " " => "")
   return quote
     $(esc(:@tryECinit))
-    strmethod = @method2string($(esc(method)), $(esc(strmethod)))
+    strmethod = @var2string($(esc(method)), $(esc(strmethod)))
     dfccdriver($(esc(:EC)), strmethod)
   end
 end
@@ -573,7 +582,7 @@ macro transform_ints(type="")
       error("No FCIDump found.")
     end
     CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
-    strtype = @method2string($(esc(type)), $(esc(strtype)))
+    strtype = @var2string($(esc(type)), $(esc(strtype)))
     if strtype ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
       CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
     elseif strtype == ""
@@ -670,16 +679,32 @@ macro show_orbs(range=nothing)
 end
 
 """
-    @import_matrix(file)
+    @import_matrix(filename)
 
   Import matrix from file `file`.
 
   The type of the matrix is determined automatically.
 """
-macro import_matrix(file)
+macro import_matrix(filename)
+  strfilename=replace("$filename", " " => "")
   return quote
     $(esc(:@tryECinit))
-    import_matrix($(esc(:EC)), $(esc(file)))
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    import_matrix($(esc(:EC)), strfilename)
   end
 end
+
+"""
+    @export_molden(filename)
+
+  Export current orbitals to Molden file `filename`.
+"""
+macro export_molden(filename)
+  strfilename=replace("$filename", " " => "")
+  return quote
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    export_molden_orbitals($(esc(:EC)), strfilename)
+  end
+end
+
 end #module

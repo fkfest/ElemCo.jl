@@ -56,7 +56,8 @@ makedocs(
       "tensortools.md",
       "utils.md",
       "interfaces.md",
-      "molpro.md"
+      "molpro.md",
+      "molden.md"
     ],
     "release-notes.md", 
   ],

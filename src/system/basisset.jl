@@ -21,9 +21,11 @@ export BasisCenter, BasisSet
 export BasisContraction, AbstractAngularShell, SphericalAngularShell, CartesianAngularShell
 export shell_range, center_range, is_cartesian, combine
 export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao
+export normalize_contraction
 export coefficients_1mat, n_coefficients_1mat
 export basis_name, generate_basis, guess_norb
 export ao_list, print_ao
+export subshell_char, max_l
 
 export ILibcint5
 
@@ -131,24 +133,24 @@ function Base.show(io::IO, bs::BasisSet)
 end
 
 """
-    shell_range(bs::BasisSet, i::Int)
+    shell_range(bs::BasisSet, i::Int=1)
 
   Return the range of angular shells for the `i`th basis set.
 
   The range is used to access the angular shells in the basis set, e.g.,
   `bs[i] for i in shell_range(bs, 1)` gives the angular shells of the first basis set.
 """
-shell_range(bs::BasisSet, i::Int) = bs.shell_ranges[i]
+shell_range(bs::BasisSet, i::Int=1) = bs.shell_ranges[i]
 
 """
-    center_range(bs::BasisSet, i::Int)
+    center_range(bs::BasisSet, i::Int=1)
 
   Return the range of centers for the `i`th basis set.
 
   The range is used to access the centers in the basis set, e.g.,
   `bs.centers[i] for i in center_range(bs, 1)` gives the centers of the first basis set.
 """
-center_range(bs::BasisSet, i::Int) = bs.center_ranges[i]
+center_range(bs::BasisSet, i::Int=1) = bs.center_ranges[i]
 
 """
     is_cartesian(bs::BasisSet)
@@ -210,6 +212,19 @@ function generate_basis(ms::AbstractSystem, type="ao"; cartesian=false, basisset
     push!(array_of_centers, BasisCenter(atom, basisname, basisfunctions))
   end
   return BasisSet(array_of_centers, ILibcint5(array_of_centers))
+end
+
+"""
+    max_l(basis::BasisSet)
+
+  Return the maximum angular momentum in the basis set.
+"""
+function max_l(basis::BasisSet)
+  maxl = 0
+  for ash in basis
+    maxl = max(maxl, ash.l)
+  end
+  return maxl
 end
 
 """

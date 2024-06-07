@@ -72,6 +72,7 @@ function guess_orb(EC::ECInfo, guess::Symbol)
     return load(EC,EC.options.wf.orb)
   else
     error("unknown guess type")
+    return Float64[]
   end
 end
 
@@ -114,12 +115,12 @@ function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
 end
 
 """
-    is_unrestricted_MO(cMO)
+    is_unrestricted_MO(cMO::AbstractArray)
 
   Return `true` if `cMO` is unrestricted MO coefficients of the form 
   [CMOα, CMOβ].
 """
-function is_unrestricted_MO(cMO)
+function is_unrestricted_MO(cMO::AbstractArray)
   if ndims(cMO) == 1
     return true
   elseif ndims(cMO) == 2
