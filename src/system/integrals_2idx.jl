@@ -37,7 +37,7 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2IDX
     @eval begin
       @doc $docstr
       function $jname(ash1::$TAS, ash2::$TAS, basis::BasisSet)
-        buf = Array{Float64}(undef, n_ao(ash1),n_ao(ash2))
+        buf = Matrix{Float64}(undef, n_ao(ash1),n_ao(ash2))
         $libname(buf, [ash1.id,ash2.id], basis.lib)
         return buf
       end

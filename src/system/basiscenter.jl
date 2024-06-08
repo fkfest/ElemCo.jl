@@ -5,14 +5,14 @@ BVector = Vector{Float64}
 
 
 """
-    BasisContraction{N, T}
+    BasisContraction
 
-  A basis contraction with `N` primitives and coefficients of type `T`.
+  A basis contraction.
   `exprange` is the range of primitives (from exponents in the angular shell).
 """
-struct BasisContraction{N, T}
+struct BasisContraction
   exprange::UnitRange{Int}
-  coefs::SVector{N, T}
+  coefs::BVector
 end
 
 """
@@ -40,13 +40,13 @@ abstract type AbstractAngularShell end
 
   $(TYPEDFIELDS)
 """
-mutable struct SphericalAngularShell{N, T} <: AbstractAngularShell
+mutable struct SphericalAngularShell <: AbstractAngularShell
   """ element symbol (e.g., "H")"""
   element::String
   """ angular momentum"""
   l::Int
   """ array of exponents"""
-  exponents::SVector{N, T}
+  exponents::BVector
   """ array of subshells (contractions)"""
   subshells::Vector{BasisContraction}
   """ index of the angular shell in the basis set"""
@@ -65,13 +65,13 @@ end
 
   $(TYPEDFIELDS)
 """
-mutable struct CartesianAngularShell{N, T} <: AbstractAngularShell
+mutable struct CartesianAngularShell <: AbstractAngularShell
   """ element symbol (e.g., "H")"""
   element::String
   """ angular momentum"""
   l::Int
   """ array of exponents"""
-  exponents::SVector{N, T}
+  exponents::BVector
   """ array of subshells (contractions)"""
   subshells::Vector{BasisContraction}
   """ index of the angular shell in the basis set"""
@@ -384,11 +384,10 @@ end
   Return an angular shell of type [`SphericalAngularShell`](@ref) or [`CartesianAngularShell`](@ref).
 """
 function generate_angularshell(elem, l, exponents; cartesian=false)
-  nprim = length(exponents)
   if cartesian
-    return CartesianAngularShell(elem, l, SVector{nprim}(exponents), BasisContraction[], 0)
+    return CartesianAngularShell(elem, l, exponents, BasisContraction[], 0)
   else
-    return SphericalAngularShell(elem, l, SVector{nprim}(exponents), BasisContraction[], 0)
+    return SphericalAngularShell(elem, l, exponents, BasisContraction[], 0)
   end
 end
 
@@ -398,7 +397,7 @@ end
   Add a subshell to the angular shell.
 """
 function add_subshell!(ashell::AbstractAngularShell, exprange, contraction)
-  push!(ashell.subshells, BasisContraction(exprange, SVector{length(contraction)}(contraction)))
+  push!(ashell.subshells, BasisContraction(exprange, BVector(contraction)))
 end
 
 function set_id!(ashell::AbstractAngularShell, id)

@@ -236,7 +236,8 @@ function parse_contraction(conline::AbstractString)
   # parse contraction coefficients
   contraction = strip.(split(conline, ","))
   # parse exponent range
-  exprange = range(parse.(Int,split(contraction[2], "."))...)
+  start, stop = parse.(Int, split(contraction[2], "."))
+  exprange = start:stop
   # remove contraction and exponent range and convert to Float64
   contraction = parse.(Float64, contraction[3:end])
   if length(contraction) != length(exprange)
