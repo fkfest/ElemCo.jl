@@ -42,3 +42,23 @@ d_oVvV = nothing
 @tensoropt R1b[B,J] += fIA[I,A] * T2b[B,A,J,I]
 @tensoropt R1b[A,I] += fAI[A,I]
 end
+
+function ccsdt_singles!(EC::ECInfo, R1, T2, T3, fij, fab, fai, fia)
+d_vovv = load(EC,"d_vovv")
+@tensoropt R1[c,j] -= d_vovv[c,i,a,b] * T2[a,b,i,j]
+@tensoropt R1[c,j] += 2 * d_vovv[c,i,b,a] * T2[a,b,i,j]
+d_vovv = nothing
+d_oovo = load(EC,"d_oovo")
+@tensoropt R1[b,k] += d_oovo[j,i,a,k] * T2[a,b,i,j]
+@tensoropt R1[b,k] -= 2 * d_oovo[j,i,a,k] * T2[b,a,i,j]
+d_oovo = nothing
+oovv = ints2(EC,"oovv")
+@tensoropt R1[c,k] += oovv[j,i,b,a] * T3[c,a,b,i,j,k]
+@tensoropt R1[c,k] -= oovv[j,i,a,b] * T3[a,b,c,i,j,k]
+@tensoropt R1[c,k] -= 2 * oovv[j,i,b,a] * T3[a,c,b,i,j,k]
+@tensoropt R1[c,k] += 2 * oovv[j,i,b,a] * T3[a,b,c,i,j,k]
+oovv = nothing
+@tensoropt R1[b,j] += 2 * fia[i,a] * T2[a,b,i,j]
+@tensoropt R1[b,j] -= fia[i,a] * T2[b,a,i,j]
+@tensoropt R1[a,i] += fai[a,i]
+end

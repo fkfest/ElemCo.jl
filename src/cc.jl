@@ -1635,6 +1635,59 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3
 end
 
 """
+    calc_cc_resid(EC::ECInfo, T1, T2, T3; dc=false, tworef=false, fixref=false)
+
+  Calculate CCSDT or DC-CCSDT residual.
+"""
+function calc_cc_resid(EC::ECInfo, T1, T2, T3; dc=false, tworef=false, fixref=false)
+  EC.options.cc.use_kext = false
+  EC.options.cc.calc_d_vvvv = true
+  EC.options.cc.calc_d_vvvo = true
+  EC.options.cc.calc_d_vovv = true
+  EC.options.cc.calc_d_vvoo = true
+  EC.options.cc.triangular_kext = false
+
+  t1 = time_ns()
+  SP = EC.space
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  if ndims(T1) == 2
+    calc_dressed_ints(EC,T1)
+    t1 = print_time(EC,t1,"dressing",2)
+  else
+    pseudo_dressed_ints(EC,true)
+  end
+
+  R1 = zeros(nvirt,nocc)
+
+  dfock = load(EC,"df_mm")
+
+  fij = dfock[SP['o'],SP['o']]
+  fab = dfock[SP['v'],SP['v']]
+  fai = dfock[SP['v'],SP['o']]
+  fia = dfock[SP['o'],SP['v']]
+
+  if length(T1) > 0
+    ccsdt_singles!(EC, R1, T2, T3, fij, fab, fai, fia)
+    t1 = print_time(EC,t1,"ccsdt singles",2)
+  end
+
+  R2 = zeros(nvirt, nvirt, nocc, nocc)
+  ccsdt_doubles!(EC, R2, T2, T3, fij, fab, fai, fia)
+  t1 = print_time(EC,t1,"ccsdt doubles",2)
+
+  R3 = zeros(nvirt, nvirt, nvirt, nocc, nocc, nocc)
+  # if dc
+  #   dcccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
+  # else
+    ccsdt_triples!(EC, R3, T2, T3, fij, fab, fai, fia)
+  # end
+  t1 = print_time(EC,t1,"ccsdt triples",2)
+
+  return R1, R2, R3
+end
+
+"""
     oss_active_orbitals(EC::ECInfo)
 
   Return the four active orbitals of an (2e,2o) open-shell singlet problem based on a single determinant reference.
