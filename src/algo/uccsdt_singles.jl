@@ -44,6 +44,7 @@ d_oVvV = nothing
 end
 
 function ccsdt_singles!(EC::ECInfo, R1, T2, T3, fij, fab, fai, fia)
+# bracs
 d_vovv = load(EC,"d_vovv")
 @tensoropt R1[c,j] -= d_vovv[c,i,a,b] * T2[a,b,i,j]
 @tensoropt R1[c,j] += 2 * d_vovv[c,i,b,a] * T2[a,b,i,j]

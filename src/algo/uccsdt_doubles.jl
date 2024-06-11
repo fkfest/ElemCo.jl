@@ -207,6 +207,7 @@ d_oVvV = nothing
 end
 
 function ccsdt_doubles!(EC::ECInfo, R2, T2, T3, fij, fab, fai, fia)
+#bracd
 d_vvvv = load(EC,"d_vvvv")
 @tensoropt R2[c,d,i,j] += d_vvvv[c,d,a,b] * T2[a,b,i,j]
 d_vvvv = nothing
