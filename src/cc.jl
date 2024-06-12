@@ -1677,11 +1677,11 @@ function calc_cc_resid(EC::ECInfo, T1, T2, T3; dc=false, tworef=false, fixref=fa
   t1 = print_time(EC,t1,"ccsdt doubles",2)
 
   R3 = zeros(nvirt, nvirt, nvirt, nocc, nocc, nocc)
-  # if dc
-  #   dcccsdt_triples!(EC, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
-  # else
+  if dc
+    dcccsdt_triples!(EC, R3, T2, T3, fij, fab, fai, fia)
+  else
     ccsdt_triples!(EC, R3, T2, T3, fij, fab, fai, fia)
-  # end
+  end
   t1 = print_time(EC,t1,"ccsdt triples",2)
 
   return R1, R2, R3
