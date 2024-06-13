@@ -280,7 +280,7 @@ function gen_dffock(EC::ECInfo, cMO::MOs)
   occb = EC.space['O']
   CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
   hsmall = load2idx(EC,"h_AA")
-  fock = Array{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
+  fock = Matrix{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
   μνL = load3idx(EC,"AAL")
   L = zeros(size(μνL,3))
   for isp = 1:2 # loop over [α, β]
