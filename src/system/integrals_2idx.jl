@@ -112,7 +112,7 @@ end
 
 function calc_1e!(out, callback::Function, bs::BasisSet)
   # Number of AOs per shell
-  nao4sh = n_ao.(bs, bs.cartesian)
+  nao4sh = Int[n_ao(ash, bs.cartesian) for ash in bs]
   nao_max = maximum(nao4sh)
 
   # Offset list for each shell, used to map shell index to AO index
@@ -153,8 +153,8 @@ end
 
 function calc_1e!(out, callback::Function, bs1::BasisSet, bs2::BasisSet)
   # Number of AOs per shell
-  nao4sh1 = n_ao.(bs1, bs1.cartesian)
-  nao4sh2 = n_ao.(bs2, bs2.cartesian)
+  nao4sh1 = Int[n_ao(ash, bs1.cartesian) for ash in bs1]
+  nao4sh2 = Int[n_ao(ash, bs2.cartesian) for ash in bs2]
   nao_max1 = maximum(nao4sh1)
   nao_max2 = maximum(nao4sh2)
 

@@ -98,8 +98,8 @@ end
 
 function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::BasisSet)
   # Number of orbitals per shell
-  nao4sh = n_ao.(ao_basis, ao_basis.cartesian)
-  nfit4sh = n_ao.(fit_basis, fit_basis.cartesian)
+  nao4sh = Int[n_ao(ash, ao_basis.cartesian) for ash in ao_basis]
+  nfit4sh = Int[n_ao(ash, fit_basis.cartesian) for ash in  fit_basis]
   nao_max = maximum(nao4sh)
   nfit_max = maximum(nfit4sh)
 

@@ -119,9 +119,16 @@ end
   Combine vectors from files with coefficients.
 """
 function combine(diis::Diis, vecfiles, coeffs)
-  outvecs = coeffs[1] * loadvecs(vecfiles[1])
+  outvecs = loadvecs(vecfiles[1])
+  for v in outvecs
+    v .*= coeffs[1]
+  end
   for i in 2:diis.nDim
-    outvecs += coeffs[i] * loadvecs(vecfiles[i])
+    vect = loadvecs(vecfiles[i])
+    coef = coeffs[i]
+    for j in eachindex(vect)
+      outvecs[j] .+= coef * vect[j]
+    end
   end
   return outvecs
 end

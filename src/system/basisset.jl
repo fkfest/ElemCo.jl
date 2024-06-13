@@ -52,8 +52,8 @@ struct BasisSet
   shell_ranges::Vector{UnitRange{Int}}
   """ cartesian basis set """
   cartesian::Bool
-  """ infos for integral library."""
-  lib::AbstractILib
+  """ infos for integral library (at the moment only libcint5 is possible)."""
+  lib::ILibcint5
 end
 
 function BasisSet(centers::Vector{BasisCenter}, cartesian::Bool, lib::AbstractILib)
