@@ -3,6 +3,7 @@ module DfDump
 using LinearAlgebra, TensorOperations
 using ..ElemCo.ECInfos
 using ..ElemCo.BasisSets
+using ..ElemCo.Wavefunctions
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
 using ..ElemCo.MSystem
@@ -154,7 +155,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMOa, cMOb, full_spaces)
   space_save = save_space(EC)
   restore_space!(EC, full_spaces)
   generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
-  fock_jkfit = gen_dffock(EC, [cMOa, cMOb], bao, jkfit)
+  fock_jkfit = gen_dffock(EC, MOs(cMOa, cMOb), bao, jkfit)
   restore_space!(EC, space_save)
   fock_jkfitMOa = cMOa' * fock_jkfit[1] * cMOa
   fock_jkfitMOb = cMOb' * fock_jkfit[2] * cMOb
@@ -184,8 +185,7 @@ function dfdump(EC::ECInfo)
     error("Only density-fitted integrals implemented")
   end
   cMO = load_orbitals(EC)
-  norbs = is_unrestricted_MO(cMO) ? size(cMO[1],2) : size(cMO,2)
-
+  norbs = size(cMO,2)
   space_save = save_space(EC)
   ncore_orbs = freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
   nfrozvirt = freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
@@ -194,11 +194,11 @@ function dfdump(EC::ECInfo)
   norbs -= ncore_orbs + nfrozvirt
   ms2 = EC.options.wf.ms2
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
-  fdump = FDump(norbs, nelec; ms2=ms2, uhf=is_unrestricted_MO(cMO))
+  fdump = FDump(norbs, nelec; ms2=ms2, uhf=!is_restricted_MO(cMO))
   if fdump.uhf
     generate_integrals(EC, fdump, cMO[1][:,1:end-nfrozvirt], cMO[2][:,1:end-nfrozvirt], space_save)
   else
-    generate_integrals(EC, fdump, cMO[:,1:end-nfrozvirt], space_save)
+    generate_integrals(EC, fdump, cMO[1][:,1:end-nfrozvirt], space_save)
   end
   restore_space!(EC, space_save)
   if length(dumpfile) > 0

@@ -8,6 +8,7 @@ using Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
+using ..ElemCo.Wavefunctions
 using ..ElemCo.TensorTools
 using ..ElemCo.DFTools
 using ..ElemCo.CCTools
@@ -382,7 +383,7 @@ end
 function eval_df_mo_integrals(EC::ECInfo, energies::NamedTuple)
   t1 = time_ns()
   cMO = load_orbitals(EC, EC.options.wf.orb)
-  unrestricted = is_unrestricted_MO(cMO)
+  unrestricted = !is_restricted_MO(cMO)
   ERef = generate_DF_integrals(EC, cMO)
   t1 = print_time(EC, t1, "generate DF integrals", 2)
   cMO = nothing

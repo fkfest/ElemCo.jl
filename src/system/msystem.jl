@@ -247,7 +247,8 @@ end
   Check whether the system is not empty.
 """
 function system_exists(ms::AbstractSystem)
-  return length(ms) > 0
+  n::Int = length(ms.particles)
+  return n > 0
 end
 
 """ 
@@ -285,8 +286,9 @@ end
   Calculate nuclear repulsion energy.
 """
 function nuclear_repulsion(ms::AbstractSystem)
-  enuc = 0.0
-  for i = 2:length(ms)
+  enuc::Float64 = 0.0
+  ncenter::Int = length(ms.particles)
+  for i = 2:ncenter
     at1 = ms[i]
     if is_dummy(at1)
       continue

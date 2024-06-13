@@ -1,12 +1,29 @@
 """
   DIIS module for iterative solvers
+
+  This module provides the DIIS (Direct Inversion in the Iterative Subspace) method for iterative solvers.
+
+  The DIIS method is used to accelerate the convergence of iterative solvers by combining 
+  previous solutions to the problem to minimize the residual.
+  The vectors and residuals are stored in files as `Vector{Vector{Float64}}`.
+
+# Usage
+```julia
+diis = Diis(EC)
+for it = 1:maxit
+  # compute Vec = [Vec1,Vec2,...] and Res = [Res1,Res2,...]
+  # ...
+  perform!(diis, Vec, Res)
+  # ...
+end
+
 """
 module DIIS
 using LinearAlgebra
 using ..ElemCo.MIO
 using ..ElemCo.ECInfos
 
-export Diis, perform
+export Diis, perform!
 
 """
   DIIS object
@@ -19,17 +36,17 @@ mutable struct Diis
   """ use CROP-DIIS instead of the standard DIIS """
   cropdiis::Bool
   """ files for DIIS vectors """
-  ampfiles::Array{String}
+  ampfiles::Vector{String}
   """ files for DIIS residuals """
-  resfiles::Array{String}
+  resfiles::Vector{String}
   """ square weights for DIIS residuals components """
-  weights::Array{Float64}
+  weights::Vector{Float64}
   """ next vector to be replaced """
   next::Int
   """ number of DIIS vectors """
   nDim::Int
   """ B matrix """
-  bmat::Array{Float64}
+  bmat::Matrix{Float64}
   """
     Diis(EC::ECInfo, weights = Float64[]; maxdiis::Int = EC.options.diis.maxdiis, resthr::Float64 = EC.options.diis.resthr)
   
@@ -57,7 +74,7 @@ end
   Save vectors to file (replacing previous vectors at position `ipos`).
 """
 function saveamps(diis::Diis, vecs, ipos)
-  miosave(diis.ampfiles[ipos],vecs...)
+  miosave(diis.ampfiles[ipos], vecs...)
 end
 
 """
@@ -72,16 +89,16 @@ end
 """
     loadvecs(file)
 
-  Load vectors from file.
+  Load vectors from file as `Vector{Vector{Float64}}`.
 """
 function loadvecs(file)
-  return mioload(file, array_of_arrays = true)
+  return mioload(file, Val(1))
 end
 
 """
     loadamps(diis::Diis, ipos)
 
-  Load vectors from file at position `ipos`.
+  Load vectors from file at position `ipos` as `Vector{Vector{Float64}}`.
 """
 function loadamps(diis::Diis, ipos)
   return loadvecs(diis.ampfiles[ipos])
@@ -90,7 +107,7 @@ end
 """
     loadres(diis::Diis, ipos)
 
-  Load residuals from file at position `ipos`.
+  Load residuals from file at position `ipos` as `Vector{Vector{Float64}}`.
 """
 function loadres(diis::Diis, ipos)
   return loadvecs(diis.resfiles[ipos])
@@ -162,11 +179,14 @@ function update_Bmat(diis::Diis, nDim, Res, ithis)
 end
 
 """
-    perform(diis::Diis, Amps, Res)
+    perform!(diis::Diis, Amps, Res)
 
   Perform DIIS.
+
+  `Amps` is an array of vectors and `Res` is an array of residuals.
+  The vectors `Amps` will be replaced by the DIIS optimized vectors.
 """
-function perform(diis::Diis, Amps, Res)
+function perform!(diis::Diis, Amps, Res)
   if diis.nDim < diis.maxdiis
     diis.nDim += 1
   end
@@ -214,10 +234,14 @@ function perform(diis::Diis, Amps, Res)
     # println("DIIS: ", thisResDot, " -> ", optres2)
     Opt = combine(diis, diis.ampfiles, coeffs)
     saveamps(diis, Opt, ithis)
-    return Opt
   else
-    return combine(diis, diis.ampfiles, coeffs)
+    Opt = combine(diis, diis.ampfiles, coeffs)
   end
+  # replace Amps with Opt vectors keeping the shape of Amps
+  for i in eachindex(Amps)
+    Amps[i][:] = Opt[i]
+  end
+  return Amps
 end
 
 end

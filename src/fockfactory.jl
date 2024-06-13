@@ -10,6 +10,7 @@ using LinearAlgebra
 using TensorOperations
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
+using ..ElemCo.Wavefunctions
 using ..ElemCo.FciDump
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
@@ -59,12 +60,12 @@ function gen_fock(EC::ECInfo, spincase::Symbol)
 end
 
 """ 
-    gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occvec)
+    gen_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occvec)
 
   Generate ``D_{μν}=C^l_{μi} C^r_{νi}`` with ``i`` defined by `occvec`.
   Only real part of ``D_{μν}`` is kept.
 """ 
-function gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occvec)
+function gen_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occvec)
   CMOlo = CMOl[:,occvec]
   CMOro = CMOr[:,occvec]
   @tensoropt den[r,s] := CMOlo[r,i]*CMOro[s,i]
@@ -77,12 +78,12 @@ function gen_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray
 end
 
 """ 
-    gen_frac_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occupation)
+    gen_frac_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occupation)
 
   Generate ``D_{μν}=C^l_{μi} C^r_{νi} n_i`` with ``n_i`` provided in `occupation`.
   Only real part of ``D_{μν}`` is kept.
 """ 
-function gen_frac_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray, occupation)
+function gen_frac_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occupation)
   @assert length(occupation) == size(CMOr,2) "Wrong occupation vector length!"
   CMOrn = CMOr .* occupation'
   @tensoropt den[r,s] := CMOl[r,i]*CMOrn[s,i]
@@ -95,11 +96,11 @@ function gen_frac_density_matrix(EC::ECInfo, CMOl::AbstractArray, CMOr::Abstract
 end
 
 """ 
-    gen_fock(EC::ECInfo, den::AbstractArray)
+    gen_fock(EC::ECInfo, den::Matrix)
 
   Calculate closed-shell fock matrix from FCIDump integrals and density matrix `den`. 
 """
-function gen_fock(EC::ECInfo, den::AbstractArray)
+function gen_fock(EC::ECInfo, den::Matrix)
   @tensoropt begin 
     fock[p,q] := integ1(EC.fd,:α)[p,q] 
     fock[p,q] += ints2(EC,"::::",:α)[p,r,q,s] * den[r,s]
@@ -109,11 +110,11 @@ function gen_fock(EC::ECInfo, den::AbstractArray)
 end
 
 """ 
-    gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
+    gen_fock(EC::ECInfo, CMOl::Matrix, CMOr::Matrix)
 
   Calculate closed-shell fock matrix from FCIDump integrals and orbitals `CMOl`, `CMOr`. 
 """
-function gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
+function gen_fock(EC::ECInfo, CMOl::Matrix, CMOr::Matrix)
   @assert EC.space['o'] == EC.space['O'] # closed-shell
   occ2 = EC.space['o']
   den = gen_density_matrix(EC, CMOl, CMOr, occ2)
@@ -126,13 +127,13 @@ function gen_fock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
 end
 
 """ 
-    gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractArray, CMOr::AbstractArray)
+    gen_fock(EC::ECInfo, spincase::Symbol, CMOl::Matrix, CMOr::Matrix)
 
   Calculate UHF fock matrix from FCIDump integrals for `spincase`∈{`:α`,`:β`} and orbitals `CMOl`, `CMOr` and
   orbitals for the opposite-spin `CMOlOS` and `CMOrOS`. 
 """
-function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractArray, CMOr::AbstractArray,
-                  CMOlOS::AbstractArray, CMOrOS::AbstractArray)
+function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::Matrix, CMOr::Matrix,
+                  CMOlOS::Matrix, CMOrOS::Matrix)
   if spincase == :α
     denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['O'])
     @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
@@ -151,13 +152,13 @@ function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractArray, CMOr::Abstr
 end
 
 """ 
-    gen_fock(EC::ECInfo, spincase::Symbol, den::AbstractArray, denOS::AbstractArray)
+    gen_fock(EC::ECInfo, spincase::Symbol, den::Matrix, denOS::Matrix)
 
   Calculate UHF fock matrix from FCIDump integrals and density matrices `den` (for `spincase`) 
   and `denOS` (opposite spin to `spincase`). 
 """
 function gen_fock(EC::ECInfo, spincase::Symbol, 
-                  den::AbstractArray, denOS::AbstractArray)
+                  den::Matrix, denOS::Matrix)
   if spincase == :α
     @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
   else
@@ -171,14 +172,15 @@ function gen_fock(EC::ECInfo, spincase::Symbol,
 end
 
 """ 
-    gen_ufock(EC::ECInfo, CMOl::AbstractArray, CMOr::AbstractArray)
+    gen_ufock(EC::ECInfo, CMOl::MOs, CMOr::MOs)
 
   Calculate UHF fock matrix from FCIDump integrals and orbitals `cMOl`, `cMOr`
   with `cMOl[1]` and `cMOr[1]` - α-MO transformation coefficients and 
   `cMOl[2]` and `cMOr[2]` - β-MO transformation coefficients. 
 """
-function gen_ufock(EC::ECInfo, cMOl::AbstractArray, cMOr::AbstractArray)
-  return [gen_fock(EC, :α, cMOl[1], cMOr[1], cMOl[2], cMOr[2]), gen_fock(EC, :β, cMOl[2], cMOr[2], cMOl[1], cMOr[1])]
+function gen_ufock(EC::ECInfo, cMOl::MOs, cMOr::MOs)
+  return Matrix{Float64}[gen_fock(EC, :α, cMOl[1], cMOr[1], cMOl[2], cMOr[2]), 
+          gen_fock(EC, :β, cMOl[2], cMOr[2], cMOl[1], cMOr[1])]
 end
 
 """
@@ -187,51 +189,18 @@ end
   Calculate UHF fock matrix from FCIDump integrals and density matrix `den`. 
 """
 function gen_ufock(EC::ECInfo, den::AbstractArray)
-  return [gen_fock(EC, :α, den[1], den[2]), gen_fock(EC, :β, den[2], den[1])]
-end
-
-
-"""
-    gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
-
-  Compute DF-HF Fock matrix (integral direct) in AO basis.
-
-  If cMO is unrestricted, α and β Fock matrices will be returned.
-"""
-function gen_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
-  if is_unrestricted_MO(cMO)
-    return gen_unrestricted_dffock(EC, cMO, bao, bfit)
-  else
-    return gen_closed_shell_dffock(EC, cMO, bao, bfit)
-  end
-end
-
-"""
-    gen_dffock(EC::ECInfo, cMO::AbstractArray)
-
-  Compute DF-HF Fock matrix in AO basis
-  (using precalculated Cholesky-decomposed integrals).
-
-  If cMO is unrestricted, α and β Fock matrices will be returned.
-"""
-function gen_dffock(EC::ECInfo, cMO::AbstractArray)
-  if is_unrestricted_MO(cMO)
-    return gen_unrestricted_dffock(EC, cMO)
-  else
-    return gen_closed_shell_dffock(EC, cMO)
-  end
+  return Matrix{Float64}[gen_fock(EC, :α, den[1], den[2]), gen_fock(EC, :β, den[2], den[1])]
 end
 
 """ 
-    gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+    gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
 
   Compute closed-shell DF-HF Fock matrix (integral direct) in AO basis.
 """
-function gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
-  @assert !is_unrestricted_MO(cMO) "Restricted orbitals only!"
+function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
   μνP = eri_2e3idx(bao,bfit)
-  PL = load(EC,"C_PL")
-  hsmall = load(EC,"h_AA")
+  PL = load2idx(EC, "C_PL")
+  hsmall = load2idx(EC, "h_AA")
   # println(size(Ppq))
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
   occ2 = EC.space['o']
@@ -248,20 +217,19 @@ function gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
 end
 
 """ 
-    gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
+    gen_dffock(EC::ECInfo, cMO::MOs, bao, bfit)
 
   Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis (integral direct).
 """
-function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
-  @assert is_unrestricted_MO(cMO) "Unrestricted orbitals only!"
+function gen_dffock(EC::ECInfo, cMO::MOs, bao, bfit)
   μνP = eri_2e3idx(bao,bfit)
-  PL = load(EC,"C_PL")
-  hsmall = load(EC,"h_AA")
+  PL = load2idx(EC,"C_PL")
+  hsmall = load2idx(EC,"h_AA")
   # println(size(Ppq))
   occa = EC.space['o']
   occb = EC.space['O']
-  CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
-  fock = Array{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
+  CMOo = Matrix{Float64}[cMO[1][:,occa], cMO[2][:,occb]]
+  fock = Matrix{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
   cL = zeros(size(PL,2))
   for isp = 1:2 # loop over [α, β]
     @tensoropt begin 
@@ -281,18 +249,17 @@ function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
 end
 
 """
-    gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray)
+    gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
 
   Compute closed-shell DF-HF Fock matrix in AO basis
   (using precalculated Cholesky-decomposed integrals).
 """
-function gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray)
-  @assert !is_unrestricted_MO(cMO) "Restricted orbitals only!"
+function gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
   occ2 = EC.space['o']
   CMO2 = cMO[:,occ2]
-  μνL = load(EC,"AAL")
-  hsmall = load(EC,"h_AA")
+  μνL = load3idx(EC,"AAL")
+  hsmall = load2idx(EC,"h_AA")
   @tensoropt begin 
     μjL[p,j,L] := μνL[p,q,L] * CMO2[q,j]
     L[L] := μjL[p,j,L] * CMO2[p,j]
@@ -303,19 +270,18 @@ function gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray)
 end
 
 """
-    gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray)
+    gen_dffock(EC::ECInfo, cMO::MOs)
 
   Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis
   (using precalculated Cholesky-decomposed integrals).
 """
-function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray)
-  @assert is_unrestricted_MO(cMO) "Unrestricted orbitals only!"
+function gen_dffock(EC::ECInfo, cMO::MOs)
   occa = EC.space['o']
   occb = EC.space['O']
   CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
-  hsmall = load(EC,"h_AA")
+  hsmall = load2idx(EC,"h_AA")
   fock = Array{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
-  μνL = load(EC,"AAL")
+  μνL = load3idx(EC,"AAL")
   L = zeros(size(μνL,3))
   for isp = 1:2 # loop over [α, β]
     @tensoropt begin 

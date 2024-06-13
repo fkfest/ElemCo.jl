@@ -13,17 +13,17 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2IDX
   jname = Symbol(jname_str)
   jname_ex = Symbol(jname_str*"!")
   descr = Symbol(descr_str)
-  for (TAS, suffix) in ((SphericalAngularShell, "sph"), (CartesianAngularShell, "cart"))
+  for (suffix,cartesian) in (("sph",false), ("cart",true))
     jname_sfx = Symbol(jname_str*"_$(suffix)")
     jname_sfx_ex = Symbol(jname_str*"_$(suffix)!")
     libname = Symbol("cint$(type)_$(suffix)!")
     docstr = """
-          $jname(ash1::$TAS, ash2::$TAS, basis::BasisSet)
+          $jname_sfx(ash1::AngularShell, ash2::AngularShell, basis::BasisSet)
 
         Compute the $descr integral between two angular shells.
       """
     docstr_ex = """
-          $jname_ex(out, ash1::$TAS, ash2::$TAS, basis::BasisSet)
+          $jname_ex(out, ash1::AngularShell, ash2::AngularShell, basis::BasisSet)
 
         Compute the $descr integral between two angular shells.
         The result is stored in `out`. 
@@ -36,14 +36,14 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2IDX
       """
     @eval begin
       @doc $docstr
-      function $jname(ash1::$TAS, ash2::$TAS, basis::BasisSet)
-        buf = Matrix{Float64}(undef, n_ao(ash1),n_ao(ash2))
+      function $jname_sfx(ash1::AngularShell, ash2::AngularShell, basis::BasisSet)
+        buf = Matrix{Float64}(undef, n_ao(ash1,$cartesian),n_ao(ash2,$cartesian))
         $libname(buf, [ash1.id,ash2.id], basis.lib)
         return buf
       end
         
       @doc $docstr_ex
-      function $jname_ex(out, ash1::$TAS, ash2::$TAS, basis::BasisSet)
+      function $jname_sfx_ex(out, ash1::AngularShell, ash2::AngularShell, basis::BasisSet)
         $libname(out, [ash1.id,ash2.id], basis.lib)
       end
 
@@ -112,7 +112,7 @@ end
 
 function calc_1e!(out, callback::Function, bs::BasisSet)
   # Number of AOs per shell
-  nao4sh = n_ao.(bs)
+  nao4sh = n_ao.(bs, bs.cartesian)
   nao_max = maximum(nao4sh)
 
   # Offset list for each shell, used to map shell index to AO index
@@ -153,8 +153,8 @@ end
 
 function calc_1e!(out, callback::Function, bs1::BasisSet, bs2::BasisSet)
   # Number of AOs per shell
-  nao4sh1 = n_ao.(bs1)
-  nao4sh2 = n_ao.(bs2)
+  nao4sh1 = n_ao.(bs1, bs1.cartesian)
+  nao4sh2 = n_ao.(bs2, bs2.cartesian)
   nao_max1 = maximum(nao4sh1)
   nao_max2 = maximum(nao4sh2)
 

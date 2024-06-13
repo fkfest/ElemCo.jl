@@ -7,6 +7,7 @@ using ..ElemCo.Utils
 using ..ElemCo.Constants
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
+using ..ElemCo.Wavefunctions
 using ..ElemCo.FciDump
 using ..ElemCo.OrbTools
 using ..ElemCo.FockFactory
@@ -16,18 +17,19 @@ export bohf, bouhf
 export guess_boorb
 
 """
-    left_from_right(cMOr)
+    left_from_right(cMOr::MOs)
 
   Calculate left BO-MO coefficients from right BO-MO coefficients.
 """
-function left_from_right(cMOr)
-  if is_unrestricted_MO(cMOr)
-    cMOl = AbstractArray[[], []]
+function left_from_right(cMOr::MOs)
+  if is_restricted_MO(cMOr)
+    cMOl = MOs((inv(cMOr[1]))')
+    restrict!(cMOl)
+  else
+    cMOl = MOs()
     for ispin = 1:2
       cMOl[ispin] = (inv(cMOr[ispin]))'
     end
-  else
-    cMOl = (inv(cMOr))'
   end
   return cMOl
 end
@@ -56,7 +58,7 @@ function guess_boorb(EC::ECInfo, guess::Symbol, uhf=false)
   elseif guess == :GWH || guess == :gwh
     cMOr = guess_bo_gwh(EC, uhf)
   elseif guess == :ORB || guess == :orb
-    cMOr = load(EC,EC.options.wf.orb)
+    cMOr = load_orbitals(EC, EC.options.wf.orb)
   else
     error("Unknown guess for MO coefficients: ", guess)
   end
@@ -71,26 +73,24 @@ end
   Guess BO-MO coefficients (right) from core Hamiltonian.
 """
 function guess_bo_hcore(EC::ECInfo, uhf)
+  CMOr_final = MOs()
   if uhf
     spins = [:α, :β]
     if !EC.fd.uhf
       spins = [:α, :α]
     end
-    CMOr_final = AbstractArray[[], []]
   else
     spins = [:α]
   end
   isp = 1
   for spin in spins
     hsmall = integ1(EC.fd, spin)
-    ϵ,cMOr = eigen(hsmall)
-    rotate_eigenvectors_to_real!(cMOr,ϵ)
-    if uhf
-      CMOr_final[isp] = real.(cMOr)
-    else
-      CMOr_final = real.(cMOr)
-    end
+    ϵ, cMOr = eigen(hsmall)
+    cMOr_final[isp], ϵ = rotate_eigenvectors_to_real(cMOr, ϵ)
     isp += 1
+  end
+  if !uhf
+    restrict!(CMOr_final)
   end
   return CMOr_final
 end
@@ -103,76 +103,77 @@ end
 function guess_bo_identity(EC::ECInfo, uhf)
   norb = length(EC.space[':'])
   if uhf
-    return AbstractArray[Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb)]
+    return MOs(Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb))
   else
-    return Matrix{Float64}(I, norb, norb)
+    return MOs(Matrix{Float64}(I, norb, norb))
   end
 end
 
 function guess_bo_gwh(EC::ECInfo, uhf)
   error("not implemented yet")
+  return MOs()
 end
 
 """
-    heatup(EC::ECInfo, cMOl, cMOr, temperature)
+    heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
 
   Heat up BO-MO coefficients to `temperature` according to Fermi-Dirac.
   
-  Returns new BO-MO coefficients `cMOl, cMOr`
+  Returns new BO-MO coefficients `cMOl::MOs, cMOr::MOs`
 """
-function heatup(EC::ECInfo, cMOl, cMOr, temperature)
+function heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
   if temperature < 1.e-10
     return cMOl, cMOr
   end
   println("Heating up starting guess to ", temperature, " K")
-  if is_unrestricted_MO(cMOr)
-    return unrestricted_heatup(EC, cMOl, cMOr, temperature)
-  else
+  if is_restricted_MO(cMOr)
     return closed_shell_heatup(EC, cMOl, cMOr, temperature)
+  else
+    return unrestricted_heatup(EC, cMOl, cMOr, temperature)
   end
 end
 
 """
-    closed_shell_heatup(EC::ECInfo, cMOl, cMOr, temperature)
+    closed_shell_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
 
   Heat up closed-shell BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """
-function closed_shell_heatup(EC::ECInfo, cMOl, cMOr, temperature)
-  fock = gen_fock(EC, cMOl, cMOr)
-  ϵ,cMOr = eigen(fock)
-  rotate_eigenvectors_to_real!(cMOr, ϵ)
-  cMOr = real.(cMOr)
+function closed_shell_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+  fock = gen_fock(EC, cMOl[1], cMOr[1])
+  ϵ, cMOr_new = eigen(fock)
+  cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
   nocc = n_occ_orbs(EC)
   nelec = 2*nocc
-  den4temp = density4temperature(EC, ϵ, cMOr, nocc, nelec, temperature)
+  den4temp = density4temperature(EC, ϵ, cMOr[1], nocc, nelec, temperature)
   fock = gen_fock(EC, den4temp)
-  ϵ,cMOr = eigen(fock)
-  rotate_eigenvectors_to_real!(cMOr, ϵ)
-  cMOr = real.(cMOr)
+  ϵ, cMOr_new = eigen(fock)
+  cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
   cMOl = left_from_right(cMOr)
   return cMOl, cMOr
 end
 
-function unrestricted_heatup(EC::ECInfo, cMOl, cMOr, temperature)
+"""
+    unrestricted_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+
+  Heat up unrestricted BO-MO coefficients to `temperature` according to Fermi-Dirac.
+"""
+function unrestricted_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
   SP = EC.space
   fock = gen_ufock(EC, cMOl, cMOr)
-  ϵ = AbstractArray[[], []]
   den4temp = AbstractArray[[], []]
-  cMOr_out = AbstractArray[[], []]
-  cMOl_out = AbstractArray[[], []]
+  cMOr_out = MOs()
+  cMOl_out = MOs()
   for (ispin, sp) = enumerate(['o', 'O'])
-    ϵ[ispin],cMOr_out[ispin] = eigen(fock[ispin])
-    rotate_eigenvectors_to_real!(cMOr_out[ispin], ϵ[ispin])
-    cMOr_out[ispin] = real.(cMOr_out[ispin])
+    ϵ, cMOr_new = eigen(fock[ispin])
+    cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
     nocc = length(SP[sp])
     nelec = nocc
-    den4temp[ispin] = density4temperature(EC, ϵ[ispin], cMOr_out[ispin], nocc, nelec, temperature)
+    den4temp[ispin] = density4temperature(EC, ϵ, cMOr_out[ispin], nocc, nelec, temperature)
   end
   fock = gen_ufock(EC, den4temp)
   for (ispin, sp) = enumerate(['o', 'O'])
-    ϵ[ispin],cMOr_out[ispin] = eigen(fock[ispin])
-    rotate_eigenvectors_to_real!(cMOr_out[ispin], ϵ[ispin])
-    cMOr_out[ispin] = real.(cMOr_out[ispin])
+    ϵ, cMOr_new = eigen(fock[ispin])
+    cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
     cMOl_out[ispin] = left_from_right(cMOr_out[ispin])
   end
   return cMOl_out, cMOr_out
@@ -237,16 +238,16 @@ function bohf(EC::ECInfo)
   flush(stdout)
   t0 = time_ns()
   for it=1:maxit
-    fock = gen_fock(EC, cMOl, cMOr)
+    fock = gen_fock(EC, cMOl[1], cMOr[1])
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
-    den = gen_density_matrix(EC, cMOl, cMOr, SP['o'])
+    den = gen_density_matrix(EC, cMOl[1], cMOr[1], SP['o'])
     fhsmall = fock + hsmall
     @tensoropt efhsmall = den[p,q]*fhsmall[p,q]
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
     Δfock = den'*fock - fock*den'
-    var = sum(abs2,Δfock)
+    var = sum(abs2, Δfock)
     tt = (time_ns() - t0)/10^9
     if pseudo
       @printf "%12.8f %10.2e %8.2f \n" EHF var tt
@@ -261,28 +262,27 @@ function bohf(EC::ECInfo)
     if pseudo
       occ = SP['o']
       vir = SP['v']
-      ϵ = zeros(Complex{Float64}, norb)
-      cMOr = zeros(Complex{Float64}, norb, norb)
-      ϵ[occ],cMOr[occ,occ] = eigen(fock[occ,occ])
-      ϵ[vir],cMOr[vir,vir] = eigen(fock[vir,vir])
+      ϵ_new = zeros(Complex{Float64}, norb)
+      cMOr_new = zeros(Complex{Float64}, norb, norb)
+      ϵ_new[occ],cMOr_new[occ,occ] = eigen(fock[occ,occ])
+      ϵ_new[vir],cMOr_new[vir,vir] = eigen(fock[vir,vir])
     else
-      fock, = perform(diis,[fock],[Δfock])
+      perform!(diis, [fock], [Δfock])
       t1 = print_time(EC, t1, "DIIS", 2)
-      ϵ,cMOr = eigen(fock)
+      ϵ_new, cMOr_new = eigen(fock)
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
-    cMOl = (inv(cMOr))'
+    cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
+    restrict!(cMOr)
+    cMOl[1] = (inv(cMOr[1]))'
+    restrict!(cMOl)
     # display(ϵ)
   end
-  # check MOs to be real
-  rotate_eigenvectors_to_real!(cMOr,ϵ)
-  cMOr = real.(cMOr)
-  cMOl = (inv(cMOr))'
   println("BO-HF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  save!(EC, EC.options.wf.orb, cMOr, description="BOHF right orbitals")
-  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl, description="BOHF left orbitals")
+  save!(EC, EC.options.wf.orb, cMOr[1], description="BOHF right orbitals")
+  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl[1], description="BOHF left orbitals")
   return EHF
 end
 
@@ -309,8 +309,10 @@ function bouhf(EC::ECInfo)
   # 1: alpha, 2: beta (cMOs can become complex(?))
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, true)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  ϵ = AbstractArray[zeros(norb), zeros(norb)]
-  hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
+  ϵ= Vector{Float64}[zeros(norb), zeros(norb)]
+  hsmall = Matrix{Float64}[integ1(EC.fd,:α), integ1(EC.fd,:β)]
+  efhsmall::Vector{Float64} = [0.0, 0.0]
+  Δfock = Matrix{Float64}[zeros(norb,norb), zeros(norb,norb)]
   EHF = 0.0
   previousEHF = 0.0
   if pseudo
@@ -325,8 +327,6 @@ function bouhf(EC::ECInfo)
   for it=1:maxit
     fock = gen_ufock(EC, cMOl, cMOr)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
-    efhsmall = Number[0.0, 0.0]
-    Δfock = AbstractArray[zeros(norb,norb), zeros(norb,norb)]
     var = 0.0
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMOl[ispin], cMOr[ispin], SP[sp])
@@ -351,30 +351,25 @@ function bouhf(EC::ECInfo)
     end
     t1 = print_time(EC, t1, "HF residual", 2)
     if !pseudo
-      fock = perform(diis, fock, Δfock)
+      perform!(diis, fock, Δfock)
       t1 = print_time(EC, t1, "DIIS", 2)
     end
     for (ispin, ov) = enumerate(["ov", "OV"])
       if pseudo
         occ = SP[ov[1]]
         vir = SP[ov[2]]
-        ϵ[ispin] = zeros(Complex{Float64}, norb)
-        cMOr[ispin] = zeros(Complex{Float64}, norb, norb)
-        ϵ[ispin][occ],cMOr[ispin][occ,occ] = eigen(fock[ispin][occ,occ])
-        ϵ[ispin][vir],cMOr[ispin][vir,vir] = eigen(fock[ispin][vir,vir])
+        ϵ_new = zeros(ComplexF64, norb)
+        cMOr_new = zeros(ComplexF64, norb, norb)
+        ϵ_new[occ], cMOr_new[occ,occ] = eigen(fock[ispin][occ,occ])
+        ϵ_new[vir], cMOr_new[vir,vir] = eigen(fock[ispin][vir,vir])
       else
-        ϵ[ispin],cMOr[ispin] = eigen(fock[ispin])
+        ϵ_new, cMOr_new = eigen(fock[ispin])
       end
+      cMOr[ispin], ϵ[ispin] = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
       cMOl[ispin] = (inv(cMOr[ispin]))'
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
-  end
-  # check MOs to be real
-  for ispin = 1:2
-    rotate_eigenvectors_to_real!(cMOr[ispin],ϵ[ispin])
-    cMOr[ispin] = real.(cMOr[ispin])
-    cMOl[ispin] = (inv(cMOr[ispin]))'
   end
   println("BO-UHF energy: ", EHF)
   flush(stdout)

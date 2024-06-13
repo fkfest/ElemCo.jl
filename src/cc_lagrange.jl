@@ -1191,7 +1191,7 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
       NormR1 = calc_contra_singles_norm(Res[singles]...)
       update_singles!(EC, LMs[singles]..., Res[singles]...)
     end
-    LMs = perform(diis, LMs, Res)
+    perform!(diis, LMs, Res)
     if do_sing
       save_current_singles(EC, LMs[singles]..., prefix="U")
     end

@@ -899,7 +899,7 @@ function dfmcscf(EC::ECInfo; direct=false)
   end
 
   # cMO and density matrices initialization
-  cMO = guess_orb(EC,guess)
+  cMO = guess_orb(EC,guess).α
   D1, D2 = denMatCreate(EC)
 
   # macro loop parameters initialisation

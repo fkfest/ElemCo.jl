@@ -2026,7 +2026,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     if restrict
       spin_project!(EC, Amps...)
     end
-    Amps = perform(diis, Amps, Res)
+    perform!(diis, Amps, Res)
     save_current_doubles(EC, Amps[doubles]...)
     En2 = calc_doubles_energy(EC, Amps[doubles]...)
     En = En2.E
@@ -2131,7 +2131,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     T1 += update_singles(EC, R1)
     T2 += update_doubles(EC, R2)
     T3 += update_deco_triples(EC, R3)
-    T1, T2, T3 = perform(diis, [T1,T2,T3], [R1,R2,R3])
+    perform!(diis, [T1,T2,T3], [R1,R2,R3])
     save!(EC, "T_XXX", T3)
     En1 = calc_singles_energy(EC, T1)
     En2 = calc_doubles_energy(EC, T2)

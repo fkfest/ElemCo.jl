@@ -4,6 +4,7 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.Integrals
 using ..ElemCo.MSystem
+using ..ElemCo.Wavefunctions
 using ..ElemCo.OrbTools
 using ..ElemCo.DFTools
 using ..ElemCo.FockFactory
@@ -37,12 +38,13 @@ function dfhf(EC::ECInfo)
     bfit = generate_basis(EC, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-  cMO = guess_orb(EC,guess)
+  cMO = guess_orb(EC, guess)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  @assert !is_unrestricted_MO(cMO) "DF-HF only implemented for closed-shell"
+  @assert is_restricted_MO(cMO) "DF-HF only implemented for closed-shell"
+  cMO = cMO.α
   ϵ = zeros(norb)
-  hsmall = load(EC, "h_AA")
-  sao = load(EC, "S_AA")
+  hsmall = load(EC, "h_AA", Val(2))
+  sao = load(EC, "S_AA", Val(2))
   # display(sao)
   EHF = 0.0
   previousEHF = 0.0
@@ -51,9 +53,9 @@ function dfhf(EC::ECInfo)
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
     if direct
-      fock = gen_dffock(EC,cMO,bao,bfit)
+      fock = gen_dffock(EC, cMO, bao, bfit)
     else
-      fock = gen_dffock(EC,cMO)
+      fock = gen_dffock(EC, cMO)
     end
     t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
     cMO2 = cMO[:,SP['o']]
@@ -73,10 +75,12 @@ function dfhf(EC::ECInfo)
       break
     end
     t1 = print_time(EC, t1, "HF residual", 2)
-    fock, = perform(diis,[fock],[Δfock])
+    perform!(diis, [fock], [Δfock])
     t1 = print_time(EC, t1, "DIIS", 2)
     # use Hermitian to ensure real eigenvalues and normalized orbitals
-    ϵ,cMO = eigen(Hermitian(fock),Hermitian(sao))
+    ϵ_new, cMO_new = eigen(Hermitian(fock),Hermitian(sao))
+    ϵ .= ϵ_new
+    cMO .= cMO_new
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
   end
@@ -113,11 +117,9 @@ function dfuhf(EC::ECInfo)
     bfit = generate_basis(EC, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-  cMO = guess_orb(EC,guess)
+  cMO = guess_orb(EC, guess)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  if !is_unrestricted_MO(cMO)
-    cMO = Array{Float64}[cMO, cMO]
-  end
+  unrestrict!(cMO)
   ϵ = [zeros(norb), zeros(norb)] 
   hsmall = load(EC, "h_AA")
   sao = load(EC, "S_AA")
@@ -129,9 +131,9 @@ function dfuhf(EC::ECInfo)
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
     if direct
-      fock = gen_dffock(EC,cMO,bao,bfit)
+      fock = gen_dffock(EC, cMO, bao, bfit)
     else
-      fock = gen_dffock(EC,cMO)
+      fock = gen_dffock(EC, cMO)
     end
     t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
     efhsmall = Float64[0.0, 0.0]
@@ -155,7 +157,7 @@ function dfuhf(EC::ECInfo)
       break
     end
     t1 = print_time(EC, t1, "HF residual", 2)
-    fock = perform(diis, fock, Δfock)
+    perform!(diis, fock, Δfock)
     t1 = print_time(EC, t1, "DIIS", 2)
     for ispin = 1:2
       # use Hermitian to ensure real eigenvalues and normalized orbitals

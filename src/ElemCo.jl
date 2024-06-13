@@ -16,6 +16,8 @@ include("system/msystem.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
+include("wavefunctions.jl")
+
 include("ecinfos.jl")
 include("ecmethods.jl")
 include("tensortools.jl")
@@ -54,6 +56,7 @@ using Dates
 using TensorOperations
 using .Utils
 using .ECInfos
+using .Wavefunctions
 using .ECMethods
 using .TensorTools
 using .FockFactory

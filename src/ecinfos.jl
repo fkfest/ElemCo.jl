@@ -38,7 +38,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  system::AbstractSystem = FlexibleSystem(Atom[], infinite_box(3), fill(DirichletZero(), 3))
+  system::FlexibleSystem = FlexibleSystem(Atom[], infinite_box(3), fill(DirichletZero(), 3))
   """ fcidump. """
   fd::FDump = FDump()
   """ information about (temporary) files. 
@@ -143,7 +143,7 @@ function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
   occb = EC.options.wf.occb
   SP = EC.space
   println("Number of orbitals: ", norb)
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(EC, occa, occb, norb, nelec; ms2, orbsym)
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(occa, occb, norb, nelec; ms2, orbsym, EC.options.wf.ignore_error)
   SP['d'] = intersect(SP['o'], SP['O'])
   SP['s'] = setdiff(SP['o'], SP['d'])
   SP['S'] = setdiff(SP['O'], SP['d'])
@@ -535,7 +535,7 @@ function parse_orbstring(orbs::String; orbsym=Vector{Int}())
   if first(orbs1) == ':'
     orbs1 = "1"*orbs1
   end
-  orblist=Vector{Int}()
+  orblist=Int[]
   for range in filter(!isempty, split(orbs1,';'))
     if first(range) == ':'
       sym = filter(!isempty, split(range[2:end],'.'))[2]
@@ -544,13 +544,13 @@ function parse_orbstring(orbs::String; orbsym=Vector{Int}())
     firstlast = filter(!isempty, split(range,':'))
     if length(firstlast) == 1
       # add the orbital
-      orblist=push!(orblist, symorb2orb(firstlast[1],symoffset))
+      push!(orblist, symorb2orb(firstlast[1],symoffset))
     else
       length(firstlast) == 2 || error("Someting wrong in range $range in orbstring $orbs")
       firstorb = symorb2orb(firstlast[1],symoffset)
       lastorb = symorb2orb(firstlast[2],symoffset)
       # add the range
-      orblist=vcat(orblist,[firstorb:lastorb]...)
+      append!(orblist, [firstorb:lastorb;])
     end
   end
   allunique(orblist) || error("Repeated orbitals found in orbstring $orbs")
@@ -559,12 +559,12 @@ function parse_orbstring(orbs::String; orbsym=Vector{Int}())
 end
 
 """
-    symorb2orb(symorb::SubString, symoffset::Vector{Int})
+    symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
 
   Convert a symorb (like 1.3 [orb.sym]) to an orbital number.
   If no sym given, just return the orbital number converted to Int.
 """
-function symorb2orb(symorb::SubString, symoffset::Vector{Int})
+function symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
   if occursin(".",symorb)
     orb, sym = filter(!isempty, split(symorb,'.'))
     @assert(parse(Int,sym) <= length(symoffset),"Symmetry label $sym larger than maximum of orbsym vector.")
@@ -577,28 +577,30 @@ function symorb2orb(symorb::SubString, symoffset::Vector{Int})
 end
 
 """
-    get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int})
+    get_occvirt(occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}, ignore_error=false)
 
   Use a +/- string to specify the occupation. If `occbs`=="-", the occupation from `occas` is used (closed-shell).
   If both are "-", the occupation is deduced from `nelec` and `ms2`.
   The optional argument `orbsym` is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
-function get_occvirt(EC::ECInfo, occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}())
+function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int; ms2=0, orbsym=Vector{Int}(), ignore_error=false)
   @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
+  occa = Int[]
+  occb = Int[]
   if occas != "-"
-    occa = parse_orbstring(occas; orbsym)
+    append!(occa, parse_orbstring(occas; orbsym))
     if occbs == "-"
       # copy occa to occb
-      occb = deepcopy(occa)
+      append!(occb, occa)
     else
-      occb = parse_orbstring(occbs; orbsym)
+      append!(occb, parse_orbstring(occbs; orbsym))
     end
-    if length(occa)+length(occb) != nelec && !EC.options.wf.ignore_error
+    if length(occa)+length(occb) != nelec && !ignore_error
       error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error wf option to ignore.")
     end
   else 
-    occa = [1:(nelec+ms2)÷2;]
-    occb = [1:(nelec-ms2)÷2;]
+    append!(occa, [1:(nelec+ms2)÷2;])
+    append!(occb, [1:(nelec-ms2)÷2;])
   end
   virta = [ i for i in 1:norb if i ∉ occa ]
   virtb = [ i for i in 1:norb if i ∉ occb ]

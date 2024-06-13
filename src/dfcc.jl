@@ -970,7 +970,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
     end
     T2 += update_deco_doubles(EC, R2)
     t1 = print_time(EC,t1,"update amplitudes",2)
-    T1, T2 = perform(diis, [T1,T2], [R1,R2])
+    perform!(diis, [T1,T2], [R1,R2])
     t1 = print_time(EC,t1,"DIIS",2)
     En2 = calc_deco_doubles_energy(EC, T2)
     En = En2.E

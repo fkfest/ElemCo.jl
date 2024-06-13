@@ -7,9 +7,11 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MIO
 
-export save!, load, loads, mmap, newmmap, closemmap
+export save!, load, load_all, mmap, newmmap, closemmap
+export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
+export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, load6idx_all
 export ints1, ints2, detri_int2
-export sqrtinvchol, invchol, rotate_eigenvectors_to_real!, svd_thr
+export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
 export print_nonzeros
 
@@ -38,21 +40,35 @@ end
 
   Type-stable load array from file `fname` in EC.scr directory.
 
-  The type `T` and dimensions `N` are given explicitly.
+  The type `T` and number of dimensions `N` are given explicitly.
 """
 function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
   return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T)[1]
 end
 
 """
-    loads(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64 ) where {N}
+    load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64 ) where {N}
 
   Type-stable load arrays from file `fname` in EC.scr directory.
 
-  The type `T` and dimensions `N` are given explicitly.
+  The type `T` and number of dimensions `N` are given explicitly (have to be the same for all arrays).
+  Return an array of arrays.
 """
-function loads(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
+function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
   return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T)
+end
+
+for N in 1:6
+  loadN = Symbol("load$(N)idx")
+  loadNall = Symbol("load$(N)idx_all")
+  @eval begin
+    function $loadN(EC::ECInfo, fname::String, T::Type=Float64)
+      return load(EC, fname, Val($N), T)
+    end
+    function $loadNall(EC::ECInfo, fname::String, T::Type=Float64)
+      return load_all(EC, fname, Val($N), T)
+    end
+  end
 end
 
 """
@@ -66,6 +82,24 @@ function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}; desc
   add_file!(EC, fname, description; overwrite=true)
   return mionewmmap(joinpath(EC.scr, fname*EC.ext), Type, dims)
 end
+
+# for N = 1:6
+#   docstr = """
+#       newmmap(EC::ECInfo, fname::String, Type, dims::NTuple{$N, Int}; description="tmp")
+
+#     Create a new memory-map file for writing (overwrites existing file).
+#     Add file to `EC.files` with `description`.
+#     Return a pointer to the file and the mmaped array.
+#   """
+#   @eval begin
+#     @doc $docstr
+#     function newmmap(EC::ECInfo, fname::String, Type, dims::NTuple{$N, Int}; description="tmp")
+#       add_file!(EC, fname, description; overwrite=true)
+#       return mionewmmap(joinpath(EC.scr, fname*EC.ext), Type, dims)
+#     end
+#   end
+# end
+
 
 """
     closemmap(EC::ECInfo, file, array)
@@ -222,12 +256,16 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
 end
 
 """ 
-    rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVector)
+    rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector)
 
-  In-place transform complex eigenvectors of a real matrix to a real space 
+  Transform complex eigenvectors of a real matrix to a real space 
   such that they block-diagonalize the matrix.
+
+  Return the eigenvectors and "eigenvalues" (the diagonal of the matrix) in the real space.
 """
-function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVector)
+function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector)
+  evecs_real::Matrix{Float64} = real.(evecs)
+  evals_real::Vector{Float64} = real.(evals)
   npairs = 0
   skip = false
   for i in eachindex(evals)
@@ -238,13 +276,11 @@ function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVect
     if abs(imag(evals[i])) > 0.0
       println("complex: ",evals[i], " ",i)
       if evals[i] == conj(evals[i+1])
-        evecs[:,i] = real.(evecs[:,i])
-        @assert  evecs[:,i] == real.(evecs[:,i+1])
-        evecs[:,i+1] = imag.(evecs[:,i+1])
-        normalize!(evecs[:,i])
-        normalize!(evecs[:,i+1])
-        evals[i] = real(evals[i])
-        evals[i+1] = real(evals[i+1])
+        @assert  evecs_real[:,i] == real.(evecs[:,i+1])
+        evecs_real[:,i+1] = imag.(evecs[:,i+1])
+        normalize!(evecs_real[:,i])
+        normalize!(evecs_real[:,i+1])
+        evals_real[i+1] = real(evals[i+1])
         npairs += 1
         skip = true
       else
@@ -255,6 +291,11 @@ function rotate_eigenvectors_to_real!(evecs::AbstractMatrix, evals::AbstractVect
   if npairs > 0
     println("$npairs eigenvector pairs rotated to the real space")
   end
+  return evecs_real, evals_real
+end
+
+function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64})
+  return evecs, evals
 end
 
 """ 

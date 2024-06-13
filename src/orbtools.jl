@@ -12,8 +12,9 @@ using ..ElemCo.BasisSets
 using ..ElemCo.Integrals
 using ..ElemCo.MSystem
 using ..ElemCo.TensorTools
+using ..ElemCo.Wavefunctions
 
-export guess_orb, load_orbitals, orbital_energies, is_unrestricted_MO
+export guess_orb, load_orbitals, orbital_energies
 export show_orbitals
 export rotate_orbs, rotate_orbs!, normalize_phase!
 
@@ -26,7 +27,7 @@ function guess_hcore(EC::ECInfo)
   hsmall = load(EC, "h_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
   ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
-  return cMO
+  return MOs(cMO)
 end
   
 """
@@ -46,11 +47,12 @@ function guess_sad(EC::ECInfo)
   sao = load(EC, "S_AA", Val(2))
   denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
   eigs, cMO = eigen(Hermitian(-denao), Hermitian(sao))
-  return cMO
+  return MOs(cMO)
 end
 
 function guess_gwh(EC::ECInfo)
   error("not implemented yet")
+  return MOs()
 end
 
 """
@@ -69,10 +71,11 @@ function guess_orb(EC::ECInfo, guess::Symbol)
   elseif guess == :GWH || guess == :gwh
     return guess_gwh(EC)
   elseif guess == :ORB || guess == :orb
-    return load(EC,EC.options.wf.orb)
+    orbs = load_all(EC, EC.options.wf.orb, Val(2))
+    return MOs(orbs...)
   else
     error("unknown guess type")
-    return Float64[]
+    return MOs()
   end
 end
 
@@ -84,6 +87,8 @@ end
   - from file `orbsfile` if not empty
   - from file [`WfOptions.orb`](@ref ECInfos.WfOptions) if not empty
   - error if all files are empty
+
+  Returns `::MOs`.
 """
 function load_orbitals(EC::ECInfo, orbsfile::String="")
   if !isempty(strip(orbsfile))
@@ -93,7 +98,7 @@ function load_orbitals(EC::ECInfo, orbsfile::String="")
   else
     error("no orbitals found")
   end
-  return load(EC, orbsfile)
+  return MOs(load_all(EC, orbsfile, Val(2))...)
 end
 
 """
@@ -115,23 +120,6 @@ function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
 end
 
 """
-    is_unrestricted_MO(cMO::AbstractArray)
-
-  Return `true` if `cMO` is unrestricted MO coefficients of the form 
-  [CMOα, CMOβ].
-"""
-function is_unrestricted_MO(cMO::AbstractArray)
-  if ndims(cMO) == 1
-    return true
-  elseif ndims(cMO) == 2
-    return false
-  else
-    error("Wrong number of dimensions in cMO: ", ndims(cMO))
-  end
-end
-
-
-"""
     rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
 
   Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
@@ -140,30 +128,28 @@ end
 function rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
   cMO = load_orbitals(EC)
   descr = file_description(EC, EC.options.wf.orb)
-  if is_unrestricted_MO(cMO)
-    isp = (spin == :α) ? 1 : 2
-    cMOrot = cMO[isp]
+  if is_restricted_MO(cMO)
+    cMOrot = cMO[1]
   else
-    cMOrot = cMO
+    cMOrot = cMO[spin]
   end
   rotate_orbs!(cMOrot, orb1, orb2, angle)
   descr *= " rot$(orb1)&$(orb2)by$(angle)"
-  if is_unrestricted_MO(cMO)
-    save!(EC, EC.options.wf.orb, cMO..., description=descr)
+  if is_restricted_MO(cMO)
+    save!(EC, EC.options.wf.orb, cMO[1], description=descr)
   else
-    save!(EC, EC.options.wf.orb, cMO, description=descr)
+    save!(EC, EC.options.wf.orb, cMO..., description=descr)
   end
 end
 
 """
-    rotate_orbs!(cMO::AbstractArray, orb1, orb2, angle=90)
+    rotate_orbs!(cMO::Matrix, orb1, orb2, angle=90)
 
   Rotate orbitals `orb1` and `orb2` from `cMO` by `angle` degrees.
 
   `cMO` is a matrix of MO coefficients.
 """
-function rotate_orbs!(cMO::AbstractArray, orb1, orb2, angle=90)
-  @assert ndims(cMO) == 2 "Wrong number of dimensions in cMO: $(ndims(cMO))"
+function rotate_orbs!(cMO::Matrix, orb1, orb2, angle=90)
   if orb1 > size(cMO,2) || orb2 > size(cMO,2)
     error("orbital index out of range")
   end
@@ -186,27 +172,27 @@ function show_orbitals(EC::ECInfo, range=nothing)
   cMO = load_orbitals(EC)
   descr = file_description(EC, EC.options.wf.orb)
   if isnothing(range)
-    range = 1:size(cMO,2)
+    range = 1:size(cMO, 2)
   end
   println(range," orbitals from $descr")
-  if is_unrestricted_MO(cMO)
+  if is_restricted_MO(cMO)
+    show_orbitals(EC, cMO[1], basis, range)
+  else
     println("Alpha orbitals:")
     show_orbitals(EC, cMO[1], basis, range)
     println("Beta orbitals:")
     show_orbitals(EC, cMO[2], basis, range)
-  else
-    show_orbitals(EC, cMO, basis, range)
   end
 end
 
 """
-    show_orbitals(EC::ECInfo, cMO::AbstractArray, basis::BasisSet, range=1:size(cMO,2)
+    show_orbitals(EC::ECInfo, cMO::Matrix, basis::BasisSet, range=1:size(cMO,2)
 
   Print the MO coefficients in `cMO` with respect to the atomic orbitals in `basis`.
 
   `range` is a range of molecular orbitals to be printed.
 """
-function show_orbitals(EC::ECInfo, cMO::AbstractArray, basis::BasisSet, range=1:size(cMO,2))
+function show_orbitals(EC::ECInfo, cMO::Matrix, basis::BasisSet, range=1:size(cMO,2))
   aos = ao_list(basis)
   nao = length(aos)
   nmo = size(cMO,2)

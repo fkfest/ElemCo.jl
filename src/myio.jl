@@ -65,6 +65,7 @@ end
   Type-stable load arrays from a file `fname`.
 
   Return an array of arrays. All arrays have the same type `T` and have `N` dimensions.
+  For `N = 1`, return vectors even if the original array was a multi-dimensional array.
 """
 function mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
   io = open(fname)
@@ -80,10 +81,18 @@ function mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
   for ia in 1:narray
     ndim = read(io, Int)
     dims = Int[]
-    for idim in 1:ndim
-      append!(dims, read(io, Int))
+    if N == 1
+      len = 1
+      for idim in 1:ndim
+        len *= read(io, Int)
+      end
+      append!(dims, len)
+    else
+      @assert N == ndim "Inconsistency in reading dimensions of data!"
+      for idim in 1:ndim
+        append!(dims, read(io, Int))
+      end
     end
-    @assert N == length(dims) "Inconsistency in reading dimensions of data!"
     push!(arrs, Array{T,N}(undef, (dims...)))
   end
   for ia in 1:narray
@@ -147,6 +156,31 @@ function mionewmmap(fname::String, Type, dims::Tuple{Vararg{Int}})
   end
   return io, mmap(io, Array{Type,length(dims)}, dims)
 end
+
+# for N = 1:6
+#   docstr = """
+#       mionewmmap(fname::String, Type, dims::NTuple{$N, Int})
+
+#     Create a new memory-map file for writing (overwrites existing file).
+#     Return a pointer to the file and the mmaped array.
+#   """
+#   @eval begin
+#     @doc $docstr
+#     function mionewmmap(fname::String, Type, dims::NTuple{$N, Int})
+#       io = open(fname, "w+")
+#       # store type of numbers
+#       write(io, JuliaT2Int[Type])
+#       # number of arrays in the file (1 for mmaps)
+#       write(io, 1)
+#       # store dimensions of the arrays
+#       write(io, length(dims))
+#       for dim in dims
+#         write(io, dim)
+#       end
+#       return io, mmap(io, Array{Type,$N}, dims)
+#     end
+#   end
+# end
 
 """
     mioclosemmap(io::IO, array::AbstractArray)
