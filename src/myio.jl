@@ -7,7 +7,7 @@
 module MIO
 using Mmap
 
-export miosave, mioload, miommap, mionewmmap, mioclosemmap
+export miosave, mioload, miommap, mionewmmap, mioclosemmap, mioflushmmap
 
 const Types = [
   Bool,
@@ -138,12 +138,12 @@ function mioload(fname::String; array_of_arrays=false)
 end
 
 """
-    mionewmmap(fname::String, Type, dims::Tuple{Vararg{Int}})
+    mionewmmap(fname::String, dims::Tuple{Vararg{Int}}, Type=Float64)
 
   Create a new memory-map file for writing (overwrites existing file).
   Return a pointer to the file and the mmaped array.
 """
-function mionewmmap(fname::String, Type, dims::Tuple{Vararg{Int}})
+function mionewmmap(fname::String, dims::NTuple{N, Int}, Type=Float64) where {N}
   io = open(fname, "w+")
   # store type of numbers
   write(io, JuliaT2Int[Type])
@@ -154,33 +154,8 @@ function mionewmmap(fname::String, Type, dims::Tuple{Vararg{Int}})
   for dim in dims
     write(io, dim)
   end
-  return io, mmap(io, Array{Type,length(dims)}, dims)
+  return io, mmap(io, Array{Type,N}, dims)
 end
-
-# for N = 1:6
-#   docstr = """
-#       mionewmmap(fname::String, Type, dims::NTuple{$N, Int})
-
-#     Create a new memory-map file for writing (overwrites existing file).
-#     Return a pointer to the file and the mmaped array.
-#   """
-#   @eval begin
-#     @doc $docstr
-#     function mionewmmap(fname::String, Type, dims::NTuple{$N, Int})
-#       io = open(fname, "w+")
-#       # store type of numbers
-#       write(io, JuliaT2Int[Type])
-#       # number of arrays in the file (1 for mmaps)
-#       write(io, 1)
-#       # store dimensions of the arrays
-#       write(io, length(dims))
-#       for dim in dims
-#         write(io, dim)
-#       end
-#       return io, mmap(io, Array{Type,$N}, dims)
-#     end
-#   end
-# end
 
 """
     mioclosemmap(io::IO, array::AbstractArray)
@@ -190,6 +165,15 @@ end
 function mioclosemmap(io::IO, array::AbstractArray)
   Mmap.sync!(array)
   close(io)
+end
+
+"""
+    mioflushmmap(io::IO, array::AbstractArray)
+
+  Flush memory-map file to disk.
+"""
+function mioflushmmap(array::AbstractArray)
+  Mmap.sync!(array)
 end
 
 """

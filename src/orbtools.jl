@@ -11,6 +11,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.BasisSets
 using ..ElemCo.Integrals
 using ..ElemCo.MSystem
+using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions
 
@@ -27,7 +28,7 @@ function guess_hcore(EC::ECInfo)
   hsmall = load(EC, "h_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
   ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
-  return MOs(cMO)
+  return SpinMatrix(cMO)
 end
   
 """
@@ -47,12 +48,12 @@ function guess_sad(EC::ECInfo)
   sao = load(EC, "S_AA", Val(2))
   denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
   eigs, cMO = eigen(Hermitian(-denao), Hermitian(sao))
-  return MOs(cMO)
+  return SpinMatrix(cMO)
 end
 
 function guess_gwh(EC::ECInfo)
   error("not implemented yet")
-  return MOs()
+  return SpinMatrix()
 end
 
 """
@@ -72,10 +73,10 @@ function guess_orb(EC::ECInfo, guess::Symbol)
     return guess_gwh(EC)
   elseif guess == :ORB || guess == :orb
     orbs = load_all(EC, EC.options.wf.orb, Val(2))
-    return MOs(orbs...)
+    return SpinMatrix(orbs...)
   else
     error("unknown guess type")
-    return MOs()
+    return SpinMatrix()
   end
 end
 
@@ -98,7 +99,7 @@ function load_orbitals(EC::ECInfo, orbsfile::String="")
   else
     error("no orbitals found")
   end
-  return MOs(load_all(EC, orbsfile, Val(2))...)
+  return SpinMatrix(load_all(EC, orbsfile, Val(2))...)
 end
 
 """
@@ -128,14 +129,14 @@ end
 function rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
   cMO = load_orbitals(EC)
   descr = file_description(EC, EC.options.wf.orb)
-  if is_restricted_MO(cMO)
+  if is_restricted(cMO)
     cMOrot = cMO[1]
   else
     cMOrot = cMO[spin]
   end
   rotate_orbs!(cMOrot, orb1, orb2, angle)
   descr *= " rot$(orb1)&$(orb2)by$(angle)"
-  if is_restricted_MO(cMO)
+  if is_restricted(cMO)
     save!(EC, EC.options.wf.orb, cMO[1], description=descr)
   else
     save!(EC, EC.options.wf.orb, cMO..., description=descr)
@@ -175,7 +176,7 @@ function show_orbitals(EC::ECInfo, range=nothing)
     range = 1:size(cMO, 2)
   end
   println(range," orbitals from $descr")
-  if is_restricted_MO(cMO)
+  if is_restricted(cMO)
     show_orbitals(EC, cMO[1], basis, range)
   else
     println("Alpha orbitals:")

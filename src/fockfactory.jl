@@ -9,6 +9,7 @@ using LinearAlgebra
 #BLAS.set_num_threads(1)
 using TensorOperations
 using ..ElemCo.ECInfos
+using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions
 using ..ElemCo.FciDump
@@ -178,18 +179,19 @@ end
   with `cMOl[1]` and `cMOr[1]` - α-MO transformation coefficients and 
   `cMOl[2]` and `cMOr[2]` - β-MO transformation coefficients. 
 """
-function gen_ufock(EC::ECInfo, cMOl::MOs, cMOr::MOs)
-  return Matrix{Float64}[gen_fock(EC, :α, cMOl[1], cMOr[1], cMOl[2], cMOr[2]), 
-          gen_fock(EC, :β, cMOl[2], cMOr[2], cMOl[1], cMOr[1])]
+function gen_ufock(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix)
+  return SpinMatrix(gen_fock(EC, :α, cMOl.α, cMOr.α, cMOl.β, cMOr.β), 
+                    gen_fock(EC, :β, cMOl.β, cMOr.β, cMOl.α, cMOr.α))
 end
 
 """
-    gen_ufock(EC::ECInfo, den::AbstractArray)
+    gen_ufock(EC::ECInfo, den::SpinMatrix)
 
   Calculate UHF fock matrix from FCIDump integrals and density matrix `den`. 
 """
-function gen_ufock(EC::ECInfo, den::AbstractArray)
-  return Matrix{Float64}[gen_fock(EC, :α, den[1], den[2]), gen_fock(EC, :β, den[2], den[1])]
+function gen_ufock(EC::ECInfo, den::SpinMatrix)
+  return SpinMatrix(gen_fock(EC, :α, den.α, den.β), 
+                    gen_fock(EC, :β, den.β, den.α))
 end
 
 """ 
@@ -198,7 +200,7 @@ end
   Compute closed-shell DF-HF Fock matrix (integral direct) in AO basis.
 """
 function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
-  μνP = eri_2e3idx(bao,bfit)
+  AAP = eri_2e3idx(bao,bfit)
   PL = load2idx(EC, "C_PL")
   hsmall = load2idx(EC, "h_AA")
   # println(size(Ppq))
@@ -206,12 +208,12 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
   occ2 = EC.space['o']
   CMO2 = cMO[:,occ2]
   @tensoropt begin 
-    μjP[p,j,P] := μνP[p,q,P] * CMO2[q,j]
-    cμjL[p,j,L] := μjP[p,j,P] * PL[P,L]
-    cL[L] := cμjL[p,j,L] * CMO2[p,j]
-    fock[p,q] := hsmall[p,q] - cμjL[p,j,L]*cμjL[q,j,L]
+    AoP[p,j,P] := AAP[p,q,P] * CMO2[q,j]
+    c_AoL[p,j,L] := AoP[p,j,P] * PL[P,L]
+    cL[L] := c_AoL[p,j,L] * CMO2[p,j]
+    fock[p,q] := hsmall[p,q] - c_AoL[p,j,L]*c_AoL[q,j,L]
     cP[P] := cL[L] * PL[P,L]
-    fock[p,q] += 2.0*cP[P]*μνP[p,q,P]
+    fock[p,q] += 2.0*cP[P]*AAP[p,q,P]
   end
   return fock
 end
@@ -219,29 +221,30 @@ end
 """ 
     gen_dffock(EC::ECInfo, cMO::MOs, bao, bfit)
 
-  Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis (integral direct).
+  Compute unrestricted DF-HF Fock matrices `SpinMatrix(Fα, Fβ)` in AO basis (integral direct).
 """
-function gen_dffock(EC::ECInfo, cMO::MOs, bao, bfit)
-  μνP = eri_2e3idx(bao,bfit)
-  PL = load2idx(EC,"C_PL")
-  hsmall = load2idx(EC,"h_AA")
+function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
+  AAP = eri_2e3idx(bao, bfit)
+  PL = load2idx(EC, "C_PL")
+  hsmall = load2idx(EC, "h_AA")
   # println(size(Ppq))
   occa = EC.space['o']
   occb = EC.space['O']
-  CMOo = Matrix{Float64}[cMO[1][:,occa], cMO[2][:,occb]]
-  fock = Matrix{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
+  CMOo = SpinMatrix(cMO[1][:,occa], cMO[2][:,occb])
+  fock = SpinMatrix(hsmall)
+  unrestrict!(fock)
   cL = zeros(size(PL,2))
   for isp = 1:2 # loop over [α, β]
     @tensoropt begin 
-      μjP[p,j,P] := μνP[p,q,P] * CMOo[isp][q,j]
-      cμjL[p,j,L] := μjP[p,j,P] * PL[P,L]
-      cL[L] += cμjL[p,j,L] * CMOo[isp][p,j]
-      fock[isp][p,q] := hsmall[p,q] - cμjL[p,j,L]*cμjL[q,j,L]
+      AoP[p,j,P] := AAP[p,q,P] * CMOo[isp][q,j]
+      c_AoL[p,j,L] := AoP[p,j,P] * PL[P,L]
+      cL[L] += c_AoL[p,j,L] * CMOo[isp][p,j]
+      fock[isp][p,q] -= c_AoL[p,j,L]*c_AoL[q,j,L]
     end
   end
   @tensoropt begin
     cP[P] := cL[L] * PL[P,L]
-    coulfock[p,q] := cP[P] * μνP[p,q,P]
+    coulfock[p,q] := cP[P] * AAP[p,q,P]
   end
   fock[1] += coulfock
   fock[2] += coulfock
@@ -275,18 +278,19 @@ end
   Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis
   (using precalculated Cholesky-decomposed integrals).
 """
-function gen_dffock(EC::ECInfo, cMO::MOs)
+function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
   occa = EC.space['o']
   occb = EC.space['O']
   CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
   hsmall = load2idx(EC,"h_AA")
-  fock = Matrix{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
+  fock = SpinMatrix(hsmall)
+  unrestrict!(fock)
   μνL = load3idx(EC,"AAL")
   L = zeros(size(μνL,3))
   for isp = 1:2 # loop over [α, β]
     @tensoropt begin 
       μjL[p,j,L] := μνL[p,q,L] * CMOo[isp][q,j]
-      fock[isp][p,q] := hsmall[p,q] - μjL[p,j,L]*μjL[q,j,L]
+      fock[isp][p,q] -= μjL[p,j,L]*μjL[q,j,L]
       L[L] += μjL[p,j,L] * CMOo[isp][p,j]
     end
   end

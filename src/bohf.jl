@@ -6,8 +6,8 @@ using LinearAlgebra, TensorOperations, Printf
 using ..ElemCo.Utils
 using ..ElemCo.Constants
 using ..ElemCo.ECInfos
+using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
-using ..ElemCo.Wavefunctions
 using ..ElemCo.FciDump
 using ..ElemCo.OrbTools
 using ..ElemCo.FockFactory
@@ -21,12 +21,12 @@ export guess_boorb
 
   Calculate left BO-MO coefficients from right BO-MO coefficients.
 """
-function left_from_right(cMOr::MOs)
-  if is_restricted_MO(cMOr)
-    cMOl = MOs((inv(cMOr[1]))')
+function left_from_right(cMOr::SpinMatrix{T}) where {T}
+  if is_restricted(cMOr)
+    cMOl = SpinMatrix((inv(cMOr[1]))')
     restrict!(cMOl)
   else
-    cMOl = MOs()
+    cMOl = SpinMatrix{T}()
     for ispin = 1:2
       cMOl[ispin] = (inv(cMOr[ispin]))'
     end
@@ -73,7 +73,7 @@ end
   Guess BO-MO coefficients (right) from core Hamiltonian.
 """
 function guess_bo_hcore(EC::ECInfo, uhf)
-  CMOr_final = MOs()
+  CMOr_final = SpinMatrix()
   if uhf
     spins = [:α, :β]
     if !EC.fd.uhf
@@ -103,15 +103,15 @@ end
 function guess_bo_identity(EC::ECInfo, uhf)
   norb = length(EC.space[':'])
   if uhf
-    return MOs(Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb))
+    return SpinMatrix(Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb))
   else
-    return MOs(Matrix{Float64}(I, norb, norb))
+    return SpinMatrix(Matrix{Float64}(I, norb, norb))
   end
 end
 
 function guess_bo_gwh(EC::ECInfo, uhf)
   error("not implemented yet")
-  return MOs()
+  return SpinMatrix()
 end
 
 """
@@ -121,12 +121,12 @@ end
   
   Returns new BO-MO coefficients `cMOl::MOs, cMOr::MOs`
 """
-function heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+function heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
   if temperature < 1.e-10
     return cMOl, cMOr
   end
   println("Heating up starting guess to ", temperature, " K")
-  if is_restricted_MO(cMOr)
+  if is_restricted(cMOr)
     return closed_shell_heatup(EC, cMOl, cMOr, temperature)
   else
     return unrestricted_heatup(EC, cMOl, cMOr, temperature)
@@ -138,7 +138,7 @@ end
 
   Heat up closed-shell BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """
-function closed_shell_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+function closed_shell_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
   fock = gen_fock(EC, cMOl[1], cMOr[1])
   ϵ, cMOr_new = eigen(fock)
   cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
@@ -157,12 +157,12 @@ end
 
   Heat up unrestricted BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """
-function unrestricted_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+function unrestricted_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
   SP = EC.space
   fock = gen_ufock(EC, cMOl, cMOr)
-  den4temp = AbstractArray[[], []]
-  cMOr_out = MOs()
-  cMOl_out = MOs()
+  den4temp = FSpinMatrix()
+  cMOr_out = FSpinMatrix()
+  cMOl_out = FSpinMatrix()
   for (ispin, sp) = enumerate(['o', 'O'])
     ϵ, cMOr_new = eigen(fock[ispin])
     cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)

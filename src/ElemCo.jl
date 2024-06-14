@@ -10,6 +10,7 @@ include("utils.jl")
 include("constants.jl")
 include("myio.jl")
 include("mnpy.jl")
+include("qmtensors.jl")
 include("dump.jl")
 include("system/elements.jl")
 include("system/msystem.jl")
@@ -56,6 +57,7 @@ using Dates
 using TensorOperations
 using .Utils
 using .ECInfos
+using .QMTensors
 using .Wavefunctions
 using .ECMethods
 using .TensorTools

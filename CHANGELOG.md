@@ -4,11 +4,17 @@
 
 ### Breaking
 
+* `DIIS.perform` has been changed to `DIIS.perform!` in order to allow to read the vectors and residuals as `Vector{}`.
+* the signature of `newmmap` function has changed (the type specification is now the last argument and defaults to `Float64`.
+
 ### Changed
+
+* `dfdump` stores the MO integrals internally in npy files.
 
 ### Added
 
 * Export of molden files (`@export_molden`). At the moment the orbital energies and occupations are not exported.
+* `QMTensors.SpinMatrix` struct for one-electron matrices (e.g., MO coefficients)
 
 ### Fixed
 

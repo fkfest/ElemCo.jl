@@ -73,7 +73,7 @@ function gen_vₓˣᴸ(EC::ECInfo)
   nL = size(mmL, 3)
   nX = size(UvoX, 3)
   # create mmap for the v_X^{X'L} intermediate
-  vXXLfile, v_XXL = newmmap(EC, "X^XL", Float64, (nX,nX,nL))
+  vXXLfile, v_XXL = newmmap(EC, "X^XL", (nX,nX,nL))
   LBlks = get_auxblks(nL)
   XBlks = get_auxblks(nX)
   for L in LBlks
@@ -212,10 +212,10 @@ function calc_dressed_3idx(EC::ECInfo, T1)
   nocc = length(SP['o'])
   nvirt = length(SP['v'])
   # create mmaps for dressed integrals
-  ovLfile, ovL = newmmap(EC, "d_ovL", Float64, (nocc,nvirt,nL))
-  voLfile, voL = newmmap(EC, "d_voL", Float64, (nvirt,nocc,nL))
-  ooLfile, ooL = newmmap(EC, "d_ooL", Float64, (nocc,nocc,nL))
-  vvLfile, vvL = newmmap(EC, "d_vvL", Float64, (nvirt,nvirt,nL))
+  ovLfile, ovL = newmmap(EC, "d_ovL", (nocc,nvirt,nL))
+  voLfile, voL = newmmap(EC, "d_voL", (nvirt,nocc,nL))
+  ooLfile, ooL = newmmap(EC, "d_ooL", (nocc,nocc,nL))
+  vvLfile, vvL = newmmap(EC, "d_vvL", (nvirt,nvirt,nL))
 
   LBlks = get_auxblks(nL)
   for L in LBlks
@@ -252,10 +252,10 @@ function save_pseudodressed_3idx(EC::ECInfo)
   nocc = length(SP['o'])
   nvirt = length(SP['v'])
   # create mmaps for dressed integrals
-  ovLfile, ovL = newmmap(EC,"d_ovL",Float64,(nocc,nvirt,nL))
-  voLfile, voL = newmmap(EC,"d_voL",Float64,(nvirt,nocc,nL))
-  ooLfile, ooL = newmmap(EC,"d_ooL",Float64,(nocc,nocc,nL))
-  vvLfile, vvL = newmmap(EC,"d_vvL",Float64,(nvirt,nvirt,nL))
+  ovLfile, ovL = newmmap(EC, "d_ovL", (nocc,nvirt,nL))
+  voLfile, voL = newmmap(EC, "d_voL", (nvirt,nocc,nL))
+  ooLfile, ooL = newmmap(EC, "d_ooL", (nocc,nocc,nL))
+  vvLfile, vvL = newmmap(EC, "d_vvL", (nvirt,nvirt,nL))
 
   LBlks = get_auxblks(nL)
   for L in LBlks
@@ -790,7 +790,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   end
   XBigBlks = get_auxblks(nX, 512)
   XXLfile, XXL = mmap(EC, "X^XL")
-  d_XXLfile, d_XXL = newmmap(EC, "d_X^XL", Float64, (nX,nX,nL))
+  d_XXLfile, d_XXL = newmmap(EC, "d_X^XL", (nX,nX,nL))
   for X in XBigBlks
     V_UvoX = @view UvoX[:,:,X]
     # ``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``

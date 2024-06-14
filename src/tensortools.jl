@@ -7,13 +7,14 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDump
 using ..ElemCo.MIO
 
-export save!, load, load_all, mmap, newmmap, closemmap
+export save!, load, load_all, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
 export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, load6idx_all
 export ints1, ints2, detri_int2
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
 export print_nonzeros
+
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
@@ -72,34 +73,16 @@ for N in 1:6
 end
 
 """
-    newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}; description="tmp")
+    newmmap(EC::ECInfo, fname::String, dims::Tuple{Vararg{Int}}, Type=Float64; description="tmp")
 
   Create a new memory-map file for writing (overwrites existing file).
   Add file to `EC.files` with `description`.
   Return a pointer to the file and the mmaped array.
 """
-function newmmap(EC::ECInfo, fname::String, Type, dims::Tuple{Vararg{Int}}; description="tmp")
+function newmmap(EC::ECInfo, fname::String, dims::NTuple{N,Int}, Type=Float64; description="tmp") where {N}
   add_file!(EC, fname, description; overwrite=true)
-  return mionewmmap(joinpath(EC.scr, fname*EC.ext), Type, dims)
+  return mionewmmap(joinpath(EC.scr, fname*EC.ext), dims, Type)
 end
-
-# for N = 1:6
-#   docstr = """
-#       newmmap(EC::ECInfo, fname::String, Type, dims::NTuple{$N, Int}; description="tmp")
-
-#     Create a new memory-map file for writing (overwrites existing file).
-#     Add file to `EC.files` with `description`.
-#     Return a pointer to the file and the mmaped array.
-#   """
-#   @eval begin
-#     @doc $docstr
-#     function newmmap(EC::ECInfo, fname::String, Type, dims::NTuple{$N, Int}; description="tmp")
-#       add_file!(EC, fname, description; overwrite=true)
-#       return mionewmmap(joinpath(EC.scr, fname*EC.ext), Type, dims)
-#     end
-#   end
-# end
-
 
 """
     closemmap(EC::ECInfo, file, array)
@@ -108,6 +91,15 @@ end
 """
 function closemmap(EC::ECInfo, file, array)
   mioclosemmap(file, array)
+end
+
+"""
+    flushmmap(EC::ECInfo, array)
+
+  Flush memory-map array to disk.
+"""
+function flushmmap(EC::ECInfo, array)
+  mioflushmmap(array)
 end
 
 """
@@ -209,7 +201,7 @@ end
 """
 function detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
   @assert ndims(allint2) == 3
-  out = Array{Float64}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
   cio, maski = triinds(norb, sp3, sp4)
   out[:,:,cio] = allint2[sp1,sp2,maski]
   cio, maski = triinds(norb, sp4, sp3, true)

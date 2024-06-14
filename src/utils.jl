@@ -6,7 +6,7 @@ using ..ElemCo.AbstractEC
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
-export substr, reshape_buf
+export substr, reshape_buf, create_buf
 export amdmkl
 
 """
@@ -200,7 +200,16 @@ function substr(string::AbstractString, range::UnitRange{Int})
 end
 
 """
-    reshape_buf(buf::Array, dims...; start=1)
+    create_buf(len::Int, T=Float64)
+
+  Create a buffer of length `len` of type `T`.
+"""
+function create_buf(len::Int, T=Float64)
+  return Vector{T}(undef, len)
+end
+
+"""
+    reshape_buf(buf::Vector{T}, dims...; start=1)
 
   Reshape (part of) a buffer to given dimensions (without copying),
   starting at `start`.
@@ -209,7 +218,7 @@ end
 
 # Example
 ```julia
-julia> buf = Array{Float64}(undef, 100000)
+julia> buf = Vector{Float64}(undef, 100000)
 julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor
 julia> B = reshape_buf(buf, 10, 10, 10, start=2001) # 10x10x10 tensor starting at 2001
 julia> B .= rand(10,10,10)
@@ -217,7 +226,7 @@ julia> C = rand(10,20)
 julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
 ```
 """
-function reshape_buf(buf::Array, dims...; start=1)
+function reshape_buf(buf::Vector{T}, dims...; start=1) where {T}
   return reshape(view(buf, 1:prod(dims)), dims)
 end
 

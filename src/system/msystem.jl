@@ -367,7 +367,7 @@ end
   `coretype` as in [`Elements.ncoreorbs`](@ref Elements.ncoreorbs).
 """
 function guess_ncore(ms::AbstractSystem, coretype::Symbol=:large)
-  return sum([ncoreorbs(element_SYMBOL(at),coretype) for at in ms if !is_dummy(at)])
+  return sum(Int[ncoreorbs(element_SYMBOL(at),coretype) for at in ms if !is_dummy(at)])
 end
 
 """ 

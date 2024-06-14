@@ -6,6 +6,7 @@ using LinearAlgebra, TensorOperations
 # using TSVD
 using IterativeSolvers
 using ..ElemCo.ECInfos
+using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 using ..ElemCo.Integrals
 using ..ElemCo.MSystem
@@ -54,6 +55,8 @@ end
   Generate AO integrals using DF + Cholesky.
   If save3idx is true, save Cholesky-decomposed 3-index integrals, 
   otherwise save pseudo-square-root-inverse Cholesky decomposition.
+
+  Return nuclear repulsion energy.
 """
 function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
   bao = generate_basis(EC, "ao")
@@ -66,7 +69,7 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
     AAP = eri_2e3idx(bao,bfit)
     nA = size(AAP,1)
     nL = size(M,2)
-    AALfile, AAL = newmmap(EC, "AAL", Float64, (nA,nA,nL))
+    AALfile, AAL = newmmap(EC, "AAL", (nA,nA,nL))
     LBlks = get_auxblks(nL)
     for L in LBlks
       V_M = @view M[:,L]
@@ -87,8 +90,8 @@ end
   ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``
   and store in file `mmL`.
 """
-function generate_3idx_integrals(EC::ECInfo, cMO::MOs, fitbasis="mpfit")
-  @assert is_restricted_MO(cMO) "unrestricted not implemented yet"
+function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit")
+  @assert is_restricted(cMO) "unrestricted not implemented yet"
   cMO1 = cMO[1]
   bao = generate_basis(EC, "ao")
   bfit = generate_basis(EC, fitbasis)
@@ -98,7 +101,7 @@ function generate_3idx_integrals(EC::ECInfo, cMO::MOs, fitbasis="mpfit")
   μνP = eri_2e3idx(bao,bfit)
   nm = size(cMO1,2)
   nL = size(M,2)
-  mmLfile, mmL = newmmap(EC, "mmL", Float64, (nm,nm,nL))
+  mmLfile, mmL = newmmap(EC, "mmL", (nm,nm,nL))
   LBlks = get_auxblks(nL)
   for L in LBlks
     V_M = @view M[:,L]
@@ -120,8 +123,8 @@ end
 
   Return reference energy (calculated using `jkfit` fitting basis).
 """
-function generate_DF_integrals(EC::ECInfo, cMO::MOs)
-  @assert is_restricted_MO(cMO) "unrestricted not implemented yet"
+function generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix)
+  @assert is_restricted(cMO) "unrestricted not implemented yet"
   if !system_exists(EC.system)
     error("Molecular system not specified!")
   end

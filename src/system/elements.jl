@@ -233,7 +233,7 @@ function ncoreorbs(elem::AbstractString, coretype::Symbol=:large)
   else
     error("unknown coretype $coretype")
   end
-  subshells = parse_electron_configuration(ELEMENTS[elem][ic])
+  subshells = parse_electron_configuration(ELEMENTS[elem][ic]::String)
   return sum([n_orbitals_in_subshell(sh.l) for sh in subshells])
 end
 

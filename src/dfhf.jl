@@ -4,6 +4,7 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.Integrals
 using ..ElemCo.MSystem
+using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 using ..ElemCo.OrbTools
 using ..ElemCo.DFTools
@@ -40,7 +41,7 @@ function dfhf(EC::ECInfo)
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC, guess)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  @assert is_restricted_MO(cMO) "DF-HF only implemented for closed-shell"
+  @assert is_restricted(cMO) "DF-HF only implemented for closed-shell"
   cMO = cMO.α
   ϵ = zeros(norb)
   hsmall = load(EC, "h_AA", Val(2))

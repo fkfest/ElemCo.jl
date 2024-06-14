@@ -16,6 +16,7 @@ using ..ElemCo.MNPY
 export FDump, fd_exists, read_fcidump, write_fcidump, transform_fcidump
 export headvar, integ1, integ2, uppertriangular, uppertriangular_range
 export reorder_orbs_int2, modify_header!
+export int1_npy_filename, int2_npy_filename
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -528,9 +529,9 @@ end
 """
 function write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
   println("Write fcidump $fcidump"...)
-  fdf = open(fcidump,"w")
-  write_header(fd,fdf)
-  write_integrals(fd,fdf,tol)
+  fdf = open(fcidump, "w")
+  write_header(fd, fdf)
+  write_integrals(fd, fdf, tol)
   close(fdf)
 end
 
@@ -578,7 +579,7 @@ end
   Write integrals to fdf file.
 """
 function write_integrals(fd::FDump, fdf, tol)
-  simtra = (headvar(fd, "ST") > 0)
+  simtra::Bool = (headvar(fd, "ST") > 0)
   if !fd.uhf
     write_integrals2(fd.int2, fdf, tol, fd.triang, simtra)
     write_integrals1(fd.int1, fdf, tol, simtra)
@@ -603,60 +604,63 @@ end
   Write 2-e integrals to fdf file.
 """
 function write_integrals2(int2, fdf, tol, triang, simtra)
-  norb = size(int2,1)
+  write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
   if triang
     inds = (p,q,r,s) -> CartesianIndex(p,q,uppertriangular(r,s))
     indslow = (p,q,r,s) -> CartesianIndex(q,p,uppertriangular(s,r))
+    write_integrals2_(int2, inds, indslow, fdf, tol)
   else
     inds = (p,q,r,s) -> CartesianIndex(p,q,r,s)
-    indslow = (p,q,r,s) -> CartesianIndex(p,q,r,s)
+    write_integrals2_(int2, inds, inds, fdf, tol)
   end
-  if simtra
-    for p = 1:norb
-      for q = 1:norb
-        for r = 1:p-1
-          # lower triangle (q>s)
-          for s = 1:q-1
-            val = int2[indslow(p,r,q,s)]
-            if abs(val) > tol
-              print_int_value(fdf,val,p,q,r,s)
-            end
-          end
-          # upper triangle (q<=s)
-          for s = q:norb
-            val = int2[inds(p,r,q,s)]
-            if abs(val) > tol
-              print_int_value(fdf,val,p,q,r,s)
-            end
-          end
-        end
-        # r==p case
-        r = p
-        for s = 1:q
+end
+function write_integrals2_simtra(int2, inds, indslow, fdf, tol)
+  norb = size(int2,1)
+  for p = 1:norb
+    for q = 1:norb
+      for r = 1:p-1
+        # lower triangle (q>s)
+        for s = 1:q-1
           val = int2[indslow(p,r,q,s)]
           if abs(val) > tol
-            print_int_value(fdf,val,p,q,r,s)
+            print_int_value(fdf, val, p, q, r, s)
+          end
+        end
+        # upper triangle (q<=s)
+        for s = q:norb
+          val = int2[inds(p,r,q,s)]
+          if abs(val) > tol
+            print_int_value(fdf, val, p, q, r, s)
           end
         end
       end
+      # r==p case
+      r = p
+      for s = 1:q
+        val = int2[indslow(p,r,q,s)]
+        if abs(val) > tol
+          print_int_value(fdf, val, p, q, r, s)
+        end
+      end
     end
-  else
-    # normal case
-    for p in 1:norb
-      for q in 1:p
-        for r in 1:p
-          for s in 1:r
-            if r*(r-1)/2+s <= p*(p-1)/2+q
-              if s < q 
-                # lower triangle
-                val = int2[indslow(p,r,q,s)]
-              else
-                # upper triangle
-                val = int2[inds(p,r,q,s)]
-              end
-              if abs(val) > tol
-                print_int_value(fdf,val,p,q,r,s)
-              end
+  end
+end
+function write_integrals2_normal(int2, inds, indslow, fdf, tol)
+  norb = size(int2,1)
+  for p in 1:norb
+    for q in 1:p
+      for r in 1:p
+        for s in 1:r
+          if r*(r-1)/2+s <= p*(p-1)/2+q
+            if s < q 
+              # lower triangle
+              val = int2[indslow(p,r,q,s)]
+            else
+              # upper triangle
+              val = int2[inds(p,r,q,s)]
+            end
+            if abs(val) > tol
+              print_int_value(fdf,val,p,q,r,s)
             end
           end
         end
@@ -664,6 +668,7 @@ function write_integrals2(int2, fdf, tol, triang, simtra)
     end
   end
 end
+
 function write_integrals2ab(int2, fdf, tol, simtra)
   norb = size(int2,1)
   if simtra
@@ -874,6 +879,74 @@ function reorder_orbs_int2(int2::AbstractArray, orbs)
     int2t = int2[orbs,orbs,orbs,orbs]
   end
   return int2t
+end
+
+"""
+    int1_npy_filename(fd::FDump, spincase::Symbol=:α)
+
+  Return filename for 1-e integrals in npy format.
+  `spincase` can be `:α` or `:β` for UHF fcidump.
+"""
+function int1_npy_filename(fd::FDump, spincase::Symbol=:α)
+  if !fd.uhf
+    file = headvar(fd, "NPY1")
+    if isnothing(file)
+      file = "int1.npy"
+      # fd.head["NPY1"] = [file]
+    end
+  else
+    if spincase == :α
+      file = headvar(fd, "NPY1A")
+      if isnothing(file)
+        file = "int1a.npy"
+        # fd.head["NPY1A"] = [file]
+      end
+    else
+      file = headvar(fd, "NPY1B")
+      if isnothing(file)
+        file = "int1b.npy"
+        # fd.head["NPY1B"] = [file]
+      end
+    end
+  end
+  return file::String
+end
+
+"""
+    int2_npy_filename(fd::FDump, spincase::Symbol=:α)
+
+  Return filename for 2-e integrals in npy format. 
+  `spincase` can be `:α`, `:β` or `:αβ` for UHF fcidump.
+"""
+function int2_npy_filename(fd::FDump, spincase::Symbol=:α)
+  if !fd.uhf
+    file = headvar(fd, "NPY2")
+    if isnothing(file)
+      file = "int2.npy"
+      # fd.head["NPY2"] = [file]
+    end
+  else
+    if spincase == :α
+      file = headvar(fd, "NPY2AA")
+      if isnothing(file)
+        file = "int2aa.npy"
+        # fd.head["NPY2AA"] = [file]
+      end
+    elseif spincase == :β
+      file = headvar(fd, "NPY2BB")
+      if isnothing(file)
+        file = "int2bb.npy"
+        # fd.head["NPY2BB"] = [file]
+      end
+    else
+      file = headvar(fd, "NPY2AB")
+      if isnothing(file)
+        file = "int2ab.npy"
+        # fd.head["NPY2AB"] = [file]
+      end
+    end
+  end
+  return file::String
 end
 
 end #module
