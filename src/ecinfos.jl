@@ -6,6 +6,7 @@ using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDump
 using ..ElemCo.MSystem
+using ..ElemCo.BasisSets
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
 export setup_space_fd!, setup_space_system!, setup_space!, reset_wf_info!
@@ -17,6 +18,8 @@ export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 
 include("options.jl")
+
+RangeOrVector = Union{UnitRange{Int},Vector{Int}}
 
 """
     ECInfo
@@ -75,7 +78,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
-  space::Dict{Char,Any} = Dict{Char,Any}()
+  space::Dict{Char,RangeOrVector} = Dict{Char,RangeOrVector}()
 end
 
 """
@@ -119,7 +122,7 @@ function setup_space_system!(EC::ECInfo)
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
-  norb = guess_norb(EC.system) 
+  norb = guess_norb(EC) 
   nelec = (nelec < 0) ? guess_nelec(EC.system) : nelec
   nelec -= charge
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2

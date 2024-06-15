@@ -28,6 +28,7 @@ makedocs(
       "Options" => "options.md" 
       ],
     "Internals" => [
+      "basisset.md",
       "bohf.md",
       "cc.md",
       "ccdriver.md",
@@ -40,17 +41,23 @@ makedocs(
       "dfmcscf.md",
       "dftools.md",
       "diis.md",
+      "dmrg.md",
       "dump.md",
       "dumptools.md",
+      "elements.md",
       "ecinfos.md",
       "ecmethod.md",
       "fockfactory.md",
+      "integrals.md",
       "mio.md",
       "mnpy.md",
       "msystem.md",
       "orbtools.md",
       "tensortools.md",
-      "utils.md"
+      "utils.md",
+      "interfaces.md",
+      "molpro.md",
+      "molden.md"
     ],
     "release-notes.md", 
   ],

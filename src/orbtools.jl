@@ -4,15 +4,18 @@
 A collection of tools for working with orbitals
 """ 
 module OrbTools
-using LinearAlgebra, TensorOperations
+using LinearAlgebra, TensorOperations, Printf
 
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
-using ..ElemCo.ECInts
+using ..ElemCo.BasisSets
+using ..ElemCo.Integrals
 using ..ElemCo.MSystem
 using ..ElemCo.TensorTools
 
 export guess_orb, load_orbitals, orbital_energies, is_unrestricted_MO
-export rotate_orbs, rotate_orbs!
+export show_orbitals
+export rotate_orbs, rotate_orbs!, normalize_phase!
 
 """
     guess_hcore(EC::ECInfo)
@@ -35,8 +38,8 @@ function guess_sad(EC::ECInfo)
   # minao = "ano-rcc-mb"
   minao = "ano-r0"
   # minao = "sto-6g"
-  bminao = BasisSet(minao,genxyz(EC.system))
-  bao = generate_basis(EC.system, "ao")
+  bminao = generate_basis(EC, basisset=minao)
+  bao = generate_basis(EC, "ao")
   smin2ao = overlap(bminao,bao)
   smin = overlap(bminao)
   eldist = electron_distribution(EC.system,minao)
@@ -69,6 +72,7 @@ function guess_orb(EC::ECInfo, guess::Symbol)
     return load(EC,EC.options.wf.orb)
   else
     error("unknown guess type")
+    return Float64[]
   end
 end
 
@@ -111,12 +115,12 @@ function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
 end
 
 """
-    is_unrestricted_MO(cMO)
+    is_unrestricted_MO(cMO::AbstractArray)
 
   Return `true` if `cMO` is unrestricted MO coefficients of the form 
   [CMOα, CMOβ].
 """
-function is_unrestricted_MO(cMO)
+function is_unrestricted_MO(cMO::AbstractArray)
   if ndims(cMO) == 1
     return true
   elseif ndims(cMO) == 2
@@ -167,6 +171,81 @@ function rotate_orbs!(cMO::AbstractArray, orb1, orb2, angle=90)
     error("orbital indices must be different")
   end
   cMO[:,[orb1,orb2]] = cMO[:,[orb1,orb2]] * [cosd(angle) -sind(angle); sind(angle) cosd(angle)]
+end
+
+"""
+    show_orbitals(EC::ECInfo, range=nothing)
+
+  Print the MO coefficients in [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  with respect to the atomic orbitals.
+  
+  `range` is a range of molecular orbitals to be printed.
+"""
+function show_orbitals(EC::ECInfo, range=nothing)
+  basis = generate_basis(EC, "ao")
+  cMO = load_orbitals(EC)
+  descr = file_description(EC, EC.options.wf.orb)
+  if isnothing(range)
+    range = 1:size(cMO,2)
+  end
+  println(range," orbitals from $descr")
+  if is_unrestricted_MO(cMO)
+    println("Alpha orbitals:")
+    show_orbitals(EC, cMO[1], basis, range)
+    println("Beta orbitals:")
+    show_orbitals(EC, cMO[2], basis, range)
+  else
+    show_orbitals(EC, cMO, basis, range)
+  end
+end
+
+"""
+    show_orbitals(EC::ECInfo, cMO::AbstractArray, basis::BasisSet, range=1:size(cMO,2)
+
+  Print the MO coefficients in `cMO` with respect to the atomic orbitals in `basis`.
+
+  `range` is a range of molecular orbitals to be printed.
+"""
+function show_orbitals(EC::ECInfo, cMO::AbstractArray, basis::BasisSet, range=1:size(cMO,2))
+  aos = ao_list(basis)
+  nao = length(aos)
+  nmo = size(cMO,2)
+  nlargest = EC.options.wf.print_nlargest
+  thr = EC.options.wf.print_thr
+  @assert size(cMO,1) == nao "Wrong number of atomic orbitals in cMO: $(size(cMO,1)) vs $(nao)"
+  for imo in range
+    @assert imo in 1:size(cMO,2) "Wrong range of orbitals: $(range). Number of orbitals: $(nmo)"
+    print("$imo: ")
+    # get nlargest coefficients (round to 4 digits to avoid numerical noise)
+    idx = argmaxN(cMO[:,imo], nlargest, by=x->round(abs(x),digits=4))
+    for iao in idx
+      if abs(cMO[iao,imo]) < thr
+        continue
+      end
+      @printf("% .3f", cMO[iao,imo])
+      print("(")
+      print_ao(aos[iao], basis)
+      print(") ")
+    end
+    println()
+  end
+end
+
+"""
+    normalize_phase!(cMO)
+
+  Normalize the phase of the MO coefficients in `cMO`.
+
+  The phase is chosen such that the first largest coefficient is positive.
+"""
+function normalize_phase!(cMO)
+  nmo = size(cMO,2)
+  for imo in 1:nmo
+    maxao = argmaxN(cMO[:,imo], 1, by=x->round(abs(x),digits=4))[1]
+    if cMO[maxao,imo] < 0
+      cMO[:,imo] .= -cMO[:,imo]
+    end
+  end
 end
 
 end #module

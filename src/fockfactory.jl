@@ -11,7 +11,7 @@ using TensorOperations
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDump
-using ..ElemCo.ECInts
+using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
 
 export gen_fock, gen_ufock, gen_dffock
@@ -229,7 +229,7 @@ end
 """
 function gen_closed_shell_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
   @assert !is_unrestricted_MO(cMO) "Restricted orbitals only!"
-  μνP = ERI_2e3c(bao,bfit)
+  μνP = eri_2e3idx(bao,bfit)
   PL = load(EC,"C_PL")
   hsmall = load(EC,"h_AA")
   # println(size(Ppq))
@@ -254,14 +254,14 @@ end
 """
 function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray, bao, bfit)
   @assert is_unrestricted_MO(cMO) "Unrestricted orbitals only!"
-  μνP = ERI_2e3c(bao,bfit)
+  μνP = eri_2e3idx(bao,bfit)
   PL = load(EC,"C_PL")
   hsmall = load(EC,"h_AA")
   # println(size(Ppq))
   occa = EC.space['o']
   occb = EC.space['O']
   CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
-  fock = Any[zeros(size(hsmall)), zeros(size(hsmall))]
+  fock = Array{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
   cL = zeros(size(PL,2))
   for isp = 1:2 # loop over [α, β]
     @tensoropt begin 
@@ -314,7 +314,7 @@ function gen_unrestricted_dffock(EC::ECInfo, cMO::AbstractArray)
   occb = EC.space['O']
   CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
   hsmall = load(EC,"h_AA")
-  fock = Any[zeros(size(hsmall)), zeros(size(hsmall))]
+  fock = Array{Float64}[zeros(size(hsmall)), zeros(size(hsmall))]
   μνL = load(EC,"AAL")
   L = zeros(size(μνL,3))
   for isp = 1:2 # loop over [α, β]

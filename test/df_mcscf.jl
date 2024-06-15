@@ -8,7 +8,7 @@ geometry="h2o.xyz"
 
 basis = Dict("ao"=>"cc-pVDZ",
             "jkfit"=>"cc-pvtz-jkfit",
-            "mp2fit"=>"cc-pvdz-rifit")
+            "mpfit"=>"cc-pvdz-rifit")
 
 @opt wf ms2=2 charge=-2
 

@@ -5,8 +5,8 @@ using Printf
 using ..ElemCo.AbstractEC
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
-export subspace_in_space
-export substr
+export subspace_in_space, argmaxN
+export substr, reshape_buf
 export amdmkl
 
 """
@@ -141,6 +141,29 @@ function subspace_in_space(subspace, space)
 end
 
 """
+    subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
+
+  Return the positions of `subspace` in `space` 
+  (with respect to `space`)
+
+  `subspace` and `space` are ranges of indices 
+  with respect to the full space (e.g., `1:norb`).
+
+  # Examples 
+```julia
+julia> get_subspace_of_space(4:6, 2:7)
+3:5
+```
+"""
+function subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
+  start = subspace.start - space.start + 1
+  stop = subspace.stop - space.start + 1
+  @assert start > 0 && start <= stop <= length(space) "Subspace not contained in space."
+  return start:stop
+end
+
+
+"""
     substr(string::AbstractString, start::Int, len::Int=-1)
 
   Return substring of `string`  starting at `start` spanning `len` characters 
@@ -148,10 +171,10 @@ end
   If `len` is not given, the substring spans to the end of `string`.
 
   Example:
-  ```julia
-  julia> substr("λabδcd", 2, 3)
-  "abδ"
-  ```
+```julia
+julia> substr("λabδcd", 2, 3)
+"abδ"
+```
 """
 function substr(string::AbstractString, start::Int, len::Int=-1)
   tail = length(string)-start-len+1
@@ -167,13 +190,82 @@ end
   Return substring of `string` defined by `range` (including unicode).
 
   Example:
-  ```julia
-  julia> substr("λabδcd", 2:4)
-  "abδ"
-  ```
+```julia
+julia> substr("λabδcd", 2:4)
+"abδ"
+```
 """
 function substr(string::AbstractString, range::UnitRange{Int})
   return substr(string, range.start, range.stop-range.start+1)
+end
+
+"""
+    reshape_buf(buf::Array, dims...; start=1)
+
+  Reshape (part of) a buffer to given dimensions (without copying),
+  starting at `start`.
+
+  It can be used, e.g., for itermediates in tensor contractions.
+
+# Example
+```julia
+julia> buf = Array{Float64}(undef, 100000)
+julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor
+julia> B = reshape_buf(buf, 10, 10, 10, start=2001) # 10x10x10 tensor starting at 2001
+julia> B .= rand(10,10,10)
+julia> C = rand(10,20)
+julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
+```
+"""
+function reshape_buf(buf::Array, dims...; start=1)
+  return reshape(view(buf, 1:prod(dims)), dims)
+end
+
+"""
+    argmaxN(vals, N; by::Function=identity)
+
+  Return the indices of the `N` largest elements in `vals`.
+
+  The order of equal elements is preserved.
+  The keyword argument `by` can be used to specify a function to compare the elements, i.e.,
+  the function is applied to the elements before comparison.
+
+  # Example
+```julia
+julia> argmaxN([1,2,3,4,5,6,7,8,9,10], 3)
+3-element Vector{Int64}:
+ 10
+  9
+  8
+julia> argmaxN([1,2,3,4,5,-6,-7,-8,-9,-10], 3; by=abs)
+3-element Vector{Int64}:
+ 10
+  9
+  8
+julia> argmaxN([1.0, 1.10, 1.112, -1.113, 1.09], 3; by=x->round(abs(x),digits=2))
+3-element Vector{Int64}:
+ 3
+ 4
+ 2
+```
+"""
+function argmaxN(vals, N; by::Function=identity)
+  perm = sortperm(vals[1:N]; by, rev=true)
+  smallest = by(vals[perm[N]])
+  @inbounds for i in N+1:length(vals)
+    el = by(vals[i])
+    if smallest < el
+      for j in 1:N
+        if by(vals[perm[j]]) < el
+          perm[j+1:end] = perm[j:end-1]
+          perm[j] = i
+          break
+        end
+      end
+      smallest = by(vals[perm[N]])
+    end
+  end
+  return perm
 end
 
 """

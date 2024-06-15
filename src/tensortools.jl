@@ -172,7 +172,7 @@ end
   Return `M`.
 """
 function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
-  CA = cholesky(A, RowMaximum(), check = false, tol = tol)
+  CA = cholesky(Symmetric(A), RowMaximum(), check = false, tol = tol)
   if CA.rank < size(A,1)
     if verbose
       redund = size(A,1) - CA.rank
