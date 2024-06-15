@@ -356,7 +356,7 @@ to minimize the energy expectation value, the Lagrangian equation as known as th
 \end{equation}
 In the end, expectation energy $E$ is calculated with transformed orbital coefficients and active orbital one- and two-particle density matrices
 \begin{equation}
-E=\pre{^c}F_t^uD_t^u+\frac{1}{2}v^{uw}_{tv}D_{tv}^{uw}+E_c+E_{nuc},
+E=\pre{^c}F_t^u \pre{^1}D^t_u+\frac{1}{2}v^{uw}_{tv}\pre{^2}D^{tv}_{uw}+E_c+E_{nuc},
 \end{equation}
 with
 \begin{equation}
@@ -369,8 +369,8 @@ $E_c$ is the closed shell electronic energy, $\bf{\pre{^c}F}$ is the closed shel
 and 1-particle density matrix $\bf{\pre{^1}D}$ and symmetrized  2-particle density matrix $\bf{\pre{^2}D}$ are defined as 
 \begin{equation}
 \begin{aligned}
-  \pre{^1}D_t^u =& c_Ic_J<\Phi_I|\hat{E}^t_u|\Phi_J>,\\
-  \pre{^2}D_{tv}^{uw} =& c_Ic_J<\Phi_I|\frac{1}{2}[\hat{E}^{tv}_{uw}+\hat{E}^{uv}_{tw}]|\Phi_J>,
+  \pre{^1}D^t_u =& c_Ic_J<\Phi_I|\hat{E}^t_u|\Phi_J>,\\
+  \pre{^2}D^{tv}_{uw} =& c_Ic_J<\Phi_I|\frac{1}{2}[\hat{E}^{tv}_{uw}+\hat{E}^{uv}_{tw}]|\Phi_J>,
 \end{aligned}
 \end{equation}
 with $\hat{E}_{tv}^{uw}$ as the 2-electron excitation operator. In order to simplify the expression, 
@@ -418,13 +418,13 @@ where $\bf{A}_r^k$ is defined as
 \begin{equation}
 \begin{aligned}
   A_r^i=&2F_r^i,\\
-  A_r^u=& \pre{^c}F_r^v D_v^u + v^{tw}_{rv}D_{tv}^{uw},\\
+  A_r^u=& \pre{^c}F_r^v D_v^u + v^{tw}_{rv}D^{tv}_{uw},\\
   A_r^a=&0,\\
 \end{aligned}
 \end{equation}
 with
 \begin{equation}
-  F_r^s = \pre{^c}F_r^s + D_t^u[v^{su}_{rt}-\frac{1}{2}v^{ts}_{ru}],
+  F_r^s = \pre{^c}F_r^s + D^t_u[v^{su}_{rt}-\frac{1}{2}v^{ru}_{ts}],
 \end{equation}
 the $\bf{F}$ matrix denotes the generalized Fock matrix calculated with density matrices.
 Since matrix $\bf{g}$ is asymmetric, $g_{rk}=-g_{kr}$, and we don't need the internal rotation parts of doubly occupied orbitals and virtual orbitals,
@@ -458,26 +458,26 @@ E^{(0)}=<0|\hat{H}^{eff}|0>,
 More specifically,
 \begin{equation}
 \begin{aligned}
-  \pre{^{SCI}}H_{ab}^{ij} =& 4(\delta_{ij}F_a^b-\delta_{ab}F_i^j),\\
-  \pre{^{SCI}}H_{ab}^{iu} =& -2\delta_{ab}F_i^vD_v^u,\\
-  \pre{^{SCI}}H_{au}^{ij} =& \delta_{ij}(4F_a^u-2F_a^vD_v^u),\\
-  \pre{^{SCI}}H_{tb}^{iu} =& 0,\\
-  \pre{^{SCI}}H_{tu}^{ij} =& (2D_t^u-4\delta_{tu}) F_i^j\\
-                   &+2\delta_{ij}[2F_t^u-(D_{tv}^{uw}-D_t^uD_v^w)F_v^w\\
+  \pre{^{SCI}}H_{ai}^{bj} =& 4(\delta_i^j F_a^b-\delta_a^b F_i^j),\\
+  \pre{^{SCI}}H_{ai}^{bu} =& -2\delta_a^b F_i^vD_v^u,\\
+  \pre{^{SCI}}H_{ai}^{uj} =& \delta_i^j(4F_a^u-2F_a^vD_v^u),\\
+  \pre{^{SCI}}H_{ti}^{bu} =& 0,\\
+  \pre{^{SCI}}H_{ti}^{uj} =& (2D_t^u-4\delta_t^u) F_i^j\\
+                   &+2\delta_i^j[2F_t^u-(D_{tv}^{uw}-D_t^uD_v^w)F_v^w\\
                    &-D_t^vF_v^u-F_t^vD_v^u],\\
-  \pre{^{SCI}}H_{ab}^{tu} =&2\delta_{ab}(D_{tv}^{uw}-D_t^uD_v^w)F_v^w + 2D_t^uF_a^b.
+  \pre{^{SCI}}H_{ab}^{tu} =&2\delta^a_b (D_{tv}^{uw}-D_t^uD_v^w)F_v^w + 2D_t^uF_a^b.
 \end{aligned}
 \end{equation}
 
 \subsection{Second Order Approximation}
 In general, the second-order Hessian matrix elements are calculated as
 \begin{equation}
-  \pre{^{SO}}H_{rs}^{kl} = (1-\perm{rk})(1-\perm{sl})[2G^{kl}_{rs}-\delta_{kl}(A_r^s+A_s^r)],
+  \pre{^{SO}}H_{rs}^{kl} = (1-\perm{rk})(1-\perm{sl})[2G^{kl}_{rs}-\delta^k_l(A_r^s+A_s^r)],
 \end{equation}
 matrices $\bf{G}$ are defined as
 \begin{equation}
 \begin{aligned}
-G^{ij}_{rs} =& 2[F_r^s\delta_{ij}+L^{ij}_{rs}],\\
+G^{ij}_{rs} =& 2[F_r^s\delta_i^j+L^{ij}_{rs}],\\
 G^{tj}_{rs} =& D_t^vL^{vj}_{rs} = G^{jt}_{sr},\\
 G^{tu}_{rs} =& \pre{^c}F_r^sD_t^u + [v^{sw}_{rv}D_{tv}^{uw}+2v^{vw}_{rs}D_{tu}^{vw}],\\
 \end{aligned}
@@ -970,7 +970,7 @@ The ``open-shell'' part of spin-projected $\alpha\beta$ amplitudes is given by
 \begin{aligned}
 ~^{αβ}\bar T^{ij}_{at} &= \frac{1}{3} ( ~^{ββ}T^{ij}_{at} + 2 ~^{αβ}T^{ij}_{at} + ~^{αβ}T^{ji}_{at})\\
 ~^{αβ}\bar T^{tj}_{ab} &= \frac{1}{3} ( ~^{αα}T^{tj}_{ab} + 2 ~^{αβ}T^{tj}_{ab} + ~^{αβ}T^{tj}_{ba})\\
-~^{αβ}\bar T^{tj}_{au} &= ~^{αβ}T^{tj}_{au} + \frac{\delta_{tu}}{2m_s + 2}\left( ~^{β}T^j_a - ~^{α}T^j_a - ~^{αβ}T^{vj}_{av} \right)
+~^{αβ}\bar T^{tj}_{au} &= ~^{αβ}T^{tj}_{au} + \frac{\delta^t_u}{2m_s + 2}\left( ~^{β}T^j_a - ~^{α}T^j_a - ~^{αβ}T^{vj}_{av} \right)
 \end{aligned}
 \end{equation}
 The projection corrections for the remaining amplitudes are defined 
