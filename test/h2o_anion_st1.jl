@@ -7,7 +7,7 @@ EMP2_test  =  -0.073645765995 + EHF_test
 ECCSD_test =  -0.086578672000 + EHF_test
 EDCSD_test =  -0.087143018852 + EHF_test
 
-fcidump = joinpath(@__DIR__,"H2O_ST1.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2O_ST1.FCIDUMP")
 
 @opt wf charge=-1
 @bohf

@@ -33,8 +33,8 @@ function freeze_orbs_in_dump(EC::ECInfo, freeze_orbs)
   ncore_orbs = freeze_nocc!(EC, freeze_occ)
   nfrozvirt = freeze_nvirt!(EC, 0, freeze_virt)
   nonfrozen = setdiff(SP[':'], freeze_occ, freeze_virt)
-  nelec = headvar(EC.fd, "NELEC") - 2*ncore_orbs
-  norbs = headvar(EC.fd, "NORB") - ncore_orbs - nfrozvirt
+  nelec = headvar(EC.fd, "NELEC", Int) - 2*ncore_orbs
+  norbs = headvar(EC.fd, "NORB", Int) - ncore_orbs - nfrozvirt
   @assert length(nonfrozen) == norbs
   if EC.fd.uhf
     core_fock_a = full_fock_a - gen_fock(EC, :α) 

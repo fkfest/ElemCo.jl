@@ -101,13 +101,18 @@ function setup_space_fd!(EC::ECInfo)
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
-  norb = headvar(EC.fd, "NORB")
-  nelec_from_fcidump = headvar(EC.fd, "NELEC")
+  norb = headvar(EC.fd, "NORB", Int)
+  @assert !isnothing(norb)
+  nelec_from_fcidump = headvar(EC.fd, "NELEC", Int)
+  @assert !isnothing(nelec_from_fcidump)
   nelec = (nelec < 0) ? nelec_from_fcidump : nelec
   nelec -= charge
-  ms2_default = (nelec == nelec_from_fcidump) ? headvar(EC.fd, "MS2") : mod(nelec,2)
+  ms2_from_fcidump = headvar(EC.fd, "MS2", Int)
+  @assert !isnothing(ms2_from_fcidump)
+  ms2_default = (nelec == nelec_from_fcidump) ? ms2_from_fcidump : mod(nelec,2)
   ms2 = (ms2 < 0) ? ms2_default : ms2
-  orbsym = convert(Vector{Int},headvar(EC.fd, "ORBSYM"))
+  orbsym = headvars(EC.fd, "ORBSYM", Int)
+  @assert !isnothing(orbsym)
   setup_space!(EC, norb, nelec, ms2, orbsym)
 end
 

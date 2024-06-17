@@ -11,7 +11,7 @@ EBOHF_test = -76.29524839981325
 EBODCSD_test =  -0.0852347071335213 + EBOHF_test
 EBODCSDfc_test =  -0.08583428759404194 + EBOHF_test
 
-fcidump = joinpath(@__DIR__,"H2O_ST1.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2O_ST1.FCIDUMP")
 
 @ECinit
 for (ime,method) in enumerate(ccmethods)

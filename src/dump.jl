@@ -14,7 +14,7 @@ using Printf
 using ..ElemCo.MNPY
 
 export FDump, fd_exists, read_fcidump, write_fcidump, transform_fcidump
-export headvar, integ1, integ2, uppertriangular, uppertriangular_range
+export headvar, headvars, integ1, integ2, uppertriangular, uppertriangular_range
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
 
@@ -23,6 +23,75 @@ const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
 
 """prefered order of keys in fcidump header (optional keys are not included)"""
 const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
+
+"""
+    FDumpHeader
+
+  Header of fcidump file
+"""
+Base.@kwdef mutable struct FDumpHeader
+  ihead::Dict{String,Vector{Int}} = Dict{String,Vector{Int}}()
+  fhead::Dict{String,Vector{Float64}} = Dict{String,Vector{Float64}}()
+  shead::Dict{String,Vector{String}} = Dict{String,Vector{String}}()
+end
+
+function Base.getindex(h::FDumpHeader, key::String)
+  if haskey(h.ihead, key)
+    return h.ihead[key]
+  elseif haskey(h.fhead, key)
+    return h.fhead[key]
+  else
+    return h.shead[key]
+  end
+end
+Base.getindex(h::FDumpHeader, key::String, ::Type{<:Int}) = h.ihead[key]
+Base.getindex(h::FDumpHeader, key::String, ::Type{Float64}) = h.fhead[key]
+Base.getindex(h::FDumpHeader, key::String, ::Type{String}) = h.shead[key]
+
+function Base.get(h::FDumpHeader, key::String, default) 
+  if haskey(h.ihead, key)
+    return h.ihead[key]
+  elseif haskey(h.fhead, key)
+    return h.fhead[key]
+  elseif haskey(h.shead, key)
+    return h.shead[key]
+  else
+    return default
+  end
+end
+Base.get(h::FDumpHeader, key::String, ::Type{<:Int}, default) = get(h.ihead, key, default)
+Base.get(h::FDumpHeader, key::String, ::Type{Float64}, default) = get(h.fhead, key, default)
+Base.get(h::FDumpHeader, key::String, ::Type{String}, default) = get(h.shead, key, default)
+
+Base.setindex!(h::FDumpHeader, val::Vector{Int}, key::String) = h.ihead[key] = val
+Base.setindex!(h::FDumpHeader, val::Vector{Float64}, key::String) = h.fhead[key] = val
+Base.setindex!(h::FDumpHeader, val::Vector{String}, key::String) = h.shead[key] = val
+
+function Base.keys(h::FDumpHeader)
+  return unique([keys(h.ihead); keys(h.fhead); keys(h.shead)])
+end
+
+Base.isempty(h::FDumpHeader) = isempty(h.ihead) && isempty(h.fhead) && isempty(h.shead)
+Base.empty!(h::FDumpHeader) = empty!(h.ihead) && empty!(h.fhead) && empty!(h.shead)
+
+function Base.iterate(h::FDumpHeader, state=1)
+  ikeys = collect(keys(h.ihead))
+  if state <= length(ikeys)
+    return ikeys[state] => h.ihead[ikeys[state]], state+1
+  end
+  fkeys = collect(keys(h.fhead))
+  fstate = state - length(ikeys)
+  if fstate <= length(fkeys)
+    return fkeys[fstate] => h.fhead[fkeys[fstate]], state+1
+  end
+  skeys = collect(keys(h.shead))
+  sstate = fstate - length(fkeys)
+  if sstate <= length(skeys)
+    return skeys[sstate] => h.shead[skeys[sstate]], state+1
+  end
+  return nothing
+end
+  
 
 """
     FDump
@@ -52,7 +121,7 @@ Base.@kwdef mutable struct FDump
   """ core energy """
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
-  head::Dict{String,AbstractArray} = Dict{String,AbstractArray}()
+  head::FDumpHeader = FDumpHeader()
   """`⟨true⟩` use an upper triangular index for last two indices of 2e⁻ integrals.""" 
   triang::Bool = true
   """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
@@ -60,24 +129,24 @@ Base.@kwdef mutable struct FDump
 end
 
 """
-    FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict{String,AbstractArray})
+    FDump(int2::Array{Float64}, int1::Array{Float64}, int0::Float64, head::FDumpHeader)
 
   Spin-free fcidump
 """
-FDump(int2::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict{String,AbstractArray}) = FDump(int2,[],[],[],int1,[],[],int0,head)
+FDump(int2::Array{Float64}, int1::Array{Float64}, int0::Float64, head::FDumpHeader) = FDump(int2,[],[],[],int1,[],[],int0,head)
 """
-    FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1::Array{Float64},int0::Float64,head::Dict{String,AbstractArray})
+    FDump(int2aa::Array{Float64}, int2bb::Array{Float64}, int2ab::Array{Float64}, int1::Array{Float64}, int0::Float64, head::FDumpHeader)
 
   Spin-polarized fcidump
 """
-FDump(int2aa::Array{Float64},int2bb::Array{Float64},int2ab::Array{Float64},int1a::Array{Float64},int1b::Array{Float64},int0::Float64,head::Dict{String,AbstractArray}) = FDump([],int2aa,int2bb,int2ab,[],int1a,int1b,int0,head)
+FDump(int2aa::Array{Float64}, int2bb::Array{Float64}, int2ab::Array{Float64}, int1a::Array{Float64}, int1b::Array{Float64}, int0::Float64, head::FDumpHeader) = FDump([],int2aa,int2bb,int2ab,[],int1a,int1b,int0,head)
 
 """
     FDump(norb,nelec;ms2=0,isym=1,orbsym=[],uhf=false,simtra=false,triang=true)
 
   Create a new FDump object
 """
-function FDump(norb, nelec; ms2=0, isym=1, orbsym=[], 
+function FDump(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[], 
                uhf=false, simtra=false, triang=true)
   fd = FDump()
   fd.head["NORB"] = [norb]
@@ -101,7 +170,7 @@ end
 
   Modify header of FDump object
 """
-function modify_header!(fd::FDump, norb, nelec; ms2=-1, isym=-1, orbsym=[])
+function modify_header!(fd::FDump, norb::Int, nelec::Int; ms2::Int=-1, isym::Int=-1, orbsym::Vector{Int}=Int[])
   fd.head["NORB"] = [norb]
   fd.head["NELEC"] = [nelec]
   if ms2 >= 0
@@ -169,12 +238,12 @@ function read_fcidump(fcidump::String)
   fdf = open(fcidump)
   fd = FDump()
   fd.head = read_header(fdf)
-  fd.uhf = (headvar(fd, "IUHF") > 0)
-  simtra = (headvar(fd, "ST") > 0)
+  fd.uhf = (headvar(fd, "IUHF", Int) > 0)
+  simtra = (headvar(fd, "ST", Int) > 0)
   if simtra
     println("Non-Hermitian")
   end
-  if isnothing(headvar(fd, "NPY2")) && isnothing(headvar(fd, "NPY2AA"))
+  if isnothing(headvar(fd, "NPY2", String)) && isnothing(headvar(fd, "NPY2AA", String))
     # read integrals from fcidump file
     read_integrals!(fd,fdf)
     close(fdf)
@@ -193,10 +262,11 @@ end
 """
 function read_header(fdfile)
   # put some defaults...
-  head = Dict{String,AbstractArray}()
+  head = FDumpHeader()
   head["IUHF"] = [0]
   head["ST"] = [0]
   variable_name = ""
+  vartype = Int
   for line in eachline(fdfile)
     #skip empty lines
     line = strip(line)
@@ -213,9 +283,11 @@ function read_header(fdfile)
     # after (before the next variable name) as a vector of values
     prev_el = ""
     elements = []
+    newvec = true
     if variable_name != ""
       # in case the elements of the last variable continue on new line...
-      elements = head[variable_name]
+      elements = head[variable_name, vartype]
+      newvec = false
     end
     push!(line_array, "\n")
     for el in line_array
@@ -227,7 +299,7 @@ function read_header(fdfile)
           end
           # case-insensitive variable names in the header
           variable_name = uppercase(prev_el)
-          elements = []
+          newvec = true
           prev_el = ""
         else
           error("No variable name before '=':"*line)
@@ -239,7 +311,16 @@ function read_header(fdfile)
             elem = tryparse(Float64,prev_el)
             if isnothing(elem)
               elem = strip(prev_el, ['"','\''])
+              vartype = String
+            else
+              vartype = Float64
             end 
+          else
+            vartype = Int
+          end
+          if newvec
+            elements = Vector{vartype}()
+            newvec = false
           end
           push!(elements, elem)
         end
@@ -273,10 +354,11 @@ function read_integrals!(fd::FDump, dir::AbstractString)
     fd.int1a = mmap_integrals(fd, dir, "NPY1A")
     fd.int1b = mmap_integrals(fd, dir, "NPY1B")
   end
-  if isnothing(headvar(fd, "ENUC"))
+  enuc = headvar(fd, "ENUC", Float64)
+  if isnothing(enuc)
     error("ENUC option not found in fcidump")
   end
-  fd.int0 = headvar(fd, "ENUC")
+  fd.int0 = enuc
 end
 
 """ 
@@ -406,28 +488,76 @@ end
   Read integrals from fcidump file
 """
 function read_integrals!(fd::FDump, fdfile::IOStream)
-  norb = headvar(fd, "NORB")
-  simtra = (headvar(fd, "ST") > 0)
+  norb = headvar(fd, "NORB", Int)
+  if isnothing(norb)
+    error("NORB option not found in fcidump")
+  end
+  st = headvar(fd, "ST", Int)
+  if isnothing(st)
+    error("ST option not found in fcidump")
+  end
+  simtra = (st > 0)
   if fd.uhf
     print("UHF")
-    fd.int1a = zeros(norb,norb)
-    fd.int1b = zeros(norb,norb)
+    int1a = zeros(norb,norb)
+    int1b = zeros(norb,norb)
     if fd.triang
-      fd.int2aa = zeros(norb,norb,norb*(norb+1)÷2)
-      fd.int2bb = zeros(norb,norb,norb*(norb+1)÷2)
+      int2aa = zeros(norb,norb,(norb+1)*norb÷2)
+      int2bb = zeros(norb,norb,(norb+1)*norb÷2)
     else
-      fd.int2aa = zeros(norb,norb,norb,norb)
-      fd.int2bb = zeros(norb,norb,norb,norb)
+      int2aa = zeros(norb,norb,norb,norb)
+      int2bb = zeros(norb,norb,norb,norb)
     end
-    fd.int2ab = zeros(norb,norb,norb,norb)
+    int2ab = zeros(norb,norb,norb,norb)
+    fd.int0 = read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, fd.triang, simtra)
+    fd.int1a = int1a
+    fd.int1b = int1b
+    fd.int2aa = int2aa
+    fd.int2bb = int2bb
+    fd.int2ab = int2ab 
   else
-    fd.int1 = zeros(norb,norb)
+    int1 = zeros(norb,norb)
     if fd.triang
-      fd.int2 = zeros(norb,norb,norb*(norb+1)÷2)
+      int2 = zeros(norb,norb,(norb+1)*norb÷2)
     else
-      fd.int2 = zeros(norb,norb,norb,norb)
+      int2 = zeros(norb,norb,norb,norb)
+    end
+    fd.int0 = read_integrals!(int1, int2, norb, fdfile, fd.triang, simtra)
+    fd.int1 = int1
+    fd.int2 = int2
+  end
+end
+
+function read_integrals!(int1, int2, norb, fdfile, triang, simtra)
+  int0 = 0.0
+  for linestr in eachline(fdfile)
+    line = split(linestr)
+    if length(line) != 5
+      # println("Last line: ",linestr)
+      # skip lines (in the case there is something left from header)...
+      continue
+    end
+    integ = parse(Float64,line[1])
+    i1 = parse(Int,line[2])
+    i2 = parse(Int,line[3])
+    i3 = parse(Int,line[4])
+    i4 = parse(Int,line[5])
+    if i1 > norb || i2 > norb || i3 > norb || i4 > norb
+      error("Index larger than norb: "*linestr)
+    end
+    if i4 > 0
+      set_int2!(int2, i1, i2, i3, i4, integ, triang, simtra, false)
+    elseif i2 > 0
+      set_int1!(int1, i1, i2, integ, simtra)
+    elseif i1 <= 0
+      int0 = integ
     end
   end
+  return int0
+end
+
+function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, triang, simtra)
+  int0 = 0.0
   spincase = 0 # aa, bb, ab, a, b
   for linestr in eachline(fdfile)
     line = split(linestr)
@@ -446,45 +576,40 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     end
     if i4 > 0
       if spincase == 0
-        if fd.uhf
-          set_int2!(fd.int2aa,i1,i2,i3,i4,integ,fd.triang,simtra,false)
-        else
-          set_int2!(fd.int2,i1,i2,i3,i4,integ,fd.triang,simtra,false)
-        end
+        set_int2!(int2aa, i1, i2, i3, i4, integ, triang, simtra, false)
       elseif spincase == 1
-        set_int2!(fd.int2bb,i1,i2,i3,i4,integ,fd.triang,simtra,false)
+        set_int2!(int2bb, i1, i2, i3, i4, integ, triang, simtra, false)
       elseif spincase == 2
-        set_int2!(fd.int2ab,i1,i2,i3,i4,integ,false,simtra,true)
+        set_int2!(int2ab, i1, i2, i3, i4, integ, false, simtra, true)
       else
           error("Unexpected 2-el integrals for spin-case "*string(spincase))
       end
     elseif i2 > 0
-      if !fd.uhf 
-        set_int1!(fd.int1,i1,i2,integ,simtra)
-      elseif spincase == 3
-        set_int1!(fd.int1a,i1,i2,integ,simtra)
+      if spincase == 3
+        set_int1!(int1a, i1, i2, integ, simtra)
       elseif spincase == 4
-        set_int1!(fd.int1b,i1,i2,integ,simtra)
+        set_int1!(int1b, i1, i2, integ, simtra)
       else
         error("Unexpected 1-el integrals for spin-case "*string(spincase))
       end
     elseif i1 <= 0
-      if fd.uhf && spincase < 5
+      if spincase < 5
         spincase += 1
       else
-        fd.int0 = integ
+        int0 = integ
       end
     end
   end
+  return int0
 end
 
 """
-    headvar(head::Dict{String,AbstractArray}, key::String)
+    headvar(head::FDumpHeader, key::String)
 
   Check header for `key`, return value if a list, 
   or the element or nothing if not there.
 """
-function headvar(head::Dict{String,AbstractArray}, key::String)
+function headvar(head::FDumpHeader, key::String)
   val = get(head, key, nothing)
   if isnothing(val)
     return val
@@ -492,6 +617,29 @@ function headvar(head::Dict{String,AbstractArray}, key::String)
     return val[1]
   else
     return val
+  end
+end
+
+"""
+    headvars(head::FDumpHeader, key::String, ::Type{T}) where {T}
+
+  Check header for `key` of type `T`, return a vector of values or nothing if not there. 
+"""
+function headvars(head::FDumpHeader, key::String, ::Type{T}) where {T}
+  return get(head, key, T, nothing)
+end
+
+"""
+    headvar(head::FDumpHeader, key::String, ::Type{T}) where {T}
+
+  Check header for `key` of type `T`, return the first element or nothing if not there. 
+"""
+function headvar(head::FDumpHeader, key::String, ::Type{T}) where {T}
+  val = headvars(head, key, T)
+  if isnothing(val)
+    return nothing
+  else
+    return val[1]
   end
 end
 
@@ -506,12 +654,30 @@ function headvar(fd::FDump, key::String )
 end
 
 """
+    headvars(fd::FDump, key::String, ::Type{T}) where {T}
+
+  Check header for `key`, return a vector of values or nothing if not there. 
+"""
+function headvars(fd::FDump, key::String, ::Type{T}) where {T}
+  return headvars(fd.head, key, T)
+end
+
+"""
+    headvar(fd::FDump, key::String, ::Type{T}) where {T}
+
+  Check header for `key`, return the first element or nothing if not there. 
+"""
+function headvar(fd::FDump, key::String, ::Type{T}) where {T}
+  return headvar(fd.head, key, T)
+end
+
+"""
     mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
 
   Memory-map integral file (from head[key])
 """
 function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
-  file = headvar(fd, key)
+  file = headvar(fd, key, String)
   if isnothing(file)
     error(key*" option not found in fcidump")
   end
@@ -579,7 +745,11 @@ end
   Write integrals to fdf file.
 """
 function write_integrals(fd::FDump, fdf, tol)
-  simtra::Bool = (headvar(fd, "ST") > 0)
+  st = headvar(fd, "ST", Int)
+  if isnothing(st)
+    error("ST option not found in fcidump")
+  end
+  simtra::Bool = (st > 0)
   if !fd.uhf
     write_integrals2(fd.int2, fdf, tol, fd.triang, simtra)
     write_integrals1(fd.int1, fdf, tol, simtra)
@@ -889,20 +1059,20 @@ end
 """
 function int1_npy_filename(fd::FDump, spincase::Symbol=:α)
   if !fd.uhf
-    file = headvar(fd, "NPY1")
+    file = headvar(fd, "NPY1", String)
     if isnothing(file)
       file = "int1.npy"
       # fd.head["NPY1"] = [file]
     end
   else
     if spincase == :α
-      file = headvar(fd, "NPY1A")
+      file = headvar(fd, "NPY1A", String)
       if isnothing(file)
         file = "int1a.npy"
         # fd.head["NPY1A"] = [file]
       end
     else
-      file = headvar(fd, "NPY1B")
+      file = headvar(fd, "NPY1B", String)
       if isnothing(file)
         file = "int1b.npy"
         # fd.head["NPY1B"] = [file]
@@ -920,26 +1090,26 @@ end
 """
 function int2_npy_filename(fd::FDump, spincase::Symbol=:α)
   if !fd.uhf
-    file = headvar(fd, "NPY2")
+    file = headvar(fd, "NPY2", String)
     if isnothing(file)
       file = "int2.npy"
       # fd.head["NPY2"] = [file]
     end
   else
     if spincase == :α
-      file = headvar(fd, "NPY2AA")
+      file = headvar(fd, "NPY2AA", String)
       if isnothing(file)
         file = "int2aa.npy"
         # fd.head["NPY2AA"] = [file]
       end
     elseif spincase == :β
-      file = headvar(fd, "NPY2BB")
+      file = headvar(fd, "NPY2BB", String)
       if isnothing(file)
         file = "int2bb.npy"
         # fd.head["NPY2BB"] = [file]
       end
     else
-      file = headvar(fd, "NPY2AB")
+      file = headvar(fd, "NPY2AB", String)
       if isnothing(file)
         file = "int2ab.npy"
         # fd.head["NPY2AB"] = [file]

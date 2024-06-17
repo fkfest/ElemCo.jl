@@ -13,7 +13,7 @@ EDC_CCSDT_test = -0.330249143963926 + EHF_test
 
 @print_input
 
-fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 EC = ECInfo()
 energies = ElemCo.ccdriver(EC, "ccsd(t)"; fcidump)

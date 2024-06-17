@@ -10,7 +10,7 @@ ERDCSD_test =     -0.241910345272 + EHF_test
 EUHF_test   =    -75.631764795601
 ECCSD_UHF_test = -0.168407943239 + EUHF_test
 
-fcidump = joinpath(@__DIR__,"H2O_CATION.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2O_CATION.FCIDUMP")
 
 energies = @cc uccd
 @test abs(last(energies)-ECCD_test) < epsilon
@@ -25,7 +25,7 @@ energies = @cc dcsd
 energies = @cc rdcsd
 @test abs(last(energies)-ERDCSD_test) < epsilon
 
-fcidump = joinpath(@__DIR__,"H2OP_UHF.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2OP_UHF.FCIDUMP")
 @ECinit
 energies = @cc uccsd
 @test abs(energies.HF-EUHF_test) < epsilon

@@ -10,7 +10,7 @@ ERCCSD_test = -0.27614920708496 + EHF_test
 ERDCSD_test = -0.28995913689122 + EHF_test
 EΛUCCSD_T_test = -0.2903721324779 + EHF_test
 
-fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 @opt wf ms2=2
 energies = @cc uccsd(t)

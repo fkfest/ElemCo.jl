@@ -141,7 +141,6 @@ end
   If `reverse`: the cartesian indices are reversed.
 """
 function triinds(norb, sp1::AbstractArray{Int}, sp2::AbstractArray{Int}, reverseCartInd = false)
-  # triangular index (TODO: save in EC or FDump)
   tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
   mask = falses(norb,norb)
   mask[sp1,sp2] .= true
