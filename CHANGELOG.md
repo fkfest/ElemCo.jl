@@ -6,9 +6,12 @@
 
 ### Changed
 
+* Save the memory using in Hessian matrix caclulation in dfmcscf function.
+
 ### Added
 
 * Export of molden files (`@export_molden`). At the moment the orbital energies and occupations are not exported.
+* Add dfmcscf part in documentation
 
 ### Fixed
 
