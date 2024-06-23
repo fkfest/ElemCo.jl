@@ -109,11 +109,11 @@ end
 """
 Base.@kwdef mutable struct FDump{N}
   """ 2-e⁻ integrals for restricted orbitals fcidump. """
-  int2::Array{Float64,N} = zeros(fill(0,N)...)
+  int2::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
   """ αα 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2aa::Array{Float64,N} = zeros(fill(0,N)...)
+  int2aa::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
   """ ββ 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2bb::Array{Float64,N} = zeros(fill(0,N)...)
+  int2bb::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
   """ αβ 2-e⁻ integrals for unrestricted orbitals fcidump. """
   int2ab::Array{Float64,4} = zeros(0,0,0,0)
   """ 1-e⁻ integrals for restricted orbitals fcidump. """
@@ -326,8 +326,7 @@ function read_header(fdfile)
   head = FDumpHeader()
   head["IUHF"] = [0]
   head["ST"] = [0]
-  variable_name = ""
-  vartype = Int
+  line_array = String[]
   for line in eachline(fdfile)
     #skip empty lines
     line = strip(line)
@@ -339,62 +338,76 @@ function read_header(fdfile)
       break
     end
     line = replace(line,"=" => " = ")
-    line_array = [var for var in split(line, [' ',',']) if !isempty(var)]
-    # search for '=' and put element before it as the variable name, and everything
-    # after (before the next variable name) as a vector of values
-    prev_el = ""
-    elements = []
-    newvec = true
-    if variable_name != ""
-      # in case the elements of the last variable continue on new line...
-      elements = head[variable_name, vartype]
-      newvec = false
-    end
-    push!(line_array, "\n")
-    for el in line_array
-      if el == "="
-        if prev_el != ""
-          if variable_name != ""
-            # store the previous array
-            head[variable_name] = elements
-          end
-          # case-insensitive variable names in the header
-          variable_name = uppercase(prev_el)
-          newvec = true
-          prev_el = ""
-        else
-          error("No variable name before '=':"*line)
-        end
+    append!(line_array, split(line, [' ',','], keepempty=false))
+  end
+  push!(line_array, "\n")
+  # search for '=' and put element before it as the variable name, and everything
+  # after (before the next variable name) as a vector of values
+  variable_name = ""
+  prev_el = ""
+  ipos = 1
+  while ipos <= length(line_array)
+    el = line_array[ipos]
+    if el == "=" 
+      if prev_el != ""
+        # case-insensitive variable names in the header
+        variable_name = uppercase(prev_el)
+        prev_el = ""
       else
-        if prev_el != ""
-          elem = tryparse(Int, prev_el)
-          if isnothing(elem)
-            elem = tryparse(Float64,prev_el)
-            if isnothing(elem)
-              elem = strip(prev_el, ['"','\''])
-              vartype = String
-            else
-              vartype = Float64
-            end 
-          else
-            vartype = Int
-          end
-          if newvec
-            elements = Vector{vartype}()
-            newvec = false
-          end
-          push!(elements, elem)
-        end
-        prev_el = el
+        error("No variable name before '=': $(line_array)")
       end
+    elseif prev_el != "" && variable_name != ""
+      elem = tryparse(Int, prev_el)
+      if !isnothing(elem)
+        head[variable_name] = Int[elem]
+        variable_name, ipos = read_elements!(head[variable_name,Int], line_array, ipos)
+      else
+        elem = tryparse(Float64,prev_el)
+        if !isnothing(elem)
+          head[variable_name] = Float64[elem]
+          variable_name, ipos = read_elements!(head[variable_name,Float64], line_array, ipos)
+        else
+          elem = strip(prev_el, ['"','\''])
+          head[variable_name] = String[elem]
+          variable_name, ipos = read_elements!(head[variable_name,String], line_array, ipos)
+        end 
+      end
+      prev_el = ""
+    else
+      prev_el = el
     end
-    if variable_name != ""
-      # store the previous array
-      head[variable_name] = elements
-    end
+    ipos += 1
   end
   # print(head)
   return head
+end
+
+function read_elements!(elements::Vector{T}, line_array::Vector{String}, ipos::Int) where T
+  variable_name = ""
+  prev_el = ""
+  while ipos <= length(line_array)
+    el = line_array[ipos]
+    if el == "=" 
+      if prev_el != ""
+        # case-insensitive variable names in the header
+        variable_name = uppercase(prev_el)
+        break
+      else
+        error("No variable name before '=': $(line_array)")
+      end
+    else
+      if prev_el != ""
+        if T == String
+          push!(elements, strip(prev_el, ['"','\'']))
+        else
+          push!(elements, parse(T, prev_el))
+        end
+      end
+      prev_el = el
+    end
+    ipos += 1
+  end
+  return variable_name, ipos
 end
 
 """
@@ -405,14 +418,14 @@ end
 function read_integrals!(fd::FDump, dir::AbstractString)
   println("Read npy files")
   if !fd.uhf
-    fd.int2 = mmap_integrals(fd, dir, "NPY2")
-    fd.int1 = mmap_integrals(fd, dir, "NPY1")
+    fd.int2 = mmap_integrals(fd, dir, "NPY2", fd.int2)
+    fd.int1 = mmap_integrals(fd, dir, "NPY1", fd.int1)
   else
-    fd.int2aa = mmap_integrals(fd, dir, "NPY2AA")
-    fd.int2bb = mmap_integrals(fd, dir, "NPY2BB")
-    fd.int2ab = mmap_integrals(fd, dir, "NPY2AB")
-    fd.int1a = mmap_integrals(fd, dir, "NPY1A")
-    fd.int1b = mmap_integrals(fd, dir, "NPY1B")
+    fd.int2aa = mmap_integrals(fd, dir, "NPY2AA", fd.int2aa)
+    fd.int2bb = mmap_integrals(fd, dir, "NPY2BB", fd.int2bb)
+    fd.int2ab = mmap_integrals(fd, dir, "NPY2AB", fd.int2ab)
+    fd.int1a = mmap_integrals(fd, dir, "NPY1A", fd.int1a)
+    fd.int1b = mmap_integrals(fd, dir, "NPY1B", fd.int1b)
   end
   enuc = headvar(fd, "ENUC", Float64)
   if isnothing(enuc)
@@ -671,11 +684,11 @@ function headvar(fd::FDump, key::String, ::Type{T}) where {T}
 end
 
 """
-    mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
+    mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString, ::Array{T,N})
 
   Memory-map integral file (from head[key])
 """
-function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
+function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString, ::Array{T,N}) where {T,N}
   file = headvar(fd, key, String)
   if isnothing(file)
     error(key*" option not found in fcidump")
@@ -684,7 +697,7 @@ function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString)
     file = joinpath(dir,file)
   end
   # return npzread(file)
-  return mnpymmap(file)
+  return mnpymmap(file, Array{T,N})
 end
 
 """

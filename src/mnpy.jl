@@ -98,6 +98,7 @@ function parseinteger(s::AbstractString)
   tail_idx = findfirst(c -> !isdigit(c), s)
   if isnothing(tail_idx)
     intstr = SubString(s, firstindex(s))
+    tail_idx = lastindex(s)+1
   else
     intstr = SubString(s, firstindex(s), prevind(s, tail_idx))
     if s[tail_idx] == 'L' # output of firstindex should be a valid code point
@@ -155,11 +156,11 @@ Base.size(hdr::Header) = hdr.shape
 Base.eltype(hdr::Header{T}) where T = T
 Base.ndims(hdr::Header{T,N}) where {T,N} = N
 
-function parseheader(s::AbstractString)
+function parseheader(s::AbstractString, ::Type{Array{T,N}}) where {T,N}
     s = parsechar(s, '{')
 
     shape = Any
-    T = Any
+    Tnpy = Any
     for _ in 1:3
         s = strip(s)
         key, s = parsestring(s)
@@ -167,7 +168,7 @@ function parseheader(s::AbstractString)
         s = parsechar(s, ':')
         s = strip(s)
         if key == "descr"
-            T, s = parsedtype(s)
+            Tnpy, s = parsedtype(s)
         elseif key == "fortran_order"
             fortran_order, s = parsebool(s)
             fortran_order || error("Cannot mmap C-ordered npy arrays!")
@@ -188,10 +189,12 @@ function parseheader(s::AbstractString)
     if s != ""
         error("malformed header")
     end
-    Header{T}(shape)
+    @assert Tnpy <: T "Missmatch between header type ($Tnpy) and requested type ($T)"
+    @assert N == Any || shape isa NTuple{N,Int} "Shape should be a tuple of $N integers"
+    Header{T,N}(shape)
 end
 
-function readheader(f::IO)
+function readheader(f::IO, ::Type{Array{T,N}}) where {T,N}
     b = read!(f, Vector{UInt8}(undef, length(NPYMagic)))
     if b != NPYMagic
         error("not a numpy array file")
@@ -207,8 +210,10 @@ function readheader(f::IO)
         error("unsupported NPY version")
     end
     hdr = ascii(String(read!(f, Vector{UInt8}(undef, hdrlen))))
-    parseheader(strip(hdr))
+    parseheader(strip(hdr), Array{T,N})
 end
+
+readheader(f::IO) = readheader(f, Array{Any,Any})
 
 function _mnpymmaparray(f, hdr::Header{T,N}) where {T,N}
     x = mmap(f, Array{T,N}, hdr.shape)
@@ -217,6 +222,11 @@ end
 
 function mnpymmaparray(f::IO)
     hdr = readheader(f)
+    _mnpymmaparray(f, hdr)
+end
+
+function mnpymmaparray(f::IO, ::Type{Array{T,N}}) where {T,N}
+    hdr::Header{T,N} = readheader(f, Array{T,N})
     _mnpymmaparray(f, hdr)
 end
 
@@ -247,6 +257,22 @@ function mnpymmap(filename::AbstractString)
     if b == NPYMagic
         seekstart(f)
         data = mnpymmaparray(f)
+    else
+        close(f)
+        error("not a NPY file: $filename")
+    end
+    close(f)
+    return data
+end
+
+function mnpymmap(filename::AbstractString, ::Type{Array{T,N}}) where {T,N}
+    # Detect if the file is a numpy npy array file
+    f = open(filename)
+    b = read!(f, Vector{UInt8}(undef, MagicLen))
+
+    if b == NPYMagic
+        seekstart(f)
+        data = mnpymmaparray(f, Array{T,N})
     else
         close(f)
         error("not a NPY file: $filename")
