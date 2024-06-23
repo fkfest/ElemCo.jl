@@ -9,8 +9,9 @@ using ITensors
 using Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
+using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 
 export calc_dmrg
 
@@ -47,7 +48,7 @@ function gen_hamiltonian(EC::ECInfo, atol=1e-15)
   else
     # last two indices of integrals are stored as upper triangular 
     for s in 1:norb, r in 1:s, q in 1:norb, p in 1:norb
-      rs = uppertriangular(r, s)
+      rs = uppertriangular_index(r, s)
       if norm(int2[p, q, rs]) > atol
         add!(ham, 0.5*int2[p, q, rs], "c†↑", p, "c†↑", q, "c↑", s, "c↑", r)
         add!(ham, 0.5*int2[p, q, rs], "c†↓", p, "c†↓", q, "c↓", s, "c↓", r)

@@ -12,7 +12,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
 

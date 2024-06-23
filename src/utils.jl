@@ -209,10 +209,10 @@ function create_buf(len::Int, T=Float64)
 end
 
 """
-    reshape_buf(buf::Vector{T}, dims...; start=1)
+    reshape_buf(buf::Vector{T}, dims...; offset=0)
 
   Reshape (part of) a buffer to given dimensions (without copying),
-  starting at `start`.
+  using `offset`.
 
   It can be used, e.g., for itermediates in tensor contractions.
 
@@ -220,14 +220,14 @@ end
 ```julia
 julia> buf = Vector{Float64}(undef, 100000)
 julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor
-julia> B = reshape_buf(buf, 10, 10, 10, start=2001) # 10x10x10 tensor starting at 2001
+julia> B = reshape_buf(buf, 10, 10, 10, offset=2000) # 10x10x10 tensor starting at 2001
 julia> B .= rand(10,10,10)
 julia> C = rand(10,20)
 julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
 ```
 """
-function reshape_buf(buf::Vector{T}, dims...; start=1) where {T}
-  return reshape(view(buf, 1:prod(dims)), dims)
+function reshape_buf(buf::Vector{T}, dims...; offset=0) where {T}
+  return reshape(view(buf, 1+offset:prod(dims)+offset), dims)
 end
 
 """

@@ -9,7 +9,7 @@ using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
 using ..ElemCo.MSystem
 using ..ElemCo.FockFactory
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
 using ..ElemCo.DFTools
 using ..ElemCo.Utils
@@ -17,7 +17,7 @@ using ..ElemCo.Utils
 export dfdump
 
 """
-    generate_integrals(EC::ECInfo, fdump::FDump, cMO::Matrix, full_spaces)
+    generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
 
   Generate `int2`, `int1` and `int0` integrals for fcidump using density fitting.
 
@@ -25,7 +25,7 @@ export dfdump
   used for `int1` and `int0` integrals. 
   `full_spaces` is a dictionary with spaces without frozen orbitals.
 """
-function generate_integrals(EC::ECInfo, fdump::FDump, cMO::Matrix, full_spaces)
+function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
   @assert !fdump.uhf "Use generate_integrals(EC, fdump, cMO::SpinMatrix, full_spaces) for UHF"
   bao = generate_basis(EC, "ao")
   bfit = generate_basis(EC, "mpfit")
@@ -38,7 +38,6 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO::Matrix, full_spaces)
   PQ = nothing
   μνP = eri_2e3idx(bao, bfit)
   cMOval = cMO[:,wocore]
-  @assert fdump.triang # store only upper triangle
   nao = size(cMO, 1)
   norbs = length(wocore)
   println("norbs: ", norbs)
@@ -112,7 +111,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO::Matrix, full_spaces)
 end
 
 """
-    generate_integrals(EC::ECInfo, fdump::FDump, cMO::SpinMatrix, full_spaces)
+    generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spaces)
 
   Generate `int2aa`, `int2bb`, `int2ab`, `int1a`, `int1b` and `int0` integrals for fcidump using density fitting.
 
@@ -120,7 +119,7 @@ end
   used for `int1` and `int0` integrals. 
   `full_spaces` is a dictionary with spaces without frozen orbitals.
 """
-function generate_integrals(EC::ECInfo, fdump::FDump, cMO::SpinMatrix, full_spaces)
+function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spaces)
   @assert fdump.uhf "Use generate_integrals(EC, fdump, cMO, full_spaces) for RHF"
   @assert size(cMO.α) == size(cMO.β) "cMO.α and cMO.β must have the same size"
   bao = generate_basis(EC, "ao")
@@ -136,7 +135,6 @@ function generate_integrals(EC::ECInfo, fdump::FDump, cMO::SpinMatrix, full_spac
   μνP = eri_2e3idx(bao, bfit)
   cMOaval = cMO[1][:,wocore]
   cMObval = cMO[2][:,wocore]
-  @assert fdump.triang # store only upper triangle for same-spin integrals
   nao = size(cMO, 1)
   norbs = length(wocore)
   println("norbs: ", norbs)
@@ -268,7 +266,7 @@ function dfdump(EC::ECInfo)
   norbs -= ncore_orbs + nfrozvirt
   ms2 = EC.options.wf.ms2
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
-  fdump = FDump(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO))
+  fdump = TFDump(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO))
   if fdump.uhf
     generate_integrals(EC, fdump, cMO[:,1:end-nfrozvirt], space_save)
   else

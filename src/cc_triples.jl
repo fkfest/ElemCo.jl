@@ -56,7 +56,7 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   IntX = zeros(nvir,nocc)
   IntY = zeros(nvir,nocc)
   if save_t3
-    t3file, T3 = newmmap(EC,"T_vvvooo",(nvir,nvir,nvir,uppertriangular(nocc,nocc,nocc)))
+    t3file, T3 = newmmap(EC,"T_vvvooo",(nvir,nvir,nvir,uppertriangular_index(nocc,nocc,nocc)))
   end
   for k = 1:nocc 
     for j = 1:k
@@ -102,7 +102,7 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
         end
         ϵoijk = ϵo[i] + ϵo[j] + ϵo[k]
         if save_t3
-          ijk = uppertriangular(i,j,k)
+          ijk = uppertriangular_index(i,j,k)
           T3[:,:,:,ijk] = Kijk
           for abc ∈ CartesianIndices(Kijk)
             a,b,c = Tuple(abc)

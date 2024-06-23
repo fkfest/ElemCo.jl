@@ -4,7 +4,7 @@ using AtomsBase
 using DocStringExtensions
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.MSystem
 using ..ElemCo.BasisSets
 
@@ -40,7 +40,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """ molecular system. """
   system::FlexibleSystem = FlexibleSystem(Atom[], infinite_box(3), fill(DirichletZero(), 3))
   """ fcidump. """
-  fd::FDump = FDump()
+  fd::TFDump = TFDump()
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:

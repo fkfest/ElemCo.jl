@@ -16,7 +16,7 @@ using ..ElemCo.CCTools
 using ..ElemCo.CoupledCluster
 using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
 
 export ccdriver, dfccdriver

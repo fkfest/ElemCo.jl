@@ -6,7 +6,7 @@
 module DumpTools
 
 using LinearAlgebra
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.ECInfos
 using ..ElemCo.FockFactory
 

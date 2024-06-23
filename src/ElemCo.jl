@@ -66,7 +66,7 @@ using .CCTools
 using .CoupledCluster
 using .CCDriver
 using .DFCoupledCluster
-using .FciDump
+using .FciDumps
 using .DumpTools
 using .OrbTools
 using .Elements

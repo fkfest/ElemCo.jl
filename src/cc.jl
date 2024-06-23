@@ -62,8 +62,9 @@ using Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
+using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.DIIS
 using ..ElemCo.DecompTools
 using ..ElemCo.DFCoupledCluster

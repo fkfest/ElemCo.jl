@@ -4,7 +4,7 @@
 module TensorTools
 using LinearAlgebra
 using ..ElemCo.ECInfos
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.MIO
 
 export save!, load, load_all, mmap, newmmap, closemmap, flushmmap

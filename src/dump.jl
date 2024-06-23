@@ -4,7 +4,7 @@
 Read and write fcidump format integrals.
 Individual arrays of integrals can also be in *.npy format
 """
-module FciDump
+module FciDumps
 
 # using LinearAlgebra
 # using NPZ
@@ -12,9 +12,11 @@ using TensorOperations
 using DocStringExtensions
 using Printf
 using ..ElemCo.MNPY
+using ..ElemCo.QMTensors
 
-export FDump, fd_exists, read_fcidump, write_fcidump, transform_fcidump
-export headvar, headvars, integ1, integ2, uppertriangular, uppertriangular_range
+export FDump, TFDump, QFDump 
+export fd_exists, read_fcidump, write_fcidump, transform_fcidump
+export headvar, headvars, integ1, integ2, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
 
@@ -94,61 +96,70 @@ end
   
 
 """
-    FDump
+    FDump{N}
 
   Molecular integrals 
 
   The 2-e integrals are stored in the physicists' notation: `int2[pqrs]` ``= <pq|rs>=v_{pq}^{rs}``
-  and for `triang` the last two indices are stored as a single upper triangular index (r <= s)
+  and for `N=3` the last two indices are stored as a single uppertriangular index (r <= s)
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct FDump
+Base.@kwdef mutable struct FDump{N}
   """ 2-e⁻ integrals for restricted orbitals fcidump. """
-  int2::Array{Float64} = []
+  int2::Array{Float64,N} = zeros(fill(0,N)...)
   """ αα 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2aa::Array{Float64} = []
+  int2aa::Array{Float64,N} = zeros(fill(0,N)...)
   """ ββ 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2bb::Array{Float64} = []
+  int2bb::Array{Float64,N} = zeros(fill(0,N)...)
   """ αβ 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2ab::Array{Float64} = []
+  int2ab::Array{Float64,4} = zeros(0,0,0,0)
   """ 1-e⁻ integrals for restricted orbitals fcidump. """
-  int1::Array{Float64} = []
+  int1::Matrix{Float64} = zeros(0,0)
   """ α 1-e⁻ integrals for unrestricted orbitals fcidump. """
-  int1a::Array{Float64} = []
+  int1a::Matrix{Float64} = zeros(0,0)
   """ β 1-e⁻ integrals for unrestricted orbitals fcidump. """
-  int1b::Array{Float64} = []
+  int1b::Matrix{Float64} = zeros(0,0)
   """ core energy """
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
   head::FDumpHeader = FDumpHeader()
-  """`⟨true⟩` use an upper triangular index for last two indices of 2e⁻ integrals.""" 
-  triang::Bool = true
   """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
   uhf::Bool = false
 end
 
+TFDump = FDump{3}
+QFDump = FDump{4}
+
+""" 
+  is_triang(fd::FDump)
+  
+  If true: an uppertriangular index for last two indices of 2e⁻ integrals is used.
+""" 
+is_triang(fd::FDump{3}) = true
+is_triang(fd::FDump{4}) = false
+
 """
-    FDump(int2::Array{Float64}, int1::Array{Float64}, int0::Float64, head::FDumpHeader)
+    FDump(int2::Array{Float64,N}, int1::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N
 
   Spin-free fcidump
 """
-FDump(int2::Array{Float64}, int1::Array{Float64}, int0::Float64, head::FDumpHeader) = FDump(int2,[],[],[],int1,[],[],int0,head)
+FDump(int2::Array{Float64,N}, int1::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2, int1, int0, head)
 """
-    FDump(int2aa::Array{Float64}, int2bb::Array{Float64}, int2ab::Array{Float64}, int1::Array{Float64}, int0::Float64, head::FDumpHeader)
+    FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N
 
   Spin-polarized fcidump
 """
-FDump(int2aa::Array{Float64}, int2bb::Array{Float64}, int2ab::Array{Float64}, int1a::Array{Float64}, int1b::Array{Float64}, int0::Float64, head::FDumpHeader) = FDump([],int2aa,int2bb,int2ab,[],int1a,int1b,int0,head)
+FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2aa, int2bb, int2ab, int1a, int1b, int0, head)
 
 """
-    FDump(norb,nelec;ms2=0,isym=1,orbsym=[],uhf=false,simtra=false,triang=true)
+    FDump{N}(norb, nelec; ms2=0, isym=1, orbsym=[], uhf=false, simtra=false)
 
   Create a new FDump object
 """
-function FDump(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[], 
-               uhf=false, simtra=false, triang=true)
-  fd = FDump()
+function FDump{N}(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[], 
+               uhf=false, simtra=false) where N
+  fd = FDump{N}()
   fd.head["NORB"] = [norb]
   fd.head["NELEC"] = [nelec]
   fd.head["MS2"] = [ms2]
@@ -160,7 +171,6 @@ function FDump(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vector{In
   end
   fd.head["IUHF"] = uhf ? [1] : [0]
   fd.head["ST"] = simtra ? [1] : [0]
-  fd.triang = triang
   fd.uhf = uhf
   return fd
 end
@@ -193,6 +203,48 @@ end
 """
 function fd_exists(fd::FDump)
   return !isempty(fd.head)
+end
+
+"""
+    set_zero!(fd::FDump, norb::Int=0)
+
+  Set all integrals to zero.
+
+  If `norb` is not provided, the integrals are set to zero with the same dimensions as before.
+"""
+function set_zero!(fd::FDump, norb::Int=0)
+  fd.int0 = 0.0
+  if norb <= 0
+    if fd.uhf
+      fill!(fd.int1a, 0.0)
+      fill!(fd.int1b, 0.0)
+      fill!(fd.int2aa, 0.0)
+      fill!(fd.int2bb, 0.0)
+      fill!(fd.int2ab, 0.0)
+    else
+      fill!(fd.int1, 0.0)
+      fill!(fd.int2, 0.0)
+    end
+  else
+    if fd.uhf
+      fd.int1a = zeros(norb,norb)
+      fd.int1b = zeros(norb,norb)
+      fd.int2aa = get_int2_zeros(fd.int2aa, norb)
+      fd.int2bb = get_int2_zeros(fd.int2bb, norb)
+      fd.int2ab = get_int2_zeros(fd.int2ab, norb)
+    else
+      fd.int1 = zeros(norb,norb)
+      fd.int2 = get_int2_zeros(fd.int2, norb)
+    end
+  end
+end
+
+function get_int2_zeros(int2::Array{Float64,3}, norb)
+  return zeros(norb,norb,(norb+1)*norb÷2)
+end
+
+function get_int2_zeros(int2::Array{Float64,4}, norb)
+  return zeros(norb,norb,norb,norb)
 end
 
 """
@@ -230,13 +282,13 @@ function integ2(fd::FDump, spincase::Symbol=:α)
 end
 
 """
-    read_fcidump(fcidump::String)
+    read_fcidump(fcidump::String, ::Val{N})
 
   Read ascii file (possibly with integrals in npy files).
-"""
-function read_fcidump(fcidump::String)
+""" 
+function read_fcidump(fcidump::String, ::Val{N}) where N
   fdf = open(fcidump)
-  fd = FDump()
+  fd = FDump{N}()
   fd.head = read_header(fdf)
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
   simtra = (headvar(fd, "ST", Int) > 0)
@@ -245,15 +297,22 @@ function read_fcidump(fcidump::String)
   end
   if isnothing(headvar(fd, "NPY2", String)) && isnothing(headvar(fd, "NPY2AA", String))
     # read integrals from fcidump file
-    read_integrals!(fd,fdf)
+    read_integrals!(fd, fdf)
     close(fdf)
   else
     close(fdf)
     # read integrals from npy files
-    read_integrals!(fd,dirname(fcidump))
+    read_integrals!(fd, dirname(fcidump))
   end
   return fd
 end
+
+"""
+    read_fcidump(fcidump::String)
+
+  Read ascii file (possibly with integrals in npy files) to TFDump object.
+"""
+read_fcidump(fcidump::String) = read_fcidump(fcidump, Val(3))
 
 """
     read_header(fdfile::IOStream)
@@ -336,7 +395,6 @@ function read_header(fdfile)
   return head
 end
 
-
 """
     read_integrals!(fd::FDump, dir::AbstractString)
 
@@ -361,116 +419,77 @@ function read_integrals!(fd::FDump, dir::AbstractString)
   fd.int0 = enuc
 end
 
-""" 
-    uppertriangular(i1, i2)
-
-  Return upper triangular index from two indices i1 <= i2.
 """
-function uppertriangular(i1, i2)
-  return i1+i2*(i2-1)÷2
-end
-
-""" 
-    uppertriangular(i1, i2, i3)
-
-  Return upper triangular index from three indices i1 <= i2 <= i3.
-"""
-function uppertriangular(i1, i2, i3)
-  return i1+i2*(i2-1)÷2+(i3+1)*i3*(i3-1)÷6
-end
-
-""" 
-    uppertriangular_range(i2)
-
-  Return range for the upper triangular index (i1 <= i2) for a given i2. 
-"""
-function uppertriangular_range(i2)
-  return (i2*(i2-1)÷2+1):(i2*(i2+1)÷2)
-end
-
-""" 
-    uppertriangular_diagonal(i2)
-
-  Return index of diagonal of upper triangular index (i1 <= i2) for a given i2. 
-"""
-function uppertriangular_diagonal(i2)
-  return (i2*(i2+1)÷2)
-end
-
-""" 
-    strict_uppertriangular_range(i2)
-
-  Return range for the upper triangular index (i1 <= i2) without diagonal (i1 < i2) for a given i2. 
-"""
-function strict_uppertriangular_range(i2)
-  return (i2*(i2-1)÷2+1):(i2*(i2+1)÷2-1)
-end
-
-"""
-    set_int2!(int2::AbstractArray, i1, i2, i3, i4, integ, triang, simtra, ab)
+    set_int2!(int2::Array{Float64,3}, i1, i2, i3, i4, integ, simtra, ab)
 
   Set 2-e integral in `int2` array to `integ` considering permutational symmetries.
 
   For not `ab`: particle symmetry is assumed.
   Integrals are stored in physicists' notation.
-  If `triang`: the last two indices are stored as a single upper triangular index.
 """
-function set_int2!(int2::AbstractArray, i1, i2, i3, i4, integ,
-                   triang, simtra, ab)
-  if triang
-    @assert !ab
-    if i2 == i4
-      i24 = uppertriangular(i2,i4)
-      int2[i1,i3,i24] = integ
-      int2[i3,i1,i24] = integ
-    elseif i2 < i4 
-      int2[i1,i3,uppertriangular(i2,i4)] = integ
-    else
-      int2[i3,i1,uppertriangular(i4,i2)] = integ
-    end
-    if !simtra
-      if i2 == i3
-        i23 = uppertriangular(i2,i3)
-        int2[i1,i4,i23] = integ
-        int2[i4,i1,i23] = integ
-      elseif i2 < i3
-        int2[i1,i4,uppertriangular(i2,i3)] = integ
-      else
-        int2[i4,i1,uppertriangular(i3,i2)] = integ
-      end
-      if i1 == i4
-        i14 = uppertriangular(i1,i4)
-        int2[i2,i3,i14] = integ
-        int2[i3,i2,i14] = integ
-      elseif i1 < i4
-        int2[i2,i3,uppertriangular(i1,i4)] = integ
-      else
-        int2[i3,i2,uppertriangular(i4,i1)] = integ
-      end
-      if i1 == i3
-        i13 = uppertriangular(i1,i3)
-        int2[i2,i4,i13] = integ
-        int2[i4,i2,i13] = integ
-      elseif i1 < i3
-        int2[i2,i4,uppertriangular(i1,i3)] = integ
-      else
-        int2[i4,i2,uppertriangular(i3,i1)] = integ
-      end
-    end
+function set_int2!(int2::Array{Float64,3}, i1, i2, i3, i4, integ, simtra, ab)
+  @assert !ab
+  if i2 == i4
+    i24 = uppertriangular_index(i2,i4)
+    int2[i1,i3,i24] = integ
+    int2[i3,i1,i24] = integ
+  elseif i2 < i4 
+    int2[i1,i3,uppertriangular_index(i2,i4)] = integ
   else
-    int2[i1,i3,i2,i4] = integ
-    if !ab
-      int2[i3,i1,i4,i2] = integ
+    int2[i3,i1,uppertriangular_index(i4,i2)] = integ
+  end
+  if !simtra
+    if i2 == i3
+      i23 = uppertriangular_index(i2,i3)
+      int2[i1,i4,i23] = integ
+      int2[i4,i1,i23] = integ
+    elseif i2 < i3
+      int2[i1,i4,uppertriangular_index(i2,i3)] = integ
+    else
+      int2[i4,i1,uppertriangular_index(i3,i2)] = integ
     end
-    if !simtra
-      int2[i1,i4,i2,i3] = integ
-      int2[i2,i3,i1,i4] = integ
-      int2[i2,i4,i1,i3] = integ
-      if !ab
-        int2[i4,i1,i3,i2] = integ
-        int2[i3,i2,i4,i1] = integ
-        int2[i4,i2,i3,i1] = integ
-      end
+    if i1 == i4
+      i14 = uppertriangular_index(i1,i4)
+      int2[i2,i3,i14] = integ
+      int2[i3,i2,i14] = integ
+    elseif i1 < i4
+      int2[i2,i3,uppertriangular_index(i1,i4)] = integ
+    else
+      int2[i3,i2,uppertriangular_index(i4,i1)] = integ
+    end
+    if i1 == i3
+      i13 = uppertriangular_index(i1,i3)
+      int2[i2,i4,i13] = integ
+      int2[i4,i2,i13] = integ
+    elseif i1 < i3
+      int2[i2,i4,uppertriangular_index(i1,i3)] = integ
+    else
+      int2[i4,i2,uppertriangular_index(i3,i1)] = integ
+    end
+  end
+end
+
+"""
+    set_int2!(int2::Array{Float64,4}, i1, i2, i3, i4, integ, simtra, ab)
+
+  Set 2-e integral in `int2` array to `integ` considering permutational symmetries.
+
+  For not `ab`: particle symmetry is assumed.
+  Integrals are stored in physicists' notation.
+"""
+function set_int2!(int2::Array{Float64,4}, i1, i2, i3, i4, integ, simtra, ab)
+  int2[i1,i3,i2,i4] = integ
+  if !ab
+    int2[i3,i1,i4,i2] = integ
+  end
+  if !simtra
+    int2[i1,i4,i2,i3] = integ
+    int2[i2,i3,i1,i4] = integ
+    int2[i2,i4,i1,i3] = integ
+    if !ab
+      int2[i4,i1,i3,i2] = integ
+      int2[i3,i2,i4,i1] = integ
+      int2[i4,i2,i3,i1] = integ
     end
   end
 end
@@ -483,11 +502,11 @@ function set_int1!(int1, i1, i2, integ, simtra)
 end
 
 """
-    read_integrals!(fd::FDump, fdfile::IOStream)
+    read_integrals!(fd::FDump{N}, fdfile::IOStream)
 
   Read integrals from fcidump file
 """
-function read_integrals!(fd::FDump, fdfile::IOStream)
+function read_integrals!(fd::FDump{N}, fdfile::IOStream) where N
   norb = headvar(fd, "NORB", Int)
   if isnothing(norb)
     error("NORB option not found in fcidump")
@@ -497,38 +516,16 @@ function read_integrals!(fd::FDump, fdfile::IOStream)
     error("ST option not found in fcidump")
   end
   simtra = (st > 0)
+  set_zero!(fd, norb)
   if fd.uhf
     print("UHF")
-    int1a = zeros(norb,norb)
-    int1b = zeros(norb,norb)
-    if fd.triang
-      int2aa = zeros(norb,norb,(norb+1)*norb÷2)
-      int2bb = zeros(norb,norb,(norb+1)*norb÷2)
-    else
-      int2aa = zeros(norb,norb,norb,norb)
-      int2bb = zeros(norb,norb,norb,norb)
-    end
-    int2ab = zeros(norb,norb,norb,norb)
-    fd.int0 = read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, fd.triang, simtra)
-    fd.int1a = int1a
-    fd.int1b = int1b
-    fd.int2aa = int2aa
-    fd.int2bb = int2bb
-    fd.int2ab = int2ab 
+    fd.int0 = read_integrals!(fd.int1a, fd.int1b, fd.int2aa, fd.int2bb, fd.int2ab, norb, fdfile, simtra)
   else
-    int1 = zeros(norb,norb)
-    if fd.triang
-      int2 = zeros(norb,norb,(norb+1)*norb÷2)
-    else
-      int2 = zeros(norb,norb,norb,norb)
-    end
-    fd.int0 = read_integrals!(int1, int2, norb, fdfile, fd.triang, simtra)
-    fd.int1 = int1
-    fd.int2 = int2
+    fd.int0 = read_integrals!(fd.int1, fd.int2, norb, fdfile, simtra)
   end
 end
 
-function read_integrals!(int1, int2, norb, fdfile, triang, simtra)
+function read_integrals!(int1, int2, norb, fdfile, simtra)
   int0 = 0.0
   for linestr in eachline(fdfile)
     line = split(linestr)
@@ -546,7 +543,7 @@ function read_integrals!(int1, int2, norb, fdfile, triang, simtra)
       error("Index larger than norb: "*linestr)
     end
     if i4 > 0
-      set_int2!(int2, i1, i2, i3, i4, integ, triang, simtra, false)
+      set_int2!(int2, i1, i2, i3, i4, integ, simtra, false)
     elseif i2 > 0
       set_int1!(int1, i1, i2, integ, simtra)
     elseif i1 <= 0
@@ -556,7 +553,7 @@ function read_integrals!(int1, int2, norb, fdfile, triang, simtra)
   return int0
 end
 
-function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, triang, simtra)
+function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, simtra)
   int0 = 0.0
   spincase = 0 # aa, bb, ab, a, b
   for linestr in eachline(fdfile)
@@ -576,11 +573,11 @@ function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, tri
     end
     if i4 > 0
       if spincase == 0
-        set_int2!(int2aa, i1, i2, i3, i4, integ, triang, simtra, false)
+        set_int2!(int2aa, i1, i2, i3, i4, integ, simtra, false)
       elseif spincase == 1
-        set_int2!(int2bb, i1, i2, i3, i4, integ, triang, simtra, false)
+        set_int2!(int2bb, i1, i2, i3, i4, integ, simtra, false)
       elseif spincase == 2
-        set_int2!(int2ab, i1, i2, i3, i4, integ, false, simtra, true)
+        set_int2!(int2ab, i1, i2, i3, i4, integ, simtra, true)
       else
           error("Unexpected 2-el integrals for spin-case "*string(spincase))
       end
@@ -751,12 +748,12 @@ function write_integrals(fd::FDump, fdf, tol)
   end
   simtra::Bool = (st > 0)
   if !fd.uhf
-    write_integrals2(fd.int2, fdf, tol, fd.triang, simtra)
+    write_integrals2(fd.int2, fdf, tol, simtra)
     write_integrals1(fd.int1, fdf, tol, simtra)
   else
-    write_integrals2(fd.int2aa, fdf, tol, fd.triang, simtra)
+    write_integrals2(fd.int2aa, fdf, tol, simtra)
     print_int_value(fdf,0.0,0,0,0,0)
-    write_integrals2(fd.int2bb, fdf, tol, fd.triang, simtra)
+    write_integrals2(fd.int2bb, fdf, tol, simtra)
     print_int_value(fdf,0.0,0,0,0,0)
     write_integrals2ab(fd.int2ab, fdf, tol, simtra)
     print_int_value(fdf,0.0,0,0,0,0)
@@ -769,21 +766,23 @@ function write_integrals(fd::FDump, fdf, tol)
 end
 
 """
-    write_integrals2(int2, fdf, tol, triang, simtra)
+    write_integrals2(int2::Array{Float64,3}, fdf, tol, simtra)
 
   Write 2-e integrals to fdf file.
 """
-function write_integrals2(int2, fdf, tol, triang, simtra)
+function write_integrals2(int2::Array{Float64,3}, fdf, tol, simtra)
   write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
-  if triang
-    inds = (p,q,r,s) -> CartesianIndex(p,q,uppertriangular(r,s))
-    indslow = (p,q,r,s) -> CartesianIndex(q,p,uppertriangular(s,r))
-    write_integrals2_(int2, inds, indslow, fdf, tol)
-  else
-    inds = (p,q,r,s) -> CartesianIndex(p,q,r,s)
-    write_integrals2_(int2, inds, inds, fdf, tol)
-  end
+  inds = (p,q,r,s) -> CartesianIndex(p,q,uppertriangular_index(r,s))
+  indslow = (p,q,r,s) -> CartesianIndex(q,p,uppertriangular_index(s,r))
+  write_integrals2_(int2, inds, indslow, fdf, tol)
 end
+
+function write_integrals2(int2::Array{Float64,4}, fdf, tol, simtra)
+  write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
+  inds = (p,q,r,s) -> CartesianIndex(p,q,r,s)
+  write_integrals2_(int2, inds, inds, fdf, tol)
+end
+
 function write_integrals2_simtra(int2, inds, indslow, fdf, tol)
   norb = size(int2,1)
   for p = 1:norb
@@ -916,85 +915,102 @@ function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
     @assert !fd.uhf # from uhf fcidump can generate only uhf fcidump
   end
   if fd.uhf
-    fd.int2aa = transform_int2(fd.int2aa, Tl[1], Tl[1], Tr[1], Tr[1], fd.triang, fd.triang)
-    fd.int2bb = transform_int2(fd.int2bb, Tl[2], Tl[2], Tr[2], Tr[2], fd.triang, fd.triang)
-    fd.int2ab = transform_int2(fd.int2ab, Tl[1], Tl[2], Tr[1], Tr[2], false, false)
+    fd.int2aa = transform_int2(fd.int2aa, Tl[1], Tl[1], Tr[1], Tr[1])
+    fd.int2bb = transform_int2(fd.int2bb, Tl[2], Tl[2], Tr[2], Tr[2])
+    fd.int2ab = transform_int2_Q(fd.int2ab, Tl[1], Tl[2], Tr[1], Tr[2])
     fd.int1a = transform_int1(fd.int1a, Tl[1], Tr[1])
     fd.int1b = transform_int1(fd.int1b, Tl[2], Tr[2])
   elseif genuhfdump
     # change fcidump from rhf to uhf format
-    fd.int2aa = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1], fd.triang, fd.triang)
-    fd.int2bb = transform_int2(fd.int2, Tl[2], Tl[2], Tr[2], Tr[2], fd.triang, fd.triang)
-    fd.int2ab = transform_int2(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2], fd.triang, false)
+    fd.int2aa = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1])
+    fd.int2bb = transform_int2(fd.int2, Tl[2], Tl[2], Tr[2], Tr[2])
+    fd.int2ab = transform_int2_Q(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2])
     fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
     fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
-    fd.int2 = []
-    fd.int1 = []
+    fd.int2 = zeros(fill(0,ndims(fd.int2))...)
+    fd.int1 = zeros(0,0)
     fd.head["IUHF"] = [1]
     fd.uhf = true
   else
-    fd.int2 = transform_int2(fd.int2, Tl, Tl, Tr, Tr, fd.triang, fd.triang)
+    fd.int2 = transform_int2(fd.int2, Tl, Tl, Tr, Tr)
     fd.int1 = transform_int1(fd.int1, Tl, Tr)
   end
 end
 
 """
-    transform_int2(int2::AbstractArray, Tl::AbstractArray, Tl2::AbstractArray, 
-                   Tr::AbstractArray, Tr2::AbstractArray, triang_in, triang_out)
+    transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                   Tr::AbstractArray, Tr2::AbstractArray)
 
   Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
 
   ``v_{pq}^{rs} = v_{p'q'}^{r's'}``* `Tl`[p',p] * `Tl2`[q',q] * `Tr`[r',r] * `Tr2`[s',s]
 
-  If `triang`: the last two indices are stored as a single upper triangular index.
+  The last two indices are stored as a single uppertriangular index.
 """
-function transform_int2(int2::AbstractArray, Tl::AbstractArray, Tl2::AbstractArray, 
-                        Tr::AbstractArray, Tr2::AbstractArray, triang_in, triang_out)
+function transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray)
   norb = size(int2,1)
-  if triang_in && triang_out
-    int2t = zeros(norb,norb,norb*(norb+1)÷2)
-    int_3i = zeros(norb,norb,norb)
-    for s = 1:norb
-      rs = strict_uppertriangular_range(s)
-      rrange = 1:s-1
-      if length(rs) > 0
-        @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
-      end
-      # contribution from the diagonal <p'q'|s's'> 
-      ss = uppertriangular_diagonal(s)
-      @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
-      for s1 = 1:norb
-        rs1 = uppertriangular_range(s1)
-        rrange = 1:s1
-        Tr2ss1 = Tr2[s,s1]
-        @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,rrange][p,q,r] * Tr2ss1
-        @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,s1][q,p] * Tr2[s,rrange][r]
-      end
+  int2t = zeros(norb,norb,norb*(norb+1)÷2)
+  int_3i = zeros(norb,norb,norb)
+  for s = 1:norb
+    rs = strict_uppertriangular_range(s)
+    rrange = 1:s-1
+    if length(rs) > 0
+      @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
     end
-  elseif triang_in && ! triang_out
-    int2t = zeros(norb,norb,norb,norb)
-    int_3i = zeros(norb,norb,norb)
-    int_3i2 = zeros(norb,norb,norb)
-    for s = 1:norb
-      rs = strict_uppertriangular_range(s)
-      rrange = 1:s-1
-      if length(rs) > 0
-        @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
-        @tensoropt int_3i2[p,q,r] = int2[:,:,rs][p',q',r'] * Tl2[p',p] * Tl[q',q] * Tr2[rrange,:][r',r]
-      end
-      # contribution from the diagonal <p'q'|s's'> 
-      ss = uppertriangular_diagonal(s)
-      @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
-      @tensoropt int_3i2[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl2[p',p] * Tl[q',q] * Tr2[s,:][r]
-
-      @tensoropt int2t[p,q,r,s'] += int_3i[p,q,r] * Tr2[s,:][s']
-      @tensoropt int2t[p,q,r,s'] += int_3i2[q,p,s'] * Tr[s,:][r]
+    # contribution from the diagonal <p'q'|s's'> 
+    ss = uppertriangular_index(s, s)
+    @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
+    for s1 = 1:norb
+      rs1 = uppertriangular_range(s1)
+      rrange = 1:s1
+      Tr2ss1 = Tr2[s,s1]
+      @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,rrange][p,q,r] * Tr2ss1
+      @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,s1][q,p] * Tr2[s,rrange][r]
     end
-  elseif !triang_in && triang_out
-    error("Can't transform from non-triangular to triangular")
-  else
-    @tensoropt int2t[p,q,r,s] := int2[p',q',r',s']*Tl[p',p]*Tl2[q',q]*Tr[r',r]*Tr2[s',s]
   end
+  return int2t
+end
+function transform_int2(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray)
+  return transform_int2_Q(int2, Tl, Tl2, Tr, Tr2)
+end
+"""
+    transform_int2_Q(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                   Tr::AbstractArray, Tr2::AbstractArray)
+
+  Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
+
+  ``v_{pq}^{rs} = v_{p'q'}^{r's'}``* `Tl`[p',p] * `Tl2`[q',q] * `Tr`[r',r] * `Tr2`[s',s]
+
+  The result is a full 4-index tensor.
+"""
+function transform_int2_Q(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray)
+  norb = size(int2,1)
+  int2t = zeros(norb,norb,norb,norb)
+  int_3i = zeros(norb,norb,norb)
+  int_3i2 = zeros(norb,norb,norb)
+  for s = 1:norb
+    rs = strict_uppertriangular_range(s)
+    rrange = 1:s-1
+    if length(rs) > 0
+      @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
+      @tensoropt int_3i2[p,q,r] = int2[:,:,rs][p',q',r'] * Tl2[p',p] * Tl[q',q] * Tr2[rrange,:][r',r]
+    end
+    # contribution from the diagonal <p'q'|s's'> 
+    ss = uppertriangular_index(s, s)
+    @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
+    @tensoropt int_3i2[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl2[p',p] * Tl[q',q] * Tr2[s,:][r]
+
+    @tensoropt int2t[p,q,r,s'] += int_3i[p,q,r] * Tr2[s,:][s']
+    @tensoropt int2t[p,q,r,s'] += int_3i2[q,p,s'] * Tr[s,:][r]
+  end
+  return int2t
+end
+function transform_int2_Q(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray)
+  @tensoropt int2t[p,q,r,s] := int2[p',q',r',s']*Tl[p',p]*Tl2[q',q]*Tr[r',r]*Tr2[s',s]
   return int2t
 end
 
@@ -1038,14 +1054,13 @@ function reorder_orbs_int2(int2::AbstractArray, orbs)
         ro = orbs[r]
         so = orbs[s]
         if ro <= so
-          int2t[:,:,uppertriangular(r,s)] = int2[orbs,orbs,uppertriangular(ro, so)]
+          int2t[:,:,uppertriangular_index(r,s)] = int2[orbs,orbs,uppertriangular_index(ro, so)]
         else
-          int2t[:,:,uppertriangular(r,s)] = permutedims(int2[orbs,orbs,uppertriangular(so, ro)], [2,1])
+          int2t[:,:,uppertriangular_index(r,s)] = permutedims(int2[orbs,orbs,uppertriangular_index(so, ro)], [2,1])
         end
       end
     end
   else
-    int2t = zeros(length(orbs),length(orbs),length(orbs),length(orbs))
     int2t = int2[orbs,orbs,orbs,orbs]
   end
   return int2t

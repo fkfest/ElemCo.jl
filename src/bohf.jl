@@ -8,7 +8,7 @@ using ..ElemCo.Constants
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
-using ..ElemCo.FciDump
+using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
 using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
