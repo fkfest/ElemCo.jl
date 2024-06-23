@@ -8,6 +8,7 @@
 * The signature of `newmmap` function has changed (the type specification is now the last argument and defaults to `Float64`.
 * The `FciDump` module has been renamed to `FciDumps`.
 * The `FDump` type has been changed to `FDump{N}` with N=3 (for triangular storage of 2-electron integrals) or 4. The logical variable `triang` has been removed (there is a function `is_triang(::FDump)` now). Aliases `TFDump = FDump{3}` and `QFDump = FDump{4}` have been introduced. 
+* The `ECInfo` type now accepts only `FDump{3}`. The `FDump{4}` objects have to be transformed first (the transformation functions are not implemented yet).
 * The triangular functions have been moved to a separate file `utensors.jl`, part of the `QMTensors` module. `uppertriangular` function has been renamed to `uppertriangular_index`.
 
 ### Changed

@@ -101,7 +101,9 @@ end
   Molecular integrals 
 
   The 2-e integrals are stored in the physicists' notation: `int2[pqrs]` ``= <pq|rs>=v_{pq}^{rs}``
-  and for `N=3` the last two indices are stored as a single uppertriangular index (r <= s)
+
+  `N` denotes the number of indices in the 2-e-integral tensors,
+  for `N=3` (usual) the last two indices are stored as a single uppertriangular index (r <= s)
 
   $(TYPEDFIELDS)
 """

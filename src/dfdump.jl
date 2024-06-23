@@ -266,7 +266,7 @@ function dfdump(EC::ECInfo)
   norbs -= ncore_orbs + nfrozvirt
   ms2 = EC.options.wf.ms2
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
-  fdump = TFDump(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO))
+  fdump = FDump{3}(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO))
   if fdump.uhf
     generate_integrals(EC, fdump, cMO[:,1:end-nfrozvirt], space_save)
   else

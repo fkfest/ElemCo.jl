@@ -18,7 +18,7 @@ Various macros are defined and exported to simplify running calculations. The ma
 | `EC::ECInfo` | A global information object containing options, molecular system description, integrals and orbital spaces information, see [`ElemCo.ECInfo`](@ref). |
 | `geometry::String` | Molecular coordinates, either in the `xyz` format or the file containing the xyz coordinates, see [`ElemCo.MSystem`](@ref). |
 | `basis::Dict` | Basis set information, see [`ElemCo.MSystem`](@ref) |
-| `fcidump::String` | File containing the integrals in the FCIDUMP format, see [`ElemCo.FciDump`](@ref). |
+| `fcidump::String` | File containing the integrals in the FCIDUMP format, see [`ElemCo.FciDumps`](@ref). |
 
 The driver routines and macros return energies as `NamedTuple`. The last energy is always the total energy (can be accessed using `last(energies)`). The following table lists the keys and their meanings.
 

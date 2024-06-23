@@ -53,6 +53,7 @@ makedocs(
       "mnpy.md",
       "msystem.md",
       "orbtools.md",
+      "qmtensors.md",
       "tensortools.md",
       "utils.md",
       "interfaces.md",
