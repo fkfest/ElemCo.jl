@@ -1,0 +1,16 @@
+using ElemCo
+@testset "H2O Closed-Shell CCSDT and DC-CCSDT" begin
+epsilon    =      1.e-6
+ECCSDT_test    = -0.214407285207
+EDCCCSDT_test  = -0.214479790853
+
+fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
+@set cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true triangular_kext = false 
+
+energies = @cc ccsdt
+@test abs(last(energies)-energies.HF-ECCSDT_test) < epsilon
+
+energies = @cc dc-ccsdt
+@test abs(last(energies)-energies.HF-EDCCCSDT_test) < epsilon
+end
+
