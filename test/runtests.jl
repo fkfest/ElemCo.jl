@@ -33,7 +33,7 @@ TESTS = [
 # long tests
 LONGTESTS = [
 ("Props", ["h2o_udcsd_prop"]),
-("High-order CC", ["uccsdt"]),
+("High-order CC", ["uccsdt", "ccsdt"]),
 ]
 
 for (testset, tests) in TESTS

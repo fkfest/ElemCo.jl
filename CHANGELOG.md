@@ -12,6 +12,7 @@
 
 * Export of molden files (`@export_molden`). At the moment the orbital energies and occupations are not exported.
 * Add dfmcscf part in documentation
+* CCSDT and DC-CCSDT closed-shell implementations generated with Quantwo.
 
 ### Fixed
 
