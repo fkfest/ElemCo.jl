@@ -1199,9 +1199,7 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
     ΛTNorm = calc_correlation_norm(EC, LMs...)
     NormR = NormR1 + NormR2
     NormLM = 1.0 + NormLM1 + NormLM2
-    tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it NormLM ΛTNorm NormR tt
-    flush(stdout)
+    output_iteration(it, NormR, time_ns()-t0, NormLM, ΛTNorm)
     if NormR < EC.options.cc.thr
       converged = true
       break
@@ -1215,7 +1213,6 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
   end
   try2save_doubles!(EC, LMs[doubles]...; type="LM")
   println()
-  @printf "Sq.Norm of LM1: %12.8f Sq.Norm of LM2: %12.8f \n" NormLM1 NormLM2
+  output_norms(["LM1"=>sqrt(NormLM1), "LM2"=>sqrt(NormLM2)])
   println()
-  flush(stdout)
 end

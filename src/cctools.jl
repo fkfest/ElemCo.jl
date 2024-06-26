@@ -60,11 +60,11 @@ end
 function calc_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
-    ϵo = load(EC,"e_m")[SP['o']]
+    ϵo = load1idx(EC,"e_m")[SP['o']]
     EHF = sum(ϵo) + sum(diag(ints1(EC,"oo"))) + EC.fd.int0
   else
-    ϵo = load(EC,"e_m")[SP['o']]
-    ϵob = load(EC,"e_M")[SP['O']]
+    ϵo = load1idx(EC,"e_m")[SP['o']]
+    ϵob = load1idx(EC,"e_M")[SP['O']]
     EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(ints1(EC, "oo"))) + sum(diag(ints1(EC, "OO")))) + EC.fd.int0
   end
   return EHF
@@ -129,14 +129,14 @@ end
 """
 function spin_project_amplitudes(EC::ECInfo, with_singles=true)
   if with_singles
-    T1a = load(EC, "T_vo")
-    T1b = load(EC, "T_VO")
+    T1a = load2idx(EC, "T_vo")
+    T1b = load2idx(EC, "T_VO")
   else
     T1a = T1b = []
   end
-  T2a = load(EC, "T_vvoo")
-  T2b = load(EC, "T_VVOO")
-  T2ab = load(EC, "T_vVoO")
+  T2a = load4idx(EC, "T_vvoo")
+  T2b = load4idx(EC, "T_VVOO")
+  T2ab = load4idx(EC, "T_vVoO")
   spin_project!(EC, T1a, T1b, T2a, T2b, T2ab)
   if with_singles
     save!(EC, "T_vo", T1a)
@@ -155,7 +155,7 @@ end
 
   if `fock_only` is true, the energy will be calculated using only non-dressed fock matrix.
   Returns total energy, SS, OS, and Openshell (0.0) contributions
-  as a NamedTuple (`E`, `ESS`, `EOS`, `EO`).
+  as `OutDict` with keys (`E`, `ESS`, `EOS`, `EO`).
 """
 function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
@@ -167,8 +167,8 @@ function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
       if !file_exists(EC, "dfc_ov") || !file_exists(EC, "dfe_ov")
         error("Files dfc_ov and dfe_ov are required in calc_singles_energy_using_dfock!")
       end
-      dfockc_ov = load(EC, "dfc_ov")
-      dfocke_ov = load(EC, "dfe_ov")
+      dfockc_ov = load2idx(EC, "dfc_ov")
+      dfocke_ov = load2idx(EC, "dfe_ov")
       @tensoropt begin
         ET1d = T1[a,i] * dfockc_ov[i,a] 
         ET1ex = T1[a,i] * dfocke_ov[i,a]
@@ -177,10 +177,10 @@ function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
       ET1OS = ET1d
       ET1 = ET1SS + ET1OS
     end
-    fov = load(EC,"f_mm")[SP['o'],SP['v']] 
+    fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
     @tensoropt ET1 += 2.0*(fov[i,a] * T1[a,i])
   end
-  return (E=ET1, ESS=ET1SS, EOS=ET1OS, EO=0.0)
+  return OutDict("E"=>ET1, "ESS"=>ET1SS, "EOS"=>ET1OS, "EO"=>0.0)
 end
 
 
@@ -357,7 +357,7 @@ function update_deco_doubles(EC, R2; use_shift=true)
   else
     shift = use_shift ? EC.options.cc.shiftp : 0.0
     ΔT2 = deepcopy(R2)
-    ϵX = load(EC,"e_X")
+    ϵX = load1idx(EC,"e_X")
     for I ∈ CartesianIndices(ΔT2)
       X,Y = Tuple(I)
       ΔT2[I] /= -(ϵX[X] + ϵX[Y] + shift)
@@ -379,7 +379,7 @@ end
 function update_deco_triples(EC, R3, use_shift=true)
   shift = use_shift ? EC.options.cc.shiftt : 0.0
   ΔT3 = deepcopy(R3)
-  ϵX = load(EC,"e_X")
+  ϵX = load1idx(EC,"e_X")
   for I ∈ CartesianIndices(ΔT3)
     X,Y,Z = Tuple(I)
     ΔT3[I] /= (ϵX[X] + ϵX[Y] + ϵX[Z] + shift)

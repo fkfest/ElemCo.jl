@@ -154,43 +154,45 @@ function triinds(norb, sp1::AbstractArray{Int}, sp2::AbstractArray{Int}, reverse
   end
 end
 
+function spincase_from_4spaces(spaces::String)
+  second_el_alpha = isalphaspin(spaces[2],spaces[4])
+  if isalphaspin(spaces[1],spaces[3])
+    if second_el_alpha
+      sc = :α
+    else
+      sc = :αβ
+    end
+  else
+    !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
+    sc = :β
+  end
+  return sc
+end
+
 """ 
-    ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
+    ints2(EC::ECInfo, spaces::String, spincase = nothing)
 
   Return subset of 2e⁻ integrals according to spaces. 
   
   The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification.
-  If the last two indices are stored as triangular and detri - make them full,
-  otherwise return as a triangular cut.
+  If the last two indices are stored as triangular - make them full.
 """
-function ints2(EC::ECInfo, spaces::String, spincase = nothing, detri = true)
+function ints2(EC::ECInfo, spaces::String, spincase = nothing)
   if isnothing(spincase)
-    second_el_alpha = isalphaspin(spaces[2],spaces[4])
-    if isalphaspin(spaces[1],spaces[3])
-      if second_el_alpha
-        sc = :α
-      else
-        sc = :αβ
-      end
-    else
-      !second_el_alpha || error("Use αβ integrals to get the βα block "*spaces)
-      sc = :β
-    end
+    sc = spincase_from_4spaces(spaces)
   else 
-    sc = spincase
+    sc::Symbol = spincase
   end
-  allint = integ2(EC.fd, sc)
+  SP = EC.space
+  if EC.fd.uhf && sc == :αβ 
+    return integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
+  end
+  allint = integ2_ss(EC.fd, sc)
+  @assert ndims(allint) == 3
   norb = length(EC.space[':'])
-  if ndims(allint) == 4
-    return allint[EC.space[spaces[1]],EC.space[spaces[2]],EC.space[spaces[3]],EC.space[spaces[4]]]
-  elseif detri
-    # last two indices as a triangular index, desymmetrize
-    return detri_int2(allint, norb, EC.space[spaces[1]], EC.space[spaces[2]], EC.space[spaces[3]], EC.space[spaces[4]])
-  else
-    cio, maski = triinds(norb, EC.space[spaces[3]], EC.space[spaces[4]])
-    return allint[EC.space[spaces[1]],EC.space[spaces[2]],maski]
-  end
+  # last two indices as a triangular index, desymmetrize
+  return detri_int2(allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
 end
 
 """ 

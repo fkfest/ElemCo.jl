@@ -6,6 +6,8 @@
 module ElemCo
 
 include("abstractEC.jl")
+include("descdict.jl")
+include("outputs.jl")
 include("utils.jl")
 include("constants.jl")
 include("myio.jl")
@@ -86,6 +88,8 @@ export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
+# from Utils
+export last_energy
 
 const __VERSION__ = "0.12.0+"
 

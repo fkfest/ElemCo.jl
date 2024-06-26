@@ -2,7 +2,8 @@
     (using a similarity-transformed FciDump)
 """
 module BOHF
-using LinearAlgebra, TensorOperations, Printf
+using LinearAlgebra, TensorOperations
+using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.Constants
 using ..ElemCo.ECInfos
@@ -248,13 +249,11 @@ function bohf(EC::ECInfo)
     previousEHF = EHF
     Δfock = den'*fock - fock*den'
     var = sum(abs2, Δfock)
-    tt = (time_ns() - t0)/10^9
     if pseudo
-      @printf "%12.8f %10.2e %8.2f \n" EHF var tt
+      output_E_var(EHF, var, time_ns() - t0)
     else
-      @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+      output_iteration(it, var, time_ns() - t0, EHF, ΔE)
     end
-    flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
@@ -339,13 +338,11 @@ function bouhf(EC::ECInfo)
     EHF = efhsmall[1] + efhsmall[2] + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
-    tt = (time_ns() - t0)/10^9
     if pseudo
-      @printf "%12.8f %10.2e %8.2f \n" EHF var tt
+      output_E_var(EHF, var, time_ns() - t0)
     else
-      @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
+      output_iteration(it, var, time_ns() - t0, EHF, ΔE)
     end
-    flush(stdout)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end

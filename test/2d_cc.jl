@@ -11,10 +11,10 @@ fcidump = joinpath(@__DIR__,"files","CH2.3B1.DZP.ROHF.FCIDUMP")
 EC = ElemCo.ECInfo()
 energies = ElemCo.ccdriver(EC, "2d-ccsd"; fcidump, occa="-2.1+1.3", occb="1.1+1.2+1.3")
 println(keys(energies))
-@test abs(energies[:TRIP2D_UCCSD]-td_ccsd_ref) < epsilon
+@test abs(energies["TRIP2D-UCCSD"]-td_ccsd_ref) < epsilon
 
 energies = @cc frt-ccsd occa="-2.1+1.3" occb="1.1+1.2+1.3"
-@test abs(energies[:FRT_UCCSD]-frt_ccsd_ref) < epsilon
+@test abs(energies["FRT-UCCSD"]-frt_ccsd_ref) < epsilon
 
 end
 
@@ -28,6 +28,6 @@ fcidump = joinpath(@__DIR__,"files","CH2O.3A1.VDZ.ROHF.FCIDUMP")
 EC = ElemCo.ECInfo()
 @opt cc nomp2=1 maxit=200
 energies = ElemCo.ccdriver(EC, "2d-dcsd"; fcidump, occa = "-3.1+1.2+-2.3", occb = "-3.1+2.2+-2.3")
-@test abs(energies[:SING2D_UDCSD]-td_dcsd_ref) < epsilon
+@test abs(energies["SING2D-UDCSD"]-td_dcsd_ref) < epsilon
 
 end

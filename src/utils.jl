@@ -3,11 +3,16 @@ module Utils
 using MKL
 using Printf
 using ..ElemCo.AbstractEC
+using ..ElemCo.DescDict
+using ..ElemCo.Outputs
 
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
 export substr, reshape_buf, create_buf
 export amdmkl
+# from DescDict
+export ODDict, getdescription, setdescription!, descriptions
+export OutDict, last_energy
 
 """
     mainname(file::String)
@@ -42,11 +47,24 @@ end
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
   if verb < EC.verbosity
-    @printf "Time for %s:\t %8.2f \n" info (t2-t1)/10^9
-    flush(stdout)
+    output_time(t2-t1, info)
   end
   return t2
 end
+
+"""
+    OutDict
+
+  An ordered descriptive dictionary that maps keys of type `String` to values of type `Float64`.
+"""
+const OutDict = ODDict{String, Float64}
+
+"""
+    last_energy(energies::OutDict)
+
+  Return the last energy in `energies`.
+"""
+last_energy(energies::OutDict) = last_value(energies)
 
 """
     draw_line(n = 63)
@@ -82,7 +100,7 @@ function print_info(info::AbstractString, additional_info::AbstractString="")
     println(additional_info)
     draw_thin_line()
   end
-  flush(stdout)
+  flush_output()
 end
 
 """
@@ -92,7 +110,7 @@ end
 """
 function draw_endline(n=63)
   println(repeat("═", n))
-  flush(stdout)
+  flush_output()
 end
 
 """

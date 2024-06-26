@@ -55,6 +55,7 @@ makedocs(
       "orbtools.md",
       "qmtensors.md",
       "tensortools.md",
+      "descdict.md",
       "utils.md",
       "interfaces.md",
       "molpro.md",

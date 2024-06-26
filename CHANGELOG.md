@@ -10,6 +10,7 @@
 * The `FDump` type has been changed to `FDump{N}` with N=3 (for triangular storage of 2-electron integrals) or 4. The logical variable `triang` has been removed (there is a function `is_triang(::FDump)` now). Aliases `TFDump = FDump{3}` and `QFDump = FDump{4}` have been introduced. 
 * The `ECInfo` type now accepts only `FDump{3}`. The `FDump{4}` objects have to be transformed first (the transformation functions are not implemented yet).
 * The triangular functions have been moved to a separate file `utensors.jl`, part of the `QMTensors` module. `uppertriangular` function has been renamed to `uppertriangular_index`.
+* The driver functions and macros now return energies in an ordered descriptive dictionary `OutDict=ODDict{String,Float64}`. Use `last_energy` function to access the last energy (or `last` to access the whole entry including the key and the description).
 
 ### Changed
 
@@ -20,6 +21,7 @@
 
 * Export of molden files (`@export_molden`). At the moment the orbital energies and occupations are not exported.
 * `QMTensors.SpinMatrix` struct for one-electron matrices (e.g., MO coefficients)
+* An ordered descriptive dictionary for energy outputs (`ODDict`) has been implemented. Each key-value entry can have a description.
 
 ### Fixed
 

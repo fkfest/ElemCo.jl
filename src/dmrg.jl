@@ -110,7 +110,7 @@ function calc_dmrg(EC::ECInfo)
   E, ψ = dmrg(H, ψref; dmrg_params...)
   println("DMRG complete")
   E2 = inner(ψ', H, ψ)
-  return (; E=E-Eref, Expect=E2-Eref)
+  return OutDict("E"=>E-Eref, "Expect"=>E2-Eref)
 end
 
 end # module DMRG

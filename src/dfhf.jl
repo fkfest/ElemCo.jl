@@ -1,5 +1,6 @@
 module DFHF
-using LinearAlgebra, TensorOperations, Printf
+using LinearAlgebra, TensorOperations
+using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.Integrals
@@ -18,7 +19,7 @@ export dfhf, dfuhf
     dfhf(EC::ECInfo)
 
   Perform closed-shell DF-HF calculation.
-  Returns the energy as the `:HF` field in a named tuple.
+  Returns the energy as the `HF` key in `OutDict`.
 """
 function dfhf(EC::ECInfo)
   t1 = time_ns()
@@ -50,7 +51,7 @@ function dfhf(EC::ECInfo)
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
-  flush(stdout)
+  flush_output()
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
     if direct
@@ -69,9 +70,7 @@ function dfhf(EC::ECInfo)
     sdf = sao*den2*fock 
     Δfock = sdf - sdf'
     var = sum(abs2,Δfock)
-    tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
-    flush(stdout)
+    output_iteration(it, var, time_ns() - t0, EHF, ΔE)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
@@ -90,14 +89,14 @@ function dfhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
-  return (HF=EHF,)
+  return OutDict("HF"=>(EHF, "closed-shell HF energy"))
 end
 
 """
     dfuhf(EC::ECInfo)
 
   Perform DF-UHF calculation.
-  Returns the energy as the `:UHF` and `:HF` field in a named tuple.
+  Returns the energy as the `UHF` and `HF` keys in `OutDict`.
 """
 function dfuhf(EC::ECInfo)
   t1 = time_ns()
@@ -128,7 +127,7 @@ function dfuhf(EC::ECInfo)
   EHF = 0.0
   previousEHF = 0.0
   println("Iter     Energy      DE          Res         Time")
-  flush(stdout)
+  flush_output()
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
     if direct
@@ -151,9 +150,7 @@ function dfuhf(EC::ECInfo)
     EHF = efhsmall[1] + efhsmall[2] + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
-    tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %10.2e %8.2f \n" it EHF ΔE var tt
-    flush(stdout)
+    output_iteration(it, var, time_ns() - t0, EHF, ΔE)
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
@@ -174,7 +171,7 @@ function dfuhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
-  return (UHF=EHF, HF=EHF)
+  return OutDict("UHF"=>(EHF,"UHF energy"), "HF"=>(EHF,"UHF energy"))
 end
 
 end #module

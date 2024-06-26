@@ -14,9 +14,9 @@ fcidump = joinpath(@__DIR__,"files","N_ST1.FCIDUMP")
 @ECinit
 for (ime,method) in enumerate(ccmethods)
   energies = @cc method 
-  @test abs(energies.HF-EHF_test) < epsilon
-  @test abs(energies.UMP2-EMP2_test) < epsilon
-  @test abs(last(energies)-EHF_test-ECC_test[ime]) < epsilon
+  @test abs(energies["HF"]-EHF_test) < epsilon
+  @test abs(energies["UMP2"]-EMP2_test) < epsilon
+  @test abs(last_energy(energies)-EHF_test-ECC_test[ime]) < epsilon
 end
 
 #EC.fd = read_fcidump(fcidump)
@@ -25,12 +25,12 @@ EBOHF = @bouhf
 @transform_ints biorthogonal
 @test abs(EBOHF-EHF_test) < epsilon
 energies = @cc udcsd
-@test abs(last(energies)-EHF_test-ECC_test[2]) < epsilon
+@test abs(last_energy(energies)-EHF_test-ECC_test[2]) < epsilon
 energies = @cc uccsd(t)
-@test abs(last(energies)-EHF_test-ECCSD_T_test) < epsilon
+@test abs(last_energy(energies)-EHF_test-ECCSD_T_test) < epsilon
 
 @freeze_orbs [1]
 energies = @cc udcsd
-@test abs(energies.HF-EHF_test) < epsilon
-@test abs(last(energies)-EBODCSDfc_test) < epsilon
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(last_energy(energies)-EBODCSDfc_test) < epsilon
 end

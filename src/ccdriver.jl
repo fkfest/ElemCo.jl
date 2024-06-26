@@ -4,7 +4,7 @@
 Module for coupled-cluster drivers.
 """
 module CCDriver
-using Printf
+using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
@@ -40,7 +40,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   setup_space_fd!(EC)
   closed_shell = is_closed_shell(EC)
 
-  energies = NamedTuple()
+  energies = OutDict()
   energies = eval_hf_energy(EC, energies, closed_shell)
 
   ecmethod = ECMethod(method)
@@ -80,7 +80,7 @@ function dfccdriver(EC::ECInfo, method)
   setup_space_system!(EC)
   closed_shell = (EC.space['o'] == EC.space['O'])
   
-  energies = NamedTuple()
+  energies = OutDict()
   energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies)
   t1 = time_ns()
   space_save = save_space(EC)
@@ -144,21 +144,21 @@ function check_fcidump(EC::ECInfo, fcidump)
 end
 
 """
-    eval_hf_energy(EC::ECInfo, energies::NamedTuple, closed_shell)
+    eval_hf_energy(EC::ECInfo, energies::OutDict, closed_shell)
 
   Evaluate the Hartree-Fock energy for the integrals in `EC.fd`.
-  Return the updated `energies::NamedTuple` with the Hartree-Fock energy (field `HF`).
+  Return the updated `energies::OutDict` with the Hartree-Fock energy (field `HF`).
 """
-function eval_hf_energy(EC::ECInfo, energies::NamedTuple, closed_shell)
+function eval_hf_energy(EC::ECInfo, energies::OutDict, closed_shell)
   t1 = time_ns()
   calc_fock_matrix(EC, closed_shell)
   EHF = calc_HF_energy(EC, closed_shell)
   hfname = closed_shell ? "HF" : "UHF"
-  @printf "%s energy: %16.12f \n" hfname EHF
+  output_E_method(EHF, hfname, "energy:")
   t1 = print_time(EC, t1, "$hfname energy", 1)
   println()
-  flush(stdout)
-  return (; energies..., HF=EHF)
+  flush_output()
+  return merge(energies, "HF"=>(EHF, "$hfname energy"))
 end
 
 """
@@ -184,79 +184,80 @@ function checkset_unrestricted_closedshell!(ecmethod::ECMethod, closed_shell, un
 end
 
 """
-    output_energy(EC::ECInfo, En::NamedTuple, energies::NamedTuple, mname; print=true)
+    output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=true)
 
-  Print the energy components and return the updated `energies::NamedTuple` with 
-  correction to the correlation energy (`mname*"correction"`, e.g., ΔMP2, if available),
-  same-spin(`mname*"SS"`), opposite-spin(`mname*"OS"`), open-shell(`mname*"O"`) components, 
-  SCS energy (`"SCS"*mname`), correlation energy (`mname*"c"`) and 
-  the total energy (field `mname`) (with `-` in `mname` replaced by `_`).
+  Print the energy components and return the updated `energies::OutDict` with 
+  correction to the correlation energy (`mname*"-correction"`, e.g., ΔMP2, if available),
+  same-spin(`mname*"-SS"`), opposite-spin(`mname*"-OS"`), open-shell(`mname*"-O"`) components, 
+  SCS energy (`"SCS-"*mname`), correlation energy (`mname*"c"`) and 
+  the total energy (field `mname`).
 """
-function output_energy(EC::ECInfo, En::NamedTuple, energies::NamedTuple, mname; print=true)
-  meth = replace(mname, "-" => "_")
-  enecor = En.E
-  enetot = En.E+energies.HF
+function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=true)
+  enecor = En["E"]
+  enetot = En["E"]+energies["HF"]
+  energies_out = copy(energies)
   if print
-    @printf "%s correlation energy: \t%16.12f \n" mname enecor
-    @printf "%s total energy:       \t%16.12f \n" mname enetot
+    output_E_method(enecor, mname, "correlation energy:")
+    output_E_method(enetot, mname, "total energy:      ")
     println()
-    flush(stdout)
   end
-  if haskey(En, :Ecorrection)
-    ecorrect = En.E + En.Ecorrection
-    ecorrectot = En.E + En.Ecorrection + energies.HF
+  if haskey(En, "E-correction")
+    ecorrect = En["E"] + En["E-correction"]
+    ecorrectot = En["E"] + En["E-correction"] + energies["HF"]
     if print
-      @printf "%s corrected correlation energy: \t%16.12f \n" mname ecorrect
-      @printf "%s corrected total energy:       \t%16.12f \n" mname ecorrectot
+      output_E_method(ecorrect, mname, "corrected correlation energy:")
+      output_E_method(ecorrectot, mname, "corrected total energy:    ")
       println()
     end
-    energies = (; energies..., Symbol(meth*"correction")=>En.Ecorrection) 
+    push!(energies_out, mname*"-correction" => (En["E-correction"], "correction to the correlation energy")) 
   end
-  if haskey(En, :Expect)
-    enecor = En.Expect
-    enetot = En.Expect+energies.HF
+  if haskey(En, "Expect")
+    enecor = En["Expect"]
+    enetot = En["Expect"]+energies["HF"]
     if print
-      @printf "%s correlation expectation energy: \t%16.12f \n" mname enecor
-      @printf "%s total expectation energy:       \t%16.12f \n" mname enetot
+      output_E_method(enecor, mname, "correlation expectation energy:")
+      output_E_method(enetot, mname, "total expectation energy:      ")
       println()
-      flush(stdout)
     end
-    energies = (; energies..., Symbol(meth*"expect")=>En.Expect) 
+    push!(energies_out, mname*"-expect" => (En["Expect"], "correlation expectation energy")) 
   end
-  if haskey(En, :ESS) && haskey(En, :EOS) && haskey(En, :EO)
+  if haskey(En, "ESS") && haskey(En, "EOS") && haskey(En, "EO")
     # SCS
-    energies = (; energies..., Symbol(meth*"SS")=>En.ESS, Symbol(meth*"OS")=>En.EOS, Symbol(meth*"O")=>En.EO) 
-    methodroot = replace(method_name(ECMethod(mname), root=true), "-" => "_")
+    push!(energies_out, mname*"-SS"=>(En["ESS"], "same-spin component to the energy"), 
+                        mname*"-OS"=>(En["EOS"], "opposite-spin component to the energy"),
+                        mname*"-O"=>(En["EO"], "open-shell component to the energy")) 
+    methodroot = method_name(ECMethod(mname), root=true)
     # calc SCS energy (if available)
     if hasfield(ECInfos.CcOptions, Symbol(lowercase(methodroot)*"_ssfac"))
       # get SCS factors (e.g., mp2_ssfac, ccsd_ssfac, dcsd_ssfac)
       ssfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ssfac"))
       osfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_osfac"))
       ofac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ofac"))
-      ΔE = En.E - En.ESS - En.EOS
-      enescs = energies.HF + ΔE + En.ESS*ssfac + En.EOS*osfac + En.EO*ofac
+      ΔE = En["E"] - En["ESS"] - En["EOS"]
+      enescs = energies["HF"] + ΔE + En["ESS"]*ssfac + En["EOS"]*osfac + En["EO"]*ofac
       if print
-        @printf "SCS-%s total energy: \t%16.12f \n" mname enescs
+        output_E_method(enescs, "SCS-"*mname, "total energy:")
         println()
-        flush(stdout)
       end
-      energies = (; energies..., Symbol("SCS"*meth)=>enescs)
+      push!(energies_out, "SCS-"*mname=>(enescs, "SCS-$mname energy"))
     end
   end
-  return (; energies..., Symbol(meth*"c")=>enecor, Symbol(meth)=>enetot)
+  push!(energies_out, mname*"c"=>(enecor, "$mname correlation energy"),
+                      mname=>(enetot, "$mname total energy"))
+  return energies_out
 end
 
 """
-    eval_mp2_energy(EC::ECInfo, energies::NamedTuple, closed_shell, restricted)
+    eval_mp2_energy(EC::ECInfo, energies::OutDict, closed_shell, restricted)
 
   Evaluate the MP2 energy for the integrals in `EC.fd`. 
   Fock matrix and HF energy must be calculated before.
-  Return the updated `energies::NamedTuple` with 
-  same-spin(`MP2SS`), opposite-spin(`MP2OS`), open-shell(`MP2O`) components, 
-  SCS-MP2 energy (`SCSMP2`), correlation energy (`MP2c`) and
+  Return the updated `energies::OutDict` with 
+  same-spin(`MP2-SS`), opposite-spin(`MP2-OS`), open-shell(`MP2-O`) components, 
+  SCS-MP2 energy (`SCS-MP2`), correlation energy (`MP2c`) and
   the MP2 energy (field `MP2`).
 """
-function eval_mp2_energy(EC::ECInfo, energies::NamedTuple, closed_shell, restricted)
+function eval_mp2_energy(EC::ECInfo, energies::OutDict, closed_shell, restricted)
   t1 = time_ns()
   if closed_shell
     EMp2 = calc_MP2(EC)
@@ -277,45 +278,47 @@ function eval_mp2_energy(EC::ECInfo, energies::NamedTuple, closed_shell, restric
 end
 
 """
-    output_2d_energy(EC::ECInfo, En, energies::NamedTuple, method; print=true)
+    output_2d_energy(EC::ECInfo, En::OutDict, energies::OutDict, method; print=true)
 
-  Print the energy components for 2D methods and return the updated `energies::NamedTuple` with 
+  Print the energy components for 2D methods and return the updated `energies::OutDict` with 
   singlet(`"SING"*method`), triplet(`"TRIP"*method`), singlet correlation(`"SING"*method*"c"`) and 
-  triplet correlation(`"TRIP"*method*"c"`) components (with `-` in `method` replaced by `_`).
+  triplet correlation(`"TRIP"*method*"c"`) components.
 """
-function output_2d_energy(EC::ECInfo, En, energies::NamedTuple, method; print=true)
-  meth = replace(method, "-" => "_")
-  enecors = En.E + En.EW
-  enecort = En.E - En.EW
-  enetots = enecors + energies.HF
-  enetott = enecort + energies.HF
-  @printf "%s singlet total energy:   \t%16.12f \n" method enetots
-  @printf "%s triplet total energy:   \t%16.12f \n" method enetott
-  @printf "%s singlet correlation energy: \t%16.12f \n" method enecors
-  @printf "%s triplet correlation energy: \t%16.12f \n" method enecort
-  return (; energies..., Symbol("SING"*meth*"c")=>enecors, Symbol("TRIP"*meth*"c")=>enecort, 
-          Symbol("SING"*meth)=>enetots, Symbol("TRIP"*meth)=>enetott)
+function output_2d_energy(EC::ECInfo, En::OutDict, energies::OutDict, method; print=true)
+  enecors = En["E"] + En["EW"]
+  enecort = En["E"] - En["EW"]
+  enetots = enecors + energies["HF"]
+  enetott = enecort + energies["HF"]
+  output_E_method(enetots, method, "singlet total energy:  ")
+  output_E_method(enetott, method, "triplet total energy:  ")
+  output_E_method(enecors, method, "singlet correlation energy:")
+  output_E_method(enecort, method, "triplet correlation energy:")
+  return merge(energies, "SING"*method*"c"=>(enecors,"$method singlet correlation energy"), 
+                         "TRIP"*method*"c"=>(enecort,"$method triplet correlation energy"), 
+                         "SING"*method=>(enetots,"$method singlet total energy"),
+                         "TRIP"*method=>(enetott,"$method triplet total energy"))
 end
 
 """
-    eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple; save_pert_t3=false)
+    eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict; save_pert_t3=false)
 
   Evaluate the coupled-cluster ground-state energy for the integrals in `EC.fd`.
   Fock matrix and HF energy must be calculated before.
-  Return the updated `energies::NamedTuple` with the correlation energy (`method*"c"`) and 
-  the total energy (field `method`) (with `-` in `method` replaced by `_`).
+  Return the updated `energies::OutDict` with the correlation energy (`method*"c"`) and 
+  the total energy (key `method`).
 """
-function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple;
+function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict;
                             save_pert_t3=false)
   if ecmethod.exclevel[4] != :none
     error("no quadruples implemented yet...")
   end
+  energies = copy(energies_in)
   if has_prefix(ecmethod, "SVD") 
     @assert ecmethod.exclevel[3] != :none "Only triples SVD at this point!"
     return eval_svd_dc_ccsdt(EC, ecmethod, energies)
   end
   t1 = time_ns()
-  EHF = energies.HF
+  EHF = energies["HF"]
   main_name = method_name(ecmethod)
   ECC = calc_cc(EC, ECMethod(main_name))
   if has_prefix(ecmethod, "2D")
@@ -331,27 +334,29 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTupl
   end
 
   if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
-    ET3, ET3b = calc_pertT(EC, ecmethod; save_t3=save_pert_t3)
+    ET3, ET3b = values(calc_pertT(EC, ecmethod; save_t3=save_pert_t3))
     println()
-    @printf "%s[T] total energy:       \t%16.12f \n" main_name ECC.E+ET3b+EHF
-    @printf "%s(T) correlation energy: \t%16.12f \n" main_name ECC.E+ET3
-    @printf "%s(T) total energy:       \t%16.12f \n" main_name ECC.E+ET3+EHF
+    output_E_method(ECC["E"]+ET3b+EHF, main_name*"[T]", "total energy:      ")
+    output_E_method(ECC["E"]+ET3, main_name*"(T)", "correlation energy:")
+    output_E_method(ECC["E"]+ET3+EHF, main_name*"(T)", "total energy:       ")
     println()
-    energies = (; energies..., T3b=ET3b, T3=ET3, 
-          Symbol(main_name*"_Tc")=>ECC.E+ET3, Symbol(main_name*"_T")=>ECC.E+ET3+EHF)
+    push!(energies, "[T]"=>(ET3b,"[T] energy contribution"), 
+                    "(T)"=>(ET3,"(T) energy contribution"),
+                    main_name*"(T)c"=>(ECC["E"]+ET3,"$main_name(T) correlation energy"),
+                    main_name*"(T)"=>(ECC["E"]+ET3+EHF,"$main_name(T) total energy"))
   end
   return energies
 end
 
 """
-    eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
+    eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
 
   Evaluate the coupled-cluster ground-state energy for the integrals in `EC.fd` using SVD-Triples.
   Fock matrix and HF energy must be calculated before.
-  Return the updated `energies::NamedTuple` with the correlation energy (`method*"c"`) and 
-  the total energy (field `method`) (with `-` in `method` replaced by `_`).
+  Return the updated `energies::OutDict` with the correlation energy (`method*"c"`) and 
+  the total energy (key `method`).
 """
-function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
+function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
   ecmethod0 = ECMethod("CCSD(T)")
   if is_unrestricted(ecmethod) || has_prefix(ecmethod, "R")
     error("SVD-Triples only implemented for closed-shell methods!")
@@ -359,50 +364,51 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
   energies = eval_cc_groundstate(EC, ecmethod0, energies, save_pert_t3=EC.options.cc.calc_t3_for_decomposition)
 
   main_name = method_name(ecmethod)
-  EHF = energies.HF
+  EHF = energies["HF"]
 
   t1 = time_ns()
   cc3 = (ecmethod.exclevel[3] == :pertiter)
   ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
-  @printf "%s correlation energy: \t%16.12f \n" main_name ECC.E
-  @printf "%s total energy:       \t%16.12f \n" main_name ECC.E+EHF
+  output_E_method(ECC["E"], main_name, "correlation energy:")
+  output_E_method(ECC["E"]+EHF, main_name, "total energy:      ")
   t1 = print_time(EC, t1,"SVD-T",1)
   println()
-  meth = replace(main_name, "-" => "_")
-  return (; energies..., Symbol(meth*"c")=>ECC.E, Symbol(meth)=>ECC.E+EHF)
+  return merge(energies, main_name*"c"=>(ECC["E"], "$main_name correlation energy"), 
+                         main_name=>(ECC["E"]+EHF, "$main_name total energy"))
 end
 
 """
-    eval_df_mo_integrals(EC::ECInfo, energies::NamedTuple)
+    eval_df_mo_integrals(EC::ECInfo, energies::OutDict)
 
   Evaluate the density-fitted integrals in MO basis 
   and store in the correct file.
 
-  Return the reference energy as `HF` field in NamedTuple and 
+  Return the reference energy as `HF` key in OutDict and 
   `true` if the integrals are calculated using unresctricted orbitals.
 """
-function eval_df_mo_integrals(EC::ECInfo, energies::NamedTuple)
+function eval_df_mo_integrals(EC::ECInfo, energies::OutDict)
   t1 = time_ns()
   cMO = load_orbitals(EC, EC.options.wf.orb)
   unrestricted = !is_restricted(cMO)
   ERef = generate_DF_integrals(EC, cMO)
   t1 = print_time(EC, t1, "generate DF integrals", 2)
   cMO = nothing
-  @printf "Reference energy: \t%16.12f \n" ERef
+  output_E_method(ERef, "Reference energy:")
   println()
-  return (; energies..., HF=ERef), unrestricted
+  return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
 end
 
 """
-    eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
+    eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict)
 
   Evaluate the coupled-cluster ground-state energy for the DF integrals,
   which have to be calculated before.
-  Return the updated `energies::NamedTuple` with the correlation energy (`method*"c"`) and 
-  the total energy (field `method`) (with `-` in `method` replaced by `_`).
+  Return the updated `energies::OutDict` with the correlation energy (`method*"c"`) and 
+  the total energy (key `method`).
 """
-function eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTuple)
+function eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict)
   t1 = time_ns()
+  energies = copy(energies_in)
   if ecmethod.exclevel[3] != :none
     error("no triples implemented yet...")
   end
@@ -422,14 +428,14 @@ function eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies::NamedTu
 end
 
 """
-    eval_dmrg_groundstate(EC::ECInfo, energies::NamedTuple)
+    eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
 
   Evaluate the DMRG ground-state energy for the integrals in `EC.fd`.
   HF energy must be calculated before.
-  Return the updated `energies::NamedTuple` with the correlation energy (`"DMRGc"`) and 
-  the total energy (field `DMRG`).
+  Return the updated `energies::OutDict` with the correlation energy (`"DMRGc"`) and 
+  the total energy (key `"DMRG"`).
 """
-function eval_dmrg_groundstate(EC::ECInfo, energies::NamedTuple)
+function eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
   t1 = time_ns()
   ECC = calc_dmrg(EC)
   energies = output_energy(EC, ECC, energies, "DMRG")

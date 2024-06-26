@@ -16,7 +16,7 @@ using ..ElemCo.QMTensors
 
 export FDump, TFDump, QFDump 
 export fd_exists, read_fcidump, write_fcidump, transform_fcidump
-export headvar, headvars, integ1, integ2, triang
+export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
 
@@ -130,8 +130,8 @@ Base.@kwdef mutable struct FDump{N}
   uhf::Bool = false
 end
 
-TFDump = FDump{3}
-QFDump = FDump{4}
+const TFDump = FDump{3}
+const QFDump = FDump{4}
 
 """ 
   is_triang(fd::FDump)
@@ -284,6 +284,34 @@ function integ2(fd::FDump, spincase::Symbol=:α)
 end
 
 """
+    integ2_ss(fd::FDump, spincase::Symbol=:α)
+
+  Return 2-e⁻ integrals (for UHF fcidump: for `spincase`).
+  `spincase` can be `:α` or `:β`.
+"""
+function integ2_ss(fd::FDump, spincase::Symbol=:α)
+  if !fd.uhf
+    return fd.int2
+  elseif spincase == :α
+    return fd.int2aa
+  elseif spincase == :β
+    return fd.int2bb
+  else
+    error("Only α and β are allowed for spincase")
+  end
+end
+
+"""
+    integ2_os(fd::FDump)
+
+  Return αβ 2-e⁻ integrals for UHF fcidump
+"""
+function integ2_os(fd::FDump)
+  @assert fd.uhf "Only for UHF"
+  return fd.int2ab
+end
+
+"""
     read_fcidump(fcidump::String, ::Val{N})
 
   Read ascii file (possibly with integrals in npy files).
@@ -343,40 +371,26 @@ function read_header(fdfile)
   push!(line_array, "\n")
   # search for '=' and put element before it as the variable name, and everything
   # after (before the next variable name) as a vector of values
-  variable_name = ""
-  prev_el = ""
-  ipos = 1
-  while ipos <= length(line_array)
-    el = line_array[ipos]
-    if el == "=" 
-      if prev_el != ""
-        # case-insensitive variable names in the header
-        variable_name = uppercase(prev_el)
-        prev_el = ""
-      else
-        error("No variable name before '=': $(line_array)")
-      end
-    elseif prev_el != "" && variable_name != ""
-      elem = tryparse(Int, prev_el)
-      if !isnothing(elem)
-        head[variable_name] = Int[elem]
-        variable_name, ipos = read_elements!(head[variable_name,Int], line_array, ipos)
-      else
-        elem = tryparse(Float64,prev_el)
-        if !isnothing(elem)
-          head[variable_name] = Float64[elem]
-          variable_name, ipos = read_elements!(head[variable_name,Float64], line_array, ipos)
-        else
-          elem = strip(prev_el, ['"','\''])
-          head[variable_name] = String[elem]
-          variable_name, ipos = read_elements!(head[variable_name,String], line_array, ipos)
-        end 
-      end
-      prev_el = ""
-    else
-      prev_el = el
-    end
+  comments = String[]
+  variable_name, ipos = read_elements!(comments, line_array, 1)
+  while ipos < length(line_array)
     ipos += 1
+    el_str = line_array[ipos]
+    elem = tryparse(Int, el_str)
+    if !isnothing(elem)
+      head[variable_name] = Int[elem]
+      variable_name, ipos = read_elements!(head[variable_name,Int], line_array, ipos+1)
+    else
+      elem = tryparse(Float64, el_str)
+      if !isnothing(elem)
+        head[variable_name] = Float64[elem]
+        variable_name, ipos = read_elements!(head[variable_name,Float64], line_array, ipos+1)
+      else
+        elem = strip(el_str, ['"','\''])
+        head[variable_name] = String[elem]
+        variable_name, ipos = read_elements!(head[variable_name,String], line_array, ipos+1)
+      end 
+    end
   end
   # print(head)
   return head

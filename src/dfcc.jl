@@ -4,7 +4,8 @@
   Density-fitted coupled-cluster methods.
 """
 module DFCoupledCluster
-using LinearAlgebra, TensorOperations, Printf
+using LinearAlgebra, TensorOperations
+using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.MSystem
@@ -97,7 +98,7 @@ end
   or full contravariant doubles amplitude `T2`=``T^{ij}_{ab}``.
 
   Returns total energy, SS, OS and Openshell (0.0) contributions
-  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
+  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
@@ -145,7 +146,7 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
     ET2SS += ET1SS
     ET2OS += ET1OS
   end
-  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
+  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
 
 """
@@ -156,7 +157,7 @@ end
   or `T2`=``T^{ij}_{ab}`` using density-fitted integrals.
 
   Returns total energy, SS, OS and Openshell (0.0) contributions
-  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
+  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_deco_doubles_energy(EC::ECInfo, T2)
   if ndims(T2) == 4
@@ -168,7 +169,7 @@ function calc_deco_doubles_energy(EC::ECInfo, T2)
       ET2SS = T2[Y,X] * ssvxx[X,Y]
     end
     ET2 = ET2SS + ET2OS
-    return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
+    return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
   else
     error("Wrong dimensionality of T2: ", ndims(T2))
   end
@@ -181,7 +182,7 @@ end
   and `T2[a,b,i,j]` = ``T^{ij}_{ab}``.
 
   Returns total energy, SS, OS and Openshell (0.0) contributions
-  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
+  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_df_doubles_energy(EC::ECInfo, T2)
   if !file_exists(EC, "d_ovL")
@@ -196,7 +197,7 @@ function calc_df_doubles_energy(EC::ECInfo, T2)
   ET2SS = ET2d - ET2ex
   ET2OS = ET2d
   ET2 = ET2SS + ET2OS
-  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
+  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
 
 """
@@ -360,12 +361,12 @@ end
   The SVD-coefficients ``U^{iX}_a`` are saved in file `C_voX`.
   The starting guess for doubles ``T_{XY}`` is saved in file `T_XX`.
   Return full MP2 correlation energy, SS, OS, and Openshell(0.0) (using the imaginary shift)
-  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
+  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   t1 = time_ns()
   println("Decomposition without doubles using threshold ", EC.options.cc.ampsvdtol)
-  flush(stdout)
+  flush_output()
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   SP = EC.space
@@ -378,13 +379,13 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   shifti = EC.options.cc.deco_ishiftp
   fullEMP2 = calc_MP2_from_3idx(EC, voL, shifti)
   if shifti ≈ 0.0
-    println("MP2 correlation energy: ", fullEMP2.E)
+    println("MP2 correlation energy: ", fullEMP2["E"])
   else
     println("MP2 imaginary shift for decomposition: ", shifti)
-    println("MP2 imaginary shifted correlation energy: ", fullEMP2.E)
+    println("MP2 imaginary shifted correlation energy: ", fullEMP2["E"])
   end
   t1 = print_time(EC, t1, "MP2 from 3idx", 2)
-  flush(stdout)
+  flush_output()
   if EC.options.cc.use_full_t2
     T2 = try2start_doubles(EC)
     if size(T2) != (nvirt,nvirt,nocc,nocc)
@@ -440,7 +441,7 @@ end
 function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   t1 = time_ns()
   println("Decomposition with doubles using threshold ", EC.options.cc.ampsvdtol)
-  flush(stdout)
+  flush_output()
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   SP = EC.space
@@ -450,7 +451,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   T2 = try2start_doubles(EC)
   if size(T2) != (nvirt,nvirt,nocc,nocc)
     println("Use MP2 doubles for decomposition")
-    flush(stdout)
+    flush_output()
     shifti = EC.options.cc.deco_ishiftp
     T2 = calc_MP2_amplitudes_from_3idx(EC, voL, shifti)
   end
@@ -459,7 +460,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   end
   t1 = print_time(EC, t1, "MP2 from 3idx", 2)
   println("decompose full doubles (can be slow!)")
-  flush(stdout)
+  flush_output()
   UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, EC.options.cc.ampsvdtol)
   t1 = print_time(EC, t1, "SVD decomposition", 2)
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
@@ -521,7 +522,7 @@ end
   
   The imaginary shift ishift is used in the denominator in the calculation of the MP2 amplitudes.
   Returns total energy, SS, OS and Openshell (0.0) contributions
-  as a NamedTuple (`E`,`ESS`,`EOS`,`EO`).
+  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_MP2_from_3idx(EC::ECInfo, voL::AbstractArray, ishift)
   @tensoropt vvoo[a,b,i,j] := voL[a,i,L] * voL[b,j,L]
@@ -554,7 +555,7 @@ function calc_MP2_from_3idx(EC::ECInfo, voL::AbstractArray, ishift)
   ET2SS = ET2d - ET2ex
   ET2OS = ET2d
   ET2 = ET2SS + ET2OS
-  return (E=ET2, ESS=ET2SS, EOS=ET2OS, EO=0.0)
+  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
 
 """
@@ -949,7 +950,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   # calc starting guess energy 
   truncEMP2 = calc_deco_doubles_energy(EC, T2)
   t1 = print_time(EC, t1, "calc starting guess energy", 2)
-  println("Starting guess energy: ", truncEMP2.E)
+  println("Starting guess energy: ", truncEMP2["E"])
   println()
   converged = false
   println("Iter     SqNorm      Energy      DE          Res         Time")
@@ -973,17 +974,15 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
     perform!(diis, [T1,T2], [R1,R2])
     t1 = print_time(EC,t1,"DIIS",2)
     En2 = calc_deco_doubles_energy(EC, T2)
-    En = En2.E
+    En = En2["E"]
     if do_sing
       En1 = calc_singles_energy_using_dfock(EC, T1)
-      En += En1.E
+      En += En1["E"]
     end
-    ΔE = En - Eh.E
+    ΔE = En - Eh["E"]
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
-    tt = (time_ns() - t0)/10^9
-    @printf "%3i %12.8f %12.8f %12.8f %10.2e %8.2f \n" it NormT Eh.E ΔE NormR tt
-    flush(stdout)
+    output_iteration(it, NormR, time_ns()-t0, NormT, Eh["E"], ΔE)
     if NormR < EC.options.cc.thr
       converged = true
       break
@@ -995,12 +994,11 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   try2save_singles!(EC, T1)
   try2save_doubles!(EC, T2)
   println()
-  @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f \n" NormT1 NormT2
+  output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
   println()
-  flush(stdout)
   if !EC.options.cc.use_full_t2
     # ΔMP2 correction
-    Eh = (; Eh..., Ecorrection=fullEMP2.E - truncEMP2.E)
+    push!(Eh, "E-correction"=>(fullEMP2["E"] - truncEMP2["E"],"ΔMP2 correction"))
   end
   return Eh
 end

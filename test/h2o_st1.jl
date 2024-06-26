@@ -16,9 +16,9 @@ fcidump = joinpath(@__DIR__,"files","H2O_ST1.FCIDUMP")
 @ECinit
 for (ime,method) in enumerate(ccmethods)
   energies = @cc method 
-  @test abs(energies.HF-EHF_test) < epsilon
-  @test abs(energies.MP2-EMP2_test) < epsilon
-  @test abs(last(energies)-EHF_test-ECC_test[ime]) < epsilon
+  @test abs(energies["HF"]-EHF_test) < epsilon
+  @test abs(energies["MP2"]-EMP2_test) < epsilon
+  @test abs(last_energy(energies)-EHF_test-ECC_test[ime]) < epsilon
 end
 
 #EC.fd = read_fcidump(fcidump)
@@ -28,10 +28,10 @@ CMOl = @loadfile EC.options.wf.orb*EC.options.wf.left
 ElemCo.transform_fcidump(EC.fd, CMOl, CMOr)
 energies = @cc dcsd
 @test abs(EBOHF-EBOHF_test) < epsilon
-@test abs(last(energies)-EBODCSD_test) < epsilon
+@test abs(last_energy(energies)-EBODCSD_test) < epsilon
 
 @freeze_orbs [1]
 energies = @cc dcsd
-@test abs(energies.HF-EBOHF_test) < epsilon
-@test abs(last(energies)-EBODCSDfc_test) < epsilon
+@test abs(energies["HF"]-EBOHF_test) < epsilon
+@test abs(last_energy(energies)-EBODCSDfc_test) < epsilon
 end

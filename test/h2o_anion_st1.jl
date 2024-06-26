@@ -13,11 +13,11 @@ fcidump = joinpath(@__DIR__,"files","H2O_ST1.FCIDUMP")
 @bohf
 @transform_ints biorthogonal
 energies = @cc ccsd
-@test abs(energies.HF-EHF_test) < epsilon
-@test abs(energies.MP2-EMP2_test) < epsilon
-@test abs(last(energies)-ECCSD_test) < epsilon
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2"]-EMP2_test) < epsilon
+@test abs(last_energy(energies)-ECCSD_test) < epsilon
 
 energies = @cc dcsd
-@test abs(last(energies)-EDCSD_test) < epsilon
+@test abs(last_energy(energies)-EDCSD_test) < epsilon
 
 end

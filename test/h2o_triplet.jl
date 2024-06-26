@@ -14,18 +14,18 @@ fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 @opt wf ms2=2
 energies = @cc uccsd(t)
-@test abs(energies.HF-EHF_test) < epsilon
-@test abs(energies.MP2-EMP2_test) < epsilon
-@test abs(energies.UCCSD-EUCCSD_test) < epsilon
-@test abs(energies.UCCSD_T-EUCCSD_T_test) < epsilon
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2"]-EMP2_test) < epsilon
+@test abs(energies["UCCSD"]-EUCCSD_test) < epsilon
+@test abs(energies["UCCSD(T)"]-EUCCSD_T_test) < epsilon
 
 energies = @cc rccsd
-@test abs(energies.RCCSD-ERCCSD_test) < epsilon
+@test abs(energies["RCCSD"]-ERCCSD_test) < epsilon
 
 energies = @cc rdcsd
-@test abs(energies.RDCSD-ERDCSD_test) < epsilon
+@test abs(energies["RDCSD"]-ERDCSD_test) < epsilon
 
 energies = @cc λuccsd(t)
-@test abs(last(energies)-EΛUCCSD_T_test) < epsilon
+@test abs(last_energy(energies)-EΛUCCSD_T_test) < epsilon
 
 end

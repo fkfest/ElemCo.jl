@@ -10,8 +10,8 @@ export has_suffix, set_suffix!
 
 const ExcLevels = "SDTQP"
 
-const Prefix4Methods = ["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R"]
-const Suffix4Methods = []
+const Prefix4Methods = String["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R"]
+const Suffix4Methods = String[]
 
 """
     ECMethod
@@ -129,7 +129,7 @@ end
   and return a list of the matching ones (without dashes for multiple-letter specs!) 
   and the final position after specs.
 """
-function check_specs(mname::AbstractString, pos, specs::Vector)
+function check_specs(mname::AbstractString, pos::Int, specs::Vector{String})
   matches = []
   for spec in specs
     if length(mname)-pos+1 >= length(spec)

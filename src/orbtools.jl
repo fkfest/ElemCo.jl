@@ -109,11 +109,11 @@ end
 """
 function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
   if spincase == :α
-    eps = load(EC, "e_m")
+    eps = load1idx(EC, "e_m")
     ϵo = eps[EC.space['o']]
     ϵv = eps[EC.space['v']]
   else
-    eps = load(EC, "e_M")
+    eps = load1idx(EC, "e_M")
     ϵo = eps[EC.space['O']]
     ϵv = eps[EC.space['V']]
   end
