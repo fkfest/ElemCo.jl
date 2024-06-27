@@ -90,6 +90,8 @@ export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
 # from Utils
 export last_energy
+# from DescDict
+export ODDict
 
 const __VERSION__ = "0.12.0+"
 

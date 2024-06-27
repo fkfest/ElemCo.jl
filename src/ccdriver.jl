@@ -243,7 +243,9 @@ function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=
     end
   end
   push!(energies_out, mname*"c"=>(enecor, "$mname correlation energy"),
-                      mname=>(enetot, "$mname total energy"))
+                      mname=>(enetot, "$mname total energy"),
+                      "Ec"=>(enecor, "$mname correlation energy"),
+                      "E"=>(enetot, "$mname total energy"))
   return energies_out
 end
 
@@ -296,7 +298,9 @@ function output_2d_energy(EC::ECInfo, En::OutDict, energies::OutDict, method; pr
   return merge(energies, "SING"*method*"c"=>(enecors,"$method singlet correlation energy"), 
                          "TRIP"*method*"c"=>(enecort,"$method triplet correlation energy"), 
                          "SING"*method=>(enetots,"$method singlet total energy"),
-                         "TRIP"*method=>(enetott,"$method triplet total energy"))
+                         "TRIP"*method=>(enetott,"$method triplet total energy"),
+                         "Ec"=>(enecors,"$method singlet correlation energy"),
+                          "E"=>(enetots,"$method singlet total energy"))
 end
 
 """

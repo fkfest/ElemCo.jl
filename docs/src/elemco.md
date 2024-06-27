@@ -25,6 +25,8 @@ The driver routines and macros return energies as ordered descriptive dictionari
 ----------------------
 | Key | Meaning |
 |:---:|:--------|
+| `E` | Total energy |
+| `Ec` | Correlation energy |
 | `HF` | Hartree-Fock energy |
 | `MP2` | MP2 energy |
 | `CCSD` | CCSD energy |
@@ -43,6 +45,13 @@ or display the complete dictionary together with the descriptions as
 
 ```julia
 julia> display(energies)
+```
+
+The values and the descriptions can be accessed using the keys as
+
+```julia
+julia> energies["E"] # Total energy
+julia> energies("E") # Description of the total energy
 ```
 
 ## [Macros](@id list_of_macros)

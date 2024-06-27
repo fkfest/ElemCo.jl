@@ -20,6 +20,16 @@ Additionally, it stores a description of each key-value pair in the form of a st
 The values are stored in an ordered dictionary, which means that the order of the key-value 
 pairs is preserved.
 
+The values can be accessed using the `[]` syntax, e.g. `dict[key]`. 
+The descriptions can be accessed using the `()` syntax, e.g. `dict(key)`.
+The value and description can be set using the `[]` syntax, e.g. `dict[key] = value`
+or `dict[key] = (value, description)`, and the description can be set using the `()` syntax,
+e.g. `dict(key, description)`.
+New key-value pairs are always added to the end of the dictionary.
+If the key already exists in the dictionary, the value and description are updated.
+In order to add a key-value pair at the end of the dictionary, irrespectively 
+whether it is new or old, use the `push!` or `merge` functions.
+
 ### Examples
 
 ```julia
@@ -84,6 +94,8 @@ function ODDict{K, V}(pairs::Pair{K, V}...) where {K, V}
   return ODDict(keys, values, descriptions)
 end
 
+ODDict(pairs::Pair{K, V}...) where {K, V} = ODDict{K, V}(pairs...)
+
 function ODDict{K, V}(pairs::Pair{K, Tuple{V, String}}...) where {K, V}
   keys = K[]
   values = V[]
@@ -95,6 +107,8 @@ function ODDict{K, V}(pairs::Pair{K, Tuple{V, String}}...) where {K, V}
   end
   return ODDict(keys, values, descriptions)
 end
+
+ODDict(pairs::Pair{K, Tuple{V, String}}...) where {K, V} = ODDict{K, V}(pairs...)
 
 function Base.getindex(dict::ODDict{K, V}, key::K) where {K, V}
   index = findfirst(isequal(key), dict.keys)
@@ -172,6 +186,26 @@ function Base.delete!(dict::ODDict{K, V}, key::K) where {K, V}
   deleteat!(dict.keys, index)
   deleteat!(dict.values, index)
   deleteat!(dict.descriptions, index)
+end
+
+function Base.delete!(dict::ODDict{K, V}, keys::K...) where {K, V}
+  for key in keys
+    delete!(dict, key)
+  end
+end
+
+function Base.empty!(dict::ODDict)
+  empty!(dict.keys)
+  empty!(dict.values)
+  empty!(dict.descriptions)
+end
+
+function (dict::ODDict)(key)
+  return getdescription(dict, key)
+end
+
+function (dict::ODDict)(key, description)
+  setdescription!(dict, description, key)
 end
 
 """

@@ -89,7 +89,7 @@ function dfhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
-  return OutDict("HF"=>(EHF, "closed-shell HF energy"))
+  return OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
 end
 
 """
@@ -171,7 +171,7 @@ function dfuhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
-  return OutDict("UHF"=>(EHF,"UHF energy"), "HF"=>(EHF,"UHF energy"))
+  return OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
 end
 
 end #module
