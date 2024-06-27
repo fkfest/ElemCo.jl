@@ -132,7 +132,7 @@ function spin_project_amplitudes(EC::ECInfo, with_singles=true)
     T1a = load2idx(EC, "T_vo")
     T1b = load2idx(EC, "T_VO")
   else
-    T1a = T1b = []
+    T1a = T1b = zeros(0, 0)
   end
   T2a = load4idx(EC, "T_vvoo")
   T2b = load4idx(EC, "T_VVOO")

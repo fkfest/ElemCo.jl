@@ -228,11 +228,11 @@ function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=
                         mname*"-O"=>(En["EO"], "open-shell component to the energy")) 
     methodroot = method_name(ECMethod(mname), root=true)
     # calc SCS energy (if available)
-    if hasfield(ECInfos.CcOptions, Symbol(lowercase(methodroot)*"_ssfac"))
+    if has_spinscalingfactor(methodroot*"_ssfac")
       # get SCS factors (e.g., mp2_ssfac, ccsd_ssfac, dcsd_ssfac)
-      ssfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ssfac"))
-      osfac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_osfac"))
-      ofac = getfield(EC.options.cc, Symbol(lowercase(methodroot)*"_ofac"))
+      ssfac = get_spinscalingfactor(EC, methodroot*"_ssfac")
+      osfac = get_spinscalingfactor(EC, methodroot*"_osfac")
+      ofac = get_spinscalingfactor(EC, methodroot*"_ofac")
       ΔE = En["E"] - En["ESS"] - En["EOS"]
       enescs = energies["HF"] + ΔE + En["ESS"]*ssfac + En["EOS"]*osfac + En["EO"]*ofac
       if print
@@ -248,6 +248,9 @@ function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=
                       "E"=>(enetot, "$mname total energy"))
   return energies_out
 end
+
+has_spinscalingfactor(name) = hasfield(ECInfos.CcOptions, Symbol(lowercase(name))) 
+get_spinscalingfactor(EC::ECInfo, name) = getfield(EC.options.cc, Symbol(lowercase(name)))::Float64
 
 """
     eval_mp2_energy(EC::ECInfo, energies::OutDict, closed_shell, restricted)
