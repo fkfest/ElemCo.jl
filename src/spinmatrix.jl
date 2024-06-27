@@ -23,8 +23,8 @@ mutable struct SpinMatrix{T<:Number}
   end
 end
 
-FSpinMatrix = SpinMatrix{Float64}
-CSpinMatrix = SpinMatrix{ComplexF64}
+const FSpinMatrix = SpinMatrix{Float64}
+const CSpinMatrix = SpinMatrix{ComplexF64}
 
 
 function Base.length(mat::SpinMatrix) 

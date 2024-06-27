@@ -19,8 +19,6 @@ export isalphaspin, space4spin, spin4space, flipspin
 
 include("options.jl")
 
-RangeOrVector = Union{UnitRange{Int},Vector{Int}}
-
 """
     ECInfo
 
@@ -78,7 +76,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
-  space::Dict{Char,RangeOrVector} = Dict{Char,RangeOrVector}()
+  space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}()
 end
 
 """
@@ -152,7 +150,7 @@ function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
   SP['d'] = intersect(SP['o'], SP['O'])
   SP['s'] = setdiff(SP['o'], SP['d'])
   SP['S'] = setdiff(SP['O'], SP['d'])
-  SP[':'] = SP['m'] = SP['M'] = 1:norb
+  SP[':'] = SP['m'] = SP['M'] = [1:norb;]
   return
 end
 
