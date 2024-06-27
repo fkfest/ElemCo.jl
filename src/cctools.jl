@@ -303,6 +303,15 @@ function update_triples!(EC::ECInfo, T3a, T3b, T3aab, T3abb, R3a, R3b, R3aab, R3
 end
 
 """
+    update_triples!(EC::ECInfo, T3, R3)
+
+  Update triples amplitudes in `T3`, with `R3`.
+"""
+function update_triples!(EC::ECInfo, T3, R3)
+  T3 .+= update_triples(EC, R3)
+end
+
+"""
     update_triples(EC::ECInfo, R3; spincase::Symbol=:α, antisymmetrize=false, use_shift=true)
 
   Calculate update for triples amplitudes for a given `spincase`∈{`:α`,`:β`,`:ααβ`,`:αββ`}.
@@ -475,6 +484,18 @@ function calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
     NormT3 += 0.125*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
     NormT3 += 0.25*(T3abb[a,b,c,i,j,k]*T3abb[a,b,c,i,j,k])
     NormT3 += 0.25*(T3aab[a,b,c,i,j,k]*T3aab[a,b,c,i,j,k])
+  end
+  return NormT3
+end
+
+"""
+    calc_triples_norm(T3)
+
+  Calculate squared norm of triples amplitudes.
+"""
+function calc_triples_norm(T3)
+  @tensoropt begin
+    NormT3 = 0.125*(T3[a,b,c,i,j,k]*T3[a,b,c,i,j,k])
   end
   return NormT3
 end

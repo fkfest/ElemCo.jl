@@ -14,12 +14,15 @@
 
 ### Changed
 
+* Save the memory using in Hessian matrix calculation in dfmcscf function.
 * `dfdump` stores the MO integrals internally in mmaped files.
 * The header of the `FDump` is now stored in a type-stable structure `FDumpHeader`.
 
 ### Added
 
 * Export of molden files (`@export_molden`). At the moment the orbital energies and occupations are not exported.
+* Add dfmcscf part in documentation
+* CCSDT and DC-CCSDT closed-shell implementations generated with Quantwo.
 * `QMTensors.SpinMatrix` struct for one-electron matrices (e.g., MO coefficients)
 * An ordered descriptive dictionary for energy outputs (`ODDict`) has been implemented. Each key-value entry can have a description.
 
