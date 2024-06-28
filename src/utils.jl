@@ -6,6 +6,7 @@ using ..ElemCo.AbstractEC
 using ..ElemCo.DescDict
 using ..ElemCo.Outputs
 
+export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
 export substr, reshape_buf, create_buf
@@ -58,6 +59,13 @@ end
   An ordered descriptive dictionary that maps keys of type `String` to values of type `Float64`.
 """
 const OutDict = ODDict{String, Float64}
+
+for N in 1:6
+  NOTHINGN = Symbol("NOTHING$(N)idx")
+  @eval begin
+    const $NOTHINGN = Array{Float64,$N}(undef, ntuple(i->0, $N))
+  end
+end
 
 """
     last_energy(energies::OutDict)

@@ -88,7 +88,7 @@ function mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
       end
       append!(dims, len)
     else
-      @assert N == ndim "Inconsistency in reading dimensions of data!"
+      @assert N == ndim "Inconsistency in reading dimensions of data! Expected $N, got $ndim."
       for idim in 1:ndim
         append!(dims, read(io, Int))
       end
@@ -200,7 +200,30 @@ function miommap(fname::String)
   for idim in 1:ndim
     append!(dims, read(io, Int))
   end
-  return io, mmap(io, Array{T,ndim}, Tuple(dims))
+  return io, mmap(io, Array{T,ndim}, dims)
 end
+
+function miommap(fname::String, ::Val{N}, T::Type=Float64) where {N}
+  io = open(fname)
+  # type of numbers
+  itype = read(io, Int)
+  if itype > length(Types)
+    error("Inconsistency in reading type of data!")
+  end
+  @assert T == Types[itype] "Inconsistency in reading type of data!"
+  # number of arrays in the file
+  narray = read(io, Int)
+  if narray != 1
+    error("miommap can map only single arrays!")
+  end
+  ndim = read(io, Int)
+  dims = Int[]
+  @assert N == ndim "Inconsistency in reading dimensions of data! Expected $N, got $ndim."
+  for idim in 1:ndim
+    append!(dims, read(io, Int))
+  end
+  return io, mmap(io, Array{T,N}, Tuple(dims)::NTuple{N,Int})
+end
+
 
 end #module

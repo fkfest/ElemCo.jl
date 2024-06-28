@@ -12,14 +12,14 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
   nocc = n_occ_orbs(EC)
   norb = n_orbs(EC)
   
-  T1 = load(EC, "T_vo")
-  T2 = load(EC, "T_vvoo")
+  T1 = load2idx(EC, "T_vo")
+  T2 = load4idx(EC, "T_vvoo")
   # Calculate 1RDM intermediates
   D1, dD1 = calc_1RDM(EC, U1, U2, T1, T2)
   t1 = print_time(EC, t1, "calculate 1RDM",2)
 
-  fock = load(EC,"f_mm")
-  dfock = load(EC,"df_mm")
+  fock = load2idx(EC,"f_mm")
+  dfock = load2idx(EC,"df_mm")
   fov = fock[SP['o'],SP['v']]
   dfov = dfock[SP['o'],SP['v']]
   if length(U1) > 0
@@ -30,7 +30,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
 
   oovv = ints2(EC,"oovv")
   @tensoropt R2[e,f,m,n] := 2.0 * oovv[m,n,e,f] - oovv[n,m,e,f]
-  int2 = load(EC, "d_oooo")
+  int2 = load4idx(EC, "d_oooo")
   if !dc
     @tensoropt int2[m,n,i,j] += oovv[m,n,c,d] * T2[c,d,i,j]
   end
@@ -102,7 +102,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
   # ``x_a^e = \tilde T^{kl}_{ac} v_{kl}^{ec}``
   @tensoropt xvv[a,e] := tT2[a,c,k,l] * oovv[k,l,e,c]
   t1 = print_time(EC, t1, "x_a^e = \\tilde T^{kl}_{ac} v_{kl}^{ec}",2)
-  int2 = load(EC, "d_voov")
+  int2 = load4idx(EC, "d_voov")
   # ``tR^{ef}_{mn} += Λ_{in}^{af} (\hat v_{am}^{ie} + v_{km}^{ce} \tilde T^{ik}_{ac})``
   @tensoropt int2[a,m,i,e] += oovv[k,m,c,e] * tT2[a,c,i,k]
   @tensoropt tR2[e,f,m,n] += U2[a,f,i,n] * int2[a,m,i,e] 
@@ -112,13 +112,13 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
     @tensoropt tR2[e,f,m,n] += 0.5 * U1[e,m] * dfov[n,f]
     t1 = print_time(EC, t1, "tR^{ef}_{mn} += 0.5 U_m^e \\hat f_n^f",2)
   end
-  int2 = load(EC, "d_vovv")
+  int2 = load4idx(EC, "d_vovv")
   if length(U1) > 0
     # ``tR^{ef}_{mn} += 0.5 Λ_n^a \hat v_{am}^{fe}``
     @tensoropt tR2[e,f,m,n] += 0.5 * U1[a,n] * int2[a,m,f,e]
     t1 = print_time(EC, t1, "tR^{ef}_{mn} += 0.5 U_n^a \\hat v_{am}^{fe}",2)
   end
-  oovo = load(EC, "d_oovo")
+  oovo = load4idx(EC, "d_oovo")
   if length(U1) > 0
     # ``tR^{ef}_{mn} -= 0.5 Λ_i^f \hat v_{mn}^{ei}``
     @tensoropt tR2[e,f,m,n] -= 0.5 * U1[f,i] * oovo[m,n,e,i]
@@ -184,7 +184,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
   if length(U1) > 0
     # ``R^e_m -= 2 Λ_{ij}^{eb} (v_{mb}^{cd} T^{ij}_{cd})`` 
     # ``(v_{mb}^{cd} T^{ij}_{cd})`` has to be precalculated
-    vT_ovoo = load(EC, "vT_ovoo")
+    vT_ovoo = load4idx(EC, "vT_ovoo")
     @tensoropt R1[e,m] -= 2.0 * U2[e,b,i,j] * vT_ovoo[m,b,i,j]
     vT_ovoo = nothing
     t1 = print_time(EC, t1, "R^e_m -= 2 U_{ij}^{eb} (v_{mb}^{cd} T^{ij}_{cd})",2)
@@ -197,7 +197,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
     pR2[e,f,m,n] -= U2[e,f,i,n] * (dfock[SP['o'],SP['o']][m,i] + fac * xoo[m,i])
   end
   t1 = print_time(EC, t1, "pR^{ef}_{mn} += U_{in}^{af} (\\hat x_a^e δ_m^i - \\hat x_m^i δ_a^e)",2)
-  int2 = load(EC, "d_vovo")
+  int2 = load4idx(EC, "d_vovo")
   # ``pR^{ef}_{mn} -= Λ_{in}^{af} \hat v_{am}^{ei}``
   @tensoropt pR2[e,f,m,n] -= U2[a,f,i,n] * int2[a,m,e,i]
   t1 = print_time(EC, t1, "pR^{ef}_{mn} -= U_{in}^{af} \\hat v_{am}^{ei}",2)
@@ -215,7 +215,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
     @tensoropt R1[e,m] += dD1[p,q] * (2.0 * int2[:,:,:,SP['v']][q,m,p,e] - int2[:,:,SP['v'],:][q,m,e,p])
     t1 = print_time(EC, t1, "R^e_m += \\hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})",2)
     # ``R^e_m -= 2 Λ_{ij}^{eb} \hat v_{mb}^{ij}``
-    int2 = load(EC, "d_vooo")
+    int2 = load4idx(EC, "d_vooo")
     @tensoropt R1[e,m] -= 2.0 * U2[e,b,i,j] * int2[b,m,j,i]
     t1 = print_time(EC, t1, "R^e_m -= 2 U_{ij}^{eb} \\hat v_{mb}^{ij}",2)
     @tensoropt begin
@@ -271,13 +271,13 @@ Return R1a, R1b, R2a, R2b, R2ab
 function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false)
   t1 = time_ns()
  
-  T2ab = load(EC, "T_vVoO")
+  T2ab = load4idx(EC, "T_vVoO")
   # Calculate 1RDM intermediates
-  T1 = load(EC, "T_vo")
-  T2 = load(EC, "T_vvoo")
+  T1 = load2idx(EC, "T_vo")
+  T2 = load4idx(EC, "T_vvoo")
   D1α, dD1α = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1, T2, T2ab, :α)
-  T1 = load(EC, "T_VO")
-  T2 = load(EC, "T_VVOO")
+  T1 = load2idx(EC, "T_VO")
+  T2 = load4idx(EC, "T_VVOO")
   D1β, dD1β = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1, T2, T2ab, :β)
   T1 = T2 = T2ab = nothing
   t1 = print_time(EC, t1, "calculate 1RDM",2)
@@ -320,8 +320,8 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
 
   norb = n_orbs(EC)
 
-  fock = load(EC,"f_"*m4s*m4s)
-  dfock = load(EC,"df_"*m4s*m4s)
+  fock = load2idx(EC,"f_"*m4s*m4s)
+  dfock = load2idx(EC,"df_"*m4s*m4s)
   fov = fock[SP[o4s],SP[v4s]]
   dfov = dfock[SP[o4s],SP[v4s]] 
   if length(U1) > 0
@@ -345,11 +345,11 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
     R1 = U1
   end
 
-  T1 = load(EC, "T_"*v4s*o4s)
-  T2 = load(EC, "T_"*v4s*v4s*o4s*o4s)
+  T1 = load2idx(EC, "T_"*v4s*o4s)
+  T2 = load4idx(EC, "T_"*v4s*v4s*o4s*o4s)
   oovv = ints2(EC,o4s*o4s*v4s*v4s)
   @tensoropt R2[e,f,m,n] := oovv[m,n,e,f] - oovv[n,m,e,f]
-  int2 = load(EC, "d_"*o4s*o4s*o4s*o4s)
+  int2 = load4idx(EC, "d_"*o4s*o4s*o4s*o4s)
   if !dc
     @tensoropt int2[m,n,i,j] += 0.5 * oovv[m,n,c,d] * T2[c,d,i,j]
   end
@@ -404,14 +404,14 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
     @tensoropt R2[e,f,m,n] += D2[m,n,k,l] * oovv[k,l,e,f]
     t1 = print_time(EC, t1, "R^{ef}_{mn} += D_{mn}^{kl} v_{kl}^{ef}",2)
   end
-  d_oovo = load(EC, "d_"*o4s*o4s*v4s*o4s)
+  d_oovo = load4idx(EC, "d_"*o4s*o4s*v4s*o4s)
   if length(U1) > 0
     # ``R_e^m += D_{mj}^{kl} \hat v_{kl}^{ej}``
     @tensoropt R1[e,m] += D2[m,j,k,l] * d_oovo[k,l,e,j]
     t1 = print_time(EC, t1, "R_e^m += D_{mj}^{kl} \\hat v_{kl}^{ej}",2)
   end
   # ``D_{ib}^{aj} = Λ_{ik}^{ac} T^{jk}_{bc} + Λ_{iK}^{aC} T^{jK}_{bC}``
-  T2ab = load(EC, "T_vVoO")
+  T2ab = load4idx(EC, "T_vVoO")
   @tensoropt D2[a,b,i,j] := U2[a,c,i,k] * T2[b,c,j,k]
   if isα
     @tensoropt D2[a,b,i,j] += U2ab[a,C,i,K] * T2ab[b,C,j,K]
@@ -425,7 +425,7 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
     @tensoropt R1[e,m] += D2[e,d,i,l] * (d_oovo[m,l,d,i] - d_oovo[l,m,d,i])
     t1 = print_time(EC, t1, "R_e^m += D_{id}^{el} (\\hat v_{ml}^{di}-\\hat v_{lm}^{di})",2)
   end
-  int2 = load(EC, "d_"*v4s*o4s*v4s*v4s)
+  int2 = load4idx(EC, "d_"*v4s*o4s*v4s*v4s)
   if length(R1) > 0
     # ``R_e^m += D_{md}^{al} (\hat v_{al}^{ed}-\hat v_{al}^{de})``
     @tensoropt R1[e,m] += D2[a,d,m,l] * (int2[a,l,e,d] - int2[a,l,d,e])
@@ -450,8 +450,8 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   end
   fac = dc ? 0.5 : 1.0
   # ``aR^{ef}_{mn} += 0.5(\hat x_c^e Λ_{mn}^{cf} - \hat x_m^k Λ_{kn}^{ef})``
-  x_vv = load(EC, "vT_"*v4s*v4s)
-  x_oo = load(EC, "vT_"*o4s*o4s)
+  x_vv = load2idx(EC, "vT_"*v4s*v4s)
+  x_oo = load2idx(EC, "vT_"*o4s*o4s)
   dx_vv = dfock[SP[v4s],SP[v4s]] - fac * x_vv
   dx_oo = dfock[SP[o4s],SP[o4s]] + fac * x_oo
   @tensoropt begin 
@@ -477,12 +477,12 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   end
   t1 = print_time(EC, t1, "aR^{ef}_{mn} += f D_m^k v_{kn}^{ef} - f D_c^e v_{mn}^{cf}",2)
   # ``aR^{ef}_{mn} += Λ_{in}^{af} \bar y_{am}^{ie}``
-  vT_voov = load(EC, "vT_"*v4s*o4s*o4s*v4s)
+  vT_voov = load4idx(EC, "vT_"*v4s*o4s*o4s*v4s)
   @tensoropt aR2[e,f,m,n] += U2[a,f,i,n] * vT_voov[a,m,i,e]
   vT_voov = nothing
   t1 = print_time(EC, t1, "aR^{ef}_{mn} += U_{in}^{af} \\bar y_{am}^{ie}",2)
   # ``aR^{ef}_{mn} += Λ_{mJ}^{eB} \bar y_{Bn}^{Jf}``
-  vT_VoOv = load(EC, "vT_"*v4os*o4s*o4os*v4s) 
+  vT_VoOv = load4idx(EC, "vT_"*v4os*o4s*o4os*v4s) 
   if isα
     @tensoropt aR2[e,f,m,n] += U2ab[e,B,m,J] * vT_VoOv[B,n,J,f]
   else
@@ -496,16 +496,16 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   t1 = print_time(EC, t1, "R^{ef}_{mn} += aR^{ef}_{mn} + aR^{fe}_{nm} - aR^{ef}_{nm} - aR^{fe}_{mn}",2)
   if length(R1) > 0
     # ``R^e_m -= Λ_{ij}^{eb} \hat v_{bm}^{ji}``
-    int2 = load(EC, "d_"*v4s*o4s*o4s*o4s)
+    int2 = load4idx(EC, "d_"*v4s*o4s*o4s*o4s)
     @tensoropt R1[e,m] -= U2[b,e,j,i] * int2[b,m,j,i]
     int2 = nothing
     t1 = print_time(EC, t1, "R^e_m -= U_{ij}^{eb} \\hat v_{bm}^{ji}",2)
     # ``R^e_m -= 0.5 Λ_{ij}^{eb} (\hat v_{mb}^{cd} T^{ij}_{cd})``
-    vT_ovoo = load(EC, "vT_"*o4s*v4s*o4s*o4s)
+    vT_ovoo = load4idx(EC, "vT_"*o4s*v4s*o4s*o4s)
     @tensoropt R1[e,m] -= 0.5 * U2[e,b,i,j] * vT_ovoo[m,b,i,j]
     t1 = print_time(EC, t1, "R^e_m -= 0.5 U_{ij}^{eb} (\\hat v_{mb}^{cd} T^{ij}_{cd})",2)
     # ``R^e_m -= Λ_{iJ}^{eB} (\hat v_{mB}^{cD} T^{iJ}_{cD})``
-    vT_ovoo = load(EC, "vT_"*o4s*v4os*o4s*o4os)
+    vT_ovoo = load4idx(EC, "vT_"*o4s*v4os*o4s*o4os)
     if isα
       @tensoropt R1[e,m] -= U2ab[e,B,i,J] * vT_ovoo[m,B,i,J]
     else
@@ -539,14 +539,14 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   noccb = n_occb_orbs(EC)
   norb = n_orbs(EC)
 
-  dfocka = load(EC,"df_mm")
-  dfockb = load(EC,"df_MM")
+  dfocka = load2idx(EC,"df_mm")
+  dfockb = load2idx(EC,"df_MM")
   dfaov = dfocka[SP['o'],SP['v']] 
   dfbov = dfockb[SP['O'],SP['V']] 
 
   if length(U1a) > 0
     # ``R^e_m -= Λ_{iJ}^{eB} \hat v_{mB}^{iJ}``
-    int2 = load(EC, "d_oVoO")
+    int2 = load4idx(EC, "d_oVoO")
     @tensoropt R1a[e,m] := - U2ab[e,B,i,J] * int2[m,B,i,J]
     int2 = nothing
   else
@@ -554,15 +554,15 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   end
   if length(U1b) > 0
     # ``R^E_M -= Λ_{jI}^{bE} \hat v_{bM}^{jI}``
-    int2 = load(EC, "d_vOoO")
+    int2 = load4idx(EC, "d_vOoO")
     @tensoropt R1b[E,M] := - U2ab[b,E,j,I] * int2[b,M,j,I]
     int2 = nothing
   else
     R1b = U1b
   end
 
-  T1a = load(EC, "T_vo")
-  T1b = load(EC, "T_VO")
+  T1a = load2idx(EC, "T_vo")
+  T1b = load2idx(EC, "T_VO")
   # the 4-external part
   if EC.options.cc.use_kext
     # the `kext` part
@@ -615,8 +615,8 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
 
   oOvV = ints2(EC,"oOvV")
   @tensoropt R2[e,F,m,N] += oOvV[m,N,e,F]
-  T2ab = load(EC, "T_vVoO")
-  int2 = load(EC, "d_oOoO")
+  T2ab = load4idx(EC, "T_vVoO")
+  int2 = load4idx(EC, "d_oOoO")
   if !dc
     @tensoropt int2[m,N,i,J] += oOvV[m,N,c,D] * T2ab[c,D,i,J]
   end
@@ -632,13 +632,13 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     @tensoropt R2[e,F,m,N] += D2[m,N,k,L] * oOvV[k,L,e,F]
     t1 = print_time(EC, t1, "R^{eF}_{mN} += D_{mN}^{kL} v_{kL}^{eF}",2)
   end
-  d_oOvO = load(EC, "d_oOvO")
+  d_oOvO = load4idx(EC, "d_oOvO")
   if length(R1a) > 0
     # ``R^e_m += D_{mJ}^{kL} \hat v_{kL}^{eJ}``
     @tensoropt R1a[e,m] += D2[m,J,k,L] * d_oOvO[k,L,e,J]
     t1 = print_time(EC, t1, "R^e_m += D_{mJ}^{kL} \\hat v_{kL}^{eJ}",2)
   end
-  d_oOoV = load(EC, "d_oOoV")
+  d_oOoV = load4idx(EC, "d_oOoV")
   if length(R1b) > 0
     # ``R^E_M += D_{jM}^{lK} \hat v_{lK}^{jE}``
     @tensoropt R1b[E,M] += D2[j,M,l,K] * d_oOoV[l,K,j,E]
@@ -647,7 +647,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   if length(R1a) > 0
     # ``\bar D_{iB}^{aJ} = Λ_{ik}^{ac} T^{kJ}_{cB} + Λ_{iK}^{aC} T^{JK}_{BC}``
     @tensoropt D2[a,B,i,J] := U2a[a,c,i,k] * T2ab[c,B,k,J]
-    T2b = load(EC, "T_VVOO")
+    T2b = load4idx(EC, "T_VVOO")
     @tensoropt D2[a,B,i,J] += U2ab[a,C,i,K] * T2b[C,B,K,J]
     t1 = print_time(EC, t1, "\\bar D_{iB}^{aJ} = U_{ik}^{ac} T^{kJ}_{cB} + U_{iK}^{aC} T^{JK}_{BC}",2)
     T2b = nothing
@@ -655,7 +655,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     @tensoropt R1a[e,m] -= D2[e,D,i,L] * d_oOoV[m,L,i,D]
     t1 = print_time(EC, t1, "R_e^m -= \\bar D_{iD}^{eL} \\hat v_{mL}^{iD}",2)
   end
-  d_vOvV = load(EC, "d_vOvV")
+  d_vOvV = load4idx(EC, "d_vOvV")
   if length(R1a) > 0
     # ``R^e_m += \bar D_{mD}^{aL} \hat v_{aL}^{eD}``
     @tensoropt R1a[e,m] += D2[a,D,m,L] * d_vOvV[a,L,e,D]
@@ -687,7 +687,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   if length(R1b) > 0
     # ``\bar D_{Ib}^{Aj} = Λ_{IK}^{AC} T^{jK}_{bC} + Λ_{kI}^{cA} T^{jk}_{bc}``
     @tensoropt D2[A,b,I,j] := U2b[A,C,I,K] * T2ab[b,C,j,K]
-    T2a = load(EC, "T_vvoo")
+    T2a = load4idx(EC, "T_vvoo")
     @tensoropt D2[A,b,I,j] += U2ab[c,A,k,I] * T2a[c,b,k,j]
     t1 = print_time(EC, t1, "\\bar D_{Ib}^{Aj} = U_{IK}^{AC} T^{jK}_{bC} + U_{kI}^{cA} T^{jk}_{bc}",2)
     T2a = nothing
@@ -695,7 +695,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     @tensoropt R1b[E,M] -= D2[E,d,I,l] * d_oOvO[l,M,d,I]
     t1 = print_time(EC, t1, "R_E^M -= \\bar D_{Id}^{El} \\hat v_{lM}^{dI}",2)
   end
-  d_oVvV = load(EC, "d_oVvV")
+  d_oVvV = load4idx(EC, "d_oVvV")
   if length(R1b) > 0
     # ``R^E_M += \bar D_{Md}^{Al} \hat v_{lA}^{dE}``
     @tensoropt R1b[E,M] += D2[A,d,M,l] * d_oVvV[l,A,d,E]
@@ -744,10 +744,10 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   d_oOvO = nothing
   fac = dc ? 0.5 : 1.0
   # ``R^{eF}_{mN} += \hat x_c^e Λ_{mN}^{cF} - \hat x_m^k Λ_{kN}^{eF} + ...``
-  x_vv = load(EC, "vT_vv")
-  x_VV = load(EC, "vT_VV")
-  x_oo = load(EC, "vT_oo")
-  x_OO = load(EC, "vT_OO")
+  x_vv = load2idx(EC, "vT_vv")
+  x_VV = load2idx(EC, "vT_VV")
+  x_oo = load2idx(EC, "vT_oo")
+  x_OO = load2idx(EC, "vT_OO")
   dx_vv = dfocka[SP['v'],SP['v']] - fac * x_vv
   dx_VV = dfockb[SP['V'],SP['V']] - fac * x_VV
   dx_oo = dfocka[SP['o'],SP['o']] + fac * x_oo
@@ -768,35 +768,35 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   end
   t1 = print_time(EC, t1, "R^{eF}_{mN} += f D_m^k v_{kN}^{eF} - f D_c^e v_{mN}^{cF} + ...",2)
   # ``R^{eF}_{mN} += Λ_{iN}^{aF} \bar y_{am}^{ie}``
-  vT_voov = load(EC, "vT_voov")
+  vT_voov = load4idx(EC, "vT_voov")
   @tensoropt R2[e,F,m,N] += U2ab[a,F,i,N] * vT_voov[a,m,i,e]
   vT_voov = nothing
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{iN}^{aF} \\bar y_{am}^{ie}",2)
   # ``R^{eF}_{mN} += Λ_{mJ}^{eB} \bar y_{BN}^{JF}``
-  vT_VOOV = load(EC, "vT_VOOV")
+  vT_VOOV = load4idx(EC, "vT_VOOV")
   @tensoropt R2[e,F,m,N] += U2ab[e,B,m,J] * vT_VOOV[B,N,J,F]
   vT_VOOV = nothing
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{mJ}^{eB} \\bar y_{BN}^{JF}",2)
   # ``R^{eF}_{mN} += Λ_{im}^{ae} \bar y_{aN}^{iF}``
-  vT_vOoV = load(EC, "vT_vOoV")
+  vT_vOoV = load4idx(EC, "vT_vOoV")
   @tensoropt R2[e,F,m,N] += U2a[a,e,i,m] * vT_vOoV[a,N,i,F]
   vT_vOoV = nothing
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{im}^{ae} \\bar y_{aN}^{iF}",2)
   # ``R^{eF}_{mN} += Λ_{IN}^{AF} \bar y_{Am}^{Ie}``
-  vT_VoOv = load(EC, "vT_VoOv")
+  vT_VoOv = load4idx(EC, "vT_VoOv")
   @tensoropt R2[e,F,m,N] += U2b[A,F,I,N] * vT_VoOv[A,m,I,e]
   vT_VoOv = nothing
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{IN}^{AF} \\bar y_{Am}^{Ie}",2)
   # ``R^{eF}_{mN} -= Λ_{mJ}^{aF} (\hat v_{aN}^{eJ} \red{- v_{kN}^{eD} T^{kJ}_{aD}})``
-  int2 = load(EC, "d_vOvO")
+  int2 = load4idx(EC, "d_vOvO")
   if !dc
-    T2ab = load(EC, "T_vVoO")
+    T2ab = load4idx(EC, "T_vVoO")
     @tensoropt int2[a,N,e,J] -= oOvV[k,N,e,D] * T2ab[a,D,k,J]
   end
   @tensoropt R2[e,F,m,N] -= U2ab[a,F,m,J] * int2[a,N,e,J]
   t1 = print_time(EC, t1, "R^{eF}_{mN} -= U_{mJ}^{aF} (\\hat v_{aN}^{eJ} + v_{kN}^{eD} T^{kJ}_{aD})",2)
   # ``R^{eF}_{mN} -= Λ_{iN}^{eB} (\hat v_{mB}^{iF} \red{- v_{mL}^{cF} T^{iL}_{cB}})``
-  int2 = load(EC, "d_oVoV")
+  int2 = load4idx(EC, "d_oVoV")
   if !dc
     @tensoropt int2[m,B,i,F] -= oOvV[m,L,c,F] * T2ab[c,B,i,L]
     T2ab = nothing
@@ -972,7 +972,7 @@ end
   and store as `vT_ovoo[m,b,i,j]`.
 """
 function calc_3ext_times_T2(EC::ECInfo, T2::AbstractArray, o1::Char='o', v1::Char='v', o2::Char='o', v2::Char='v')
-  int2 = load(EC, "d_"*v2*o1*v2*v1)
+  int2 = load4idx(EC, "d_"*v2*o1*v2*v1)
   @tensoropt vT_ovoo[m,b,i,j] := int2[b,m,d,c] * T2[d,c,j,i]
   save!(EC, "vT_"*o1*v2*o1*o2, vT_ovoo)
 end
@@ -989,7 +989,7 @@ end
 function calc_3ext_times_T2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, T2ab::AbstractArray)
   calc_3ext_times_T2(EC, T2a, 'o', 'v', 'o', 'v')
   calc_3ext_times_T2(EC, T2b, 'O', 'V', 'O', 'V')
-  int2 = load(EC, "d_oVvV")
+  int2 = load4idx(EC, "d_oVvV")
   @tensoropt vT_oVoO[m,B,i,J] := int2[m,B,c,D] * T2ab[c,D,i,J]
   save!(EC, "vT_oVoO", vT_oVoO)
   int2 = vT_oVoO = nothing
@@ -1039,9 +1039,9 @@ end
 """
 function calc_rings_vT2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, T2ab::AbstractArray; dc=false)
   # αα and βα 
-  vT_voov = load(EC, "d_voov")
-  @tensoropt vT_voov[a,m,i,e] -= load(EC, "d_vovo")[a,m,e,i]
-  @tensoropt vT_VoOv[B,n,J,f] := load(EC, "d_oVvO")[n,B,f,J]
+  vT_voov = load4idx(EC, "d_voov")
+  @tensoropt vT_voov[a,m,i,e] -= load4idx(EC, "d_vovo")[a,m,e,i]
+  @tensoropt vT_VoOv[B,n,J,f] := load4idx(EC, "d_oVvO")[n,B,f,J]
   # add x terms
   oovv = ints2(EC, "oovv")
   if dc
@@ -1054,9 +1054,9 @@ function calc_rings_vT2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, T2ab
   @tensoropt vT_VoOv[A,m,I,e] += T2ab[d,A,l,I] * int2[l,m,d,e]
 
   # ββ and αβ
-  vT_VOOV = load(EC, "d_VOOV")
-  @tensoropt vT_VOOV[A,M,I,E] -= load(EC, "d_VOVO")[A,M,E,I]
-  vT_vOoV = load(EC, "d_vOoV")
+  vT_VOOV = load4idx(EC, "d_VOOV")
+  @tensoropt vT_VOOV[A,M,I,E] -= load4idx(EC, "d_VOVO")[A,M,E,I]
+  vT_vOoV = load4idx(EC, "d_vOoV")
   # add x terms
   oovv = ints2(EC, "OOVV")
   if dc
@@ -1089,11 +1089,11 @@ end
   Return ``⟨Λ|Ψ⟩ = ⟨Λ_1|T_1⟩ + ⟨Λ_2|T_2+\\frac{1}{2}T_1 T_1⟩``.
 """
 function calc_correlation_norm(EC::ECInfo, U1, U2)
-  T2 = load(EC, "T_vvoo")
+  T2 = load4idx(EC, "T_vvoo")
   Norm = 0.0
   @tensoropt Norm += U2[a,b,i,j] * T2[a,b,i,j]
   if length(U1) > 0
-    T1 = load(EC, "T_vo")
+    T1 = load2idx(EC, "T_vo")
     if length(T1) > 0
       @tensoropt Norm += U2[a,b,i,j] * T1[a,i] * T1[b,j]
       @tensoropt Norm += U1[a,i] * T1[a,i]
@@ -1111,16 +1111,16 @@ end
   Return ``⟨Λ|Ψ⟩ = ⟨Λ_1|T_1⟩ + ⟨Λ_2|T_2+\\frac{1}{2}T_1 T_1⟩``.
 """
 function calc_correlation_norm(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab)
-  T2 = load(EC, "T_vvoo")
+  T2 = load4idx(EC, "T_vvoo")
   Norm = 0.0
   @tensoropt Norm += 0.25*(U2a[a,b,i,j] * T2[a,b,i,j])
-  T2 = load(EC, "T_VVOO")
+  T2 = load4idx(EC, "T_VVOO")
   @tensoropt Norm += 0.25*(U2b[a,b,i,j] * T2[a,b,i,j])
-  T2 = load(EC, "T_vVoO")
+  T2 = load4idx(EC, "T_vVoO")
   @tensoropt Norm += U2ab[a,b,i,j] * T2[a,b,i,j]
   if length(U1a) > 0 || length(U1b) > 0
-    T1a = load(EC, "T_vo")
-    T1b = load(EC, "T_VO")
+    T1a = load2idx(EC, "T_vo")
+    T1b = load2idx(EC, "T_VO")
     if length(T1a) > 0
       @tensoropt Norm += 0.5*(U2a[a,b,i,j] * T1a[a,i] * T1a[b,j])
       @tensoropt Norm += U1a[a,i] * T1a[a,i]
@@ -1144,10 +1144,23 @@ end
   Exact specification of the method is given by `method`.
 """
 function calc_lm_cc(EC::ECInfo, method::ECMethod)
-  dc = (method.theory == "DC" || last(method.theory,2) == "DC")
   print_info(method_name(method)*" Lagrange multipliers")
   LMs, exc_ranges = starting_amplitudes(EC, method)
   singles, doubles, triples = exc_ranges[1:3]
+  
+  NormLM1, NormLM2 = lm_cc_iterations!(LMs, singles, doubles, triples, EC, method)
+
+  if method.exclevel[1] == :full
+    try2save_singles!(EC, LMs[singles]...; type="LM")
+  end
+  try2save_doubles!(EC, LMs[doubles]...; type="LM")
+  println()
+  output_norms(["LM1"=>sqrt(NormLM1), "LM2"=>sqrt(NormLM2)])
+  println()
+end
+
+function lm_cc_iterations!(LMs, singles, doubles, triples, EC::ECInfo, method::ECMethod)
+  dc = (method.theory == "DC" || last(method.theory,2) == "DC")
   if is_unrestricted(method)
     @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
   else
@@ -1160,21 +1173,21 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
   calc_vT2_intermediates(EC, LMs[doubles]...; dc)
 
   diis = Diis(EC)
-  transform_amplitudes2lagrange_multipliers!(LMs, exc_ranges)
+  transform_amplitudes2lagrange_multipliers!(LMs, (singles,doubles,triples))
 
   do_sing = (method.exclevel[1] == :full)
-  if !do_sing
-    if is_unrestricted(method)
-      LMs[singles[1]] = Float64[]
-      LMs[singles[2]] = Float64[]
-    else
-      LMs[singles[1]] = Float64[]
-    end
-  end
+  # if !do_sing
+  #   if is_unrestricted(method)
+  #     LMs[singles[1]] = Float64[]
+  #     LMs[singles[2]] = Float64[]
+  #   else
+  #     LMs[singles[1]] = Float64[]
+  #   end
+  # end
 
   NormR1 = 0.0
-  NormLM1 = 0.0
-  NormLM2 = 0.0
+  NormLM1::Float64 = 0.0
+  NormLM2::Float64 = 0.0
   ΛTNorm = 0.0
   converged = false
   t0 = time_ns()
@@ -1208,11 +1221,5 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
   if !converged
     println("WARNING: CC-LM iterations did not converge!")
   end
-  if do_sing
-    try2save_singles!(EC, LMs[singles]...; type="LM")
-  end
-  try2save_doubles!(EC, LMs[doubles]...; type="LM")
-  println()
-  output_norms(["LM1"=>sqrt(NormLM1), "LM2"=>sqrt(NormLM2)])
-  println()
+  return NormLM1, NormLM2
 end

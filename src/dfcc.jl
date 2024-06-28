@@ -33,13 +33,13 @@ export calc_dressed_3idx, calc_svd_dc
 """
 function get_ssv_osvˣˣ(EC::ECInfo)
   if file_exists(EC, "ssd_^XX") 
-    return load(EC, "ssd_^XX"), load(EC, "osd_^XX")
+    return load2idx(EC, "ssd_^XX"), load2idx(EC, "osd_^XX")
   end
   if !file_exists(EC, "d_ovL") || !file_exists(EC, "C_voX")
     error("Files d_ovL or C_voX do not exist!")
   end
-  UvoX = load(EC, "C_voX")
-  ovLfile, ovL = mmap(EC, "d_ovL")
+  UvoX = load3idx(EC, "C_voX")
+  ovLfile, ovL = mmap3idx(EC, "d_ovL")
 
   nocc, nvirt, nL = size(ovL)
   LBlks = get_auxblks(nL)
@@ -68,8 +68,8 @@ end
 """
 function gen_vₓˣᴸ(EC::ECInfo)
   t1 = time_ns()
-  UvoX = load(EC, "C_voX")
-  mmLfile, mmL = mmap(EC, "mmL")
+  UvoX = load3idx(EC, "C_voX")
+  mmLfile, mmL = mmap3idx(EC, "mmL")
   SP = EC.space
   nL = size(mmL, 3)
   nX = size(UvoX, 3)
@@ -109,7 +109,7 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
     error("Wrong dimensionality of T2!")
   end
   if full_t2
-    ovL = load(EC, "d_ovL")
+    ovL = load3idx(EC, "d_ovL")
     @tensoropt begin
       int2[a,b,i,j] := R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L]
       ET2d = T2[a,b,i,j] * int2[a,b,i,j]
@@ -125,14 +125,14 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
       ET2OS = T2[X,Y] * (osvxx[X,Y] + R2[X,Y])
       ET2SS = T2[Y,X] * (ssvxx[X,Y] + R2[X,Y])
     end
-    UvoX = load(EC, "C_voX")
+    UvoX = load3idx(EC, "C_voX")
     @tensoropt ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
     UvoX = nothing
     ET2 = ET2SS + ET2OS
   end
   if length(T1) > 0
-    dfockc_ov = load(EC, "dfc_ov")
-    dfocke_ov = load(EC, "dfe_ov")
+    dfockc_ov = load2idx(EC, "dfc_ov")
+    dfocke_ov = load2idx(EC, "dfe_ov")
     @tensoropt begin
       ET1d = T1[a,i] * dfockc_ov[i,a] 
       ET1ex = T1[a,i] * dfocke_ov[i,a]
@@ -140,7 +140,7 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
     ET1SS = ET1d - ET1ex
     ET1OS = ET1d
     ET1 = ET1SS + ET1OS
-    fov = load(EC,"f_mm")[SP['o'],SP['v']] 
+    fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
     @tensoropt ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
     ET2 += ET1
     ET2SS += ET1SS
@@ -188,7 +188,7 @@ function calc_df_doubles_energy(EC::ECInfo, T2)
   if !file_exists(EC, "d_ovL")
     error("File d_ovL does not exist!")
   end
-  ovL = load(EC, "d_ovL")
+  ovL = load3idx(EC, "d_ovL")
   @tensoropt begin
     int2[a,b,i,j] := ovL[i,a,L] * ovL[j,b,L]
     ET2d = T2[a,b,i,j] * int2[a,b,i,j]
@@ -206,7 +206,7 @@ end
   Calculate dressed integrals for 3-index integrals from file `mmL`.
 """
 function calc_dressed_3idx(EC::ECInfo, T1)
-  mmLfile, mmL = mmap(EC, "mmL")
+  mmLfile, mmL = mmap3idx(EC, "mmL")
   # println(size(mmL))
   SP = EC.space
   nL = size(mmL, 3)
@@ -246,7 +246,7 @@ end
   Save non-dressed 3-index integrals from file `mmL` to dressed files.
 """
 function save_pseudodressed_3idx(EC::ECInfo)
-  mmLfile, mmL = mmap(EC, "mmL")
+  mmLfile, mmL = mmap3idx(EC, "mmL")
   # println(size(mmL))
   SP = EC.space
   nL = size(mmL, 3)
@@ -283,8 +283,8 @@ end
   are stored in files `dfc_ov` and `dfe_ov`.
 """
 function dress_df_fock(EC::ECInfo, T1)
-  dfock = load(EC, "f_mm")
-  mmLfile, mmL = mmap(EC, "mmL")
+  dfock = load2idx(EC, "f_mm")
+  mmLfile, mmL = mmap3idx(EC, "mmL")
   nL = size(mmL, 3)
   occ = EC.space['o']
   virt = EC.space['v']
@@ -323,7 +323,7 @@ end
   Save non-dressed DF fock matrix from file `f_mm` to dressed file `df_mm`.
 """
 function save_pseudo_dress_df_fock(EC::ECInfo)
-  dfock = load(EC, "f_mm")
+  dfock = load2idx(EC, "f_mm")
   dfc = zeros(size(dfock))
   occ = EC.space['o']
   virt = EC.space['v']
@@ -372,7 +372,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   SP = EC.space
   # first approximation for U^{iX}_a from 3-index integrals v_a^{iL} 
   # TODO: add shifted Laplace transform!
-  mmLfile, mmL = mmap(EC, "mmL")
+  mmLfile, mmL = mmap3idx(EC, "mmL")
   nL = size(mmL, 3)
   tol2 = (EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
   voL = mmL[SP['v'],SP['o'],:]
@@ -445,7 +445,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   SP = EC.space
-  mmLfile, mmL = mmap(EC, "mmL")
+  mmLfile, mmL = mmap3idx(EC, "mmL")
   nL = size(mmL, 3)
   voL = mmL[SP['v'],SP['o'],:]
   T2 = try2start_doubles(EC)
@@ -595,7 +595,7 @@ end
   ``T̃_{XY} = U^{†a}_{iX} U^{†b}_{jY} T̃^{ij}_{ab}``
 """
 function contravariant_deco_doubles(EC::ECInfo, T2, projx=false)
-  UvoX = load(EC, "C_voX")
+  UvoX = load3idx(EC, "C_voX")
   # calc T^{ij}_{ab} = U^{iX}_a U^{jY}_b T_{XY}
   @tensoropt Tabij[a,b,i,j] := UvoX[a,i,X] * (UvoX[b,j,Y] * T2[X,Y])
   if projx
@@ -621,8 +621,8 @@ function calc_voX(EC::ECInfo; calc_vᵥᵒˣ=false, calc_vᵛₒₓ=false)
   if !file_exists(EC, "C_voX")
     error("File C_voX does not exist!")
   end
-  vvLfile, vvL = mmap(EC, "d_vvL")
-  ooLfile, ooL = mmap(EC, "d_ooL")
+  vvLfile, vvL = mmap3idx(EC, "d_vvL")
+  ooLfile, ooL = mmap3idx(EC, "d_ooL")
   nL = size(vvL, 3)
   nocc = size(ooL,1)
   nvirt = size(vvL,1)
@@ -636,7 +636,7 @@ function calc_voX(EC::ECInfo; calc_vᵥᵒˣ=false, calc_vᵛₒₓ=false)
   end
   close(vvLfile)
   close(ooLfile)
-  UvoX = load(EC, "C_voX")
+  UvoX = load3idx(EC, "C_voX")
   v_voX = v_voX2 = similar(UvoX, 0)
   if calc_vᵥᵒˣ
     # ``v_a^{iX} = v_{ac}^{ki} U^{kX}_c``
@@ -668,7 +668,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     dress_df_fock(EC, T1)
     t1 = print_time(EC, t1, "dressed fock", 2)
   end
-  UvoX = load(EC, "C_voX")
+  UvoX = load3idx(EC, "C_voX")
   use_projected_exchange = EC.options.cc.use_projx
   project_amps_vovo_t2 = EC.options.cc.project_vovo_t2 != 2
   project_resid_vovo_t2 = EC.options.cc.project_vovo_t2 >= 2
@@ -695,7 +695,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     error("Wrong dimensionality of T2!")
   end
   SP = EC.space
-  dfock = load(EC, "df_mm")
+  dfock = load2idx(EC, "df_mm")
   if length(T1) > 0
     R1 = dfock[SP['v'],SP['o']]
   else
@@ -709,10 +709,10 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   end
   x_vv = dfock[SP['v'],SP['v']]
   x_oo = dfock[SP['o'],SP['o']]
-  voLfile, voL = mmap(EC, "d_voL")
-  ovLfile, ovL = mmap(EC, "d_ovL")
-  vvLfile, vvL = mmap(EC, "d_vvL")
-  ooLfile, ooL = mmap(EC, "d_ooL")
+  voLfile, voL = mmap3idx(EC, "d_voL")
+  ovLfile, ovL = mmap3idx(EC, "d_ovL")
+  vvLfile, vvL = mmap3idx(EC, "d_vvL")
+  ooLfile, ooL = mmap3idx(EC, "d_ooL")
   f_ov = dfock[SP['o'],SP['v']]
   if length(R1) > 0
     if full_tt2
@@ -790,7 +790,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     t1 = print_time(EC, t1, "``U^{i}_{jX} = U^{†b}_{jX} T^i_b``", 2)
   end
   XBigBlks = get_auxblks(nX, 512)
-  XXLfile, XXL = mmap(EC, "X^XL")
+  XXLfile, XXL = mmap3idx(EC, "X^XL")
   d_XXLfile, d_XXL = newmmap(EC, "d_X^XL", (nX,nX,nL))
   for X in XBigBlks
     V_UvoX = @view UvoX[:,:,X]
@@ -820,7 +820,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   XXL = nothing
   close(XXLfile)
   UTooX = nothing
-  d_XXLfile, d_XXL = mmap(EC, "d_X^XL")
+  d_XXLfile, d_XXL = mmap3idx(EC, "d_X^XL")
   for L in LBlks
     v_XXL = @view d_XXL[:,:,L]
     # ``R_{XY} += v_X^{X'L} T_{X'Y'} v_Y^{Y'L}``
@@ -922,7 +922,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   fullEMP2 = calc_doubles_decomposition(EC)
   t1 = print_time(EC, t1, "doubles decomposition", 2)
   if do_sing
-    T1 = read_starting_guess4amplitudes(EC, 1)
+    T1 = read_starting_guess4amplitudes(EC, Val(1))
   else
     T1 = Float64[]
   end
@@ -943,9 +943,9 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   Eh = 0.0
   t0 = time_ns()
   if EC.options.cc.use_full_t2
-    T2 = load(EC,"T_vvoo")
+    T2 = load4idx(EC,"T_vvoo")
   else
-    T2 = load(EC,"T_XX")
+    T2 = load2idx(EC,"T_XX")
   end
   # calc starting guess energy 
   truncEMP2 = calc_deco_doubles_energy(EC, T2)

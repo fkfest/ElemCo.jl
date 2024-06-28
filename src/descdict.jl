@@ -330,14 +330,14 @@ function Base.push!(dict::ODDict{K, V}, pair::Pair{K, Tuple{V, String}}) where {
   push!(dict, pair.first, pair.second...)
 end
 
-function Base.push!(dict::ODDict{K, V}, pairs::Pair{K, V}...) where {K, V}
+function Base.push!(dict::ODDict{K, V}, pairs::Vararg{Pair{K, V},N}) where {K, V, N}
   for pair in pairs
-    push!(dict, pair)
+    push!(dict, pair.first, pair.second::V)
   end
   return dict
 end
 
-function Base.push!(dict::ODDict{K, V}, pairs::Pair{K, Tuple{V, String}}...) where {K, V}
+function Base.push!(dict::ODDict{K, V}, pairs::Vararg{Pair{K, Tuple{V, String}}}) where {K, V}
   for pair in pairs
     push!(dict, pair)
   end

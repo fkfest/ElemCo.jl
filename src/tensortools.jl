@@ -10,6 +10,7 @@ using ..ElemCo.MIO
 export save!, load, load_all, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
 export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, load6idx_all
+export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
@@ -110,6 +111,23 @@ end
 """
 function mmap(EC::ECInfo, fname::String)
   return miommap(joinpath(EC.scr, fname*EC.ext))
+end
+
+function mmap(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
+  return miommap(joinpath(EC.scr, fname*EC.ext), Val(N), T)
+end
+
+for N in 1:6
+  mmapN = Symbol("mmap$(N)idx")
+  mmapNall = Symbol("mmap$(N)idx_all")
+  @eval begin
+    function $mmapN(EC::ECInfo, fname::String, T::Type=Float64)
+      return mmap(EC, fname, Val($N), T)
+    end
+    function $mmapNall(EC::ECInfo, fname::String, T::Type=Float64)
+      return load_all(EC, fname, Val($N), T)
+    end
+  end
 end
 
 """ 

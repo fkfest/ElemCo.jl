@@ -300,9 +300,9 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     hd_vvvv = ints2(EC,v1*v2*v1*v2)
     vovv = ints2(EC,v1*o2*v1*v2)
     @tensoropt hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T12[c,k]
-    vovv = nothing
+    vovv = NOTHING4idx
     save!(EC,"hd_"*v1*v2*v1*v2,hd_vvvv)
-    hd_vvvv = nothing
+    hd_vvvv = NOTHING4idx
     t1 = print_time(EC,t1,"dress hd_"*v1*v2*v1*v2,3)
   end
   # <ik|j \hat l>
@@ -312,11 +312,11 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     hd_oooo2 = deepcopy(hd_oooo)
     oovo = ints2(EC,o1*o2*v1*o2)
     @tensoropt hd_oooo2[i,j,k,l] += oovo[i,j,d,l] * T1[d,k]
-    oovo = nothing
+    oovo = NOTHING4idx
   end
   ooov = ints2(EC,o1*o2*o1*v2)
   @tensoropt hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
-  ooov = nothing
+  ooov = NOTHING4idx
   t1 = print_time(EC,t1,"dress hd_"*o1*o2*o1*o2,3)
   if calc_d_vvoo
     # <a\hat c|j \hat l>
@@ -325,15 +325,15 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     vooo = ints2(EC,v1*o2*o1*o2)
     @tensoropt begin
       vooo[a,k,j,l] += voov[a,k,j,d] * T12[d,l]
-      voov = nothing
+      voov = NOTHING4idx
       hd_vvoo[a,c,j,l] -= vooo[a,k,j,l] * T12[c,k]
-      vooo = nothing
+      vooo = NOTHING4idx
     end
     vvov = ints2(EC,v1*v2*o1*v2)
     @tensoropt hd_vvoo[a,c,j,l] += vvov[a,c,j,d] * T12[d,l]
-    vvov = nothing
+    vvov = NOTHING4idx
     save!(EC,"hd_"*v1*v2*o1*o2,hd_vvoo)
-    hd_vvoo = nothing
+    hd_vvoo = NOTHING4idx
     t1 = print_time(EC,t1,"dress hd_"*v1*v2*o1*o2,3)
   end
   # <\hat a k| \hat j l>
@@ -342,12 +342,12 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     @tensoropt hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
   else
     @tensoropt hd_vooo[a,k,j,l] -= hd_oooo2[i,k,j,l] * T1[a,i]
-    hd_oooo2 = nothing
+    hd_oooo2 = NOTHING4idx
   end
   if no2 > 0
     vovo = ints2(EC,v1*o2*v1*o2)
     @tensoropt hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
-    vovo = nothing
+    vovo = NOTHING4idx
   end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*o1*o2,3)
   if mixed
@@ -377,7 +377,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     oOvV = ints2(EC,o1*o2*v1*v2)
     d_ooov = ints2(EC,o1*o2*o1*v2)
     @tensoropt d_ooov[k,l,j,d] += oOvV[k,l,b,d] * T1[b,j]
-    oOvV = nothing
+    oOvV = NOTHING4idx
     save!(EC,"d_"*o1*o2*o1*v2,d_ooov)
     t1 = print_time(EC,t1,"dress d_"*o1*o2*o1*v2,3)
     if no1 > 0 && no2 > 0
@@ -403,7 +403,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   if no2 > 0
     @tensoropt hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
   end
-  vovv = nothing
+  vovv = NOTHING4idx
   if mixed
     # <k\hat a|dj>
     ovvv = ints2(EC,o1*v2*v1*v2)
@@ -417,7 +417,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
 
     hd_ovov = ints2(EC,o1*v2*o1*v2)
     @tensoropt hd_ovov[k,a,l,b] += ovvv[k,a,d,b] * T1[d,l]
-    ovvv = nothing
+    ovvv = NOTHING4idx
   end
   t1 = print_time(EC,t1,"dress hd_"*v1*o2*v1*o2,3)
   if calc_d_vvvo
@@ -429,7 +429,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
       hd_vvvo[a,c,b,l] += vvvv[a,c,b,d] * T12[d,l]
     end
     save!(EC,"hd_"*v1*v2*v1*o2,hd_vvvo)
-    hd_vvvo = nothing
+    hd_vvvo = NOTHING4idx
     if mixed
       hd_vvov = ints2(EC,v1*v2*o1*v2)
       @tensoropt begin
@@ -437,9 +437,9 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
         hd_vvov[a,c,l,b] += vvvv[a,c,d,b] * T1[d,l]
       end
       save!(EC,"hd_"*v1*v2*o1*v2,hd_vvov)
-      hd_vvov = nothing
+      hd_vvov = NOTHING4idx
     end
-    vvvv = nothing
+    vvvv = NOTHING4idx
     t1 = print_time(EC,t1,"dress hd_"*v1*v2*v1*o2,3)
   end
 
@@ -451,14 +451,14 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     save!(EC,"d_"*v1*o2*v1*v2,d_vovv)
     t1 = print_time(EC,t1,"dress d_"*v1*o2*v1*v2,3)
     if mixed
-      d_vovv = nothing
+      d_vovv = NOTHING4idx
       d_ovvv = ints2(EC,o1*v2*v1*v2)
       @tensoropt d_ovvv[i,b,a,c] -= oovv[i,j,a,c] * T12[b,j]
       save!(EC,"d_"*o1*v2*v1*v2,d_ovvv)
       t1 = print_time(EC,t1,"dress d_"*o1*v2*v1*v2,3)
     end
   end
-  oovv = nothing
+  oovv = NOTHING4idx
   if calc_d_vvvv
     # <ab\hat|cd>
     d_vvvv = load4idx(EC,"hd_"*v1*v2*v1*v2)
@@ -467,27 +467,27 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     end
     if !mixed
       @tensoropt d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i]
-      d_vovv = nothing
+      d_vovv = NOTHING4idx
     else
       @tensoropt d_vvvv[a,c,b,d] -= d_ovvv[i,c,b,d] * T1[a,i]
-      d_ovvv = nothing
+      d_ovvv = NOTHING4idx
     end
     save!(EC,"d_"*v1*v2*v1*v2,d_vvvv)
-    d_vvvv = nothing
+    d_vvvv = NOTHING4idx
     t1 = print_time(EC,t1,"dress d_"*v1*v2*v1*v2,3)
   end
   # <ak\hat|bl>
   d_vovo = hd_vovo
   @tensoropt d_vovo[a,k,b,l] -= d_oovo[i,k,b,l] * T1[a,i]
   save!(EC,"d_"*v1*o2*v1*o2,d_vovo)
-  hd_vovo = nothing
-  d_vovo = nothing
+  hd_vovo = NOTHING4idx
+  d_vovo = NOTHING4idx
   if mixed
     d_ovov = hd_ovov
     @tensoropt d_ovov[k,a,l,b] -= d_ooov[k,i,l,b] * T12[a,i]
     save!(EC,"d_"*o1*v2*o1*v2,d_ovov)
-    hd_ovov = nothing
-    d_ovov = nothing
+    hd_ovov = NOTHING4idx
+    d_ovov = NOTHING4idx
   end
   t1 = print_time(EC,t1,"dress d_"*v1*o2*v1*o2,3)
   # <aj\hat|kl>
@@ -508,16 +508,16 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
       d_vvvo = load4idx(EC,"hd_"*v1*v2*v1*o2)
       @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i]
       save!(EC,"d_"*v1*v2*v1*o2,d_vvvo)
-      d_vvvo = nothing
+      d_vvvo = NOTHING4idx
     else
       d_vvvo = load4idx(EC,"hd_"*v1*v2*v1*o2)
       @tensoropt d_vvvo[c,a,b,l] -= d_ovvo[i,a,b,l] * T1[c,i]
       save!(EC,"d_"*v1*v2*v1*o2,d_vvvo)
-      d_vvvo = nothing
+      d_vvvo = NOTHING4idx
       d_vvov = load4idx(EC,"hd_"*v1*v2*o1*v2)
       @tensoropt d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T12[c,i]
       save!(EC,"d_"*v1*v2*o1*v2,d_vvov)
-      d_vvov = nothing
+      d_vvov = NOTHING4idx
     end
     t1 = print_time(EC,t1,"dress d_"*v1*v2*v1*o2,3)
   end
@@ -534,14 +534,14 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     d_vvoo = load4idx(EC,"hd_"*v1*v2*o1*o2)
     hd_vvvo = load4idx(EC,"hd_"*v1*v2*v1*o2)
     @tensoropt d_vvoo[a,c,j,l] += hd_vvvo[a,c,b,l] * T1[b,j]
-    hd_vvvo = nothing
+    hd_vvvo = NOTHING4idx
     if !mixed
       @tensoropt d_vvoo[a,c,j,l] -= d_vooo[c,i,l,j] * T1[a,i] 
     else
       @tensoropt d_vvoo[a,c,j,l] -= d_ovoo[i,c,j,l] * T1[a,i] 
     end
     save!(EC,"d_"*v1*v2*o1*o2,d_vvoo)
-    d_vvoo = nothing
+    d_vvoo = NOTHING4idx
     t1 = print_time(EC,t1,"dress d_"*v1*v2*o1*o2,3)
   end
 end
@@ -577,7 +577,7 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   end
   d_vovo = load4idx(EC,"d_vovo")
   @tensoropt fvv[a,b] := 2.0*d_vovo[a,k,b,k]
-  d_vovo = nothing
+  d_vovo = NOTHING4idx
   d_voov = load4idx(EC,"d_voov")
   @tensoropt fvv[a,b] -= d_voov[a,k,k,b]
   dfock[SP['o'],SP['o']] += foo
@@ -626,11 +626,11 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   end
   d_vovo = load4idx(EC,"d_"*v1*o1*v1*o1)
   @tensoropt fvv[a,b] := d_vovo[a,k,b,k]
-  d_vovo = nothing
+  d_vovo = NOTHING4idx
   if no1 > 0 
     d_voov = load4idx(EC,"d_"*v1*o1*o1*v1)
     @tensoropt fvv[a,b] -= d_voov[a,k,k,b]
-    d_voov = nothing
+    d_voov = NOTHING4idx
   end
   dfock[SP[o1],SP[o1]] += foo
   dfock[SP[v1],SP[o1]] += fvo
@@ -653,25 +653,25 @@ function dress_fock_oppositespin(EC::ECInfo)
     foo[i,j] := d_oooo[i,k,j,k]
     fOO[i,j] := d_oooo[k,i,k,j]
   end
-  d_oooo = nothing
+  d_oooo = NOTHING4idx
   d_vooo = load4idx(EC,"d_vOoO")
   @tensoropt fvo[a,i] := d_vooo[a,k,i,k]
-  d_vooo = nothing
+  d_vooo = NOTHING4idx
   d_ovoo = load4idx(EC,"d_oVoO")
   @tensoropt fVO[a,i] := d_ovoo[k,a,k,i]
-  d_ovoo = nothing
+  d_ovoo = NOTHING4idx
   d_oovo = load4idx(EC,"d_oOvO")
   @tensoropt fov[i,a] := d_oovo[i,k,a,k]
-  d_oovo = nothing
+  d_oovo = NOTHING4idx
   d_ooov = load4idx(EC,"d_oOoV")
   @tensoropt fOV[i,a] := d_ooov[k,i,k,a]
-  d_ooov = nothing
+  d_ooov = NOTHING4idx
   d_vovo = load4idx(EC,"d_vOvO")
   @tensoropt fvv[a,b] := d_vovo[a,k,b,k]
-  d_vovo = nothing
+  d_vovo = NOTHING4idx
   d_ovov = load4idx(EC,"d_oVoV")
   @tensoropt fVV[a,b] := d_ovov[k,a,k,b]
-  d_ovov = nothing
+  d_ovov = NOTHING4idx
 
   dfocka = load2idx(EC,"df_mm")
   dfocka[SP['o'],SP['o']] += foo
@@ -1029,12 +1029,12 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
         D2 = calc_D2(EC, T1, T2)[:,:,trioo]
         # <pq|rs> D^ij_rs
         @tensoropt K2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
-        D2 = nothing
+        D2 = NOTHING3idx
         K2pq = Array{Float64}(undef,norb,norb,nocc,nocc)
         K2pq[:,:,trioo] = K2pqx
         trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
         @tensor K2pq[:,:,trioor][p,q,x] = K2pqx[q,p,x]
-        K2pqx = nothing
+        K2pqx = NOTHING3idx
       else
         D2 = calc_D2(EC, T1, T2)
         # <pq|rs> D^ij_rs
@@ -1661,7 +1661,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2, T3; dc=false, tworef=false, fixref=fa
 
   R1 = zeros(nvirt,nocc)
 
-  dfock = load(EC,"df_mm")
+  dfock = load2idx(EC,"df_mm")
 
   fij = dfock[SP['o'],SP['o']]
   fab = dfock[SP['v'],SP['v']]
@@ -2016,13 +2016,36 @@ end
   - `"EW"` - singlet/triplet energy contribution (for 2D methods)
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
+  print_info(method_name(method))
+  Amps, exc_ranges = starting_amplitudes(EC, method)
+  singles, doubles, triples = exc_ranges[1:3]
+
+  Eh, NormT1, NormT2, NormT3 = cc_iterations!(Amps, singles, doubles, triples, EC, method)
+
+  if method.exclevel[1] == :full
+    try2save_singles!(EC, Amps[singles]...)
+  end
+  try2save_doubles!(EC, Amps[doubles]...)
+  println()
+  if method.exclevel[3] == :full
+    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2), "T3"=>sqrt(NormT3)])
+  else
+    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
+  end
+  println()
+  if has_prefix(method, "2D")
+    ene = Eh["E"] + Eh["EIAS"]
+    W = load1idx(EC,"2d_ccsd_W")[1]
+    push!(Eh, "EW"=>W, "E"=>ene)
+  end
+  return Eh
+end
+
+function cc_iterations!(Amps, singles, doubles, triples, EC::ECInfo, method::ECMethod)
   dc = (method.theory[1:2] == "DC")
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
-  print_info(method_name(method))
-  Amps, exc_ranges = starting_amplitudes(EC, method)
-  singles, doubles, triples = exc_ranges[1:3]
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
   else
@@ -2032,11 +2055,11 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   diis = Diis(EC)
 
   NormR1 = 0.0
-  NormT1 = 0.0
-  NormT2 = 0.0
-  NormT3 = 0.0
+  NormT1::Float64 = 0.0
+  NormT2::Float64 = 0.0
+  NormT3::Float64 = 0.0
   do_sing = (method.exclevel[1] == :full)
-  Eh = 0.0
+  Eh = OutDict()
   En1 = 0.0
   Eias = 0.0
   converged = false
@@ -2045,6 +2068,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
+    @assert typeof(Res) == typeof(Amps) 
     if restrict
       spin_project!(EC, Res...)
     end
@@ -2105,23 +2129,10 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   if !converged
     println("WARNING: CC iterations did not converge!")
   end
-  if do_sing
-    try2save_singles!(EC, Amps[singles]...)
+  if tworef
+    push!(Eh, "EIAS"=>Eias)
   end
-  try2save_doubles!(EC, Amps[doubles]...)
-  println()
-  if method.exclevel[3] == :full
-    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2), "T3"=>sqrt(NormT3)])
-  else
-    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
-  end
-  println()
-  if has_prefix(method, "2D")
-    ene = Eh["E"] + Eias
-    W = load1idx(EC,"2d_ccsd_W")[1]
-    push!(Eh, "EIAS"=>Eias, "EW"=>W, "E"=>ene)
-  end
-  return Eh
+  return Eh, NormT1, NormT2, NormT3
 end
 
 """ 
@@ -2139,8 +2150,8 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     print_info("DC-CCSDT")
   end
   calc_integrals_decomposition(EC)
-  T1 = read_starting_guess4amplitudes(EC, 1)
-  T2 = read_starting_guess4amplitudes(EC, 2)
+  T1 = read_starting_guess4amplitudes(EC, Val(1))
+  T2 = read_starting_guess4amplitudes(EC, Val(2))
   if useT3
     calc_triples_decomposition(EC)
   else
@@ -2209,8 +2220,8 @@ end
 """
 function add_to_singles_and_doubles_residuals(EC, R1, R2)
   SP = EC.space
-  ooPfile, ooP = mmap(EC, "d_ooL")
-  ovPfile, ovP = mmap(EC, "d_ovL")
+  ooPfile, ooP = mmap3idx(EC, "d_ooL")
+  ovPfile, ovP = mmap3idx(EC, "d_ovL")
   Txyz = load3idx(EC, "T_XXX")
   
   U = load3idx(EC, "C_voX")
@@ -2225,7 +2236,7 @@ function add_to_singles_and_doubles_residuals(EC, R1, R2)
   BBU = nothing
 
   @tensoropt Bov[i,a,P,X] := ooP[j,i,P] * U[a,j,X]
-  vvPfile, vvP = mmap(EC, "d_vvL")
+  vvPfile, vvP = mmap3idx(EC, "d_vvL")
   @tensoropt Bvo[a,i,P,X] := vvP[a,b,P] * U[b,i,X]
   close(vvPfile)
   vvP = nothing
@@ -2286,7 +2297,7 @@ function calc_triples_decomposition(EC::ECInfo)
   nvirt = n_virt_orbs(EC)
 
   Triples_Amplitudes = zeros(nvirt, nocc, nvirt, nocc, nvirt, nocc)
-  t3file, T3 = mmap(EC, "T_vvvooo")
+  t3file, T3 = mmap4idx(EC, "T_vvvooo")
   trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
   for ijk in axes(T3,4)
     i,j,k = Tuple(trippp[ijk])                                            #trippp is giving the indices according to the joint index ijk as a tuple
@@ -2328,9 +2339,9 @@ end
   ``T^i_{aXY}`` from `T2` (and `UvoX`)
 """
 function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
-  voPfile, voP = mmap(EC, "d_voL")
-  ooPfile, ooP = mmap(EC, "d_ooL")
-  vvPfile, vvP = mmap(EC, "d_vvL")
+  voPfile, voP = mmap3idx(EC, "d_voL")
+  ooPfile, ooP = mmap3idx(EC, "d_ooL")
+  vvPfile, vvP = mmap3idx(EC, "d_vvL")
 
   @tensoropt TXai[X,a,i] := UvoX[b,j,X] * T2[a,b,i,j]
   @tensoropt dU[P,X] := voP[c,k,P] * UvoX[c,k,X]
@@ -2411,10 +2422,10 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   #display(T3_XYZ)
 
   #load df coeff
-  ovPfile, ovP = mmap(EC, "d_ovL")
-  voPfile, voP = mmap(EC, "d_voL")
-  ooPfile, ooP = mmap(EC, "d_ooL")
-  vvPfile, vvP = mmap(EC, "d_vvL")
+  ovPfile, ovP = mmap3idx(EC, "d_ovL")
+  voPfile, voP = mmap3idx(EC, "d_voL")
+  ooPfile, ooP = mmap3idx(EC, "d_ooL")
+  vvPfile, vvP = mmap3idx(EC, "d_vvL")
 
   #load dressed fock matrices
   SP = EC.space

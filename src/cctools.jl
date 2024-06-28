@@ -641,14 +641,14 @@ function try2start_doubles(EC::ECInfo; type="T")
 end
 
 """
-    read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
+    read_starting_guess4amplitudes(EC::ECInfo, ::Val{level}, spins...)
 
   Read starting guess for excitation `level`.
 
   The guess will be read from `T_vo`, `T_VO`, `T_vvoo` etc files.
   If the file does not exist, the guess will be a zeroed-vector.
 """
-function read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
+function read_starting_guess4amplitudes(EC::ECInfo, ::Val{level}, spins...) where level
   if length(spins) == 0
     spins = [:α for i in 1:level]
   end
@@ -664,9 +664,9 @@ function read_starting_guess4amplitudes(EC::ECInfo, level::Int, spins...)
   end
   filename = "T_"*spaces
   if file_exists(EC, filename)
-    return load(EC, filename)
+    return load(EC, filename, Val(level*2))
   else
-    return zeros(len_spaces(EC, spaces)...)
+    return zeros(len_spaces(EC, spaces)...)::Array{Float64,level*2}
   end
 end
 
@@ -731,11 +731,11 @@ function starting_amplitudes(EC::ECInfo, method::ECMethod)
   end
   if is_unrestricted(method) || has_prefix(method, "R")
     namps = sum([i + 1 for i in 1:highest_full_exc])
-    exc_ranges = [1:2, 3:5, 6:9]
+    exc_ranges = UnitRange{Int}[1:2, 3:5, 6:9]
     spins = [(:α,), (:β,), (:α, :α), (:β, :β), (:α, :β), (:α, :α, :α), (:β, :β, :β), (:α, :α, :β), (:α, :β, :β)]
   else
     namps = highest_full_exc
-    exc_ranges = [1:1, 2:2, 3:3]
+    exc_ranges = UnitRange{Int}[1:1, 2:2, 3:3]
     spins = [(:α,), (:α, :α), (:α, :α, :α)]
   end
   Amps = AbstractArray[Float64[] for i in 1:namps]
@@ -743,11 +743,11 @@ function starting_amplitudes(EC::ECInfo, method::ECMethod)
   for (iex,ex) in enumerate(method.exclevel)
     if ex == :full
       for iamp in exc_ranges[iex]
-        Amps[iamp] = read_starting_guess4amplitudes(EC, iex, spins[iamp]...)
+        Amps[iamp] = read_starting_guess4amplitudes(EC, Val(iex), spins[iamp]...)
       end
     end
   end
-  return Amps, exc_ranges
+  return Tuple(Amps), exc_ranges
 end
 
 """
@@ -763,6 +763,7 @@ function transform_amplitudes2lagrange_multipliers!(Amps, exc_ranges)
   @assert (unrestricted && length(doubles) == 3) || (!unrestricted && length(doubles) == 1)
   # add singles to doubles
   add_singles2doubles!(Amps[doubles]..., Amps[singles]...)
+  return
 end
 
 """
