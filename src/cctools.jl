@@ -16,7 +16,7 @@ export calc_fock_matrix, calc_HF_energy
 export calc_singles_energy_using_dfock
 export update_singles, update_doubles, update_singles!, update_doubles!, update_triples!, update_deco_doubles, update_deco_triples
 export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
-export read_starting_guess4amplitudes, save_current_singles, save_current_doubles, starting_amplitudes
+export read_starting_guess4amplitudes, save_current_singles, save_current_doubles
 export transform_amplitudes2lagrange_multipliers!
 export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
 export contra2covariant
@@ -711,58 +711,17 @@ function save_current_doubles(EC::ECInfo, T2a, T2b, T2ab; prefix="T")
 end
 
 """
-    starting_amplitudes(EC::ECInfo, method::ECMethod)
-
-  Prepare starting amplitudes for coupled cluster calculation.
-  
-  The starting amplitudes are read from files `T_vo`, `T_VO`, `T_vvoo`, etc.
-  If the files do not exist, the amplitudes are initialized to zero.
-  The order of amplitudes is as follows:
-  - singles: `α`, `β`
-  - doubles: `αα`, `ββ`, `αβ`
-  - triples: `ααα`, `βββ`, `ααβ`, `αββ`
-  Return a list of vectors of starting amplitudes 
-  and a list of ranges for excitation levels.
-"""
-function starting_amplitudes(EC::ECInfo, method::ECMethod)
-  highest_full_exc = max_full_exc(method)
-  if highest_full_exc > 3
-    error("starting_amplitudes only implemented upto triples")
-  end
-  if is_unrestricted(method) || has_prefix(method, "R")
-    namps = sum([i + 1 for i in 1:highest_full_exc])
-    exc_ranges = UnitRange{Int}[1:2, 3:5, 6:9]
-    spins = [(:α,), (:β,), (:α, :α), (:β, :β), (:α, :β), (:α, :α, :α), (:β, :β, :β), (:α, :α, :β), (:α, :β, :β)]
-  else
-    namps = highest_full_exc
-    exc_ranges = UnitRange{Int}[1:1, 2:2, 3:3]
-    spins = [(:α,), (:α, :α), (:α, :α, :α)]
-  end
-  Amps = AbstractArray[Float64[] for i in 1:namps]
-  # starting guesses
-  for (iex,ex) in enumerate(method.exclevel)
-    if ex == :full
-      for iamp in exc_ranges[iex]
-        Amps[iamp] = read_starting_guess4amplitudes(EC, Val(iex), spins[iamp]...)
-      end
-    end
-  end
-  return Tuple(Amps), exc_ranges
-end
-
-"""
-    transform_amplitudes2lagrange_multipliers!(Amps, exc_ranges)
+    transform_amplitudes2lagrange_multipliers!(Amps1, Amps2)
 
   Transform amplitudes to first guess for Lagrange multipliers.
 
   The amplitudes are transformed in-place. 
 """
-function transform_amplitudes2lagrange_multipliers!(Amps, exc_ranges)
-  singles, doubles, triples = exc_ranges[1:3]
-  unrestricted = (length(singles) == 2)
-  @assert (unrestricted && length(doubles) == 3) || (!unrestricted && length(doubles) == 1)
+function transform_amplitudes2lagrange_multipliers!(Amps1, Amps2)
+  unrestricted = (length(Amps1) == 2)
+  @assert (unrestricted && length(Amps2) == 3) || (!unrestricted && length(Amps2) == 1)
   # add singles to doubles
-  add_singles2doubles!(Amps[doubles]..., Amps[singles]...)
+  add_singles2doubles!(Amps2..., Amps1...)
   return
 end
 

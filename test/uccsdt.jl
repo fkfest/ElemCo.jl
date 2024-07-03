@@ -5,7 +5,7 @@ ECCSDT_test    = -0.170787150063
 EDCCCSDT_test  = -0.170829455099
 
 fcidump = joinpath(@__DIR__,"files","H2OP_UHF.FCIDUMP")
-@set cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true triangular_kext = false 
+@set cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true
 
 energies = @cc uccsdt
 @test abs(last_energy(energies)-energies["HF"]-ECCSDT_test) < epsilon

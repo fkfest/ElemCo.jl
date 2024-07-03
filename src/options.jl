@@ -144,8 +144,6 @@ Base.@kwdef mutable struct CcOptions
   calc_d_vovv::Bool = false
   """`⟨false⟩` calculate dressed <vv|oo>. """
   calc_d_vvoo::Bool = false
-  """`⟨true⟩` use a triangular kext if possible. """
-  triangular_kext::Bool = true
   """`⟨false⟩` calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
   """`⟨0.0⟩` imaginary shift for denominator in doubles decomposition. """

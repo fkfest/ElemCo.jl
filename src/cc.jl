@@ -689,7 +689,7 @@ function dress_fock_oppositespin(EC::ECInfo)
 end
 
 """
-    calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[];
+    calc_dressed_ints(EC::ECInfo, T1;
               calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
               calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
 
@@ -698,20 +698,21 @@ end
   ``\\hat v_{ab}^{cd}``, ``\\hat v_{ab}^{ci}``, ``\\hat v_{ak}^{cd}`` and ``\\hat v_{ab}^{ij}`` are only 
   calculated if requested in `EC.options.cc` or using keyword-arguments.
 """
-function calc_dressed_ints(EC::ECInfo, T1a, T1b=Float64[];
+function calc_dressed_ints(EC::ECInfo, T1;
               calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
               calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
-  if ndims(T1b) != 2
-    calc_dressed_ints(EC, T1a, T1a, "ovov"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
-    dress_fock_closedshell(EC, T1a)
-  else
-    calc_dressed_ints(EC, T1a, T1a, "ovov"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
-    calc_dressed_ints(EC, T1b, T1b, "OVOV"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
-    calc_dressed_ints(EC, T1a, T1b, "ovOV"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
-    dress_fock_samespin(EC, T1a, "ov"...)
-    dress_fock_samespin(EC, T1b, "OV"...)
-    dress_fock_oppositespin(EC)
-  end
+  calc_dressed_ints(EC, T1, T1, "ovov"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+  dress_fock_closedshell(EC, T1)
+end
+function calc_dressed_ints(EC::ECInfo, T1a, T1b;
+              calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
+  calc_dressed_ints(EC, T1a, T1a, "ovov"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+  calc_dressed_ints(EC, T1b, T1b, "OVOV"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+  calc_dressed_ints(EC, T1a, T1b, "ovOV"...; calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo)
+  dress_fock_samespin(EC, T1a, "ov"...)
+  dress_fock_samespin(EC, T1b, "OV"...)
+  dress_fock_oppositespin(EC)
 end
 
 """
@@ -971,7 +972,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   nvirt = n_virt_orbs(EC)
   norb = n_orbs(EC)
   if length(T1) > 0
-    calc_dressed_ints(EC,T1)
+    calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
     pseudo_dressed_ints(EC)
@@ -998,7 +999,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
     end
     t1 = print_time(EC,t1,"singles residual",2)
   else
-    R1 = Float64[]
+    R1 = zero(T1)
   end
 
   # <ab|ij>
@@ -1022,36 +1023,16 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   @tensoropt R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
   t1 = print_time(EC,t1,"I_klij T^kl_ab",2)
   if EC.options.cc.use_kext
-    int2 = integ2(EC.fd)
-    if ndims(int2) == 4
-      if EC.options.cc.triangular_kext
-        trioo = [CartesianIndex(i,j) for j in 1:nocc for i in 1:j]
-        D2 = calc_D2(EC, T1, T2)[:,:,trioo]
-        # <pq|rs> D^ij_rs
-        @tensoropt K2pqx[p,r,x] := int2[p,r,q,s] * D2[q,s,x]
-        D2 = NOTHING3idx
-        K2pq = Array{Float64}(undef,norb,norb,nocc,nocc)
-        K2pq[:,:,trioo] = K2pqx
-        trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
-        @tensor K2pq[:,:,trioor][p,q,x] = K2pqx[q,p,x]
-        K2pqx = NOTHING3idx
-      else
-        D2 = calc_D2(EC, T1, T2)
-        # <pq|rs> D^ij_rs
-        @tensoropt K2pq[p,r,i,j] := int2[p,r,q,s] * D2[q,s,i,j]
-        D2 = nothing
-      end
-    else
-      # last two indices of integrals are stored as upper triangular 
-      tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
-      D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
-      # <pq|rs> D^ij_rs
-      @tensoropt rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
-      D2 = nothing
-      # symmetrize R
-      @tensoropt K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
-      rK2pq = nothing
-    end
+    int2 = integ2_ss(EC.fd)
+    # last two indices of integrals are stored as upper triangular 
+    tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+    D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
+    # <pq|rs> D^ij_rs
+    @tensoropt rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
+    D2 = nothing
+    # symmetrize R
+    @tensoropt K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
+    rK2pq = nothing
     R2 += K2pq[SP['v'],SP['v'],:,:]
     if length(T1) > 0
       @tensoropt begin
@@ -1148,15 +1129,15 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     T2ab[active.ua,active.tb,active.ta,active.ub] = 0.0
   end
 
-  if ndims(T1a) == 2
-    calc_dressed_ints(EC,T1a,T1b)
+  if length(T1a) > 0 || length(T1b) > 0
+    calc_dressed_ints(EC, T1a, T1b)
     t1 = print_time(EC,t1,"dressing",2)
   else
-    pseudo_dressed_ints(EC,true)
+    pseudo_dressed_ints(EC, true)
   end
 
-  R1a = Float64[]
-  R1b = Float64[]
+  R1a = zero(T1a)
+  R1b = zero(T1b)
 
   dfock = load2idx(EC,"df_mm")
   dfockb = load2idx(EC,"df_MM")
@@ -1243,8 +1224,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
     if EC.fd.uhf
       # αα
-      int2a = integ2(EC.fd, :α)
-      @assert ndims(int2a) == 3 "Triangular storage of integrals expected!"
+      int2a = integ2_ss(EC.fd, :α)
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
       @tensoropt rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
       D2a = nothing
@@ -1255,7 +1235,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       R2a += K2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
-        int2b = integ2(EC.fd, :β)
+        int2b = integ2_ss(EC.fd, :β)
         D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
         @tensoropt rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
@@ -1265,7 +1245,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
         rK2pqb = nothing
         R2b += K2pqb[SP['V'],SP['V'],:,:]
         # αβ
-        int2ab = integ2(EC.fd, :αβ)
+        int2ab = integ2_os(EC.fd)
         D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
         @tensoropt K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
         D2ab = nothing
@@ -1273,8 +1253,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
         R2ab += K2pqab[SP['v'],SP['V'],:,:]
       end
     else
-      int2 = integ2(EC.fd)
-      @assert ndims(int2) == 3 "Triangular storage of integrals expected!"
+      int2 = integ2_ss(EC.fd)
       # αα
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
       @tensoropt rK2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
@@ -1580,7 +1559,6 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3
   EC.options.cc.calc_d_vvvo = true
   EC.options.cc.calc_d_vovv = true
   EC.options.cc.calc_d_vvoo = true
-  EC.options.cc.triangular_kext = false
 
   t1 = time_ns()
   SP = EC.space
@@ -1588,15 +1566,15 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3
   noccb = n_occb_orbs(EC)
   nvirt = n_virt_orbs(EC)
   nvirtb = n_virtb_orbs(EC)
-  if ndims(T1a) == 2
-    calc_dressed_ints(EC,T1a,T1b)
+  if length(T1a) > 0 || length(T1b) > 0
+    calc_dressed_ints(EC, T1a, T1b)
     t1 = print_time(EC,t1,"dressing",2)
   else
     pseudo_dressed_ints(EC,true)
   end
 
-  R1a = zeros(nvirt,nocc)
-  R1b = zeros(nvirtb,noccb)
+  R1a = zero(T1a)
+  R1b = zero(T1b)
 
   dfock = load2idx(EC,"df_mm")
   dfockb = load2idx(EC,"df_MM")
@@ -1646,14 +1624,13 @@ function calc_cc_resid(EC::ECInfo, T1, T2, T3; dc=false, tworef=false, fixref=fa
   EC.options.cc.calc_d_vvvo = true
   EC.options.cc.calc_d_vovv = true
   EC.options.cc.calc_d_vvoo = true
-  EC.options.cc.triangular_kext = false
 
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
-  if ndims(T1) == 2
-    calc_dressed_ints(EC,T1)
+  if length(T1) > 0
+    calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
     pseudo_dressed_ints(EC,true)
@@ -1699,9 +1676,13 @@ function oss_active_orbitals(EC::ECInfo)
   torb = setdiff(SP['o'],SP['O'])[1]
   uorb = setdiff(SP['O'],SP['o'])[1]
   torba = findfirst(isequal(torb),SP['o'])
+  @assert !isnothing(torba) "Active orbital not found in alpha orbitals."
   uorbb = findfirst(isequal(uorb),SP['O'])
+  @assert !isnothing(uorbb) "Active orbital not found in beta orbitals."
   torbb = findfirst(isequal(torb),SP['V'])
+  @assert !isnothing(torbb) "Active orbital not found in beta virtuals."
   uorba = findfirst(isequal(uorb),SP['v'])
+  @assert !isnothing(uorba) "Active orbital not found in alpha virtuals."
   return (ta=torba,ub=uorbb,tb=torbb,ua=uorba)
 end
 
@@ -2016,42 +1997,76 @@ end
   - `"EW"` - singlet/triplet energy contribution (for 2D methods)
 """
 function calc_cc(EC::ECInfo, method::ECMethod)
+  t0 = time_ns()
   print_info(method_name(method))
-  Amps, exc_ranges = starting_amplitudes(EC, method)
-  singles, doubles, triples = exc_ranges[1:3]
 
-  Eh, NormT1, NormT2, NormT3 = cc_iterations!(Amps, singles, doubles, triples, EC, method)
-
-  if method.exclevel[1] == :full
-    try2save_singles!(EC, Amps[singles]...)
+  highest_full_exc = max_full_exc(method)
+  if highest_full_exc > 3
+    error("only implemented upto triples")
   end
-  try2save_doubles!(EC, Amps[doubles]...)
-  println()
-  if method.exclevel[3] == :full
-    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2), "T3"=>sqrt(NormT3)])
+  if is_unrestricted(method) || has_prefix(method, "R")
+    if method.exclevel[1] == :full
+      T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
+      T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
+    else
+      T1a = zeros(0,0)
+      T1b = zeros(0,0)
+    end
+    if method.exclevel[2] != :full
+      error("No doubles is not implemented")
+    end
+    T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
+    T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
+    T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    if method.exclevel[3] != :full
+      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (), EC, method)
+    else
+      T3aaa = read_starting_guess4amplitudes(EC, Val(3), :α, :α, :α)
+      T3bbb = read_starting_guess4amplitudes(EC, Val(3), :β, :β, :β)
+      T3aab = read_starting_guess4amplitudes(EC, Val(3), :α, :α, :β)
+      T3abb = read_starting_guess4amplitudes(EC, Val(3), :α, :β, :β)
+      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (T3aaa,T3bbb,T3aab,T3abb), EC, method)
+    end
   else
-    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
+    if method.exclevel[1] == :full
+      T1 = read_starting_guess4amplitudes(EC, Val(1))
+    else
+      T1 = zeros(0,0)
+    end
+    if method.exclevel[2] != :full
+      error("No doubles is not implemented")
+    end
+    T2 = read_starting_guess4amplitudes(EC, Val(2))
+    if method.exclevel[3] != :full
+      Eh = cc_iterations!((T1,), (T2,), (), EC, method)
+    else
+      T3 = read_starting_guess4amplitudes(EC, Val(3))
+      Eh = cc_iterations!((T1,), (T2,), (T3,), EC, method)
+    end
   end
-  println()
+
   if has_prefix(method, "2D")
     ene = Eh["E"] + Eh["EIAS"]
     W = load1idx(EC,"2d_ccsd_W")[1]
     push!(Eh, "EW"=>W, "E"=>ene)
   end
+  t0 = print_time(EC, t0, "total", 1)
   return Eh
 end
 
-function cc_iterations!(Amps, singles, doubles, triples, EC::ECInfo, method::ECMethod)
+function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod)
+  t0 = time_ns()
   dc = (method.theory[1:2] == "DC")
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
   if is_unrestricted(method) || has_prefix(method, "R")
-    @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
+    @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
-    @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
+    @assert (length(Amps1) == 1) && (length(Amps2) == 1) && (length(Amps3) == 1 || length(Amps3) == 0)
   end
-  T2αβ = last(doubles)
+  Amps = (Amps1..., Amps2..., Amps3...) 
+  T2αβ = last(Amps2)
   diis = Diis(EC)
 
   NormR1 = 0.0
@@ -2063,60 +2078,67 @@ function cc_iterations!(Amps, singles, doubles, triples, EC::ECInfo, method::ECM
   En1 = 0.0
   Eias = 0.0
   converged = false
-  t0 = time_ns()
+  t0 = print_time(EC, t0, "initialization", 1)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
-    @assert typeof(Res) == typeof(Amps) 
-    if restrict
-      spin_project!(EC, Res...)
+    @assert typeof(Res) == typeof(Amps)
+    Res1 = Res[1:length(Amps1)]
+    Res2 = Res[length(Amps1)+1:length(Amps1)+length(Amps2)]
+    Res3 = Res[length(Amps1)+length(Amps2)+1:end]
+    if length(Amps1) == 2 && restrict
+      # spin_project!(EC, Res...)
+      # at the moment we don't project the triples
+      spin_project!(EC, Res1..., Res2...)
     end
     t1 = print_time(EC, t1, "residual", 2)
-    NormT2 = calc_doubles_norm(Amps[doubles]...)
-    NormR2 = calc_doubles_norm(Res[doubles]...)
+    NormT2 = calc_doubles_norm(Amps2...)
+    NormR2 = calc_doubles_norm(Res2...)
     if has_prefix(method, "FRS")
       active = oss_active_orbitals(EC)
-      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = 1.0
+      T2αβ[active.ua,active.tb,active.ta,active.ub] = 1.0
     elseif has_prefix(method, "FRT")
       active = oss_active_orbitals(EC)
-      Amps[T2αβ][active.ua,active.tb,active.ta,active.ub] = -1.0
+      T2αβ[active.ua,active.tb,active.ta,active.ub] = -1.0
     end
-    Eh = calc_hylleraas(EC, Amps[singles]..., Amps[doubles]..., Res[singles]..., Res[doubles]...)
-    update_doubles!(EC, Amps[doubles]..., Res[doubles]...)
-    if method.exclevel[3] == :full
-      NormT3 = calc_triples_norm(Amps[triples]...)
-      NormR3 = calc_triples_norm(Res[triples]...)
-      update_triples!(EC, Amps[triples]..., Res[triples]...)
+    Eh = calc_hylleraas(EC, Amps1..., Amps2..., Res1..., Res2...)
+    update_doubles!(EC, Amps2..., Res2...)
+    if length(Amps3) > 0 
+      NormT3 = calc_triples_norm(Amps3...)
+      NormR3 = calc_triples_norm(Res3...)
+      update_triples!(EC, Amps3..., Res3...)
     end
     if do_sing
-      NormT1 = calc_singles_norm(Amps[singles]...)
-      NormR1 = calc_singles_norm(Res[singles]...)
-      update_singles!(EC, Amps[singles]..., Res[singles]...)
+      NormT1 = calc_singles_norm(Amps1...)
+      NormR1 = calc_singles_norm(Res1...)
+      update_singles!(EC, Amps1..., Res1...)
       if has_prefix(method, "2D")
         active = oss_active_orbitals(EC)
-        T1α = first(singles)
-        T1β = last(singles)
+        T1α = first(Amps1)
+        T1β = last(Amps1)
         W = load1idx(EC,"2d_ccsd_W")[1]
-        Eias = - W * Amps[T1α][active.ua,active.ta] * Amps[T1β][active.tb,active.ub]
+        Eias = - W * T1α[active.ua,active.ta] * T1β[active.tb,active.ub]
       end
     end
-    if restrict
-      spin_project!(EC, Amps...)
+    if length(Amps1) == 2 && restrict
+      # spin_project!(EC, Amps...)
+      # at the moment we don't project the triples
+      spin_project!(EC, Amps1..., Amps2...)
     end
     perform!(diis, Amps, Res)
-    save_current_doubles(EC, Amps[doubles]...)
-    En2 = calc_doubles_energy(EC, Amps[doubles]...)
+    save_current_doubles(EC, Amps2...)
+    En2 = calc_doubles_energy(EC, Amps2...)
     En = En2["E"]
     if do_sing
-      save_current_singles(EC, Amps[singles]...)
-      En1 = calc_singles_energy(EC, Amps[singles]...)
+      save_current_singles(EC, Amps1...)
+      En1 = calc_singles_energy(EC, Amps1...)
       En += En1["E"]
     end
     ΔE = En - Eh["E"]
     NormR = NormR1 + NormR2
     NormT = 1.0 + NormT1 + NormT2
-    if method.exclevel[3] == :full
+    if length(Amps3) > 0
       NormR += NormR3
       NormT += NormT3
     end
@@ -2132,7 +2154,18 @@ function cc_iterations!(Amps, singles, doubles, triples, EC::ECInfo, method::ECM
   if tworef
     push!(Eh, "EIAS"=>Eias)
   end
-  return Eh, NormT1, NormT2, NormT3
+  if do_sing
+    try2save_singles!(EC, Amps1...)
+  end
+  try2save_doubles!(EC, Amps2...)
+  println()
+  if length(Amps3) > 0
+    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2), "T3"=>sqrt(NormT3)])
+  else
+    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
+  end
+  println()
+  return Eh 
 end
 
 """ 
@@ -2167,7 +2200,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   NormT2 = 0.0
   NormT3 = 0.0
   R1 = Float64[]
-  Eh = 0.0
+  Eh = OutDict()
   t0 = time_ns()
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
@@ -2193,7 +2226,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     T1 += update_singles(EC, R1)
     T2 += update_doubles(EC, R2)
     T3 += update_deco_triples(EC, R3)
-    perform!(diis, [T1,T2,T3], [R1,R2,R3])
+    perform!(diis, (T1,T2,T3), (R1,R2,R3))
     save!(EC, "T_XXX", T3)
     En1 = calc_singles_energy(EC, T1)
     En2 = calc_doubles_energy(EC, T2)

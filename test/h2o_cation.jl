@@ -31,7 +31,7 @@ energies = @cc uccsd
 @test abs(energies["HF"]-EUHF_test) < epsilon
 @test abs(last_energy(energies)-ECCSD_UHF_test) < epsilon
 
-@set cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true triangular_kext = false 
+@set cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true
 energies = @cc uccsd
 @test abs(last_energy(energies)-ECCSD_UHF_test) < epsilon
 

@@ -270,6 +270,9 @@ end
 
   Return 2-e⁻ integrals (for UHF fcidump: for `spincase`).
   `spincase` can be `:α`, `:β` or `:αβ`.
+
+  Use type-stable versions instead: 
+  [`integ2_ss`](@ref) for same-spin integrals and [`integ2_os`](@ref) for opposite-spin integrals.
 """
 function integ2(fd::FDump, spincase::Symbol=:α)
   if !fd.uhf

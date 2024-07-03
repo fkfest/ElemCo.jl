@@ -145,7 +145,7 @@ function weighted_dot(diis::Diis, vecs1, vecs2)
   @assert length(vecs1) == length(diis.weights)
   dot = 0.0
   for i in eachindex(vecs1)
-    dot += diis.weights[i] * (vecs1[i] ⋅ vecs2[i])
+    dot += diis.weights[i] * (vec(vecs1[i]) ⋅ vec(vecs2[i]))
   end
   return dot
 end

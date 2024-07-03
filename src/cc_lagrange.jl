@@ -40,38 +40,18 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
   # the 4-external part
   if EC.options.cc.use_kext
     # the `kext` part
-    int2 = integ2(EC.fd)
-    if ndims(int2) == 4
-      if EC.options.cc.triangular_kext
-        trioo = [CartesianIndex(i,j) for j in 1:nocc for i in 1:j]
-        dU2 = calc_dU2(EC, T1, T1, U2)[:,:,trioo]
-        # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-        @tensoropt Kmmx[r,s,x] := int2[p,q,r,s] * dU2[p,q,x]
-        dU2 = nothing
-        Kmmoo = Array{Float64}(undef,norb,norb,nocc,nocc)
-        Kmmoo[:,:,trioo] = Kmmx
-        trioor = CartesianIndex.(reverse.(Tuple.(trioo)))
-        @tensor Kmmoo[:,:,trioor][p,q,x] = Kmmx[q,p,x]
-        Kmmx = nothing
-      else
-        dU2 = calc_dU2(EC, T1, T1, U2)
-        # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-        @tensoropt Kmmoo[r,s,m,n] := int2[p,q,r,s] * dU2[p,q,m,n]
-        dU2 = nothing
-      end
-    else
-      # last two indices of integrals are stored as upper triangular 
-      dU2 = calc_dU2(EC, T1, T1, U2)
-      # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-      @tensoropt Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
-      dU2 = nothing
-      Kmmoo = Array{Float64}(undef,norb,norb,nocc,nocc)
-      tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
-      Kmmoo[tripp,:,:] = Kxoo
-      trippr = CartesianIndex.(reverse.(Tuple.(tripp)))
-      @tensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
-      Kxoo = nothing
-    end
+    int2 = integ2_ss(EC.fd)
+    # last two indices of integrals are stored as upper triangular 
+    dU2 = calc_dU2(EC, T1, T1, U2)
+    # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
+    @tensoropt Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
+    dU2 = nothing
+    Kmmoo = Array{Float64}(undef,norb,norb,nocc,nocc)
+    tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+    Kmmoo[tripp,:,:] = Kxoo
+    trippr = CartesianIndex.(reverse.(Tuple.(tripp)))
+    @tensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
+    Kxoo = nothing
     t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
     # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
     R2 += Kmmoo[SP['v'],SP['v'],:,:]
@@ -242,14 +222,9 @@ Return `dU2[p,q,m,n]`=``Λ_{mn}^{ab}δ_a^p δ_b^q - Λ_{mn}^{ab}T^i_a δ_i^p δ_
 function calc_dU2(EC::ECInfo, T1, T12, U2, o1='o', v1='v', o2='o', v2='v')
   SP = EC.space
   norb = n_orbs(EC)
-  nocc1 = length(SP[o1])
-  nocc2 = length(SP[o2])
-  if length(T1) > 0
-    # dU2 = Array{Float64}(undef,norb,norb,nocc1,nocc2)
-    dU2 = zeros(norb,norb,nocc1,nocc2)
-  else
-    dU2 = zeros(norb,norb,nocc1,nocc2)
-  end
+  nocc1 = size(U2,3)
+  nocc2 = size(U2,4)
+  dU2 = zeros(norb,norb,nocc1,nocc2)
   dU2[SP[v1],SP[v2],:,:] = U2 
   if length(T1) > 0
     @tensoropt dUovoo[i,b,m,n] := U2[a,b,m,n] * T1[a,i]
@@ -361,7 +336,7 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   if EC.options.cc.use_kext
     # the `kext` part
     spin4int = EC.fd.uhf ? spin : :α
-    int2 = integ2(EC.fd, spin4int)
+    int2 = integ2_ss(EC.fd, spin4int)
     dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
     if ndims(int2) == 4
       error("Non-triangular integrals not tested in kext equations in ΛUCCSD")
@@ -531,7 +506,8 @@ Additionally, remaining contributions to the singles residual are calculated.
 
 Return ΔR1a, ΔR1b, R2ab
 """
-function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1a, D1b; dc=false) 
+function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1b::Matrix{Float64}, 
+          U2a::Array{Float64,4}, U2b::Array{Float64}, U2ab::Array{Float64}, D1a, D1b; dc=false) 
   t1 = time_ns()
 
   SP = EC.space
@@ -548,7 +524,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     # ``R^e_m -= Λ_{iJ}^{eB} \hat v_{mB}^{iJ}``
     int2 = load4idx(EC, "d_oVoO")
     @tensoropt R1a[e,m] := - U2ab[e,B,i,J] * int2[m,B,i,J]
-    int2 = nothing
+    int2 = NOTHING4idx
   else
     R1a = U1a
   end
@@ -556,7 +532,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     # ``R^E_M -= Λ_{jI}^{bE} \hat v_{bM}^{jI}``
     int2 = load4idx(EC, "d_vOoO")
     @tensoropt R1b[E,M] := - U2ab[b,E,j,I] * int2[b,M,j,I]
-    int2 = nothing
+    int2 = NOTHING4idx
   else
     R1b = U1b
   end
@@ -566,29 +542,27 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   # the 4-external part
   if EC.options.cc.use_kext
     # the `kext` part
-    dU2 = calc_dU2(EC, T1a, T1b, U2ab, "ovOV"...)
+    dU2 = calc_dU2(EC, T1a, T1b, U2ab, 'o','v','O','V')
+    Kmmoo = Array{Float64,4}(undef,norb,norb,nocca,noccb) 
     if EC.fd.uhf
-      int2 = integ2(EC.fd, :αβ)
-      @assert ndims(int2) == 4
+      int2 = integ2_os(EC.fd)
       # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``
-      @tensoropt Kmmoo[r,S,m,N] := int2[p,Q,r,S] * dU2[p,Q,m,N]
-      dU2 = nothing
+      @tensoropt Kmmoo[r,S,m,N] = int2[p,Q,r,S] * dU2[p,Q,m,N]
+      int2 = NOTHING4idx
     else
-      int2 = integ2(EC.fd)
-      # last two indices of integrals are stored as upper triangular 
-      @assert ndims(int2) == 3
+      int2_3idx = integ2_ss(EC.fd)
       # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``, ``r ≤ S``
-      @tensoropt Kxoo[x,m,N] := int2[p,Q,x] * dU2[p,Q,m,N]
-      Kmmoo = Array{Float64}(undef,norb,norb,nocca,noccb) 
+      @tensoropt Kxoo[x,m,N] := int2_3idx[p,Q,x] * dU2[p,Q,m,N]
       tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
       Kmmoo[tripp,:,:] = Kxoo
       # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{Qp}^{Sr}``, ``S ≤ r``
-      @tensoropt Kxoo[x,m,N] = int2[Q,p,x] * dU2[p,Q,m,N]
-      dU2 = nothing
+      @tensoropt Kxoo[x,m,N] = int2_3idx[Q,p,x] * dU2[p,Q,m,N]
       trippr = CartesianIndex.(reverse.(Tuple.(tripp)))
       @tensor Kmmoo[trippr,:,:][x,m,N] = Kxoo[x,m,N]
-      Kxoo = nothing
+      Kxoo = NOTHING3idx
+      int2_3idx = NOTHING3idx
     end
+    dU2 = NOTHING4idx
     t1 = print_time(EC, t1, "K_{mN}^{rS} = \\hat U_{mN}^{pQ} v_{pQ}^{rS}",2)
     # ``R^{eF}_{mN} += K_{mN}^{rS} δ_r^e δ_S^F``
     R2 = Kmmoo[SP['v'],SP['V'],:,:]
@@ -608,7 +582,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
       end 
     end
     t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
-    Kmmoo = nothing
+    Kmmoo = NOTHING4idx
   else
     error("non-kext Λ equations not implemented")
   end
@@ -676,13 +650,13 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     @tensoropt R1b[E,M] -= D2[b,d,M,K] * d_vOvV[b,K,d,E]
     t1 = print_time(EC, t1, "R_E^M -= D_{Md}^{bK} \\hat v_{bK}^{dE}",2)
   end
-  D2 = nothing
+  D2 = NOTHING4idx
   if length(U1a) > 0
     # ``R^{eF}_{mN} += Λ^a_m \hat v_{aN}^{eF}``
     @tensoropt R2[e,F,m,N] += U1a[a,m] * d_vOvV[a,N,e,F]
     t1 = print_time(EC, t1, "R^{eF}_{mN} += U^a_m \\hat v_{aN}^{eF}",2)
   end
-  d_vOvV = nothing
+  d_vOvV = NOTHING4idx
 
   if length(R1b) > 0
     # ``\bar D_{Ib}^{Aj} = Λ_{IK}^{AC} T^{jK}_{bC} + Λ_{kI}^{cA} T^{jk}_{bc}``
@@ -690,7 +664,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     T2a = load4idx(EC, "T_vvoo")
     @tensoropt D2[A,b,I,j] += U2ab[c,A,k,I] * T2a[c,b,k,j]
     t1 = print_time(EC, t1, "\\bar D_{Ib}^{Aj} = U_{IK}^{AC} T^{jK}_{bC} + U_{kI}^{cA} T^{jk}_{bc}",2)
-    T2a = nothing
+    T2a = NOTHING4idx
     # ``R^E_M -= \bar D_{Id}^{El} \hat v_{lM}^{dI}``
     @tensoropt R1b[E,M] -= D2[E,d,I,l] * d_oOvO[l,M,d,I]
     t1 = print_time(EC, t1, "R_E^M -= \\bar D_{Id}^{El} \\hat v_{lM}^{dI}",2)
@@ -716,14 +690,14 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     @tensoropt R1a[e,m] -= D2[B,D,m,k] * d_oVvV[k,B,e,D]
     t1 = print_time(EC, t1, "R_e^m -= D_{mD}^{Bk} \\hat v_{kB}^{eD}",2)
   end
-  D2 = nothing
+  D2 = NOTHING4idx
   if length(U1b) > 0
     # ``R^{eF}_{mN} += Λ^A_N \hat v_{mA}^{eF}``
     @tensoropt R2[e,F,m,N] += U1b[A,N] * d_oVvV[m,A,e,F]
     t1 = print_time(EC, t1, "R^{eF}_{mN} += U^A_N \\hat v_{mA}^{eF}",2)
   end
-  d_oVvV = nothing
-  T2ab = nothing
+  d_oVvV = NOTHING4idx
+  T2ab = NOTHING4idx
   if length(U1a) > 0
     # ``R^{eF}_{mN} -= Λ_{i}^{e} \hat v_{mN}^{iF}``
     @tensoropt R2[e,F,m,N] -= U1a[e,i] * d_oOoV[m,N,i,F]
@@ -732,7 +706,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     @tensoropt R2[e,F,m,N] += U1a[e,m] * dfbov[N,F]
     t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{m}^{e} \\hat f_{N}^{F}",2)
   end
-  d_oOoV = nothing
+  d_oOoV = NOTHING4idx
   if length(U1b) > 0
     # ``R^{eF}_{mN} -= Λ_{I}^{F} \hat v_{mN}^{eI}``
     @tensoropt R2[e,F,m,N] -= U1b[F,I] * d_oOvO[m,N,e,I]
@@ -741,7 +715,7 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
     @tensoropt R2[e,F,m,N] += U1b[F,N] * dfaov[m,e]
     t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{N}^{F} \\hat f_{m}^{e}",2)
   end
-  d_oOvO = nothing
+  d_oOvO = NOTHING4idx
   fac = dc ? 0.5 : 1.0
   # ``R^{eF}_{mN} += \hat x_c^e Λ_{mN}^{cF} - \hat x_m^k Λ_{kN}^{eF} + ...``
   x_vv = load2idx(EC, "vT_vv")
@@ -770,22 +744,22 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   # ``R^{eF}_{mN} += Λ_{iN}^{aF} \bar y_{am}^{ie}``
   vT_voov = load4idx(EC, "vT_voov")
   @tensoropt R2[e,F,m,N] += U2ab[a,F,i,N] * vT_voov[a,m,i,e]
-  vT_voov = nothing
+  vT_voov = NOTHING4idx
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{iN}^{aF} \\bar y_{am}^{ie}",2)
   # ``R^{eF}_{mN} += Λ_{mJ}^{eB} \bar y_{BN}^{JF}``
   vT_VOOV = load4idx(EC, "vT_VOOV")
   @tensoropt R2[e,F,m,N] += U2ab[e,B,m,J] * vT_VOOV[B,N,J,F]
-  vT_VOOV = nothing
+  vT_VOOV = NOTHING4idx
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{mJ}^{eB} \\bar y_{BN}^{JF}",2)
   # ``R^{eF}_{mN} += Λ_{im}^{ae} \bar y_{aN}^{iF}``
   vT_vOoV = load4idx(EC, "vT_vOoV")
   @tensoropt R2[e,F,m,N] += U2a[a,e,i,m] * vT_vOoV[a,N,i,F]
-  vT_vOoV = nothing
+  vT_vOoV = NOTHING4idx
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{im}^{ae} \\bar y_{aN}^{iF}",2)
   # ``R^{eF}_{mN} += Λ_{IN}^{AF} \bar y_{Am}^{Ie}``
   vT_VoOv = load4idx(EC, "vT_VoOv")
   @tensoropt R2[e,F,m,N] += U2b[A,F,I,N] * vT_VoOv[A,m,I,e]
-  vT_VoOv = nothing
+  vT_VoOv = NOTHING4idx
   t1 = print_time(EC, t1, "R^{eF}_{mN} += U_{IN}^{AF} \\bar y_{Am}^{Ie}",2)
   # ``R^{eF}_{mN} -= Λ_{mJ}^{aF} (\hat v_{aN}^{eJ} \red{- v_{kN}^{eD} T^{kJ}_{aD}})``
   int2 = load4idx(EC, "d_vOvO")
@@ -799,11 +773,11 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab
   int2 = load4idx(EC, "d_oVoV")
   if !dc
     @tensoropt int2[m,B,i,F] -= oOvV[m,L,c,F] * T2ab[c,B,i,L]
-    T2ab = nothing
+    T2ab = NOTHING4idx
   end
   @tensoropt R2[e,F,m,N] -= U2ab[e,B,i,N] * int2[m,B,i,F]
   t1 = print_time(EC, t1, "R^{eF}_{mN} -= U_{iN}^{eB} (\\hat v_{mB}^{iF} + v_{mL}^{cF} T^{iL}_{cB})",2)
-  int2 = nothing
+  int2 = NOTHING4idx
 
   return R1a, R1b, R2
 end
@@ -992,7 +966,7 @@ function calc_3ext_times_T2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, 
   int2 = load4idx(EC, "d_oVvV")
   @tensoropt vT_oVoO[m,B,i,J] := int2[m,B,c,D] * T2ab[c,D,i,J]
   save!(EC, "vT_oVoO", vT_oVoO)
-  int2 = vT_oVoO = nothing
+  int2 = vT_oVoO = NOTHING4idx
   calc_3ext_times_T2(EC, T2ab, 'O', 'V', 'o', 'v')
 end
 
@@ -1145,45 +1119,57 @@ end
 """
 function calc_lm_cc(EC::ECInfo, method::ECMethod)
   print_info(method_name(method)*" Lagrange multipliers")
-  LMs, exc_ranges = starting_amplitudes(EC, method)
-  singles, doubles, triples = exc_ranges[1:3]
-  
-  NormLM1, NormLM2 = lm_cc_iterations!(LMs, singles, doubles, triples, EC, method)
-
-  if method.exclevel[1] == :full
-    try2save_singles!(EC, LMs[singles]...; type="LM")
+  highest_full_exc = max_full_exc(method)
+  if highest_full_exc > 2
+    error("only implemented upto doubles")
   end
-  try2save_doubles!(EC, LMs[doubles]...; type="LM")
-  println()
-  output_norms(["LM1"=>sqrt(NormLM1), "LM2"=>sqrt(NormLM2)])
-  println()
+  if is_unrestricted(method) || has_prefix(method, "R")
+    if method.exclevel[1] == :full
+      T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
+      T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
+    else
+      T1a = zeros(0,0)
+      T1b = zeros(0,0)
+    end
+    if method.exclevel[2] != :full
+      error("No doubles is not implemented")
+    end
+    T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
+    T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
+    T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    lm_cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), EC, method)
+  else
+    if method.exclevel[1] == :full
+      T1 = read_starting_guess4amplitudes(EC, Val(1))
+    else
+      T1 = zeros(0,0)
+    end
+    if method.exclevel[2] != :full
+      error("No doubles is not implemented")
+    end
+    T2 = read_starting_guess4amplitudes(EC, Val(2))
+    lm_cc_iterations!((T1,), (T2,), EC, method)
+  end
 end
 
-function lm_cc_iterations!(LMs, singles, doubles, triples, EC::ECInfo, method::ECMethod)
+function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC" || last(method.theory,2) == "DC")
-  if is_unrestricted(method)
-    @assert (length(singles) == 2) && (length(doubles) == 3) && (length(triples) == 4)
+  if is_unrestricted(method) || has_prefix(method, "R")
+    @assert (length(LMs1) == 2) && (length(LMs2) == 3)
   else
-    @assert (length(singles) == 1) && (length(doubles) == 1) && (length(triples) == 1)
+    @assert (length(LMs1) == 1) && (length(LMs2) == 1) 
   end
+  LMs = (LMs1..., LMs2...)
   # dress integrals
   t1 = time_ns()
-  calc_dressed_ints(EC, LMs[singles]...; calc_d_vovv=true)
+  calc_dressed_ints(EC, LMs1...; calc_d_vovv=true)
   t1 = print_time(EC, t1, "dressing integrals",2)
-  calc_vT2_intermediates(EC, LMs[doubles]...; dc)
+  calc_vT2_intermediates(EC, LMs2...; dc)
 
   diis = Diis(EC)
-  transform_amplitudes2lagrange_multipliers!(LMs, (singles,doubles,triples))
+  transform_amplitudes2lagrange_multipliers!(LMs1, LMs2)
 
   do_sing = (method.exclevel[1] == :full)
-  # if !do_sing
-  #   if is_unrestricted(method)
-  #     LMs[singles[1]] = Float64[]
-  #     LMs[singles[2]] = Float64[]
-  #   else
-  #     LMs[singles[1]] = Float64[]
-  #   end
-  # end
 
   NormR1 = 0.0
   NormLM1::Float64 = 0.0
@@ -1195,20 +1181,23 @@ function lm_cc_iterations!(LMs, singles, doubles, triples, EC::ECInfo, method::E
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     Res = calc_ccsd_vector_times_Jacobian(EC, LMs...; dc)
+    @assert typeof(Res) == typeof(LMs)
+    Res1 = Res[1:length(LMs1)]
+    Res2 = Res[length(LMs1)+1:end]
     t1 = print_time(EC, t1, "residual", 2)
-    update_doubles!(EC, LMs[doubles]..., Res[doubles]...)
-    NormLM2 = calc_contra_doubles_norm(LMs[doubles]...)
-    NormR2 = calc_contra_doubles_norm(Res[doubles]...)
+    update_doubles!(EC, LMs2..., Res2...)
+    NormLM2 = calc_contra_doubles_norm(LMs2...)
+    NormR2 = calc_contra_doubles_norm(Res2...)
     if do_sing
-      NormLM1 = calc_contra_singles_norm(LMs[singles]...)
-      NormR1 = calc_contra_singles_norm(Res[singles]...)
-      update_singles!(EC, LMs[singles]..., Res[singles]...)
+      NormLM1 = calc_contra_singles_norm(LMs1...)
+      NormR1 = calc_contra_singles_norm(Res1...)
+      update_singles!(EC, LMs1..., Res1...)
     end
     perform!(diis, LMs, Res)
     if do_sing
-      save_current_singles(EC, LMs[singles]..., prefix="U")
+      save_current_singles(EC, LMs1..., prefix="U")
     end
-    save_current_doubles(EC, LMs[doubles]..., prefix="U")
+    save_current_doubles(EC, LMs2..., prefix="U")
     ΛTNorm = calc_correlation_norm(EC, LMs...)
     NormR = NormR1 + NormR2
     NormLM = 1.0 + NormLM1 + NormLM2
@@ -1221,5 +1210,12 @@ function lm_cc_iterations!(LMs, singles, doubles, triples, EC::ECInfo, method::E
   if !converged
     println("WARNING: CC-LM iterations did not converge!")
   end
-  return NormLM1, NormLM2
+  if do_sing
+    try2save_singles!(EC, LMs1...; type="LM")
+  end
+  try2save_doubles!(EC, LMs2...; type="LM")
+  println()
+  output_norms(["LM1"=>sqrt(NormLM1), "LM2"=>sqrt(NormLM2)])
+  println()
+  return
 end

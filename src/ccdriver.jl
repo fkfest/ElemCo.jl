@@ -35,6 +35,7 @@ export ccdriver, dfccdriver
   Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
 """
 function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
+  t0 = time_ns()
   save_occs = check_occs(EC, occa, occb)
   check_fcidump(EC, fcidump)
   setup_space_fd!(EC)
