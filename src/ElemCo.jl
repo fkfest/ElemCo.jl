@@ -57,6 +57,7 @@ using Printf
 using Dates
 #BLAS.set_num_threads(1)
 using TensorOperations
+using PrecompileTools
 using .Utils
 using .ECInfos
 using .QMTensors
@@ -716,6 +717,20 @@ macro export_molden(filename)
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
   end
+end
+
+@setup_workload begin
+  savestd = stdout
+  redirect_stdout(devnull)
+  geometry = "H 0.0 0.0 0.0
+              H 0.0 0.0 1.0"
+  basis = "vdz"
+  @compile_workload begin
+    @dfhf
+    @cc dcsd
+    @cc uccsd
+  end
+  redirect_stdout(savestd)
 end
 
 end #module
