@@ -81,10 +81,10 @@ include("cc_lagrange.jl")
 
 include("cc_tests.jl")
 
-include("algo/ccsdt_singles.jl")
-include("algo/ccsdt_doubles.jl")
-include("algo/ccsdt_triples.jl")
-include("algo/dcccsdt_triples.jl")
+include("../algo/ccsdt_singles.jl")
+include("../algo/ccsdt_doubles.jl")
+include("../algo/ccsdt_triples.jl")
+include("../algo/dcccsdt_triples.jl")
 
 """
     calc_singles_energy(EC::ECInfo, T1; fock_only=false)
