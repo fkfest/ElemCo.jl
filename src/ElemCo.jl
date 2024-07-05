@@ -729,6 +729,7 @@ end
     @dfhf
     @cc dcsd
     @cc uccsd
+    @dfcc svd-dcsd
   end
   redirect_stdout(savestd)
 end

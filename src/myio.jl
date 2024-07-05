@@ -60,18 +60,24 @@ function miosave(fname::String,arrs::AbstractArray{T}...) where T
 end
 
 """
-    mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
+    mioload(fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
 
   Type-stable load arrays from a file `fname`.
 
   Return an array of arrays. All arrays have the same type `T` and have `N` dimensions.
   For `N = 1`, return vectors even if the original array was a multi-dimensional array.
+  If `skip_error` is set to true, the function will not throw an error if
+  the type of the data/number of dimensions in the file does not match `T`/`N` 
+  and an array with one empty Array{T,N} will be returned.
 """
-function mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
+function mioload(fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
   io = open(fname)
   # type of numbers
   itype = read(io, Int)
   if itype > length(Types)
+    if skip_error
+      return Array{T,N}[Array{T,N}(undef, ntuple(i->0, Val(N)))]
+    end
     error("Inconsistency in reading type of data!")
   end
   @assert T == Types[itype] "Inconsistency in reading type of data!"
@@ -88,7 +94,12 @@ function mioload(fname::String, ::Val{N}, T::Type=Float64) where {N}
       end
       append!(dims, len)
     else
-      @assert N == ndim "Inconsistency in reading dimensions of data! Expected $N, got $ndim."
+      if ndim != N
+        if skip_error
+          return Array{T,N}[Array{T,N}(undef, ntuple(i->0, Val(N)))]
+        end
+        error("Inconsistency in reading dimensions of data! Expected $N, got $ndim.")
+      end
       for idim in 1:ndim
         append!(dims, read(io, Int))
       end

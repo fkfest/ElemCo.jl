@@ -100,53 +100,57 @@ end
   Returns total energy, SS, OS and Openshell (0.0) contributions
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
-function calc_deco_hylleraas(EC::ECInfo, T1, T2, R1, R2)
-  SP = EC.space
-  full_t2 = true
-  if ndims(T2) == 2
-    full_t2 = false
-  elseif ndims(T2) != 4
-    error("Wrong dimensionality of T2!")
+function calc_deco_hylleraas(EC::ECInfo, T1, T2::Array{Float64,4}, R1, R2::Array{Float64,4}) 
+  ovL = load3idx(EC, "d_ovL")
+  @tensoropt begin
+    int2[a,b,i,j] := R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L]
+    ET2d = T2[a,b,i,j] * int2[a,b,i,j]
+    ET2ex = T2[a,b,j,i] * int2[a,b,i,j]
   end
-  if full_t2
-    ovL = load3idx(EC, "d_ovL")
-    @tensoropt begin
-      int2[a,b,i,j] := R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L]
-      ET2d = T2[a,b,i,j] * int2[a,b,i,j]
-      ET2ex = T2[a,b,j,i] * int2[a,b,i,j]
-    end
-    ET2SS = ET2d - ET2ex
-    ET2OS = ET2d
-    ET2 = ET2SS + ET2OS
-    ovL = nothing
-  else
-    ssvxx, osvxx = get_ssv_osvˣˣ(EC)
-    @tensoropt begin
-      ET2OS = T2[X,Y] * (osvxx[X,Y] + R2[X,Y])
-      ET2SS = T2[Y,X] * (ssvxx[X,Y] + R2[X,Y])
-    end
-    UvoX = load3idx(EC, "C_voX")
-    @tensoropt ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
-    UvoX = nothing
-    ET2 = ET2SS + ET2OS
-  end
+  ET2SS = ET2d - ET2ex
+  ET2OS = ET2d
+  ET2 = ET2SS + ET2OS
+  ovL = nothing
   if length(T1) > 0
-    dfockc_ov = load2idx(EC, "dfc_ov")
-    dfocke_ov = load2idx(EC, "dfe_ov")
-    @tensoropt begin
-      ET1d = T1[a,i] * dfockc_ov[i,a] 
-      ET1ex = T1[a,i] * dfocke_ov[i,a]
-    end
-    ET1SS = ET1d - ET1ex
-    ET1OS = ET1d
-    ET1 = ET1SS + ET1OS
-    fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
-    @tensoropt ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
+    ET1, ET1SS, ET1OS = calc_deco_hylleraas_singles(EC, T1, R1)
     ET2 += ET1
     ET2SS += ET1SS
     ET2OS += ET1OS
   end
   return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
+end
+function calc_deco_hylleraas(EC::ECInfo, T1, T2::Matrix{Float64}, R1, R2::Matrix{Float64})
+  ssvxx, osvxx = get_ssv_osvˣˣ(EC)
+  @tensoropt begin
+    ET2OS = T2[X,Y] * (osvxx[X,Y] + R2[X,Y])
+    ET2SS = T2[Y,X] * (ssvxx[X,Y] + R2[X,Y])
+  end
+  UvoX = load3idx(EC, "C_voX")
+  @tensoropt ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
+  UvoX = nothing
+  ET2 = ET2SS + ET2OS
+  if length(T1) > 0
+    ET1, ET1SS, ET1OS = calc_deco_hylleraas_singles(EC, T1, R1)
+    ET2 += ET1
+    ET2SS += ET1SS
+    ET2OS += ET1OS
+  end
+  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
+end
+function calc_deco_hylleraas_singles(EC::ECInfo, T1, R1)
+  SP = EC.space
+  dfockc_ov = load2idx(EC, "dfc_ov")
+  dfocke_ov = load2idx(EC, "dfe_ov")
+  @tensoropt begin
+    ET1d = T1[a,i] * dfockc_ov[i,a] 
+    ET1ex = T1[a,i] * dfocke_ov[i,a]
+  end
+  ET1SS = ET1d - ET1ex
+  ET1OS = ET1d
+  ET1 = ET1SS + ET1OS
+  fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
+  @tensoropt ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
+  return ET1, ET1SS, ET1OS
 end
 
 """
@@ -159,20 +163,17 @@ end
   Returns total energy, SS, OS and Openshell (0.0) contributions
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
-function calc_deco_doubles_energy(EC::ECInfo, T2)
-  if ndims(T2) == 4
-    return calc_df_doubles_energy(EC, T2)
-  elseif ndims(T2) == 2
-    ssvxx, osvxx = get_ssv_osvˣˣ(EC)
-    @tensoropt begin
-      ET2OS = T2[X,Y] * osvxx[X,Y] 
-      ET2SS = T2[Y,X] * ssvxx[X,Y]
-    end
-    ET2 = ET2SS + ET2OS
-    return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
-  else
-    error("Wrong dimensionality of T2: ", ndims(T2))
+function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,4})
+  return calc_df_doubles_energy(EC, T2)
+end
+function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,2})
+  ssvxx, osvxx = get_ssv_osvˣˣ(EC)
+  @tensoropt begin
+    ET2OS = T2[X,Y] * osvxx[X,Y] 
+    ET2SS = T2[Y,X] * ssvxx[X,Y]
   end
+  ET2 = ET2SS + ET2OS
+  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
 
 """
@@ -481,7 +482,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
     # save!(EC, "T_XX", zeros(size(v_XX)))
     t1 = print_time(EC, t1, "starting guess T_{XY}", 2)
   end
-  return (E=0.0,)
+  return OutDict("E"=>0.0)
 end
 
 """
@@ -699,11 +700,11 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   if length(T1) > 0
     R1 = dfock[SP['v'],SP['o']]
   else
-    R1 = Float64[]
+    R1 = zero(T1)
   end
-  R2 = zeros(size(T2))
+  R2 = zero(T2)
   if full_t2
-    dR2 = zeros(size(dT2))
+    dR2 = zero(dT2)
   else
     dR2 = R2
   end
@@ -912,19 +913,19 @@ end
 """
 function calc_svd_dc(EC::ECInfo, method::ECMethod)
   t1 = time_ns()
-  print_info(method_name(method), additional_info(EC))
+  methodname = method_name(method)
+  print_info(methodname, additional_info(EC))
   if method.theory != "DC"
     error("Only DC methods are supported in SVD!")
   end
-  do_sing = (method.exclevel[1] == :full)
 
   # decomposition and starting guess
   fullEMP2 = calc_doubles_decomposition(EC)
   t1 = print_time(EC, t1, "doubles decomposition", 2)
-  if do_sing
+  if method.exclevel[1] == :full
     T1 = read_starting_guess4amplitudes(EC, Val(1))
   else
-    T1 = Float64[]
+    T1 = zeros(0,0)
   end
   save_pseudodressed_3idx(EC)
   save_pseudo_dress_df_fock(EC)
@@ -934,25 +935,34 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   gen_vₓˣᴸ(EC)
   t1 = print_time(EC, t1, "intermediates", 2)
 
+  if EC.options.cc.use_full_t2
+    T2 = load4idx(EC,"T_vvoo")
+    return svd_dc_iterations!(T1, T2, EC, methodname)
+  else
+    T2 = load2idx(EC,"T_XX")
+    Eh = svd_dc_iterations!(T1, T2, EC, methodname)
+    # ΔMP2 correction
+    push!(Eh, "E-correction"=>(fullEMP2["E"] - Eh["SVD-MP2"],"ΔMP2 correction"))
+    return Eh
+  end
+end
+
+function svd_dc_iterations!(T1, T2, EC::ECInfo, methodname)
+  t1 = time_ns()
   diis = Diis(EC)
 
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
-  R1 = Float64[]
-  Eh = 0.0
-  t0 = time_ns()
-  if EC.options.cc.use_full_t2
-    T2 = load4idx(EC,"T_vvoo")
-  else
-    T2 = load2idx(EC,"T_XX")
-  end
+  R1 = zeros(size(T1))
+  Eh = OutDict()
   # calc starting guess energy 
   truncEMP2 = calc_deco_doubles_energy(EC, T2)
   t1 = print_time(EC, t1, "calc starting guess energy", 2)
   println("Starting guess energy: ", truncEMP2["E"])
   println()
   converged = false
+  t0 = time_ns()
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
@@ -964,18 +974,18 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
     t1 = print_time(EC,t1,"calc hylleraas",2)
     NormT2 = calc_deco_doubles_norm(T2)
     NormR2 = calc_deco_doubles_norm(R2)
-    if do_sing
+    if length(T1) > 0
       NormT1 = calc_singles_norm(T1)
       NormR1 = calc_singles_norm(R1)
       T1 += update_singles(EC, R1)
     end
     T2 += update_deco_doubles(EC, R2)
     t1 = print_time(EC,t1,"update amplitudes",2)
-    perform!(diis, [T1,T2], [R1,R2])
+    perform!(diis, (T1,T2), (R1,R2))
     t1 = print_time(EC,t1,"DIIS",2)
     En2 = calc_deco_doubles_energy(EC, T2)
     En = En2["E"]
-    if do_sing
+    if length(T1) > 0
       En1 = calc_singles_energy_using_dfock(EC, T1)
       En += En1["E"]
     end
@@ -996,10 +1006,7 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   println()
   output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
   println()
-  if !EC.options.cc.use_full_t2
-    # ΔMP2 correction
-    push!(Eh, "E-correction"=>(fullEMP2["E"] - truncEMP2["E"],"ΔMP2 correction"))
-  end
+  Eh["SVD-MP2"] = truncEMP2["E"]
   return Eh
 end
 

@@ -140,7 +140,7 @@ function generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix)
   save!(EC, "e_m", eps)
   save!(EC, "e_M", eps)
   occ = EC.space['o']
-  hsmall = cMO[1]' * load(EC,"h_AA") * cMO[1]
+  hsmall = cMO[1]' * load2idx(EC,"h_AA") * cMO[1]
   EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.system)
   # calculate 3-index integrals
   generate_3idx_integrals(EC, cMO, "mpfit")

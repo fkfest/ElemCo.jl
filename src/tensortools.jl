@@ -38,37 +38,39 @@ function load(EC::ECInfo, fname::String)
 end
 
 """
-    load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64 ) where {N}
+    load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
 
   Type-stable load array from file `fname` in EC.scr directory.
 
   The type `T` and number of dimensions `N` are given explicitly.
+  If `skip_error` is true, return empty `Array{T,N}` if the dimension/type is wrong.
 """
-function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T)[1]
+function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)[1]
 end
 
 """
-    load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64 ) where {N}
+    load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
 
   Type-stable load arrays from file `fname` in EC.scr directory.
 
   The type `T` and number of dimensions `N` are given explicitly (have to be the same for all arrays).
   Return an array of arrays.
+  If `skip_error` is true, return empty `Array{T,N}[Array{T,N}()]` if the dimension/type is wrong.
 """
-function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T)
+function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)
 end
 
 for N in 1:6
   loadN = Symbol("load$(N)idx")
   loadNall = Symbol("load$(N)idx_all")
   @eval begin
-    function $loadN(EC::ECInfo, fname::String, T::Type=Float64)
-      return load(EC, fname, Val($N), T)
+    function $loadN(EC::ECInfo, fname::String, T::Type=Float64; skip_error=false)
+      return load(EC, fname, Val($N), T; skip_error)
     end
-    function $loadNall(EC::ECInfo, fname::String, T::Type=Float64)
-      return load_all(EC, fname, Val($N), T)
+    function $loadNall(EC::ECInfo, fname::String, T::Type=Float64; skip_error=false)
+      return load_all(EC, fname, Val($N), T; skip_error)
     end
   end
 end

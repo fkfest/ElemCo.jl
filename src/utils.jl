@@ -63,7 +63,7 @@ const OutDict = ODDict{String, Float64}
 for N in 1:6
   NOTHINGN = Symbol("NOTHING$(N)idx")
   @eval begin
-    const $NOTHINGN = Array{Float64,$N}(undef, ntuple(i->0, $N))
+    const $NOTHINGN = Array{Float64,$N}(undef, ntuple(i->0, Val($N)))
   end
 end
 

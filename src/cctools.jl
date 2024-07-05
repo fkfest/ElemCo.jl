@@ -568,12 +568,12 @@ function save_or_start_file(EC::ECInfo, type, excitation_level, save=true)
 end
 
 """
-    try2save_amps!(EC::ECInfo, excitation_level, amps...; type="T")
+    try2save_amps!(EC::ECInfo, ::Val{excitation_level}, amps...; type="T")
 
   Save amplitudes (type="T") or Lagrange multipliers (type="LM") 
   to file `EC.options.cc.save[_lm]*"_excitation_level"`.
 """
-function try2save_amps!(EC::ECInfo, excitation_level, amps...; type="T")
+function try2save_amps!(EC::ECInfo, ::Val{excitation_level}, amps...; type="T") where excitation_level
   mainfilename, descr = save_or_start_file(EC, type, excitation_level)
   if mainfilename != ""
     filename = mainfilename*"_$excitation_level"
@@ -583,21 +583,21 @@ function try2save_amps!(EC::ECInfo, excitation_level, amps...; type="T")
 end
 
 """
-    try2start_amps(EC::ECInfo, excitation_level; type="T")
+    try2start_amps(EC::ECInfo, ::Val{excitation_level}; type="T")
 
   Read amplitudes (type="T") or Lagrange multipliers (type="LM") 
   from file `EC.options.cc.start[_lm]*"_excitation_level"`.
 """
-function try2start_amps(EC::ECInfo, excitation_level; type="T")
+function try2start_amps(EC::ECInfo, ::Val{excitation_level}; type="T") where excitation_level
   mainfilename, descr = save_or_start_file(EC, type, excitation_level, false)
   if mainfilename != ""
     filename = mainfilename*"_$excitation_level"
     if file_exists(EC, filename)
       println("Read $descr from file $filename")
-      return load(EC, filename)
+      return load(EC, filename, Val(excitation_level*2), skip_error=true)
     end
   end
-  return []
+  return Array{Float64,excitation_level*2}(undef, ntuple(i->0, Val(excitation_level*2)))
 end
 
 """
@@ -607,7 +607,7 @@ end
   to file `EC.options.cc.save[_lm]*"_1"`.
 """
 function try2save_singles!(EC::ECInfo, singles...; type="T")
-  try2save_amps!(EC, 1, singles...; type)
+  try2save_amps!(EC, Val(1), singles...; type)
 end
 
 """
@@ -617,7 +617,7 @@ end
   to file `EC.options.cc.save[_lm]*"_2"`.
 """
 function try2save_doubles!(EC::ECInfo, doubles...; type="T")
-  try2save_amps!(EC, 2, doubles...; type)
+  try2save_amps!(EC, Val(2), doubles...; type)
 end
 
 """
@@ -627,7 +627,7 @@ end
   from file `EC.options.cc.start[_lm]*"_1"`.
 """
 function try2start_singles(EC::ECInfo; type="T")
-  return try2start_amps(EC, 1; type)
+  return try2start_amps(EC, Val(1); type)
 end
 
 """
@@ -637,7 +637,7 @@ end
   from file `EC.options.cc.start[_lm]*"_2"`.
 """
 function try2start_doubles(EC::ECInfo; type="T")
-  return try2start_amps(EC, 2; type)
+  return try2start_amps(EC, Val(2); type)
 end
 
 """
