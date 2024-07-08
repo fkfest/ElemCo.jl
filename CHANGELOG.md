@@ -25,6 +25,7 @@
 * CCSDT and DC-CCSDT closed-shell implementations generated with Quantwo.
 * `QMTensors.SpinMatrix` struct for one-electron matrices (e.g., MO coefficients)
 * An ordered descriptive dictionary for energy outputs (`ODDict`) has been implemented. Each key-value entry can have a description.
+* `DIIS.perform!` now accepts a tuple of functions to calculate cusomized dot-products (e.g., involving contravariants etc).
 
 ### Fixed
 
