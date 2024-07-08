@@ -9,8 +9,10 @@ using AtomsBase
 using Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
+using ..ElemCo.QMTensors
 using ..ElemCo.MSystem
 using ..ElemCo.BasisSets
+using ..ElemCo.Wavefunctions
 using ..ElemCo.OrbTools
 
 export is_molden_file, write_molden_orbitals
@@ -104,15 +106,15 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       maxl > 5 && println(f, "[13I]")
     end
     #TODO use correct energies and occupations
-    if is_unrestricted_MO(orbs)
+    if is_restricted(orbs)
+      energies = zeros(size(orbs,2))
+      occupation = zeros(size(orbs,2))
+      printmos(f, orbs, order, energies, occupation)
+    else
       energies = zeros(size(orbs[1],2))
       occupation = zeros(size(orbs[1],2))
       printmos(f, orbs[1], order, energies, occupation)
       printmos(f, orbs[2], order, energies, occupation, "Beta")
-    else
-      energies = zeros(size(orbs,2))
-      occupation = zeros(size(orbs,2))
-      printmos(f, orbs, order, energies, occupation)
     end
   end
 end

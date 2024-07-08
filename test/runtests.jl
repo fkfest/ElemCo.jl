@@ -21,7 +21,7 @@ end
 # testset is the name of the test set
 # tests is a list of test file names (without the .jl extension)
 TESTS = [
-("FCIDUMP", ["h2o", "h2o_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]),
+("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]),
 ("CC", ["h2-"]),
 ("DF", ["df_hf", "df_uhf", "df_mcscf"]),
 ("SVD", ["svd_dc"]),

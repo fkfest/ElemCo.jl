@@ -18,7 +18,7 @@ using ..ElemCo.MSystem
 using ..ElemCo.AbstractEC
 
 export BasisCenter, BasisSet
-export BasisContraction, AbstractAngularShell, SphericalAngularShell, CartesianAngularShell
+export BasisContraction, AngularShell
 export shell_range, center_range, is_cartesian, combine
 export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao
 export normalize_contraction
@@ -50,20 +50,22 @@ struct BasisSet
   center_ranges::Vector{UnitRange{Int}}
   """ angular shell ranges for each basis sets in a combined set."""
   shell_ranges::Vector{UnitRange{Int}}
-  """ infos for integral library."""
-  lib::AbstractILib
+  """ cartesian basis set """
+  cartesian::Bool
+  """ infos for integral library (at the moment only libcint5 is possible)."""
+  lib::ILibcint5
 end
 
-function BasisSet(centers::Vector{BasisCenter}, lib::AbstractILib)
+function BasisSet(centers::Vector{BasisCenter}, cartesian::Bool, lib::AbstractILib)
   shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centers) for j in 1:n_angularshells(c)]
   center_ranges = [1:length(centers)]
   shell_ranges = [1:length(shell_indices)]
-  return BasisSet(centers, shell_indices, center_ranges, shell_ranges, lib)
+  return BasisSet(centers, shell_indices, center_ranges, shell_ranges, cartesian, lib)
 end
 
-function BasisSet(centers::Vector{BasisCenter}, center_ranges, shell_ranges, lib::AbstractILib)
+function BasisSet(centers::Vector{BasisCenter}, center_ranges, shell_ranges, cartesian::Bool, lib::AbstractILib)
   shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centers) for j in 1:n_angularshells(c)]
-  return BasisSet(centers, shell_indices, center_ranges, shell_ranges, lib)
+  return BasisSet(centers, shell_indices, center_ranges, shell_ranges, cartesian, lib)
 end
 
 """
@@ -123,7 +125,8 @@ function combine(bs1::BasisSet, bs2::BasisSet)
   set_id!(centers, 1)
   center_ranges = vcat(bs1.center_ranges, [r .+ length(bs1.centers) for r in bs2.center_ranges])
   shell_ranges = vcat(bs1.shell_ranges, [r .+ length(bs1.shell_indices) for r in bs2.shell_ranges])
-  return BasisSet(centers, center_ranges, shell_ranges, ILibcint5(centers))
+  cartesian = bs1.cartesian && bs2.cartesian
+  return BasisSet(centers, center_ranges, shell_ranges, cartesian, ILibcint5(centers, cartesian))
 end
 
 function Base.show(io::IO, bs::BasisSet)
@@ -157,7 +160,7 @@ center_range(bs::BasisSet, i::Int=1) = bs.center_ranges[i]
 
   Check if the basis set is Cartesian.
 """
-is_cartesian(bs::BasisSet) = bs[1] isa CartesianAngularShell
+is_cartesian(bs::BasisSet) = bs.cartesian
 
 """
     basis_name(atoms, type="ao")
@@ -183,7 +186,7 @@ end
   If `basisset` is provided, it is used as the basis set.
 """
 function generate_basis(EC::AbstractECInfo, type="ao"; basisset::AbstractString="")
-  return generate_basis(EC.system, type; EC.options.int.cartesian, basisset)
+  return generate_basis(EC.system, type; cartesian=EC.options.int.cartesian, basisset=basisset)
 end
 
 """
@@ -195,7 +198,7 @@ end
   `type` can be `"ao"`, `"mpfit"` or `"jkfit"`.
   If `basisset` is provided, it is used as the basis set.
 """
-function generate_basis(ms::AbstractSystem, type="ao"; cartesian=false, basisset::AbstractString="")
+function generate_basis(ms::AbstractSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
   array_of_centers = BasisCenter[]
   id = 1
   for atom in ms
@@ -207,11 +210,11 @@ function generate_basis(ms::AbstractSystem, type="ao"; cartesian=false, basisset
         basisname = guess_basis_name(atom, type)
       end
     end
-    basisfunctions = parse_basis(basisname, atom; cartesian)
+    basisfunctions = parse_basis(basisname, atom)
     id = set_id!(basisfunctions, id)
     push!(array_of_centers, BasisCenter(atom, basisname, basisfunctions))
   end
-  return BasisSet(array_of_centers, ILibcint5(array_of_centers))
+  return BasisSet(array_of_centers, cartesian, ILibcint5(array_of_centers, cartesian))
 end
 
 """
@@ -256,8 +259,8 @@ n_primitives(atoms) = sum(n_primitives, atoms)
 
   Return the number of atomic orbitals in the basis set.
 """
-n_ao(atoms::BasisSet) = sum(n_ao, atoms.centers)
-n_ao(atoms) = sum(n_ao, atoms)
+n_ao(atoms::BasisSet) = sum(x->n_ao(x, atoms.cartesian), atoms.centers)
+n_ao(atoms, cartesian) = sum(x->n_ao(x, cartesian), atoms)
 
 
 """
@@ -268,19 +271,19 @@ n_ao(atoms) = sum(n_ao, atoms)
   For a combined basis set, use `ibas` to select the basis set.
 """
 function ao_list(basis::BasisSet, ibas=1)
-  out = AbstractAtomicOrbital[]
   if is_cartesian(basis)
     AtomicOrbital = CartesianAtomicOrbital
   else
     AtomicOrbital = SphericalAtomicOrbital
   end
+  out = AtomicOrbital[]
   nnumber = zeros(Int, length(SUBSHELL2L))
   for ic in center_range(basis, ibas)
     nnumber .= 0
     for ash in basis.centers[ic].shells
       for (isubshell, con) in enumerate(ash.subshells)
         nnumber[ash.l+1] += 1
-        for iao in 1:n_ao4subshell(ash)
+        for iao in 1:n_ao4subshell(ash, basis.cartesian)
           ml = iao - 1 - ash.l
           push!(out, AtomicOrbital(ic, ash.id, isubshell, nnumber[ash.l+1], ash.l, ml))
         end

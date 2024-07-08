@@ -5,38 +5,43 @@
 """
 module ElemCo
 
-include("abstractEC.jl")
-include("utils.jl")
-include("constants.jl")
-include("myio.jl")
-include("mnpy.jl")
-include("dump.jl")
+include("infos/abstractEC.jl")
+include("tools/descdict.jl")
+include("tools/outputs.jl")
+include("tools/utils.jl")
+include("tools/constants.jl")
+include("tools/myio.jl")
+include("tools/mnpy.jl")
+include("tools/qmtensors.jl")
+include("integrals/dump.jl")
 include("system/elements.jl")
 include("system/msystem.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
-include("ecinfos.jl")
-include("ecmethods.jl")
-include("tensortools.jl")
-include("diis.jl")
-include("orbtools.jl")
-include("fockfactory.jl")
-include("dumptools.jl")
-include("dftools.jl")
-include("decomptools.jl")
-include("cctools.jl")
-include("dfcc.jl")
-include("cc.jl")
-include("dmrg.jl")
-include("ccdriver.jl")
+include("system/wavefunctions.jl")
 
-include("bohf.jl")
+include("infos/ecinfos.jl")
+include("infos/ecmethods.jl")
+include("tools/tensortools.jl")
+include("solvers/diis.jl")
+include("scf/orbtools.jl")
+include("scf/fockfactory.jl")
+include("integrals/dumptools.jl")
+include("integrals/dftools.jl")
+include("integrals/decomptools.jl")
+include("cc/cctools.jl")
+include("cc/dfcc.jl")
+include("cc/cc.jl")
+include("dmrg/dmrg.jl")
+include("cc/ccdriver.jl")
 
-include("dfhf.jl")
-include("dfdump.jl")
+include("scf/bohf.jl")
 
-include("dfmcscf.jl")
+include("scf/dfhf.jl")
+include("integrals/dfdump.jl")
+
+include("scf/dfmcscf.jl")
 
 include("interfaces/molpro.jl")
 include("interfaces/molden.jl")
@@ -52,8 +57,11 @@ using Printf
 using Dates
 #BLAS.set_num_threads(1)
 using TensorOperations
+using PrecompileTools
 using .Utils
 using .ECInfos
+using .QMTensors
+using .Wavefunctions
 using .ECMethods
 using .TensorTools
 using .FockFactory
@@ -61,7 +69,7 @@ using .CCTools
 using .CoupledCluster
 using .CCDriver
 using .DFCoupledCluster
-using .FciDump
+using .FciDumps
 using .DumpTools
 using .OrbTools
 using .Elements
@@ -81,6 +89,10 @@ export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
+# from Utils
+export last_energy
+# from DescDict
+export ODDict
 
 const __VERSION__ = "0.12.0+"
 
@@ -705,6 +717,21 @@ macro export_molden(filename)
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
   end
+end
+
+@setup_workload begin
+  savestd = stdout
+  redirect_stdout(devnull)
+  geometry = "H 0.0 0.0 0.0
+              H 0.0 0.0 1.0"
+  basis = "vdz"
+  @compile_workload begin
+    @dfhf
+    @cc dcsd
+    @cc uccsd
+    @dfcc svd-dcsd
+  end
+  redirect_stdout(savestd)
 end
 
 end #module

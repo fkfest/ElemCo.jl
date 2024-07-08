@@ -30,7 +30,7 @@ ints2
 ```@docs
 sqrtinvchol
 invchol
-rotate_eigenvectors_to_real!
+rotate_eigenvectors_to_real
 ```
 
 ## Other exported functions
@@ -39,7 +39,7 @@ rotate_eigenvectors_to_real!
 Modules = [TensorTools]
 Private = false
 Order = [:function]
-Filter = t -> t ∉ [ElemCo.save!, ElemCo.load, ElemCo.mmap, ElemCo.newmmap, ElemCo.closemmap, ElemCo.ints1, ElemCo.ints2, ElemCo.sqrtinvchol, ElemCo.invchol, ElemCo.rotate_eigenvectors_to_real! ]
+Filter = t -> t ∉ [ElemCo.save!, ElemCo.load, ElemCo.mmap, ElemCo.newmmap, ElemCo.closemmap, ElemCo.ints1, ElemCo.ints2, ElemCo.sqrtinvchol, ElemCo.invchol, ElemCo.rotate_eigenvectors_to_real ]
 ```
 
 ## Internal functions

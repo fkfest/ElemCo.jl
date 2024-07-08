@@ -4,7 +4,7 @@ using ElemCo
 epsilon    =   1.e-6
 EMCSCF_test   = -75.39523234954376
 
-geometry="h2o.xyz"
+geometry=joinpath(@__DIR__,"files","h2o.xyz")
 
 basis = Dict("ao"=>"cc-pVDZ",
             "jkfit"=>"cc-pvtz-jkfit",

@@ -23,11 +23,11 @@ end
 Base.show(io::IO, ilib::ILibcint5) = print(io, "libcint v5")
 
 """
-    ILibcint5(atoms::Vector{BasisCenter})
+    ILibcint5(atoms::Vector{BasisCenter}, cartesian::Bool)
 
   Prepare the infos for Libcint5 integral library.
 """
-function ILibcint5(atoms::Vector{BasisCenter})
+function ILibcint5(atoms::Vector{BasisCenter}, cartesian::Bool)
   ATM_SLOTS = 6
   BAS_SLOTS = 8
 
@@ -79,7 +79,7 @@ function ILibcint5(atoms::Vector{BasisCenter})
     off += nprim
     # Seventh is the env index address for contraction coeff
     lc_bas[7 + BAS_SLOTS*ib] = off
-    env[off+1:off+ncoefs] .= coefficients_1mat(ashell)[:]
+    env[off+1:off+ncoefs] .= coefficients_1mat(ashell, cartesian)[:]
     off += ncoefs
     # Eigth, nothing
     ib += 1

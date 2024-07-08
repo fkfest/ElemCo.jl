@@ -4,15 +4,28 @@
 
 ### Breaking
 
+* `DIIS.perform` has been changed to `DIIS.perform!` in order to allow to read the vectors and residuals as `Vector{}`.
+* The signature of `newmmap` function has changed (the type specification is now the last argument and defaults to `Float64`.
+* The `FciDump` module has been renamed to `FciDumps`.
+* The `FDump` type has been changed to `FDump{N}` with N=3 (for triangular storage of 2-electron integrals) or 4. The logical variable `triang` has been removed (there is a function `is_triang(::FDump)` now). Aliases `TFDump = FDump{3}` and `QFDump = FDump{4}` have been introduced. 
+* The `ECInfo` type now accepts only `FDump{3}`. The `FDump{4}` objects have to be transformed first (the transformation functions are not implemented yet).
+* The triangular functions have been moved to a separate file `utensors.jl`, part of the `QMTensors` module. `uppertriangular` function has been renamed to `uppertriangular_index`.
+* The driver functions and macros now return energies in an ordered descriptive dictionary `OutDict=ODDict{String,Float64}`. Use `last_energy` function to access the last energy (or `last` to access the whole entry including the key and the description).
+
 ### Changed
 
-* Save the memory using in Hessian matrix caclulation in dfmcscf function.
+* Save the memory using in Hessian matrix calculation in dfmcscf function.
+* `dfdump` stores the MO integrals internally in mmaped files.
+* The header of the `FDump` is now stored in a type-stable structure `FDumpHeader`.
 
 ### Added
 
 * Export of molden files (`@export_molden`). At the moment the orbital energies and occupations are not exported.
 * Add dfmcscf part in documentation
 * CCSDT and DC-CCSDT closed-shell implementations generated with Quantwo.
+* `QMTensors.SpinMatrix` struct for one-electron matrices (e.g., MO coefficients)
+* An ordered descriptive dictionary for energy outputs (`ODDict`) has been implemented. Each key-value entry can have a description.
+* `DIIS.perform!` now accepts a tuple of functions to calculate cusomized dot-products (e.g., involving contravariants etc).
 
 ### Fixed
 
