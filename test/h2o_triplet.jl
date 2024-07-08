@@ -4,10 +4,10 @@ using ElemCo
 epsilon    =   1.e-6
 EHF_test   = -75.62407982361415
 EMP2_test  =  -0.22401008330020 + EHF_test
-EUCCSD_test = -0.27656151568706 + EHF_test
-EUCCSD_T_test = -0.2953883330999 + EHF_test
-ERCCSD_test = -0.27614920708496 + EHF_test
-ERDCSD_test = -0.28995913689122 + EHF_test
+EUCCSD_test = -0.276561735300 + EHF_test
+EUCCSD_T_test = -0.295387562394 + EHF_test
+ERCCSD_test = -0.276149630440 + EHF_test
+ERDCSD_test = -0.289960838813 + EHF_test
 EΛUCCSD_T_test = -0.2903721324779 + EHF_test
 
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")

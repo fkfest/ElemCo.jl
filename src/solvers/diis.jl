@@ -16,7 +16,10 @@ for it = 1:maxit
   perform!(diis, Vec, Res)
   # ...
 end
+```
 
+One can also provide a tuple of custom dot-product functions for the residuals components
+as `customdots` argument in [`perform!`](@ref) function.
 """
 module DIIS
 using LinearAlgebra
@@ -143,15 +146,41 @@ function weighted_dot(diis::Diis, vecs1, vecs2)
     return vecs1 ⋅ vecs2
   end
   @assert length(vecs1) == length(diis.weights)
-  dot = 0.0
+  dot::Float64 = 0.0
   for i in eachindex(vecs1)
     dot += diis.weights[i] * (vec(vecs1[i]) ⋅ vec(vecs2[i]))
   end
   return dot
 end
 
+"""
+    custom_dot(diis::Diis, customdots, tens, vecs)
+
+  Compute weighted (with diis.weights) dot product of vectors
+  using custom dot-product functions `customdots::Tuple`.
+  `vecs` are reshaped to the shape of tensors `tens`.
+"""
+function custom_dot(diis::Diis, customdots, tens, vecs)
+  if length(diis.weights) == 0
+    weights = ones(length(tens))
+  else
+    weights = diis.weights
+    @assert length(tens) == length(weights)
+  end
+  @assert length(tens) == length(customdots)
+  @assert length(tens) == length(vecs)
+  dot::Float64 = 0.0
+  for i in eachindex(tens)
+    # f = customdots[i]
+    dot += weights[i] * dispatch(customdots[i], tens[i], vecs[i])
+  end
+  return dot
+end
+
+dispatch(f::Function, t, v) = f(t, reshape(v, size(t)))::Float64
+
 @doc raw"""
-    update_Bmat(diis::Diis, nDim, Res, ithis)
+    update_Bmat(diis::Diis, nDim, Res, ithis, customdots=())
 
   Update B matrix with new residual (at the position `ithis`).
 
@@ -167,12 +196,20 @@ end
 ```
   Returns the dot product of the new residual with itself, ``\langle {\bf R}_{\rm ithis}, {\bf R}_{\rm ithis} \rangle``.
 """
-function update_Bmat(diis::Diis, nDim, Res, ithis)
-  thisResDot = weighted_dot(diis, Res, Res)
+function update_Bmat(diis::Diis, nDim, Res, ithis, customdots=())
+  if length(customdots) == 0
+    thisResDot = weighted_dot(diis, Res, Res)
+  else
+    thisResDot = custom_dot(diis, customdots, Res, Res)
+  end
   for i in 1:nDim
     if i != ithis
       resi = loadres(diis, i)
-      dot = weighted_dot(diis, Res, resi)
+      if length(customdots) == 0
+        dot = weighted_dot(diis, Res, resi)
+      else
+        dot = custom_dot(diis, customdots, Res, resi)
+      end
       diis.bmat[i,ithis] = dot
       diis.bmat[ithis,i] = dot
     else
@@ -186,14 +223,16 @@ function update_Bmat(diis::Diis, nDim, Res, ithis)
 end
 
 """
-    perform!(diis::Diis, Amps, Res)
+    perform!(diis::Diis, Amps, Res, customdots=())
 
   Perform DIIS.
 
   `Amps` is an array of vectors and `Res` is an array of residuals.
   The vectors `Amps` will be replaced by the DIIS optimized vectors.
+  `customdots` is a tuple of functions for each residual component to calculate
+  the dot-product. The functions should have the signature `f(ten1::Array{T,N}, ten2::Array{T,N})`.
 """
-function perform!(diis::Diis, Amps, Res)
+function perform!(diis::Diis, Amps, Res, customdots=())
   if diis.nDim < diis.maxdiis
     diis.nDim += 1
   end
@@ -201,7 +240,7 @@ function perform!(diis::Diis, Amps, Res)
   nDim = diis.nDim
   saveamps(diis, Amps, ithis)
   saveres(diis, Res, ithis)
-  thisResDot = update_Bmat(diis, nDim, Res, ithis)
+  thisResDot = update_Bmat(diis, nDim, Res, ithis, customdots)
   rhs = zeros(nDim+1)
   rhs[nDim+1] = -1.0
 
@@ -237,7 +276,11 @@ function perform!(diis::Diis, Amps, Res)
   if diis.cropdiis
     Opt = combine(diis, diis.resfiles, coeffs)
     saveres(diis, Opt, ithis)
-    optres2 = update_Bmat(diis, nDim, Opt, ithis)
+    # replace Res with Opt residuals keeping the shape of Res
+    for i in eachindex(Res)
+      Res[i][:] = Opt[i]
+    end
+    optres2 = update_Bmat(diis, nDim, Res, ithis, customdots)
     # println("DIIS: ", thisResDot, " -> ", optres2)
     Opt = combine(diis, diis.ampfiles, coeffs)
     saveamps(diis, Opt, ithis)

@@ -10,8 +10,8 @@ basis="vdz"
 
 @time @ECinit
 @time @dfhf
-#@time @cc dcsd
-@time @dfcc svd-dcsd
+@time @cc dcsd
+#@time @dfcc svd-dcsd
 
 @report_opt target_modules=(@__MODULE__,
                             ElemCo,
@@ -50,9 +50,9 @@ basis="vdz"
                             ElemCo.MolproInterface,
                             ElemCo.MSystem
                             #) ElemCo.DfDump.dfdump(EC)
-                            #) ElemCo.DFHF.dfuhf(EC)
-                            #) ElemCo.CCDriver.ccdriver(EC,"λCCSD")
-                            ) ElemCo.CCDriver.dfccdriver(EC,"SVD-DCSD")
+                            #) ElemCo.DFHF.dfhf(EC)
+                            ) ElemCo.CCDriver.ccdriver(EC,"λCCSD")
+                            #) ElemCo.CCDriver.dfccdriver(EC,"SVD-DCSD")
                             
 end
 @time main()

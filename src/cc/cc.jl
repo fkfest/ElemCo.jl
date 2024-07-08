@@ -1823,20 +1823,25 @@ function calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab,activeorbs)
   if length(T1a) > 0
     internalT1a = T1a[morbb,norbb]
     internalT1b = T1b[norba,morba]
-    @tensoropt TT1a[a,i] := T1a[virtualsb,occcoreb][a,i] - T1b[virtualsa,occcorea][a,i]
-    @tensoropt TT1b[a,i] := T1b[virtualsa,occcorea][a,i] - T1a[virtualsb,occcoreb][a,i]
-
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * TT1b[a,j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * TT1b[a,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * TT1b[a,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * TT1b[a,j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[morbb,occcoreb][j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[morbb,occcoreb][j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[morbb,occcoreb][j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[morbb,occcoreb][j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= internalT1b * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += internalT1b * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-
+    T1a_ai = T1a[virtualsb,occcoreb]
+    T1b_ai = T1b[virtualsa,occcorea]
+    @tensoropt TT1a[a,i] := T1a_ai[a,i] - T1b_ai[a,i]
+    @tensoropt TT1b[a,i] := T1b_ai[a,i] - T1a_ai[a,i]
+    T2ab_i = T2ab[morbb,norba,occcoreb,morba]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab_i[i] * TT1b[a,j]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += T2ab_i[i] * TT1b[a,j]
+    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += T2ab_i[i] * TT1b[a,j]
+    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= T2ab_i[i] * TT1b[a,j]
+    T2ab_ai = T2ab[virtualsb,norba,occcoreb,morba]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
+    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
+    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
+    T2a_aij = T2a[morbb,virtualsb,occcoreb,occcoreb]
+    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= internalT1b * T2a_aij[a,i,j]
+    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += internalT1b * T2a_aij[a,i,j]
+    T2a_aij = nothing
+    #TODO remove permutedims
     @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
     @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
     @tensoropt M2[virtualsa,virtualsa,occcorea,morba][a,b,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
@@ -2018,14 +2023,18 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
     T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
     T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    # custom functions for dot products in diis
+    dots1 = (calc_u_singles_dot, calc_u_singles_dot)
+    dots2 = (calc_samespin_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot)
     if method.exclevel[3] != :full
-      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (), EC, method)
+      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (), EC, method, (dots1..., dots2...))
     else
       T3aaa = read_starting_guess4amplitudes(EC, Val(3), :α, :α, :α)
       T3bbb = read_starting_guess4amplitudes(EC, Val(3), :β, :β, :β)
       T3aab = read_starting_guess4amplitudes(EC, Val(3), :α, :α, :β)
       T3abb = read_starting_guess4amplitudes(EC, Val(3), :α, :β, :β)
-      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (T3aaa,T3bbb,T3aab,T3abb), EC, method)
+      dots3 = (calc_samespin_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot, calc_mixedspin_triples_dot)
+      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (T3aaa,T3bbb,T3aab,T3abb), EC, method, (dots1..., dots2..., dots3))
     end
   else
     if method.exclevel[1] == :full
@@ -2037,11 +2046,15 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       error("No doubles is not implemented")
     end
     T2 = read_starting_guess4amplitudes(EC, Val(2))
+    # custom functions for dot products in diis
+    dots1 = (calc_cs_singles_dot,)
+    dots2 = (calc_cs_doubles_dot,)
     if method.exclevel[3] != :full
-      Eh = cc_iterations!((T1,), (T2,), (), EC, method)
+      Eh = cc_iterations!((T1,), (T2,), (), EC, method, (dots1..., dots2...))
     else
       T3 = read_starting_guess4amplitudes(EC, Val(3))
-      Eh = cc_iterations!((T1,), (T2,), (T3,), EC, method)
+      dots3 = (calc_cs_triples_dot,)
+      Eh = cc_iterations!((T1,), (T2,), (T3,), EC, method, (dots1..., dots2..., dots3...))
     end
   end
 
@@ -2054,7 +2067,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   return Eh
 end
 
-function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod)
+function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=())
   t0 = time_ns()
   dc = (method.theory[1:2] == "DC")
   tworef = has_prefix(method, "2D")
@@ -2092,6 +2105,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod)
       # at the moment we don't project the triples
       spin_project!(EC, Res1..., Res2...)
     end
+    if length(Amps3) == 1
+      clean_cs_triples!(Res3...)
+    end
     t1 = print_time(EC, t1, "residual", 2)
     NormT2 = calc_doubles_norm(Amps2...)
     NormR2 = calc_doubles_norm(Res2...)
@@ -2108,6 +2124,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod)
       NormT3 = calc_triples_norm(Amps3...)
       NormR3 = calc_triples_norm(Res3...)
       update_triples!(EC, Amps3..., Res3...)
+      if length(Amps3) == 1
+        clean_cs_triples!(Amps3...)
+      end
     end
     if do_sing
       NormT1 = calc_singles_norm(Amps1...)
@@ -2126,7 +2145,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod)
       # at the moment we don't project the triples
       spin_project!(EC, Amps1..., Amps2...)
     end
-    perform!(diis, Amps, Res)
+    perform!(diis, Amps, Res, dots)
     save_current_doubles(EC, Amps2...)
     En2 = calc_doubles_energy(EC, Amps2...)
     En = En2["E"]

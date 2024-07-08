@@ -21,6 +21,10 @@ export transform_amplitudes2lagrange_multipliers!
 export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
 export contra2covariant
 export spin_project!, spin_project_amplitudes
+export clean_cs_triples!
+export calc_cs_singles_dot, calc_u_singles_dot
+export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
+export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
 
 """ 
     calc_fock_matrix(EC::ECInfo, closed_shell)
@@ -440,6 +444,30 @@ function calc_contra_singles_norm(T1a, T1b)
 end
 
 """
+    calc_cs_singles_dot(T1, T1_)
+
+  Calculate dot product of closed-shell singles amplitudes.
+"""
+function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
+  @tensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
+  return DotT1::Float64
+end
+calc_cs_singles_dot(T1, T1_) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
+
+"""
+    calc_u_singles_dot(T1, T1_)
+
+  Calculate dot of unrestricted singles amplitudes.
+"""
+function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
+  @tensor begin
+    DotT1 = T1[a,i]*T1_[a,i]
+  end
+  return DotT1::Float64
+end
+calc_u_singles_dot(T1, T1_) = error("calc_u_singles_dot: T1 and T1_ must be matrices!")
+
+"""
     calc_doubles_norm(T2)
 
   Calculate squared norm of closed-shell doubles amplitudes.
@@ -474,14 +502,51 @@ function calc_doubles_norm(T2a, T2b, T2ab)
 end
 
 """
+    calc_cs_doubles_dot(T2, T2_)
+
+  Calculate dot of closed-shell doubles amplitudes.
+"""
+function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+  @tensoropt DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
+  return DotT2::Float64
+end
+calc_cs_doubles_dot(T2, T2_) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
+
+"""
+    calc_samespin_doubles_dot(T2, T2_)
+
+  Calculate dot of unrestricted same-spin doubles amplitudes.
+"""
+function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+  @tensoropt begin
+    DotT2 = 0.25*(T2[a,b,i,j]*T2_[a,b,i,j])
+  end
+  return DotT2::Float64
+end
+calc_samespin_doubles_dot(T2, T2_) = error("calc_samespin_doubles_dot: T2 and T2_ must be 4D arrays!")
+
+"""
+    calc_ab_doubles_dot(T2, T2_)
+
+  Calculate dot of unrestricted αβ doubles amplitudes.
+"""
+function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+  @tensoropt begin
+    DotT2 = T2[a,b,i,j]*T2_[a,b,i,j]
+  end
+  return DotT2::Float64
+end
+calc_ab_doubles_dot(T2, T2_) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D arrays!")
+
+"""
     calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
 
   Calculate squared norm of unrestricted triples amplitudes.
 """
 function calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
   @tensoropt begin
-    NormT3 = 0.125*(T3aaa[a,b,c,i,j,k]*T3aaa[a,b,c,i,j,k])
-    NormT3 += 0.125*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
+    NormT3 = (1/36)*(T3aaa[a,b,c,i,j,k]*T3aaa[a,b,c,i,j,k])
+    NormT3 += (1/36)*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
     NormT3 += 0.25*(T3abb[a,b,c,i,j,k]*T3abb[a,b,c,i,j,k])
     NormT3 += 0.25*(T3aab[a,b,c,i,j,k]*T3aab[a,b,c,i,j,k])
   end
@@ -494,12 +559,112 @@ end
   Calculate squared norm of triples amplitudes.
 """
 function calc_triples_norm(T3)
-  @tensoropt begin
-    NormT3 = 0.125*(T3[a,b,c,i,j,k]*T3[a,b,c,i,j,k])
+  NormT3 = 0.0
+  nocc = size(T3, 6)
+  for k = 1:nocc 
+    for j = 1:k
+      prefac = (j == k) ? 1.0 : 2.0
+      for i = 1:j
+        fac = prefac 
+        if i == j 
+          if j == k
+            continue
+          end 
+          fac = 1.0
+        end
+        T3_ijk = @view T3[:,:,:,i,j,k]
+        @tensoropt begin
+          NormT3_ = 4*(T3_ijk[a,b,c]*T3_ijk[a,b,c])
+          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[a,c,b])
+          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[c,b,a])
+          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[b,a,c])
+          NormT3_ += (T3_ijk[a,b,c]*T3_ijk[c,a,b])
+          NormT3_ += (T3_ijk[a,b,c]*T3_ijk[b,c,a])
+        end
+        NormT3 += fac*NormT3_
+      end
+    end
   end
   return NormT3
 end
 
+"""
+    calc_cs_triples_dot(T3, T3_)
+
+  Calculate dot of closed-shell triples amplitudes.
+"""
+function calc_cs_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
+  DotT3 = 0.0
+  nocc = size(T3, 6)
+  for k = 1:nocc 
+    for j = 1:k
+      prefac = (j == k) ? 1.0 : 2.0
+      for i = 1:j
+        fac = prefac 
+        if i == j 
+          if j == k
+            continue
+          end 
+          fac = 1.0
+        end
+        T3_ijk = @view T3[:,:,:,i,j,k]
+        T3_ijk_ = @view T3_[:,:,:,i,j,k]
+        @tensoropt begin
+          DotT3_ = 4*(T3_ijk[a,b,c]*T3_ijk_[a,b,c])
+          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[a,c,b])
+          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[c,b,a])
+          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[b,a,c])
+          DotT3_ += (T3_ijk[a,b,c]*T3_ijk_[c,a,b])
+          DotT3_ += (T3_ijk[a,b,c]*T3_ijk_[b,c,a])
+        end
+        DotT3 += fac*DotT3_
+      end
+    end
+  end
+  return DotT3::Float64
+end
+calc_cs_triples_dot(T3, T3_) = error("calc_cs_triples_dot not implemented for this type of T3")
+
+"""
+    calc_samespin_triples_dot(T3, T3_)
+
+  Calculate dot of unrestricted same-spin triples amplitudes.
+"""
+function calc_samespin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
+  @tensoropt begin
+    DotT3 = (1/36)*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
+  end
+  return DotT3::Float64
+end
+calc_samespin_triples_dot(T3, T3_) = error("calc_samespin_triples_dot not implemented for this type of T3")
+
+"""
+    calc_mixedspin_triples_dot(T3, T3_)
+
+  Calculate dot of unrestricted mixed-spin triples amplitudes.
+"""
+function calc_mixedspin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
+  @tensoropt begin
+    DotT3 = 0.25*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
+  end
+  return DotT3::Float64
+end
+calc_mixedspin_triples_dot(T3, T3_) = error("calc_mixedspin_triples_dot not implemented for this type of T3")
+
+"""
+    clean_cs_triples!(T3)
+
+  Clean closed-shell triples amplitudes by setting ``T^{iii}_{abc} = T^{ijk}_{aaa} = 0``.
+"""
+function clean_cs_triples!(T3)
+  nocc = size(T3, 6)
+  diagindx = [CartesianIndex(i,i,i) for i in 1:nocc]
+  T3[:,:,:,diagindx] .= 0.0
+  nvirt = size(T3, 3)
+  diagindx = [CartesianIndex(i,i,i) for i in 1:nvirt]
+  T3[diagindx,:,:,:] .= 0.0
+  return T3
+end
 """
     calc_contra_doubles_norm(T2a, T2b, T2ab)
 
