@@ -2034,7 +2034,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       T3aab = read_starting_guess4amplitudes(EC, Val(3), :α, :α, :β)
       T3abb = read_starting_guess4amplitudes(EC, Val(3), :α, :β, :β)
       dots3 = (calc_samespin_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot, calc_mixedspin_triples_dot)
-      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (T3aaa,T3bbb,T3aab,T3abb), EC, method, (dots1..., dots2..., dots3))
+      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (T3aaa,T3bbb,T3aab,T3abb), EC, method, (dots1..., dots2..., dots3...))
     end
   else
     if method.exclevel[1] == :full
