@@ -13,7 +13,8 @@ H2     0.000000000  -1.489124508   1.033245507"
 
 basis = "v5z"
 
-orbs = @import_matrix "orbs.matrop"
+matropfile = joinpath(@__DIR__,"files","orbs.matrop")
+orbs = @import_matrix matropfile
 basisset = ElemCo.generate_basis(EC)
 overlap = ElemCo.Integrals.overlap(basisset)
 unity = orbs'*overlap*orbs

@@ -13,7 +13,7 @@ Utils
 ```@autodocs
 Modules = [Utils]
 Private = false
-Order = [:function]
+Order = [:function, :type]
 ```
 
 ## Internal functions

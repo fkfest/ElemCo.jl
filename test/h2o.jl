@@ -13,27 +13,27 @@ EDC_CCSDT_test = -0.330249143963926 + EHF_test
 
 @print_input
 
-fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 EC = ECInfo()
 energies = ElemCo.ccdriver(EC, "ccsd(t)"; fcidump)
-@test abs(energies.HF-EHF_test) < epsilon
-@test abs(energies.MP2c-EMP2_test) < epsilon
-@test abs(energies.CCSD_T-ECCSD_T_test) < epsilon
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2c"]-EMP2_test) < epsilon
+@test abs(energies["CCSD(T)"]-ECCSD_T_test) < epsilon
 
 energies = @cc λccsd(t)
-@test abs(energies.ΛCCSD_T-EΛCCSD_T_test) < epsilon
+@test abs(energies["ΛCCSD(T)"]-EΛCCSD_T_test) < epsilon
 
 energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
-@test abs(last(energies)-EDCSD_test) < epsilon
+@test abs(last_energy(energies)-EDCSD_test) < epsilon
 
 @set cholesky thr = 1.e-4
 @set cc ampsvdtol = 1.e-2
 energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
-@test abs(last(energies)-EDC_CCSDT_test) < epsilon
+@test abs(last_energy(energies)-EDC_CCSDT_test) < epsilon
 
 @set cc calc_t3_for_decomposition = true
 energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
-@test abs(last(energies)-EDC_CCSDT_useT3_test) < epsilon
+@test abs(last_energy(energies)-EDC_CCSDT_useT3_test) < epsilon
 
 end

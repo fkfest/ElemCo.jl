@@ -1,16 +1,16 @@
 const BASIS_LIB = joinpath(@__DIR__, "..", "..", "lib", "basis_sets")
 
 """
-    parse_basis(basis_name::String, atom::Atom; cartesian=false) 
+    parse_basis(basis_name::String, atom::Atom) 
 
   Search and parse the basis set for a given atom.
 
-  Return a list of subshells `AbstractSubShell`.
+  Return a list of angular shells [`AngularShell`](@ref).
 """
-function parse_basis(basis_name::String, atom::Atom; cartesian=false)
+function parse_basis(basis_name::String, atom::Atom)
   basisfile = basis_file(basis_name)
   basisblock = read_basis_block(basisfile, atom)
-  return parse_basis_block(basisblock, atom; cartesian)
+  return parse_basis_block(basisblock, atom)
 end
 
 """
@@ -104,10 +104,10 @@ function read_basis_block(basisfile::AbstractString, atom::Atom)
   # search for `! $elem  ....`
   reg_start = Regex("^!\\s$elem\\s+")
   reg_end = Regex("^\\s*[!}]\\s*")
-  basisblock = ""
+  basisblock::String = ""
   open(basisfile) do f
     elemfound = false
-    for line in eachline(f)
+    for line::String in eachline(f)
       if elemfound
         if occursin(reg_end, line)
           break
@@ -126,11 +126,11 @@ function read_basis_block(basisfile::AbstractString, atom::Atom)
 end
 
 """
-    parse_basis_block(basisblock::AbstractString, atom::Atom; cartesian=false) 
+    parse_basis_block(basisblock::AbstractString, atom::Atom) 
 
   Parse the basis block for a given atom.
 
-  Return a list of angular shells [`AbstractAngularShell`](@ref).
+  Return a list of angular shells [`AngularShell`](@ref).
   The basis block is in the Molpro format:
   - `!` comments
   - `s,p,d,f,g,h` angular momentum
@@ -158,12 +158,12 @@ p, H , 0.8000000
 c, 1.1, 1.0000000
 ```
 """
-function parse_basis_block(basisblock::AbstractString, atom::Atom; cartesian=false)
+function parse_basis_block(basisblock::AbstractString, atom::Atom)
   elem = element_SYMBOL(atom)
   # search for ` s, $elem , 13...`
   reg_exp = Regex("^\\s*[$SUBSHELLS_NAMES]\\s*,\\s*$elem\\s*,")
   reg_con = Regex("^\\s*c,\\s*")
-  ashells = AbstractAngularShell[] # cartesian ? CartesianAngularShell[] : SphericalAngularShell[]
+  ashells = AngularShell[]
   for line in split(basisblock, "\n")
     #remove comments ` abc !...` -> `abc`
     line = strip(replace(line, r"!.*" => ""))
@@ -174,7 +174,7 @@ function parse_basis_block(basisblock::AbstractString, atom::Atom; cartesian=fal
     expline = occursin(reg_exp, line)
     if expline
       # parse exponents
-      push!(ashells, generate_angularshell(elem, parse_exponents(line)...; cartesian))
+      push!(ashells, generate_angularshell(elem, parse_exponents(line)...))
     else
       conline = occursin(reg_con, line)
       if conline
@@ -194,9 +194,9 @@ function parse_basis_block(basisblock::AbstractString, atom::Atom; cartesian=fal
     end
   end
   # split angular shells if necessary
-  ashells_split = AbstractAngularShell[]
+  ashells_split = AngularShell[]
   for ashell in ashells
-    append!(ashells_split, split_angular_shell(ashell; cartesian))
+    append!(ashells_split, split_angular_shell(ashell))
   end
   return ashells_split
 end
@@ -236,7 +236,8 @@ function parse_contraction(conline::AbstractString)
   # parse contraction coefficients
   contraction = strip.(split(conline, ","))
   # parse exponent range
-  exprange = range(parse.(Int,split(contraction[2], "."))...)
+  start, stop = parse.(Int, split(contraction[2], "."))
+  exprange = start:stop
   # remove contraction and exponent range and convert to Float64
   contraction = parse.(Float64, contraction[3:end])
   if length(contraction) != length(exprange)
@@ -247,18 +248,18 @@ function parse_contraction(conline::AbstractString)
 end
 
 """
-    split_angular_shell(ashell::AbstractAngularShell; cartesian=false)
+    split_angular_shell(ashell::AngularShell)
 
   If the ranges of exponents do not overlap, split the angular shell
   into separate angular shells for each subshell.
   The shells are kept together only if one is a subset of the other.
 """
-function split_angular_shell(ashell::AbstractAngularShell; cartesian=false)
+function split_angular_shell(ashell::AngularShell)
   ers = [sh.exprange for sh in ashell.subshells]
   # intersection matrix for ranges of exponents (true if one is a subset of the other)
   imat = [length(intersect(r1, r2)) == min(length(r1),length(r2)) for r1 in ers, r2 in ers]
   # find ranges of block-diagonal blocks in the intersection matrix
-  blocks = UnitRange[]
+  blocks = UnitRange{Int}[]
   start = 1
   for i in 1:length(ers)
     if !any(imat[start:i,i+1:end])
@@ -267,11 +268,11 @@ function split_angular_shell(ashell::AbstractAngularShell; cartesian=false)
     end
   end
   # split the angular shell
-  ashells = AbstractAngularShell[]
+  ashells = AngularShell[]
   for block in blocks
     # total exponent range for this block
     totexprange = minimum(ers[block]).start:maximum(ers[block]).stop
-    push!(ashells, generate_angularshell(ashell.element, ashell.l, ashell.exponents[totexprange]; cartesian))
+    push!(ashells, generate_angularshell(ashell.element, ashell.l, ashell.exponents[totexprange] ))
     for i in block
       exprange = subspace_in_space(ashell.subshells[i].exprange, totexprange)
       add_subshell!(last(ashells), exprange, ashell.subshells[i].coefs)

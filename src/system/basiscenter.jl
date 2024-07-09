@@ -1,33 +1,24 @@
 
+BVector = Vector{Float64}
+# const MAXBSIZE = 40
+# BVector = SVector{MAXBSIZE, Float64}
+
 
 """
-    BasisContraction{N, T}
+    BasisContraction
 
-  A basis contraction with `N` primitives and coefficients of type `T`.
+  A basis contraction.
   `exprange` is the range of primitives (from exponents in the angular shell).
 """
-struct BasisContraction{N, T}
+struct BasisContraction
   exprange::UnitRange{Int}
-  coefs::SVector{N, T}
+  coefs::BVector
 end
 
 """
-    AbstractAngularShell
+    AngularShell
 
-  Abstract type for angular shells, i.e, subshells with the same angular momentum.
-  For general contracted basis sets, the angular shell is a collection of all subshells 
-  with the same l quantum number. 
-  TODO For some other basis sets (e.g., the def2-family), the angular shell can be a
-  single subshell with a specific l quantum number.
-  See [`SphericalAngularShell`](@ref) and [`CartesianAngularShell`](@ref).
-  `id` is the index of the angular shell in the basis set.
-"""
-abstract type AbstractAngularShell end
-
-"""
-    SphericalAngularShell
-
-  Type for spherical angular shells, i.e, subshells with the same angular momentum.
+  Type for angular shells, i.e, subshells with the same angular momentum.
   For general contracted basis sets, the angular shell is a collection of all subshells 
   with the same l quantum number. 
   For some other basis sets (e.g., the def2-family), the angular shell can be a
@@ -36,38 +27,13 @@ abstract type AbstractAngularShell end
 
   $(TYPEDFIELDS)
 """
-mutable struct SphericalAngularShell{N, T} <: AbstractAngularShell
+mutable struct AngularShell
   """ element symbol (e.g., "H")"""
   element::String
   """ angular momentum"""
   l::Int
   """ array of exponents"""
-  exponents::SVector{N, T}
-  """ array of subshells (contractions)"""
-  subshells::Vector{BasisContraction}
-  """ index of the angular shell in the basis set"""
-  id::Int
-end
-
-"""
-    CartesianAngularShell
-
-  Type for cartesian angular shells, i.e, subshells with the same angular momentum.
-  For general contracted basis sets, the angular shell is a collection of all subshells 
-  with the same l quantum number. 
-  For some other basis sets (e.g., the def2-family), the angular shell can be a
-  single subshell with a specific l quantum number.
-  `id` is the index of the angular shell in the basis set.
-
-  $(TYPEDFIELDS)
-"""
-mutable struct CartesianAngularShell{N, T} <: AbstractAngularShell
-  """ element symbol (e.g., "H")"""
-  element::String
-  """ angular momentum"""
-  l::Int
-  """ array of exponents"""
-  exponents::SVector{N, T}
+  exponents::BVector
   """ array of subshells (contractions)"""
   subshells::Vector{BasisContraction}
   """ index of the angular shell in the basis set"""
@@ -91,7 +57,7 @@ struct BasisCenter
   """ name of the basis set (e.g., "cc-pVDZ")"""
   basis::String
   """ array of angular shells"""
-  shells::Vector{AbstractAngularShell}
+  shells::Vector{AngularShell}
 end
 
 function BasisCenter(atom::Atom, basis="", basisfunctions=[])
@@ -111,15 +77,15 @@ function Base.length(bc::BasisContraction)
   return length(bc.coefs)
 end
 
-function Base.getindex(ashell::AbstractAngularShell, i::Int)
+function Base.getindex(ashell::AngularShell, i::Int)
   return ashell.subshells[i]
 end
 
-function Base.setindex!(ashell::AbstractAngularShell, val, i::Int)
+function Base.setindex!(ashell::AngularShell, val, i::Int)
   ashell.subshells[i] = val
 end
 
-function Base.length(ashell::AbstractAngularShell)
+function Base.length(ashell::AngularShell)
   return length(ashell.subshells)
 end
 
@@ -150,8 +116,8 @@ function Base.show(io::IO, bc::BasisContraction)
   end
 end
 
-function Base.show(io::IO, ashell::AbstractAngularShell)
-  print(io, SUBSHELLS_NAMES[ashell.l+1], ", ", ashell.element)
+function Base.show(io::IO, ashell::AngularShell)
+  print(io, subshell_char(ashell.l), ", ", ashell.element)
   for exp in ashell.exponents
     print(io, ", ", exp)
   end
@@ -161,7 +127,7 @@ function Base.show(io::IO, ashell::AbstractAngularShell)
   end
 end
 
-function Base.show(io::IO, ashs::Vector{<:AbstractAngularShell})
+function Base.show(io::IO, ashs::Vector{<:AngularShell})
   for ashell in ashs
     println(io, ashell)
   end
@@ -177,11 +143,11 @@ end
 angularshells(cen::BasisCenter) = cen.shells
 
 """
-    n_subshells(ashell::AbstractAngularShell)
+    n_subshells(ashell::AngularShell)
 
   Return the number of subshells in the angular shell.
 """
-n_subshells(ashell::AbstractAngularShell) = length(ashell.subshells)
+n_subshells(ashell::AngularShell) = length(ashell.subshells)
 
 """
     n_primitives(subshell::BasisContraction)
@@ -191,11 +157,11 @@ n_subshells(ashell::AbstractAngularShell) = length(ashell.subshells)
 n_primitives(subshell::BasisContraction) = length(subshell.exprange)
 
 """
-    n_primitives(ashell::AbstractAngularShell)
+    n_primitives(ashell::AngularShell)
 
   Return the total number of primitives in the angular shell.
 """
-n_primitives(ashell::AbstractAngularShell) = length(ashell.exponents)
+n_primitives(ashell::AngularShell) = length(ashell.exponents)
 
 """
     n_coefficients(subshell::BasisContraction)
@@ -205,41 +171,34 @@ n_primitives(ashell::AbstractAngularShell) = length(ashell.exponents)
 n_coefficients(subshell::BasisContraction) = length(subshell.coefs)
 
 """
-    n_coefficients(ashell::AbstractAngularShell)
+    n_coefficients(ashell::AngularShell)
 
   Return the total number of coefficients in the angular shell.
 """
-n_coefficients(ashell::AbstractAngularShell) = sum(n_coefficients, ashell.subshells)
+n_coefficients(ashell::AngularShell) = sum(n_coefficients, ashell.subshells)
 
 """
-    n_coefficients_1mat(ashell::AbstractAngularShell)
+    n_coefficients_1mat(ashell::AngularShell)
 
   Return the number of coefficients in the angular shell for a single contraction matrix.
 
   The missing coefficients will be set to zero.
 """
-n_coefficients_1mat(ashell::AbstractAngularShell) = n_primitives(ashell) * n_subshells(ashell) 
+n_coefficients_1mat(ashell::AngularShell) = n_primitives(ashell) * n_subshells(ashell) 
 
 """
-    n_ao4subshell(ashell::SphericalAngularShell)
-
-  Return the number of atomic orbitals for the subshell.
-"""
-n_ao4subshell(ashell::SphericalAngularShell) = 2*ashell.l + 1
-
-"""
-    n_ao4subshell(ashell::CartesianAngularShell)
+    n_ao4subshell(ashell::AngularShell, cartesian::Bool)
 
   Return the number of atomic orbitals for the subshell.
 """
-n_ao4subshell(ashell::CartesianAngularShell) = (ashell.l + 1)*(ashell.l + 2) ÷ 2
+n_ao4subshell(ashell::AngularShell, cartesian::Bool) = cartesian ? (ashell.l + 1)*(ashell.l + 2) ÷ 2 : 2*ashell.l + 1
 
 """
-    n_ao(ashell::AbstractAngularShell)
+    n_ao(ashell::AngularShell, cartesian::Bool)
 
   Return the number of atomic orbitals in the angular shell.
 """
-n_ao(ashell::AbstractAngularShell) = n_ao4subshell(ashell) * n_subshells(ashell)
+n_ao(ashell::AngularShell, cartesian::Bool) = n_ao4subshell(ashell, cartesian) * n_subshells(ashell)
 
 """
     n_angularshells(atom::BasisCenter)
@@ -256,7 +215,12 @@ end
   Return the number of subshells in the basis set for `atom`.
 """
 function n_subshells(atom::BasisCenter)
-  return sum(n_subshells, atom.shells)
+  # return sum(n_subshells, atom.shells)
+  n = 0
+  for ashell in atom.shells
+    n += n_subshells(ashell)
+  end
+  return n
 end
 
 """
@@ -265,46 +229,63 @@ end
   Return the number of primitives in the basis set for `atom`.
 """
 function n_primitives(atom::BasisCenter)
-  return sum(n_primitives, atom.shells)
+  # return sum(n_primitives, atom.shells)
+  n = 0
+  for ashell in atom.shells
+    n += n_primitives(ashell)
+  end
+  return n
 end
 
 """
-    n_ao(atom::BasisCenter)
+    n_ao(atom::BasisCenter, cartesian::Bool)
 
   Return the number of atomic orbitals in the basis set for `atom`.
 """
-function n_ao(atom::BasisCenter)
-  return sum(n_ao, atom.shells)
+function n_ao(atom::BasisCenter, cartesian::Bool)
+  # return sum(x->n_ao(x, cartesian), atom.shells)
+  n = 0
+  for ashell in atom.shells
+    n += n_ao(ashell, cartesian)
+  end
+  return n
 end
 
 """
-    coefficients_1mat(ashell::AbstractAngularShell)
+    coefficients_1mat(ashell::AngularShell, cartesian::Bool)
 
   Return a single contraction matrix of the coefficients in the angular shell 
   (nprimitives × nsubshells). The contractions are normalized.
 
   The missing coefficients are set to zero in the matrix.
 """
-function coefficients_1mat end
-
-function coefficients_1mat(ashell::CartesianAngularShell)
+function coefficients_1mat(ashell::AngularShell, cartesian::Bool)
   coefs = zeros(n_primitives(ashell), n_subshells(ashell))
+  normalize = cartesian ? normalize_cartesian_contraction : normalize_spherical_contraction
   for (i, subshell) in enumerate(ashell.subshells)
-    coefs[subshell.exprange, i] .= normalize_cartesian_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
-  end
-  return coefs
-end
-
-function coefficients_1mat(ashell::SphericalAngularShell)
-  coefs = zeros(n_primitives(ashell), n_subshells(ashell))
-  for (i, subshell) in enumerate(ashell.subshells)
-    coefs[subshell.exprange, i] .= normalize_spherical_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
+    coefs[subshell.exprange, i] .= normalize(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
   end
   return coefs
 end
 
 # DOUBLEFACTORIAL[l+1] = (2l+1)!! = 1*3*5*...*(2l+1) for s, p, d, f, g, h, i, k, l
 const DOUBLEFACTORIAL = [1, 3, 15, 105, 945, 10395, 135135, 2027025, 34459425]
+
+"""
+    normalize_contraction(subshell::BasisContraction, ashell::AngularShell, cartesian::Bool)
+
+  Normalize the contraction coefficients in `subshell`. 
+  
+  The subshell has to be part of the angular shell `ashell`.
+  Return the normalized contraction.
+"""
+function normalize_contraction(subshell::BasisContraction, ashell::AngularShell, cartesian::Bool)
+  if cartesian
+    return normalize_cartesian_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
+  else
+    return normalize_spherical_contraction(subshell.coefs, ashell.exponents[subshell.exprange], ashell.l)
+  end
+end
 
 """
     normalize_spherical_contraction(contraction, exponents, l)
@@ -357,41 +338,36 @@ function normalize_cartesian_contraction(contraction, exponents, l)
 end
 
 """
-    generate_angularshell(elem, l, exponents; cartesian=false)
+    generate_angularshell(elem, l, exponents)
 
   Generate an angular shell with angular momentum `l` and exponents.
   The contractions have to be added later.
-  Return an angular shell of type [`SphericalAngularShell`](@ref) or [`CartesianAngularShell`](@ref).
+  Return an angular shell of type [`AngularShell`](@ref).
 """
-function generate_angularshell(elem, l, exponents; cartesian=false)
-  nprim = length(exponents)
-  if cartesian
-    return CartesianAngularShell(elem, l, SVector{nprim}(exponents), BasisContraction[], 0)
-  else
-    return SphericalAngularShell(elem, l, SVector{nprim}(exponents), BasisContraction[], 0)
-  end
+function generate_angularshell(elem, l, exponents)
+  return AngularShell(elem, l, exponents, BasisContraction[], 0)
 end
 
 """
-    add_subshell!(ashell::AbstractAngularShell, exprange, contraction)
+    add_subshell!(ashell::AngularShell, exprange, contraction)
 
   Add a subshell to the angular shell.
 """
-function add_subshell!(ashell::AbstractAngularShell, exprange, contraction)
-  push!(ashell.subshells, BasisContraction(exprange, SVector{length(contraction)}(contraction)))
+function add_subshell!(ashell::AngularShell, exprange, contraction)
+  push!(ashell.subshells, BasisContraction(exprange, contraction))
 end
 
-function set_id!(ashell::AbstractAngularShell, id)
+function set_id!(ashell::AngularShell, id)
   ashell.id = id
 end
 
 """
-    set_id!(ashells::AbstractArray{AbstractAngularShell}, start_id)
+    set_id!(ashells::AbstractArray{AngularShell}, start_id)
 
   Set the id for each angular shell in the array.
   Return the next id.
 """
-function set_id!(ashells::AbstractArray{AbstractAngularShell}, start_id)
+function set_id!(ashells::AbstractArray{AngularShell}, start_id)
   id = start_id
   for ashell in ashells
     set_id!(ashell, id)
@@ -413,3 +389,10 @@ function set_id!(centers::AbstractArray{BasisCenter}, start_id)
   end
   return id
 end
+
+"""
+    subshell_char(l)
+
+  Return the character for the subshell with angular momentum `l`.
+"""
+subshell_char(l::Int) = SUBSHELLS_NAMES[l+1]

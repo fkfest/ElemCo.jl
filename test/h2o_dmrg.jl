@@ -17,6 +17,6 @@ basis = Dict("ao"=>"sto-3g",
 @dfhf
 energies = @cc dmrg
 
-@test abs(energies.DMRG-EDMRG_test) < epsilon
+@test abs(energies["DMRG"]-EDMRG_test) < epsilon
 
 end

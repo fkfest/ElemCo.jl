@@ -10,29 +10,29 @@ ERDCSD_test =     -0.241910345272 + EHF_test
 EUHF_test   =    -75.631764795601
 ECCSD_UHF_test = -0.168407943239 + EUHF_test
 
-fcidump = joinpath(@__DIR__,"H2O_CATION.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2O_CATION.FCIDUMP")
 
 energies = @cc uccd
-@test abs(last(energies)-ECCD_test) < epsilon
+@test abs(last_energy(energies)-ECCD_test) < epsilon
 energies = @cc uccsd
-@test abs(energies.HF-EHF_test) < epsilon
-@test abs(energies.MP2-EMP2_test) < epsilon
-@test abs(last(energies)-ECCSD_test) < epsilon
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2"]-EMP2_test) < epsilon
+@test abs(last_energy(energies)-ECCSD_test) < epsilon
 
 energies = @cc dcsd
-@test abs(last(energies)-EDCSD_test) < epsilon
+@test abs(last_energy(energies)-EDCSD_test) < epsilon
 
 energies = @cc rdcsd
-@test abs(last(energies)-ERDCSD_test) < epsilon
+@test abs(last_energy(energies)-ERDCSD_test) < epsilon
 
-fcidump = joinpath(@__DIR__,"H2OP_UHF.FCIDUMP")
+fcidump = joinpath(@__DIR__,"files","H2OP_UHF.FCIDUMP")
 @ECinit
 energies = @cc uccsd
-@test abs(energies.HF-EUHF_test) < epsilon
-@test abs(last(energies)-ECCSD_UHF_test) < epsilon
+@test abs(energies["HF"]-EUHF_test) < epsilon
+@test abs(last_energy(energies)-ECCSD_UHF_test) < epsilon
 
-@set cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true triangular_kext = false 
+@set cc use_kext = false calc_d_vvvv = true calc_d_vvvo = true calc_d_vovv = true calc_d_vvoo = true
 energies = @cc uccsd
-@test abs(last(energies)-ECCSD_UHF_test) < epsilon
+@test abs(last_energy(energies)-ECCSD_UHF_test) < epsilon
 
 end

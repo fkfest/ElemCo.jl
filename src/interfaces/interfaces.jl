@@ -9,8 +9,9 @@ module Interfaces
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.MolproInterface: MolproInterface, is_matrop_file
+using ..ElemCo.MoldenInterface: MoldenInterface, is_molden_file
 
-export import_matrix
+export import_matrix, export_molden_orbitals
 
 """
     import_matrix(EC::ECInfo, filename::String)
@@ -31,6 +32,19 @@ function import_matrix(EC::ECInfo, filename::String)
   else
     error("Type of $filename not recognized. Call the appropriate function directly.")
   end
+end
+
+function export_matrix(EC::ECInfo, filename::String, mat::AbstractArray)
+  error("export_matrix not implemented yet")
+end
+
+"""
+    export_molden_orbitals(EC::ECInfo, filename::String)
+
+  Export the current orbitals to a Molden file.
+"""
+function export_molden_orbitals(EC::ECInfo, filename::String)
+  MoldenInterface.write_molden_orbitals(EC, filename)
 end
 
 end # module
