@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## Version [v0.13.0] - 2024.07.09
 
 ### Breaking
 
@@ -26,8 +26,6 @@
 * `QMTensors.SpinMatrix` struct for one-electron matrices (e.g., MO coefficients)
 * An ordered descriptive dictionary for energy outputs (`ODDict`) has been implemented. Each key-value entry can have a description.
 * `DIIS.perform!` now accepts a tuple of functions to calculate cusomized dot-products (e.g., involving contravariants etc).
-
-### Fixed
 
 ## Version [v0.12.0] - 2024.05.28
 
