@@ -77,7 +77,7 @@
 
 \begin{document}
 \title{Equations and derivations for \ElemCojl}
-\author{Thomas Schraivogel and Daniel Kats}
+\author{Thomas Schraivogel, Fangcheng Wu and Daniel Kats}
 \maketitle
 \tableofcontents
 \chapter{Introduction}
@@ -317,6 +317,261 @@ which has to be taken into account in the equations.
 The residual of the Hartree-Fock equations, which can be used in DIIS, is equivalent to
 \eq{eq:hf-residual}, with the overlap matrix $S_{\mu}^{\nu}$ removed.
 
+\chapter{Density-Fitted Multiconfigurational Self-Consistent Field}
+\section{Orbital Rotation}
+The orbital transformed wavefunction can be expressed by
+\begin{equation}
+  |\Psi> = \exp(\hat{R})|0>,
+\end{equation}
+where
+\begin{equation}
+\begin{aligned}
+  \exp(\hat{R}) &= 1+\hat{R}+\frac{1}{2!}\hat{R}^2+ \cdots, \\
+  \hat{R} &= R_r^s\hat{E}_s^r,\\
+\end{aligned}
+\end{equation}
+
+$\hat{E}^r_s$ is the singlet excitation operator $(\hat{a}_{r\alpha}^{\dagger}\hat{a}_{k\alpha}+\hat{a}_{r\beta}^{\dagger}\hat{a}_{k\beta} )$. 
+Mathemetically if $\bf{R}$ is antisymmetric, $\exp(\hat{R})$ is an unitary transformation.
+\begin{equation}
+  \begin{aligned}
+    R_r^s &= -R_s^r,\\
+    \hat{R} &= [R_r^s(\hat{E}_s^r-\hat{E}_r^s)]_{r\mathchar"313E s},
+  \end{aligned}
+  \end{equation}
+
+\section{MCSCF}
+The energy expectation value of the wavefunction is be given by
+\begin{equation}
+\begin{aligned}
+E(\bf{R}) &= <\Psi|\hat{H}|\Psi> \\
+&= <0|\exp(-\hat{R})\hat{H}\exp(\hat{R})|0> \\
+&= <0|\hat{H}|0> + <0|[\hat{H},\hat{R}]|0> + \frac{1}{2!}< 0|[[\hat{H},\hat{R}], \hat{R}]|0> + \cdots\\
+&= E_0+\bf{g}^T\bf{x} +\frac{1}{2} \bf{x}^T\bf{hx}+ \cdots.\\
+\end{aligned}
+\end{equation}
+In which Hamiltonian operator $\hat{H}$ is expressed as
+\begin{equation}
+\begin{aligned}
+\hat{H} &= E_0 + h^q_p\hat{a}_p^\dagger\hat{a}_q + \frac{1}{2}v^{qs}_{pr}\hat{a}_p^\dagger\hat{a}_r^\dagger\hat{a}_s\hat{a}_q\\
+&= E_0 + h^q_p\hat{E}^p_q + \frac{1}{2}v^{qs}_{pr}\hat{e}^{pr}_{qs},\\
+\end{aligned}
+\end{equation}
+with $\hat{e}^{pr}_{qs}$ as the 2-electron excitation operator $\sum_{\sigma\tau}\hat{a}_{p\sigma}^\dagger\hat{a}_{r\tau}^\dagger\hat{a}_{s\tau}\hat{a}_{q\sigma}$.
+In the first expression, $p,q,r,s$ denote the spin orbitals, and in the second expression, $p,q,r,s$ denote spatial orbitals.
+
+The orbital transformation parameters $\bf{R}$ is expressed as vector $\bf{x}$, 
+the linear coefficients as gradient vector $\bf{g}$, 
+the quadratic coefficients as matrix $\bf{h}$. 
+When terms after the quadratic terms truncated, 
+to minimize the energy expectation value, the Lagrangian equation as known as the Newton-Raphson equation is
+\begin{equation}
+\frac{\partial}{\partial \bf{x}}(\bf{g}^T\bf{x}+\frac{1}{2}\bf{x}^T\bf{hx})= \bf{g}+\bf{hx} =0.
+\end{equation}
+Since the internal rotation of each of doubly occupied orbitals and virtual orbitals don't change the wavefunction, 
+vector $\bf{x}$ is consisted of 4 parts, can be expressed as $[\bf{x}_t^j,\bf{x}_a^j,\bf{x}_t^u, \bf{x}_a^u]$.
+
+Here, $\bf{g}$ is calculated from
+\begin{equation}
+\begin{aligned}
+  g_r^k&= (\frac{\partial E}{\partial x_r^k})_{\bf{R = \bf{0}}}\\
+  &= <0|[\hat{H}, \hat{E}^r_k-\hat{E}^k_r]|0>\\
+  &= [1-\perm{rk}]<0|[\hat{E}^k_r, h^{q'}_{p'}\hat{E}^{p'}_{q'} + \frac{1}{2}v^{q's'}_{p'r'}\hat{e}^{p'r'}_{q's'}]|0>\\
+  &= [1-\perm{rk}]<0|h^{q'}_r\hat{E}^k_{q'}-h^k_{p'}\hat{E}^{p'}_r +v^{q's'}_{rr'}\hat{e}^{kr'}_{q's'}- v^{ks'}_{p'r'}\hat{e}^{p'r'}_{rs'}|0>,\\
+  &= [1-\perm{rk}](h^{q'}_r\pre{^1}D^k_{q'}-h^k_{p'}\pre{^1}D^{p'}_r+v^{q's'}_{rr'}\pre{^2}D^{kr'}_{q's'}-v^{ks'}_{p'r'}\pre{^2}D^{p'r'}_{rs'})
+\end{aligned}
+\end{equation}
+let
+\begin{equation}
+  \red{A_r^k= \frac{1}{2}(h^{q'}_r\pre{^1}D^k_{q'} + h^r_{p'}\pre{^1}D^{p'}_k) + \frac{1}{2}(v^{q's'}_{rr'}\pre{^2}D^{kr'}_{q's'}+v^{rs'}_{p'r'}\pre{^2}D^{p'r'}_{ks'}),}
+\end{equation}
+then
+\begin{equation}
+  \red{g_r^k = 2(A_r^k-A_k^r).}
+\end{equation}
+In which 1-particle density matrix $\bf{\pre{^1}D}$ and 2-particle density matrix $\bf{\pre{^2}D}$ are defined as 
+\begin{equation}
+\begin{aligned}
+  \pre{^1}D^t_u &= <0|\hat{E}^t_u|0> = c_Ic_J<\Phi_I|\hat{E}^t_u|\Phi_J>,\\
+  \pre{^2}D^{tv}_{uw} &= <0|\hat{e}^{tv}_{uw}|0> = c_Ic_J<\Phi_I|\hat{e}^{tv}_{uw}|\Phi_J>.
+\end{aligned}
+\end{equation}
+In order to simplify the expression, 
+the $\pre{^1}D_v^u$ is written as $D_v^u$, and $\pre{^2}D_{tv}^{uw}$ is written as $D_{tv}^{uw}$ in follow. 
+
+Fock matrix can be generalizingly defined as 
+\begin{equation}
+  F_r^s = \pre{^c}F_r^s + D^t_u[v^{su}_{rt}-\frac{1}{2}v^{us}_{rt}],
+\end{equation}
+with 
+\begin{equation}
+  \pre{^c}F_r^s = h^s_r+(2v^{sj}_{rj}-v^{js}_{rj})
+\end{equation}
+defined as the closed shell part of Fock matrix.
+
+$\bf{A}_r^k$ can be calculated as 
+\begin{equation}
+\begin{aligned}
+  A_r^i=& \frac{1}{2}(h^{q'}_rD^i_{q'} + h^r_{p'}D^{p'}_i) + \frac{1}{2}(v^{q's'}_{rr'}D^{ir'}_{q's'}+v^{rs'}_{p'r'}D^{p'r'}_{is'}),\\
+  =&\frac{1}{2}(h^i_rD^i_i+h^r_iD^i_i)+\frac{1}{2}(v^{ij}_{rj}D^{ij}_{ij}+v^{rj}_{ij}D^{ij}_{ij} +v^{ji}_{rj}D^{ij}_{ji} +v^{rj}_{ji}D^{ji}_{ij}\\
+    &+ v^{iu}_{rt}D^{it}_{iu}+v_{iu}^{rt}D_{it}^{iu} + v^{ui}_{rt}D^{it}_{ui} + v^{rt}_{ui}D^{ui}_{it})\\
+  =&\frac{1}{2}(2h^i_r+2h^r_i)+\frac{1}{2}(4v^{ij}_{rj}+4v^{rj}_{ij} -2v^{ji}_{rj} -2v^{rj}_{ji} + 2v^{iu}_{rt}D^t_u+2v_{iu}^{rt}D_t^u - v^{ui}_{rt}D^t_u - v^{rt}_{ui}D^u_t)\\
+  =&\sop{ri}(h^i_r+2v^{ij}_{rj}-v^{ji}_{rj}+v^{iu}_{rt}D^t_u-\frac{1}{2}v^{ui}_{rt}D^t_u)\\
+  =&\sop{ri} F_r^i,
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+  A_r^u=& \frac{1}{2}(h^{q'}_rD^u_{q'} + h^r_{p'}D^{p'}_u) + \frac{1}{2}(v^{q's'}_{rr'}D^{ur'}_{q's'}+v^{rs'}_{p'r'}D^{p'r'}_{us'})\\
+  =&\frac{1}{2}(h^t_rD^u_t+h^r_tD^t_u) + \frac{1}{2}(v^{tj}_{rj}D^{uj}_{tj}+v^{rj}_{tj}D^{tj}_{uj}+v^{tv}_{rw}D^{uw}_{tv}+v^{rw}_{tv}D^{tv}_{uw}+v^{jt}_{rj}D^{uj}_{jt}+v^{rj}_{jt}D^{jt}_{uj})\\
+  =&\frac{1}{2}(h^t_rD^u_t+h^r_tD^t_u) + \frac{1}{2}(2v^{tj}_{rj}D^u_t+2v^{rj}_{tj}D^t_u+v^{tv}_{rw}D^{uw}_{tv}+v^{rw}_{tv}D^{tv}_{uw}-v^{jt}_{rj}D^u_t-v^{rj}_{jt}D^t_u)\\
+  =&\frac{1}{2}[(h^t_r + 2v^{tj}_{rj} - v^{jt}_{rj})D^u_t + v^{tv}_{rw}D^{uw}_{tv}] + \frac{1}{2}[(h^r_t + 2v^{rj}_{tj} - v^{jr}_{tj})D^t_u + v^{rw}_{tv}D^{tv}_{uw}]\\
+  =&\frac{1}{2}(\pre{^c}F_r^tD^u_t+v^{tv}_{rw}D^{uw}_{tv}) + \frac{1}{2}(\pre{^c}F_t^rD^t_u+v^{rw}_{tv}D^{tv}_{uw}),\\
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+  A_r^a=0.
+\end{equation}
+
+Electronic energy $E$ after orbital transformation is calculated with transformed orbitals and active orbital 1- and 2-particle density matrices
+\begin{equation}
+E=\pre{^c}F_t^uD^t_u+\frac{1}{2}v^{uw}_{tv}D^{tv}_{uw}+E_c,
+\end{equation}
+with
+\begin{equation}
+  E_c=h^j_j+\pre{^c}F_j^j,
+\end{equation}
+$E_c$ is the closed shell electronic energy.
+
+The 4-index integral $v^{uw}_{tv}$ is calculated as the density fitted integrals, as mentioned in previous chapter,
+\begin{equation}
+\begin{aligned}
+  v^{uw}_{tv} =& v^{uL}_t v^{wL}_v,\\
+  v^{uL}_t =& v^{\nu L}_{\mu} C_t^{\dagger \mu} C^u_{\nu}.\\
+\end{aligned}
+\end{equation}
+Likewise, other four-index integrals in this chapter are calculated in the same way.
+
+
+\section{Augmented Hessian}
+In order to make the coefficients transforming step smaller and more robust, 
+a level-shift $\epsilon$ is introduced to control the step $\bf{x}$ \cite{augmentedHessian1981}
+\begin{equation}
+\bf{g}+(\bf{h}+\epsilon \bf{I})\bf{x}=0,
+\end{equation}
+in which
+\begin{equation}
+\epsilon =-\lambda^2\bf{x}^T\bf{g},
+\end{equation}
+\begin{equation}
+\begin{pmatrix}
+    0 & \lambda \bf{g}^T \\
+    \lambda \bf{g} & \bf{h}
+\end{pmatrix}
+\begin{pmatrix}
+    \frac{1}{\lambda} \\
+    \bf{x}
+\end{pmatrix}
+= \nu
+\begin{pmatrix}
+    \frac{1}{\lambda} \\
+    \bf{x}
+\end{pmatrix}.
+\end{equation}
+
+We search for the value of $\lambda$ with a combination method of linear search and logarithmic bisection search:
+\begin{equation}
+\begin{aligned}
+  \lambda =&\frac{(\left\lVert\bf{x_{small\lambda}}\right\rVert - trust) + (trust -\left\lVert\bf{x_{large\lambda}}\right\rVert)}{\left\lVert\bf{x_{small\lambda}}\right\rVert-\left\lVert\bf{x_{large\lambda}}\right\rVert},\\
+  \lambda=&\exp{(\ln{small\lambda}+(\ln{big\lambda}-\ln{small\lambda}) * bisecdamp)}.
+\end{aligned}
+\end{equation}
+If there are both tested smallest and biggest limits in one iteration search for $\lambda$, we adopt the linear search with the norm of both limit $\bf{x}$,
+otherwise, we use either the upper and lower boundaries value(by default set to be 1000 and 1) and the tested $\lambda$ to do the logarithmic bisection search.
+
+
+\section{Hessian Approximation}
+
+\subsection{First Order Approximation}
+We adopt the Super-CI optimization approximation\cite{SCI1989}, in which 
+\begin{equation}
+\hat{H}^{eff}=\sum_{pq}F_p^q \hat{E}_p^q,
+\end{equation}
+\begin{equation}
+E^{(0)}=<0|\hat{H}^{eff}|0>,
+\end{equation}
+\begin{equation}
+\pre{^{SCI}}H_{rs}^{kl}=2<rk|\hat{H}^{eff} - E^{(0)}|sl>.
+\end{equation}
+More specifically,
+\begin{equation}
+\begin{aligned}
+  \red{\pre{^{SCI}}H_{ab}^{ij} =}&\red{ 4(\delta_i^j F_a^b-\delta_a^b F_i^j),}\\
+  \red{\pre{^{SCI}}H_{ab}^{iu} =}&\red{ -2\delta_a^b F_i^vD_v^u,} \\
+  \red{\pre{^{SCI}}H_{au}^{ij} =}&\red{ \delta_i^j(4F_a^u-2F_a^vD_v^u), }\\
+  \red{\pre{^{SCI}}H_{tb}^{iu} =}&\red{ 0,}\\
+  \red{\pre{^{SCI}}H_{tu}^{ij} =}&\red{ (2D_t^u-4\delta_t^u) F_i^j+2\delta_i^j[2F_t^u-(D^{tv}_{uw}-D^t_uD^v_w)F_v^w-D_t^vF_v^u-F_t^vD^v_u],}\\
+  \red{\pre{^{SCI}}H_{ab}^{tu} =}&\red{ 2\delta^a_b (D^{tv}_{uw}-D^t_uD^v_w)F_v^w + 2D^t_uF_a^b.}
+\end{aligned}
+\end{equation}
+
+\subsection{Second Order Approximation}
+In general, the second-order Hessian matrix elements are calculated as
+\begin{equation}
+\begin{aligned}
+  \pre{^{SO}}H_{rs}^{kl} =&  (\frac{\partial E}{\partial x_r^k\partial x_s^l})_{\bf{R = \bf{0}}}\\
+  =& \frac{1}{2}\Sop{rs}{kl} <0|[[\hat{H},\hat{E}^k_r-\hat{E}^r_k],\hat{E}^l_s-\hat{E}^s_l]|0>\\
+  =& \frac{1}{2}\Sop{rs}{kl} \ASop{rk}{sl} <0|[[\hat{H},\hat{E}^k_r], \hat{E}^l_s]|0>\\
+  =& \frac{1}{2}\Sop{rs}{kl} \ASop{rk}{sl} <0|[\hat{E}^l_s,[\hat{E}^k_r, h^{q'}_{p'}\hat{E}^{p'}_{q'} + \frac{1}{2}v^{q's'}_{p'r'}\hat{e}^{p'r'}_{q's'}]]|0>\\
+  =& \frac{1}{2}\Sop{rs}{kl} \ASop{rk}{sl} (-h^l_rD^k_s -h^k_sD^l_r + h^{q'}_rD^l_{q'}\delta^k_s + h^k_{p'}D^{p'}_s\delta^l_r\\
+  &+\delta^k_sv^{q's'}_{rr'}D^{lr'}_{q's'} + \delta^l_r v^{ks'}_{p'r'}D^{p'r'}_{ss'}-v^{ls'}_{rr'}D^{kr'}_{ss'} - v^{ks'}_{sr'}D^{lr'}_{rs'}\\
+  &+v^{q's'}_{rs}D^{kl}_{q's'} + v^{kl}_{p'r'}D^{p'r'}_{rs} - v^{q'l}_{rr'}D^{kr'}_{q's} - v^{ks'}_{p's}D^{p'l}_{rs'})\\
+  =& \ASop{rk}{sl} (-h^l_rD^k_s - h^k_sD^l_r -v^{ls'}_{rr'}D^{kr'}_{ss'} - v^{ks'}_{sr'}D^{lr'}_{rs'} +v^{q's'}_{rs}D^{kl}_{q's'} + v^{kl}_{p'r'}D^{p'r'}_{rs} - v^{q'l}_{rr'}D^{kr'}_{q's} - v^{ks'}_{p's}D^{p'l}_{rs'} )\\
+   &+ \frac{1}{2} \Sop{rs}{kl} \ASop{rk}{sl} \delta^k_s(h^{q'}_rD^l_{q'} + h^r_{p'}D^{p'}_l +v^{q's'}_{rr'} D^{lr'}_{q's'}+ v^{rs'}_{p'r'}D^{p'r'}_{ls'} ) \\
+  =&\red{ \ASop{rk}{sl} (h^s_rD^k_l + h^r_s D^l_k + v^{ss'}_{rr'}D^{kr'}_{ls'} + v^{rs'}_{sr'}D^{lr'}_{ks'} + v^{q's'}_{rs}D^{kl}_{q's'} + v^{rs}_{p'r'}D^{p'r'}_{kl} + v^{q's}_{rr'}D^{kr'}_{q'l}+  v^{rs'}_{p's}D^{p'l}_{ks'}) }\\
+   &+ \ASop{rk}{sl}(\delta^k_sA^l_r+\delta^l_rA^k_s)\\
+  =& \ASop{rk}{sl} [2G^{kl}_{rs}+ \red{\delta^k_s(A^l_r+A^r_l)}]\\
+  =& \ASop{rk}{sl} [2G^{kl}_{rs}-\delta^k_l(A_r^s+A_s^r)],\\
+\end{aligned}
+\end{equation}
+matrices $\bf{G}$ are defined as
+\begin{equation}
+  \red{G^{kl}_{rs} = \frac{1}{2} (h^s_rD^k_l + h^r_s D^l_k + v^{ss'}_{rr'}D^{kr'}_{ls'} + v^{rs'}_{sr'}D^{lr'}_{ks'} + v^{q's'}_{rs}D^{kl}_{q's'} + v^{rs}_{p'r'}D^{p'r'}_{kl} + v^{q's}_{rr'}D^{kr'}_{q'l}+  v^{rs'}_{p's}D^{p'l}_{ks'})}
+\end{equation}
+
+\begin{equation}
+\red{G^{ij}_{rs} = \delta_i^j(F^r_s+F^s_r)+L^{ij}_{rs} + L^{rs}_{ij},}
+\end{equation}
+\begin{equation}
+\red{G^{tj}_{rs} = \frac{1}{2}(D^t_uL^{uj}_{rs} + D^u_tL^{rs}_{uj}) = G^{jt}_{sr},}
+\end{equation}
+\begin{equation}
+\red{G^{tu}_{rs} = \frac{1}{2}( \pre{^c}F_r^sD_t^u + \pre{^c}F_s^rD_u^t  + v^{sw}_{rv}D^{tv}_{uw} + v^{rv}_{sw}D^{uw}_{tv})+v^{vw}_{rs}D^{tu}_{vw} + v_{vw}^{rs}D_{tu}^{vw},}
+\end{equation}
+where
+\begin{equation}
+  L^{pq}_{rs} = 2v^{pq}_{rs} +2^{ps}_{rq} - v^{sp}_{rq} - v^{qp}_{rs}.
+\end{equation}
+
+\subsection{Combined Second-Order and Super-CI Hessian Approximation}
+By default, the SO-SCI Hessian matrix \cite{kreplinMCSCF2020} is approximated as below:
+\begin{equation}
+\begin{aligned}
+\pre{^{SO-SCI}}H_{ab}^{ij} =& \pre{^{SCI}}H_{ab}^{ij},\\
+\pre{^{SO-SCI}}H_{ab}^{iu} =& \pre{^{SCI}}H_{ab}^{iu},\\
+\pre{^{SO-SCI}}H_{au}^{ij} =& \pre{^{SCI}}H_{au}^{ij},\\
+\pre{^{SO-SCI}}H_{tb}^{iu} =& \pre{^{SO}}H_{tb}^{iu},\\
+\pre{^{SO-SCI}}H_{tu}^{ij} =& \pre{^{SO}}H_{tu}^{ij},\\
+\pre{^{SO-SCI}}H_{ab}^{tu} =& \pre{^{SO}}H_{ab}^{tu}.\\
+\end{aligned}
+\end{equation}
+If the $\bf{SO\_SCI\_origin}$ option is set to be $false$, 
+\begin{equation}
+  \pre{^{SO-SCI}}H_{ab}^{tu} = \pre{^{SCI}}H_{ab}^{tu},
+\end{equation}
+and the rest blocks of Hessian matrix remain the same.
 
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
 \section{Closed-shell CCSD/DCSD Lagrangian} \label{sec:cs-ccsd}
@@ -783,7 +1038,7 @@ The ``open-shell'' part of spin-projected $\alpha\beta$ amplitudes is given by
 \begin{aligned}
 ~^{αβ}\bar T^{ij}_{at} &= \frac{1}{3} ( ~^{ββ}T^{ij}_{at} + 2 ~^{αβ}T^{ij}_{at} + ~^{αβ}T^{ji}_{at})\\
 ~^{αβ}\bar T^{tj}_{ab} &= \frac{1}{3} ( ~^{αα}T^{tj}_{ab} + 2 ~^{αβ}T^{tj}_{ab} + ~^{αβ}T^{tj}_{ba})\\
-~^{αβ}\bar T^{tj}_{au} &= ~^{αβ}T^{tj}_{au} + \frac{\delta_{tu}}{2m_s + 2}\left( ~^{β}T^j_a - ~^{α}T^j_a - ~^{αβ}T^{vj}_{av} \right)
+~^{αβ}\bar T^{tj}_{au} &= ~^{αβ}T^{tj}_{au} + \frac{\delta^t_u}{2m_s + 2}\left( ~^{β}T^j_a - ~^{α}T^j_a - ~^{αβ}T^{vj}_{av} \right)
 \end{aligned}
 \end{equation}
 The projection corrections for the remaining amplitudes are defined 
@@ -1342,14 +1597,14 @@ and which are not explicitly listed in Ref.\cite{szalay94} are coloured \magenta
 Terms we have added to ensure proper antisymmetry and which are not explicitly listed in Ref.\cite{szalay94} are coloured \green{green}.
 IAS terms, which are terms including the all internal singles, are coloured \brown{brown}.
 \begin{align}
-R^i_a &= < {}^A\Phi^i_a |\op H_N e^{\op T_A} | {}^A \Phi >_C - \left( < {}^A\Phi^i_a | e^{\op T_B} | {}^B\Phi ><{}^B\Phi | \op H_N e^{\op T_A} | {}^A \Phi> \right)_C \NL
-      &\equiv < {}^A\Phi^i_a | \op H_N e^{\op T_A} | {}^A \Phi >_C + M^i_a W = 0,
+R^i_a &= < \pre{^A}\Phi^i_a |\op H_N e^{\op T_A} | \pre{^A} \Phi >_C - \left( < \pre{^A}\Phi^i_a | e^{\op T_B} | \pre{^B}\Phi ><\pre{^B}\Phi | \op H_N e^{\op T_A} | \pre{^A} \Phi> \right)_C \NL
+      &\equiv < \pre{^A}\Phi^i_a | \op H_N e^{\op T_A} | \pre{^A} \Phi >_C + M^i_a W = 0,
 \end{align}
 \begin{align}
-R^{ij}_{ab} &= <{}^A\Phi^{ij}_{ab} |\op H_N e^{\op T_A}| {}^A \Phi>_C - \left( <{}^A \Phi^{ij}_{ab} |e^{\op T_B}| {}^B \Phi><{}^B\Phi |\op H_N e^{\op T_A}| {}^A\Phi> \right)_C \NL
-            &-\ASop{ij}{ab} \Big[ <{}^A \Phi^i_a |e^{\op T_A}| {}^A\Phi> \left( <{}^A\Phi^j_b |e^{\op T_B}| {}^B\Phi> <{}^B\Phi |\op H_N e^{\op T_A}| {}^A\Phi>  \right)_C \NL
-                           &- \op R(ia) <{}^B \Phi^i_a |e^{\op T_B}| {}^B\Phi> \left( <{}^A\Phi^j_b |e^{\op T_B}| {}^B\Phi> <{}^B\Phi |\op H_N e^{\op T_A}| {}^A\Phi> \right)_C \Big] \NL
-            &\equiv <{}^A\Phi^{ij}_{ab} |\op H_N e^{\op T_A}| {}^A\Phi>_C + M^{ij}_{ab} W = 0,
+R^{ij}_{ab} &= <\pre{^A}\Phi^{ij}_{ab} |\op H_N e^{\op T_A}| \pre{^A} \Phi>_C - \left( <\pre{^A} \Phi^{ij}_{ab} |e^{\op T_B}| \pre{^B} \Phi><\pre{^B}\Phi |\op H_N e^{\op T_A}| \pre{^A}\Phi> \right)_C \NL
+            &-\ASop{ij}{ab} \Big[ <\pre{^A} \Phi^i_a |e^{\op T_A}| \pre{^A}\Phi> \left( <\pre{^A}\Phi^j_b |e^{\op T_B}| \pre{^B}\Phi> <\pre{^B}\Phi |\op H_N e^{\op T_A}| \pre{^A}\Phi>  \right)_C \NL
+                           &- \op R(ia) <\pre{^B} \Phi^i_a |e^{\op T_B}| \pre{^B}\Phi> \left( <\pre{^A}\Phi^j_b |e^{\op T_B}| \pre{^B}\Phi> <\pre{^B}\Phi |\op H_N e^{\op T_A}| \pre{^A}\Phi> \right)_C \Big] \NL
+            &\equiv <\pre{^A}\Phi^{ij}_{ab} |\op H_N e^{\op T_A}| \pre{^A}\Phi>_C + M^{ij}_{ab} W = 0,
 \end{align}
 The operator $\op R(ia)$ excludes the active orbitals from the corresponding orbital spaces.
 The following intermediates are used:

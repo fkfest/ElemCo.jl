@@ -8,3 +8,4 @@ docs/equations/*.log
 docs/equations/*.out
 docs/equations/*.toc
 docs/src/release-notes.md
+LocalPreferences.toml

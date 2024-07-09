@@ -40,20 +40,20 @@ fcidump = "DF_HF_TEST.FCIDUMP"
 @dfints
 
 energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
-@test abs(energies.HF-EHF_test) < epsilon
-@test abs(energies.MP2-EMP2_test) < epsilon
-@test abs(energies.DCSD-EDCSD_test) < epsilon
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2"]-EMP2_test) < epsilon
+@test abs(energies["DCSD"]-EDCSD_test) < epsilon
 
 rm(fcidump)
 
 energies = @dfcc svd-dcsd
-@test abs(energies.SVD_DCSD-ESVDDCSD_test) < epsilon
+@test abs(energies["SVD-DCSD"]-ESVDDCSD_test) < epsilon
 @set cc use_full_t2=true
 energies = @dfcc svd-dcsd
-@test abs(energies.SVD_DCSD-ESVDDCSD_ft_test) < epsilon
+@test abs(energies["SVD-DCSD"]-ESVDDCSD_ft_test) < epsilon
 
 @set scf direct=false
 @set wf ms2=2
 EUHF = @dfuhf
-@test abs(EUHF.HF-EUHF_test) < epsilon
+@test abs(EUHF["HF"]-EUHF_test) < epsilon
 end

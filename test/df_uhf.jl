@@ -20,8 +20,8 @@ let
   @opt wf ms2=2
   EUHF = @dfuhf
   energies = @cc udcsd
-  @test abs(last(EUHF)-EUHF_test) < epsilon
-  @test abs(last(energies)-EUDCSD_test) < epsilon
+  @test abs(last_energy(EUHF)-EUHF_test) < epsilon
+  @test abs(last_energy(energies)-EUDCSD_test) < epsilon
 end
 
 let
@@ -33,8 +33,8 @@ let
   @dfints 
   energies = @cc uccsd fcidump=fcidump
   rm(fcidump)
-  @test abs(last(EUHF)-EUHF1_test) < epsilon
-  @test abs(last(energies)-EUCCSD1_test) < epsilon
+  @test abs(last_energy(EUHF)-EUHF1_test) < epsilon
+  @test abs(last_energy(energies)-EUCCSD1_test) < epsilon
 end
 
 end
