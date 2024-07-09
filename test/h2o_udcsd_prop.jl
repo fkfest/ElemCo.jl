@@ -20,10 +20,10 @@ let
   @dfuhf
   @rotate_orbs 6 7 90
   @cc λudcsd occa="-4+6" occb="-3"
-  U1a, U1b = @loadfile("cc_multipliers_singles") 
-  U2a, U2b, U2ab = @loadfile("cc_multipliers_doubles") 
-  T1a, T1b = @loadfile("cc_amplitudes_singles") 
-  T2a, T2b, T2ab = @loadfile("cc_amplitudes_doubles") 
+  U1a, U1b = @loadfile("cc_multipliers_1") 
+  U2a, U2b, U2ab = @loadfile("cc_multipliers_2") 
+  T1a, T1b = @loadfile("cc_amplitudes_1") 
+  T2a, T2b, T2ab = @loadfile("cc_amplitudes_2") 
   D1a, dD1a = ElemCo.calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1a, T2a, T2ab, :α)
   D1b, dD1b = ElemCo.calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1b, T2b, T2ab, :β)
 end

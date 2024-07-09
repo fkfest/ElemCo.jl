@@ -21,9 +21,8 @@ end
 # testset is the name of the test set
 # tests is a list of test file names (without the .jl extension)
 TESTS = [
-("FCIDUMP", ["h2o", "h2o_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]),
+("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]),
 ("CC", ["h2-"]),
-("DMRG", ["h2o_dmrg"]),
 ("DF", ["df_hf", "df_uhf", "df_mcscf"]),
 ("SVD", ["svd_dc"]),
 ("Interface", ["h2o_matrop"]),
@@ -33,7 +32,8 @@ TESTS = [
 # long tests
 LONGTESTS = [
 ("Props", ["h2o_udcsd_prop"]),
-("High-order CC", ["uccsdt"]),
+("DMRG", ["h2o_dmrg"]),
+("High-order CC", ["uccsdt", "ccsdt"]),
 ]
 
 for (testset, tests) in TESTS

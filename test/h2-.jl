@@ -19,12 +19,12 @@ basis = Dict("ao"=>"cc-pVDZ",
 @dfuhf
 
 energies = @cc dcsd
-@test abs(energies.HF-EHF_test) < epsilon
-@test abs(energies.MP2-EMP2_test) < epsilon
-@test abs(energies.UDCSD-EDCSD_test) < epsilon
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2"]-EMP2_test) < epsilon
+@test abs(energies["UDCSD"]-EDCSD_test) < epsilon
 
 energies = @cc λuccsd(t)
-@test abs(energies.ΛUCCSD_T-EΛUCCSD_T_test) < epsilon
-@test abs(energies.T3+energies.ΛUCCSD-EΛUCCSD_T_test) < epsilon
+@test abs(energies["ΛUCCSD(T)"]-EΛUCCSD_T_test) < epsilon
+@test abs(energies["(T)"]+energies["ΛUCCSD"]-EΛUCCSD_T_test) < epsilon
 
 end

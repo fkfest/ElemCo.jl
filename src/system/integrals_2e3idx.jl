@@ -10,18 +10,18 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2E3IDX
   jname = Symbol(jname_str)
   jname_ex = Symbol(jname_str*"!")
   descr = Symbol(descr_str)
-  for (TAS, suffix) in ((SphericalAngularShell, "sph"), (CartesianAngularShell, "cart"))
+  for (suffix, cartesian) in (("sph", false), ("cart", true))
     jname_sfx = Symbol(jname_str*"_$(suffix)")
     jname_sfx_ex = Symbol(jname_str*"_$(suffix)!")
     libname = Symbol("cint3c2e$(type)$(suffix)!")
     docstr = """
-          $jname(ash1ao::$TAS, ash2ao::$TAS, ashfit::$TAS, basis::BasisSet)
+          $jname_sfx(ash1ao::AngularShell, ash2ao::AngularShell, ashfit::AngularShell, basis::BasisSet)
 
         Compute the $descr integral ``v_{a_1}^{a_2 P}`` for given angular shells.
         `basis` has to contain ao and fit bases.
       """
     docstr_ex = """
-          $jname_ex(out, ash1ao::$TAS, ash2ao::$TAS, ashfit::$TAS, basis::BasisSet)
+          $jname_ex(out, ash1ao::AngularShell, ash2ao::AngularShell, ashfit::AngularShell, basis::BasisSet)
 
         Compute the $descr integral ``v_{a_1}^{a_2 P}`` for given angular shells.
         `basis` has to contain ao and fit bases.
@@ -36,14 +36,14 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2E3IDX
       """
     @eval begin
       @doc $docstr
-      function $jname(ash1ao::$TAS, ash2ao::$TAS, ashfit::$TAS, basis::BasisSet)
-        buf = Array{Float64}(undef, n_ao(ash1ao),n_ao(ash2ao),n_ao(ashfit))
+      function $jname_sfx(ash1ao::AngularShell, ash2ao::AngularShell, ashfit::AngularShell, basis::BasisSet)
+        buf = Array{Float64,3}(undef, n_ao(ash1ao,$cartesian),n_ao(ash2ao,$cartesian),n_ao(ashfit,$cartesian))
         $libname(buf, [ash1ao.id,ash2ao.id,ashfit.id], basis.lib)
         return buf
       end
         
       @doc $docstr_ex
-      function $jname_ex(out, ash1ao::$TAS, ash2ao::$TAS, ashfit::$TAS, basis::BasisSet)
+      function $jname_sfx_ex(out, ash1ao::AngularShell, ash2ao::AngularShell, ashfit::AngularShell, basis::BasisSet)
         $libname(out, [ash1ao.id,ash2ao.id,ashfit.id], basis.lib)
       end
 
@@ -98,8 +98,8 @@ end
 
 function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::BasisSet)
   # Number of orbitals per shell
-  nao4sh = n_ao.(ao_basis)
-  nfit4sh = n_ao.(fit_basis)
+  nao4sh = Int[n_ao(ash, ao_basis.cartesian) for ash in ao_basis]
+  nfit4sh = Int[n_ao(ash, fit_basis.cartesian) for ash in  fit_basis]
   nao_max = maximum(nao4sh)
   nfit_max = maximum(nfit4sh)
 

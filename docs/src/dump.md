@@ -1,31 +1,38 @@
 # FCIDump files
 
 ```@meta
-CurrentModule = ElemCo.FciDump
+CurrentModule = ElemCo.FciDumps
 ```
 
 ```@docs
-FciDump
+FciDumps
 ```
 
 The FCIDump file format is a simple text file format for storing molecular integrals. It is used by many quantum chemistry programs. 
 
 ## Storage of molecular integrals
+
 ```@docs
 FDump
 ```
 
+
 ## Exported functions
 
 ```@autodocs
-Modules = [FciDump]
+Modules = [FciDumps]
 Private = false
 Order = [:function]
 ```
 
 ## Internal functions
+
+```@docs
+FDumpHeader
+```
+
 ```@autodocs
-Modules = [FciDump]
+Modules = [FciDumps]
 Public = false
 Order = [:function]
 ```
