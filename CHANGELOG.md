@@ -8,7 +8,11 @@
 
 ### Added
 
+* Store MP2 amplitudes in `cc_amplitudes_` files in `@cc mp2` calculations.
+
 ### Fixed
+
+* Fix `maxit=0` case for `cc` calculations. 
 
 ## Version [v0.13.0] - 2024.07.09
 
