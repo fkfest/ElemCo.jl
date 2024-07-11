@@ -1,10 +1,6 @@
 # Release notes
 
-## Unreleased
-
-### Breaking
-
-### Changed
+## Version [v0.13.1] - 2024.07.11
 
 ### Added
 
