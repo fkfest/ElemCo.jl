@@ -94,7 +94,7 @@ export last_energy
 # from DescDict
 export ODDict
 
-const __VERSION__ = "0.13.1"
+const __VERSION__ = "0.13.1+"
 
 """
     __init__()

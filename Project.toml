@@ -1,7 +1,7 @@
 name = "ElemCo"
 uuid = "094d408e-8508-40f4-9646-a254980d91ac"
 authors = ["Daniel Kats <d.kats@fkf.mpg.de> and contributors"]
-version = "0.13.1"
+version = "0.13.1+"
 
 [deps]
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
