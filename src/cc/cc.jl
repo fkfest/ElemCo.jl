@@ -2087,7 +2087,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   NormT2::Float64 = 0.0
   NormT3::Float64 = 0.0
   do_sing = (method.exclevel[1] == :full)
-  Eh = OutDict()
+  Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
   En1 = 0.0
   Eias = 0.0
   converged = false
@@ -2219,7 +2219,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   NormT2 = 0.0
   NormT3 = 0.0
   R1 = Float64[]
-  Eh = OutDict()
+  Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
   t0 = time_ns()
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
