@@ -53,6 +53,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   end
 
   if ecmethod.theory == "MP"
+    save_last_amplitudes(EC, ecmethod)
     # do nothing
   elseif ecmethod.theory == "DMRG"
     energies = eval_dmrg_groundstate(EC, energies)
@@ -109,6 +110,27 @@ function dfccdriver(EC::ECInfo, method)
   restore_space!(EC, space_save)
   draw_endline()
   return energies
+end
+
+function save_last_amplitudes(EC::ECInfo, method::ECMethod)
+  if is_unrestricted(method) || has_prefix(method, "R")
+    if method.exclevel[1] != :none
+      T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
+      T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
+      try2save_singles!(EC, T1a, T1b)
+    end
+    T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
+    T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
+    T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    try2save_doubles!(EC, T2a, T2b, T2ab)
+  else
+    if method.exclevel[1] != :none
+      T1 = read_starting_guess4amplitudes(EC, Val(1))
+      try2save_singles!(EC, T1)
+    end
+    T2 = read_starting_guess4amplitudes(EC, Val(2))
+    try2save_doubles!(EC, T2)
+  end
 end
 
 """
