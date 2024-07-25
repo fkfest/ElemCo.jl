@@ -1176,6 +1176,7 @@ function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   NormLM2::Float64 = 0.0
   ΛTNorm = 0.0
   converged = false
+  thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
   t0 = time_ns()
   println("Iter     SqNorm     Corr.Norm   Res         Time")
   for it in 1:EC.options.cc.maxit
@@ -1198,11 +1199,12 @@ function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
       save_current_singles(EC, LMs1..., prefix="U")
     end
     save_current_doubles(EC, LMs2..., prefix="U")
+    ΛTNorm_prev = ΛTNorm
     ΛTNorm = calc_correlation_norm(EC, LMs...)
     NormR = NormR1 + NormR2
     NormLM = 1.0 + NormLM1 + NormLM2
     output_iteration(it, NormR, time_ns()-t0, NormLM, ΛTNorm)
-    if NormR < EC.options.cc.thr
+    if NormR < EC.options.cc.thr && abs(ΛTNorm-ΛTNorm_prev) < thren
       converged = true
       break
     end

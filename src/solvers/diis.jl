@@ -117,6 +117,17 @@ function loadres(diis::Diis, ipos)
 end
 
 """
+    tuple_reshape(vecs, tens)
+
+  Reshape vectors `vecs` to the shape of tensors `tens`.
+
+  Returns `Tuple` of reshaped vectors.
+"""
+function tuple_reshape(vecs, tens)
+  return Tuple([ reshape(vecs[i], size(tens[i])) for i in eachindex(tens) ])
+end
+
+"""
     combine(diis::Diis, vecfiles, coeffs)
 
   Combine vectors from files with coefficients.
@@ -276,11 +287,10 @@ function perform!(diis::Diis, Amps, Res, customdots=())
   if diis.cropdiis
     Opt = combine(diis, diis.resfiles, coeffs)
     saveres(diis, Opt, ithis)
-    # replace Res with Opt residuals keeping the shape of Res
-    for i in eachindex(Res)
-      Res[i][:] = Opt[i]
-    end
-    optres2 = update_Bmat(diis, nDim, Res, ithis, customdots)
+    # reshape Opt to the shape of Res
+    Optr = tuple_reshape(Opt, Res)
+    optres2 = update_Bmat(diis, nDim, Optr, ithis, customdots)
+    Opt = Optr = nothing
     # println("DIIS: ", thisResDot, " -> ", optres2)
     Opt = combine(diis, diis.ampfiles, coeffs)
     saveamps(diis, Opt, ithis)
