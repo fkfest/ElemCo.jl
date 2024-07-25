@@ -119,6 +119,8 @@ end
 Base.@kwdef mutable struct CcOptions
   """`⟨1.e-10⟩` convergence threshold. """
   thr::Float64 = 1.e-10
+  """`⟨0.1⟩` energy convergence factor. The energy convergence threshold is `sqrt(thr) * conven`. """
+  conven::Float64 = 0.1
   """`⟨50⟩` maximum number of iterations. """
   maxit::Int = 50
   """`⟨0.15⟩` level shift for singles. """

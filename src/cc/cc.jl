@@ -189,7 +189,7 @@ end
 
   Calculate closed-shell singles and doubles Hylleraas energy.
   Returns total energy, SS, OS and Openshell (0.0) contributions
-  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
+  as `OutDict` with keys (`pE`,`pESS`,`pEOS`,`pEO`,`E`,`ESS`,`EOS`,`EO`) where `pE` are projected energies.
 """
 function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
@@ -205,27 +205,47 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
     ET1 = ET1SS + ET1OS
   end
   @tensoropt begin
-    int2[i,j,a,b] += R2[a,b,i,j]
-    ET2d = T2[a,b,i,j] * int2[i,j,a,b]
-    ET2ex = T2[b,a,i,j] * int2[i,j,a,b]
+    pET2d = T2[a,b,i,j] * int2[i,j,a,b]
+    pET2ex = T2[b,a,i,j] * int2[i,j,a,b]
+    rET2d = T2[a,b,i,j] * R2[a,b,i,j]
+    rET2ex = T2[b,a,i,j] * R2[a,b,i,j]
   end
+  ET2d = pET2d + rET2d
+  ET2ex = pET2ex + rET2ex
   ET2SS = ET2d - ET2ex
   ET2OS = ET2d
   ET2 = ET2SS + ET2OS
+  pET2SS = pET2d - pET2ex
+  pET2OS = pET2d
+  pET2 = pET2SS + pET2OS
   if length(T1) > 0
     fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
-    @tensoropt ET1 += 2.0*((fov[i,a] + R1[a,i]) * T1[a,i])
+    @tensoropt begin
+      pET1 = 2.0*(fov[i,a] * T1[a,i])
+      rET1 = 2.0*(R1[a,i] * T1[a,i])
+    end
+    ET1 += pET1 + rET1
+  else
+    pET1 = 0.0
   end
+  pET1 += ET1SS + ET1OS
   ET2 += ET1
   ET2SS += ET1SS
   ET2OS += ET1OS
-  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
+  pET2 += pET1
+  pET2SS += ET1SS
+  pET2OS += ET1OS
+  return OutDict("pE"=>pET2, "pESS"=>pET2SS, "pEOS"=>pET2OS, "pEO"=>0.0,
+                 "E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
 
 """
     calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R2, fov)
 
   Calculate singles and doubles Hylleraas energy for one spin case.
+  
+  Returns OutDict with keys (`pE2`,`pE1`,`pE1_2`,`E2`,`E1`,`E1_2`) where `pE` are projected energies
+  and `E` are Hylleraas energies, and 2, 1, 1_2 are doubles, singles and quadratic singles contributions.
 """
 function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R2, fov)
   int2 = ints2(EC,o1*o2*v1*v2)
@@ -243,13 +263,16 @@ function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R
     end
   end
   @tensoropt begin
-    int2[i,j,a,b] += fac*R2[a,b,i,j]
-    ET2 = fac*(T2[a,b,i,j] * int2[i,j,a,b])
+    pET2 = fac*(T2[a,b,i,j] * int2[i,j,a,b])
+    rET2 = fac*fac*(T2[a,b,i,j] * R2[a,b,i,j])
   end
+  ET2 = pET2 + rET2
+  pET1 = 0.0
   if length(R1) > 0
+    @tensoropt pET1 = fov[i,a] * T1[a,i]
     @tensoropt ET1 = (fov[i,a] + R1[a,i]) * T1[a,i]
   end
-  return ET2, ET1, ET1_2
+  return OutDict("pE2"=>pET2, "pE1"=>pET1, "pE1_2"=>ET1_2, "E2"=>ET2, "E1"=>ET1, "E1_2"=>ET1_2)
 end
 
 """
@@ -257,23 +280,28 @@ end
 
   Calculate singles and doubles Hylleraas energy.
   Returns total energy, SS, OS and Openshell contributions
-  as OutDict with keys (`E`,`ESS`,`EOS`,`EO`).
+  as OutDict with keys (`pE`,`pESS`,`pEOS`,`pEO`,`E`,`ESS`,`EOS`,`EO`) where `pE` are projected energies.
 """
 function calc_hylleraas(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, R1a, R1b, R2a, R2b, R2ab)
   SP = EC.space
-  Eh2SSa, Eh1a, Eh1SSa = calc_hylleraas4spincase(EC, "ovov"..., T1a, T1b, T2a, R1a, R2a, load2idx(EC,"f_mm")[SP['o'],SP['v']])
+  # Eh2SSa, Eh1a, Eh1SSa = calc_hylleraas4spincase(EC, "ovov"..., T1a, T1b, T2a, R1a, R2a, load2idx(EC,"f_mm")[SP['o'],SP['v']])
+  Ea = calc_hylleraas4spincase(EC, "ovov"..., T1a, T1b, T2a, R1a, R2a, load2idx(EC,"f_mm")[SP['o'],SP['v']])
   if n_occb_orbs(EC) > 0
-    Eh2SSb, Eh1b, Eh1SSb = calc_hylleraas4spincase(EC, "OVOV"..., T1b, T1a, T2b, R1b, R2b, load2idx(EC,"f_MM")[SP['O'],SP['V']])
-    Eh2OS, Eh1, Eh1OS = calc_hylleraas4spincase(EC, "ovOV"..., T1a, T1b, T2ab, Float64[], R2ab, Float64[])
+    Eb = calc_hylleraas4spincase(EC, "OVOV"..., T1b, T1a, T2b, R1b, R2b, load2idx(EC,"f_MM")[SP['O'],SP['V']])
+    Eab = calc_hylleraas4spincase(EC, "ovOV"..., T1a, T1b, T2ab, zeros(0,0), R2ab, zeros(0,0))
   else
-    Eh2SSb = Eh1b = Eh1SSb = 0.0
-    Eh2OS = Eh1 = Eh1OS = 0.0
+    Eb = Eab = OutDict("pE2"=>0.0, "pE1"=>0.0, "pE1_2"=>0.0, "E2"=>0.0, "E1"=>0.0, "E1_2"=>0.0)
   end
-  Eh = Eh2SSa + Eh2SSb + Eh2OS + Eh1a + Eh1b + Eh1SSa + Eh1SSb + Eh1 + Eh1OS
-  EhSS = Eh2SSa + Eh2SSb + Eh1SSa + Eh1SSb
-  EhOS = Eh2OS + Eh1OS
-  EhO = Eh2SSa - Eh2SSb + Eh1SSa - Eh1SSb
-  return OutDict("E"=>Eh, "ESS"=>EhSS, "EOS"=>EhOS, "EO"=>EhO)
+  Eh = Ea["E2"] + Eb["E2"] + Eab["E2"] + Ea["E1"] + Eb["E1"] + Ea["E1_2"] + Eb["E1_2"] + Eab["E1"] + Eab["E1_2"]
+  EhSS = Ea["E2"] + Eb["E2"] + Ea["E1_2"] + Eb["E1_2"]
+  EhOS = Eab["E2"] + Eab["E1_2"]
+  EhO = Ea["E2"] - Eb["E2"] + Ea["E1_2"] - Eb["E1_2"]
+  Ep = Ea["pE2"] + Eb["pE2"] + Eab["pE2"] + Ea["pE1"] + Eb["pE1"] + Ea["pE1_2"] + Eb["pE1_2"] + Eab["pE1"] + Eab["pE1_2"]
+  EpSS = Ea["pE2"] + Eb["pE2"] + Ea["pE1_2"] + Eb["pE1_2"]
+  EpOS = Eab["pE2"] + Eab["pE1_2"]
+  EpO = Ea["pE2"] - Eb["pE2"] + Ea["pE1_2"] - Eb["pE1_2"]
+  return OutDict("pE"=>Ep, "pESS"=>EpSS, "pEOS"=>EpOS, "pEO"=>EpO,
+                 "E"=>Eh, "ESS"=>EhSS, "EOS"=>EhOS, "EO"=>EhO)
 end
 
 """ 
@@ -2027,14 +2055,15 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     dots1 = (calc_u_singles_dot, calc_u_singles_dot)
     dots2 = (calc_samespin_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot)
     if method.exclevel[3] != :full
-      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (), EC, method, (dots1..., dots2...))
+      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (), EC, method, (dots1..., dots2...), [1.0, 1.0, 2.0, 2.0, 1.0])
     else
       T3aaa = read_starting_guess4amplitudes(EC, Val(3), :α, :α, :α)
       T3bbb = read_starting_guess4amplitudes(EC, Val(3), :β, :β, :β)
       T3aab = read_starting_guess4amplitudes(EC, Val(3), :α, :α, :β)
       T3abb = read_starting_guess4amplitudes(EC, Val(3), :α, :β, :β)
       dots3 = (calc_samespin_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot, calc_mixedspin_triples_dot)
-      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (T3aaa,T3bbb,T3aab,T3abb), EC, method, (dots1..., dots2..., dots3...))
+      Eh = cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), (T3aaa,T3bbb,T3aab,T3abb), EC, method, (dots1..., dots2..., dots3...),
+                          [1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     end
   else
     if method.exclevel[1] == :full
@@ -2067,7 +2096,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   return Eh
 end
 
-function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=())
+function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=(), weights=Float64[])
   t0 = time_ns()
   dc = (method.theory[1:2] == "DC")
   tworef = has_prefix(method, "2D")
@@ -2080,7 +2109,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   end
   Amps = (Amps1..., Amps2..., Amps3...) 
   T2αβ = last(Amps2)
-  diis = Diis(EC)
+  diis = Diis(EC, weights)
 
   NormR1 = 0.0
   NormT1::Float64 = 0.0
@@ -2091,6 +2120,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   En1 = 0.0
   Eias = 0.0
   converged = false
+  thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
   t0 = print_time(EC, t0, "initialization", 1)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
@@ -2162,7 +2192,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       NormT += NormT3
     end
     output_iteration(it, NormR, time_ns() - t0, NormT, Eh["E"], ΔE) 
-    if NormR < EC.options.cc.thr
+    if NormR < EC.options.cc.thr && abs(ΔE) < thren
       converged = true
       break
     end
@@ -2212,6 +2242,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     calc_triples_decomposition_without_triples(EC, T2)
   end
   diis = Diis(EC)
+  thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
 
   println("Iter     SqNorm      Energy      DE          Res         Time")
   NormR1 = 0.0
@@ -2254,7 +2285,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     NormR = NormR1 + NormR2 + NormR3
     NormT = 1.0 + NormT1 + NormT2 + NormT3
     output_iteration(it, NormR, time_ns() - t0, NormT, Eh["E"], ΔE)
-    if NormR < EC.options.cc.thr
+    if NormR < EC.options.cc.thr && abs(ΔE) < thren
       break
     end
   end
