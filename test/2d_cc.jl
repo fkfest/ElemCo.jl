@@ -21,7 +21,7 @@ end
 @testset "Two-Determinant CCSD IAS" begin
 
 epsilon    =   1.e-6
-td_dcsd_ref = -113.824157087033
+td_dcsd_ref = -113.824157753
 
 fcidump = joinpath(@__DIR__,"files","CH2O.3A1.VDZ.ROHF.FCIDUMP")
 

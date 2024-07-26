@@ -2162,13 +2162,6 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       NormT1 = calc_singles_norm(Amps1...)
       NormR1 = calc_singles_norm(Res1...)
       update_singles!(EC, Amps1..., Res1...)
-      if has_prefix(method, "2D")
-        active = oss_active_orbitals(EC)
-        T1α = first(Amps1)
-        T1β = last(Amps1)
-        W = load1idx(EC,"2d_ccsd_W")[1]
-        Eias = - W * T1α[active.ua,active.ta] * T1β[active.tb,active.ub]
-      end
     end
     if length(Amps1) == 2 && restrict
       # spin_project!(EC, Amps...)
@@ -2183,6 +2176,13 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       save_current_singles(EC, Amps1...)
       En1 = calc_singles_energy(EC, Amps1...)
       En += En1["E"]
+      if has_prefix(method, "2D")
+        active = oss_active_orbitals(EC)
+        T1α = first(Amps1)
+        T1β = last(Amps1)
+        W = load1idx(EC,"2d_ccsd_W")[1]
+        Eias = - W * T1α[active.ua,active.ta] * T1β[active.tb,active.ub]
+      end
     end
     ΔE = En - Eh["E"]
     NormR = NormR1 + NormR2
