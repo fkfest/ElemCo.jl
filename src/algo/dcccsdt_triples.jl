@@ -1180,11 +1180,12 @@ end
 function dcccsdt_triples!(EC::ECInfo, R3, T2, T3, fij, fab, fai, fia)
 #bract
 #act,divide=$(1 - \Perm{abc}{cab})$
-d_vvvv = load4idx(EC,"d_vvvv")
-@tensoropt R3[e,c,d,i,j,k] += d_vvvv[c,d,a,b] * T3[a,e,b,j,i,k]
-@tensoropt R3[c,e,d,i,j,k] += d_vvvv[c,d,a,b] * T3[a,e,b,i,j,k]
-@tensoropt R3[c,d,e,i,j,k] += d_vvvv[c,d,a,b] * T3[a,e,b,i,k,j]
-d_vvvv = nothing
+# d_vvvv = load4idx(EC,"d_vvvv")
+# @tensoropt R3[e,c,d,i,j,k] += d_vvvv[c,d,a,b] * T3[a,e,b,j,i,k]
+# @tensoropt R3[c,e,d,i,j,k] += d_vvvv[c,d,a,b] * T3[a,e,b,i,j,k]
+# @tensoropt R3[c,d,e,i,j,k] += d_vvvv[c,d,a,b] * T3[a,e,b,i,k,j]
+# d_vvvv = nothing
+triples_4ext!(EC, R3, T3)
 d_vvvo = load4idx(EC,"d_vvvo")
 @tensoropt R3[d,b,c,j,k,i] += d_vvvo[b,c,a,i] * T2[a,d,k,j]
 @tensoropt R3[b,d,c,j,k,i] += d_vvvo[b,c,a,i] * T2[a,d,j,k]
