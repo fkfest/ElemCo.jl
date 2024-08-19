@@ -25,6 +25,7 @@ export clean_cs_triples!
 export calc_cs_singles_dot, calc_u_singles_dot
 export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
 export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
+export triples_4ext!
 
 """ 
     calc_fock_matrix(EC::ECInfo, closed_shell)
@@ -933,6 +934,35 @@ end
 function contra2covariant(T2)
   @tensoropt U2[a,b,i,j] := (1/3) * (2*T2[a,b,i,j] + T2[b,a,i,j])
   return U2
+end
+
+"""
+    triples_4ext!(EC::ECInfo, R3, T3)
+
+  Calculate 4-external contraction with triples amplitudes
+  and store the result in `R3`.
+"""
+function triples_4ext!(EC::ECInfo, R3, T3)
+  nocc = size(T3, 6)
+  nvirt = size(T3, 3)
+  d_vvvv = load4idx(EC,"d_vvvv")
+  diagindx = [CartesianIndex(i,i) for i in 1:nvirt]
+  d_vvvv[:,:,diagindx] *= 0.5
+  trivv = [CartesianIndex(i,j) for j in 1:nvirt for i in 1:j]
+  d_vvvv = d_vvvv[:,:,trivv]
+  X3 = Array{Float64}(undef, nvirt, nvirt, nvirt, nocc, nocc)
+  T3k = Array{Float64}(undef, length(trivv), nvirt, nocc, nocc)
+  for k = 1:nocc
+    T3k .= T3[trivv,:,:,:,k]
+    @tensoropt X3[a,b,c,i,j] = d_vvvv[a,b,x] * T3k[x,c,i,j]
+    vR3 = selectdim(R3, 6, k)
+    @tensoropt vR3[a,b,c,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
+    vR3 = selectdim(R3, 5, k)
+    @tensoropt vR3[a,c,b,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
+    vR3 = selectdim(R3, 4, k)
+    @tensoropt vR3[c,a,b,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
+  end
+  return R3
 end
 
 end # module
