@@ -6,6 +6,8 @@
 
 ### Changed
 
+* faster closed-shell and unrestricted CCSDT and DC-CCSDT implementations.
+
 ### Added
 
 ### Fixed
