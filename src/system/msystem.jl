@@ -13,7 +13,7 @@ using ..ElemCo.Elements
 using ..ElemCo.Constants
 export parse_geometry, system_exists, genxyz, nuclear_repulsion, bond_length, electron_distribution
 export guess_nelec, guess_norb, guess_ncore
-export element_name, element_symbol, element_SYMBOL, is_dummy, set_dummy!, unset_dummy!
+export atomic_center_symbol, element_name, element_symbol, element_SYMBOL, is_dummy, set_dummy!, unset_dummy!
 
 include("minbas.jl")
 
@@ -97,6 +97,15 @@ function element_name(atom::Atom)
 end
 
 """
+    atomic_center_symbol(atom::Atom)
+
+  Return atomic center symbol (i.e., element symbol possibly with a number).
+"""
+function atomic_center_symbol(atom::Atom)
+  return atom[:atomic_center_symbol]
+end
+
+"""
     try2create_atom(line::AbstractString, basis::Dict, unit=u"bohr")
 
   Create `Atom` from a line `<Atom> x y z`. 
@@ -114,11 +123,11 @@ function try2create_atom(line::AbstractString, basis::Dict, unit=u"bohr")
     if !isnothing(xcoord) && !isnothing(ycoord) && !isnothing(zcoord)
       basis4a = genbasis4element(basis,coords[1])
       anum = nuclear_charge_of_center(element_SYMBOL(coords[1]))
-      return Atom(anum, [xcoord,ycoord,zcoord]*unit, atomic_symbol=Symbol(coords[1]), basis=basis4a), true
+      return Atom(anum, [xcoord,ycoord,zcoord]*unit, atomic_center_symbol=Symbol(coords[1]), basis=basis4a), true
     end
   end
   # not a center
-  return Atom(1, atomic_symbol=:X, [0.0,0.0,0.0]u"bohr"), false
+  return Atom(1, atomic_center_symbol=:X, [0.0,0.0,0.0]u"bohr"), false
 end
 
 """
@@ -242,11 +251,11 @@ function parse_xyz_geometry(xyz_lines::AbstractArray, basis::Dict)
 end
 
 """ 
-    system_exists(ms::AbstractSystem)
+    system_exists(ms::FlexibleSystem)
 
   Check whether the system is not empty.
 """
-function system_exists(ms::AbstractSystem)
+function system_exists(ms::FlexibleSystem)
   n::Int = length(ms.particles)
   return n > 0
 end
@@ -263,11 +272,11 @@ function genxyz(ac::Atom; unit=u"angstrom")
 end
 
 """ 
-    genxyz(ms::AbstractSystem; unit=u"angstrom")
+    genxyz(ms::FlexibleSystem; unit=u"angstrom")
 
   Generate xyz string with elements without numbers.
 """
-function genxyz(ms::AbstractSystem; unit=u"angstrom")
+function genxyz(ms::FlexibleSystem; unit=u"angstrom")
   return join([genxyz(at; unit) for at in ms],"\n")
 end
 
@@ -281,11 +290,11 @@ function bond_length(cen1::Atom, cen2::Atom)
 end
 
 """ 
-    nuclear_repulsion(ms::AbstractSystem)
+    nuclear_repulsion(ms::FlexibleSystem)
 
   Calculate nuclear repulsion energy.
 """
-function nuclear_repulsion(ms::AbstractSystem)
+function nuclear_repulsion(ms::FlexibleSystem)
   enuc::Float64 = 0.0
   ncenter::Int = length(ms.particles)
   for i = 2:ncenter
@@ -307,11 +316,11 @@ function nuclear_repulsion(ms::AbstractSystem)
 end
 
 """ 
-    guess_nelec(ms::AbstractSystem)
+    guess_nelec(ms::FlexibleSystem)
 
   Guess the number of electrons in the neutral system.
 """
-function guess_nelec(ms::AbstractSystem)
+function guess_nelec(ms::FlexibleSystem)
   nelec = 0
   for at in ms if !is_dummy(at)
     nelec += atomic_number(at)
@@ -320,11 +329,11 @@ function guess_nelec(ms::AbstractSystem)
 end
 
 """
-    guess_nalpha(ms::AbstractSystem)
+    guess_nalpha(ms::FlexibleSystem)
 
   Guess the number of alpha electrons in the neutral system.
 """
-function guess_nalpha(ms::AbstractSystem)
+function guess_nalpha(ms::FlexibleSystem)
   nelec = guess_nelec(ms)
   if nelec % 2 == 0
     return nelec ÷ 2
@@ -334,11 +343,11 @@ function guess_nalpha(ms::AbstractSystem)
 end
 
 """
-    guess_nbeta(ms::AbstractSystem)
+    guess_nbeta(ms::FlexibleSystem)
 
   Guess the number of beta electrons in the neutral system.
 """
-function guess_nbeta(ms::AbstractSystem)
+function guess_nbeta(ms::FlexibleSystem)
   nelec = guess_nelec(ms)
   if nelec % 2 == 0
     return nelec ÷ 2
@@ -348,11 +357,11 @@ function guess_nbeta(ms::AbstractSystem)
 end
 
 """
-    guess_nocc(ms::AbstractSystem)
+    guess_nocc(ms::FlexibleSystem)
 
   Guess the number of alpha and beta occupied orbitals in the neutral system.
 """
-function guess_nocc(ms::AbstractSystem)
+function guess_nocc(ms::FlexibleSystem)
   nalpha = guess_nalpha(ms)
   nbeta = guess_nbeta(ms)
   return nalpha, nbeta
@@ -360,24 +369,24 @@ end
 
 
 """
-    guess_ncore(ms::AbstractSystem, coretype::Symbol=:large)
+    guess_ncore(ms::FlexibleSystem, coretype::Symbol=:large)
 
   Guess the number of core orbitals in the system.
 
   `coretype` as in [`Elements.ncoreorbs`](@ref Elements.ncoreorbs).
 """
-function guess_ncore(ms::AbstractSystem, coretype::Symbol=:large)
+function guess_ncore(ms::FlexibleSystem, coretype::Symbol=:large)
   return sum(Int[ncoreorbs(element_SYMBOL(at),coretype) for at in ms if !is_dummy(at)])
 end
 
 """ 
-    electron_distribution(ms::AbstractSystem, minbas::AbstractString)
+    electron_distribution(ms::FlexibleSystem, minbas::AbstractString)
 
   Return the averaged number of electrons in the orbitals in the minimal basis set.
   
   Number of orbitals in the minimal basis set has to be specified in `minbas.jl`.
 """
-function electron_distribution(ms::AbstractSystem, minbas::AbstractString)
+function electron_distribution(ms::FlexibleSystem, minbas::AbstractString)
   eldist = Float64[]
   for at in ms if !is_dummy(at)
     elnam = element_SYMBOL(at)

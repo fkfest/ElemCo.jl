@@ -1,5 +1,6 @@
 """ Various global infos """
 module ECInfos
+using Unitful, UnitfulAtomic
 using AtomsBase
 using DocStringExtensions
 using ..ElemCo.AbstractEC
@@ -36,7 +37,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  system::FlexibleSystem = FlexibleSystem(Atom[], infinite_box(3), fill(DirichletZero(), 3))
+  system::FlexibleSystem = create_empty_system()
   """ fcidump. """
   fd::TFDump = TFDump()
   """ information about (temporary) files. 
@@ -77,6 +78,17 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
   space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}()
+end
+
+"""
+    create_empty_system()
+
+  Create an empty molecular system of type `FlexibleSystem`.
+"""
+function create_empty_system() 
+  fs = isolated_system([:H => [0, 0, 0]u"bohr"])
+  deleteat!(fs.particles, 1)
+  return fs
 end
 
 """

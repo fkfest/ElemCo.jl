@@ -61,8 +61,8 @@ struct BasisCenter
 end
 
 function BasisCenter(atom::Atom, basis="", basisfunctions=[])
-  return BasisCenter(string(atomic_symbol(atom)), uconvert.(u"bohr", atom.position)/u"bohr", 
-                    atom.atomic_number, basis, basisfunctions)
+  return BasisCenter(string(atomic_center_symbol(atom)), uconvert.(u"bohr", atom.position)/u"bohr", 
+                    atomic_number(atom), basis, basisfunctions)
 end
 
 function Base.getindex(bc::BasisContraction, i::Int)
