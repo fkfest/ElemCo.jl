@@ -23,7 +23,7 @@ UnitfulAtomic = "a7773ee8-282e-5fa2-be4e-bd808c38a91a"
 libcint_jll = "574b78ca-bebd-517c-801d-4735c93a9686"
 
 [compat]
-AtomsBase = "0.3.5 - 0.3"
+AtomsBase = "0.3.5 - 0.4"
 DocStringExtensions = "0.9"
 ITensors = "0.4.0 - 0.7"
 IterativeSolvers = "0.9"

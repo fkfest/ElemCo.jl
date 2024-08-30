@@ -166,7 +166,7 @@ is_cartesian(bs::BasisSet) = bs.cartesian
     basis_name(atoms, type="ao")
 
   Return the name of the basis set (or `unknown` if not found).
-  `atoms` can be a single atom `::Atom` or a system `::AbstractSystem`.
+  `atoms` can be a single atom `::Atom` or a system `::FlexibleSystem`.
 """
 function basis_name(atoms, type="ao")
   if haskey(atoms, :basis) && haskey(atoms[:basis], type)
@@ -190,7 +190,7 @@ function generate_basis(EC::AbstractECInfo, type="ao"; basisset::AbstractString=
 end
 
 """
-    generate_basis(ms::AbstractSystem, type="ao"; cartesian=false, basisset::AbstractString="")
+    generate_basis(ms::FlexibleSystem, type="ao"; cartesian=false, basisset::AbstractString="")
 
   Generate basis sets for integral calculations.
 
@@ -198,7 +198,7 @@ end
   `type` can be `"ao"`, `"mpfit"` or `"jkfit"`.
   If `basisset` is provided, it is used as the basis set.
 """
-function generate_basis(ms::AbstractSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
+function generate_basis(ms::FlexibleSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
   array_of_centers = BasisCenter[]
   id = 1
   for atom in ms
@@ -318,7 +318,7 @@ end
 """
 function guess_basis_name(atom::Atom, type)
   if type == "ao"
-    error("AO basis set for atom $(atomic_symbol(atom)) not defined!")
+    error("AO basis set for atom $(atomic_center_symbol(atom)) not defined!")
   end
   aobasis = basis_name(atom, "ao")
   return aobasis * "-" * type
