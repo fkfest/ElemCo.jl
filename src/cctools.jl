@@ -319,6 +319,50 @@ function update_deco_triples(EC, R3, use_shift=true)
     X,Y,Z = Tuple(I)
     ΔT3[I] /= (ϵX[X] + ϵX[Y] + ϵX[Z] + shift)
   end
+  #Charlotte change start
+  iii_aaa_remove = false
+  if iii_aaa_remove == true
+      #change to avoid potential iii and aaa contributions (also changed after amplitudes DIIS update)
+      #attention! no complex conjugation is taken into account so far!
+
+      @tensoropt DeltaTriplesDotProductOne = ΔT3[X,Y,Z] * ΔT3[X,Y,Z]
+      println("DeltaTriples DotProduct without substraction:")
+      println(DeltaTriplesDotProductOne)
+
+      nocc = n_occ_orbs(EC)
+      nvirt = n_virt_orbs(EC)
+      ΔT_iii = zeros(nvirt,nvirt,nvirt)
+      Diff_ΔT_iii_aaa = zero(ΔT3)
+
+      UvoX = load(EC, "C_voX")
+      for i in 1:nocc
+         Ui = UvoX[:,i,:]
+         #println("Ui:")
+         #display(Ui)
+         @tensoropt ΔT_iii[a,b,c] = (((ΔT3[X,Y,Z] * Ui[a,X]) * Ui[b,Y]) * Ui[c,Z])
+
+         for a in 1:nvirt
+            ΔT_iii[a,a,a] = 0.0
+         end
+         #println("ΔT_iii:")
+         #display(ΔT_iii)
+         @tensoropt Diff_ΔT_iii_aaa[X,Y,Z] += (((ΔT_iii[a,b,c] * Ui[a,X]) * Ui[b,Y]) * Ui[c,Z])
+      end
+
+      ΔT_aaa = zeros(nocc,nocc,nocc)
+
+      for a in 1:nvirt
+         Ua = UvoX[a,:,:]
+         @tensoropt ΔT_aaa[i,j,k] = (((ΔT3[X,Y,Z] * Ua[i,X]) * Ua[j,Y]) * Ua[k,Z])
+         @tensoropt Diff_ΔT_iii_aaa[X,Y,Z] += (((ΔT_aaa[i,j,k] * Ua[i,X]) * Ua[j,Y]) * Ua[k,Z])
+      end
+      ΔT3 .-= Diff_ΔT_iii_aaa
+
+      @tensoropt DeltaTriplesDotProductTwo = ΔT3[X,Y,Z] * ΔT3[X,Y,Z]
+      println("DeltaTriples DotProduct with substraction:")
+      println(DeltaTriplesDotProductTwo)
+  end
+  #Charlotte Change end
   return ΔT3
 end
 

@@ -16,7 +16,7 @@ using ..ElemCo.DFTools
 using ..ElemCo.CCTools
 using ..ElemCo.DIIS
 
-export calc_dressed_3idx, calc_svd_dc
+export calc_dressed_3idx, calc_svd_dc, calc_undressed_3idx
 
 """
     get_tildevˣˣ(EC::ECInfo)
@@ -119,6 +119,43 @@ function calc_df_doubles_energy(EC::ECInfo, T2)
   ovL = load(EC, "d_ovL")
   @tensoropt ET2 = (2.0*T2[a,b,i,j] - T2[a,b,j,i]) * (ovL[i,a,L] * ovL[j,b,L])
   return ET2
+end
+
+"""
+    calc_undressed_3idx(EC)
+
+  Calculate non-dressed integrals for 3-index integrals from file `mmL`.
+"""
+function calc_undressed_3idx(EC)
+  mmLfile, mmL = mmap(EC, "mmL")
+  # println(size(mmL))
+  SP = EC.space
+  nL = size(mmL, 3)
+  nocc = length(SP['o'])
+  nvirt = length(SP['v'])
+  # create mmaps for dressed integrals
+  notd_ovLfile, notd_ovL = newmmap(EC, "notd_ovL", Float64, (nocc,nvirt,nL))
+  notd_voLfile, notd_voL = newmmap(EC, "notd_voL", Float64, (nvirt,nocc,nL))
+  notd_ooLfile, notd_ooL = newmmap(EC, "notd_ooL", Float64, (nocc,nocc,nL))
+  notd_vvLfile, notd_vvL = newmmap(EC, "notd_vvL", Float64, (nvirt,nvirt,nL))
+
+  LBlks = get_auxblks(nL)
+  for L in LBlks
+    notd_ovL[:,:,L] = mmL[SP['o'],SP['v'],L]
+    V_ovL = @view notd_ovL[:,:,L]
+    V_vvL = mmL[SP['v'],SP['v'],L]
+    V_voL = mmL[SP['v'],SP['o'],L]
+    notd_vvL[:,:,L] = V_vvL;   V_vvL = nothing
+    V_ooL = mmL[SP['o'],SP['o'],L]
+    notd_voL[:,:,L] = V_voL;   V_voL = nothing
+    notd_ooL[:,:,L] = V_ooL;   V_ooL = nothing
+  end
+
+  closemmap(EC, notd_ovLfile, notd_ovL)
+  closemmap(EC, notd_voLfile, notd_voL)
+  closemmap(EC, notd_ooLfile, notd_ooL)
+  closemmap(EC, notd_vvLfile, notd_vvL)
+  close(mmLfile)
 end
 
 """

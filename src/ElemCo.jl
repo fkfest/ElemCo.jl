@@ -687,11 +687,12 @@ function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
         println("$main_name(T) total energy: ",ECC+ET3+EHF)
         if do_full_t3
           cc3 = (ecmethod.exclevel[3] == :pertiter)
-          ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
+	  ECC = CoupledCluster.calc_ccsdt(EC, ECC+ET3, EC.options.cc.calc_t3_for_decomposition, cc3)
           main_name = method_name(ecmethod)
           println("$main_name correlation energy: ",ECC)
           println("$main_name total energy: ",ECC+EHF)
-        end 
+          GC.gc()
+	end 
       end
     end
     println()

@@ -2121,16 +2121,23 @@ function calc_cc(EC::ECInfo, method::ECMethod)
 end
 
 """ 
-    calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
+    calc_ccsdt(EC::ECInfo, ccsd_pertt_energy, useT3=false, cc3=false)
 
   Calculate decomposed closed-shell DC-CCSDT amplitudes.
 
   If `useT3`: (T) amplitudes from a preceding calculations will be used as starting guess.
   If cc3: calculate CC3 amplitudes.
 """
-function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
+function calc_ccsdt(EC::ECInfo, ccsd_pertt_energy, useT3=false, cc3=false)
+  
+  pert_svd_T = true
+  
   if cc3
     print_info("CC3")
+  end
+  if pert_svd_T
+    print_info("DC-CCSDT")
+    println("DC-CCSDT with SVD-(T)")
   else
     print_info("DC-CCSDT")
   end
@@ -2154,7 +2161,30 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   R1 = Float64[]
   Eh = 0.0
   t0 = time_ns()
+
+
+# Charlottes block for svd-ccsd(t)  
+  if pert_svd_T
+    nocc = n_occ_orbs(EC)
+    nvirt = n_virt_orbs(EC)
+  
+    calc_undressed_3idx(EC)
+    calc_SVD_pert_T(EC, T2)
+    R3 = load(EC, "R_XXX")
+    T3 = load(EC, "T_XXX")
+    T3 += update_deco_triples(EC, R3, false)
+    save!(EC, "T_XXX", T3)
+    
+    R1 = zeros(nvirt,nocc)
+    R2 = zeros(nvirt, nvirt, nocc, nocc)
+    R1, R2 = SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
+  
+    Eh_init = calc_hylleraas(EC, T1, T2, R1, R2)
+    @printf "SVD-CCSD(T) energy:  %20.12f \n" Eh_init    
+  end
+
   for it in 1:EC.options.cc.maxit
+
     t1 = time_ns()
     #get dressed integrals
     calc_dressed_3idx(EC, T1)
@@ -2178,7 +2208,52 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     T1 += update_singles(EC, R1)
     T2 += update_doubles(EC, R2)
     T3 += update_deco_triples(EC, R3)
+    #comment DIIS out for testing purpose
     T1, T2, T3 = perform(diis, [T1,T2,T3], [R1,R2,R3])
+    
+    iii_aaa_remove = false
+    if iii_aaa_remove == true
+        #change to avoid potential iii and aaa contributions (also changed after amplitudes DIIS update)
+        #attention! no complex conjugation is taken into account so far!
+ 
+        @tensoropt TriplesDotProductOne = T3[X,Y,Z] * T3[X,Y,Z]
+        println("Triples DotProduct without substraction:")
+        println(TriplesDotProductOne)
+ 
+        T_iii = zeros(nvirt,nvirt,nvirt)
+        println("zero_T_iii:")
+	display(T_iii)
+	Diff_T_iii_aaa = zero(T3)
+        
+        UvoX = load(EC, "C_voX")
+        for i in 1:nocc
+           Ui = UvoX[:,i,:]
+           println("Ui:")
+           display(Ui)
+	   @tensoropt T_iii[a,b,c] = (((T3[X,Y,Z] * Ui[a,X]) * Ui[b,Y]) * Ui[c,Z])
+
+           for a in 1:nvirt
+              T_iii[a,a,a] = 0.0
+           end
+           println("T_iii:")
+	   display(T_iii)
+	   @tensoropt Diff_T_iii_aaa[X,Y,Z] += (((T_iii[a,b,c] * Ui[a,X]) * Ui[b,Y]) * Ui[c,Z])
+        end
+ 
+        T_aaa = zeros(nocc,nocc,nocc)
+ 
+        for a in 1:nvirt
+           Ua = UvoX[a,:,:]
+           @tensoropt T_aaa[i,j,k] = (((T3[X,Y,Z] * Ua[i,X]) * Ua[j,Y]) * Ua[k,Z])
+           @tensoropt Diff_T_iii_aaa[X,Y,Z] += (((T_aaa[i,j,k] * Ua[i,X]) * Ua[j,Y]) * Ua[k,Z])
+        end
+        T3 .-= Diff_T_iii_aaa
+ 
+        @tensoropt TriplesDotProductTwo = T3[X,Y,Z] * T3[X,Y,Z]
+        println("Triples DotProduct with substraction:")
+        println(TriplesDotProductTwo)
+    end
+	
     save!(EC, "T_XXX", T3)
     En = calc_singles_energy(EC, T1)
     En += calc_doubles_energy(EC, T2)
@@ -2193,12 +2268,65 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     end
   end
   println()
+
+  if pert_svd_T
+    @printf "SVD-DC-CCSDT energy:  %20.12f \n" Eh
+    @printf "SVD-DC-CCSDT - SVD-CCSD(T):  %20.12f \n" (Eh - Eh_init)
+    @printf "CCSD(T):  %20.12f \n" ccsd_pertt_energy
+    @printf "CCSD(T) - SVD-CCSD(T) + SVD-DC-CCSDT:  %20.12f \n" (ccsd_pertt_energy - Eh_init + Eh)
+  end
+
   @printf "Sq.Norm of T1: %12.8f Sq.Norm of T2: %12.8f Sq.Norm of T3: %12.8f \n" NormT1 NormT2 NormT3
   println()
   flush(stdout)
   
   return Eh
 end
+
+
+"""
+    SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
+
+  Add contributions for SVD-(T) from triples to singles and doubles residuals.
+"""
+function SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
+  SP = EC.space
+  notd_ooPfile, notd_ooP = mmap(EC, "notd_ooL")
+  notd_ovPfile, notd_ovP = mmap(EC, "notd_ovL")
+
+  Txyz = load(EC, "T_XXX")
+
+  U = load(EC, "C_voX")
+  # println(size(U))
+
+  @tensoropt Boo[i,j,P,X] := notd_ovP[i,a,P] * U[a,j,X]
+  @tensoropt A[P,X] := Boo[i,i,P,X]
+  @tensoropt BBU[Z,d,j] := (notd_ovP[j,c,P] * notd_ovP[k,d,P]) * U[c,k,Z]
+  @tensoropt R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
+  @tensoropt R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,d,j] ))
+
+  BBU = nothing
+
+  @tensoropt Bov[i,a,P,X] := notd_ooP[j,i,P] * U[a,j,X]
+  notd_vvPfile, notd_vvP = mmap(EC, "notd_vvL")
+  @tensoropt Bvo[a,i,P,X] := notd_vvP[a,b,P] * U[b,i,X]
+  close(notd_vvPfile)
+  notd_vvP = nothing
+  #dfock = load(EC, "df_mm")
+  #fov = dfock[SP['o'], SP['v']]
+  # R2[abij] = RR2[abij] + RR2[baji]
+  #@tensoropt RR2[a,b,i,j] := U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
+  @tensoropt RR2[a,b,i,j] := 2.0*U[b,j,Y] * ((Bvo[a,i,P,Z] - Bov[i,a,P,Z])*(Txyz[X,Y,Z] * A[P,X]))
+  @tensoropt RR2[a,b,i,j] += (Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Boo[k,j,P,Y] * (Txyz[X,Y,Z] * U[b,k,X]))
+  @tensoropt RR2[a,b,i,j] -= U[b,j,Z] * (Txyz[X,Y,Z] * (Bvo[a,k,P,X] * Boo[k,i,P,Y] - U[a,k,Y] * (Bov[i,c,P,X] * notd_ovP[k,c,P])))
+  @tensoropt R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
+  close(notd_ovPfile)
+  close(notd_ooPfile)
+
+  return R1,R2
+  GC.gc()
+end
+
 
 """
     add_to_singles_and_doubles_residuals(EC, R1, R2)
@@ -2239,6 +2367,7 @@ function add_to_singles_and_doubles_residuals(EC, R1, R2)
   close(ooPfile)
 
   return R1,R2
+  GC.gc()
 end
 
 
@@ -2373,26 +2502,112 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   # end
   # test_calc_pertT_from_T3(EC,T3_decomp_check)
   @tensoropt D2[a,i,b,j] := R[X,Y,a,i] * R[X,Y,b,j]
-  # remove T^iii contributions from D2
-  UU = zeros(naux,naux,nocc)
-  for i = 1:nocc
-    @tensoropt UU[:,:,i][X,Y] = UvoX[:,i,:][a,X] * UvoX[:,i,:][a,Y]
+ 
+  #Charlottes modification: making it possible to not project out iii and aaa contributions for constructing the SVD basis
+  iii_aaa_remove = true
+  if iii_aaa_remove == false
+	  println("ATTENTION, PROJECTING OUT III AND AAA IN THE SVD BASIS IS DEACTIVATED")
   end
-  TUU4i = zeros(naux,naux,size(UvoX,1))
-  ΔD2 = zeros(size(D2,1),size(D2,3))
-  for i = 1:nocc
-    @tensoropt TUU4i[X',Y',a] = (R[:,:,:,i][X,Y,a] * UU[:,:,i][X,X']) * UU[:,:,i][Y,Y']
-    for j = 1:nocc
-      @tensoropt ΔD2[a,b] = TUU4i[X,Y,a] * R[:,:,:,j][X,Y,b]
-      @tensoropt D2[:,i,:,j][a,b] -= ΔD2[a,b]
-      if i != j
-        @tensoropt D2[:,j,:,i][b,a] -= ΔD2[a,b]
-      end
-    end
+  if iii_aaa_remove == true
+   # remove T^iii contributions from D2
+   UU = zeros(naux,naux,nocc)
+   for i = 1:nocc
+     @tensoropt UU[:,:,i][X,Y] = UvoX[:,i,:][a,X] * UvoX[:,i,:][a,Y]
+   end
+   TUU4i = zeros(naux,naux,size(UvoX,1))
+   ΔD2 = zeros(size(D2,1),size(D2,3))
+   for i = 1:nocc
+     @tensoropt TUU4i[X',Y',a] = (R[:,:,:,i][X,Y,a] * UU[:,:,i][X,X']) * UU[:,:,i][Y,Y']
+     for j = 1:nocc
+       @tensoropt ΔD2[a,b] = TUU4i[X,Y,a] * R[:,:,:,j][X,Y,b]
+       @tensoropt D2[:,i,:,j][a,b] -= ΔD2[a,b]
+       if i != j
+         @tensoropt D2[:,j,:,i][b,a] -= ΔD2[a,b]
+       end
+     end
+   end
   end
+
   # display(D2)
   return D2
 end
+
+"""
+    calc_SVD_pert_T(EC::ECInfo, T2)
+
+  Calculate SVD-CCSD(T).
+"""
+
+function calc_SVD_pert_T(EC::ECInfo, T2)
+  
+  t1 = time_ns()
+  UvoX = load(EC, "C_voX")
+  #display(UvoX)
+
+  #load decomposed amplitudes
+  T3_XYZ = load(EC, "T_XXX")
+  #display(T3_XYZ)
+  #load df coeff
+  notd_ooPfile, notd_ooP = mmap(EC, "notd_ooL")
+  notd_voPfile, notd_voP = mmap(EC, "notd_voL")
+  notd_vvPfile, notd_vvP = mmap(EC, "notd_vvL")
+
+  @tensoropt Thetavirt[b,d,Z] := notd_vvP[b,d,Q] * (notd_voP[c,k,Q] * UvoX[c,k,Z]) #virt1
+  notd_vvP = nothing
+  #println(1)
+  #flush(stdout)
+  
+  @tensoropt Thetaocc[l,j,Z] := notd_ooP[l,j,Q] * (notd_voP[c,k,Q] * UvoX[c,k,Z]) #occ1
+  notd_voP = nothing
+  notd_ooP = nothing
+  #println(4)
+  #flush(stdout)
+
+  @tensoropt TaiX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
+  #println(16)
+  #flush(stdout)
+  
+  nocc = n_occ_orbs(EC)
+  nsvd = size(T3_XYZ, 1)
+  Term1 = zeros(nsvd,nsvd,nsvd)
+  for j in 1:nocc
+    ThetaoccCut = Thetaocc[:,j,:]
+    @tensoropt IntermediateTerm11[b,X,Z] := TaiX[b,l,X] * ThetaoccCut[l,Z]
+    ThetaoccCut = nothing
+    TaiXCut = TaiX[:,j,:]
+    @tensoropt IntermediateTerm11[b,X,Z] -= Thetavirt[b,d,Z] * TaiXCut[d,X]
+    TaiXCut = nothing
+    UvoXCut = UvoX[:,j,:]
+    @tensoropt Term1[X,Y,Z] += IntermediateTerm11[b,X,Z] * UvoXCut[b,Y]
+    IntermediateTerm11 = nothing
+    UvoXCut = nothing
+  end
+  #println(23)
+  #flush(stdout)
+  Thetaocc = nothing
+  Thetavirt = nothing
+  TaiX = nothing
+  t1 = print_time(EC, t1, "Theta terms in R3(T3)", 2)
+
+  @tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z] + Term1[Y,X,Z] + Term1[X,Z,Y] + Term1[Z,Y,X] + Term1[Z,X,Y] + Term1[Y,Z,X]
+  #println(24)
+  #flush(stdout)
+  Term1 = nothing
+  t1 = print_time(EC, t1, "Symmetrization of Theta terms in R3(T3)", 2)
+
+  #display(R3decomp)
+
+  close(notd_vvPfile)
+  close(notd_voPfile)
+  close(notd_ooPfile)
+
+  save!(EC, "R_XXX", R3decomp)
+  #println(40)
+  #flush(stdout)
+end
+
+
+
 
 """
     calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
@@ -2400,6 +2615,7 @@ end
   Calculate decomposed triples DC-CCSDT or CC3 residuals.
 """
 function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
+ 
   t1 = time_ns()
   UvoX = load(EC, "C_voX")
   #display(UvoX)
@@ -2885,6 +3101,63 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   Term2 = nothing
   t1 = print_time(EC, t1, "Symmetrization of Chi terms in R3(T3)", 2)
 
+  iii_aaa_remove = false
+
+  if iii_aaa_remove == true 
+     #change to avoid potential iii and aaa contributions (also changed after amplitudes DIIS update)
+     #attention! no complex conjugation is taken into account so far!
+
+     @tensoropt ResidualsDotProductOne = R3decomp[X,Y,Z] * R3decomp[X,Y,Z]
+     println("Residuals DotProduct without substraction:")
+     println(ResidualsDotProductOne)
+  
+     R_iii = zeros(nvirt,nvirt,nvirt)
+     Diff_R_iii_aaa = zero(R3decomp)
+  
+     for i in 1:nocc
+        Ui = UvoX[:,i,:]
+        @tensoropt R_iii[a,b,c] = (((R3decomp[X,Y,Z] * Ui[a,X]) * Ui[b,Y]) * Ui[c,Z])
+     
+        for a in 1:nvirt
+           R_iii[a,a,a] = 0.0
+        end
+        @tensoropt Diff_R_iii_aaa[X,Y,Z] += (((R_iii[a,b,c] * Ui[a,X]) * Ui[b,Y]) * Ui[c,Z])
+     end
+
+     R_aaa = zeros(nocc,nocc,nocc)
+  
+     for a in 1:nvirt
+        Ua = UvoX[a,:,:]
+        @tensoropt R_aaa[i,j,k] = (((R3decomp[X,Y,Z] * Ua[i,X]) * Ua[j,Y]) * Ua[k,Z])
+        @tensoropt Diff_R_iii_aaa[X,Y,Z] += (((R_aaa[i,j,k] * Ua[i,X]) * Ua[j,Y]) * Ua[k,Z])
+     end
+     R3decomp .-= Diff_R_iii_aaa
+
+     @tensoropt ResidualsDotProductTwo = R3decomp[X,Y,Z] * R3decomp[X,Y,Z]
+     println("Residuals DotProduct with substraction:")
+     println(ResidualsDotProductTwo)
+
+     #Daniels suggested code:
+     #RR = zeros(nvirt,nvirt,nvirt)
+     #DR = zero(R)
+     #for i in 1:nocc
+     #   Ui = U[:,i,:]
+     #   @tensoropt RR[a,b,c] = R[X,Y,Z] * Ui[a,X] * Ui[b,Y] * Ui[c,Z]
+     #   for a in 1:nvirt
+     #      RR[a,a,a] = 0.0
+     #   end
+     #   @tensoropt DR[X,Y,Z] += RR[a,b,c] * Ui[a,X] * Ui[b,Y] * Ui[c,Z]
+     #end
+     #RRR = zeros(nocc,nocc,nocc)
+     #for a in 1:nvirt
+     #   Ua = U[a,:,:]
+     #   @tensoropt RRR[i,j,k] = R[X,Y,Z] * Ua[i,X] * Ua[j,Y] * Ua[k,Z]
+     #   @tensoropt DR[X,Y,Z] += RRR[i,j,k] * Ua[i,X] * Ua[j,Y] * Ua[k,Z]
+     #end
+     #R .-= DR
+  end
+
+
   #display(R3decomp)
 
   close(ovPfile)
@@ -2893,6 +3166,7 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   close(vvPfile)
 
   save!(EC, "R_XXX", R3decomp)
+  GC.gc()
   #println(40)
   #flush(stdout)
 
