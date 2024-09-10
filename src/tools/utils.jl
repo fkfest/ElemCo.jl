@@ -328,17 +328,41 @@ function amdmkl(reset::Bool=false)
 
   cd(mklpath)
 
-  rm("libmkl_rt.so")
-  rm("libmkl_core.so")
+  # check if a different process is modifying the files right now (e.g., another call to amdmkl)
+  # and wait until the other process is done (max 5 minutes)
+  while isfile("libamdmkl.c") && 0 < time() - mtime("libamdmkl.c") < 300
+    sleep(5)
+  end
+
+  original = islink("libmkl_core.so") && islink("libmkl_rt.so")
   
   if reset
-    symlink("libmkl_core.so.2","libmkl_core.so")
-    symlink("libmkl_rt.so.2","libmkl_rt.so")
+    if !original || isfile("libamdmkl.c")
+      rm("libmkl_rt.so", force=true)
+      rm("libmkl_core.so", force=true)
+      rm("libamdmkl.c", force=true)
+      symlink("libmkl_core.so.2","libmkl_core.so")
+      symlink("libmkl_rt.so.2","libmkl_rt.so")
+    end
   else
-    write("libamdmkl.c","int mkl_serv_intel_cpu_true() {return 1;}")
-    run(`gcc -shared -o libmkl_core.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_core.so.2`)
-    run(`gcc -shared -o libmkl_rt.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_rt.so.2`)
-    rm("libamdmkl.c")
+    if original || isfile("libamdmkl.c")
+      try
+        write("libamdmkl.c","int mkl_serv_intel_cpu_true() {return 1;}")
+        rm("libmkl_core.so", force=true)
+        run(`gcc -shared -o libmkl_core.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_core.so.2`)
+        rm("libmkl_rt.so", force=true)
+        run(`gcc -shared -o libmkl_rt.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_rt.so.2`)
+        rm("libamdmkl.c")
+      catch
+        # if something goes wrong, revert to original
+        println("Error: Reverting to original MKL libraries.")
+        rm("libmkl_rt.so", force=true)
+        rm("libmkl_core.so", force=true)
+        rm("libamdmkl.c", force=true)
+        symlink("libmkl_core.so.2","libmkl_core.so")
+        symlink("libmkl_rt.so.2","libmkl_rt.so")
+      end
+    end
   end
 end
 
