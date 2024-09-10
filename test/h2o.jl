@@ -5,33 +5,35 @@ using ElemCo.ECInfos
 epsilon    =   1.e-6
 EHF_test   = -75.6457645933
 EMP2_test  =  -0.287815830908
-ECCSD_T_test =  -0.329259440500
-EΛCCSD_T_test = -0.326915143863 
-EDCSD_test =  -0.328754956597
-EDC_CCSDT_useT3_test = -0.330054209137
-EDC_CCSDT_test = -0.33024914396392
+ECCSD_T_test =  -0.329259440500 + EHF_test
+EΛCCSD_T_test = -0.326915143863 + EHF_test
+EDCSD_test =  -0.328754956597 + EHF_test
+EDC_CCSDT_useT3_test = -0.330054209137 + EHF_test
+EDC_CCSDT_test = -0.330249143963926 + EHF_test
 
-fcidump = joinpath(@__DIR__,"H2O.FCIDUMP")
+@print_input
+
+fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 EC = ECInfo()
-EHF, EMP2, ECCSD, ET3 = ECdriver(EC, "ccsd(t)"; fcidump)
-@test abs(EHF-EHF_test) < epsilon
-@test abs(EMP2-EMP2_test) < epsilon
-@test abs(ECCSD+ET3-ECCSD_T_test) < epsilon
+energies = ElemCo.ccdriver(EC, "ccsd(t)"; fcidump)
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2c"]-EMP2_test) < epsilon
+@test abs(energies["CCSD(T)"]-ECCSD_T_test) < epsilon
 
-EHF, EMP2, ECCSD, ET3 = @cc λccsd(t)
-@test abs(ECCSD+ET3-EΛCCSD_T_test) < epsilon
+energies = @cc λccsd(t)
+@test abs(energies["ΛCCSD(T)"]-EΛCCSD_T_test) < epsilon
 
-EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
-@test abs(EDCSD-EDCSD_test) < epsilon
+energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
+@test abs(last_energy(energies)-EDCSD_test) < epsilon
 
-@opt cholesky thr = 1.e-4
-@opt cc ampsvdtol = 1.e-2
-EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump="")
-@test abs(EDC_CCSDT-EDC_CCSDT_test) < epsilon
+@set cholesky thr = 1.e-4
+@set cc ampsvdtol = 1.e-2
+energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
+@test abs(last_energy(energies)-EDC_CCSDT_test) < epsilon
 
-@opt cc calc_t3_for_decomposition = true
-EHF, EMP2, EDC_CCSDT = ECdriver(EC, "dc-ccsdt"; fcidump="")
-@test abs(EDC_CCSDT-EDC_CCSDT_useT3_test) < epsilon
+@set cc calc_t3_for_decomposition = true
+energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
+@test abs(last_energy(energies)-EDC_CCSDT_useT3_test) < epsilon
 
 end

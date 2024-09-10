@@ -19,6 +19,7 @@ for file in readdir()
   println(mainname)
   output = mainname*".out"
   redirect_stdio(stdout=output) do
+    @print_input
     geometry = file
     basis = Dict("ao"=>"cc-pVDZ",
             "jkfit"=>"cc-pvtz-jkfit",

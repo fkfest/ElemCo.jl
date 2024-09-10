@@ -4,16 +4,15 @@ using ElemCo
 epsilon    =   1.e-6
 EMCSCF_test   = -75.39523234954376
 
-geometry="h2o.xyz"
+geometry=joinpath(@__DIR__,"files","h2o.xyz")
 
 basis = Dict("ao"=>"cc-pVDZ",
             "jkfit"=>"cc-pvtz-jkfit",
-            "mp2fit"=>"cc-pvdz-rifit")
+            "mpfit"=>"cc-pvdz-rifit")
 
 @opt wf ms2=2 charge=-2
 
-E,cMO =  ElemCo.dfmcscf(EC,direct=false)
-
+E = @dfmcscf
 @test abs(E-EMCSCF_test) < epsilon
 
 end

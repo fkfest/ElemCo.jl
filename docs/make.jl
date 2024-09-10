@@ -1,9 +1,17 @@
 push!(LOAD_PATH,"../src/")
-using Documenter, ElemCo
+using Documenter, ElemCo, Changelog
 
 DocMeta.setdocmeta!(ElemCo, :DocTestSetup, :(using ElemCo); recursive=true)
 
 cp(joinpath(@__DIR__,"equations","equations.pdf"),joinpath(@__DIR__,"src","assets","equations.pdf"), force=true)
+
+# Generate a Documenter-friendly changelog from CHANGELOG.md
+Changelog.generate(
+    Changelog.Documenter(),
+    joinpath(@__DIR__, "..", "CHANGELOG.md"),
+    joinpath(@__DIR__, "src", "release-notes.md");
+    repo = "fkfest/ElemCo.jl",
+)
 
 makedocs(
   modules = [ElemCo],
@@ -20,8 +28,10 @@ makedocs(
       "Options" => "options.md" 
       ],
     "Internals" => [
+      "basisset.md",
       "bohf.md",
       "cc.md",
+      "ccdriver.md",
       "cctools.md",
       "constants.md",
       "decomptools.md",
@@ -31,18 +41,27 @@ makedocs(
       "dfmcscf.md",
       "dftools.md",
       "diis.md",
+      "dmrg.md",
       "dump.md",
       "dumptools.md",
+      "elements.md",
       "ecinfos.md",
       "ecmethod.md",
       "fockfactory.md",
+      "integrals.md",
       "mio.md",
       "mnpy.md",
       "msystem.md",
       "orbtools.md",
+      "qmtensors.md",
       "tensortools.md",
-      "utils.md"
-    ]
+      "descdict.md",
+      "utils.md",
+      "interfaces.md",
+      "molpro.md",
+      "molden.md"
+    ],
+    "release-notes.md", 
   ],
   checkdocs=:exports)
 

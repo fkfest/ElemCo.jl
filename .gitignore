@@ -1,4 +1,4 @@
-Manifest.toml
+Manifest*.toml
 docs/build
 examples/*.out
 examples/ElemCo.jl-devel
@@ -7,3 +7,5 @@ docs/equations/*.blg
 docs/equations/*.log
 docs/equations/*.out
 docs/equations/*.toc
+docs/src/release-notes.md
+LocalPreferences.toml

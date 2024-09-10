@@ -3,9 +3,9 @@ using ElemCo
 @testset "DF-HF Open-Shell Test" begin
 epsilon    =  1.e-6
 EUHF_test   =     -75.79199546194373
-EUDCSD_test =     -0.1866586054908987
+EUDCSD_test =     -0.1866586054908987 + EUHF_test
 EUHF1_test  =     -75.63312357707606
-EUCCSD1_test =    -0.1706009099216159
+EUCCSD1_test =    -0.1706009099216159 + EUHF1_test
 
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -15,13 +15,13 @@ geometry="bohr
 
 basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+             "mpfit"=>"cc-pvdz-rifit")
 let
   @opt wf ms2=2
   EUHF = @dfuhf
-  EHF, EMP2, EUDCSD = @cc udcsd
-  @test abs(EUHF-EUHF_test) < epsilon
-  @test abs(EUDCSD-EUDCSD_test) < epsilon
+  energies = @cc udcsd
+  @test abs(last_energy(EUHF)-EUHF_test) < epsilon
+  @test abs(last_energy(energies)-EUDCSD_test) < epsilon
 end
 
 let
@@ -31,10 +31,10 @@ let
   fcidump = "DF_UHF_TEST.FCIDUMP"
   @opt int fcidump=fcidump
   @dfints 
-  EHF, EMP2, EUCCSD = @cc uccsd fcidump=fcidump
+  energies = @cc uccsd fcidump=fcidump
   rm(fcidump)
-  @test abs(EUHF-EUHF1_test) < epsilon
-  @test abs(EUCCSD-EUCCSD1_test) < epsilon
+  @test abs(last_energy(EUHF)-EUHF1_test) < epsilon
+  @test abs(last_energy(energies)-EUCCSD1_test) < epsilon
 end
 
 end

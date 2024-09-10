@@ -3,11 +3,13 @@ using ElemCo
 @testset "DF-HF Closed-Shell Test" begin
 epsilon    =  1.e-6
 EHF_test   =      -76.02145513971418
-EMP2_test  =      -0.204723138509385
-EDCSD_test =      -0.219150244853825
-ESVDDCSD_test =   -0.220331906783324
-ESVDDCSD_ft_test =-0.219961375476643
+EMP2_test  =      -0.204723138509385 + EHF_test
+EDCSD_test =      -0.219150244853825 + EHF_test
+ESVDDCSD_test =   -0.220331906783324 + EHF_test
+ESVDDCSD_ft_test =-0.219961375476643 + EHF_test
 EUHF_test  =      -75.79199546193901
+
+orbital_printout_test = "4:5 orbitals from DFHF orbitals\n4:  0.788(O[1]1p{z})  0.353(H1[2]1s)  0.353(H2[3]1s) -0.290(O[1]2s) -0.170(O[1]3s) \n5:  0.922(O[1]1p{x}) \n"
 
 xyz="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -17,31 +19,41 @@ xyz="bohr
 
 basis = Dict("ao"=>"cc-pVDZ",
              "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+             "mpfit"=>"cc-pvdz-mpfit")
 
-EC = ElemCo.ECInfo(ms=ElemCo.MSys(xyz,basis))
+EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz,basis))
 
-@opt scf direct=true
+@set scf direct=true
 @dfhf
+# store orbital printout in a string
+original_stdout = stdout
+(rd, wr) = redirect_stdout();
+@show_orbs 4:5
+redirect_stdout(original_stdout)
+close(wr)
+orbital_printout = read(rd, String)
+close(rd)
+println(orbital_printout)
+@test orbital_printout == orbital_printout_test 
 fcidump = "DF_HF_TEST.FCIDUMP"
-@opt int fcidump=fcidump
+@set int fcidump=fcidump
 @dfints
 
-EHF, EMP2, EDCSD = ECdriver(EC, "dcsd"; fcidump)
-@test abs(EHF-EHF_test) < epsilon
-@test abs(EMP2-EMP2_test) < epsilon
-@test abs(EDCSD-EDCSD_test) < epsilon
+energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
+@test abs(energies["HF"]-EHF_test) < epsilon
+@test abs(energies["MP2"]-EMP2_test) < epsilon
+@test abs(energies["DCSD"]-EDCSD_test) < epsilon
 
 rm(fcidump)
 
-ESVDDCSD = @svdcc dcsd
-@test abs(ESVDDCSD-ESVDDCSD_test) < epsilon
-@opt cc use_full_t2=true
-ESVDDCSD_ft = @svdcc dcsd
-@test abs(ESVDDCSD_ft-ESVDDCSD_ft_test) < epsilon
+energies = @dfcc svd-dcsd
+@test abs(energies["SVD-DCSD"]-ESVDDCSD_test) < epsilon
+@set cc use_full_t2=true
+energies = @dfcc svd-dcsd
+@test abs(energies["SVD-DCSD"]-ESVDDCSD_ft_test) < epsilon
 
-@opt scf direct=false
-@opt wf ms2=2
+@set scf direct=false
+@set wf ms2=2
 EUHF = @dfuhf
-@test abs(EUHF-EUHF_test) < epsilon
+@test abs(EUHF["HF"]-EUHF_test) < epsilon
 end

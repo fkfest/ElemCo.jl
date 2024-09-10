@@ -5,34 +5,47 @@
 """
 module ElemCo
 
-include("abstractEC.jl")
-include("utils.jl")
-include("constants.jl")
-include("myio.jl")
-include("mnpy.jl")
-include("dump.jl")
-include("integrals.jl")
-include("msystem.jl")
+include("infos/abstractEC.jl")
+include("tools/descdict.jl")
+include("tools/outputs.jl")
+include("tools/utils.jl")
+include("tools/constants.jl")
+include("tools/myio.jl")
+include("tools/mnpy.jl")
+include("tools/qmtensors.jl")
+include("integrals/dump.jl")
+include("system/elements.jl")
+include("system/msystem.jl")
+include("system/basisset.jl")
+include("system/integrals.jl")
 
-include("ecinfos.jl")
-include("ecmethods.jl")
-include("tensortools.jl")
-include("diis.jl")
-include("orbtools.jl")
-include("fockfactory.jl")
-include("dumptools.jl")
-include("dftools.jl")
-include("decomptools.jl")
-include("cctools.jl")
-include("dfcc.jl")
-include("cc.jl")
+include("system/wavefunctions.jl")
 
-include("bohf.jl")
+include("infos/ecinfos.jl")
+include("infos/ecmethods.jl")
+include("tools/tensortools.jl")
+include("solvers/diis.jl")
+include("scf/orbtools.jl")
+include("scf/fockfactory.jl")
+include("integrals/dumptools.jl")
+include("integrals/dftools.jl")
+include("integrals/decomptools.jl")
+include("cc/cctools.jl")
+include("cc/dfcc.jl")
+include("cc/cc.jl")
+include("dmrg/dmrg.jl")
+include("cc/ccdriver.jl")
 
-include("dfhf.jl")
-include("dfdump.jl")
+include("scf/bohf.jl")
 
-include("dfmcscf.jl")
+include("scf/dfhf.jl")
+include("integrals/dfdump.jl")
+
+include("scf/dfmcscf.jl")
+
+include("interfaces/molpro.jl")
+include("interfaces/molden.jl")
+include("interfaces/interfaces.jl")
 
 try
   using MKL
@@ -43,47 +56,72 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
+using TensorOperations
+using PrecompileTools
 using .Utils
 using .ECInfos
+using .QMTensors
+using .Wavefunctions
 using .ECMethods
 using .TensorTools
 using .FockFactory
 using .CCTools
 using .CoupledCluster
+using .CCDriver
 using .DFCoupledCluster
-using .FciDump
+using .FciDumps
 using .DumpTools
+using .OrbTools
+using .Elements
 using .MSystem
+using .BasisSets
 using .BOHF
 using .DFHF
 using .DFMCSCF
 using .DfDump
+using .DMRG
+using .Interfaces
 
 
-export ECdriver 
-export @mainname
+export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @opt, @reset, @run, @method2string
-export @transform_ints, @write_ints, @dfints, @freeze_orbs
-export @dfhf, @dfuhf, @cc, @svdcc, @bohf, @bouhf
+export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string
+export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
+export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @import_matrix, @export_molden
+# from Utils
+export last_energy
+# from DescDict
+export ODDict
 
+const __VERSION__ = "0.13.1+"
+
+"""
+    __init__()
+
+  Print the header with the version and the git hash of the current commit.
+"""
 function __init__()
   draw_line(15)
   println("   ElemCo.jl")
   draw_line(15)
+  println("Version: ", __VERSION__)
   srcpath = @__DIR__
-  try
-    hash = read(`git -C $srcpath rev-parse HEAD`, String)
-    println("Git hash: ", hash[1:end-1])
-  catch
-    # get hash from .git/HEAD
+  if isdir(joinpath(srcpath,"..",".git"))
+    # get hash from git
     try
-      head = read(joinpath(srcpath,"..",".git","HEAD"), String)
-      head = split(head)[2]
-      hash = read(joinpath(srcpath,"..",".git",head), String)
+      hash = read(`git -C $srcpath rev-parse HEAD`, String)
       println("Git hash: ", hash[1:end-1])
     catch
-      println("Git hash: unknown")
+      # get hash from .git/HEAD
+      try
+        head = read(joinpath(srcpath,"..",".git","HEAD"), String)
+        head = split(head)[2]
+        hash = read(joinpath(srcpath,"..",".git",head), String)
+        println("Git hash: ", hash[1:end-1])
+      catch
+        println("Git hash: unknown")
+      end
     end
   end
   println("Website: elem.co.il")
@@ -122,6 +160,26 @@ macro mainname(file)
 end
 
 """
+    @print_input(print_init=false)
+
+  Print the input file content. 
+
+  Can be used to print the input file content to the output.
+"""
+macro print_input(print_init=false)
+  return quote
+    if $(esc(print_init))
+      __init__()
+    end
+    try
+      print_info(read($(string(__source__.file)), String))
+    catch
+      print_info("No input file found.")
+    end
+  end
+end
+
+"""
     @loadfile(filename)
 
   Read file `filename` from `EC.scr` directory.
@@ -133,8 +191,10 @@ orbs = @loadfile("C_Am")
 ```
 """
 macro loadfile(filename)
+  strfilename=replace("$filename", " " => "")
   return quote
-    load($(esc(:EC)), $(esc(filename)))
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    load($(esc(:EC)), strfilename)
   end
 end
 
@@ -149,8 +209,10 @@ end
 """
 macro savefile(filename, arr, kwargs...)
   ekwa = [esc(a) for a in kwargs]
+  strfilename=replace("$filename", " " => "")
   return quote
-    save!($(esc(:EC)), $(esc(filename)), $(esc(arr)); $(ekwa...))
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    save!($(esc(:EC)), strfilename, $(esc(arr)); $(ekwa...))
   end
 end
 
@@ -164,8 +226,12 @@ end
 """
 macro copyfile(from_file, to_file, kwargs...)
   ekwa = [esc(a) for a in kwargs]
+  strfrom=replace("$from_file", " " => "")
+  strto=replace("$to_file", " " => "")
   return quote
-    copy_file!($(esc(:EC)), $(esc(from_file)), $(esc(to_file)); $(ekwa...))
+    strfrom = @var2string($(esc(from_file)), $(esc(strfrom)))
+    strto = @var2string($(esc(to_file)), $(esc(strto)))
+    copy_file!($(esc(:EC)), strfrom, strto; $(ekwa...))
   end
 end
 
@@ -181,7 +247,7 @@ end
   # Examples
 ```julia
 geometry="He 0.0 0.0 0.0"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @ECinit
 # output
 Occupied orbitals:[1]
@@ -192,13 +258,15 @@ macro ECinit()
   return quote
     $(esc(:EC)) = ECInfo()
     try
+      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))
       println("Basis: ",$(esc(:basis)))
-      $(esc(:EC)).ms = MSys($(esc(:geometry)),$(esc(:basis)))
+      $(esc(:EC)).system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
     try
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:geometry))
       println("FCIDump: ",$(esc(:fcidump)))
       $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
     catch err
@@ -216,7 +284,7 @@ macro tryECinit()
   return quote
     runECinit = [false]
     try
-      $(esc(:EC)).ignore_error
+      $(esc(:EC)).verbosity
     catch
       runECinit[1] = true
     end
@@ -227,51 +295,58 @@ macro tryECinit()
 end
 
 """ 
-    @opt(what, kwargs...)
+    @set(opt, kwargs...)
 
   Set options for `EC::ECInfo`. 
     
-  The first argument `what` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
+  The first argument `opt` is the name of the option (e.g., `scf`, `cc`, `cholesky`), see [`ECInfos.Options`](@ref).
   The keyword arguments are the options to be set (e.g., `thr=1.e-14`, `maxit=10`).
-  The current state of the options can be stored in a variable, e.g., `opt_cc = @opt cc`.
-  The state can then be restored by `@opt cc opt_cc`.
+  The current state of the options can be stored in a variable, e.g., `opt_cc = @set cc`.
+  The state can then be restored by `@set cc opt_cc`.
   If `EC` is not already initialized, it will be done. 
 
 
   # Examples
 ```julia
-optscf = @opt scf thr=1.e-14 maxit=10
-@opt cc maxit=100
+optscf = @set scf thr=1.e-14 maxit=10
+@set cc maxit=100
 ...
-@opt scf optscf
+@set scf optscf
 ```
 """
-macro opt(what, kwargs...)
-  strwhat="$what"
+macro set(opt, kwargs...)
+  stropt="$opt"
   ekwa = [esc(a) for a in kwargs]
   if length(kwargs) == 1 && (typeof(kwargs[1]) != Expr || kwargs[1].head != :(=)) 
     # if only one argument is provided and it is not a keyword argument
     # then set the option to the value of the argument
     return quote
       $(esc(:@tryECinit))
-      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
-        typeof($(ekwa[1])) == typeof($(esc(:EC)).options.$what) || error("Wrong type of argument in @opt")
-        $(esc(:EC)).options.$what = deepcopy($(ekwa[1]))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
+        typeof($(ekwa[1])) == typeof($(esc(:EC)).options.$opt) || error("Wrong type of argument in @set")
+        $(esc(:EC)).options.$opt = deepcopy($(ekwa[1]))
       else
-        error("no such option: ",$(esc(strwhat)))
+        error("no such option: ",$(esc(stropt)))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      if hasproperty($(esc(:EC)).options, Symbol($(esc(strwhat))))
-        deepcopy(set_options!($(esc(:EC)).options.$what; $(ekwa...)))
+      if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
+        deepcopy(set_options!($(esc(:EC)).options.$opt; $(ekwa...)))
       else
-        error("no such option: ",$(esc(strwhat)))
+        error("no such option: ",$(esc(stropt)))
       end
     end
   end
 end
+
+"""
+    @opt(opt, kwargs...)
+
+  Alias for [`@set`](@ref).
+"""
+var"@opt" = var"@set"
 
 """ 
     @reset(opt)
@@ -299,37 +374,37 @@ macro run(method, kwargs...)
 end
 
 """
-    @method2string(method, strmethod="")
+    @var2string(var, strvar="")
 
-  Return string representation of `method`.
+  Return string representation of `var`.
 
-  If `method` is a String variable, return the value of the variable.
-  Otherwise, return the string representation of `method` (or `strmethod` if provided).
+  If `var` is a String variable, return the value of the variable.
+  Otherwise, return the string representation of `var` (or `strvar` if provided).
 
   # Examples
 ```julia
-julia> @method2string(CCSD)
+julia> @var2string(CCSD)
 "CCSD"
 julia> CCSD = "UCCSD";
-julia> @method2string(CCSD)
+julia> @var2string(CCSD)
 "UCCSD"
 ```
 """
-macro method2string(method, strmethod="")
-  if strmethod == ""
-    strmethod = replace("$method", " " => "")
+macro var2string(var, strvar="")
+  if strvar == ""
+    strvar = replace("$var", " " => "")
   end
-  varmethod = :($(esc(method)))
+  valvar = :($(esc(var)))
   return quote
     isvar = [false]
-    try @assert(typeof($(esc(method))) <: AbstractString)
+    try @assert(typeof($(esc(var))) <: AbstractString)
       isvar[1] = true
     catch
     end
     if isvar[1]
-      $varmethod
+      $valvar
     else
-      $(esc(strmethod))
+      $(esc(strvar))
     end
   end
 end
@@ -355,6 +430,13 @@ macro dfuhf()
   return quote
     $(esc(:@tryECinit))
     dfuhf($(esc(:EC)))
+  end
+end
+
+macro dfmcscf()
+  return quote
+    $(esc(:@tryECinit))
+    dfmcscf($(esc(:EC)))
   end
 end
 
@@ -385,13 +467,16 @@ end
   - `occa::String`: occupied α orbitals (default: "-").
   - `occb::String`: occupied β orbitals (default: "-").
 
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+
   # Examples
 ```julia
 geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
 @dfints
 @cc ccsd
@@ -403,8 +488,8 @@ macro cc(method, kwargs...)
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
       $(esc(:@tryECinit))
-      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-      ECdriver($(esc(:EC)), strmethod; $(ekwa...))
+      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+      ccdriver($(esc(:EC)), strmethod; $(ekwa...))
     end
   else
     return quote
@@ -412,18 +497,20 @@ macro cc(method, kwargs...)
       if !fd_exists($(esc(:EC)).fd)
         $(esc(:@dfints))
       end
-      strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-      ECdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+      ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
     end
   end
 end
 
 """
-    @svdcc(method="dcsd")
+    @dfcc(method="svd-dcsd")
 
-  Run coupled cluster calculation with SVD decomposition of the amplitudes.
+  Run coupled cluster calculation using density fitted integrals.
 
-  The type of the method is determined by the first argument (dcsd/dcd)
+  The type of the method is determined by the first argument.
+  The method can be specified as a string or as a variable, e.g., 
+  `@dfcc SVD-DCSD` or `@dfcc "SVD-DCSD"` or `ccmethod="SVD-DCSD";  @dfcc ccmethod`.
   
   # Examples
 ```julia
@@ -431,16 +518,17 @@ geometry="bohr
 O      0.000000000    0.000000000   -0.130186067
 H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
-basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mp2fit"=>"cc-pvdz-rifit")
+basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
-@svdcc
+@dfcc svd-dcsd
 ```
 """
-macro svdcc(method="dcsd")
+macro dfcc(method="svd-dcsd")
   strmethod=replace("$method", " " => "")
   return quote
-    strmethod = @method2string($(esc(method)), $(esc(strmethod)))
-    calc_svd_dc($(esc(:EC)), strmethod)
+    $(esc(:@tryECinit))
+    strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+    dfccdriver($(esc(:EC)), strmethod)
   end
 end
 
@@ -506,7 +594,7 @@ macro transform_ints(type="")
       error("No FCIDump found.")
     end
     CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
-    strtype = @method2string($(esc(type)), $(esc(strtype)))
+    strtype = @var2string($(esc(type)), $(esc(strtype)))
     if strtype ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
       CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
     elseif strtype == ""
@@ -557,175 +645,93 @@ macro freeze_orbs(freeze_orbs)
   end
 end
 
-function run_mcscf()
-  geometry="bohr
-     O      0.000000000    0.000000000   -0.130186067
-     H1     0.000000000    1.489124508    1.033245507
-     H2     0.000000000   -1.489124508    1.033245507"
+"""
+    @rotate_orbs(orb1, orb2, angle, kwargs...)
 
-  basis = Dict("ao"=>"cc-pVDZ",
-             "jkfit"=>"cc-pvtz-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+  Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  by `angle` (in degrees). For UHF, `spin` can be `:α` or `:β` (keyword argument).
+  
+  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
 
-  @opt wf ms2=2 charge=-2
-  E,cMO =  dfmcscf(EC,direct=false)
+  # Keyword arguments
+  - `spin::Symbol`: spin of the orbitals (default: `:α`).
+
+  # Examples
+```julia
+@dfhf
+# swap orbitals 1 and 2
+@rotate_orbs 1, 2, 90
+```
+"""
+macro rotate_orbs(orb1, orb2, angle, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECinit))
+    rotate_orbs($(esc(:EC)), $(esc(orb1)), $(esc(orb2)), $(esc(angle)); $(ekwa...))
+  end
 end
 
-""" 
-    ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
-
-  Run electronic structure calculation for `EC::ECInfo` using methods `methods::String`.
-
-  The integrals are read from `fcidump::String` (default: "FCIDUMP").
-  If `fcidump::String` is empty, the integrals from `EC.fd` are used.
-  The occupied α orbitals are given by `occa::String` (default: "-").
-  The occupied β orbitals are given by `occb::String` (default: "-").
-  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
 """
-function ECdriver(EC::ECInfo, methods; fcidump="FCIDUMP", occa="-", occb="-")
-  t1 = time_ns()
-  method_names = split(methods)
-  if occa != "-"
-    EC.options.wf.occa = occa
+    @show_orbs(range=nothing)
+
+  Show orbitals in the integrals according to an array or range 
+  `range`.
+
+  # Examples
+```julia
+@dfhf
+@show_orbs 1:5
+```
+"""
+macro show_orbs(range=nothing)
+  return quote
+    $(esc(:@tryECinit))
+    show_orbitals($(esc(:EC)), $(esc(range)))
   end
-  if occb != "-"
-    EC.options.wf.occb = occb
+end
+
+"""
+    @import_matrix(filename)
+
+  Import matrix from file `file`.
+
+  The type of the matrix is determined automatically.
+"""
+macro import_matrix(filename)
+  strfilename=replace("$filename", " " => "")
+  return quote
+    $(esc(:@tryECinit))
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    import_matrix($(esc(:EC)), strfilename)
   end
-  if fcidump != ""
-    # read fcidump intergrals
-    EC.fd = read_fcidump(fcidump)
-    t1 = print_time(EC,t1,"read fcidump",1)
+end
+
+"""
+    @export_molden(filename)
+
+  Export current orbitals to Molden file `filename`.
+"""
+macro export_molden(filename)
+  strfilename=replace("$filename", " " => "")
+  return quote
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    export_molden_orbitals($(esc(:EC)), strfilename)
   end
-  setup_space_fd!(EC)
+end
 
-  closed_shell = is_closed_shell(EC)
-
-  calc_fock_matrix(EC, closed_shell)
-  EHF = calc_HF_energy(EC, closed_shell)
-  hfname = closed_shell ? "HF" : "UHF"
-  println("$hfname energy: ",EHF)
-  flush(stdout)
-
-  for mname in method_names
-    println()
-    println("Next method: ",mname)
-    ecmethod = ECMethod(mname)
-    if is_unrestricted(ecmethod)
-      closed_shell_method = false
-    elseif has_prefix(ecmethod, "R")
-      closed_shell_method = false
-      @assert !EC.fd.uhf "For restricted methods, the FCIDUMP must not be UHF!"
-    else
-      closed_shell_method = closed_shell
-      if !closed_shell_method
-        set_unrestricted!(ecmethod)
-      end
-    end
-    # at the moment we always calculate MP2 first
-    # calculate MP2
-    if EC.options.cc.nomp2 != 1
-      if closed_shell_method
-        EMp2 = calc_MP2(EC)
-        method0 = "MP2"
-      else
-        EMp2 = calc_UMP2(EC)
-        method0 = "UMP2"
-      end
-      println("$method0 correlation energy: ",EMp2)
-      println("$method0 total energy: ",EMp2+EHF)
-      t1 = print_time(EC,t1,"MP2",1)
-      flush(stdout)
-      if !closed_shell_method && has_prefix(ecmethod, "R")
-        spin_project_amplitudes(EC)
-        EMp2 = calc_UMP2_energy(EC)
-        method0 = "RMP2"
-        println("$method0 correlation energy: ",EMp2)
-        println("$method0 total energy: ",EMp2+EHF)
-        flush(stdout)
-      end
-      if ecmethod.theory == "MP"
-        continue
-      end
-    else
-      EMp2 = 0.0
-    end
-
-    if ecmethod.exclevel[4] != :none
-      error("no quadruples implemented yet...")
-    end
-
-    ecmethod_save = ecmethod
-    if ecmethod.exclevel[3] in [:full, :pertiter]
-      ecmethod = ECMethod("CCSD")
-      if is_unrestricted(ecmethod_save)
-        set_unrestricted!(ecmethod)
-      elseif has_prefix(ecmethod_save, "R")
-        set_prefix!(ecmethod, "R")
-      end
-    end
-    ECC = calc_cc(EC, ecmethod)
-
-    main_name = method_name(ecmethod)
-    ecmethod = ecmethod_save # restore
-
-    if closed_shell_method
-      if has_prefix(ecmethod, "Λ")
-        calc_lm_cc(EC, ecmethod)
-      end
-      if ecmethod.exclevel[3] != :none
-        do_full_t3 = (ecmethod.exclevel[3] ∈ [:full, :pertiter])
-        save_pert_t3 = do_full_t3 && EC.options.cc.calc_t3_for_decomposition
-        if has_prefix(ecmethod, "Λ")
-          @assert !save_pert_t3 "Saving perturbative triples not implemented for ΛCCSD(T)"
-          ET3, ET3b = calc_ΛpertT(EC)
-        else
-          ET3, ET3b = calc_pertT(EC; save_t3 = save_pert_t3)
-        end
-        println()
-        println("$main_name[T] total energy: ",ECC+ET3b+EHF)
-        println("$main_name(T) correlation energy: ",ECC+ET3)
-        println("$main_name(T) total energy: ",ECC+ET3+EHF)
-        if do_full_t3
-          cc3 = (ecmethod.exclevel[3] == :pertiter)
-	  ECC = CoupledCluster.calc_ccsdt(EC, ECC+ET3, EC.options.cc.calc_t3_for_decomposition, cc3)
-          main_name = method_name(ecmethod)
-          println("$main_name correlation energy: ",ECC)
-          println("$main_name total energy: ",ECC+EHF)
-          GC.gc()
-	end 
-      end
-    end
-    println()
-    flush(stdout)
-
-    if has_prefix(ecmethod, "2D")
-      W = load(EC,"2d_ccsd_W")[1]
-      @printf "%26s %16.12f \n" "$main_name singlet energy:" EHF+ECC+W
-      @printf "%26s %16.12f \n" "$main_name triplet energy:" EHF+ECC-W
-      t1 = print_time(EC, t1,"CC",1)
-      delete_temporary_files!(EC)
-      draw_endline()
-      return EHF, EMp2, ECC, W
-    else
-      println("$main_name correlation energy: ",ECC)
-      println("$main_name total energy: ",ECC+EHF)
-      t1 = print_time(EC, t1,"CC",1)
-
-      if EC.options.cc.properties
-        calc_lm_cc(EC, ecmethod)
-      end
-
-      delete_temporary_files!(EC)
-      draw_endline()
-      if length(method_names) == 1
-        if ecmethod.exclevel[3] != :none
-          return EHF, EMp2, ECC, ET3
-        else
-          return EHF, EMp2, ECC
-        end
-      end
-    end
+@setup_workload begin
+  savestd = stdout
+  redirect_stdout(devnull)
+  geometry = "H 0.0 0.0 0.0
+              H 0.0 0.0 1.0"
+  basis = "vdz"
+  @compile_workload begin
+    @dfhf
+    @cc dcsd
+    @cc uccsd
+    @dfcc svd-dcsd
   end
+  redirect_stdout(savestd)
 end
 
 end #module
