@@ -191,7 +191,7 @@ orbs = @loadfile("C_Am")
 ```
 """
 macro loadfile(filename)
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     load($(esc(:EC)), strfilename)
@@ -209,7 +209,7 @@ end
 """
 macro savefile(filename, arr, kwargs...)
   ekwa = [esc(a) for a in kwargs]
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     save!($(esc(:EC)), strfilename, $(esc(arr)); $(ekwa...))
@@ -226,8 +226,8 @@ end
 """
 macro copyfile(from_file, to_file, kwargs...)
   ekwa = [esc(a) for a in kwargs]
-  strfrom=replace("$from_file", " " => "")
-  strto=replace("$to_file", " " => "")
+  strfrom = clean_exprstring(from_file)
+  strto = clean_exprstring(to_file)
   return quote
     strfrom = @var2string($(esc(from_file)), $(esc(strfrom)))
     strto = @var2string($(esc(to_file)), $(esc(strto)))
@@ -374,6 +374,26 @@ macro run(method, kwargs...)
 end
 
 """
+    clean_exprstring(expr)
+
+  Return a clean string from an expression, i.e., without empty spaces and extra parentheses.
+
+  # Examples
+```julia
+julia> clean_exprstring(:(SVD-CCSD))
+"SVD-CCSD"
+julia> clean_exprstring(:(eom-svd-df-ccsd(t)))
+"eom-svd-df-ccsd(t)"
+```
+"""
+function clean_exprstring(expr)
+  if expr isa Symbol || expr.head != :call || expr.args[1] ∉ [:-, :+, :*, :/]
+    return string(expr)
+  end
+  return join([clean_exprstring(a) for a in expr.args[2:end]], string(expr.args[1]))
+end
+
+"""
     @var2string(var, strvar="")
 
   Return string representation of `var`.
@@ -392,7 +412,7 @@ julia> @var2string(CCSD)
 """
 macro var2string(var, strvar="")
   if strvar == ""
-    strvar = replace("$var", " " => "")
+    strvar = clean_exprstring(var)
   end
   valvar = :($(esc(var)))
   return quote
@@ -483,7 +503,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 ```
 """
 macro cc(method, kwargs...)
-  strmethod=replace("$method", " " => "")
+  strmethod = clean_exprstring(method)
   ekwa = [esc(a) for a in kwargs]
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
@@ -524,7 +544,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 ```
 """
 macro dfcc(method="svd-dcsd")
-  strmethod=replace("$method", " " => "")
+  strmethod = clean_exprstring(method)
   return quote
     $(esc(:@tryECinit))
     strmethod = @var2string($(esc(method)), $(esc(strmethod)))
@@ -587,7 +607,7 @@ end
   read from [`WfOptions.orb`](@ref ECInfos.WfOptions)*[`WfOptions.left`](@ref ECInfos.WfOptions).
 """
 macro transform_ints(type="")
-  strtype=replace("$type", " " => "")
+  strtype = clean_exprstring(type)
   return quote
     $(esc(:@tryECinit))
     if !fd_exists($(esc(:EC)).fd)
@@ -698,7 +718,7 @@ end
   The type of the matrix is determined automatically.
 """
 macro import_matrix(filename)
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     $(esc(:@tryECinit))
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
@@ -712,7 +732,7 @@ end
   Export current orbitals to Molden file `filename`.
 """
 macro export_molden(filename)
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
