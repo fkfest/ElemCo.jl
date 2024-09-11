@@ -17,7 +17,7 @@ using ..ElemCo.DFTools
 using ..ElemCo.CCTools
 using ..ElemCo.DIIS
 
-export calc_dressed_3idx, calc_svd_dc
+export calc_dressed_3idx, save_pseudodressed_3idx, calc_svd_dc
 
 """
     get_ssv_osvˣˣ(EC::ECInfo)
@@ -1004,10 +1004,11 @@ function svd_dc_iterations!(T1, T2, EC::ECInfo, methodname)
   try2save_singles!(EC, T1)
   try2save_doubles!(EC, T2)
   println()
-  output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
+  output_norms("T1"=>NormT1, "T2"=>NormT2)
   println()
   Eh["SVD-MP2"] = truncEMP2["E"]
   return Eh
+
 end
 
 end # module DFCoupledCluster

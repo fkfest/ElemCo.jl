@@ -166,6 +166,7 @@ function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if length(T1) > 0
+    fock = load(EC, "f_mm")
     if fock_only
       ET1SS = ET1OS = ET1 = 0.0
     else
