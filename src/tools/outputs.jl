@@ -73,7 +73,7 @@ end
 """
 function output_norms(norms::Pair{String,Float64}...)
   for norm in norms
-    @printf "Norm² of %s: %12.8f " norm.first norm.second
+    @printf "|%s|²: %12.8f   " norm.first norm.second
   end
   println()
   flush(stdout)
