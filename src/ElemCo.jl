@@ -387,7 +387,7 @@ julia> clean_exprstring(:(eom-svd-df-ccsd(t)))
 ```
 """
 function clean_exprstring(expr)
-  if expr isa Symbol || expr.head != :call || expr.args[1] ∉ [:-, :+, :*, :/]
+  if !(expr isa Expr) || expr.head != :call || expr.args[1] ∉ [:-, :+, :*, :/]
     return string(expr)
   end
   return join([clean_exprstring(a) for a in expr.args[2:end]], string(expr.args[1]))
