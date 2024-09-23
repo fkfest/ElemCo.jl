@@ -1105,11 +1105,11 @@ end
 
 
 """
-    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1159,7 +1159,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   klcd = ints2(EC,"oovv")
   t1 = print_time(EC,t1,"<kl|cd>",2)
   int2 = load4idx(EC,"d_oooo")
-  if !dc
+  if !dc && !linearized
     # I_klij = <kl|ij>+<kl|cd>T^ij_cd
     @tensoropt int2[k,l,i,j] += klcd[k,l,c,d] * T2[c,d,i,j]
   end
@@ -1201,7 +1201,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
     @tensoropt R2[a,b,i,j] += int2[a,b,c,d] * T2[c,d,i,j]
     t1 = print_time(EC,t1,"<ab|cd> T^ij_cd",2)
   end
-  if !dc
+  if !dc && !linearized
     # <kl|cd> T^kj_ad T^il_cb
     @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2[a,d,k,j] * T2[c,b,i,l]
     t1 = print_time(EC,t1,"<kl|cd> T^kj_ad T^il_cb",2)
@@ -1212,11 +1212,13 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   # x_ki = f_ki + <kl|cd> \tilde T^il_cd
   xad = dfock[SP['v'],SP['v']]
   xki = dfock[SP['o'],SP['o']]
-  @tensoropt begin
-    xad[a,d] -= fac * klcd[k,l,c,d] * T2t[c,a,k,l]
-    xki[k,i] += fac * klcd[k,l,c,d] * T2t[c,d,i,l]
+  if !linearized
+    @tensoropt begin
+      xad[a,d] -= fac * klcd[k,l,c,d] * T2t[c,a,k,l]
+      xki[k,i] += fac * klcd[k,l,c,d] * T2t[c,d,i,l]
+    end
+    t1 = print_time(EC,t1,"xad, xki",2)
   end
-  t1 = print_time(EC,t1,"xad, xki",2)
 
   # terms for P(ia;jb)
   @tensoropt begin
@@ -1227,12 +1229,14 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   end
   t1 = print_time(EC,t1,"x_ad T^ij_db -x_ki T^kj_ab",2)
   int2 = load4idx(EC,"d_voov")
-  # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
-  @tensoropt int2[a,k,i,c] += 0.5*klcd[k,l,c,d] * T2t[a,d,i,l] 
+  if !linearized
+    # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
+    @tensoropt int2[a,k,i,c] += 0.5*klcd[k,l,c,d] * T2t[a,d,i,l] 
+  end
   # <ak|ic> \tilde T^kj_cb
   @tensoropt R2r[a,b,i,j] += int2[a,k,i,c] * T2t[c,b,k,j]
   t1 = print_time(EC,t1,"<ak|ic> tT^kj_cb",2)
-  if !dc
+  if !dc && !linearized
     # -<kl|cd> T^ki_da (T^lj_cb - T^lj_bc)
     T2t -= T2
     @tensoropt R2r[a,b,i,j] -= klcd[k,l,c,d] * T2[d,a,k,i] * T2t[c,b,l,j]
@@ -2241,8 +2245,11 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
-    #Res = calc_qvcc_resid(EC, Amps...; dc)
+    if length(Amps3) == 0 && length(Amps1) == 0
+      Res = calc_qvcc_resid(EC, Amps...; dc) #TODO fix later
+    else
+      Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
+    end
     @assert typeof(Res) == typeof(Amps)
     Res1 = Res[1:length(Amps1)]
     Res2 = Res[length(Amps1)+1:length(Amps1)+length(Amps2)]
