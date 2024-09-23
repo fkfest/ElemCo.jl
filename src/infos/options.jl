@@ -34,6 +34,9 @@ Base.@kwdef mutable struct WfOptions
   """`⟨"-"⟩` occupied β orbitals. 
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
   occb::String = "-"
+  """`⟨"-"⟩` active space.
+  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format. """
+  active::String = "-"
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
   """`⟨5⟩` number of largest orbitals to print. """

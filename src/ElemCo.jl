@@ -444,7 +444,7 @@ end
 """ 
     @dfuhf()
 
-  Run DF-UHF calculation. The orbitals are stored to `WfOptions.orb`.
+  Run DF-UHF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
 """
 macro dfuhf()
   return quote
@@ -453,6 +453,11 @@ macro dfuhf()
   end
 end
 
+"""
+    @dfmcscf()
+
+  Run DF-MCSCF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+"""
 macro dfmcscf()
   return quote
     $(esc(:@tryECinit))
