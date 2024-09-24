@@ -987,6 +987,26 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
   end
   return D2ab
 end
+
+"""
+    calc_E_Coe(eigenvalue_vector::Vector)
+
+  Calculate the coefficient matrix in QVCCD residual calculation.
+"""
+function calc_E_Coe(eigenvalue_vector::Vector, q)
+  coefficient_matrix = zeros(length(eigenvalue_vector), length(eigenvalue_vector))
+  for i in 1:length(eigenvalue_vector)
+    for j in 1:length(eigenvalue_vector)
+      if j!= i
+        coefficient_matrix[i,j] = eigenvalue_vector[i]^(-q/2) - eigenvalue_vector[j]^(-q/2) / (eigenvalue_vector[i] - eigenvalue_vector[j])
+      else
+        coefficient_matrix[i,j] = 0.0
+      end
+    end
+  end
+  return coefficient_matrix
+end
+
 """
     calc_qvcc_resid(EC:ECInfo, T2; dc=false)
 
@@ -1004,47 +1024,47 @@ function calc_qvcc_resid(EC:ECInfo, T2; dc=false)
   end
   # a function that can calculate the eigenvectors & eigenvalues of a matrix
   # and this part is uncertain 
-  AX, Ae = eigen(AU)
-  BX, Be = eigen(BU)
-  CX, Ce = eigen(reshape(CU, nocc^2, nocc^2))
-  YX, Ye = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
-  WX, We = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
+  Ae, AX = eigen(AU)
+  Be, BX = eigen(BU)
+  Ce, CX = eigen(reshape(CU, nocc^2, nocc^2))
+  Ye, YX = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
+  We, WX = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
   # to be added: if e difference is 0
   sumG = []
 
   for q in 1:2
-    @tensoropt begin
-      AE[b,a] = (Ae[b]^(-q/2) - Ae[a]^(-q/2)) / (Ae[b] - Ae[a])
-      BE[i,j] = (Be[i]^(-q/2) - Be[j]^(-q/2)) / (Be[i] - Be[j])
-      CE[ij,kl] = (Ce[ij]^(-q/2) - Ce[kl]^(-q/2)) / (Ce[ij] - Ce[kl])
-      YE[ai,bj] = (Ye[ai]^(-q/2) - Ye[bj]^(-q/2)) / (Ye[ai] - Ye[bj])
-      WE[ai,bj] = (We[ai]^(-q/2) - We[bj]^(-q/2)) / (We[ai] - We[bj])
-    end
-    AU1 = AU ^ (-q/2)
-    BU1 = BU ^ (-q/2)
-    CU1 = CU ^ (-q/2)
-    Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
-    W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
+    AE = calc_E_Coe(Ae, q)
+    BE = calc_E_Coe(Be, q)
+    CE = calc_E_Coe(Ce, q)
+    YE = calc_E_Coe(Ye, q)
+    WE = calc_E_Coe(We, q)
+
+    AU1 = AX' * Diagonal(Ae .^ (-q/2)) * AX # AU1 = AU ^ (-q/2)
+    BU1 = BX' * Diagonal(Be .^ (-q/2)) * BX # BU1 = BU ^ (-q/2)
+    CU1 = reshape(CX' * Diagonal(Ce .^ (-q/2)) * CX, nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
+    Y1 = reshape(YX' * Diagonal(Ye .^ (-q/2)) * YX, nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
+    W1 = reshape(WX' * Diagonal(We .^ (-q/2)) * WX, nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
 
     if q == 1
       @tensoropt begin
-        YWT[a,b,i,j] = Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
-                     0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,i] * T2[c,b,i,k]
-        1T[a,b,i,j] = AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
+        YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
+                     0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,j] * T2[c,b,i,k]
+        q1T[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
                       CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
       end
-      qV = 1T # using an existing function
+      T1 = zeros(0,0)
+      qV = calc_cc_resid(EC, T1, q1T; linearized=true) # using an existing function
     else
       qV = load4idx(EC,"d_vvoo")
     end
 
     @tensoropt begin
-      qAF[c,a] = qV[a,b,i,j] * T2[c,b,i,j]
-      qBF[i,k] = qV[a,b,i,j] * T2[a,b,k,j]
-      qCF[i,j,k,l] = qV[a,b,k,l] * T2[a,b,i,j]
-      q1DF[a,i,c,k] = qV[a,b,i,j] * (T2[c,b,k,j] - 0.5*T2[b,c,k,j])
-      q2DF[a,i,c,k] = 0.5*qV[a,b,i,j] * T2[b,c,k,j]
-      q3DF[a,j,c,k] = qV[a,b,i,j] * T2[c,b,i,k]
+      qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
+      qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
+      qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
+      q1DF[a,i,c,k] := qV[a,b,i,j] * (T2[c,b,k,j] - 0.5*T2[b,c,k,j])
+      q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j]
+      q3DF[a,j,c,k] := qV[a,b,i,j] * T2[c,b,i,k]
     end
     qAz = vec(sum(AX' * qAF .* AX',dims=2)) .* (Ae.^(-q/2-1))
     @tensoropt qAZ[e,f] := AX[a,e] * qAF[b,a] * AX[b,f]
@@ -1054,46 +1074,46 @@ function calc_qvcc_resid(EC:ECInfo, T2; dc=false)
     @tensoropt qBZ[e,f] := BX[a,e] * qBF[b,a] * BX[b,f]
     qBZ .= qBZ .* BE
 
-    qCF .= reshape(qCF, nocc^2, nocc^2)
+    qCF = reshape(qCF, nocc^2, nocc^2)
     qCz = vec(sum(CX' * qCF .* CX',dims=2)) .* (Ce.^(-q/2-1))
     @tensoropt qCZ[e,f] := CX[a,e] * qCF[b,a] * CX[b,f]
     qCZ .= qCZ .* CE
 
-    q1DF .= reshape(q1DF, nvirt*nocc, nvirt*nocc)
+    q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
     q1Dz = vec(sum(YX' * q1DF .* YX',dims=2)) .* (Ye.^(-q/2-1))
     @tensoropt q1DZ[e,f] := YX[a,e] * q1DF[b,a] * YX[b,f]
     q1DZ .= q1DZ .* YE
 
-    q2DF .= reshape(q2DF, nvirt*nocc, nvirt*nocc)
-    q3DF .= reshape(q3DF, nvirt*nocc, nvirt*nocc)
+    q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
+    q3DF = reshape(q3DF, nvirt*nocc, nvirt*nocc)
     q2DF .= q2DF .+ q3DF  # here q2DF is redefined as the sum of q2DF and q3DF
     q2Dz = vec(sum(WX' * q2DF .* WX',dims=2)) .* (We.^(-q/2-1))
     @tensoropt q2DZ[e,f] := WX[a,e] * q2DF[b,a] * WX[b,f]
     q2DZ .= q2DZ .* WE
 
     qAzX = qAz .* AX'
-    @tensoropt qAR[d,c] = -q/2.0 * qAzX[e,d] * AX[c,e] + qAZ[e,f] * AX[d,f] * AX[c,e]
+    @tensoropt qAR[d,c] := -q/2.0 * qAzX[e,d] * AX[c,e] + qAZ[e,f] * AX[d,f] * AX[c,e]
     qBzX = qBz .* BX'
-    @tensoropt qBR[d,c] = -q/2.0 * qBzX[e,d] * BX[c,e] + qBZ[e,f] * BX[d,f] * BX[c,e]
+    @tensoropt qBR[d,c] := -q/2.0 * qBzX[e,d] * BX[c,e] + qBZ[e,f] * BX[d,f] * BX[c,e]
     qCzX = qCZ .* CX'
-    @tensoropt qCR[d,c] = -q/2.0 * qCzX[e,d] * CX[c,e] + qCZ[e,f] * CX[d,f] * CX[c,e]
+    @tensoropt qCR[d,c] := -q/2.0 * qCzX[e,d] * CX[c,e] + qCZ[e,f] * CX[d,f] * CX[c,e]
     qCR = reshape(qCR, nocc, nocc, nocc, nocc) # qCR[i,j,k,l]
 
     q1DzX = q1Dz .* YX'
-    @tensoropt q1DR[d,c] = -q/2.0 * q1DzX[e,d] * YX[c,e] + q1DZ[e,f] * YX[d,f] * YX[c,e]
+    @tensoropt q1DR[d,c] := -q/2.0 * q1DzX[e,d] * YX[c,e] + q1DZ[e,f] * YX[d,f] * YX[c,e]
     q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc) # q1DR[d,l,e,m]
 
     q2DzX = q2Dz .* WX'
-    @tensoropt q2DR[d,c] = -q/2.0 * q2DzX[e,d] * WX[c,e] + q2DZ[e,f] * WX[d,f] * WX[c,e]
+    @tensoropt q2DR[d,c] := -q/2.0 * q2DzX[e,d] * WX[c,e] + q2DZ[e,f] * WX[d,f] * WX[c,e]
     q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc) # q2DR[d,l,e,m]
 
     @tensoropt qG[a,b,i,j] := (qAR[d,a] + qAR[a,d]) * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
                               (qBR[l,i] + qBR[i,l]) * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] -
                               ((qCR[m,n,i,j] + qCR[i,j,m,n]) * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) -
-                              0.5 * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) - q1DR[b,i,c,k]* (4.0 * T2[c,k,a,j] - 2.0 * T2[a,k,c,j])
+                              0.5 * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
                               + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] + qV[c,b,k,j] * Y1[c,k,a,i] - 0.5 * qV[c,a,k,j] * Y1[c,k,b,i]
                               + 0.5 * qV[c,a,k,j] * W1[c,k,b,i] + qV[c,b,i,k] * W1[c,k,a,j])
-    @tensoropt qG[a,b,i,j] = qG[a,b,i,j] + qG[b,a,j,i]
+    qG .= qG .+ permutedims(qG, (2,1,4,3))
     if q == 1
       sumG = qG
     else
