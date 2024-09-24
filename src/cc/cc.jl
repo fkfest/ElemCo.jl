@@ -989,11 +989,11 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 end
 
 """
-    calc_E_Coe(eigenvalue_vector::Vector)
+    calc_E_Coe(eigenvalue_vector, q)
 
-  Calculate the coefficient matrix in QVCCD residual calculation.
+  Calculate the coefficient matrix in QV-CCD or QV-DCD residual calculation.
 """
-function calc_E_Coe(eigenvalue_vector::Vector, q)
+function calc_E_Coe(eigenvalue_vector, q)
   coefficient_matrix = zeros(length(eigenvalue_vector), length(eigenvalue_vector))
   for i in 1:length(eigenvalue_vector)
     for j in 1:length(eigenvalue_vector)
@@ -1008,11 +1008,11 @@ function calc_E_Coe(eigenvalue_vector::Vector, q)
 end
 
 """
-    calc_qvcc_resid(EC:ECInfo, T2; dc=false)
+    calc_qvcc_resid(EC::ECInfo, T2; dc=false)
 
-  Calculate QV-CCSD or QV-DC-CCSD closed-shell residual.
+  Calculate QV-CCD or QV-DCD closed-shell residual.
 """
-function calc_qvcc_resid(EC:ECInfo, T2; dc=false)
+function calc_qvcc_resid(EC::ECInfo, T2; dc=false)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   @tensoropt begin
@@ -1032,7 +1032,7 @@ function calc_qvcc_resid(EC:ECInfo, T2; dc=false)
   # to be added: if e difference is 0
   sumG = []
 
-  for q in 1:2
+  for q in [1.0, 2.0]
     AE = calc_E_Coe(Ae, q)
     BE = calc_E_Coe(Be, q)
     CE = calc_E_Coe(Ce, q)
@@ -1113,7 +1113,7 @@ function calc_qvcc_resid(EC:ECInfo, T2; dc=false)
                               0.5 * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
                               + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] + qV[c,b,k,j] * Y1[c,k,a,i] - 0.5 * qV[c,a,k,j] * Y1[c,k,b,i]
                               + 0.5 * qV[c,a,k,j] * W1[c,k,b,i] + qV[c,b,i,k] * W1[c,k,a,j])
-    qG .= qG .+ permutedims(qG, (2,1,4,3))
+    qG .+= permutedims(qG, (2,1,4,3))
     if q == 1
       sumG = qG
     else
