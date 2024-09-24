@@ -1008,11 +1008,11 @@ function calc_E_Coe(eigenvalue_vector, q)
 end
 
 """
-    calc_qvcc_resid(EC::ECInfo, T2; dc=false)
+    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
-function calc_qvcc_resid(EC::ECInfo, T2; dc=false)
+function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   @tensoropt begin
@@ -1053,7 +1053,7 @@ function calc_qvcc_resid(EC::ECInfo, T2; dc=false)
                       CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
       end
       T1 = zeros(0,0)
-      qV = calc_cc_resid(EC, T1, q1T; linearized=true) # using an existing function
+      R1, qV = calc_cc_resid(EC, T1, q1T; linearized=true) # using an existing function
     else
       qV = load4idx(EC,"d_vvoo")
     end
@@ -1120,7 +1120,7 @@ function calc_qvcc_resid(EC::ECInfo, T2; dc=false)
       sumG .+= qG
     end
   end
-  return sumG
+  return T1, sumG
 end
 
 
@@ -2265,7 +2265,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    if length(Amps3) == 0 && length(Amps1) == 0
+    if length(Amps3) == 0 && !do_sing
       Res = calc_qvcc_resid(EC, Amps...; dc) #TODO fix later
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
