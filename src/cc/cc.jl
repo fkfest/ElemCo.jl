@@ -1013,6 +1013,7 @@ end
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
 function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
+  EC.options.cc.calc_d_vvoo = true
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   @tensoropt begin
@@ -1039,11 +1040,11 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     YE = calc_E_Coe(Ye, q)
     WE = calc_E_Coe(We, q)
 
-    AU1 = AX' * Diagonal(Ae .^ (-q/2)) * AX # AU1 = AU ^ (-q/2)
-    BU1 = BX' * Diagonal(Be .^ (-q/2)) * BX # BU1 = BU ^ (-q/2)
-    CU1 = reshape(CX' * Diagonal(Ce .^ (-q/2)) * CX, nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
-    Y1 = reshape(YX' * Diagonal(Ye .^ (-q/2)) * YX, nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
-    W1 = reshape(WX' * Diagonal(We .^ (-q/2)) * WX, nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
+    AU1 = AX * Diagonal(Ae .^ (-q/2)) * AX' # AU1 = AU ^ (-q/2)
+    BU1 = BX * Diagonal(Be .^ (-q/2)) * BX' # BU1 = BU ^ (-q/2)
+    CU1 = reshape(CX * Diagonal(Ce .^ (-q/2)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
+    Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
+    W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
 
     if q == 1
       @tensoropt begin
@@ -1066,7 +1067,7 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
       q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j]
       q3DF[a,j,c,k] := qV[a,b,i,j] * T2[c,b,i,k]
     end
-    qAz = vec(sum(AX' * qAF .* AX',dims=2)) .* (Ae.^(-q/2-1))
+    qAz = vec(sum(AX' * qAF .* AX',dims=2)) .* (Ae.^(-q/2-1)) # diag(AX' * qAF * AX) .* Ae.^(-q/2-1)
     @tensoropt qAZ[e,f] := AX[a,e] * qAF[b,a] * AX[b,f]
     qAZ .= qAZ .* AE
 
