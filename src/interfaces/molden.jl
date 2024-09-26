@@ -81,7 +81,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     for (iat,atom) in enumerate(EC.system)
       coord = uconvert.(distunit, atom.position)/distunit
       @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
-              atomic_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
+              atomic_center_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
     end
     println(f, "[GTO]")
     for ic in center_range(basisset)

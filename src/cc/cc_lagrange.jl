@@ -1217,7 +1217,7 @@ function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   end
   try2save_doubles!(EC, LMs2...; type="LM")
   println()
-  output_norms(["LM1"=>sqrt(NormLM1), "LM2"=>sqrt(NormLM2)])
+  output_norms("LM1"=>NormLM1, "LM2"=>NormLM2)
   println()
   return
 end

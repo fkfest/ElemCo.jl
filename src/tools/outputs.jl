@@ -65,15 +65,15 @@ function output_E_method(En, method::AbstractString, info::AbstractString="")
 end
 
 """
-    output_norms(norms::Vector{Pair{String,Float64}})
+    output_norms(norms::Pair{String,Float64}...)
 
-  Output norms. 
+  Output squared norms. 
 
-  The norms are a vector of pairs of strings and floats.
+  The norms are pairs of strings and floats.
 """
-function output_norms(norms::Vector{Pair{String,Float64}})
+function output_norms(norms::Pair{String,Float64}...)
   for norm in norms
-    @printf "Norm of %s: %12.8f " norm.first norm.second
+    @printf "|%s|²: %12.8f   " norm.first norm.second
   end
   println()
   flush(stdout)

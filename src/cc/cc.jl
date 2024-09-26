@@ -56,6 +56,7 @@ catch
   #println("MKL package not found, using OpenBLAS.")
 end
 using LinearAlgebra
+using Printf # to be removed
 #BLAS.set_num_threads(1)
 using TensorOperations
 using ..ElemCo.Outputs
@@ -2336,9 +2337,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   try2save_doubles!(EC, Amps2...)
   println()
   if length(Amps3) > 0
-    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2), "T3"=>sqrt(NormT3)])
+    output_norms("T1"=>NormT1, "T2"=>NormT2, "T3"=>NormT3)
   else
-    output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2)])
+    output_norms("T1"=>NormT1, "T2"=>NormT2)
   end
   println()
   return Eh 
@@ -2353,10 +2354,16 @@ end
   If cc3: calculate CC3 amplitudes.
 """
 function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
+  t0 = time_ns()
+  pert_svd_T = true
+  
   if cc3
     print_info("CC3")
   else
     print_info("DC-CCSDT")
+    if pert_svd_T
+      println("DC-CCSDT with SVD-(T)")
+    end
   end
   calc_integrals_decomposition(EC)
   T1 = read_starting_guess4amplitudes(EC, Val(1))
@@ -2379,6 +2386,28 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   R1 = Float64[]
   Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
   t0 = time_ns()
+
+
+# Charlottes block for svd-ccsd(t)  
+  if pert_svd_T
+    nocc = n_occ_orbs(EC)
+    nvirt = n_virt_orbs(EC)
+  
+    save_pseudodressed_3idx(EC)
+    calc_SVD_pert_T(EC, T2)
+    R3 = load3idx(EC, "R_XXX")
+    T3 = load3idx(EC, "T_XXX")
+    T3 += update_deco_triples(EC, R3, false)
+    save!(EC, "T_XXX", T3)
+    
+    R1 = zeros(nvirt,nocc)
+    R2 = zeros(nvirt, nvirt, nocc, nocc)
+    R1, R2 = SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
+  
+    Eh_init = calc_hylleraas(EC, T1, T2, R1, R2)
+    output_E_method(Eh_init["E"], "SVD-CCSD(T)", "correlation energy:")
+  end
+
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     #get dressed integrals
@@ -2417,11 +2446,59 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     end
   end
   println()
-  output_norms(["T1"=>sqrt(NormT1), "T2"=>sqrt(NormT2), "T3"=>sqrt(NormT3)])
+  output_norms("T1"=>NormT1, "T2"=>NormT2, "T3"=>NormT3)
   println()
-  
+  if pert_svd_T
+    push!(Eh, "SVD-CCSD(T)"=>Eh_init["E"])
+  end
+  t0 = print_time(EC, t0, "total", 1)
   return Eh
 end
+
+
+"""
+    SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
+
+  Add contributions for SVD-(T) from triples to singles and doubles residuals.
+"""
+function SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
+  SP = EC.space
+  ooPfile, ooP = mmap3idx(EC, "d_ooL")
+  ovPfile, ovP = mmap3idx(EC, "d_ovL")
+
+  Txyz = load3idx(EC, "T_XXX")
+
+  U = load3idx(EC, "C_voX")
+  # println(size(U))
+
+  @tensoropt Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
+  @tensoropt A[P,X] := Boo[i,i,P,X]
+  @tensoropt BBU[Z,d,j] := (ovP[j,c,P] * ovP[k,d,P]) * U[c,k,Z]
+  @tensoropt R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
+  @tensoropt R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,d,j] ))
+
+  BBU = nothing
+
+  @tensoropt Bov[i,a,P,X] := ooP[j,i,P] * U[a,j,X]
+  vvPfile, vvP = mmap3idx(EC, "d_vvL")
+  @tensoropt Bvo[a,i,P,X] := vvP[a,b,P] * U[b,i,X]
+  close(vvPfile)
+  vvP = nothing
+  #dfock = load2idx(EC, "df_mm")
+  #fov = dfock[SP['o'], SP['v']]
+  # R2[abij] = RR2[abij] + RR2[baji]
+  #@tensoropt RR2[a,b,i,j] := U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
+  @tensoropt RR2[a,b,i,j] := 2.0*U[b,j,Y] * ((Bvo[a,i,P,Z] - Bov[i,a,P,Z])*(Txyz[X,Y,Z] * A[P,X]))
+  @tensoropt RR2[a,b,i,j] += (Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Boo[k,j,P,Y] * (Txyz[X,Y,Z] * U[b,k,X]))
+  @tensoropt RR2[a,b,i,j] -= U[b,j,Z] * (Txyz[X,Y,Z] * (Bvo[a,k,P,X] * Boo[k,i,P,Y] - U[a,k,Y] * (Bov[i,c,P,X] * ovP[k,c,P])))
+  @tensoropt R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
+  close(ovPfile)
+  close(ooPfile)
+
+  return R1,R2
+  GC.gc()
+end
+
 
 """
     add_to_singles_and_doubles_residuals(EC, R1, R2)
@@ -2618,6 +2695,83 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
 end
 
 """
+    calc_SVD_pert_T(EC::ECInfo, T2)
+
+  Calculate SVD-CCSD(T).
+"""
+
+function calc_SVD_pert_T(EC::ECInfo, T2)
+  
+  t1 = time_ns()
+  UvoX = load3idx(EC, "C_voX")
+  #display(UvoX)
+
+  #load decomposed amplitudes
+  T3_XYZ = load3idx(EC, "T_XXX")
+  #display(T3_XYZ)
+  #load df coeff
+  ooPfile, ooP = mmap3idx(EC, "d_ooL")
+  voPfile, voP = mmap3idx(EC, "d_voL")
+  vvPfile, vvP = mmap3idx(EC, "d_vvL")
+
+  @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #virt1
+  vvP = nothing
+  #println(1)
+  #flush(stdout)
+  
+  @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #occ1
+  voP = nothing
+  ooP = nothing
+  #println(4)
+  #flush(stdout)
+
+  @tensoropt TaiX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
+  #println(16)
+  #flush(stdout)
+  
+  nocc = n_occ_orbs(EC)
+  nsvd = size(T3_XYZ, 1)
+  Term1 = zeros(nsvd,nsvd,nsvd)
+  for j in 1:nocc
+    ThetaoccCut = Thetaocc[:,j,:]
+    @tensoropt IntermediateTerm11[b,X,Z] := TaiX[b,l,X] * ThetaoccCut[l,Z]
+    ThetaoccCut = nothing
+    TaiXCut = TaiX[:,j,:]
+    @tensoropt IntermediateTerm11[b,X,Z] -= Thetavirt[b,d,Z] * TaiXCut[d,X]
+    TaiXCut = nothing
+    UvoXCut = UvoX[:,j,:]
+    @tensoropt Term1[X,Y,Z] += IntermediateTerm11[b,X,Z] * UvoXCut[b,Y]
+    IntermediateTerm11 = nothing
+    UvoXCut = nothing
+  end
+  #println(23)
+  #flush(stdout)
+  Thetaocc = nothing
+  Thetavirt = nothing
+  TaiX = nothing
+  t1 = print_time(EC, t1, "Theta terms in R3(T3)", 2)
+
+  @tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z] + Term1[Y,X,Z] + Term1[X,Z,Y] + Term1[Z,Y,X] + Term1[Z,X,Y] + Term1[Y,Z,X]
+  #println(24)
+  #flush(stdout)
+  Term1 = nothing
+  t1 = print_time(EC, t1, "Symmetrization of Theta terms in R3(T3)", 2)
+
+  #display(R3decomp)
+
+  close(vvPfile)
+  close(voPfile)
+  close(ooPfile)
+
+  save!(EC, "R_XXX", R3decomp)
+  #println(40)
+  #flush(stdout)
+end
+
+
+
+
+"""
     calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
 
   Calculate decomposed triples DC-CCSDT or CC3 residuals.
@@ -2643,10 +2797,26 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   dfoo = dfock[SP['o'], SP['o']]
   dfov = dfock[SP['o'], SP['v']]
   dfvv = dfock[SP['v'], SP['v']]
-  
+ 
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nsvd = size(T3_XYZ, 1)
+  naux = size(voP, 3)
+
   @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #virt1
   @tensoropt Thetavirt[b,d,Z] += UvoX[c,k,Z] * (T2[c,b,l,m] * (ooP[l,k,Q] * ovP[m,d,Q])) #virt3
-  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (T2[b,e,l,k] * (UvoX[c,k,Z] * vvP[c,e,Q])) #virt6
+
+  for k in 1:nocc
+    UvoXCut = UvoX[:,k,:]
+    @tensoropt IntermediateV62[e,Q,Z] := UvoXCut[c,Z] * vvP[c,e,Q]
+    UvoXCut = nothing
+    T2Cut = T2[:,:,:,k]
+    @tensoropt IntermediateV61[b,l,Q,Z] := T2Cut[b,e,l] * IntermediateV62[e,Q,Z]
+    IntermediateV62 = nothing
+    T2Cut = nothing
+    @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * IntermediateV61[b,l,Q,Z] #virt6
+    IntermediateV61 = nothing
+  end
   t1 = print_time(EC, t1, "1 Theta terms in R3(T3)", 2)
   
   @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #occ1
@@ -2655,20 +2825,105 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   t1 = print_time(EC, t1, "2 Theta terms in R3(T3)", 2)
   if !cc3
     @tensoropt BooQX[i,j,Q,X] := ovP[i,a,Q] * UvoX[a,j,X]
-    @tensoropt Thetavirt[b,d,Z] += 0.5* T3_XYZ[X',Y',Z] * (UvoX[b,m,Y'] * (ovP[l,d,Q] * BooQX[m,l,Q,X'])) #virt9
+
+    for W in 1:nsvd
+      BooQXCut = BooQX[:,:,:,W]
+      @tensoropt IntermediateV92[d,m] := ovP[l,d,Q] * BooQXCut[m,l,Q]
+      BooQXCut = nothing
+      @tensoropt IntermediateV91[b,d,Y'] := UvoX[b,m,Y'] * IntermediateV92[d,m]
+      IntermediateV92 = nothing
+      T3_XYZCut = T3_XYZ[W,:,:]
+      @tensoropt Thetavirt[b,d,Z] += 0.5* T3_XYZCut[Y',Z] * IntermediateV91[b,d,Y'] #virt9
+      IntermediateV91 = nothing
+      T3_XYZCut = nothing
+    end
+
     @tensoropt Thetaocc[l,j,Z] -= 0.5 * T3_XYZ[X',Z,Z'] * (BooQX[l,m,Q,X'] * BooQX[m,j,Q,Z']) #occ8
     BooQX = nothing
     t1 = print_time(EC, t1, "3 Theta terms in R3(T3)", 2)
 
     @tensoropt A[Q,X] := ovP[i,a,Q] * UvoX[a,i,X]
-    @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (UvoX[b,l,Z'] * (T3_XYZ[X',Z,Z'] * A[Q,X'])) #virt7
-    @tensoropt Thetaocc[l,j,Z] += ovP[l,d,Q] * (UvoX[d,j,Z']* (T3_XYZ[X',Z,Z'] * A[Q,X']))   #occ6
+    
+    @tensoropt IntermediateV72[Q,Z,Z'] := T3_XYZ[X',Z,Z'] * A[Q,X']
+    for l in 1:nocc
+      UvoXCut = UvoX[:,l,:]
+      @tensoropt IntermediateV71[b,Q,Z] := UvoXCut[b,Z'] * IntermediateV72[Q,Z,Z']
+      UvoXCut = nothing
+      ovPCut = ovP[l,:,:]
+      @tensoropt Thetavirt[b,d,Z] -= ovPCut[d,Q] * IntermediateV71[b,Q,Z] #virt7
+      IntermediateV71 = nothing
+      ovPCut = nothing
+    end
+    IntermediateV72 = nothing 
+    
+    @tensoropt IntermediateO62[Q,Z,Z'] := T3_XYZ[X',Z,Z'] * A[Q,X']
+    for d in 1:nvirt
+      UvoXCut = UvoX[d,:,:]
+      @tensoropt IntermediateO61[j,Q,Z] := UvoXCut[j,Z'] * IntermediateO62[Q,Z,Z']
+      UvoXCut = nothing
+      ovPCut = ovP[:,d,:]
+      @tensoropt Thetaocc[l,j,Z] += ovPCut[l,Q] * IntermediateO61[j,Q,Z]   #occ6
+      ovPCut = nothing
+      IntermediateO61 = nothing
+    end
+    IntermediateO62 = nothing
     A = nothing
     t1 = print_time(EC, t1, "4 Theta terms in R3(T3)", 2)
 
-    @tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * (UvoX[e,k,Y'] * (T3_XYZ[X',Y',Z'] * (UvoX[c,m,X'] * UvoX[c,k,Z])))
-    @tensoropt Thetavirt[b,d,Z] += 0.5* ovP[l,d,Q] * (UvoX[b,l,Z'] * IntermediateTheta[Q,Z',Z]) #virt8
-    @tensoropt Thetaocc[l,j,Z] -= 0.5 * ovP[l,d,Q] * (UvoX[d,j,Z'] * IntermediateTheta[Q,Z',Z]) #occ7
+    IntermediateTheta = zeros(naux,nsvd,nsvd)
+    @tensoropt IntermediateThetaV82[k,m,Q,Y'] := ovP[m,e,Q] * UvoX[e,k,Y']
+    for W in 1:nsvd
+      T3_XYZCut = T3_XYZ[:,:,W]
+      @tensoropt IntermediateThetaV83[c,m,Y'] := UvoX[c,m,X'] * T3_XYZCut[X',Y']
+      T3_XYZCut = nothing
+      @tensoropt IntermediateThetaV81[c,k,Q] := IntermediateThetaV83[c,m,Y'] * IntermediateThetaV82[k,m,Q,Y']
+      IntermediateThetaV83 = nothing
+      @tensoropt IntermediateThetaCut[Q,Z] := IntermediateThetaV81[c,k,Q] * UvoX[c,k,Z]
+      IntermediateThetaV81 = nothing
+      IntermediateTheta[:,W,:] += IntermediateThetaCut
+      IntermediateThetaCut = nothing
+    #@tensoropt IntermediateThetaV83[k,m,X',Z] := UvoX[c,m,X'] * UvoX[c,k,Z]
+    #@tensoropt IntermediateThetaV82[k,m,Y',Z,Z'] := T3_XYZ[X',Y',Z'] * IntermediateThetaV83[k,m,X',Z]
+    #@tensoropt IntermediateThetaV81[e,m,Z,Z'] := UvoX[e,k,Y'] * IntermediateThetaV82[k,m,Y',Z,Z']
+    #@tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * IntermediateThetaV81[e,m,Z,Z']
+    end
+    IntermediateThetaV82 = nothing
+    #println(13)
+    #flush(stdout)
+
+    #@tensoropt IntermediateThetaV83[k,m,X',Z] := UvoX[c,m,X'] * UvoX[c,k,Z]
+    #@tensoropt IntermediateThetaV82[k,m,Y',Z,Z'] := T3_XYZ[X',Y',Z'] * IntermediateThetaV83[k,m,X',Z]
+    #IntermediateThetaV83 = nothing
+    #@tensoropt IntermediateThetaV81[e,m,Z,Z'] := UvoX[e,k,Y'] * IntermediateThetaV82[k,m,Y',Z,Z']
+    #IntermediateThetaV82 = nothing
+    #@tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * IntermediateThetaV81[e,m,Z,Z']
+    #IntermediateThetaV81 = nothing
+    #println(13)
+    #flush(stdout)
+   
+    for l in 1:nocc
+      UvoXCut = UvoX[:,l,:]
+      @tensoropt IntermediateV81[b,Q,Z] := UvoXCut[b,W] * IntermediateTheta[Q,W,Z]
+      UvoXCut = nothing
+      ovPCut = ovP[l,:,:]
+      @tensoropt Thetavirt[b,d,Z] += 0.5 * ovPCut[d,Q] * IntermediateV81[b,Q,Z] #virt8
+      ovPCut = nothing
+      IntermediateV81 = nothing
+    end
+    #println(14)
+    #flush(stdout)
+    
+    for d in 1:nvirt
+      UvoXCut = UvoX[d,:,:]
+      @tensoropt IntermediateO71[j,Q,Z] := UvoXCut[j,Z'] * IntermediateTheta[Q,Z',Z]
+      UvoXCut = nothing
+      ovPCut = ovP[:,d,:]
+      @tensoropt Thetaocc[l,j,Z] -= 0.5 * ovPCut[l,Q] * IntermediateO71[j,Q,Z] #occ7
+      IntermediateO71 = nothing
+      ovPCut = nothing
+    end
+    #println(15)
+    #flush(stdout)
     IntermediateTheta = nothing
     t1 = print_time(EC, t1, "5 Theta terms in R3(T3)", 2)
   end
@@ -2681,11 +2936,49 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   t1 = print_time(EC, t1, "6 Theta terms in R3(T3)", 2)
 
   @tensoropt Thetavirt[b,d,Z] -= dfov[l,d] * TaiX[b,l,Z] #virt2
-  @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * (vvP[b,e,Q] * TaiX[e,l,Z]) #virt5
-  @tensoropt Thetaocc[l,j,Z] -= ooP[m,j,Q] * (ovP[l,d,Q] * TaiX[d,m,Z]) #occ3
-  t1 = print_time(EC, t1, "7 Theta terms in R3(T3)", 2)
+  #println(20)
+  #flush(stdout)
   
-  @tensoropt Term1[X,Y,Z] := (TaiX[b,l,X] * Thetaocc[l,j,Z] - Thetavirt[b,d,Z] * TaiX[d,j,X]) * UvoX[b,j,Y]
+  for l in 1:nocc
+    TaiXCut = TaiX[:,l,:]
+    @tensoropt IntermediateV51[b,Q,Z] := vvP[b,e,Q] * TaiXCut[e,Z]
+    TaiXCut = nothing
+    ovPCut = ovP[l,:,:]
+    @tensoropt Thetavirt[b,d,Z] -= ovPCut[d,Q] * IntermediateV51[b,Q,Z] #virt5
+    IntermediateV51 = nothing
+    ovPCut = nothing
+  end
+  #println(21)
+  #flush(stdout)
+ 
+  for m in 1:nocc
+    TaiXCut = TaiX[:,m,:]
+    @tensoropt IntermediateO31[l,Q,Z] := ovP[l,d,Q] * TaiXCut[d,Z]
+    TaiXCut = nothing
+    ooPCut = ooP[m,:,:]
+    @tensoropt Thetaocc[l,j,Z] -= ooPCut[j,Q] * IntermediateO31[l,Q,Z] #occ3
+    IntermediateO31 = nothing
+    ooPCut = nothing
+  end
+  #println(22)
+  #flush(stdout)
+  t1 = print_time(EC, t1, "7 Theta terms in R3(T3)", 2)
+
+  Term1 = zeros(nsvd,nsvd,nsvd)
+  for j in 1:nocc
+    ThetaoccCut = Thetaocc[:,j,:]
+    @tensoropt IntermediateTerm11[b,X,Z] := TaiX[b,l,X] * ThetaoccCut[l,Z]
+    ThetaoccCut = nothing
+    TaiXCut = TaiX[:,j,:]
+    @tensoropt IntermediateTerm11[b,X,Z] -= Thetavirt[b,d,Z] * TaiXCut[d,X]
+    TaiXCut = nothing
+    UvoXCut = UvoX[:,j,:]
+    @tensoropt Term1[X,Y,Z] += IntermediateTerm11[b,X,Z] * UvoXCut[b,Y]
+    IntermediateTerm11 = nothing
+    UvoXCut = nothing
+  end
+  #println(23)
+  #flush(stdout)
   Thetaocc = nothing
   Thetavirt = nothing
   TaiX = nothing
@@ -2708,18 +3001,183 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
     t1 = print_time(EC, t1, "1 Chi terms in R3(T3)", 2)
     @tensoropt Term2[X,Y,Z] += (UvoX[a,i,X] * ((ooP[l,i,P] * vvP[a,d,P]) * UvoX[d,l,X'])) * (T3_XYZ[X',Y',Z] * (UvoX[b,j,Y] * UvoX[b,j,Y'])) #3
     @tensoropt Term2[X,Y,Z] -= 2* (T3_XYZ[X',Y,Z] *((voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m]) * UvoX[a,i,X]) * (ovP[l,d,P] * UvoX[d,l,X'])) #4
-    @tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',Z'] * (((UvoX[c,k,Z] * UvoX[c,m,Z']) * ooP[m,k,P]) * (UvoX[b,j,Y] * (ooP[l,j,P] * UvoX[b,l,Y']))) #5
-    @tensoropt Intermediate2Term2[Y,Y',P] :=  UvoX[b,j,Y] * (vvP[b,d,P] * UvoX[d,j,Y'])
-    @tensoropt Intermediate3Term2[X',Y,Z,P] :=  T3_XYZ[X',Y',Z] * (Intermediate2Term2[Y,Y',P])
-    @tensoropt Term2[X,Y,Z] -= (T3_XYZ[X,Y',Z'] * Intermediate2Term2[Y,Y',P]) * (UvoX[e,k,Z'] * (UvoX[c,k,Z] * vvP[c,e,P])) #6
+    #println(30)
+    #flush(stdout)
+
+    """
+    example for get_spaceblocks from Daniels dfcc.jl:
+
+     W_LL = zeros(nL,nL)
+     # generate ``W^{LL'} = v_a^{iL} v_a^{iL'}`` for SVD
+     oBlks = get_spaceblocks(1:length(SP['o']))
+     for oblk in oBlks
+       voL = full_voL[:,oblk,:]
+       @tensoropt W_LL[L,L'] += voL[a,i,L] * voL[a,i,L']
+     end
+    
+    get_spaceblocks creates a list with ranges of the maximum size 100 up til the length which was defined
+    e.g. get_spaceblocks(1:1500) gives back:
+    Any[1:100, 101:200, 201:300, 301:400, 401:500, 501:600, 601:700, 701:800, 801:900, 901:1000, 1001:1100, 1101:1200, 1201:1300, 1301:1400, 1401:1500]
+    """
+    
+    @tensoropt Intermediate52[Y,Y',P] := UvoX[b,j,Y] * (ooP[l,j,P] * UvoX[b,l,Y'])
+    #println("30_1")
+    #flush(stdout)
+  
+
+
+    #@tensoropt Intermediate51[Z,W,P] := (UvoX[c,k,Z] * UvoX[c,m,W]) * ooP[m,k,P]
+    #@tensoropt Intermediate53[Y,Y',Z,W] := Intermediate51[Z,W,P] * Intermediate52[Y,Y',P]
+    #@tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',W] * Intermediate53[Y,Y',Z,W]
+
+
+       
+    @tensoropt Intermediate51[Z,W,P] := (UvoX[c,k,Z] * UvoX[c,m,W]) * ooP[m,k,P]
+    #println("30_2")
+    #println(sizeof(Intermediate51))
+    #flush(stdout)
+    #int1= Intermediate51[:,W,:] 
+    
+    for W in 1:nsvd
+       Intermediate51Cut = Intermediate51[:,W,:] 
+       #Intermediate51 = nothing
+       #println("30_3")
+       #println(sizeof(Intermediate51Cut))
+       #display(Intermediate51Cut)
+       flush(stdout)
+       
+       #Intermediate53 = zeros(nsvd,nsvd,nsvd)
+       #display(Intermediate53)
+       @tensoropt Intermediate53[Y,Y',Z] := Intermediate51Cut[Z,P] * Intermediate52[Y,Y',P]
+       #println("30_4")
+       #flush(stdout)
+       Intermediate51Cut = nothing
+
+       #println("30_5")
+       #flush(stdout)
+       
+       T3_XYZCut = T3_XYZ[:,:,W]
+
+       @tensoropt Term2[X,Y,Z] -= T3_XYZCut[X,Y'] * Intermediate53[Y,Y',Z] #5
+       Intermediate53 = nothing
+       T3_XYZCut = nothing
+
+       #cut out W from all tensors, because [1,x,y] tensor should be represented as [x,y]
+
+       #println("30_6")
+       #flush(stdout)
+    end
+    
+    Intermediate51 = nothing
+    Intermediate52 = nothing
+
+    #Intermediate53 = zeros(nsvd, nsvd, nsvd, nsvd)
+    #println(size(Intermediate53))
+
+    """
+    svdBlks = get_spaceblocks(1:nsvd)
+
+    for svdblk in svdBlks
+       @tensoropt Intermediate53[Y,Y',Z,Z'] += Intermediate51[Z,Z',P] * Intermediate52[Y,Y',P]
+       @tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',Z'] * Intermediate53[Y,Y',Z,Z']
+    end
+    """   
+
+    """@tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',Z'] * (((UvoX[c,k,Z] * UvoX[c,m,Z']) * ooP[m,k,P]) * (UvoX[b,j,Y] * (ooP[l,j,P] * UvoX[b,l,Y']))) #5
+    """
+
+    #Intermediate51 = nothing
+    #Intermediate52 = nothing
+    #Intermediate53 = nothing
+    #println(31)
+    #flush(stdout)
+   
+    Intermediate2Term2 = zeros(nsvd,nsvd,naux)
+    for j in 1:nocc
+      UvoXCut = UvoX[:,j,:]
+      @tensoropt IntermediateI2T21[b,P,Y'] := vvP[b,d,P] * UvoXCut[d,Y']
+      @tensoropt Intermediate2Term2[Y,Y',P] +=  UvoXCut[b,Y] * IntermediateI2T21[b,P,Y']
+      IntermediateI2T21 = nothing
+      UvoXCut = nothing
+    end
+    #println(32)
+    #flush(stdout)
+
+    #hier vielleicht groeßere Scheiben schneiden mit get_spaceblocks Funktion??
+    for P in 1:naux
+      Intermediate2Term2Cut = Intermediate2Term2[:,:,P]
+      @tensoropt IntermediateT2_1[X,Y,Z'] := T3_XYZ[X,Y',Z'] * Intermediate2Term2Cut[Y,Y']
+      Intermediate2Term2Cut = nothing
+
+      vvPCut = vvP[:,:,P]
+      @tensoropt IntermediateT2_2[e,k,Z] := UvoX[c,k,Z] * vvPCut[c,e]
+      @tensoropt IntermediateT2_3[Z,Z'] := UvoX[e,k,Z'] * IntermediateT2_2[e,k,Z]
+      IntermediateT2_2 = nothing
+    
+      @tensoropt Term2[X,Y,Z] -= IntermediateT2_1[X,Y,Z'] * IntermediateT2_3[Z,Z'] #6
+      IntermediateT2_1 = nothing
+      IntermediateT2_3 = nothing
+    end
+    #println(34)
+    #flush(stdout)
+    t1 = print_time(EC,t1,"2 Chi terms in R3(T3)",2) #weil andere Termreihenfolge Print veraendern??
+   
+    for W in 1:nsvd 
+      UvoXCut = UvoX[:,:,W]
+      @tensoropt IntermediateT2_5[i,l,X] := UvoX[a,i,X] * UvoXCut[a,l]
+      UvoXCut = nothing
+      @tensoropt IntermediateT2_4[P,X] := ooP[l,i,P] * IntermediateT2_5[i,l,X]
+      IntermediateT2_5 = nothing
+
+      T3_XYZCut = T3_XYZ[W,:,:]
+      @tensoropt Intermediate3Term2[Y,Z,P] :=  T3_XYZCut[Y',Z] * Intermediate2Term2[Y,Y',P]
+      T3_XYZCut = nothing
+      #println(33)
+      #flush(stdout)
+
+      @tensoropt Term2[X,Y,Z] += IntermediateT2_4[P,X] * (Intermediate3Term2[Y,Z,P] + Intermediate3Term2[Z,Y,P]) #7
+      IntermediateT2_4 = nothing
+      Intermediate3Term2 = nothing
+    end
+
     Intermediate2Term2 = nothing
-    t1 = print_time(EC,t1,"2 Chi terms in R3(T3)",2)
-    @tensoropt Term2[X,Y,Z] += (ooP[l,i,P] * (UvoX[a,i,X] * UvoX[a,l,X'])) * (Intermediate3Term2[X',Y,Z,P] + Intermediate3Term2[X',Z,Y,P]) #7
-    Intermediate3Term2 = nothing
     t1 = print_time(EC, t1, "3 Chi terms in R3(T3)", 2)
     @tensoropt Intermediate4Term2[l,d,a,i] := ovP[l,d,P] * (voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m])
-    @tensoropt Term2[X,Y,Z] += UvoX[c,k,Z] * ((T3_XYZ[X',Y',Y] * UvoX[c,l,X']) * (UvoX[d,k,Y'] * (UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]))) #8
-    @tensoropt Term2[X,Y,Z] += UvoX[b,j,Y] * ((T3_XYZ[X',Y',Z] * UvoX[b,l,X']) * (UvoX[d,j,Y'] * (UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]))) #9
+    #println(36)
+    #flush(stdout)
+    
+    @tensoropt IntermediateT2_9[d,l,X] := UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]
+    @tensoropt IntermediateT2_8[k,l,X,Y'] := UvoX[d,k,Y'] * IntermediateT2_9[d,l,X]
+    IntermediateT2_9 = nothing
+    for c in 1:nvirt
+      UvoXCut2 = UvoX[c,:,:]
+      @tensoropt IntermediateT2_7[l,Y,Y'] := T3_XYZ[X',Y',Y] * UvoXCut2[l,X']
+      @tensoropt IntermediateT2_6[k,X,Y] := IntermediateT2_7[l,Y,Y'] * IntermediateT2_8[k,l,X,Y']
+      IntermediateT2_7 = nothing
+      @tensoropt Term2[X,Y,Z] += UvoXCut2[k,Z] * IntermediateT2_6[k,X,Y] #8
+      IntermediateT2_6 = nothing
+      UvoXCut2 = nothing
+    end
+    IntermediateT2_8 = nothing
+    #println(37)
+    #flush(stdout)
+    #@tensoropt Term2[X,Y,Z] += UvoX[c,k,Z] * ((T3_XYZ[X',Y',Y] * UvoX[c,l,X']) * (UvoX[d,k,Y'] * (UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]))) #8
+   
+
+    
+    @tensoropt IntermediateT2_13[l,d,X] := UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]
+    @tensoropt IntermediateT2_12[j,l,X,Y'] := UvoX[d,j,Y'] * IntermediateT2_13[l,d,X]
+    IntermediateT2_13 = nothing
+    for b in 1:nvirt
+      UvoXCut = UvoX[b,:,:]
+      @tensoropt IntermediateT2_11[l,Y',Z] := T3_XYZ[X',Y',Z] * UvoXCut[l,X']
+      @tensoropt IntermediateT2_10[j,X,Z] := IntermediateT2_11[l,Y',Z] * IntermediateT2_12[j,l,X,Y']
+      IntermediateT2_11 = nothing
+      @tensoropt Term2[X,Y,Z] += UvoXCut[j,Y] * IntermediateT2_10[j,X,Z] #9
+      IntermediateT2_10 = nothing
+      UvoXCut = nothing
+    end
+    IntermediateT2_12 = nothing
     Intermediate4Term2 = nothing
     t1 = print_time(EC, t1, "4 Chi terms in R3(T3)", 2)
   end
@@ -2736,7 +3194,10 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   close(vvPfile)
 
   save!(EC, "R_XXX", R3decomp)
-  
+  GC.gc()
+  #println(40)
+  #flush(stdout)
+
 end
 
 end #module
