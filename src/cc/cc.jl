@@ -991,12 +991,12 @@ end
 """
     calc_E_Coe(eigenvalue_vector, q)
 
-  Calculate the coefficient matrix in QV-CCD or QV-DCD residual calculation.
+  Calculate the coefficient matrix in QV-CCD/DCD residual calculation.
 """
 function calc_E_Coe(eigenvalue_vector, q)
   coefficient_matrix = zeros(length(eigenvalue_vector), length(eigenvalue_vector))
-  for i in 1:length(eigenvalue_vector)
-    for j in 1:length(eigenvalue_vector)
+  for i in eachindex(eigenvalue_vector)
+    for j in eachindex(eigenvalue_vector)
       if j!= i
         coefficient_matrix[i,j] = eigenvalue_vector[i]^(-q/2) - eigenvalue_vector[j]^(-q/2) / (eigenvalue_vector[i] - eigenvalue_vector[j])
       else
@@ -1008,6 +1008,22 @@ function calc_E_Coe(eigenvalue_vector, q)
 end
 
 """
+    calc_R_from_U_F(e, X, F, q)
+
+  Calculate intermediate R with F and eigenvalue e, eigenvectors X of corresponding U in QV-CCD/DCD.
+"""
+function calc_R_from_U_F(e, X, F, q)
+  E = calc_E_Coe(e, q)
+  R = X' * F * X
+  z = diag(R)
+  R .= R .* E
+  z .= e.^(-q/2.0-1.0) .* z .* (-q/2.0)
+  R .+= Diagonal(z)
+  R .= X * R * X'
+  return R
+end
+
+"""
     calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
@@ -1016,30 +1032,25 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
   EC.options.cc.calc_d_vvoo = true
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
+  I_ab = Matrix(I,nvirt,nvirt)
+  I_ij = Matrix(I,nocc,nocc)
   @tensoropt begin
-    AU[b,a] := Matrix(I,nvirt,nvirt)[b,a] + 2.0 * T2[a,c,i,j] * T2[b,c,i,j] - T2[a,c,i,j] * T2[c,b,i,j]
-    BU[i,j] := Matrix(I,nocc,nocc)[i,j] +  2.0 * T2[a,b,i,k] * T2[a,b,j,k] - T2[a,b,i,k] * T2[a,b,k,j]
-    CU[i,j,k,l] := Matrix(I,nocc,nocc)[i,k] * Matrix(I,nocc,nocc)[j,l] + T2[a,b,k,l] * T2[a,b,i,j]
-    Y[a,i,b,j] := Matrix(I,nvirt,nvirt)[a,b] * Matrix(I,nocc,nocc)[i,j] + 4.0 * T2[a,c,i,k] * T2[b,c,j,k] - 2.0 * T2[c,a,i,k] * T2[b,c,j,k] - 2.0 * T2[a,c,i,k] * T2[c,b,j,k] + T2[c,a,i,k] * T2[c,b,j,k]
-    W[a,i,b,j] := Matrix(I,nvirt,nvirt)[a,b] * Matrix(I,nocc,nocc)[i,j] + T2[c,a,i,k] * T2[c,b,j,k]
+    AU[b,a] := I_ab[b,a] + 2.0 * T2[a,c,i,j] * T2[b,c,i,j] - T2[a,c,i,j] * T2[c,b,i,j]
+    BU[i,j] := I_ij[i,j] +  2.0 * T2[a,b,i,k] * T2[a,b,j,k] - T2[a,b,i,k] * T2[a,b,k,j]
+    CU[i,j,k,l] := I_ij[i,k] * I_ij[j,l] + T2[a,b,k,l] * T2[a,b,i,j]
+    Y[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + 4.0 * T2[a,c,i,k] * T2[b,c,j,k] - 2.0 * T2[c,a,i,k] * T2[b,c,j,k] - 2.0 * T2[a,c,i,k] * T2[c,b,j,k] + T2[c,a,i,k] * T2[c,b,j,k]
+    W[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + T2[c,a,i,k] * T2[c,b,j,k]
   end
   # a function that can calculate the eigenvectors & eigenvalues of a matrix
-  # and this part is uncertain 
+  # CU[i,j,k,l] -> CU[ij,kl], Y[a,i,b,j] -> Y[ai,bj], W[a,i,b,j] -> W[ai,bj]
+  # corresponding to \pre{_C}U^{ij}_{kl}, Y^{aj}_{bi}, W^{aj}_{bi}
   Ae, AX = eigen(AU)
   Be, BX = eigen(BU)
   Ce, CX = eigen(reshape(CU, nocc^2, nocc^2))
   Ye, YX = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
   We, WX = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
-  # to be added: if e difference is 0
-  sumG = []
-
+  G2 = zeros(nvirt, nvirt, nocc, nocc)
   for q in [1.0, 2.0]
-    AE = calc_E_Coe(Ae, q)
-    BE = calc_E_Coe(Be, q)
-    CE = calc_E_Coe(Ce, q)
-    YE = calc_E_Coe(Ye, q)
-    WE = calc_E_Coe(We, q)
-
     AU1 = AX * Diagonal(Ae .^ (-q/2)) * AX' # AU1 = AU ^ (-q/2)
     BU1 = BX * Diagonal(Be .^ (-q/2)) * BX' # BU1 = BU ^ (-q/2)
     CU1 = reshape(CX * Diagonal(Ce .^ (-q/2)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
@@ -1067,61 +1078,32 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
       q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j]
       q3DF[a,j,c,k] := qV[a,b,i,j] * T2[c,b,i,k]
     end
-    qAz = vec(sum(AX' * qAF .* AX',dims=2)) .* (Ae.^(-q/2-1)) # diag(AX' * qAF * AX) .* Ae.^(-q/2-1)
-    @tensoropt qAZ[e,f] := AX[a,e] * qAF[b,a] * AX[b,f]
-    qAZ .= qAZ .* AE
-
-    qBz = vec(sum(BX' * qBF .* BX',dims=2)) .* (Be.^(-q/2-1))
-    @tensoropt qBZ[e,f] := BX[a,e] * qBF[b,a] * BX[b,f]
-    qBZ .= qBZ .* BE
 
     qCF = reshape(qCF, nocc^2, nocc^2)
-    qCz = vec(sum(CX' * qCF .* CX',dims=2)) .* (Ce.^(-q/2-1))
-    @tensoropt qCZ[e,f] := CX[a,e] * qCF[b,a] * CX[b,f]
-    qCZ .= qCZ .* CE
-
     q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
-    q1Dz = vec(sum(YX' * q1DF .* YX',dims=2)) .* (Ye.^(-q/2-1))
-    @tensoropt q1DZ[e,f] := YX[a,e] * q1DF[b,a] * YX[b,f]
-    q1DZ .= q1DZ .* YE
-
     q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
     q3DF = reshape(q3DF, nvirt*nocc, nvirt*nocc)
-    q2DF .= q2DF .+ q3DF  # here q2DF is redefined as the sum of q2DF and q3DF
-    q2Dz = vec(sum(WX' * q2DF .* WX',dims=2)) .* (We.^(-q/2-1))
-    @tensoropt q2DZ[e,f] := WX[a,e] * q2DF[b,a] * WX[b,f]
-    q2DZ .= q2DZ .* WE
 
-    qAzX = qAz .* AX'
-    @tensoropt qAR[d,c] := -q/2.0 * qAzX[e,d] * AX[c,e] + qAZ[e,f] * AX[d,f] * AX[c,e]
-    qBzX = qBz .* BX'
-    @tensoropt qBR[d,c] := -q/2.0 * qBzX[e,d] * BX[c,e] + qBZ[e,f] * BX[d,f] * BX[c,e]
-    qCzX = qCZ .* CX'
-    @tensoropt qCR[d,c] := -q/2.0 * qCzX[e,d] * CX[c,e] + qCZ[e,f] * CX[d,f] * CX[c,e]
-    qCR = reshape(qCR, nocc, nocc, nocc, nocc) # qCR[i,j,k,l]
+    qAR = calc_R_from_U_F(Ae, AX, qAF, q)
+    qBR = calc_R_from_U_F(Be, BX, qBF, q)
+    qCR = calc_R_from_U_F(Ce, CX, qCF, q)
+    q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
+    q2DR = calc_R_from_U_F(We, WX, q2DF+q3DF, q)
 
-    q1DzX = q1Dz .* YX'
-    @tensoropt q1DR[d,c] := -q/2.0 * q1DzX[e,d] * YX[c,e] + q1DZ[e,f] * YX[d,f] * YX[c,e]
-    q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc) # q1DR[d,l,e,m]
-
-    q2DzX = q2Dz .* WX'
-    @tensoropt q2DR[d,c] := -q/2.0 * q2DzX[e,d] * WX[c,e] + q2DZ[e,f] * WX[d,f] * WX[c,e]
-    q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc) # q2DR[d,l,e,m]
+    qCR = reshape(qCR, nocc, nocc, nocc, nocc)
+    q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
+    q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
 
     @tensoropt qG[a,b,i,j] := (qAR[d,a] + qAR[a,d]) * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
                               (qBR[l,i] + qBR[i,l]) * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] -
                               ((qCR[m,n,i,j] + qCR[i,j,m,n]) * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) -
                               0.5 * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
-                              + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] + qV[c,b,k,j] * Y1[c,k,a,i] - 0.5 * qV[c,a,k,j] * Y1[c,k,b,i]
-                              + 0.5 * qV[c,a,k,j] * W1[c,k,b,i] + qV[c,b,i,k] * W1[c,k,a,j])
+                              + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] + qV[c,b,k,j] * Y1[a,i,c,k] - 0.5 * qV[c,a,k,j] * Y1[b,i,c,k]
+                              + 0.5 * qV[c,a,k,j] * W1[b,i,c,k] + qV[c,b,i,k] * W1[a,j,c,k])
     qG .+= permutedims(qG, (2,1,4,3))
-    if q == 1
-      sumG = qG
-    else
-      sumG .+= qG
-    end
+    G2 += qG
   end
-  return T1, sumG
+  return T1, G2
 end
 
 
