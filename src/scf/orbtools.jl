@@ -37,8 +37,8 @@ end
   Guess MO coefficients from atomic densities.
 """
 function guess_sad(EC::ECInfo)
-  # minao = "ano-rcc-mb"
-  minao = "ano-r0"
+  minao = "ano-rcc-mb"
+  # minao = "ano-r0"
   # minao = "sto-6g"
   bminao = generate_basis(EC, basisset=minao)
   bao = generate_basis(EC, "ao")
