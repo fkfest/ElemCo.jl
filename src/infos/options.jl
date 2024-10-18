@@ -80,7 +80,6 @@ Base.@kwdef mutable struct ScfOptions
   """
   HessianType::Symbol = :SO_SCI
   """`⟨:GRADIENT_SETPLUS⟩` Initial Vectors Type for MCSCF:
-  - `:RANDOM` one random vector
   - `:INHERIT` from last macro/micro iterations
   - `:GRADIENT_SET` b0 as [1,0,0,...], b1 as gradient
   - `:GRADIENT_SETPLUS` b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
@@ -259,6 +258,16 @@ Base.@kwdef mutable struct DiisOptions
   maxcrop::Int = 3
 end
 
+"""
+  Options for Davidson.
+
+  $(TYPEDFIELDS)
+"""
+Base.@kwdef mutable struct DavidsonOptions
+  """`⟨10⟩` maximum number of Davidson vectors per state. """
+  maxdav::Int = 10
+end
+
 """ 
   Options for ElemCo.jl.
 
@@ -279,4 +288,6 @@ Base.@kwdef mutable struct Options
   cholesky::CholeskyOptions = CholeskyOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
+  """ Davidson options ([`DavidsonOptions`](@ref)). """
+  davidson::DavidsonOptions = DavidsonOptions()
 end

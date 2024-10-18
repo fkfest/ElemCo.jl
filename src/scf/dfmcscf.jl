@@ -607,7 +607,7 @@ thres is the criterion of convergence,
 convTrack is to decide whether the tracking of eigenvectors is used
 """
 
-function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
+function davidson!(EC::ECInfo, eigenvec::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
   h_block::NTuple{10, Matrix{Float64}}, g::Vector, λ::Number, initVecType::Symbol, 
   fock_MO::Matrix, cMO::Matrix, HessianType::Symbol, D1::Matrix, convTrack::Bool=false)
   V = zeros(N,n_max)
@@ -636,34 +636,29 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   initGuessIndex = findmax(abs.(H0_hb))[2]
   numInitialVectors = 0 
 
-  if initVecType == :RANDOM
-    v = rand(size(v,1))
-    v = v ./ norm(v)
+  if initVecType == :INHERIT
+    eigenvec .= eigenvec ./ norm(eigenvec)
     numInitialVectors = 1
-    V[:,1] = v
-  elseif initVecType == :INHERIT
-    v = v ./ norm(v)
-    numInitialVectors = 1
-    V[:,1] = v
+    V[:,1] = eigenvec
   elseif initVecType == :GRADIENT_SET
     V[1,1] = 1.0
     g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
-    v = [[0.];g_r] ./ norm(g_r)
-    V[:,2] = v
+    eigenvec .= [[0.];g_r] ./ norm(g_r)
+    V[:,2] = eigenvec
     σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, λ, h_block, HessianType)
     numInitialVectors = 2
   elseif initVecType == :GRADIENT_SETPLUS
     V[1,1] = 1.0
     g_r = g 
-    v = [[0.];g_r] ./ norm(g_r)
-    V[:,2] = v
+    eigenvec .= [[0.];g_r] ./ norm(g_r)
+    V[:,2] = eigenvec
     σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, λ, h_block, HessianType)
     σ[:,2] = H_multiply(EC, fock_MO, cMO, D1, V[:,2], num_MO, g, λ, h_block, HessianType)
     V[initGuessIndex, 3] = 1.0
-    v = V[:,3]
-    v = v - V[initGuessIndex,2].* V[:,2]
-    v = v ./ norm(v)
-    V[:,3] = v
+    eigenvec = V[:,3]
+    eigenvec .= eigenvec - V[initGuessIndex,2].* V[:,2]
+    eigenvec .= eigenvec ./ norm(eigenvec)
+    V[:,3] = eigenvec
     newh_hb = V' * σ[:,2]
     h[:,2] = newh_hb
     h[2,:] = newh_hb
@@ -674,7 +669,7 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   for i in numInitialVectors+1:n_max
     davCounti += 1
     # blockwise H * v
-    newσ_hb = H_multiply(EC, fock_MO, cMO, D1, v, num_MO, g, λ, h_block, HessianType)
+    newσ_hb = H_multiply(EC, fock_MO, cMO, D1, eigenvec, num_MO, g, λ, h_block, HessianType)
     σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
     h[:,i-1] = newh_hb 
@@ -689,19 +684,19 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
       converged = true
       break
     end
-    v = -1.0 ./ (H0_hb .- ε[eigvec_index]) .* r
-    v[isnan.(v)] .= 0
-    v[isinf.(v)] .= 1e8
-    c = transpose(v) * V
-    v = v - V * transpose(c)
-    v = v./norm(v)
-    V[:,i] = v
+    eigenvec = -1.0 ./ (H0_hb .- ε[eigvec_index]) .* r
+    eigenvec[isnan.(eigenvec)] .= 0
+    eigenvec[isinf.(eigenvec)] .= 1e8
+    c = transpose(eigenvec) * V
+    eigenvec = eigenvec - V * transpose(c)
+    eigenvec = eigenvec./norm(eigenvec)
+    V[:,i] = eigenvec
   end
   if !converged
     println("davidson algorithm not converged!")
   end
-  v = V * ac
-  return ε[eigvec_index], v, converged, davCounti
+  eigenvec = V * ac
+  return ε[eigvec_index], eigenvec, converged, davCounti
 end
 
 """
@@ -736,7 +731,7 @@ function λTuning(EC::ECInfo, trust::Number, maxit4λ::Integer, λmax::Number, �
   # λ tuning loop (micro loop)
   for it=1:maxit4λ
     push!(λs, λ)
-    val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
+    val, vec, converged, davCounti = davidson!(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
     davCount += davCounti
     # while !converged
     #   davItMax += 50
