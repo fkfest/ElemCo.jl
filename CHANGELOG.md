@@ -11,6 +11,8 @@
 
 ### Added
 
+* a macro `@dummy` has been added to set some atoms to dummy atoms. 
+
 ### Fixed
 
 * Improve parsing method names in macros. Now the parser is not confused by multiple dashes in the name and, e.g., `@cc svd-dc-ccsdt` is evaluated correctly.

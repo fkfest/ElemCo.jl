@@ -54,6 +54,8 @@ struct BasisCenter
   position::SVector{3, Float64}
   """ atomic number"""
   atomic_number::Int
+  """ nuclear charge (= 0 for dummy atoms)"""
+  charge::Int
   """ name of the basis set (e.g., "cc-pVDZ")"""
   basis::String
   """ array of angular shells"""
@@ -62,7 +64,8 @@ end
 
 function BasisCenter(atom::Atom, basis="", basisfunctions=[])
   return BasisCenter(string(atomic_center_symbol(atom)), uconvert.(u"bohr", atom.position)/u"bohr", 
-                    atomic_number(atom), basis, basisfunctions)
+                    atomic_number(atom), is_dummy(atom) ? 0 : atomic_number(atom),
+                    basis, basisfunctions)
 end
 
 function Base.getindex(bc::BasisContraction, i::Int)
