@@ -85,7 +85,7 @@ using .Interfaces
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string
+export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
@@ -640,6 +640,29 @@ macro write_ints(file="FCIDUMP", tol=-1.0)
       error("No FCIDump found.")
     end
     write_fcidump($(esc(:EC)).fd, $file, $tol)
+  end
+end
+
+"""
+    @dummy(atoms)
+
+  Set atoms as dummy atoms in the system.
+  `atoms` is a list of atom indices or atomic symbols.
+
+  After running the macro, only the atoms in the list are set as dummy atoms in the system.
+
+  # Examples
+```julia
+@dummy [1,2,3]
+@dummy ["H1","H2"]
+@dummy [1,"H2",:H3]
+@dummy [] # unset all dummy atoms
+```
+"""
+macro dummy(atoms)
+  return quote
+    $(esc(:@tryECinit))
+    set_dummy!($(esc(:EC)).system, $(esc(atoms)))
   end
 end
 

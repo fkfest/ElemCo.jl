@@ -158,6 +158,38 @@ function unset_dummy!(ac::Atom)
 end
 
 """
+    set_dummy!(sys::FlexibleSystem, list)
+
+  Set dummy atoms in the system.
+  The list can contain atom indices or element symbols.
+  All atoms are unset first, i.e., only the atoms in the list are set as dummy.
+"""
+function set_dummy!(sys::FlexibleSystem, list)
+  for at in sys
+    unset_dummy!(at)
+  end
+  for a in list
+    if a isa Int64
+      if a < 1 || a > length(sys)
+        error("Atom index $a out of range!")
+      end
+      set_dummy!(sys[a])
+    else
+      found = false
+      for at in sys
+        if uppercase(String(atomic_center_symbol(at))) == uppercase(String(a))
+          set_dummy!(at)
+          found = true
+        end
+      end
+      if !found
+        error("Atom $a not found in the system!")
+      end
+    end
+  end 
+end
+
+"""
     parse_geometry(geometry::AbstractString, basis::AbstractString)
 
   Parse geometry `geometry` and return `FlexibleSystem` object.
@@ -388,11 +420,15 @@ end
 """
 function electron_distribution(ms::FlexibleSystem, minbas::AbstractString)
   eldist = Float64[]
-  for at in ms if !is_dummy(at)
+  for at in ms 
     elnam = element_SYMBOL(at)
     nnum = atomic_number(at)
-    eldist = vcat(eldist,electron_distribution4element(elnam,nshell4l_minbas(nnum,uppercase(minbas))))
-  end end
+    eldist4el = electron_distribution4element(elnam, nshell4l_minbas(nnum, uppercase(minbas)))
+    if is_dummy(at)
+      eldist4el .= 0.0
+    end 
+    eldist = vcat(eldist, eldist4el)
+  end
   return eldist
 end
 
