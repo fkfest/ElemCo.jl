@@ -89,7 +89,7 @@ end
   - from file [`WfOptions.orb`](@ref ECInfos.WfOptions) if not empty
   - error if all files are empty
 
-  Returns `::MOs`.
+  Returns `::SpinMatrix`. 
 """
 function load_orbitals(EC::ECInfo, orbsfile::String="")
   if !isempty(strip(orbsfile))

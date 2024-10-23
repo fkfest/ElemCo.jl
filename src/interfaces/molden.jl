@@ -107,9 +107,10 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     end
     #TODO use correct energies and occupations
     if is_restricted(orbs)
-      energies = zeros(size(orbs,2))
-      occupation = zeros(size(orbs,2))
-      printmos(f, orbs, order, energies, occupation)
+      cmo = orbs[1]
+      energies = zeros(size(cmo,2))
+      occupation = zeros(size(cmo,2))
+      printmos(f, cmo, order, energies, occupation)
     else
       energies = zeros(size(orbs[1],2))
       occupation = zeros(size(orbs[1],2))

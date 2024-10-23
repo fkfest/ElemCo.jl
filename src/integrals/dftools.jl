@@ -84,7 +84,7 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
 end
 
 """
-    generate_3idx_integrals(EC::ECInfo, cMO::MOs, fitbasis="mpfit")
+    generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit")
 
   Generate ``v_p^{qL}`` with
   ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``
@@ -113,7 +113,7 @@ function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit")
 end
 
 """
-    generate_DF_integrals(EC::ECInfo, cMO::MOs)
+    generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix)
 
   Generate ``v_p^{qL}`` and ``f_p^q`` with
   ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``.

@@ -173,7 +173,7 @@ function gen_fock(EC::ECInfo, spincase::Symbol,
 end
 
 """ 
-    gen_ufock(EC::ECInfo, CMOl::MOs, CMOr::MOs)
+    gen_ufock(EC::ECInfo, CMOl::SpinMatrix, CMOr::SpinMatrix)
 
   Calculate UHF fock matrix from FCIDump integrals and orbitals `cMOl`, `cMOr`
   with `cMOl[1]` and `cMOr[1]` - α-MO transformation coefficients and 
@@ -219,7 +219,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
 end
 
 """ 
-    gen_dffock(EC::ECInfo, cMO::MOs, bao, bfit)
+    gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
 
   Compute unrestricted DF-HF Fock matrices `SpinMatrix(Fα, Fβ)` in AO basis (integral direct).
 """
@@ -273,7 +273,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
 end
 
 """
-    gen_dffock(EC::ECInfo, cMO::MOs)
+    gen_dffock(EC::ECInfo, cMO::SpinMatrix)
 
   Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis
   (using precalculated Cholesky-decomposed integrals).
