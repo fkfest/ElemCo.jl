@@ -17,6 +17,7 @@
 
 * Improve parsing method names in macros. Now the parser is not confused by multiple dashes in the name and, e.g., `@cc svd-dc-ccsdt` is evaluated correctly.
 * SAD orbital guess for Li and Be has been fixed.
+* molden export functionality has been fixed.
 
 ## Version [v0.13.1] - 2024.07.11
 
