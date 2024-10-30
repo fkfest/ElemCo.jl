@@ -13,5 +13,5 @@ basis = Dict("ao"=>"cc-pVDZ",
              "mp2fit"=>"cc-pvdz-rifit")
 @set scf guess=:HCORE
 
-@dfhf
+@dfhf_positron
 
