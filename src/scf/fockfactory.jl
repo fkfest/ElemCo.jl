@@ -273,7 +273,28 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
 end
 
 """
-    gen_dffock(EC::ECInfo, cMO::SpinMatrix)
+    gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
+
+  Compute closed-shell DF-HF Fock matrix and the positron
+  Fock matrix in AO basis  (using precalculated Cholesky-
+  decomposed integrals and density matrices).
+"""
+function gen_dffock(EC::ECInfo, eden::Matrix{Float64}, pden::Matrix{Float64})
+  @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
+  μνL = load3idx(EC,"AAL")
+  @tensoropt begin 
+    L[L] := μνL[p,q,L] * eden[p,q]
+    P[L] := μνL[p,q,L] * pden[p,q]
+    J[p,q] := μνL[p,q,L] * L[L]
+    Jp[p,q] := μνL[p,q,L] * P[L] 
+    K[p,q] := μνL[p,r,L] * eden[r,s] * μνL[q,s,L]
+  end
+
+  return J, Jp, K
+end
+
+"""
+    gen_dffock(EC::ECInfo, cMO::MOs)
 
   Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis
   (using precalculated Cholesky-decomposed integrals).

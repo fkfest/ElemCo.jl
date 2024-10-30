@@ -57,6 +57,17 @@ function guess_gwh(EC::ECInfo)
 end
 
 """
+    guess_positron(EC::ECInfo)
+
+  Initialize positron MO coefficients as zeroes.
+"""
+function guess_positron(EC::ECInfo)
+  hsmall = load(EC, "h_AA", Val(2))
+  ϵ, cMO = zeros(size(hsmall,1)), zeros(size(hsmall))
+  return SpinMatrix(cMO)
+end
+
+"""
     guess_orb(EC::ECInfo, guess::Symbol)
 
   Calculate starting guess for MO coefficients.
@@ -66,17 +77,23 @@ end
 """
 function guess_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
-    return guess_hcore(EC)
+    emat = guess_hcore(EC)
   elseif guess == :SAD || guess == :sad
-    return guess_sad(EC)
+    emat = guess_sad(EC)
   elseif guess == :GWH || guess == :gwh
-    return guess_gwh(EC)
+    emat = guess_gwh(EC)
   elseif guess == :ORB || guess == :orb
     orbs = load_all(EC, EC.options.wf.orb, Val(2))
-    return SpinMatrix(orbs...)
+    emat = SpinMatrix(orbs...)
   else
     error("unknown guess type")
-    return SpinMatrix()
+    emat = SpinMatrix()
+  end
+  if EC.positron
+    posmat = guess_positron(EC)
+    return emat, posmat
+  else
+    return emat
   end
 end
 

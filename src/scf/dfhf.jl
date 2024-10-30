@@ -13,7 +13,7 @@ using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
-export dfhf, dfuhf
+export dfhf, dfhf_positron, dfuhf
 
 """
     dfhf(EC::ECInfo)
@@ -90,6 +90,100 @@ function dfhf(EC::ECInfo)
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
   return OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
+end
+
+"""
+    dfhf_positron(EC::ECInfo)
+
+  Perform closed-shell DF-HF calculation.
+  Returns the energy as the `HF` key in `OutDict`.
+"""
+function dfhf_positron(EC::ECInfo)
+  t1 = time_ns()
+  print_info("Positron DF-HF")
+  setup_space_system!(EC)
+  SP = EC.space
+  norb = length(SP[':'])
+  diis = Diis(EC)
+  thren = EC.options.scf.thren
+  if thren < 0.0
+    thren = sqrt(EC.options.scf.thr)*0.1
+  end
+  direct = EC.options.scf.direct
+  if direct
+    error("Exiting function dfhf_positron: 'direct' option is enabled with positron.")
+  end
+  guess = EC.options.scf.guess
+  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
+  if direct
+    bao = generate_basis(EC, "ao")
+    bfit = generate_basis(EC, "jkfit")
+  end
+  t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
+  cMO, cPO = guess_orb(EC, guess)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
+  @assert is_restricted(cMO) "DF-HF only implemented for closed-shell"
+  cMO = cMO.α
+  cPO = cPO.α
+  ϵ = zeros(norb)
+  ε_pos = zeros(norb)
+  hsmall = load(EC, "h_AA", Val(2))
+  hsmall_pos = load(EC, "h_AA_positron", Val(2))
+  sao = load(EC, "S_AA", Val(2))
+  # display(sao)
+  EHF = 0.0
+  previousEHF = 0.0
+  println("Iter     Energy      DE          Res         Time")
+  flush_output()
+  t0 = time_ns()
+  for it=1:EC.options.scf.maxit
+    eden = 2.0 * gen_density_matrix(EC, cMO, cMO, SP['o'])
+    pden = gen_density_matrix(EC, cPO, cPO, [1])
+    if direct
+      fock = gen_dffock(EC, cMO, bao, bfit)
+    else
+      J, Jp, K = gen_dffock(EC, eden, pden)
+    end
+    fock = hsmall + 0.5 * (2 * J - K) - Jp
+    fock_pos = hsmall_pos - J
+    t1 = print_time(EC, t1, "generate DF-Fock matrices for e and e+", 2)
+    @tensoropt E1body = eden[p,q] * hsmall[p,q]
+    @tensoropt E1body += pden[p,q] * hsmall_pos[p,q]
+    @tensoropt Ecoul = 0.5 * J[p,q] * eden[p,q]
+    @tensoropt Ecoul -= pden[p,q] * J[p,q]
+    @tensoropt Eex = -0.25 * eden[p,q] * K[p,q]
+    EHF = E1body + Ecoul + Eex + Enuc
+    ΔE = EHF - previousEHF
+    previousEHF = EHF
+    Δfock = sao*eden'*fock - fock*eden'*sao
+    Δfock_pos = sao*pden'*fock_pos - fock_pos*pden'*sao
+    var = sum(abs2,Δfock) + sum(abs2,Δfock_pos)
+    output_iteration(it, var, time_ns() - t0, EHF, ΔE)
+    if abs(ΔE) < thren && var < EC.options.scf.thr
+      break
+    end
+    t1 = print_time(EC, t1, "HF residual", 2)
+    perform!(diis, [fock], [Δfock])
+    #perform!(diis, [fock_pos], [Δfock_pos])
+    t1 = print_time(EC, t1, "DIIS", 2)
+    # use Hermitian to ensure real eigenvalues and normalized orbitals
+    ϵ_new, cMO_new = eigen(Hermitian(fock),Hermitian(sao))
+    ε_new_pos, cPO_new = eigen(Hermitian(fock_pos),Hermitian(sao))
+    ϵ .= ϵ_new
+    ε_pos .= ε_new_pos
+    cMO .= cMO_new
+    cPO .= cPO_new
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
+    # display(ϵ)
+  end
+  normalize_phase!(cMO)
+  normalize_phase!(cPO)
+  println("DF-HF energy: ", EHF)
+  draw_endline()
+  delete_temporary_files!(EC)
+  save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
+  save!(EC, EC.options.wf.orb_pos, cPO, description="DFHF positron orbitals")
+  return OutDict("HF"=>(EHF, "closed-shell DF-HF+ energy"), "E"=>(EHF, "closed-shell DF-HF+ energy"))
 end
 
 """

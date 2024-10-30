@@ -87,7 +87,7 @@ export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
-export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
 # from Utils
 export last_energy
@@ -438,6 +438,19 @@ macro dfhf()
   return quote
     $(esc(:@tryECinit))
     dfhf($(esc(:EC)))
+  end
+end
+
+""" 
+    @dfhf_positron()
+
+  Run DF-HF calculation with positron. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+"""
+macro dfhf_positron()
+  return quote
+    $(esc(:@tryECinit))
+    $(esc(:EC)).positron=true
+    dfhf_positron($(esc(:EC)))
   end
 end
 

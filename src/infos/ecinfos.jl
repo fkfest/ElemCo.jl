@@ -40,6 +40,8 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   system::FlexibleSystem = create_empty_system()
   """ fcidump. """
   fd::TFDump = TFDump()
+  """ positron """
+  positron::Bool = false
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -144,6 +146,9 @@ function setup_space_system!(EC::ECInfo)
   orbsym = ones(Int,norb)
   println("Number of orbitals: ", norb)
   println("Number of electrons: ", nelec)
+  if EC.positron
+    println("Positron: ", EC.positron)
+  end
   println("Spin: ", ms2)
   setup_space!(EC, norb, nelec, ms2, orbsym)
 end
