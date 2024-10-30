@@ -163,8 +163,7 @@ function dfhf_positron(EC::ECInfo)
       break
     end
     t1 = print_time(EC, t1, "HF residual", 2)
-    perform!(diis, [fock], [Δfock])
-    #perform!(diis, [fock_pos], [Δfock_pos])
+    perform!(diis, [fock, fock_pos], [Δfock, Δfock_pos])
     t1 = print_time(EC, t1, "DIIS", 2)
     # use Hermitian to ensure real eigenvalues and normalized orbitals
     ϵ_new, cMO_new = eigen(Hermitian(fock),Hermitian(sao))
