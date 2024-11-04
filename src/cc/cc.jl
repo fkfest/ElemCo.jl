@@ -1071,6 +1071,9 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
 
     # println("diff_AX_YX", norm(AX - YX))
 
+    # println("BU: ", BU)
+    # println("BU1: ", BU1)
+
 
     if q == 1
       @tensoropt begin
@@ -1086,11 +1089,11 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
         q1TC[a,b,i,j] := -CU1[i,j,k,l] * T2[a,b,k,l]
         q1TD[a,b,i,j] := - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
       end
-
       # display(q1TA)
       # display(q1TB)
       # display(q1TC)
-      # display(q1TD)      
+      # display(q1TD)
+      # println("diff_q1TB_q1TC*2", norm(q1TB + 2.0 .* q1TC))
       T1 = zeros(0,0)
       R1, qV = calc_cc_resid(EC, T1, q1T; linearized=true) # using an existing function
       qV .-= load4idx(EC,"d_vvoo")
@@ -1130,7 +1133,18 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     q2DR = calc_R_from_U_F(We, WX, q2DF+q3DF, q)
 
     # println("test symmetry")
-    # display(qAR' - q1DR .*2.0)
+    # display(qBF)
+    # display(qBR)
+    # display(qBR./qBF)
+    # display(qCF)
+    # display(qCR)
+    # display(qCR./qCF)
+
+    q1DR .+= q1DR'
+    q1DR .*= 0.5
+
+    q2DR .+= q2DR'
+    q2DR .*= 0.5
 
     qCR = reshape(qCR, nocc, nocc, nocc, nocc)
     q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
@@ -1154,7 +1168,7 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
       qAG[a,b,i,j] += qV[c,b,i,j] * AU1[c,a] 
       qAG_2[a,b,i,j] := qV[c,b,i,j] * AU1[c,a] 
       qBG[a,b,i,j] :=  (qBR[l,i] + qBR[i,l]) * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k]
-      qCG[a,b,i,j] := -((qCR[m,n,i,j] + qCR[i,j,m,n]) * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j])
+      qCG[a,b,i,j] := - 0.5 * ((qCR[m,n,i,j] + qCR[i,j,m,n]) * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j])
 
       qDG[a,b,i,j] := - 0.5 * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]))
       qDG[a,b,i,j] += 0.5*(q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j]))
@@ -1182,19 +1196,15 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
                       + qV[c,b,i,k] * W1[a,j,c,k])
     end
 
-    qAG .+= permutedims(qAG, (2,1,4,3))
-    qAG_1 .+= permutedims(qAG_1, (2,1,4,3))
-    qAG_2 .+= permutedims(qAG_2, (2,1,4,3))
-    qBG .+= permutedims(qBG, (2,1,4,3))
-    qCG .+= permutedims(qCG, (2,1,4,3))
-    qDG .+= permutedims(qDG, (2,1,4,3))
-    qDG_ .+= permutedims(qDG_, (2,1,4,3))
-    qDG_1 .+= permutedims(qDG_1, (2,1,4,3))
-    qDG_2 .+= permutedims(qDG_2, (2,1,4,3))
+
+
+    # println("A ", norm(qAG), "    B ", norm(qBG), "    C ", norm(qCG), "    D ", norm(qDG))
     # display(qAG)
     # display(qBG)
     # display(qCG)
     # display(qDG)
+    # println("diff_qBG_2qCG", norm(qBG + 2.0.*qCG))
+    # println("diff_qAG_qDG", norm(qAG + qDG))
     qG .+= permutedims(qG, (2,1,4,3))
     G2 += qG
   end
