@@ -1055,6 +1055,7 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
   Ye, YX = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
   We, WX = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
   G2 = zeros(nvirt, nvirt, nocc, nocc)
+  E_qvccd = 0.0
   for q in [1.0, 2.0]
     AU1 = AX * Diagonal(Ae .^ (-q/2)) * AX' # AU1 = AU ^ (-q/2)
     BU1 = BX * Diagonal(Be .^ (-q/2)) * BX' # BU1 = BU ^ (-q/2)
@@ -1062,27 +1063,21 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
     W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
 
-
-    if q == 1
-      @tensoropt begin
-        YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
-                     0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,j] * T2[c,b,i,k]
-        YWT1[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j])
-        YWT2[a,b,i,j] := 0.5*W1[c,k,a,i] * T2[b,c,k,j]
-        YWT3[a,b,i,j] :=  W1[c,k,a,j] * T2[c,b,i,k]
-        q1T[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
-                      CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
-        q1TA[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j]
-        q1TB[a,b,i,j] := BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k]
-        q1TC[a,b,i,j] := -CU1[i,j,k,l] * T2[a,b,k,l]
-        q1TD[a,b,i,j] := - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
-      end
+    @tensoropt begin
+      YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
+                    0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,j] * T2[c,b,i,k]
+      qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
+                    CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
+    end
+    if q == 1.0
       T1_0 = zeros(0,0)
-      R1, qV = calc_cc_resid(EC, T1_0, q1T; linearized=true) 
+      R1, qV = calc_cc_resid(EC, T1_0, qT; linearized=true) 
       qV .-= load4idx(EC,"d_vvoo")
     else
       qV = load4idx(EC,"d_vvoo")
     end
+    qV .= 2.0 * qV .- permutedims(qV, (2,1,3,4))
+    E_qvccd += sum(qV .* qT) * q
 
     @tensoropt begin
       qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
@@ -1102,6 +1097,12 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
     q2DR = calc_R_from_U_F(We, WX, q2DF, q)
 
+    qAR .+= qAR'
+    qAR .*= 0.5
+    qBR .+= qBR'
+    qBR .*= 0.5
+    qCR .+= qCR'
+    qCR .*= 0.5
     q1DR .+= q1DR'
     q1DR .*= 0.5
     q2DR .+= q2DR'
@@ -1111,9 +1112,9 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
     q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
 
-    @tensoropt qG[a,b,i,j] := (qAR[d,a] + qAR[a,d]) * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
-                              (qBR[l,i] + qBR[i,l]) * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] +
-                              (-0.5) * ((qCR[m,n,i,j] + qCR[i,j,m,n]) * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) +
+    @tensoropt qG[a,b,i,j] := 2.0 * qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
+                              2.0 * qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] +
+                              (-0.5) * (2.0 * qCR[m,n,i,j] * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) +
                               (-0.5) * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
                               - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
                               + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] 
@@ -1124,6 +1125,8 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     qG .+= permutedims(qG, (2,1,4,3))
     G2 += qG
   end
+  println("QV-CCD/DCD correlation energy: ", E_qvccd)
+  G2 .= G2 .* 2.0/3.0 .+ permutedims(G2, (2,1,3,4)) .* 1.0/3.0
   return T1, G2
 end
 
