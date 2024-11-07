@@ -9,7 +9,7 @@ using ..ElemCo.Outputs
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
-export substr, reshape_buf, create_buf
+export substr, reshape_buf, create_buf, neuralyze
 export amdmkl
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
@@ -255,6 +255,56 @@ julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
 function reshape_buf(buf::Vector{T}, dims...; offset=0) where {T}
   return reshape(view(buf, 1+offset:prod(dims)+offset), dims)
 end
+
+"""
+    neuralyze(tensor::AbstractArray)
+
+  Wipe the memory about origin of `tensor`.
+
+  `tensor` is a (contiguous!) array that is a (possibly reshaped) view of a larger array.
+  Return the same tensor pointing to the same memory, 
+  but without the information about the origin.
+  To be used together with `reshape_buf` to trick `Base.mightalias`.
+
+  !!! note "Note" If you use this function for the tensor reshaped without offset, Julia can still see it 
+  as an alias of the original array.
+  
+  !!! warning "Warning" Note that this function is unsafe and should be used with caution!
+  If too much memory is wiped, Julia might garbage-collect the
+  original array and the tensor will point to invalid memory.
+
+  !!! tip "Tip" One can use GC.@preserve to prevent the garbage collection of the original array.
+
+# Example
+```julia  
+julia> buf = Vector{Float64}(undef, 100000)
+julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor view
+julia> B = reshape_buf(buf, 10, 10, 10, offset=2000) # 10x10x10 tensor starting at 2001
+julia> Bn = neuralyze(B) # tensor without origin
+julia> rand!(B)
+julia> C = reshape_buf(buf, 10,20, offset=3000) # 10x20 tensor starting at 3001
+julia> Cn = neuralyze(C) # tensor without origin
+julia> rand!(C)
+julia> @tensor A[i,j,k] = Bn[i,j,l] * Cn[l,k]
+```
+"""
+function neuralyze(tensor::AbstractArray)
+  @assert iscontiguous_tensor(tensor) "Tensor must be contiguous!"
+  return unsafe_wrap(Array, pointer(tensor), size(tensor), own=false)
+end
+
+"""
+    iscontiguous_tensor(tensor::AbstractArray)
+
+  Check if `tensor` is contiguous.
+
+  Return `true` if `tensor` is a `Vector` or a `SubArray` that is contiguous.
+"""
+function iscontiguous_tensor(tensor::AbstractArray)
+  vtensor = vec(tensor)
+  return typeof(vtensor) <: Array || ( typeof(vtensor) <: SubArray && Base.iscontiguous(vtensor) )
+end
+
 
 """
     argmaxN(vals, N; by::Function=identity)
