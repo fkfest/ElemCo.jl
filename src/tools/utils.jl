@@ -266,14 +266,17 @@ end
   but without the information about the origin.
   To be used together with `reshape_buf` to trick `Base.mightalias`.
 
-  !!! note "Note" If you use this function for the tensor reshaped without offset, Julia can still see it 
-  as an alias of the original array.
+!!! note "Note" 
+    If you use this function for the tensor reshaped without offset, Julia can still see it 
+    as an alias of the original array.
   
-  !!! warning "Warning" Note that this function is unsafe and should be used with caution!
-  If too much memory is wiped, Julia might garbage-collect the
-  original array and the tensor will point to invalid memory.
+!!! warning "Warning" 
+    Note that this function is unsafe and should be used with caution!
+    If too much memory is wiped, Julia might garbage-collect the
+    original array and the tensor will point to invalid memory.
 
-  !!! tip "Tip" One can use GC.@preserve to prevent the garbage collection of the original array.
+!!! tip "Tip" 
+    One can use GC.@preserve to prevent the garbage collection of the original array.
 
 # Example
 ```julia  
