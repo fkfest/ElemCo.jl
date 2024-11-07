@@ -12,6 +12,7 @@
 ### Added
 
 * a macro `@dummy` has been added to set some atoms to dummy atoms. 
+* a `neuralize` function to trick `Base.mightalias` in `TensorOperations` for reshaped-buffer arrays.
 
 ### Fixed
 
