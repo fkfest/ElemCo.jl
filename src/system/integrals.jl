@@ -5,6 +5,7 @@ include("libcint5.jl")
 """
 module Integrals
 using ..ElemCo.Utils
+using ..ElemCo.Buffers
 using ..ElemCo.BasisSets
 using ..ElemCo.Libcint5
 
