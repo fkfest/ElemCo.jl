@@ -7,6 +7,7 @@ module ElemCo
 
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
+include("tools/buffers.jl")
 include("tools/outputs.jl")
 include("tools/utils.jl")
 include("tools/constants.jl")
@@ -58,6 +59,7 @@ using Dates
 #BLAS.set_num_threads(1)
 using TensorOperations
 using PrecompileTools
+using .Buffers
 using .Utils
 using .ECInfos
 using .QMTensors
