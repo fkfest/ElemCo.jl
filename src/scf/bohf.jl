@@ -18,7 +18,7 @@ export bohf, bouhf
 export guess_boorb
 
 """
-    left_from_right(cMOr::MOs)
+    left_from_right(cMOr::SpinMatrix)
 
   Calculate left BO-MO coefficients from right BO-MO coefficients.
 """
@@ -116,11 +116,11 @@ function guess_bo_gwh(EC::ECInfo, uhf)
 end
 
 """
-    heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+    heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 
   Heat up BO-MO coefficients to `temperature` according to Fermi-Dirac.
   
-  Returns new BO-MO coefficients `cMOl::MOs, cMOr::MOs`
+  Returns new BO-MO coefficients `cMOl::SpinMatrix, cMOr::SpinMatrix`
 """
 function heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
   if temperature < 1.e-10
@@ -135,7 +135,7 @@ function heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 end
 
 """
-    closed_shell_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+    closed_shell_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 
   Heat up closed-shell BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """
@@ -154,7 +154,7 @@ function closed_shell_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, tem
 end
 
 """
-    unrestricted_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+    unrestricted_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 
   Heat up unrestricted BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """

@@ -7,12 +7,21 @@
 ### Changed
 
 * faster closed-shell and unrestricted CCSDT and DC-CCSDT implementations.
+* ANO-RCC-MB basis is now used as the minimal AO basis for the SAD orbital starting guess.
+* memory buffers are now handled by functions and types in `Buffers` module.
 
 ### Added
+
+* a macro `@dummy` has been added to set some atoms to dummy atoms. 
+* a `neuralize` function to trick `Base.mightalias` in `TensorOperations` for reshaped-buffer arrays.
+* `Buffer` and `ThreadsBuffer` types and `alloc!`, `drop!`, `reset!`, `reshape_buf!` functions.
 
 ### Fixed
 
 * Improve parsing method names in macros. Now the parser is not confused by multiple dashes in the name and, e.g., `@cc svd-dc-ccsdt` is evaluated correctly.
+* SAD orbital guess for Li and Be has been fixed.
+* molden export functionality has been fixed.
+* thread-safe handling of buffers using ThreadsBuffer.
 
 ## Version [v0.13.1] - 2024.07.11
 

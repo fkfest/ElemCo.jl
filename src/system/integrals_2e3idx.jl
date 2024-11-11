@@ -109,12 +109,12 @@ function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::Ba
   ao_offset = cumsum(vcat(0, nao4sh)) 
   fit_offset = cumsum(vcat(0, nfit4sh))
 
-  buf_arrays = [zeros(Cdouble, nao_max^2*nfit_max) for _ = 1:Threads.nthreads()]
+  tbufs = ThreadsBuffer{Cdouble}(nao_max^2*nfit_max)
 
   @sync for (P, Pb) in enumerate(shell_range(bs,2))
     Threads.@spawn begin
       @inbounds begin
-        buf = buf_arrays[Threads.threadid()]
+        buf = neuralyze(reshape_buf!(tbufs, length(tbufs)))
         nP = nfit4sh[P]
         Pblk = (1:nP) .+ fit_offset[P]
         for (j, jb) in enumerate(shell_range(bs,1))
@@ -128,12 +128,13 @@ function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::Ba
             callback(buf, ib, jb, Pb, bs)
             
             # save elements
-            vbuf = reshape_buf(buf, ni, nj, nP)
+            vbuf = reshape_buf!(tbufs, ni, nj, nP)
             out[iblk, jblk, Pblk] = vbuf
             v_jiP = @view out[jblk, iblk, Pblk]
             permutedims!(v_jiP, vbuf, (2,1,3))
           end
         end
+        reset!(tbufs)
       end #inbounds
     end #spwan
   end #sync
