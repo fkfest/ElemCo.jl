@@ -71,6 +71,7 @@ using ..ElemCo.DecompTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
+using ..ElemCo.MIO
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy 
 export calc_cc, calc_pertT
@@ -1031,7 +1032,7 @@ end
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
-function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
+function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   EC.options.cc.calc_d_vvoo = true
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
@@ -1043,9 +1044,21 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     CU[i,j,k,l] := I_ij[i,k] * I_ij[j,l] + T2[a,b,k,l] * T2[a,b,i,j]
     Y[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + 4.0 * T2[a,c,i,k] * T2[b,c,j,k] - 2.0 * T2[c,a,i,k] * T2[b,c,j,k] - 2.0 * T2[a,c,i,k] * T2[c,b,j,k] + T2[c,a,i,k] * T2[c,b,j,k]
     W[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + T2[c,a,i,k] * T2[c,b,j,k]
-
   end
 
+  thr = 1e-8
+  AU[abs.(AU) .< thr] .= 0.0 
+  BU[abs.(BU)  .< thr] .= 0.0
+  CU[abs.(CU)  .< thr] .= 0.0
+  Y[abs.(Y)  .< thr] .= 0.0
+  W[abs.(W)  .< thr] .= 0.0
+  
+  AU .= 0.5 .* (AU .+ AU')
+  BU .= 0.5 .* (BU .+ BU')
+  CU .= 0.5 .* (CU .+ permutedims(CU, (3,4,1,2)))
+  Y .= 0.5 .* (Y .+ permutedims(Y, (3,4,1,2)))
+  W .= 0.5 .* (W .+ permutedims(W, (3,4,1,2)))
+ 
   # a function that can calculate the eigenvectors & eigenvalues of a matrix
   # CU[i,j,k,l] -> CU[ij,kl], Y[a,i,b,j] -> Y[ai,bj], W[a,i,b,j] -> W[ai,bj]
   # corresponding to \pre{_C}U^{ij}_{kl}, Y^{aj}_{bi}, W^{aj}_{bi}
@@ -1125,7 +1138,10 @@ function calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
     qG .+= permutedims(qG, (2,1,4,3))
     G2 += qG
   end
-  println("QV-CCD/DCD correlation energy: ", E_qvccd)
+  fname = EC.options.cc.fname
+  E_qvccds = mioload(fname)
+  push!(E_qvccds, E_qvccd+E_qvccds[1])
+  miosave(fname, E_qvccds)
   G2 .= G2 .* 2.0/3.0 .+ permutedims(G2, (2,1,3,4)) .* 1.0/3.0
   return T1, G2
 end
@@ -2273,7 +2289,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if length(Amps3) == 0 && !do_sing
-      Res = calc_qvcc_resid(EC, Amps...; dc) #TODO fix later
+      Res = calc_qvcc_resid(EC, it, Amps...; dc) #TODO fix later
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
     end

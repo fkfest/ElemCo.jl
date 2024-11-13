@@ -195,6 +195,8 @@ Base.@kwdef mutable struct CcOptions
   dcsd_osfac::Float64 = 1.05
   """`⟨0.15⟩` Factor for open-shell component in SCS-DCSD. """
   dcsd_ofac::Float64 = 0.15
+  """ temporary files for QVCCD calculations """
+  fname::String = "/Users/equation/QVCCD-run/test"
 end
 
 """ 

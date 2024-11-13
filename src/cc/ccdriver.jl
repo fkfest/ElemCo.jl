@@ -18,6 +18,7 @@ using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
+using ..ElemCo.MIO
 
 export ccdriver, dfccdriver
 
@@ -349,6 +350,10 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   end
   t1 = time_ns()
   EHF = energies["HF"]
+  E_qvccds = Float64[]
+  push!(E_qvccds, EHF)
+  println("EHF saved: ", EHF)
+  miosave(EC.options.cc.fname, E_qvccds)
   main_name = method_name(ecmethod)
   ECC = calc_cc(EC, ECMethod(main_name))
   if has_prefix(ecmethod, "2D")
