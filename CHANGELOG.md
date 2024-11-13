@@ -9,6 +9,7 @@
 * faster closed-shell and unrestricted CCSDT and DC-CCSDT implementations.
 * ANO-RCC-MB basis is now used as the minimal AO basis for the SAD orbital starting guess.
 * memory buffers are now handled by functions and types in `Buffers` module.
+* the precompilation is disabled for development versions.
 
 ### Added
 
