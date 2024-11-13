@@ -12,7 +12,6 @@ jobs:
     permissions:
       actions: write
       contents: write
-      pull-requests: read
       statuses: write
     runs-on: ubuntu-latest
     strategy:
@@ -32,6 +31,8 @@ jobs:
         #run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
       #- name: Build and deploy
       - uses: julia-actions/julia-buildpkg@latest
+      - name: Switch off precompilation
+        run: cp profile/LocalPreferences.toml .
       - uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # If authenticating with GitHub Actions token
