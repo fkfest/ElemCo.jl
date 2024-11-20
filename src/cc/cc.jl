@@ -71,7 +71,6 @@ using ..ElemCo.DecompTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
-using ..ElemCo.MIO
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy 
 export calc_cc, calc_pertT
@@ -1138,12 +1137,8 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     qG .+= permutedims(qG, (2,1,4,3))
     G2 += qG
   end
-  fname = EC.options.cc.fname
-  E_qvccds = mioload(fname)
-  push!(E_qvccds, E_qvccd+E_qvccds[1])
-  miosave(fname, E_qvccds)
   G2 .= G2 .* 2.0/3.0 .+ permutedims(G2, (2,1,3,4)) .* 1.0/3.0
-  return T1, G2
+  return (T1,G2), E_qvccd
 end
 
 
@@ -2265,6 +2260,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
+  qv = has_prefix(method, "QV")
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
@@ -2288,8 +2284,10 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    if length(Amps3) == 0 && !do_sing
-      Res = calc_qvcc_resid(EC, it, Amps...; dc) #TODO fix later
+    if length(Amps3) == 0 && !do_sing && qv
+      # println("qvccd used")
+      Res, E = calc_qvcc_resid(EC, it, Amps...; dc) #TODO fix later
+      Eh = OutDict("E"=>E)
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
     end
@@ -2315,7 +2313,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       active = oss_active_orbitals(EC)
       T2αβ[active.ua,active.tb,active.ta,active.ub] = -1.0
     end
-    Eh = calc_hylleraas(EC, Amps1..., Amps2..., Res1..., Res2...)
+    if qv == false
+      Eh = calc_hylleraas(EC, Amps1..., Amps2..., Res1..., Res2...)
+    end
     update_doubles!(EC, Amps2..., Res2...)
     if length(Amps3) > 0 
       NormT3 = calc_triples_norm(Amps3...)
@@ -2360,6 +2360,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
     end
     output_iteration(it, NormR, time_ns() - t0, NormT, Eh["E"], ΔE) 
     if NormR < EC.options.cc.thr && abs(ΔE) < thren
+      converged = true
+      break
+    elseif NormR < EC.options.cc.thr && qv
       converged = true
       break
     end
