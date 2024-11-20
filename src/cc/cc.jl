@@ -996,12 +996,21 @@ end
 """
 function calc_E_Coe(eigenvalue_vector, q, threshold=1e-10)
   coefficient_matrix = zeros(length(eigenvalue_vector), length(eigenvalue_vector))
+  if q == 1
+    evq = eigenvalue_vector .^ (-1/2)
+  else
+    evq = 1.0 ./ eigenvalue_vector
+  end
   for i in eachindex(eigenvalue_vector)
     for j in eachindex(eigenvalue_vector)
       if abs(eigenvalue_vector[j] - eigenvalue_vector[i]) > threshold
-        coefficient_matrix[i,j] = (eigenvalue_vector[i]^(-q/2.0) - eigenvalue_vector[j]^(-q/2.0)) / (eigenvalue_vector[i] - eigenvalue_vector[j])
+        if q == 1.0
+          coefficient_matrix[i,j] = (evq[i] - evq[j]) / (eigenvalue_vector[i] - eigenvalue_vector[j])
+        else
+          coefficient_matrix[i,j] = -1.0/ (eigenvalue_vector[i] * eigenvalue_vector[j])
+        end
       elseif j != i
-        coefficient_matrix[i,j] = (-q/2) * eigenvalue_vector[i]^(-q/2-1)
+        coefficient_matrix[i,j] = (-q/2) *  evq[i] *  1 ./(eigenvalue_vector[i])
       else
         coefficient_matrix[i,j] = 0
       end
@@ -1032,7 +1041,6 @@ end
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
 function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
-  EC.options.cc.calc_d_vvoo = true
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   I_ab = Matrix(I,nvirt,nvirt)
@@ -1045,13 +1053,6 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     W[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + T2[c,a,i,k] * T2[c,b,j,k]
   end
 
-  thr = 1e-8
-  AU[abs.(AU) .< thr] .= 0.0 
-  BU[abs.(BU)  .< thr] .= 0.0
-  CU[abs.(CU)  .< thr] .= 0.0
-  Y[abs.(Y)  .< thr] .= 0.0
-  W[abs.(W)  .< thr] .= 0.0
-  
   AU .= 0.5 .* (AU .+ AU')
   BU .= 0.5 .* (BU .+ BU')
   CU .= 0.5 .* (CU .+ permutedims(CU, (3,4,1,2)))
@@ -1084,9 +1085,9 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     if q == 1.0
       T1_0 = zeros(0,0)
       R1, qV = calc_cc_resid(EC, T1_0, qT; linearized=true) 
-      qV .-= load4idx(EC,"d_vvoo")
+      qV .-= ints2(EC, "vvoo")
     else
-      qV = load4idx(EC,"d_vvoo")
+      qV = ints2(EC, "vvoo")
     end
     qV .= 2.0 * qV .- permutedims(qV, (2,1,3,4))
     E_qvccd += sum(qV .* qT) * q
@@ -1109,16 +1110,11 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
     q2DR = calc_R_from_U_F(We, WX, q2DF, q)
 
-    qAR .+= qAR'
-    qAR .*= 0.5
-    qBR .+= qBR'
-    qBR .*= 0.5
-    qCR .+= qCR'
-    qCR .*= 0.5
-    q1DR .+= q1DR'
-    q1DR .*= 0.5
-    q2DR .+= q2DR'
-    q2DR .*= 0.5
+    qAR .= 0.5 .* (qAR .+ qAR')
+    qBR .= 0.5 .* (qBR .+ qBR')
+    qCR .= 0.5 .* (qCR .+ qCR')
+    q1DR .= 0.5 .* (q1DR .+ q1DR')
+    q2DR .= 0.5 .* (q2DR .+ q2DR')
 
     qCR = reshape(qCR, nocc, nocc, nocc, nocc)
     q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
@@ -2285,8 +2281,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if length(Amps3) == 0 && !do_sing && qv
-      # println("qvccd used")
-      Res, E = calc_qvcc_resid(EC, it, Amps...; dc) #TODO fix later
+      Res, E = calc_qvcc_resid(EC, it, Amps...; dc)
       Eh = OutDict("E"=>E)
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
@@ -2313,7 +2308,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       active = oss_active_orbitals(EC)
       T2αβ[active.ua,active.tb,active.ta,active.ub] = -1.0
     end
-    if qv == false
+    if !qv
       Eh = calc_hylleraas(EC, Amps1..., Amps2..., Res1..., Res2...)
     end
     update_doubles!(EC, Amps2..., Res2...)
@@ -2358,11 +2353,11 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       NormR += NormR3
       NormT += NormT3
     end
+    if qv
+      ΔE = 0.0
+    end
     output_iteration(it, NormR, time_ns() - t0, NormT, Eh["E"], ΔE) 
     if NormR < EC.options.cc.thr && abs(ΔE) < thren
-      converged = true
-      break
-    elseif NormR < EC.options.cc.thr && qv
       converged = true
       break
     end
