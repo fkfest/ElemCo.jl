@@ -990,11 +990,163 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
 end
 
 """
-    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+    calc_E_Coe(eigenvalue_vector, q)
+
+  Calculate the coefficient matrix in QV-CCD/DCD residual calculation.
+"""
+function calc_E_Coe(eigenvalue_vector, q, threshold=1e-10)
+  coefficient_matrix = zeros(length(eigenvalue_vector), length(eigenvalue_vector))
+  for i in eachindex(eigenvalue_vector)
+    if eigenvalue_vector[i] < threshold
+      println("WARNING: SMALL EIGENVALUE DETECTED IN calc_E_Coe() ", eigenvalue_vector[i])
+    end
+  end
+  if q == 1
+    evq = sqrt.(eigenvalue_vector)
+  elseif q == 2
+    evq = eigenvalue_vector
+  else
+    error("q must be 1 or 2")
+  end
+  for i in eachindex(eigenvalue_vector)
+    for j in eachindex(eigenvalue_vector)
+      if i == j
+        coefficient_matrix[i,j] = 0      
+      elseif q == 1
+        coefficient_matrix[i,j] = -1/(evq[i]*evq[j]*(evq[i] + evq[j]))
+      else
+        coefficient_matrix[i,j] = -1/(evq[i] * evq[j])
+      end
+    end
+  end
+  return coefficient_matrix
+end
+
+"""
+    calc_R_from_U_F(e, X, F, q)
+
+  Calculate intermediate R with F and eigenvalue e, eigenvectors X of corresponding U in QV-CCD/DCD.
+"""
+function calc_R_from_U_F(e, X, F, q)
+  E = calc_E_Coe(e, q)
+  R = X' * F * X
+  z = diag(R)
+  R .= R .* E
+  z .= e.^(-q/2.0-1.0) .* z .* (-q/2.0)
+  R .+= Diagonal(z)
+  R .= X * R * X'
+  return R
+end
+
+"""
+    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
+
+  Calculate QV-CCD or QV-DCD closed-shell residual.
+"""
+function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  I_ab = Matrix(I,nvirt,nvirt)
+  I_ij = Matrix(I,nocc,nocc)
+  @tensoropt begin
+    AU[b,a] := I_ab[b,a] + 2.0 * T2[a,c,i,j] * T2[b,c,i,j] - T2[a,c,i,j] * T2[c,b,i,j]
+    BU[i,j] := I_ij[i,j] +  2.0 * T2[a,b,i,k] * T2[a,b,j,k] - T2[a,b,i,k] * T2[a,b,k,j]
+    CU[i,j,k,l] := I_ij[i,k] * I_ij[j,l] + T2[a,b,k,l] * T2[a,b,i,j]
+    Y[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + 4.0 * T2[a,c,i,k] * T2[b,c,j,k] - 2.0 * T2[c,a,i,k] * T2[b,c,j,k] - 2.0 * T2[a,c,i,k] * T2[c,b,j,k] + T2[c,a,i,k] * T2[c,b,j,k]
+    W[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + T2[c,a,i,k] * T2[c,b,j,k]
+  end
+
+  AU .= 0.5 .* (AU .+ AU')
+  BU .= 0.5 .* (BU .+ BU')
+  CU .= 0.5 .* (CU .+ permutedims(CU, (3,4,1,2)))
+  Y .= 0.5 .* (Y .+ permutedims(Y, (3,4,1,2)))
+  W .= 0.5 .* (W .+ permutedims(W, (3,4,1,2)))
+ 
+  # a function that can calculate the eigenvectors & eigenvalues of a matrix
+  # CU[i,j,k,l] -> CU[ij,kl], Y[a,i,b,j] -> Y[ai,bj], W[a,i,b,j] -> W[ai,bj]
+  # corresponding to \pre{_C}U^{ij}_{kl}, Y^{aj}_{bi}, W^{aj}_{bi}
+  Ae, AX = eigen(AU)
+  Be, BX = eigen(BU)
+  Ce, CX = eigen(reshape(CU, nocc^2, nocc^2))
+  Ye, YX = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
+  We, WX = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
+  G2 = zeros(nvirt, nvirt, nocc, nocc)
+  E_qvccd = 0.0
+  for q in [1.0, 2.0]
+    AU1 = AX * Diagonal(Ae .^ (-q/2)) * AX' # AU1 = AU ^ (-q/2)
+    BU1 = BX * Diagonal(Be .^ (-q/2)) * BX' # BU1 = BU ^ (-q/2)
+    CU1 = reshape(CX * Diagonal(Ce .^ (-q/2)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
+    Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
+    W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
+
+    @tensoropt begin
+      YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
+                    0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,j] * T2[c,b,i,k]
+      qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
+                    CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
+    end
+    if q == 1.0
+      T1_0 = zeros(0,0)
+      R1, qV = calc_cc_resid(EC, T1_0, qT; linearized=true) 
+      qV .-= ints2(EC, "vvoo")
+    else
+      qV = ints2(EC, "vvoo")
+    end
+    qV .= 2.0 * qV .- permutedims(qV, (2,1,3,4))
+    E_qvccd += sum(qV .* qT) * q
+
+    @tensoropt begin
+      qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
+      qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
+      qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
+      q1DF[a,i,c,k] := qV[a,b,i,j] * (T2[c,b,k,j] - 0.5*T2[b,c,k,j])
+      q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j] + qV[a,b,j,i] * T2[c,b,j,k]
+    end
+
+    qCF = reshape(qCF, nocc^2, nocc^2)
+    q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
+    q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
+
+    qAR = calc_R_from_U_F(Ae, AX, qAF, q)
+    qBR = calc_R_from_U_F(Be, BX, qBF, q)
+    qCR = calc_R_from_U_F(Ce, CX, qCF, q)
+    q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
+    q2DR = calc_R_from_U_F(We, WX, q2DF, q)
+
+    qAR .= 0.5 .* (qAR .+ qAR')
+    qBR .= 0.5 .* (qBR .+ qBR')
+    qCR .= 0.5 .* (qCR .+ qCR')
+    q1DR .= 0.5 .* (q1DR .+ q1DR')
+    q2DR .= 0.5 .* (q2DR .+ q2DR')
+
+    qCR = reshape(qCR, nocc, nocc, nocc, nocc)
+    q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
+    q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
+
+    @tensoropt qG[a,b,i,j] := 2.0 * qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
+                              2.0 * qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] +
+                              (-0.5) * (2.0 * qCR[m,n,i,j] * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) +
+                              (-0.5) * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
+                              - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
+                              + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] 
+                              + qV[c,b,k,j] * Y1[a,i,c,k] 
+                              - 0.5 * qV[c,a,k,j] * Y1[b,i,c,k]
+                              + 0.5 * qV[c,a,k,j] * W1[b,i,c,k] 
+                              + qV[c,b,i,k] * W1[a,j,c,k])
+    qG .+= permutedims(qG, (2,1,4,3))
+    G2 += qG
+  end
+  G2 .= G2 .* 2.0/3.0 .+ permutedims(G2, (2,1,3,4)) .* 1.0/3.0
+  return (T1,G2), E_qvccd
+end
+
+
+"""
+    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1044,7 +1196,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   klcd = ints2(EC,"oovv")
   t1 = print_time(EC,t1,"<kl|cd>",2)
   int2 = load4idx(EC,"d_oooo")
-  if !dc
+  if !dc && !linearized
     # I_klij = <kl|ij>+<kl|cd>T^ij_cd
     @tensoropt int2[k,l,i,j] += klcd[k,l,c,d] * T2[c,d,i,j]
   end
@@ -1086,7 +1238,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
     @tensoropt R2[a,b,i,j] += int2[a,b,c,d] * T2[c,d,i,j]
     t1 = print_time(EC,t1,"<ab|cd> T^ij_cd",2)
   end
-  if !dc
+  if !dc && !linearized
     # <kl|cd> T^kj_ad T^il_cb
     @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2[a,d,k,j] * T2[c,b,i,l]
     t1 = print_time(EC,t1,"<kl|cd> T^kj_ad T^il_cb",2)
@@ -1097,11 +1249,13 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   # x_ki = f_ki + <kl|cd> \tilde T^il_cd
   xad = dfock[SP['v'],SP['v']]
   xki = dfock[SP['o'],SP['o']]
-  @tensoropt begin
-    xad[a,d] -= fac * klcd[k,l,c,d] * T2t[c,a,k,l]
-    xki[k,i] += fac * klcd[k,l,c,d] * T2t[c,d,i,l]
+  if !linearized
+    @tensoropt begin
+      xad[a,d] -= fac * klcd[k,l,c,d] * T2t[c,a,k,l]
+      xki[k,i] += fac * klcd[k,l,c,d] * T2t[c,d,i,l]
+    end
+    t1 = print_time(EC,t1,"xad, xki",2)
   end
-  t1 = print_time(EC,t1,"xad, xki",2)
 
   # terms for P(ia;jb)
   @tensoropt begin
@@ -1112,12 +1266,14 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false)
   end
   t1 = print_time(EC,t1,"x_ad T^ij_db -x_ki T^kj_ab",2)
   int2 = load4idx(EC,"d_voov")
-  # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
-  @tensoropt int2[a,k,i,c] += 0.5*klcd[k,l,c,d] * T2t[a,d,i,l] 
+  if !linearized
+    # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
+    @tensoropt int2[a,k,i,c] += 0.5*klcd[k,l,c,d] * T2t[a,d,i,l] 
+  end
   # <ak|ic> \tilde T^kj_cb
   @tensoropt R2r[a,b,i,j] += int2[a,k,i,c] * T2t[c,b,k,j]
   t1 = print_time(EC,t1,"<ak|ic> tT^kj_cb",2)
-  if !dc
+  if !dc && !linearized
     # -<kl|cd> T^ki_da (T^lj_cb - T^lj_bc)
     T2t -= T2
     @tensoropt R2r[a,b,i,j] -= klcd[k,l,c,d] * T2[d,a,k,i] * T2t[c,b,l,j]
@@ -2103,6 +2259,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   tworef = has_prefix(method, "2D")
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
+  qv = has_prefix(method, "QV")
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
@@ -2126,7 +2283,12 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
+    if length(Amps3) == 0 && !do_sing && qv
+      Res, E = calc_qvcc_resid(EC, it, Amps...; dc)
+      Eh = OutDict("E"=>E)
+    else
+      Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
+    end
     @assert typeof(Res) == typeof(Amps)
     Res1 = Res[1:length(Amps1)]
     Res2 = Res[length(Amps1)+1:length(Amps1)+length(Amps2)]
@@ -2149,7 +2311,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       active = oss_active_orbitals(EC)
       T2αβ[active.ua,active.tb,active.ta,active.ub] = -1.0
     end
-    Eh = calc_hylleraas(EC, Amps1..., Amps2..., Res1..., Res2...)
+    if !qv
+      Eh = calc_hylleraas(EC, Amps1..., Amps2..., Res1..., Res2...)
+    end
     update_doubles!(EC, Amps2..., Res2...)
     if length(Amps3) > 0 
       NormT3 = calc_triples_norm(Amps3...)
@@ -2191,6 +2355,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
     if length(Amps3) > 0
       NormR += NormR3
       NormT += NormT3
+    end
+    if qv
+      ΔE = 0.0
     end
     output_iteration(it, NormR, time_ns() - t0, NormT, Eh["E"], ΔE) 
     if NormR < EC.options.cc.thr && abs(ΔE) < thren
