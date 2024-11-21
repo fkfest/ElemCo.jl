@@ -996,24 +996,26 @@ end
 """
 function calc_E_Coe(eigenvalue_vector, q, threshold=1e-10)
   coefficient_matrix = zeros(length(eigenvalue_vector), length(eigenvalue_vector))
-  eigenvalue_vector .+= 1e-20
+  for i in eachindex(eigenvalue_vector)
+    if eigenvalue_vector[i] < threshold
+      println("WARNING: SMALL EIGENVALUE DETECTED IN calc_E_Coe() ", eigenvalue_vector[i])
+    end
+  end
   if q == 1
-    evq = inv.(sqrt.(eigenvalue_vector))
+    evq = sqrt.(eigenvalue_vector)
+  elseif q == 2
+    evq = eigenvalue_vector
   else
-    evq = inv.(eigenvalue_vector)
+    error("q must be 1 or 2")
   end
   for i in eachindex(eigenvalue_vector)
     for j in eachindex(eigenvalue_vector)
-      if abs(eigenvalue_vector[j] - eigenvalue_vector[i]) > threshold
-        if q == 1.0
-          coefficient_matrix[i,j] = (evq[i] - evq[j]) / (eigenvalue_vector[i] - eigenvalue_vector[j])
-        else
-          coefficient_matrix[i,j] = -1.0 * evq[i] * evq[j]
-        end
-      elseif j != i
-        coefficient_matrix[i,j] = (-q/2) *  evq[i] / eigenvalue_vector[i]
+      if i == j
+        coefficient_matrix[i,j] = 0      
+      elseif q == 1
+        coefficient_matrix[i,j] = -1/(evq[i]*evq[j]*(evq[i] + evq[j]))
       else
-        coefficient_matrix[i,j] = 0
+        coefficient_matrix[i,j] = -1/(evq[i] * evq[j])
       end
     end
   end
