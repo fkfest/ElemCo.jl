@@ -996,10 +996,11 @@ end
 """
 function calc_E_Coe(eigenvalue_vector, q, threshold=1e-10)
   coefficient_matrix = zeros(length(eigenvalue_vector), length(eigenvalue_vector))
+  eigenvalue_vector .+= 1e-20
   if q == 1
-    evq = eigenvalue_vector .^ (-1/2)
+    evq = inv.(sqrt.(eigenvalue_vector))
   else
-    evq = 1.0 ./ eigenvalue_vector
+    evq = inv.(eigenvalue_vector)
   end
   for i in eachindex(eigenvalue_vector)
     for j in eachindex(eigenvalue_vector)
@@ -1007,10 +1008,10 @@ function calc_E_Coe(eigenvalue_vector, q, threshold=1e-10)
         if q == 1.0
           coefficient_matrix[i,j] = (evq[i] - evq[j]) / (eigenvalue_vector[i] - eigenvalue_vector[j])
         else
-          coefficient_matrix[i,j] = -1.0/ (eigenvalue_vector[i] * eigenvalue_vector[j])
+          coefficient_matrix[i,j] = -1.0 * evq[i] * evq[j]
         end
       elseif j != i
-        coefficient_matrix[i,j] = (-q/2) *  evq[i] *  1 ./(eigenvalue_vector[i])
+        coefficient_matrix[i,j] = (-q/2) *  evq[i] / eigenvalue_vector[i]
       else
         coefficient_matrix[i,j] = 0
       end
