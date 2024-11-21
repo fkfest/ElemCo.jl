@@ -15,7 +15,7 @@ ThreadsBuffer
 ```@autodocs
 Modules = [Buffers]
 Private = false
-Order = [:function]
+Order = [:function,:macro]
 ```
 
 ## Internal functions

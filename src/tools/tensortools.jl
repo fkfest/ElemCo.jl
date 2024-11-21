@@ -7,11 +7,12 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
 
-export save!, load, load_all, mmap, newmmap, closemmap, flushmmap
+export save!, load, load_all, load!, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
 export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, load6idx_all
 export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
+export ints2!, detri_int2!
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
 export print_nonzeros
@@ -73,6 +74,18 @@ for N in 1:6
       return load_all(EC, fname, Val($N), T; skip_error)
     end
   end
+end
+
+"""
+    load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_error=false)
+
+  Load array(s) from file `fname` in EC.scr directory.
+
+  The type and number of dimensions are deduced from the first array in `arrs`.
+  If `skip_error` is true, return false if the dimension/type is wrong.
+"""
+function load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_error=false) where {T,N}
+  return mioload!(joinpath(EC.scr, fname*EC.ext), arrs...; skip_error)
 end
 
 """
@@ -216,17 +229,57 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing)
 end
 
 """ 
+    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+
+  Return subset of 2e⁻ integrals according to spaces. 
+  
+  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
+  from upper/lower case of spaces specification.
+  If the last two indices are stored as triangular - make them full.
+  The result is stored in `out`.
+"""
+function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+  if isnothing(spincase)
+    sc = spincase_from_4spaces(spaces)
+  else 
+    sc::Symbol = spincase
+  end
+  SP = EC.space
+  if EC.fd.uhf && sc == :αβ
+    @assert size(out) == (length(SP[spaces[1]]),length(SP[spaces[2]]),length(SP[spaces[3]]),length(SP[spaces[4]]))
+    out .= @view integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
+    return out
+  end
+  allint = integ2_ss(EC.fd, sc)
+  @assert ndims(allint) == 3
+  norb = length(EC.space[':'])
+  # last two indices as a triangular index, desymmetrize
+  return detri_int2!(out, allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+end
+
+""" 
     detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
 
   Return full 2e⁻ integrals <sp1 sp2 | sp3 sp4> from allint2 with last two indices as a triangular index.
 """
 function detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
-  @assert ndims(allint2) == 3
   out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+  return detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
+end
+
+"""
+    detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
+
+  Return full 2e⁻ integrals <sp1 sp2 | sp3 sp4> from allint2 with last two indices as a triangular index.
+  The result is stored in `out`.
+"""
+function detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
+  @assert ndims(allint2) == 3
+  @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
   cio, maski = triinds(norb, sp3, sp4)
-  out[:,:,cio] = allint2[sp1,sp2,maski]
+  out[:,:,cio] .= @view(allint2[sp1,sp2,maski])
   cio, maski = triinds(norb, sp4, sp3, true)
-  out[:,:,cio] = permutedims(allint2[sp2,sp1,maski], (2,1,3))
+  permutedims!(@view(out[:,:,cio]), @view(allint2[sp2,sp1,maski]), (2,1,3))
   return out
 end
 
