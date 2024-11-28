@@ -1067,24 +1067,19 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   # a function that can calculate the eigenvectors & eigenvalues of a matrix
   # CU[i,j,k,l] -> CU[ij,kl], Y[a,i,b,j] -> Y[ai,bj], W[a,i,b,j] -> W[ai,bj]
   # corresponding to \pre{_C}U^{ij}_{kl}, Y^{aj}_{bi}, W^{aj}_{bi}
-  #Ae, AX = eigen(AU)
-  #Be, BX = eigen(BU)
-  #Ce, CX = eigen(reshape(CU, nocc^2, nocc^2))
-  #Ye, YX = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
-  #We, WX = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
+  Ae, AX = eigen(AU)
+  Be, BX = eigen(BU)
+  Ce, CX = eigen(reshape(CU, nocc^2, nocc^2))
+  Ye, YX = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
+  We, WX = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
   G2 = zeros(nvirt, nvirt, nocc, nocc)
   E_qvccd = 0.0
   for q in [1.0, 2.0]
-    # AU1 = AX * Diagonal(Ae .^ (-q/2)) * AX' # AU1 = AU ^ (-q/2)
-    AU1 = AU ^ (-q/2)
-    # BU1 = BX * Diagonal(Be .^ (-q/2)) * BX' # BU1 = BU ^ (-q/2)
-    BU1 = BU ^ (-q/2)
-    # CU1 = reshape(CX * Diagonal(Ce .^ (-q/2)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
-    CU1 = reshape(reshape(CU, nocc^2, nocc^2) ^ (-q/2), nocc, nocc, nocc, nocc)
-    # Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
-    Y1 = reshape(reshape(Y, nvirt*nocc, nvirt*nocc) ^ (-q/2), nvirt, nocc, nvirt, nocc)
-    # W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
-    W1 = reshape(reshape(W, nvirt*nocc, nvirt*nocc) ^ (-q/2), nvirt, nocc, nvirt, nocc)
+    AU1 = AX * Diagonal(Ae .^ (-q/2)) * AX' # AU1 = AU ^ (-q/2)
+    BU1 = BX * Diagonal(Be .^ (-q/2)) * BX' # BU1 = BU ^ (-q/2)
+    CU1 = reshape(CX * Diagonal(Ce .^ (-q/2)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
+    Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
+    W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
 
     @tensoropt begin
       YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
@@ -1101,12 +1096,6 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     end
     qV .= 2.0 * qV .- permutedims(qV, (2,1,3,4))
     E_qvccd += sum(qV .* qT) * q
-
-  Ae, AX = eigen(ForwardDiff.value.(AU))
-  Be, BX = eigen(ForwardDiff.value.(BU))
-  Ce, CX = eigen(reshape(ForwardDiff.value.(CU), nocc^2, nocc^2))
-  Ye, YX = eigen(reshape(ForwardDiff.value.(Y), nvirt*nocc, nvirt*nocc))
-  We, WX = eigen(reshape(ForwardDiff.value.(W), nvirt*nocc, nvirt*nocc))
 
     @tensoropt begin
       qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
@@ -2297,13 +2286,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if length(Amps3) == 0 && !do_sing && qv
-      T1, T2 = Amps[1], Amps[2]
-      println(size(T2))
       Res, E = calc_qvcc_resid(EC, it, Amps...; dc)
-      f(_T2) = calc_qvcc_resid(EC, it, T1, _T2; dc)[2]
-      NumRes_approx = DI.gradient(f, DI.AutoFiniteDiff(), T2)
-      NumRes_exact = DI.gradient(f, DI.AutoForwardDiff(), T2)
-      @info "Test with numerical differenciation" 2.0 .*Res[2] NumRes_approx NumRes_exact
       Eh = OutDict("E"=>E)
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
