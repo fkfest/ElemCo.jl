@@ -59,8 +59,6 @@ using LinearAlgebra
 using Printf # to be removed
 #BLAS.set_num_threads(1)
 using TensorOperations
-import ForwardDiff, FiniteDiff
-import DifferentiationInterface as DI
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos

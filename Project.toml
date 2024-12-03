@@ -25,10 +25,7 @@ libcint_jll = "574b78ca-bebd-517c-801d-4735c93a9686"
 
 [compat]
 AtomsBase = "0.3.5 - 0.4"
-DifferentiationInterface = "0.6.23"
 DocStringExtensions = "0.9"
-FiniteDiff = "2.26.2"
-ForwardDiff = "0.10.38"
 ITensors = "0.4 - 0.6"
 IterativeSolvers = "0.9"
 MKL = "0.6 - 0.7"
