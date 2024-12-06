@@ -3039,6 +3039,89 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   nsvd = size(T3_XYZ, 1)
   naux = size(voP, 3)
 
+  myallocator = TensorOperations.ManualAllocator()
+
+  @tensor allocator = myallocator  VvoA[a,i,L] := ovP[k,c,L] * (2.0 * T2[a,c,i,k] - T2[c,a,i,k])
+  
+  @tensor allocator = myallocator  YSA[X,L] := UvoX[a,i,X] * (voP[a,i,L] + VvoA[a,i,L])
+  @tensor allocator = myallocator  TvSo[a,X,i] := UvoX[b,j,X] * T2[a,b,i,j]
+
+  @tensor allocator = myallocator  XvSv[b,Z,d] := vvP[b,d,L] * YSA[Z,L] - dfov[l,d] * TvSo[b,Z,l]  
+  @tensor allocator = myallocator  XoSo[l,Z,j] := ooP[l,j,L] * YSA[Z,L] 
+
+
+  AAS = zeros(naux,nsvd)
+  wovS = zeros(nocc,nvirt,nsvd)
+  for L in 1:naux
+    CutovP = ovP[1:nocc,1:nvirt,L]	  
+    CutvvP = vvP[1:nvirt,1:nvirt,L]
+    CutooP = ooP[1:nocc,1:nocc,L]
+    @tensor allocator = myallocator  GvSoA[b,X,j] := T2[b,c,j,k] * (UvoX[c,l,X] * CutooP[k,l] - UvoX[d,k,X] * CutvvP[d,c])
+    @tensor allocator = myallocator BooAS[i,j,X] := CutovP[i,a] * UvoX[a,j,X]
+    @tensor allocator = myallocator  GvSoA[b,X,j] -= UvoX[b,j,Z'] * (T3_XYZ[X,Y',Z'] * BooAS[i,i,Y'] - 0.5 * ((UvoX[c,m,X'] * T3_XYZ[X',Y',Z']) * BooAS[m,k,Y']) * UvoX[c,k,X])
+    
+    @tensor allocator = myallocator  XvSv[b,Z,d] += CutovP[l,d] * (GvSoA[b,Z,l] - CutvvP[b,c] * TvSo[c,Z,l])
+    CutvvP = nothing
+    @tensor allocator = myallocator  XoSo[l,Z,j] -= CutovP[l,d] * (GvSoA[d,Z,j] + CutooP[k,j] * TvSo[d,Z,k]) 
+    GvSoA = nothing
+    CutooP = nothing
+
+    @tensor allocator = myallocator  wovS[k,d,X] += CutovP[l,d] * BooAS[k,l,X]
+    CutovP = nothing
+    @tensor allocator = myallocator IntermediateAAS[X] := BooAS[i,i,X]
+    BooAS = nothing
+    AAS[L,1:nsvd] += IntermediateAAS[1:nsvd]
+    IntermediateAAS = nothing
+  end
+
+
+  for YPrime in 1:nsvd
+    CutUvoX = UvoX[1:nvirt,1:nocc,YPrime]
+    CutT3_XYZ = T3_XYZ[1:nsvd,YPrime,1:nsvd]
+    @tensor allocator = myallocator  XvSv[b,Z,d] += 0.5 * CutT3_XYZ[X',Z] * (CutUvoX[b,k] * wovS[k,d,X'])
+    @tensor allocator = myallocator  XoSo[l,Z,j] -= 0.5 * CutT3_XYZ[X',Z] * (CutUvoX[d,j] * wovS[l,d,X'])
+    CutT3_XYZ = nothing
+    CutUvoX = nothing
+  end
+  wovS = nothing
+ 
+  BigQ = zeros(nsvd,nsvd,nsvd)
+  for b in 1:nvirt
+    CutTvSo = TvSo[b,1:nsvd,1:nocc]
+    CutUvoX = UvoX[b,1:nocc,1:nsvd]
+    CutXvSv = XvSv[b,1:nsvd,1:nvirt]
+    @tensor allocator = myallocator  BigQ[X,Y,Z] += CutUvoX[j,Y] * (CutTvSo[X,l] * XoSo[l,Z,j] - CutXvSv[Z,d] * TvSo[d,X,j] + (T3_XYZ[X',Y',Z] * CutUvoX[l,X']) * (UvoX[d,j,Y'] * (ovP[l,d,L] * YSA[X,L])))
+    CutXvSv = nothing
+    CutUvoX = nothing
+    CutTvSo = nothing
+  end
+  TvSo = nothing
+
+  @tensor allocator = myallocator  R3decomp[X,Y,Z] := BigQ[X,Y,Z] + BigQ[Y,X,Z] + BigQ[X,Z,Y] + BigQ[Z,Y,X] + BigQ[Z,X,Y] + BigQ[Y,Z,X]
+  BigQ = nothing
+
+
+  @tensor allocator = myallocator  smallq[X,Y,Z] := T3_XYZ[X',Y,Z] * (UvoX[a,l,X'] * ((dfoo[l,i] + 0.5 * ovP[l,d,L] * VvoA[d,i,L]) * UvoX[a,i,X]) - UvoX[a,i,X] * ((dfvv[a,d] - 0.5 * ovP[l,d,L] * VvoA[a,l,L]) * UvoX[d,i,X']) + UvoX[a,i,X] * ((ooP[l,i,L] * vvP[a,d,L]) * UvoX[d,l,X']) - 2 * YSA[X,L] * AAS[L,X']) 
+  AAS = nothing
+  YSA = nothing
+  VvoA = nothing
+
+
+  @tensor allocator = myallocator  WSSA[Y,Y',L] := UvoX[b,j,Y] * (ooP[i,j,L] * UvoX[b,i,Y'] - vvP[b,a,L] * UvoX[a,j,Y'])
+  for YPrime in 1:nsvd
+    CutWSSA = WSSA[1:nsvd,YPrime,1:naux]
+    CutT3_XYZ = T3_XYZ[1:nsvd,YPrime,1:nsvd] 
+    @tensor allocator = myallocator  smallq[X,Y,Z] -= CutT3_XYZ[X,Z'] * (CutWSSA[Y,L] * WSSA[Z,Z',L])
+    CutT3_XYZ = nothing
+    CutWSSA = nothing
+  end
+  WSSA = nothing
+
+  @tensor allocator = myallocator  R3decomp[X,Y,Z] += smallq[X,Y,Z] + smallq[Y,X,Z] + smallq[Z,Y,X]
+  smallq = nothing
+
+
+  #=
   @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #virt1
   @tensoropt Thetavirt[b,d,Z] += UvoX[c,k,Z] * (T2[c,b,l,m] * (ooP[l,k,Q] * ovP[m,d,Q])) #virt3
 
@@ -3423,6 +3506,8 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
   t1 = print_time(EC, t1, "Symmetrization of Chi terms in R3(T3)", 2)
 
   #display(R3decomp)
+
+  =#
 
   close(ovPfile)
   close(voPfile)
