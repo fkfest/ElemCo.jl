@@ -115,14 +115,10 @@ function dfhf_positron(EC::ECInfo)
   end
   guess = EC.options.scf.guess
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
-  if direct
-    bao = generate_basis(EC, "ao")
-    bfit = generate_basis(EC, "jkfit")
-  end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO, cPO = guess_orb(EC, guess)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  @assert is_restricted(cMO) "DF-HF only implemented for closed-shell"
+  @assert is_restricted(cMO) "Positron DF-HF only implemented for closed-electron-shell"
   cMO = cMO.α
   cPO = cPO.α
   ϵ = zeros(norb)
@@ -139,11 +135,7 @@ function dfhf_positron(EC::ECInfo)
   for it=1:EC.options.scf.maxit
     eden = 2.0 * gen_density_matrix(EC, cMO, cMO, SP['o'])
     pden = gen_density_matrix(EC, cPO, cPO, [1])
-    if direct
-      fock = gen_dffock(EC, cMO, bao, bfit)
-    else
-      J, Jp, K = gen_dffock(EC, eden, pden)
-    end
+    J, Jp, K = gen_dffock(EC, eden, pden)
     fock = hsmall + 0.5 * (2 * J - K) - Jp
     fock_pos = hsmall_pos - J
     t1 = print_time(EC, t1, "generate DF-Fock matrices for e and e+", 2)
