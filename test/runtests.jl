@@ -24,6 +24,7 @@ TESTS = [
 ("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]),
 ("CC", ["h2-"]),
 ("DF", ["df_hf", "df_uhf", "df_mcscf"]),
+("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc"]),
 ("Interface", ["h2o_matrop"]),
 ("Unit-tests", ["unit_tests"])
