@@ -279,18 +279,26 @@ end
   Fock matrix in AO basis  (using precalculated Cholesky-
   decomposed integrals and density matrices).
 """
-function gen_dffock(EC::ECInfo, eden::Matrix{Float64}, pden::Matrix{Float64})
+function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
+  occ2 = EC.space['o']
+  CMO2 = cMO[:,occ2]
+  CMO2p = cPO[:,1:1]
   μνL = load3idx(EC,"AAL")
   @tensoropt begin 
-    L[L] := μνL[p,q,L] * eden[p,q]
-    P[L] := μνL[p,q,L] * pden[p,q]
+    μjL[p,j,L] := μνL[p,q,L] * CMO2[q,j]
+    μjLpos[p,j,L] := μνL[p,q,L] * CMO2p[q,j]
+    L[L] := 2.0 * μjL[p,j,L] * CMO2[p,j]
+    P[L] := μjLpos[p,j,L] * CMO2p[p,j]
     J[p,q] := μνL[p,q,L] * L[L]
     Jp[p,q] := μνL[p,q,L] * P[L] 
-    K[p,q] := μνL[p,r,L] * eden[r,s] * μνL[q,s,L]
+    K[p,q] := 2.0 * μjL[p,j,L] * μjL[q,j,L] 
+    # fock[p,q] := hsmall[p,q] - μjL[p,j,L]*μjL[q,j,L]
+    # fock[p,q] -=  
+    # fock[p,q] += 2.0*L[L]*μνL[p,q,L]
   end
-
   return J, Jp, K
+  #return fock
 end
 
 """
