@@ -289,9 +289,9 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
   # Electron
   @tensoropt begin 
     μjL[p,j,L] := μνL[p,q,L] * CMO2[q,j]
-    L[L] := 2.0 * μjL[p,j,L] * CMO2[p,j]
+    L[L] := μjL[p,j,L] * CMO2[p,j]
     J[p,q] := μνL[p,q,L] * L[L]
-    K[p,q] := 2.0 * μjL[p,j,L] * μjL[q,j,L] 
+    K[p,q] := μjL[p,j,L] * μjL[q,j,L] 
   end
   # Positron
   @tensoropt begin
