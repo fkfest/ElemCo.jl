@@ -1078,13 +1078,20 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     CU1 = reshape(CX * Diagonal(Ce .^ (-q/2)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
     Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
     W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
-
+    
     @tensoropt begin
       YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
                     0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,j] * T2[c,b,i,k]
-      qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
-                    CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
     end
+    if !dc
+      @tensoropt qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
+                      CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
+    else
+      @tensoropt qT[a,b,i,j] := 0.5 * (AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + 
+                                BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k])  - 
+                                0.25 * (YWT[a,b,i,j] + YWT[b,a,j,i])
+    end
+
     if q == 1.0
       T1_0 = zeros(0,0)
       R1, qV = calc_cc_resid(EC, T1_0, qT; linearized=true) 
@@ -1122,17 +1129,28 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     qCR = reshape(qCR, nocc, nocc, nocc, nocc)
     q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
     q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
-
-    @tensoropt qG[a,b,i,j] := 2.0 * qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
-                              2.0 * qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] +
-                              (-0.5) * (2.0 * qCR[m,n,i,j] * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) +
-                              (-0.5) * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
-                              - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
-                              + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] 
-                              + qV[c,b,k,j] * Y1[a,i,c,k] 
-                              - 0.5 * qV[c,a,k,j] * Y1[b,i,c,k]
-                              + 0.5 * qV[c,a,k,j] * W1[b,i,c,k] 
-                              + qV[c,b,i,k] * W1[a,j,c,k])
+    if !dc
+      @tensoropt qG[a,b,i,j] := 2.0 * qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
+                                2.0 * qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] +
+                                (-0.5) * (2.0 * qCR[m,n,i,j] * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) +
+                                (-0.5) * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
+                                - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
+                                + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] 
+                                + qV[c,b,k,j] * Y1[a,i,c,k] 
+                                - 0.5 * qV[c,a,k,j] * Y1[b,i,c,k]
+                                + 0.5 * qV[c,a,k,j] * W1[b,i,c,k] 
+                                + qV[c,b,i,k] * W1[a,j,c,k])
+    else
+      @tensoropt qG[a,b,i,j] := qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + 0.5 * qV[c,b,i,j] * AU1[c,a] + 
+                                qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + 0.5 * qV[a,b,k,j] * BU1[i,k] +
+                                (-0.25) * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
+                                - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
+                                + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] 
+                                + qV[c,b,k,j] * Y1[a,i,c,k] 
+                                - 0.5 * qV[c,a,k,j] * Y1[b,i,c,k]
+                                + 0.5 * qV[c,a,k,j] * W1[b,i,c,k] 
+                                + qV[c,b,i,k] * W1[a,j,c,k])
+    end
     qG .+= permutedims(qG, (2,1,4,3))
     G2 += qG
   end
