@@ -135,9 +135,7 @@ function dfhf_positron(EC::ECInfo)
   for it=1:EC.options.scf.maxit
     eden = 2.0 * gen_density_matrix(EC, cMO, cMO, SP['o'])
     pden = gen_density_matrix(EC, cPO, cPO, [1])
-    J, Jp, K = gen_dffock(EC, cMO, cPO)
-    fock = hsmall + 2 * J - K - Jp
-    fock_pos = hsmall_pos - 2 * J
+    fock, fock_pos, Jp = gen_dffock(EC, cMO, cPO)
     t1 = print_time(EC, t1, "generate DF-Fock matrices for e and e+", 2)
     @tensoropt E_el = 0.5 * eden[p,q] * hsmall[p,q]
     @tensoropt E_el += 0.5 * eden[p,q] * fock[p,q]

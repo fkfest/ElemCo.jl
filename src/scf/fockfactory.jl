@@ -285,6 +285,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
   CMO2 = cMO[:,occ2]
   CMO2p = cPO[:,1:1]
   hsmall = load2idx(EC,"h_AA")
+  hsmall_pos = load2idx(EC,"h_AA_positron")
   μνL = load3idx(EC,"AAL")
   # Electron
   @tensoropt begin 
@@ -299,7 +300,9 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
     P[L] := μjLpos[p,j,L] * CMO2p[p,j]
     Jp[p,q] := μνL[p,q,L] * P[L] 
   end
-  return J, Jp, K
+  fock = hsmall + 2*J - K - Jp
+  fock_pos = hsmall_pos - 2*J
+  return fock, fock_pos, Jp
   #return fock
 end
 
