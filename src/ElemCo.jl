@@ -7,6 +7,7 @@ module ElemCo
 
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
+include("tools/buffers.jl")
 include("tools/outputs.jl")
 include("tools/utils.jl")
 include("tools/constants.jl")
@@ -58,6 +59,7 @@ using Dates
 #BLAS.set_num_threads(1)
 using TensorOperations
 using PrecompileTools
+using .Buffers
 using .Utils
 using .ECInfos
 using .QMTensors
@@ -775,19 +777,22 @@ macro export_molden(filename)
   end
 end
 
-@setup_workload begin
-  savestd = stdout
-  redirect_stdout(devnull)
-  geometry = "H 0.0 0.0 0.0
-              H 0.0 0.0 1.0"
-  basis = "vdz"
-  @compile_workload begin
-    @dfhf
-    @cc dcsd
-    @cc uccsd
-    @dfcc svd-dcsd
+# precompile if not in development mode
+if last(__VERSION__) != '+'
+  @setup_workload begin
+    savestd = stdout
+    redirect_stdout(devnull)
+    geometry = "H 0.0 0.0 0.0
+                H 0.0 0.0 1.0"
+    basis = "vdz"
+    @compile_workload begin
+      @dfhf
+      @cc dcsd
+      @cc uccsd
+      @dfcc svd-dcsd
+    end
+    redirect_stdout(savestd)
   end
-  redirect_stdout(savestd)
 end
 
 end #module

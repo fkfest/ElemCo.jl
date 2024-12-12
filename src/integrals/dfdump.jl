@@ -13,6 +13,7 @@ using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
 using ..ElemCo.DFTools
 using ..ElemCo.Utils
+using ..ElemCo.Buffers
 
 export dfdump
 
@@ -46,14 +47,14 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
   nL = size(M,2)
   LBlks = get_auxblks(nL)
   maxL = maximum(length, LBlks)
-  bufAAL = create_buf(nao^2*maxL)
-  bufmmL = create_buf(norbs^2*maxL)
+  bufAAL = Buffer(nao^2*maxL)
+  bufmmL = Buffer(norbs^2*maxL)
   first = true
   for L in LBlks
     nL = length(L)
     V_M = @view M[:,L]
-    AAL = reshape_buf(bufAAL, nao, nao, nL)
-    mmL = reshape_buf(bufmmL, norbs, norbs, nL)
+    AAL = reshape_buf!(bufAAL, nao, nao, nL)
+    mmL = reshape_buf!(bufmmL, norbs, norbs, nL)
     @tensoropt begin
       AAL[p,q,L] = μνP[p,q,P] * V_M[P,L]
       mmL[p,q,L] = cMOval[μ,p] * AAL[μ,ν,L] * cMOval[ν,q]
@@ -147,16 +148,16 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
   nL = size(M,2)
   LBlks = get_auxblks(nL)
   maxL = maximum(length, LBlks)
-  bufAAL = create_buf(nao^2*maxL)
-  bufmmL = create_buf(norbs^2*maxL)
-  bufMML = create_buf(norbs^2*maxL)
+  bufAAL = Buffer(nao^2*maxL)
+  bufmmL = Buffer(norbs^2*maxL)
+  bufMML = Buffer(norbs^2*maxL)
   first = true
   for L in LBlks
     nL = length(L)
     V_M = @view M[:,L]
-    AAL = reshape_buf(bufAAL, nao, nao, nL)
-    mmL = reshape_buf(bufmmL, norbs, norbs, nL)
-    MML = reshape_buf(bufMML, norbs, norbs, nL)
+    AAL = reshape_buf!(bufAAL, nao, nao, nL)
+    mmL = reshape_buf!(bufmmL, norbs, norbs, nL)
+    MML = reshape_buf!(bufMML, norbs, norbs, nL)
     @tensoropt begin
       AAL[p,q,L] = μνP[p,q,P] * V_M[P,L]
       mmL[p,q,L] = cMOaval[μ,p] * AAL[μ,ν,L] * cMOaval[ν,q]

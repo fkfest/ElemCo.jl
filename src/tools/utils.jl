@@ -9,7 +9,7 @@ using ..ElemCo.Outputs
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
-export substr, reshape_buf, create_buf
+export substr
 export amdmkl
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
@@ -223,37 +223,6 @@ julia> substr("λabδcd", 2:4)
 """
 function substr(string::AbstractString, range::UnitRange{Int})
   return substr(string, range.start, range.stop-range.start+1)
-end
-
-"""
-    create_buf(len::Int, T=Float64)
-
-  Create a buffer of length `len` of type `T`.
-"""
-function create_buf(len::Int, T=Float64)
-  return Vector{T}(undef, len)
-end
-
-"""
-    reshape_buf(buf::Vector{T}, dims...; offset=0)
-
-  Reshape (part of) a buffer to given dimensions (without copying),
-  using `offset`.
-
-  It can be used, e.g., for itermediates in tensor contractions.
-
-# Example
-```julia
-julia> buf = Vector{Float64}(undef, 100000)
-julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor
-julia> B = reshape_buf(buf, 10, 10, 10, offset=2000) # 10x10x10 tensor starting at 2001
-julia> B .= rand(10,10,10)
-julia> C = rand(10,20)
-julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
-```
-"""
-function reshape_buf(buf::Vector{T}, dims...; offset=0) where {T}
-  return reshape(view(buf, 1+offset:prod(dims)+offset), dims)
 end
 
 """

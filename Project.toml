@@ -26,7 +26,7 @@ libcint_jll = "574b78ca-bebd-517c-801d-4735c93a9686"
 [compat]
 AtomsBase = "0.3.5 - 0.4"
 DocStringExtensions = "0.9"
-ITensors = "0.4.0 - 0.7"
+ITensors = "0.4 - 0.6"
 IterativeSolvers = "0.9"
 MKL = "0.6 - 0.7"
 NPZ = "0.4"
