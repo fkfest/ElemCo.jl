@@ -71,6 +71,8 @@ Base.@kwdef mutable struct ScfOptions
   - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
+  """`⟨:HCORE⟩` positron orbital guess. Only `:HCORE` is implemented. """
+  guess_pos::Symbol = :HCORE
   """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
   bisecdamp::Float64 = 0.5
   """`⟨3⟩` maximum number of iterations for searching for lambda value to get a reasonalbe guess within trust radius for MCSCF. """

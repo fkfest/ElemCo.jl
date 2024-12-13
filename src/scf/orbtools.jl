@@ -15,7 +15,7 @@ using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions
 
-export guess_orb, load_orbitals, orbital_energies
+export guess_orb, guess_pos_orb, load_orbitals, orbital_energies
 export show_orbitals
 export rotate_orbs, rotate_orbs!, normalize_phase!
 
@@ -26,6 +26,18 @@ export rotate_orbs, rotate_orbs!, normalize_phase!
 """
 function guess_hcore(EC::ECInfo)
   hsmall = load(EC, "h_AA", Val(2))
+  sao = load(EC, "S_AA", Val(2))
+  ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
+  return SpinMatrix(cMO)
+end
+
+"""
+    guess_pos_hcore(EC::ECInfo)
+
+  Guess MO coefficients for positron from core Hamiltonian.
+"""
+function guess_pos_hcore(EC::ECInfo)
+  hsmall = load(EC, "h_positron_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
   ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
   return SpinMatrix(cMO)
@@ -78,23 +90,36 @@ end
 """
 function guess_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
-    emat = guess_hcore(EC)
+    return guess_hcore(EC)
   elseif guess == :SAD || guess == :sad
-    emat = guess_sad(EC)
+    return guess_sad(EC)
   elseif guess == :GWH || guess == :gwh
-    emat = guess_gwh(EC)
+    return guess_gwh(EC)
   elseif guess == :ORB || guess == :orb
     orbs = load_all(EC, EC.options.wf.orb, Val(2))
-    emat = SpinMatrix(orbs...)
+    return SpinMatrix(orbs...)
   else
     error("unknown guess type")
-    emat = SpinMatrix()
+    return SpinMatrix()
   end
-  if EC.options.wf.npositron > 0
-    posmat = guess_positron(EC)
-    return emat, posmat
+end
+
+"""
+  guess_pos_orb(EC::ECInfo, guess::Symbol)
+
+  Calculate starting guess for MO positron coefficients.
+  Type of initial guess for MO coefficients is given by `guess`.
+
+  See [`ScfOptions.guess`](@ref ECInfos.ScfOptions) for possible values.
+
+"""
+
+function guess_pos_orb(EC::ECInfo, guess::Symbol)
+  if guess == :HCORE || guess == :hcore
+    return guess_pos_hcore(EC)
   else
-    return emat
+    error("unknown guess type")
+    return SpinMatrix()
   end
 end
 

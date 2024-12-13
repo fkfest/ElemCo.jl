@@ -114,9 +114,11 @@ function dfhf_positron(EC::ECInfo)
     error("Exiting function dfhf_positron: 'direct' option is enabled with positron.")
   end
   guess = EC.options.scf.guess
+  guess_pos = EC.options.scf.guess_pos
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-  cMO, cPO = guess_orb(EC, guess)
+  cMO = guess_orb(EC, guess)
+  cPO = guess_pos_orb(EC, guess_pos)
   t1 = print_time(EC, t1, "guess orbitals", 2)
   @assert is_restricted(cMO) "Positron DF-HF only implemented for closed-electron-shell"
   cMO = cMO.α
