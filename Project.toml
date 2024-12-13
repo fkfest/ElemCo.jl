@@ -5,6 +5,7 @@ version = "0.13.1+"
 
 [deps]
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
+Buffers = "d9ae4b7f-d04c-4b7f-92f7-4d9c2e17e1a4"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 ITensors = "9136182c-28ba-11e9-034c-db9fb085ebd5"
@@ -24,6 +25,7 @@ libcint_jll = "574b78ca-bebd-517c-801d-4735c93a9686"
 
 [compat]
 AtomsBase = "0.3.5 - 0.4"
+Buffers = "0.1.1"
 DocStringExtensions = "0.9"
 ITensors = "0.4 - 0.6"
 IterativeSolvers = "0.9"
