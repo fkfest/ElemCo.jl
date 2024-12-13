@@ -4,8 +4,8 @@ include("libcint5.jl")
   Electron-repulsion (and other) integrals 
 """
 module Integrals
+using Buffers
 using ..ElemCo.Utils
-using ..ElemCo.Buffers
 using ..ElemCo.BasisSets
 using ..ElemCo.Libcint5
 
