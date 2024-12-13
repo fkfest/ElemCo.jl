@@ -62,8 +62,9 @@ end
   Initialize positron MO coefficients as zeroes.
 """
 function guess_positron(EC::ECInfo)
-  hsmall = load(EC, "h_AA", Val(2))
-  ϵ, cMO = zeros(size(hsmall,1)), zeros(size(hsmall))
+  hsmall = load(EC, "h_positron_AA", Val(2))
+  sao = load(EC, "S_AA", Val(2))
+  ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
   return SpinMatrix(cMO)
 end
 
@@ -89,7 +90,7 @@ function guess_orb(EC::ECInfo, guess::Symbol)
     error("unknown guess type")
     emat = SpinMatrix()
   end
-  if EC.positron
+  if EC.options.wf.npositron > 0
     posmat = guess_positron(EC)
     return emat, posmat
   else

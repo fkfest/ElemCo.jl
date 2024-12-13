@@ -22,11 +22,13 @@ basis_LiH = Dict("ao"=>"aug-cc-pVqZ",
 
 EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_H,basis_H))
 @set wf charge=-1
-E_H=@dfhf_positron
+@set wf npositron=1
+E_H=@dfhf
 @test abs(E_H["HF"]-EHF_H_test) < epsilon
 EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_LiH,basis_LiH))
 @set wf charge=0
-E_LiH=@dfhf_positron
+@set wf npositron=1
+E_LiH=@dfhf
 @test abs(E_LiH["HF"]-EHF_LiH_test) < epsilon
 
 end

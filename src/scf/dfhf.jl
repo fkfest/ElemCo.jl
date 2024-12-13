@@ -124,7 +124,7 @@ function dfhf_positron(EC::ECInfo)
   ϵ = zeros(norb)
   ε_pos = zeros(norb)
   hsmall = load(EC, "h_AA", Val(2))
-  hsmall_pos = load(EC, "h_AA_positron", Val(2))
+  hsmall_pos = load(EC, "h_positron_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
   # display(sao)
   EHF = 0.0

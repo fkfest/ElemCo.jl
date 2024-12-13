@@ -16,6 +16,8 @@ Base.@kwdef mutable struct WfOptions
   """`⟨"C_Am"⟩` filename of MO coefficients. 
   Used by all programs to read and write orbitals from/to file. """
   orb::String = "C_Am"
+  """`⟨0⟩` Number of positrons. """
+  npositron::Int = 0
   """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 
   Used by all programs to read and write positron orbitals from/to file. """
   orb_pos::String = "C_Am_pos"

@@ -439,20 +439,11 @@ end
 macro dfhf()
   return quote
     $(esc(:@tryECinit))
-    dfhf($(esc(:EC)))
-  end
-end
-
-""" 
-    @dfhf_positron()
-
-  Run DF-HF calculation with positron. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
-"""
-macro dfhf_positron()
-  return quote
-    $(esc(:@tryECinit))
-    $(esc(:EC)).positron=true
-    dfhf_positron($(esc(:EC)))
+    if $(esc(:EC)).options.wf.npositron > 0
+      dfhf_positron($(esc(:EC)))
+    else
+      dfhf($(esc(:EC)))
+    end
   end
 end
 
