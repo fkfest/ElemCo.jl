@@ -8,9 +8,9 @@ geometry="bohr
 
 #basis="def2-sv(p)"
 #basis="vdz"
-basis = Dict("ao"=>"cc-pVDZ",
+basis = Dict("ao"=>"aug-cc-pVQZ",
              "jkfit"=>"def2-universal-jkfit",
-             "mp2fit"=>"cc-pvdz-rifit")
+             "mp2fit"=>"aug-cc-pvqz-rifit")
 @set scf guess=:HCORE
 
 @dfhf_positron
