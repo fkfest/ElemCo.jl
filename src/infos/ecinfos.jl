@@ -108,8 +108,10 @@ end
 function setup_space_fd!(EC::ECInfo)
   @assert fd_exists(EC.fd) "EC.fd is not set up!"
   nelec = EC.options.wf.nelec
+  npositron = EC.options.wf.npositron
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
+  @assert npositron == 0 "Positron calculation not supported for post-HF yet."
 
   norb = headvar(EC.fd, "NORB", Int)
   @assert !isnothing(norb)
@@ -144,6 +146,10 @@ function setup_space_system!(EC::ECInfo)
   orbsym = ones(Int,norb)
   println("Number of orbitals: ", norb)
   println("Number of electrons: ", nelec)
+  if EC.options.wf.npositron > 0
+    println("Number of positrons: ", EC.options.wf.npositron)
+    @assert ms2 == 0 "Cannot have positrons and spin > 0."
+  end
   println("Spin: ", ms2)
   setup_space!(EC, norb, nelec, ms2, orbsym)
 end

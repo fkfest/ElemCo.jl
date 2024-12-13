@@ -62,7 +62,10 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
   bao = generate_basis(EC, "ao")
   bfit = generate_basis(EC, fitbasis)
   save!(EC,"S_AA",overlap(bao))
-  save!(EC,"h_AA",kinetic(bao) + nuclear(bao))
+  save!(EC,"h_AA",kinetic(bao) + nuclear(bao))  
+  if EC.options.wf.npositron > 0
+    save!(EC,"h_positron_AA",kinetic(bao) - nuclear(bao))
+  end
   PQ = eri_2e2idx(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   if save3idx

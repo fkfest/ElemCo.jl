@@ -89,7 +89,7 @@ export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
-export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
 # from Utils
 export last_energy
@@ -439,7 +439,11 @@ end
 macro dfhf()
   return quote
     $(esc(:@tryECinit))
-    dfhf($(esc(:EC)))
+    if $(esc(:EC)).options.wf.npositron > 0
+      dfhf_positron($(esc(:EC)))
+    else
+      dfhf($(esc(:EC)))
+    end
   end
 end
 

@@ -25,6 +25,7 @@ TESTS = [
 ("CC", ["h2-"]),
 ("QV-CC", ["h2o_qv-ccd"]),
 ("DF", ["df_hf", "df_uhf", "df_mcscf"]),
+("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc"]),
 ("Interface", ["h2o_matrop"]),
 ("Unit-tests", ["unit_tests"])

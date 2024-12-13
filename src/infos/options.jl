@@ -16,6 +16,11 @@ Base.@kwdef mutable struct WfOptions
   """`⟨"C_Am"⟩` filename of MO coefficients. 
   Used by all programs to read and write orbitals from/to file. """
   orb::String = "C_Am"
+  """`⟨0⟩` Number of positrons. """
+  npositron::Int = 0
+  """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 
+  Used by all programs to read and write positron orbitals from/to file. """
+  orb_pos::String = "C_Am_pos"
   """`⟨"-left"⟩` addition to the filename for left orbitals (for biorthogonal calculations). """
   left::String = "-left"
   """`⟨:large⟩` core type for frozen-core approximation: 
@@ -66,6 +71,8 @@ Base.@kwdef mutable struct ScfOptions
   - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
+  """`⟨:HCORE⟩` positron orbital guess. Only `:HCORE` is implemented. """
+  guess_pos::Symbol = :HCORE
   """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
   bisecdamp::Float64 = 0.5
   """`⟨3⟩` maximum number of iterations for searching for lambda value to get a reasonalbe guess within trust radius for MCSCF. """
