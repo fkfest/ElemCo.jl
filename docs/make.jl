@@ -56,7 +56,6 @@ makedocs(
       "qmtensors.md",
       "tensortools.md",
       "descdict.md",
-      "buffers.md",
       "utils.md",
       "interfaces.md",
       "molpro.md",

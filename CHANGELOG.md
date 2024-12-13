@@ -10,6 +10,7 @@
 * ANO-RCC-MB basis is now used as the minimal AO basis for the SAD orbital starting guess.
 * memory buffers are now handled by functions and types in `Buffers` module.
 * the precompilation is disabled for development versions.
+* Buffers is moved to a separate package Buffers.jl.
 
 ### Added
 
