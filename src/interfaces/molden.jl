@@ -184,15 +184,6 @@ end
 """
 function printmos(f, orbs, order, energies, occupation, spin="Alpha")
   nmo = size(orbs,2)
-  #@show orbs
-  @show nmo
-  @show energies
-  @show occupation
-  # show some shapes of above variables
-  @show size(orbs)
-  @show size(energies)
-  @show size(occupation)
-
   for imo = 1:nmo
     println(f, " Sym=  ", imo, ".1")
     println(f, " Ene=  ", energies[imo])
