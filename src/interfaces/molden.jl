@@ -70,9 +70,21 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   order = ao_permutation(EC, true)
   orbs = load_orbitals(EC)
   eps = load_epsilon(EC)
-  @show eps
-  occ = load_occupations(EC)
-  @show occ
+  SP = EC.space
+  if is_restricted(orbs)
+    occ=append!(2*ones(Int, length(SP['o'])), zeros(Int, length(SP['v'])))
+    eps = eps[1]
+  else
+    occa=append!(ones(Int, length(SP['o'])), zeros(Int, length(SP['v'])))
+    occb=append!(ones(Int, length(SP['O'])), zeros(Int, length(SP['V'])))
+  end
+  has_positron = EC.options.wf.npositron > 0
+  if has_positron
+    orbs_pos = load_positron_orbitals(EC)
+    eps_pos = load_positron_epsilon(EC)
+    occ_pos = zeros(Int, length(SP['m']))
+    occ_pos[1] = 1
+  end
   open(filename, "w") do f
     println(f, "[Molden Format]")
     distunit = unit(EC.system[1].position[1])
@@ -109,21 +121,17 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       maxl > 4 && println(f, "[11H]")
       maxl > 5 && println(f, "[13I]")
     end
-    #TODO use correct energies and occupations
     if is_restricted(orbs)
       cmo = orbs[1]
       energies = eps
       occupation = occ
       printmos(f, cmo, order, energies, occupation)
     else
-      printmos(f, orbs[1], order, eps, occ)
-      printmos(f, orbs[2], order, eps, occ, "Beta")
+      printmos(f, orbs[1], order, eps[1], occa)
+      printmos(f, orbs[2], order, eps[2], occb, "Beta")
     end
   end
-  if (EC.options.wf.npositron > 0)
-    orbs_pos = load_positron_orbitals(EC)
-    eps_pos = load_positron_epsilon(EC)
-    occ_pos = load_positron_occupations(EC)
+  if (has_positron)
     println("Writing also positron orbitals to $(filename)_positron")
     open(filename*"_positron", "w") do f
       println(f, "[Molden Format]")
@@ -161,12 +169,9 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
         maxl > 4 && println(f, "[11H]")
         maxl > 5 && println(f, "[13I]")
       end
-      #TODO use correct energies 
       cmo = orbs_pos[1]
       energies = eps_pos
       occupation = occ_pos
-      # Only first orbital for positron is occupied
-      occupation[1] = 1
       printmos(f, cmo, order, energies, occupation)
     end
   end
