@@ -69,14 +69,18 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   basisset = generate_basis(EC, "ao")
   order = ao_permutation(EC, true)
   orbs = load_orbitals(EC)
-  eps = load_epsilon(EC)
   SP = EC.space
   if is_restricted(orbs)
     occ=append!(2*ones(Int, length(SP['o'])), zeros(Int, length(SP['v'])))
-    eps = eps[1]
+    ϵo, ϵv = orbital_energies(EC)
+    eps = append!(ϵo, ϵv)
   else
     occa=append!(ones(Int, length(SP['o'])), zeros(Int, length(SP['v'])))
     occb=append!(ones(Int, length(SP['O'])), zeros(Int, length(SP['V'])))
+    ϵoa, ϵva = orbital_energies(EC, :α)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    epsa = append!(ϵoa, ϵva)
+    epsb = append!(ϵob, ϵvb)
   end
   has_positron = EC.options.wf.npositron > 0
   if has_positron
@@ -127,8 +131,8 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       occupation = occ
       printmos(f, cmo, order, energies, occupation)
     else
-      printmos(f, orbs[1], order, eps[1], occa)
-      printmos(f, orbs[2], order, eps[2], occb, "Beta")
+      printmos(f, orbs[1], order, epsa, occa)
+      printmos(f, orbs[2], order, epsb, occb, "Beta")
     end
   end
   if (has_positron)

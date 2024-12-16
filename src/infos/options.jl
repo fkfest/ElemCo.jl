@@ -13,8 +13,8 @@ Base.@kwdef mutable struct WfOptions
   nelec::Int = -1
   """`⟨0⟩` charge of the system (relative to nelec/FCIDump/neutral system!). """
   charge::Int = 0
-  """`⟨"E_Am"⟩` filename of the orbital energies. """
-  eps::String = "E_Am"
+  """`⟨["e_m","e_M"]⟩` filename of the orbital energies."""
+  eps::Vector{String} = ["e_m", "e_M"]
   """`⟨"O_Am"⟩` filename of the orbital occupation. """
   occ::String = "O_Am"
   """`⟨"C_Am"⟩` filename of MO coefficients. 
@@ -22,8 +22,8 @@ Base.@kwdef mutable struct WfOptions
   orb::String = "C_Am"
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
-  """`⟨"E_Am_pos"⟩` filename of the positron orbital energies. """
-  eps_pos::String = "E_Am_pos"
+  """`⟨"e_m_pos"⟩` filename of the positron orbital energies. """
+  eps_pos::String = "e_m_pos"
   """`⟨"O_Am_pos"⟩` filename of the positron orbital occupation. """
   occ_pos::String = "O_Am_pos"
   """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 

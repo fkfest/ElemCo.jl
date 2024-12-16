@@ -146,28 +146,6 @@ function load_orbitals(EC::ECInfo, orbsfile::String="")
 end
 
 """
-    load_epsilon(EC::ECInfo, orbsfile::String="")
-
-  Load (last) orbital energies.
-  
-  - from file `epsfile` if not empty
-  - from file [`WfOptions.ϵ`](@ref ECInfos.WfOptions) if not empty
-  - error if all files are empty
-
-  Returns `::SpinMatrix`. 
-"""
-function load_epsilon(EC::ECInfo, epsfile::String="")
-  if !isempty(strip(epsfile))
-    # epsfile will be used
-  elseif !isempty(strip(EC.options.wf.eps))
-    epsfile = EC.options.wf.eps
-  else
-    error("no orbitals found")
-  end
-  return load_all(EC, epsfile, Val(1))
-end
-
-"""
     load_positron_orbitals(EC::ECInfo, orbsfile::String="")
 
   Load (last) orbitals.
