@@ -69,6 +69,10 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   basisset = generate_basis(EC, "ao")
   order = ao_permutation(EC, true)
   orbs = load_orbitals(EC)
+  eps = load_epsilon(EC)
+  @show eps
+  occ = load_occupations(EC)
+  @show occ
   open(filename, "w") do f
     println(f, "[Molden Format]")
     distunit = unit(EC.system[1].position[1])
@@ -108,14 +112,62 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     #TODO use correct energies and occupations
     if is_restricted(orbs)
       cmo = orbs[1]
-      energies = zeros(size(cmo,2))
-      occupation = zeros(size(cmo,2))
+      energies = eps
+      occupation = occ
       printmos(f, cmo, order, energies, occupation)
     else
-      energies = zeros(size(orbs[1],2))
-      occupation = zeros(size(orbs[1],2))
-      printmos(f, orbs[1], order, energies, occupation)
-      printmos(f, orbs[2], order, energies, occupation, "Beta")
+      printmos(f, orbs[1], order, eps, occ)
+      printmos(f, orbs[2], order, eps, occ, "Beta")
+    end
+  end
+  if (EC.options.wf.npositron > 0)
+    orbs_pos = load_positron_orbitals(EC)
+    eps_pos = load_positron_epsilon(EC)
+    occ_pos = load_positron_occupations(EC)
+    println("Writing also positron orbitals to $(filename)_positron")
+    open(filename*"_positron", "w") do f
+      println(f, "[Molden Format]")
+      distunit = unit(EC.system[1].position[1])
+      if distunit == u"bohr"
+        println(f, "[Atoms] AU")
+      else
+        distunit = u"angstrom"
+        println(f, "[Atoms] Angs")
+      end
+      for (iat,atom) in enumerate(EC.system)
+        coord = uconvert.(distunit, atom.position)/distunit
+        @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
+                atomic_center_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
+      end
+      println(f, "[GTO]")
+      for ic in center_range(basisset)
+        println(f, "   ", ic, " ", 0)
+        for ash in basisset.centers[ic].shells
+          for con in ash.subshells
+            println(f, " ", subshell_char(ash.l), " ", length(con.exprange))
+            for (i, iex) in enumerate(con.exprange)
+              @printf(f, "%.10E %.10E\n", ash.exponents[iex], con.coefs[i])
+            end
+          end
+        end
+        println(f)
+      end
+      println(f, "[MO]")
+      if !is_cartesian(basisset)
+        maxl = max_l(basisset)
+        maxl > 1 && println(f, "[5D]")
+        maxl > 2 && println(f, "[7F]")
+        maxl > 3 && println(f, "[9G]")
+        maxl > 4 && println(f, "[11H]")
+        maxl > 5 && println(f, "[13I]")
+      end
+      #TODO use correct energies 
+      cmo = orbs_pos[1]
+      energies = eps_pos
+      occupation = occ_pos
+      # Only first orbital for positron is occupied
+      occupation[1] = 1
+      printmos(f, cmo, order, energies, occupation)
     end
   end
 end
@@ -127,6 +179,15 @@ end
 """
 function printmos(f, orbs, order, energies, occupation, spin="Alpha")
   nmo = size(orbs,2)
+  #@show orbs
+  @show nmo
+  @show energies
+  @show occupation
+  # show some shapes of above variables
+  @show size(orbs)
+  @show size(energies)
+  @show size(occupation)
+
   for imo = 1:nmo
     println(f, " Sym=  ", imo, ".1")
     println(f, " Ene=  ", energies[imo])

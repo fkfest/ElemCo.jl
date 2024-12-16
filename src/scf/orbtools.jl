@@ -15,7 +15,7 @@ using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions
 
-export guess_orb, guess_pos_orb, load_orbitals, orbital_energies
+export guess_orb, guess_pos_orb, load_orbitals, orbital_energies, load_positron_orbitals, load_epsilon, load_positron_epsilon, load_occupations, load_positron_occupations
 export show_orbitals
 export rotate_orbs, rotate_orbs!, normalize_phase!
 
@@ -143,6 +143,117 @@ function load_orbitals(EC::ECInfo, orbsfile::String="")
     error("no orbitals found")
   end
   return SpinMatrix(load_all(EC, orbsfile, Val(2))...)
+end
+
+"""
+    load_epsilon(EC::ECInfo, orbsfile::String="")
+
+  Load (last) orbital energies.
+  
+  - from file `epsfile` if not empty
+  - from file [`WfOptions.ϵ`](@ref ECInfos.WfOptions) if not empty
+  - error if all files are empty
+
+  Returns `::SpinMatrix`. 
+"""
+function load_epsilon(EC::ECInfo, epsfile::String="")
+  if !isempty(strip(epsfile))
+    # epsfile will be used
+  elseif !isempty(strip(EC.options.wf.eps))
+    epsfile = EC.options.wf.eps
+  else
+    error("no orbitals found")
+  end
+  return load(EC, epsfile)
+end
+
+"""
+    load_occupations(EC::ECInfo, occfile::String="")
+
+  Load (last) orbital occupations.
+
+  - from file `occfile` if not empty
+  - from file [`WfOptions.occ`](@ref ECInfos.WfOptions) if not empty
+  - error if all files are empty
+
+  Returns `::SpinMatrix`.
+"""
+function load_occupations(EC::ECInfo, occfile::String="")
+  if !isempty(strip(occfile))
+    # occfile will be used
+  elseif !isempty(strip(EC.options.wf.occ))
+    occfile = EC.options.wf.occ
+  else
+    error("no orbitals found")
+  end
+  return load(EC, occfile)
+end
+
+
+"""
+    load_positron_orbitals(EC::ECInfo, orbsfile::String="")
+
+  Load (last) orbitals.
+  
+  - from file `orbsfile` if not empty
+  - from file [`WfOptions.orb_pos`](@ref ECInfos.WfOptions) if not empty
+  - error if all files are empty
+
+  Returns `::SpinMatrix`. 
+"""
+function load_positron_orbitals(EC::ECInfo, orbsfile::String="")
+  if !isempty(strip(orbsfile))
+    # orbsfile will be used
+  elseif !isempty(strip(EC.options.wf.orb))
+    orbsfile = EC.options.wf.orb_pos
+  else
+    error("no orbitals found")
+  end
+  return load_all(EC, orbsfile, Val(2))
+end
+
+"""
+    load_positron_epsilon(EC::ECInfo, epsfile::String="")
+
+  Load (last) orbital energies.
+  
+  - from file `epsfile` if not empty
+  - from file [`WfOptions.ϵ_pos`](@ref ECInfos.WfOptions) if not empty
+  - error if all files are empty
+
+  Returns `::SpinMatrix`. 
+"""
+function load_positron_epsilon(EC::ECInfo, epsfile::String="")
+  if !isempty(strip(epsfile))
+    # epsfile will be used
+  elseif !isempty(strip(EC.options.wf.eps_pos))
+    epsfile = EC.options.wf.eps_pos
+  else
+    error("no orbitals found")
+  end
+  return load(EC, epsfile)
+end
+
+"""
+    load_positron_occupations(EC::ECInfo, occfile::String="")
+
+  Load (last) orbital occupations.
+
+  - from file `occfile` if not empty
+  - from file [`WfOptions.occ_pos`](@ref ECInfos.WfOptions) if not empty
+  - error if all files are empty
+
+  Returns `::SpinMatrix`.
+"""
+function load_positron_occupations(EC::ECInfo, occfile::String="")
+  if !isempty(strip(occfile))
+    # occfile will be used
+  elseif !isempty(strip(EC.options.wf.occ))
+    occfile = EC.options.wf.occ_pos
+  else
+    error("no orbitals found")
+  end
+  return load(EC, occfile)
 end
 
 """
