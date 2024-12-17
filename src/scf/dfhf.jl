@@ -256,7 +256,7 @@ function dfuhf(EC::ECInfo)
   draw_endline()
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.eps[1], ϵ[1], description="DFUHF spin-up orbital energies")
-  save!(EC, EC.options.wf.eps[2], ϵ[2], description="DFHF spin-down orbital energies")
+  save!(EC, EC.options.wf.eps[2], ϵ[2], description="DFUHF spin-down orbital energies")
   save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
   return OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
 end
