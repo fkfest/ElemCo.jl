@@ -71,7 +71,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   orbs = load_orbitals(EC)
   SP = EC.space
   if is_restricted(orbs)
-    occ=append!(2*ones(Int, length(SP['o'])), zeros(Int, length(SP['v'])))
+    occ = [2*ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
     ϵo, ϵv = orbital_energies(EC)
     eps = append!(ϵo, ϵv)
   else
