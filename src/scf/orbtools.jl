@@ -181,8 +181,8 @@ end
 function load_positron_epsilon(EC::ECInfo, epsfile::String="")
   if !isempty(strip(epsfile))
     # epsfile will be used
-  elseif !isempty(strip("e_m_pos"))
-    epsfile = "e_m_pos"
+  elseif !isempty(strip(EC.options.wf.eps_pos))
+    epsfile = EC.options.wf.eps_pos
   else
     error("no orbitals found")
   end
