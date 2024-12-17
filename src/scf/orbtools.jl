@@ -170,7 +170,7 @@ end
 """
     load_positron_epsilon(EC::ECInfo, epsfile::String="")
 
-  Load (last) orbital energies.
+  Load (last) positron orbital energies.
   
   - from file `epsfile` if not empty
   - from file [`WfOptions.ϵ_pos`](@ref ECInfos.WfOptions) if not empty
