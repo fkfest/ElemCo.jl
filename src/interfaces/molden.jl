@@ -101,7 +101,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     for (iat,atom) in enumerate(EC.system)
       coord = uconvert.(distunit, atom.position)/distunit
       @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
-              atomic_center_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
+              atomic_center_symbol(atom), iat, basisset.centers[iat].charge, coord[1], coord[2], coord[3])
     end
     println(f, "[GTO]")
     for ic in center_range(basisset)
@@ -116,7 +116,6 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       end
       println(f)
     end
-    println(f, "[MO]")
     if !is_cartesian(basisset)
       maxl = max_l(basisset)
       maxl > 1 && println(f, "[5D]")
@@ -125,6 +124,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       maxl > 4 && println(f, "[11H]")
       maxl > 5 && println(f, "[13I]")
     end
+    println(f, "[MO]")
     if is_restricted(orbs)
       cmo = orbs[1]
       energies = eps
@@ -164,7 +164,6 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
         end
         println(f)
       end
-      println(f, "[MO]")
       if !is_cartesian(basisset)
         maxl = max_l(basisset)
         maxl > 1 && println(f, "[5D]")
@@ -173,6 +172,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
         maxl > 4 && println(f, "[11H]")
         maxl > 5 && println(f, "[13I]")
       end
+      println(f, "[MO]")
       cmo = orbs_pos[1]
       energies = eps_pos
       occupation = occ_pos
