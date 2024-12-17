@@ -79,7 +79,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     occb = [ones(Int, length(SP['O'])); zeros(Int, length(SP['V']))]
     ϵoa, ϵva = orbital_energies(EC, :α)
     ϵob, ϵvb = orbital_energies(EC, :β)
-    epsa = append!(ϵoa, ϵva)
+    epsa = [ϵoa; ϵva]
     epsb = append!(ϵob, ϵvb)
   end
   has_positron = EC.options.wf.npositron > 0
