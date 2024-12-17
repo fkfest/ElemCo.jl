@@ -75,7 +75,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     ϵo, ϵv = orbital_energies(EC)
     eps = append!(ϵo, ϵv)
   else
-    occa=append!(ones(Int, length(SP['o'])), zeros(Int, length(SP['v'])))
+    occa = [ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
     occb = [ones(Int, length(SP['O'])); zeros(Int, length(SP['V']))]
     ϵoa, ϵva = orbital_energies(EC, :α)
     ϵob, ϵvb = orbital_energies(EC, :β)
