@@ -96,7 +96,7 @@ end
 """
     dfhf_positron(EC::ECInfo)
 
-  Perform closed-shell DF-HF calculation.
+  Perform closed-shell DF-HF calculation with positron.
   Returns the energy as the `HF` key in `OutDict`.
 """
 function dfhf_positron(EC::ECInfo)
