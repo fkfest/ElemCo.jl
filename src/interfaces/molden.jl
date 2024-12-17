@@ -73,7 +73,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   if is_restricted(orbs)
     occ = [2*ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
     ϵo, ϵv = orbital_energies(EC)
-    eps = append!(ϵo, ϵv)
+    eps = [ϵo; ϵv]
   else
     occa = [ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
     occb = [ones(Int, length(SP['O'])); zeros(Int, length(SP['V']))]
