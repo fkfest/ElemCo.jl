@@ -148,7 +148,7 @@ end
 """
     load_positron_orbitals(EC::ECInfo, orbsfile::String="")
 
-  Load (last) orbitals.
+  Load (last) positron orbitals.
   
   - from file `orbsfile` if not empty
   - from file [`WfOptions.orb_pos`](@ref ECInfos.WfOptions) if not empty
