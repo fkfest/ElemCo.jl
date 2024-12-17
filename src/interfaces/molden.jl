@@ -116,7 +116,6 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       end
       println(f)
     end
-    println(f, "[MO]")
     if !is_cartesian(basisset)
       maxl = max_l(basisset)
       maxl > 1 && println(f, "[5D]")
@@ -125,6 +124,7 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       maxl > 4 && println(f, "[11H]")
       maxl > 5 && println(f, "[13I]")
     end
+    println(f, "[MO]")
     if is_restricted(orbs)
       cmo = orbs[1]
       energies = eps
