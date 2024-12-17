@@ -69,6 +69,26 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   basisset = generate_basis(EC, "ao")
   order = ao_permutation(EC, true)
   orbs = load_orbitals(EC)
+  SP = EC.space
+  if is_restricted(orbs)
+    occ = [2*ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
+    ϵo, ϵv = orbital_energies(EC)
+    eps = [ϵo; ϵv]
+  else
+    occa = [ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
+    occb = [ones(Int, length(SP['O'])); zeros(Int, length(SP['V']))]
+    ϵoa, ϵva = orbital_energies(EC, :α)
+    ϵob, ϵvb = orbital_energies(EC, :β)
+    epsa = [ϵoa; ϵva]
+    epsb = [ϵob; ϵvb]
+  end
+  has_positron = EC.options.wf.npositron > 0
+  if has_positron
+    orbs_pos = load_positron_orbitals(EC)
+    eps_pos = load_positron_epsilon(EC)
+    occ_pos = zeros(Int, length(SP['m']))
+    occ_pos[1] = 1
+  end
   open(filename, "w") do f
     println(f, "[Molden Format]")
     distunit = unit(EC.system[1].position[1])
@@ -105,17 +125,58 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       maxl > 4 && println(f, "[11H]")
       maxl > 5 && println(f, "[13I]")
     end
-    #TODO use correct energies and occupations
     if is_restricted(orbs)
       cmo = orbs[1]
-      energies = zeros(size(cmo,2))
-      occupation = zeros(size(cmo,2))
+      energies = eps
+      occupation = occ
       printmos(f, cmo, order, energies, occupation)
     else
-      energies = zeros(size(orbs[1],2))
-      occupation = zeros(size(orbs[1],2))
-      printmos(f, orbs[1], order, energies, occupation)
-      printmos(f, orbs[2], order, energies, occupation, "Beta")
+      printmos(f, orbs[1], order, epsa, occa)
+      printmos(f, orbs[2], order, epsb, occb, "Beta")
+    end
+  end
+  if (has_positron)
+    println("Writing also positron orbitals to $(filename)_positron")
+    open(filename*"_positron", "w") do f
+      println(f, "[Molden Format]")
+      distunit = unit(EC.system[1].position[1])
+      if distunit == u"bohr"
+        println(f, "[Atoms] AU")
+      else
+        distunit = u"angstrom"
+        println(f, "[Atoms] Angs")
+      end
+      for (iat,atom) in enumerate(EC.system)
+        coord = uconvert.(distunit, atom.position)/distunit
+        @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
+                atomic_center_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
+      end
+      println(f, "[GTO]")
+      for ic in center_range(basisset)
+        println(f, "   ", ic, " ", 0)
+        for ash in basisset.centers[ic].shells
+          for con in ash.subshells
+            println(f, " ", subshell_char(ash.l), " ", length(con.exprange))
+            for (i, iex) in enumerate(con.exprange)
+              @printf(f, "%.10E %.10E\n", ash.exponents[iex], con.coefs[i])
+            end
+          end
+        end
+        println(f)
+      end
+      println(f, "[MO]")
+      if !is_cartesian(basisset)
+        maxl = max_l(basisset)
+        maxl > 1 && println(f, "[5D]")
+        maxl > 2 && println(f, "[7F]")
+        maxl > 3 && println(f, "[9G]")
+        maxl > 4 && println(f, "[11H]")
+        maxl > 5 && println(f, "[13I]")
+      end
+      cmo = orbs_pos[1]
+      energies = eps_pos
+      occupation = occ_pos
+      printmos(f, cmo, order, energies, occupation)
     end
   end
 end

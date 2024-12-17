@@ -18,6 +18,8 @@ Base.@kwdef mutable struct WfOptions
   orb::String = "C_Am"
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
+  """`⟨"e_m_pos"⟩` filename of the positron orbital energies. """
+  eps_pos::String = "e_m_pos"
   """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 
   Used by all programs to read and write positron orbitals from/to file. """
   orb_pos::String = "C_Am_pos"

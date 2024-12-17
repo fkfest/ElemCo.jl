@@ -88,6 +88,7 @@ function dfhf(EC::ECInfo)
   println("DF-HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
+  save!(EC, "e_m", ϵ, description="DFHF orbital energies")
   save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
   return OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
 end
@@ -95,7 +96,7 @@ end
 """
     dfhf_positron(EC::ECInfo)
 
-  Perform closed-shell DF-HF calculation.
+  Perform closed-shell DF-HF calculation with positron.
   Returns the energy as the `HF` key in `OutDict`.
 """
 function dfhf_positron(EC::ECInfo)
@@ -126,7 +127,6 @@ function dfhf_positron(EC::ECInfo)
   ϵ = zeros(norb)
   ε_pos = zeros(norb)
   hsmall = load(EC, "h_AA", Val(2))
-  hsmall_pos = load(EC, "h_positron_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
   # display(sao)
   EHF = 0.0
@@ -170,6 +170,8 @@ function dfhf_positron(EC::ECInfo)
   println("DF-HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
+  save!(EC, "e_m", ϵ, description="DFHF orbital energies")
+  save!(EC, EC.options.wf.eps_pos, ε_pos, description="DFHF positron orbital energies")
   save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
   save!(EC, EC.options.wf.orb_pos, cPO, description="DFHF positron orbitals")
   return OutDict("HF"=>(EHF, "closed-shell DF-HF+ energy"), "E"=>(EHF, "closed-shell DF-HF+ energy"))
@@ -253,6 +255,8 @@ function dfuhf(EC::ECInfo)
   println("DF-UHF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
+  save!(EC, "e_m", ϵ[1], description="DFUHF spin-up orbital energies")
+  save!(EC, "e_M", ϵ[2], description="DFUHF spin-down orbital energies")
   save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
   return OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
 end
