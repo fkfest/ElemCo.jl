@@ -8,8 +8,13 @@ const BASIS_LIB = joinpath(@__DIR__, "..", "..", "lib", "basis_sets")
   Return a list of angular shells [`AngularShell`](@ref).
 """
 function parse_basis(basis_name::String, atom::Atom)
-  basisfile = basis_file(basis_name)
-  basisblock = read_basis_block(basisfile, atom)
+  if startswith(basis_name, "{")
+    # the basis block is given explicitly, parse basis set from string
+    return parse_basis_block(strip(basis_name, ['{','}'] ) , atom)
+  else
+    basisfile = basis_file(basis_name)
+    basisblock = read_basis_block(basisfile, atom)
+  end
   return parse_basis_block(basisblock, atom)
 end
 
@@ -126,7 +131,7 @@ function read_basis_block(basisfile::AbstractString, atom::Atom)
 end
 
 """
-    parse_basis_block(basisblock::AbstractString, atom::Atom) 
+    parse_basis_block(basis_block::AbstractString, atom::Atom) 
 
   Parse the basis block for a given atom.
 
@@ -158,8 +163,9 @@ p, H , 0.8000000
 c, 1.1, 1.0000000
 ```
 """
-function parse_basis_block(basisblock::AbstractString, atom::Atom)
-  elem = element_SYMBOL(atom)
+function parse_basis_block(basis_block::AbstractString, atom::Atom)
+  basisblock = lowercase(basis_block)
+  elem = lowercase(element_SYMBOL(atom))
   # search for ` s, $elem , 13...`
   reg_exp = Regex("^\\s*[$SUBSHELLS_NAMES]\\s*,\\s*$elem\\s*,")
   reg_con = Regex("^\\s*c,\\s*")
