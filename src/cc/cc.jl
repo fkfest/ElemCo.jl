@@ -2595,11 +2595,12 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   pert_svd_T = true
   
   if cc3
-    print_info("CC3")
+    error("SVD-CC3 not implemented yet")
+    print_info("SVD-CC3")
   else
-    print_info("DC-CCSDT")
+    print_info("SVD-DC-CCSDT")
     if pert_svd_T
-      println("DC-CCSDT with SVD-(T)")
+      println("SVD-DC-CCSDT with SVD-(T)")
     end
   end
   calc_integrals_decomposition(EC)
@@ -2656,7 +2657,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     t1 = print_time(EC, t1, "dressed 3-idx integrals", 2)
     R1, R2 = calc_cc_resid(EC, T1, T2)
     t1 = print_time(EC, t1, "ccsd residual", 2)
-    calc_triples_residuals!(EC, R1, R2, T2, cc3)
+    calc_triples_residuals!(EC, R1, R2, T2)
     t1 = print_time(EC, t1, "R3", 2)
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
@@ -2751,13 +2752,11 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   nvirt = n_virt_orbs(EC)
 
   # first approx for U^iX_a from doubles decomposition
-  tol2 = EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac
+  tol2 = sqrt(EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
   UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nocc*nvirt, nocc*nvirt)), nvirt, nocc, tol2)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX) 
-  # use tol^2 because D2 = (T3)^2
-  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
-  # UaiX = eigen_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol^2)
+  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -2792,7 +2791,7 @@ function calc_triples_decomposition(EC::ECInfo)
   end
   close(t3file)
   if use_svd
-    UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol)
+    UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol))
   else
     naux = nvirt * 2 
     UaiX = iter_svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, naux)
@@ -3098,9 +3097,9 @@ end
 """
     calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
 
-  Calculate decomposed triples DC-CCSDT or CC3 residuals.
+  Calculate decomposed triples DC-CCSDT residuals.
 """
-function calc_triples_residuals!(EC::ECInfo, R1, R2, T2, cc3 = false)
+function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   t1 = time_ns()
   UvoX = load3idx(EC, "C_voX")
   #display(UvoX)
