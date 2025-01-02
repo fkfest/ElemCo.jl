@@ -72,6 +72,7 @@ using ..ElemCo.DecompTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
+using ..ElemCo.DFTools: get_auxblks
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy 
 export calc_cc, calc_pertT
@@ -2644,6 +2645,9 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     output_E_method(Eh_init["E"], "SVD-CCSD(T)", "correlation energy:")
   end
 
+  # calc intermediates for SVD-T
+  calc_intermediates4triples(EC)
+
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     #get dressed integrals
@@ -2652,9 +2656,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     t1 = print_time(EC, t1, "dressed 3-idx integrals", 2)
     R1, R2 = calc_cc_resid(EC, T1, T2)
     t1 = print_time(EC, t1, "ccsd residual", 2)
-    R1, R2 = add_to_singles_and_doubles_residuals(EC, R1, R2)
-    t1 = print_time(EC, t1, "R1(T3) and R2(T3)", 2)
-    calc_triples_residuals(EC, T1, T2, cc3)
+    calc_triples_residuals!(EC, R1, R2, T2, cc3)
     t1 = print_time(EC, t1, "R3", 2)
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
@@ -2735,49 +2737,6 @@ function SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
   GC.gc()
 end
 
-
-"""
-    add_to_singles_and_doubles_residuals(EC, R1, R2)
-
-  Add contributions from triples to singles and doubles residuals.
-"""
-function add_to_singles_and_doubles_residuals(EC, R1, R2)
-  SP = EC.space
-  ooPfile, ooP = mmap3idx(EC, "d_ooL")
-  ovPfile, ovP = mmap3idx(EC, "d_ovL")
-  Txyz = load3idx(EC, "T_XXX")
-  
-  U = load3idx(EC, "C_voX")
-  # println(size(U))
-
-  @tensoropt Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
-  @tensoropt A[P,X] := Boo[i,i,P,X] 
-  @tensoropt BBU[Z,d,j] := (ovP[j,c,P] * ovP[k,d,P]) * U[c,k,Z]
-  @tensoropt R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
-  @tensoropt R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,d,j] ))
-
-  BBU = nothing
-
-  @tensoropt Bov[i,a,P,X] := ooP[j,i,P] * U[a,j,X]
-  vvPfile, vvP = mmap3idx(EC, "d_vvL")
-  @tensoropt Bvo[a,i,P,X] := vvP[a,b,P] * U[b,i,X]
-  close(vvPfile)
-  vvP = nothing
-  dfock = load2idx(EC, "df_mm")
-  fov = dfock[SP['o'], SP['v']]
-  # R2[abij] = RR2[abij] + RR2[baji]  
-  @tensoropt RR2[a,b,i,j] := U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
-  @tensoropt RR2[a,b,i,j] += 2.0*U[b,j,Y] * ((Bvo[a,i,P,Z] - Bov[i,a,P,Z])*(Txyz[X,Y,Z] * A[P,X]))
-  @tensoropt RR2[a,b,i,j] += (Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Boo[k,j,P,Y] * (Txyz[X,Y,Z] * U[b,k,X]))
-  @tensoropt RR2[a,b,i,j] -= U[b,j,Z] * (Txyz[X,Y,Z] * (Bvo[a,k,P,X] * Boo[k,i,P,Y] - U[a,k,Y] * (Bov[i,c,P,X] * ovP[k,c,P])))
-  @tensoropt R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
-  close(ovPfile)
-  close(ooPfile)
-
-  return R1,R2
-end
-
-
 """
     calc_triples_decomposition_without_triples(EC::ECInfo, T2)
 
@@ -2804,7 +2763,7 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   #display(UaiX)
   naux = length(ϵX)
   save!(EC,"C_voX",UaiX)
-  # TODO: calc starting guess for T3_XYZ from T2 and UvoX
+  # TODO: calc starting guess for T_XXX from T2 and UvoX
   save!(EC,"T_XXX",zeros(naux, naux, naux))
 end
 
@@ -2943,8 +2902,8 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   #display(UvoX)
 
   #load decomposed amplitudes
-  T3_XYZ = load3idx(EC, "T_XXX")
-  #display(T3_XYZ)
+  T_XXX = load3idx(EC, "T_XXX")
+  #display(T_XXX)
   #load df coeff
   ooPfile, ooP = mmap3idx(EC, "d_ooL")
   voPfile, voP = mmap3idx(EC, "d_voL")
@@ -2966,7 +2925,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   #flush(stdout)
   
   nocc = n_occ_orbs(EC)
-  nsvd = size(T3_XYZ, 1)
+  nsvd = size(T_XXX, 1)
   Term1 = zeros(nsvd,nsvd,nsvd)
   for j in 1:nocc
     ThetaoccCut = Thetaocc[:,j,:]
@@ -3004,28 +2963,157 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   #flush(stdout)
 end
 
+"""
+    calc_intermediates4triples(EC::ECInfo)
 
+  Calculate intermediates for decomposed triples independent of the amplitudes.
+"""
+function calc_intermediates4triples(EC::ECInfo)
+  UvoX = load3idx(EC, "C_voX")
+  ovLfile, ovL = mmap3idx(EC, "d_ovL")
 
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nX = size(UvoX, 3)
+  nL = size(ovL, 3)
+
+  LBlks = get_auxblks(nL)
+
+  A_XL = zeros(nX, nL)
+  B_XX = zeros(nX, nX)
+  w_ovX = zeros(nocc, nvirt, nX)
+  B_ooXLfile, B_ooXL = newmmap(EC, "B_ooXL", (nocc,nocc,nX,nL))
+  for L in LBlks
+    v!ovL = @view ovL[:,:,L]	  
+    v!B_ooXL = @view B_ooXL[:,:,:,L]
+    # ``B_i^{jXL} = v_i^{aL} U^{jX}_a``
+    @mtensor v!B_ooXL[i,j,X,L] = v!ovL[i,a,L] * UvoX[a,j,X]
+    # ``A^{XL} = B_i^{iXL}``
+    v!A_XL = @view A_XL[:,L]
+    @mtensor v!A_XL[X,L] = v!B_ooXL[i,i,X,L]
+    # ``B^{XY} = B_j^{kXL} B_k^{jYL}``
+    @mtensor B_XX[X,Y] += v!B_ooXL[j,k,X,L] * v!B_ooXL[k,j,Y,L]
+    # ``w_k^{dX} = v_l^{dL} B_k^{lXL}``
+    @mtensor w_ovX[k,d,X] += v!ovL[l,d,L] * v!B_ooXL[k,l,X,L]
+  end
+  closemmap(EC, B_ooXLfile, B_ooXL)
+  close(ovLfile)
+  save!(EC, "A_XL", A_XL)
+  save!(EC, "B_XX", B_XX)
+  save!(EC, "w_ovX", w_ovX)
+end
+
+# Function to calculate length for buffer(s) buf
+# autogenerated by @print_buffer_usage
+function auto_buf_length4calc_triples_residuals(nvirt, nX, nocc, nL, lenL, lenX, lenY, lenZ, lenXt, lena)
+    buf = [0, 0]
+    vY_ovX = pseudo_alloc!(buf, nocc, nvirt, nX)
+    tT2 = pseudo_alloc!(buf, nvirt, nocc, nocc, nvirt)
+    begin
+        V_voL = pseudo_alloc!(buf, nvirt, nocc, lenL)
+        pseudo_drop!(buf, V_voL)
+    end
+    pseudo_drop!(buf, tT2)
+    UvY_oXoX = pseudo_alloc!(buf, nocc, nX, nocc, nX)
+    pseudo_drop!(buf, UvY_oXoX)
+    pseudo_drop!(buf, vY_ovX)
+    RR_vovo = pseudo_alloc!(buf, nvirt, nocc, nvirt, nocc)
+    R_voX = pseudo_alloc!(buf, nvirt, nocc, nX)
+    R_ooX = pseudo_alloc!(buf, nocc, nocc, nX)
+    G_ooX = pseudo_alloc!(buf, nocc, nocc, nX)
+    w_ovX = pseudo_alloc!(buf, nocc, nvirt, nX)
+    fU_X = pseudo_alloc!(buf, nX)
+    begin
+        TvoXX = pseudo_alloc!(buf, nvirt, nocc, nX, lenX)
+        begin
+            TUvY_voXX = pseudo_alloc!(buf, nvirt, nocc, lenY, lenX)
+            a!Q_XXX = pseudo_alloc!(buf, nX, lenY, lenX)
+            pseudo_drop!(buf, a!Q_XXX)
+            pseudo_drop!(buf, TUvY_voXX)
+        end
+        Bv_vvX = pseudo_alloc!(buf, nvirt, nvirt, lenX)
+        Bv_ooX = pseudo_alloc!(buf, nocc, nocc, lenX)
+        begin
+            bB_voXL = pseudo_alloc!(buf, nvirt, nocc, lenX, lenL)
+            B_voXL = pseudo_alloc!(buf, nvirt, nocc, lenX, lenL)
+            pseudo_drop!(buf, B_voXL)
+            a!W_XXL = pseudo_alloc!(buf, nX, lenX, lenL)
+            pseudo_drop!(buf, a!W_XXL)
+            V_XXL = pseudo_alloc!(buf, nX, lenX, lenL)
+            V_voXL = pseudo_alloc!(buf, nvirt, nocc, lenX, lenL)
+            pseudo_drop!(buf, V_voXL)
+            pseudo_drop!(buf, V_XXL)
+            pseudo_drop!(buf, bB_voXL)
+        end
+        UBv = pseudo_alloc!(buf, nvirt, nocc, nX, lenX)
+        pseudo_drop!(buf, UBv)
+        pseudo_drop!(buf, Bv_ooX, Bv_vvX)
+        pseudo_drop!(buf, TvoXX)
+    end
+    pseudo_drop!(buf, fU_X)
+    pseudo_drop!(buf, w_ovX)
+    pseudo_drop!(buf, G_ooX, R_ooX)
+    pseudo_drop!(buf, R_voX)
+    pseudo_drop!(buf, RR_vovo)
+    A_XL = pseudo_alloc!(buf, nX, nL)
+    B_XX = pseudo_alloc!(buf, nX, nX)
+    pseudo_drop!(buf, A_XL, B_XX)
+    begin
+        vV_XXov = pseudo_alloc!(buf, nX, lenX, nocc, nvirt)
+        pseudo_drop!(buf, vV_XXov)
+    end
+    oovo = pseudo_alloc!(buf, nocc, nocc, nvirt, nocc)
+    begin
+        vvov = pseudo_alloc!(buf, lena, nvirt, nocc, nvirt)
+        a!UvoX = pseudo_alloc!(buf, lena, nocc, nX)
+        a!T2 = pseudo_alloc!(buf, nvirt, lena, nocc, nocc)
+        vT_vooo = pseudo_alloc!(buf, lena, nocc, nocc, nocc)
+        pseudo_drop!(buf, vT_vooo)
+        vT_vvvo = pseudo_alloc!(buf, lena, nvirt, nvirt, nocc)
+        pseudo_drop!(buf, vT_vvvo)
+        pseudo_drop!(buf, a!T2, a!UvoX)
+        pseudo_drop!(buf, vvov)
+    end
+    pseudo_drop!(buf, oovo)
+    begin
+        XT_voXX = pseudo_alloc!(buf, nvirt, nocc, nX, lenZ)
+        pseudo_drop!(buf, XT_voXX)
+    end
+    W_LXX = pseudo_alloc!(buf, nL, nX, nX)
+    begin
+        W_XXX = pseudo_alloc!(buf, nX, nX, lenXt)
+        qq_XX = pseudo_alloc!(buf, nX, lenXt)
+        pseudo_drop!(buf, qq_XX, W_XXX)
+    end
+    pseudo_drop!(buf, W_LXX)
+    q_voX = pseudo_alloc!(buf, nvirt, nocc, nX)
+    vvoo = pseudo_alloc!(buf, nvirt, nvirt, nocc, nocc)
+    pseudo_drop!(buf, vvoo)
+    pseudo_drop!(buf, q_voX)
+    A_XL = pseudo_alloc!(buf, nX, nL)
+    pseudo_drop!(buf, A_XL)
+    return buf[2]
+end
 
 """
-    calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
+    calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
 
   Calculate decomposed triples DC-CCSDT or CC3 residuals.
 """
-function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
+function calc_triples_residuals!(EC::ECInfo, R1, R2, T2, cc3 = false)
   t1 = time_ns()
   UvoX = load3idx(EC, "C_voX")
   #display(UvoX)
 
   #load decomposed amplitudes
-  T3_XYZ = load3idx(EC, "T_XXX")
-  #display(T3_XYZ)
+  T_XXX = load3idx(EC, "T_XXX")
+  #display(T_XXX)
 
   #load df coeff
-  ovPfile, ovP = mmap3idx(EC, "d_ovL")
-  voPfile, voP = mmap3idx(EC, "d_voL")
-  ooPfile, ooP = mmap3idx(EC, "d_ooL")
-  vvPfile, vvP = mmap3idx(EC, "d_vvL")
+  ovLfile, ovL = mmap3idx(EC, "d_ovL")
+  voLfile, voL = mmap3idx(EC, "d_voL")
+  ooLfile, ooL = mmap3idx(EC, "d_ooL")
+  vvLfile, vvL = mmap3idx(EC, "d_vvL")
 
   #load dressed fock matrices
   SP = EC.space
@@ -3036,484 +3124,369 @@ function calc_triples_residuals(EC::ECInfo, T1, T2, cc3 = false)
  
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
-  nsvd = size(T3_XYZ, 1)
-  naux = size(voP, 3)
+  nX = size(T_XXX, 1)
+  nL = size(voL, 3)
 
-  myallocator = TensorOperations.ManualAllocator()
+  LBlks = get_auxblks(nL)
+  XBlks = get_auxblks(nX)
+  XBigBlks = get_auxblks(nX, 256)
+  virtBlks = get_auxblks(nvirt)
 
-  @tensor allocator = myallocator  VvoA[a,i,L] := ovP[k,c,L] * (2.0 * T2[a,c,i,k] - T2[c,a,i,k])
-  
-  @tensor allocator = myallocator  YSA[X,L] := UvoX[a,i,X] * (voP[a,i,L] + VvoA[a,i,L])
-  @tensor allocator = myallocator  TvSo[a,X,i] := UvoX[b,j,X] * T2[a,b,i,j]
+  maxL = maximum(length, LBlks)
+  maxX = maximum(length, XBlks)
+  maxXBig = maximum(length, XBigBlks)
+  maxa = maximum(length, virtBlks)
+  lenbuf = auto_buf_length4calc_triples_residuals(nvirt, nX, nocc, nL, maxL, maxXBig, maxX, maxX, nX, maxa)
+  buf = Buffer(lenbuf)
+  # @print_buffer_usage buf begin
 
-  @tensor allocator = myallocator  XvSv[b,Z,d] := vvP[b,d,L] * YSA[Z,L] - dfov[l,d] * TvSo[b,Z,l]  
-  @tensor allocator = myallocator  XoSo[l,Z,j] := ooP[l,j,L] * YSA[Z,L] 
-
-
-  AAS = zeros(naux,nsvd)
-  wovS = zeros(nocc,nvirt,nsvd)
-  for L in 1:naux
-    CutovP = ovP[1:nocc,1:nvirt,L]	  
-    CutvvP = vvP[1:nvirt,1:nvirt,L]
-    CutooP = ooP[1:nocc,1:nocc,L]
-    @tensor allocator = myallocator  GvSoA[b,X,j] := T2[b,c,j,k] * (UvoX[c,l,X] * CutooP[k,l] - UvoX[d,k,X] * CutvvP[d,c])
-    @tensor allocator = myallocator BooAS[i,j,X] := CutovP[i,a] * UvoX[a,j,X]
-    @tensor allocator = myallocator  GvSoA[b,X,j] -= UvoX[b,j,Z'] * (T3_XYZ[X,Y',Z'] * BooAS[i,i,Y'] - 0.5 * ((UvoX[c,m,X'] * T3_XYZ[X',Y',Z']) * BooAS[m,k,Y']) * UvoX[c,k,X])
-    
-    @tensor allocator = myallocator  XvSv[b,Z,d] += CutovP[l,d] * (GvSoA[b,Z,l] - CutvvP[b,c] * TvSo[c,Z,l])
-    CutvvP = nothing
-    @tensor allocator = myallocator  XoSo[l,Z,j] -= CutovP[l,d] * (GvSoA[d,Z,j] + CutooP[k,j] * TvSo[d,Z,k]) 
-    GvSoA = nothing
-    CutooP = nothing
-
-    @tensor allocator = myallocator  wovS[k,d,X] += CutovP[l,d] * BooAS[k,l,X]
-    CutovP = nothing
-    @tensor allocator = myallocator IntermediateAAS[X] := BooAS[i,i,X]
-    BooAS = nothing
-    AAS[L,1:nsvd] += IntermediateAAS[1:nsvd]
-    IntermediateAAS = nothing
+  Y_XL = zeros(nX, nL)
+  x_oo = dfoo
+  x_vv = dfvv
+  # ``vY_{lX}^{d} = v_{l}^{dL} Y_{X}^{L}``
+  vY_ovX = alloc!(buf, nocc, nvirt, nX)
+  vY_ovX .= 0.0
+  tT2 = alloc!(buf, nvirt, nocc, nocc, nvirt)
+  @mtensor tT2[a,i,j,b] = 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
+  for L in LBlks
+    lenL = length(L)
+    v!ovL = @view ovL[:,:,L]
+    v!voL = @view voL[:,:,L]
+    v!Y_XL = @view Y_XL[:,L]
+    V_voL = alloc!(buf, nvirt, nocc, lenL)
+    # ``V_{a}^{iL} = v_k^{cL} (2T^{ik}_{ac}- T^{ik}_{ca})``
+    n!V_voL = neuralyze(V_voL)
+    @mtensor n!V_voL[a,i,L] = tT2[a,i,k,c] * v!ovL[k,c,L]
+    # ``x_l^i = \hat f_l^i + 0.5 V_{d}^{iL} v_{l}^{dL}``
+    @mtensor x_oo[l,i] += 0.5 * v!ovL[l,d,L] * V_voL[d,i,L]
+    # ``x_a^d = \hat f_a^d - 0.5 V_{a}^{lL} v_{l}^{dL}``
+    @mtensor x_vv[a,d] -= 0.5 * v!ovL[l,d,L] * V_voL[a,l,L]
+    # ``Y_{X}^{L} = U^{†a}_{iX} (\hat v_{a}^{iL} + V_{a}^{iL})``
+    @mtensor V_voL[a,i,L] += v!voL[a,i,L]
+    @mtensor v!Y_XL[X,L] = UvoX[a,i,X] * V_voL[a,i,L]
+    drop!(buf, V_voL)
+    # ``vY_{lX}^{d} = v_{l}^{dL} Y_{X}^{L}``
+    @mtensor vY_ovX[l,d,X] += v!ovL[l,d,L] * v!Y_XL[X,L]
   end
+  drop!(buf, tT2)
+  # UvY[lYjX] = ``UvY_{lX}^{jY} = U^{jY}_d vY_{lX}^{d}``
+  UvY_oXoX = alloc!(buf, nocc, nX, nocc, nX)
+  n!UvY_oXoX = neuralyze(UvY_oXoX)
+  @mtensor n!UvY_oXoX[l,Y,j,X] = UvoX[d,j,Y] * vY_ovX[l,d,X]
+  save!(EC, "UvY_oXoX", UvY_oXoX)
+  drop!(buf, UvY_oXoX)
+  drop!(buf, vY_ovX)
 
-
-  for YPrime in 1:nsvd
-    CutUvoX = UvoX[1:nvirt,1:nocc,YPrime]
-    CutT3_XYZ = T3_XYZ[1:nsvd,YPrime,1:nsvd]
-    @tensor allocator = myallocator  XvSv[b,Z,d] += 0.5 * CutT3_XYZ[X',Z] * (CutUvoX[b,k] * wovS[k,d,X'])
-    @tensor allocator = myallocator  XoSo[l,Z,j] -= 0.5 * CutT3_XYZ[X',Z] * (CutUvoX[d,j] * wovS[l,d,X'])
-    CutT3_XYZ = nothing
-    CutUvoX = nothing
+  # ``T_{aX}^i = U^{†b}_{jX} T^{ij}_{ab}``
+  @mtensor T_voX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
+  # ``X_{bZ}^d = - \hat f_l^d T_{bZ}^{l} (+...)``
+  @mtensor X_vvX[b,d,Z] := - dfov[l,d] * T_voX[b,l,Z]
+  X_ooX = zeros(nocc, nocc, nX)
+  for L in LBlks
+    v!vvL = @view vvL[:,:,L]
+    v!ooL = @view ooL[:,:,L]
+    v!Y_XL = @view Y_XL[:,L]
+    # ``X_{bZ}^d += \hat v_b^{dL} Y_Z^{L}``
+    @mtensor X_vvX[b,d,Z] += v!vvL[b,d,L] * v!Y_XL[Z,L]
+    # ``X_{lZ}^j += \hat v_l^{jL} Y_Z^{L}``
+    @mtensor X_ooX[l,j,Z] += v!ooL[l,j,L] * v!Y_XL[Z,L] 
   end
-  wovS = nothing
  
-  BigQ = zeros(nsvd,nsvd,nsvd)
-  for b in 1:nvirt
-    CutTvSo = TvSo[b,1:nsvd,1:nocc]
-    CutUvoX = UvoX[b,1:nocc,1:nsvd]
-    CutXvSv = XvSv[b,1:nsvd,1:nvirt]
-    @tensor allocator = myallocator  BigQ[X,Y,Z] += CutUvoX[j,Y] * (CutTvSo[X,l] * XoSo[l,Z,j] - CutXvSv[Z,d] * TvSo[d,X,j] + (T3_XYZ[X',Y',Z] * CutUvoX[l,X']) * (UvoX[d,j,Y'] * (ovP[l,d,L] * YSA[X,L])))
-    CutXvSv = nothing
-    CutUvoX = nothing
-    CutTvSo = nothing
+  Q_XXX = zeros(nX, nX, nX)
+  # RR[aibj] = ``RR^{ij}_{ab}``
+  RR_vovo = alloc!(buf, nvirt, nocc, nvirt, nocc)
+  RR_vovo .= 0.0
+  R_voX = alloc!(buf, nvirt, nocc, nX)
+  R_voX .= 0.0
+  R_ooX = alloc!(buf,nocc,nocc,nX)
+  R_ooX .= 0.0
+  G_ooX = alloc!(buf, nocc, nocc, nX)
+  # ``W_{X}^{YL} = (\bar B - B)_b^{jYL} U^{\dagger b}_{jX}
+  W_XXLfile, W_XXL = newmmap(EC, "W_XXL", (nX, nX, nL))
+  # ``\tilde V_{YX}^{L} = T_{ZYX} A^{ZL} - 0.5 V_{aX}^{jL} U^{\dagger a}_{jY}``
+  tV_XXLfile, tV_XXL = newmmap(EC, "tV_XXL", (nX, nX, nL))
+  B_ooXLfile, B_ooXL = mmap4idx(EC, "B_ooXL")
+  A_XLfile, A_XL = mmap2idx(EC, "A_XL")
+  UvY_oXoXfile, UvY_oXoX = mmap4idx(EC, "UvY_oXoX")
+  w_ovX = alloc!(buf, nocc, nvirt, nX)
+  load!(EC, "w_ovX", w_ovX)
+  # ``fU^X = \hat f_k^c U^{kX}_c``
+  fU_X = alloc!(buf, nX)
+  @mtensor fU_X[X] = dfov[k,c] * UvoX[c,k,X]
+  for X in XBigBlks
+    lenX = length(X)
+    v!T_XXX = @view T_XXX[:,:,X]
+    v!UvoX = @view UvoX[:,:,X]
+    # ``T^i_{aYX} = U^{iZ}_a T_{ZYX}``
+    TvoXX = alloc!(buf, nvirt, nocc, nX, lenX)
+    @mtensor TvoXX[a,i,Y,X] = UvoX[a,i,Z] * v!T_XXX[Z,Y,X]
+    # ``R_{aY}^i += T_{aYX}^i fU^X``
+    v!fU_X = @view fU_X[X]
+    n!R_voX = neuralyze(R_voX)
+    @mtensor n!R_voX[a,i,Y] += TvoXX[a,i,Y,X] * v!fU_X[X]
+    # ``X_{bZ}^d += 0.5 T^k_{bYX} w_{k}^{dY}``
+    v!X_vvX = @view X_vvX[:,:,X]
+    @mtensor v!X_vvX[b,d,X] += 0.5 * TvoXX[b,k,Y,X] * w_ovX[k,d,Y]
+    # ``G_{jX}^i = T_{dYX}^i w_j^{dY}``
+    v!G_ooX = @view G_ooX[:,:,X]
+    n!v!G_ooX = neuralyze(v!G_ooX)
+    @mtensor n!v!G_ooX[j,i,X] = TvoXX[d,i,Y,X] * w_ovX[j,d,Y]
+    for Y in XBlks
+      lenY = length(Y)
+      v!UvY_oXoX = @view UvY_oXoX[:,:,:,Y]
+      # ``TUvY^j_{bYX} = T_{bZX}^l UvY_{Yl}^{jZ}``
+      TUvY_voXX = alloc!(buf, nvirt, nocc, lenY, lenX)
+      n!TUvY_voXX = neuralyze(TUvY_voXX)
+      @mtensor n!TUvY_voXX[b,j,Y,X] = TvoXX[b,l,Z,X] * v!UvY_oXoX[l,Z,j,Y]
+      # ``Q_{ZYX} = U^{\dagger b}_{jZ} TUvY^j_{bYX}``
+      a!Q_XXX = alloc!(buf, nX, lenY, lenX)
+      n!Q_XXX = neuralyze(a!Q_XXX)
+      @mtensor n!Q_XXX[Z,Y,X] = UvoX[b,j,Z] * TUvY_voXX[b,j,Y,X]
+      Q_XXX[:,Y,X] = a!Q_XXX
+      drop!(buf, a!Q_XXX)
+      drop!(buf, TUvY_voXX)
+    end
+    Bv_vvX = alloc!(buf, nvirt, nvirt, lenX)
+    Bv_vvX .= 0.0
+    Bv_ooX = alloc!(buf, nocc, nocc, lenX)
+    Bv_ooX .= 0.0
+    v!R_ooX = @view R_ooX[:,:,X]
+    for L in LBlks
+      lenL = length(L)
+      v!ooL = @view ooL[:,:,L]
+      v!vvL = @view vvL[:,:,L]
+      v!ovL = @view ovL[:,:,L]
+      # ``\bar B_a^{iXL} = \hat v_a^{bL} U^{iX}_b``
+      bB_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
+      @mtensor bB_voXL[a,i,X,L] = v!vvL[a,b,L] * v!UvoX[b,i,X]
+      # ``B_a^{iXL} = \hat v_j^{iL} U^{jX}_a``
+      B_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
+      @mtensor B_voXL[a,i,X,L] = v!ooL[j,i,L] * v!UvoX[a,j,X]
+      # ``Bv_a^{cX} = \bar B_a^{kXL} v_k^{cL}``
+      n!Bv_vvX = neuralyze(Bv_vvX)
+      @mtensor n!Bv_vvX[a,c,X] += bB_voXL[a,k,X,L] * v!ovL[k,c,L]
+      # ``Bv_k^{iX} = B_c^{iXL} v_k^{cL}``
+      n!Bv_ooX = neuralyze(Bv_ooX)
+      @mtensor n!Bv_ooX[k,i,X] += B_voXL[c,i,X,L] * v!ovL[k,c,L]
+      # ``\bar B_a^{iXL} -= B_a^{iXL}``
+      n!bB_voXL = neuralyze(bB_voXL)
+      @mtensor n!bB_voXL[a,i,X,L] -= B_voXL[a,i,X,L]
+      drop!(buf, B_voXL)
+      # ``W_{Y}^{XL} = (\bar B - B)_b^{jXL} U^{\dagger b}_{jY}
+      a!W_XXL = alloc!(buf, nX, lenX, lenL)
+      n!W_XXL = neuralyze(a!W_XXL)
+      @mtensor n!W_XXL[Y,X,L] = bB_voXL[b,j,X,L] * UvoX[b,j,Y]
+      W_XXL[:,X,L] = a!W_XXL
+      drop!(buf, a!W_XXL)
+
+      v!B_ooXL = @view B_ooXL[:,:,:,L]
+      v!A_XL = @view A_XL[:,L]
+      # ``V_{YX}^{L} = T_{ZYX} A^{ZL}``
+      V_XXL = alloc!(buf, nX, lenX, lenL)
+      @mtensor V_XXL[Y,X,L] = v!T_XXX[Z,Y,X] * v!A_XL[Z,L]
+      # ``R_{jX}^{i} = 2 B_j^{iYL} V_{YX}^{L}``
+      n!v!R_ooX = neuralyze(v!R_ooX)
+      @mtensor n!v!R_ooX[j,i,X] += 2.0 * v!B_ooXL[j,i,Y,L] * V_XXL[Y,X,L]
+      # ``R_{aZ}^i = 2 (\bar B - B)_a^{LiX} V_{ZX}^{L}``
+      n!R_voX = neuralyze(R_voX)
+      @mtensor n!R_voX[a,i,Z] += 2.0 * bB_voXL[a,i,X,L] * V_XXL[Z,X,L]
+      # V[ajXL]=``V_{aX}^{jL} = T^i_{aYX} B_i^{jYL}``
+      V_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
+      n!V_voXL = neuralyze(V_voXL)
+      @mtensor n!V_voXL[a,j,X,L] = TvoXX[a,i,Y,X] * v!B_ooXL[i,j,Y,L]
+      # ``\tilde V_{YX}^{L} -= 0.5 V_{aX}^{jL} U^{\dagger a}_{jY}``
+      n!V_XXL = neuralyze(V_XXL)
+      @mtensor n!V_XXL[Y,X,L] -= 0.5 * V_voXL[a,j,X,L] * UvoX[a,j,Y]
+      tV_XXL[:,X,L] = V_XXL
+      # ``RR^{ij}_{ab} -= (\bar B - B)_a^{LiX} V_{bX}^{jL}``
+      n!RR_vovo = neuralyze(RR_vovo)
+      @mtensor n!RR_vovo[a,i,b,j] -= bB_voXL[a,i,X,L] * V_voXL[b,j,X,L]
+      drop!(buf, V_voXL)
+      drop!(buf, V_XXL)
+      drop!(buf, bB_voXL)
+    end
+    # ``Bv_k^{iX} -= \hat f_k^c U^{iX}_c``
+    @mtensor Bv_ooX[k,i,X] -= dfov[k,c] * v!UvoX[c,i,X]
+    # ``UBv_a^{iYX} = U^{iY}_c Bv_a^{cX}``
+    UBv = alloc!(buf, nvirt, nocc, nX, lenX)
+    n!UBv = neuralyze(UBv)
+    @mtensor n!UBv[a,i,Y,X] = UvoX[c,i,Y] * Bv_vvX[a,c,X]
+    # ``UBv_a^{iYX} -= U^{kY}_a Bv_k^{iX}``
+    @mtensor n!UBv[a,i,Y,X] -= UvoX[a,k,Y] * Bv_ooX[k,i,X]
+    # ``R_{aZ}^i -= T_{ZYX} UBv_a^{iYX}``
+    n!R_voX = neuralyze(R_voX)
+    @mtensor n!R_voX[a,i,Z] -= v!T_XXX[Z,Y,X] * UBv[a,i,Y,X]
+    drop!(buf, UBv)
+    drop!(buf, Bv_ooX, Bv_vvX)
+    drop!(buf, TvoXX)
   end
-  TvSo = nothing
+  drop!(buf, fU_X)
+  drop!(buf, w_ovX)
+  close(UvY_oXoXfile)
+  close(A_XLfile)
+  close(B_ooXLfile)
+  closemmap(EC, W_XXLfile, W_XXL)
+  closemmap(EC, tV_XXLfile, tV_XXL)
+  # ``R_{jZ}^{i} -= G_{jZ}^{i}``
+  n!R_ooX = neuralyze(R_ooX)
+  @mtensor n!R_ooX[j,i,Z] -= G_ooX[j,i,Z]
+  # ``R^i_a -= R_{jY}^{i} U^{jY}_a``
+  @mtensor R1[a,i] -= R_ooX[j,i,Y] * UvoX[a,j,Y]
+  # ``X_{jZ}^i -= 0.5 G_{jZ}^{i}``
+  @mtensor X_ooX[j,i,Z] -= 0.5 * G_ooX[j,i,Z]
+  drop!(buf, G_ooX, R_ooX)
+  # ``RR^{ij}_{ab} += R_{aZ}^i U^{jZ}_b``
+  n!RR_vovo = neuralyze(RR_vovo)
+  @mtensor n!RR_vovo[a,i,b,j] += R_voX[a,i,Z] * UvoX[b,j,Z]
+  drop!(buf, R_voX)
+  # ``R^{ij}_{ab} = RR^{ij}_{ab} + RR^{ji}_{ba}``
+  @mtensor R2[a,b,i,j] += RR_vovo[a,i,b,j] + RR_vovo[b,j,a,i]
+  drop!(buf, RR_vovo)
 
-  @tensor allocator = myallocator  R3decomp[X,Y,Z] := BigQ[X,Y,Z] + BigQ[Y,X,Z] + BigQ[X,Z,Y] + BigQ[Z,Y,X] + BigQ[Z,X,Y] + BigQ[Y,Z,X]
-  BigQ = nothing
+  A_XL = alloc!(buf, nX, nL)
+  load!(EC, "A_XL", A_XL)
+  B_XX = alloc!(buf, nX, nX)
+  load!(EC, "B_XX", B_XX)
+  # ``B^{XY} -= 2 A^{XL} A^{YL}``
+  n!B_XX = neuralyze(B_XX)
+  @mtensor n!B_XX[X,Y] -= 2.0 * A_XL[X,L] * A_XL[Y,L]
+  # ``R^i_a -= U^{iX}_a (T_{XYZ} B^{YZ})
+  @mtensor R1[a,i] -= UvoX[a,i,X] * (T_XXX[X,Y,Z] * B_XX[Y,Z])
+  drop!(buf, A_XL, B_XX)
 
-
-  @tensor allocator = myallocator  smallq[X,Y,Z] := T3_XYZ[X',Y,Z] * (UvoX[a,l,X'] * ((dfoo[l,i] + 0.5 * ovP[l,d,L] * VvoA[d,i,L]) * UvoX[a,i,X]) - UvoX[a,i,X] * ((dfvv[a,d] - 0.5 * ovP[l,d,L] * VvoA[a,l,L]) * UvoX[d,i,X']) + UvoX[a,i,X] * ((ooP[l,i,L] * vvP[a,d,L]) * UvoX[d,l,X']) - 2 * YSA[X,L] * AAS[L,X']) 
-  AAS = nothing
-  YSA = nothing
-  VvoA = nothing
-
-
-  @tensor allocator = myallocator  WSSA[Y,Y',L] := UvoX[b,j,Y] * (ooP[i,j,L] * UvoX[b,i,Y'] - vvP[b,a,L] * UvoX[a,j,Y'])
-  for YPrime in 1:nsvd
-    CutWSSA = WSSA[1:nsvd,YPrime,1:naux]
-    CutT3_XYZ = T3_XYZ[1:nsvd,YPrime,1:nsvd] 
-    @tensor allocator = myallocator  smallq[X,Y,Z] -= CutT3_XYZ[X,Z'] * (CutWSSA[Y,L] * WSSA[Z,Z',L])
-    CutT3_XYZ = nothing
-    CutWSSA = nothing
+  tV_XXLfile, tV_XXL = mmap3idx(EC, "tV_XXL")
+  for X in XBigBlks
+    lenX = length(X)
+    # ``vV_{YXl}^d = v_{l}^{dL} \tilde V_{YX}^{L}``
+    vV_XXov = alloc!(buf, nX, lenX, nocc, nvirt)
+    vV_XXov .= 0.0
+    for L in LBlks
+      v!ovL = @view ovL[:,:,L]
+      v!tV_XXL = @view tV_XXL[:,X,L]
+      @mtensor vV_XXov[Y,X,l,d] += v!ovL[l,d,L] * v!tV_XXL[Y,X,L]
+    end
+    # ``X_{lY}^j += vV_{YXl}^d U^{jX}_d``
+    v!UvoX = @view UvoX[:,:,X]
+    @mtensor X_ooX[l,j,Y] += vV_XXov[Y,X,l,d] * v!UvoX[d,j,X]
+    # ``X_{bY}^d -= vV_{YXl}^d U^{lX}_b``
+    @mtensor X_vvX[b,d,Y] -= vV_XXov[Y,X,l,d] * v!UvoX[b,l,X]
+    drop!(buf, vV_XXov)
   end
-  WSSA = nothing
+  close(tV_XXLfile)
 
-  @tensor allocator = myallocator  R3decomp[X,Y,Z] += smallq[X,Y,Z] + smallq[Y,X,Z] + smallq[Z,Y,X]
-  smallq = nothing
-
-
-  #=
-  @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #virt1
-  @tensoropt Thetavirt[b,d,Z] += UvoX[c,k,Z] * (T2[c,b,l,m] * (ooP[l,k,Q] * ovP[m,d,Q])) #virt3
-
-  for k in 1:nocc
-    UvoXCut = UvoX[:,k,:]
-    @tensoropt IntermediateV62[e,Q,Z] := UvoXCut[c,Z] * vvP[c,e,Q]
-    UvoXCut = nothing
-    T2Cut = T2[:,:,:,k]
-    @tensoropt IntermediateV61[b,l,Q,Z] := T2Cut[b,e,l] * IntermediateV62[e,Q,Z]
-    IntermediateV62 = nothing
-    T2Cut = nothing
-    @tensoropt Thetavirt[b,d,Z] -= ovP[l,d,Q] * IntermediateV61[b,l,Q,Z] #virt6
-    IntermediateV61 = nothing
+  # ``\hat v_{lk}^{di} = \hat v_{l}^{dL} \hat v_{k}^{iL}``
+  oovo = alloc!(buf, nocc, nocc, nvirt, nocc)
+  @mtensor oovo[l,k,d,i] = ovL[l,d,L] * ooL[k,i,L]
+  for a in virtBlks
+    lena = length(a)
+    v!vvL = @view vvL[a,:,:]
+    # vvov[acld] = ``\hat v_{al}^{cd} = \hat v_{a}^{cL} v_{l}^{dL}``
+    vvov = alloc!(buf, lena, nvirt, nocc, nvirt)
+    @mtensor vvov[a,c,l,d] = v!vvL[a,c,L] * ovL[l,d,L]
+    a!UvoX = alloc!(buf, lena, nocc, nX)
+    a!UvoX .= @view UvoX[a,:,:]
+    a!T2 = alloc!(buf, nvirt, lena, nocc, nocc)
+    a!T2 .= @view T2[:,a,:,:]
+    # ``vT_{al}^{ij} = \hat v_{al}^{cd} T_{cd}^{ij} - \hat v_{lk}^{di} T_{da}^{jk}``
+    vT_vooo = alloc!(buf, lena, nocc, nocc, nocc)
+    n!vT_vooo = neuralyze(vT_vooo)
+    @mtensor n!vT_vooo[a,l,i,j] = vvov[a,c,l,d] * T2[c,d,i,j]
+    @mtensor n!vT_vooo[a,l,i,j] -= oovo[l,k,d,i] * a!T2[d,a,j,k]
+    # ``X_{lY}^j += vT_{al}^{ij} U^{\dagger a}_{iY}``
+    @mtensor X_ooX[l,j,Y] += vT_vooo[a,l,i,j] * a!UvoX[a,i,Y]
+    drop!(buf, vT_vooo)
+    # vT[adbi] = ``vT_{ab}^{di} = \hat v_{lk}^{di} T_{ba}^{lk} - \hat v_{al}^{cd} T_{bc}^{li}``
+    vT_vvvo = alloc!(buf, lena, nvirt, nvirt, nocc)
+    n!vT_vvvo = neuralyze(vT_vvvo)
+    @mtensor n!vT_vvvo[a,d,b,i] = oovo[l,k,d,i] * a!T2[b,a,l,k]
+    @mtensor n!vT_vvvo[a,d,b,i] -= vvov[a,c,l,d] * a!T2[b,c,l,i]
+    # ``X_{bY}^d += vT_{ab}^{di} U^{\dagger a}_{iY}``
+    @mtensor X_vvX[b,d,Y] += vT_vvvo[a,d,b,i] * a!UvoX[a,i,Y]
+    drop!(buf, vT_vvvo)
+    drop!(buf, a!T2, a!UvoX)
+    # ``X_{aY}^d -= \hat v_{al}^{cd} T_{cY}^{l}``
+    v!X_vvX = @view X_vvX[a,:,:]
+    @mtensor v!X_vvX[a,d,Y] -= vvov[a,c,l,d] * T_voX[c,l,Y]
+    drop!(buf, vvov)
   end
-  t1 = print_time(EC, t1, "1 Theta terms in R3(T3)", 2)
-  
-  @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #occ1
-  @tensoropt Thetaocc[l,j,Z] -= UvoX[c,k,Z] * (T2[c,d,m,j] * (ovP[l,d,Q] * ooP[m,k,Q])) #occ4
-  @tensoropt Thetaocc[l,j,Z] += UvoX[c,k,Z] * (T2[d,e,k,j]* (ovP[l,e,Q] * vvP[c,d,Q])) #occ5
-  t1 = print_time(EC, t1, "2 Theta terms in R3(T3)", 2)
-  if !cc3
-    @tensoropt BooQX[i,j,Q,X] := ovP[i,a,Q] * UvoX[a,j,X]
+  # ``X_{lY}^j -= \hat v_{lk}^{dj} T_{dY}^{k}``
+  @mtensor X_ooX[l,j,Y] -= oovo[l,k,d,j] * T_voX[d,k,Y]
+  drop!(buf, oovo)
 
-    for W in 1:nsvd
-      BooQXCut = BooQX[:,:,:,W]
-      @tensoropt IntermediateV92[d,m] := ovP[l,d,Q] * BooQXCut[m,l,Q]
-      BooQXCut = nothing
-      @tensoropt IntermediateV91[b,d,Y'] := UvoX[b,m,Y'] * IntermediateV92[d,m]
-      IntermediateV92 = nothing
-      T3_XYZCut = T3_XYZ[W,:,:]
-      @tensoropt Thetavirt[b,d,Z] += 0.5* T3_XYZCut[Y',Z] * IntermediateV91[b,d,Y'] #virt9
-      IntermediateV91 = nothing
-      T3_XYZCut = nothing
-    end
-
-    @tensoropt Thetaocc[l,j,Z] -= 0.5 * T3_XYZ[X',Z,Z'] * (BooQX[l,m,Q,X'] * BooQX[m,j,Q,Z']) #occ8
-    BooQX = nothing
-    t1 = print_time(EC, t1, "3 Theta terms in R3(T3)", 2)
-
-    @tensoropt A[Q,X] := ovP[i,a,Q] * UvoX[a,i,X]
-    
-    @tensoropt IntermediateV72[Q,Z,Z'] := T3_XYZ[X',Z,Z'] * A[Q,X']
-    for l in 1:nocc
-      UvoXCut = UvoX[:,l,:]
-      @tensoropt IntermediateV71[b,Q,Z] := UvoXCut[b,Z'] * IntermediateV72[Q,Z,Z']
-      UvoXCut = nothing
-      ovPCut = ovP[l,:,:]
-      @tensoropt Thetavirt[b,d,Z] -= ovPCut[d,Q] * IntermediateV71[b,Q,Z] #virt7
-      IntermediateV71 = nothing
-      ovPCut = nothing
-    end
-    IntermediateV72 = nothing 
-    
-    @tensoropt IntermediateO62[Q,Z,Z'] := T3_XYZ[X',Z,Z'] * A[Q,X']
-    for d in 1:nvirt
-      UvoXCut = UvoX[d,:,:]
-      @tensoropt IntermediateO61[j,Q,Z] := UvoXCut[j,Z'] * IntermediateO62[Q,Z,Z']
-      UvoXCut = nothing
-      ovPCut = ovP[:,d,:]
-      @tensoropt Thetaocc[l,j,Z] += ovPCut[l,Q] * IntermediateO61[j,Q,Z]   #occ6
-      ovPCut = nothing
-      IntermediateO61 = nothing
-    end
-    IntermediateO62 = nothing
-    A = nothing
-    t1 = print_time(EC, t1, "4 Theta terms in R3(T3)", 2)
-
-    IntermediateTheta = zeros(naux,nsvd,nsvd)
-    @tensoropt IntermediateThetaV82[k,m,Q,Y'] := ovP[m,e,Q] * UvoX[e,k,Y']
-    for W in 1:nsvd
-      T3_XYZCut = T3_XYZ[:,:,W]
-      @tensoropt IntermediateThetaV83[c,m,Y'] := UvoX[c,m,X'] * T3_XYZCut[X',Y']
-      T3_XYZCut = nothing
-      @tensoropt IntermediateThetaV81[c,k,Q] := IntermediateThetaV83[c,m,Y'] * IntermediateThetaV82[k,m,Q,Y']
-      IntermediateThetaV83 = nothing
-      @tensoropt IntermediateThetaCut[Q,Z] := IntermediateThetaV81[c,k,Q] * UvoX[c,k,Z]
-      IntermediateThetaV81 = nothing
-      IntermediateTheta[:,W,:] += IntermediateThetaCut
-      IntermediateThetaCut = nothing
-    #@tensoropt IntermediateThetaV83[k,m,X',Z] := UvoX[c,m,X'] * UvoX[c,k,Z]
-    #@tensoropt IntermediateThetaV82[k,m,Y',Z,Z'] := T3_XYZ[X',Y',Z'] * IntermediateThetaV83[k,m,X',Z]
-    #@tensoropt IntermediateThetaV81[e,m,Z,Z'] := UvoX[e,k,Y'] * IntermediateThetaV82[k,m,Y',Z,Z']
-    #@tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * IntermediateThetaV81[e,m,Z,Z']
-    end
-    IntermediateThetaV82 = nothing
-    #println(13)
-    #flush(stdout)
-
-    #@tensoropt IntermediateThetaV83[k,m,X',Z] := UvoX[c,m,X'] * UvoX[c,k,Z]
-    #@tensoropt IntermediateThetaV82[k,m,Y',Z,Z'] := T3_XYZ[X',Y',Z'] * IntermediateThetaV83[k,m,X',Z]
-    #IntermediateThetaV83 = nothing
-    #@tensoropt IntermediateThetaV81[e,m,Z,Z'] := UvoX[e,k,Y'] * IntermediateThetaV82[k,m,Y',Z,Z']
-    #IntermediateThetaV82 = nothing
-    #@tensoropt IntermediateTheta[Q,Z',Z] := ovP[m,e,Q] * IntermediateThetaV81[e,m,Z,Z']
-    #IntermediateThetaV81 = nothing
-    #println(13)
-    #flush(stdout)
-   
-    for l in 1:nocc
-      UvoXCut = UvoX[:,l,:]
-      @tensoropt IntermediateV81[b,Q,Z] := UvoXCut[b,W] * IntermediateTheta[Q,W,Z]
-      UvoXCut = nothing
-      ovPCut = ovP[l,:,:]
-      @tensoropt Thetavirt[b,d,Z] += 0.5 * ovPCut[d,Q] * IntermediateV81[b,Q,Z] #virt8
-      ovPCut = nothing
-      IntermediateV81 = nothing
-    end
-    #println(14)
-    #flush(stdout)
-    
-    for d in 1:nvirt
-      UvoXCut = UvoX[d,:,:]
-      @tensoropt IntermediateO71[j,Q,Z] := UvoXCut[j,Z'] * IntermediateTheta[Q,Z',Z]
-      UvoXCut = nothing
-      ovPCut = ovP[:,d,:]
-      @tensoropt Thetaocc[l,j,Z] -= 0.5 * ovPCut[l,Q] * IntermediateO71[j,Q,Z] #occ7
-      IntermediateO71 = nothing
-      ovPCut = nothing
-    end
-    #println(15)
-    #flush(stdout)
-    IntermediateTheta = nothing
-    t1 = print_time(EC, t1, "5 Theta terms in R3(T3)", 2)
+  # ``Q_{XYZ} += U^{\dagger b}_{jX} (X_{lY}^j T_{bZ}^l - X_{bY}^d T_{dZ}^j)``
+  for Z in XBlks
+    lenZ = length(Z)
+    v!T_voX = @view T_voX[:,:,Z]
+    v!Q_XXX = @view Q_XXX[:,:,Z]
+    XT_voXX = alloc!(buf, nvirt, nocc, nX, lenZ)
+    @mtensor XT_voXX[b,j,Y,Z] = X_ooX[l,j,Y] * v!T_voX[b,l,Z]
+    @mtensor XT_voXX[b,j,Y,Z] -= X_vvX[b,d,Y] * v!T_voX[d,j,Z]
+    @mtensor v!Q_XXX[X,Y,Z] += UvoX[b,j,X] * XT_voXX[b,j,Y,Z]
+    drop!(buf, XT_voXX)
   end
+  # ``R_{XYZ} += Q_{XYZ} + Q_{YXZ} + Q_{XZY} + Q_{ZXY} + Q_{ZYX} + Q_{YZX}``
+  @mtensor R3decomp[X,Y,Z] := Q_XXX[X,Y,Z] + Q_XXX[Y,X,Z] + Q_XXX[X,Z,Y] + Q_XXX[Z,Y,X] + Q_XXX[Z,X,Y] + Q_XXX[Y,Z,X]
 
-  @tensoropt TaiX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
-  @tensoropt TStrich[a,i,X] := 2* TaiX[a,i,X] - UvoX[b,j,X] * T2[b,a,i,j] 
-  @tensoropt Thetavirt[b,d,Z] += vvP[b,d,Q] * (ovP[l,e,Q] * TStrich[e,l,Z]) #virt4
-  @tensoropt Thetaocc[l,j,Z] += ooP[l,j,Q] * (ovP[m,d,Q] * TStrich[d,m,Z]) #occ2
-  TStrich = nothing
-  t1 = print_time(EC, t1, "6 Theta terms in R3(T3)", 2)
-
-  @tensoropt Thetavirt[b,d,Z] -= dfov[l,d] * TaiX[b,l,Z] #virt2
-  #println(20)
-  #flush(stdout)
-  
-  for l in 1:nocc
-    TaiXCut = TaiX[:,l,:]
-    @tensoropt IntermediateV51[b,Q,Z] := vvP[b,e,Q] * TaiXCut[e,Z]
-    TaiXCut = nothing
-    ovPCut = ovP[l,:,:]
-    @tensoropt Thetavirt[b,d,Z] -= ovPCut[d,Q] * IntermediateV51[b,Q,Z] #virt5
-    IntermediateV51 = nothing
-    ovPCut = nothing
+  # reuse memory
+  q_XXX = Q_XXX
+  q_XXX .= 0.0
+  # reorder W_{X}^{YL} for a triangular contraction
+  W_LXX = alloc!(buf, nL, nX, nX)
+  W_XXLfile, W_XXL = mmap3idx(EC, "W_XXL")
+  for L in LBlks
+    v!W_XXL = @view W_XXL[:,:,L]
+    v!W_LXX = @view W_LXX[L,:,:]
+    permutedims!(v!W_LXX, v!W_XXL, (3,2,1))
   end
-  #println(21)
-  #flush(stdout)
- 
-  for m in 1:nocc
-    TaiXCut = TaiX[:,m,:]
-    @tensoropt IntermediateO31[l,Q,Z] := ovP[l,d,Q] * TaiXCut[d,Z]
-    TaiXCut = nothing
-    ooPCut = ooP[m,:,:]
-    @tensoropt Thetaocc[l,j,Z] -= ooPCut[j,Q] * IntermediateO31[l,Q,Z] #occ3
-    IntermediateO31 = nothing
-    ooPCut = nothing
+  close(W_XXLfile)
+  for iY in 1:nX
+    v!W_LX = @view W_LXX[:,:,iY]
+    X = 1:iY # only upper triangular part
+    lenXt = length(X)
+    v!W_LXX = @view W_LXX[:,:,X]
+    W_XXX = alloc!(buf, nX, nX, lenXt)
+    n!W_XXX = neuralyze(W_XXX)
+    @mtensor n!W_XXX[Y',X',X] = v!W_LXX[L,X',X] * v!W_LX[L,Y']
+    # ``qq_{ZXY} += T_{ZX'Y'} W^{X'Y'}_{XY}``
+    qq_XX = alloc!(buf, nX, lenXt)
+    n!qq_XX = neuralyze(qq_XX)
+    @mtensor n!qq_XX[Z,X] = T_XXX[Z,X',Y'] * W_XXX[X',Y',X]
+    q_XXX[:,X,iY] = -qq_XX
+    q_XXX[:,iY,X] = -qq_XX
+    drop!(buf, qq_XX, W_XXX)
+  end  
+  drop!(buf, W_LXX)
+  # ``q_{X}^{X'} = U^{\dagger a}_{iX} q_{a}^{iX'} - 2 Y_{X}^L A^{X'L}``
+  # with ``q_{a}^{iX'} = x_{l}^{i} U_{a}^{lX'} - x_{a}^{d} U^{d}_{iX'} + (\hat v_{l}^{iL} \hat v_{a}^{dL}) U^{d}_{lX'}``
+  q_voX = alloc!(buf, nvirt, nocc, nX)
+  # vvoo[adli] = ``v_{al}^{di} = \hat v_{a}^{dL} \hat v_{l}^{iL}``
+  vvoo = alloc!(buf, nvirt, nvirt, nocc, nocc)
+  vvoo .= 0.0
+  for L in LBlks
+    v!vvL = @view vvL[:,:,L]
+    v!ooL = @view ooL[:,:,L]
+    @mtensor vvoo[a,d,l,i] += v!vvL[a,d,L] * v!ooL[l,i,L]
   end
-  #println(22)
-  #flush(stdout)
-  t1 = print_time(EC, t1, "7 Theta terms in R3(T3)", 2)
+  n!q_voX = neuralyze(q_voX)
+  @mtensor n!q_voX[a,i,X] = vvoo[a,d,l,i] * UvoX[d,l,X]
+  drop!(buf, vvoo)
+  @mtensor q_voX[a,i,X] += x_oo[l,i] * UvoX[a,l,X] - x_vv[a,d] * UvoX[d,i,X]
+  @mtensor q_XX[X,X'] := q_voX[a,i,X'] * UvoX[a,i,X]
+  drop!(buf, q_voX)
+  A_XL = alloc!(buf, nX, nL)
+  load!(EC, "A_XL", A_XL)
+  @mtensor q_XX[X,X'] -= 2.0 * Y_XL[X,L] * A_XL[X',L]
+  drop!(buf, A_XL)
+  # ``q_{XYZ} = T_{X'YZ} q_{X}^{X'}``
+  @mtensor q_XXX[X,Y,Z] += T_XXX[X',Y,Z] * q_XX[X,X']
 
-  Term1 = zeros(nsvd,nsvd,nsvd)
-  for j in 1:nocc
-    ThetaoccCut = Thetaocc[:,j,:]
-    @tensoropt IntermediateTerm11[b,X,Z] := TaiX[b,l,X] * ThetaoccCut[l,Z]
-    ThetaoccCut = nothing
-    TaiXCut = TaiX[:,j,:]
-    @tensoropt IntermediateTerm11[b,X,Z] -= Thetavirt[b,d,Z] * TaiXCut[d,X]
-    TaiXCut = nothing
-    UvoXCut = UvoX[:,j,:]
-    @tensoropt Term1[X,Y,Z] += IntermediateTerm11[b,X,Z] * UvoXCut[b,Y]
-    IntermediateTerm11 = nothing
-    UvoXCut = nothing
-  end
-  #println(23)
-  #flush(stdout)
-  Thetaocc = nothing
-  Thetavirt = nothing
-  TaiX = nothing
-  t1 = print_time(EC, t1, "Theta terms in R3(T3)", 2)
+  @mtensor R3decomp[X,Y,Z] += q_XXX[X,Y,Z] + q_XXX[Y,X,Z] + q_XXX[Z,Y,X]
 
-  @tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z] + Term1[Y,X,Z] + Term1[X,Z,Y] + Term1[Z,Y,X] + Term1[Z,X,Y] + Term1[Y,Z,X]
-  Term1 = nothing
-  t1 = print_time(EC, t1, "Symmetrization of Theta terms in R3(T3)", 2)
-
-
-  @tensor TTilde[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
-  if cc3
-    @tensoropt Term2[X,Y,Z] := T3_XYZ[X',Y,Z] * (UvoX[a,l,X'] * (dfoo[l,i]  * UvoX[a,i,X])) #1
-    @tensoropt Term2[X,Y,Z] -= T3_XYZ[X',Y,Z] * (UvoX[a,i,X] *( dfvv[a,d] * UvoX[d,i,X'])) #2
-  else
-    @tensoropt Intermediate1Term2[l,d,m,e] := ovP[l,d,P] * ovP[m,e,P]
-    @tensoropt Term2[X,Y,Z] := T3_XYZ[X',Y,Z] * (UvoX[a,l,X'] * ( (dfoo[l,i] + 0.5 * Intermediate1Term2[l,d,m,e] * TTilde[d,e,i,m]) * UvoX[a,i,X])) #1
-    @tensoropt Term2[X,Y,Z] -= T3_XYZ[X',Y,Z] * (UvoX[a,i,X] *( (dfvv[a,d] - 0.5 * Intermediate1Term2[l,d,m,e] * TTilde[a,e,l,m]) * UvoX[d,i,X'])) #2
-    Intermediate1Term2 = nothing
-    t1 = print_time(EC, t1, "1 Chi terms in R3(T3)", 2)
-    @tensoropt Term2[X,Y,Z] += (UvoX[a,i,X] * ((ooP[l,i,P] * vvP[a,d,P]) * UvoX[d,l,X'])) * (T3_XYZ[X',Y',Z] * (UvoX[b,j,Y] * UvoX[b,j,Y'])) #3
-    @tensoropt Term2[X,Y,Z] -= 2* (T3_XYZ[X',Y,Z] *((voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m]) * UvoX[a,i,X]) * (ovP[l,d,P] * UvoX[d,l,X'])) #4
-    #println(30)
-    #flush(stdout)
-
-    """
-    example for get_spaceblocks from Daniels dfcc.jl:
-
-     W_LL = zeros(nL,nL)
-     # generate ``W^{LL'} = v_a^{iL} v_a^{iL'}`` for SVD
-     oBlks = get_spaceblocks(1:length(SP['o']))
-     for oblk in oBlks
-       voL = full_voL[:,oblk,:]
-       @tensoropt W_LL[L,L'] += voL[a,i,L] * voL[a,i,L']
-     end
-    
-    get_spaceblocks creates a list with ranges of the maximum size 100 up til the length which was defined
-    e.g. get_spaceblocks(1:1500) gives back:
-    Any[1:100, 101:200, 201:300, 301:400, 401:500, 501:600, 601:700, 701:800, 801:900, 901:1000, 1001:1100, 1101:1200, 1201:1300, 1301:1400, 1401:1500]
-    """
-    
-    @tensoropt Intermediate52[Y,Y',P] := UvoX[b,j,Y] * (ooP[l,j,P] * UvoX[b,l,Y'])
-    #println("30_1")
-    #flush(stdout)
-  
-
-
-    #@tensoropt Intermediate51[Z,W,P] := (UvoX[c,k,Z] * UvoX[c,m,W]) * ooP[m,k,P]
-    #@tensoropt Intermediate53[Y,Y',Z,W] := Intermediate51[Z,W,P] * Intermediate52[Y,Y',P]
-    #@tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',W] * Intermediate53[Y,Y',Z,W]
-
-
-       
-    @tensoropt Intermediate51[Z,W,P] := (UvoX[c,k,Z] * UvoX[c,m,W]) * ooP[m,k,P]
-    #println("30_2")
-    #println(sizeof(Intermediate51))
-    #flush(stdout)
-    #int1= Intermediate51[:,W,:] 
-    
-    for W in 1:nsvd
-       Intermediate51Cut = Intermediate51[:,W,:] 
-       #Intermediate51 = nothing
-       #println("30_3")
-       #println(sizeof(Intermediate51Cut))
-       #display(Intermediate51Cut)
-       flush(stdout)
-       
-       #Intermediate53 = zeros(nsvd,nsvd,nsvd)
-       #display(Intermediate53)
-       @tensoropt Intermediate53[Y,Y',Z] := Intermediate51Cut[Z,P] * Intermediate52[Y,Y',P]
-       #println("30_4")
-       #flush(stdout)
-       Intermediate51Cut = nothing
-
-       #println("30_5")
-       #flush(stdout)
-       
-       T3_XYZCut = T3_XYZ[:,:,W]
-
-       @tensoropt Term2[X,Y,Z] -= T3_XYZCut[X,Y'] * Intermediate53[Y,Y',Z] #5
-       Intermediate53 = nothing
-       T3_XYZCut = nothing
-
-       #cut out W from all tensors, because [1,x,y] tensor should be represented as [x,y]
-
-       #println("30_6")
-       #flush(stdout)
-    end
-    
-    Intermediate51 = nothing
-    Intermediate52 = nothing
-
-    #Intermediate53 = zeros(nsvd, nsvd, nsvd, nsvd)
-    #println(size(Intermediate53))
-
-    """
-    svdBlks = get_spaceblocks(1:nsvd)
-
-    for svdblk in svdBlks
-       @tensoropt Intermediate53[Y,Y',Z,Z'] += Intermediate51[Z,Z',P] * Intermediate52[Y,Y',P]
-       @tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',Z'] * Intermediate53[Y,Y',Z,Z']
-    end
-    """   
-
-    """@tensoropt Term2[X,Y,Z] -= T3_XYZ[X,Y',Z'] * (((UvoX[c,k,Z] * UvoX[c,m,Z']) * ooP[m,k,P]) * (UvoX[b,j,Y] * (ooP[l,j,P] * UvoX[b,l,Y']))) #5
-    """
-
-    #Intermediate51 = nothing
-    #Intermediate52 = nothing
-    #Intermediate53 = nothing
-    #println(31)
-    #flush(stdout)
-   
-    Intermediate2Term2 = zeros(nsvd,nsvd,naux)
-    for j in 1:nocc
-      UvoXCut = UvoX[:,j,:]
-      @tensoropt IntermediateI2T21[b,P,Y'] := vvP[b,d,P] * UvoXCut[d,Y']
-      @tensoropt Intermediate2Term2[Y,Y',P] +=  UvoXCut[b,Y] * IntermediateI2T21[b,P,Y']
-      IntermediateI2T21 = nothing
-      UvoXCut = nothing
-    end
-    #println(32)
-    #flush(stdout)
-
-    #hier vielleicht groeßere Scheiben schneiden mit get_spaceblocks Funktion??
-    for P in 1:naux
-      Intermediate2Term2Cut = Intermediate2Term2[:,:,P]
-      @tensoropt IntermediateT2_1[X,Y,Z'] := T3_XYZ[X,Y',Z'] * Intermediate2Term2Cut[Y,Y']
-      Intermediate2Term2Cut = nothing
-
-      vvPCut = vvP[:,:,P]
-      @tensoropt IntermediateT2_2[e,k,Z] := UvoX[c,k,Z] * vvPCut[c,e]
-      @tensoropt IntermediateT2_3[Z,Z'] := UvoX[e,k,Z'] * IntermediateT2_2[e,k,Z]
-      IntermediateT2_2 = nothing
-    
-      @tensoropt Term2[X,Y,Z] -= IntermediateT2_1[X,Y,Z'] * IntermediateT2_3[Z,Z'] #6
-      IntermediateT2_1 = nothing
-      IntermediateT2_3 = nothing
-    end
-    #println(34)
-    #flush(stdout)
-    t1 = print_time(EC,t1,"2 Chi terms in R3(T3)",2) #weil andere Termreihenfolge Print veraendern??
-   
-    for W in 1:nsvd 
-      UvoXCut = UvoX[:,:,W]
-      @tensoropt IntermediateT2_5[i,l,X] := UvoX[a,i,X] * UvoXCut[a,l]
-      UvoXCut = nothing
-      @tensoropt IntermediateT2_4[P,X] := ooP[l,i,P] * IntermediateT2_5[i,l,X]
-      IntermediateT2_5 = nothing
-
-      T3_XYZCut = T3_XYZ[W,:,:]
-      @tensoropt Intermediate3Term2[Y,Z,P] :=  T3_XYZCut[Y',Z] * Intermediate2Term2[Y,Y',P]
-      T3_XYZCut = nothing
-      #println(33)
-      #flush(stdout)
-
-      @tensoropt Term2[X,Y,Z] += IntermediateT2_4[P,X] * (Intermediate3Term2[Y,Z,P] + Intermediate3Term2[Z,Y,P]) #7
-      IntermediateT2_4 = nothing
-      Intermediate3Term2 = nothing
-    end
-
-    Intermediate2Term2 = nothing
-    t1 = print_time(EC, t1, "3 Chi terms in R3(T3)", 2)
-    @tensoropt Intermediate4Term2[l,d,a,i] := ovP[l,d,P] * (voP[a,i,P] + ovP[m,e,P] * TTilde[a,e,i,m])
-    #println(36)
-    #flush(stdout)
-    
-    @tensoropt IntermediateT2_9[d,l,X] := UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]
-    @tensoropt IntermediateT2_8[k,l,X,Y'] := UvoX[d,k,Y'] * IntermediateT2_9[d,l,X]
-    IntermediateT2_9 = nothing
-    for c in 1:nvirt
-      UvoXCut2 = UvoX[c,:,:]
-      @tensoropt IntermediateT2_7[l,Y,Y'] := T3_XYZ[X',Y',Y] * UvoXCut2[l,X']
-      @tensoropt IntermediateT2_6[k,X,Y] := IntermediateT2_7[l,Y,Y'] * IntermediateT2_8[k,l,X,Y']
-      IntermediateT2_7 = nothing
-      @tensoropt Term2[X,Y,Z] += UvoXCut2[k,Z] * IntermediateT2_6[k,X,Y] #8
-      IntermediateT2_6 = nothing
-      UvoXCut2 = nothing
-    end
-    IntermediateT2_8 = nothing
-    #println(37)
-    #flush(stdout)
-    #@tensoropt Term2[X,Y,Z] += UvoX[c,k,Z] * ((T3_XYZ[X',Y',Y] * UvoX[c,l,X']) * (UvoX[d,k,Y'] * (UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]))) #8
-   
-
-    
-    @tensoropt IntermediateT2_13[l,d,X] := UvoX[a,i,X] * Intermediate4Term2[l,d,a,i]
-    @tensoropt IntermediateT2_12[j,l,X,Y'] := UvoX[d,j,Y'] * IntermediateT2_13[l,d,X]
-    IntermediateT2_13 = nothing
-    for b in 1:nvirt
-      UvoXCut = UvoX[b,:,:]
-      @tensoropt IntermediateT2_11[l,Y',Z] := T3_XYZ[X',Y',Z] * UvoXCut[l,X']
-      @tensoropt IntermediateT2_10[j,X,Z] := IntermediateT2_11[l,Y',Z] * IntermediateT2_12[j,l,X,Y']
-      IntermediateT2_11 = nothing
-      @tensoropt Term2[X,Y,Z] += UvoXCut[j,Y] * IntermediateT2_10[j,X,Z] #9
-      IntermediateT2_10 = nothing
-      UvoXCut = nothing
-    end
-    IntermediateT2_12 = nothing
-    Intermediate4Term2 = nothing
-    t1 = print_time(EC, t1, "4 Chi terms in R3(T3)", 2)
-  end
-
-  @tensoropt R3decomp[X,Y,Z] += Term2[X,Y,Z] + Term2[Y,X,Z] + Term2[Z,Y,X]
-  Term2 = nothing
-  t1 = print_time(EC, t1, "Symmetrization of Chi terms in R3(T3)", 2)
-
-  #display(R3decomp)
-
-  =#
-
-  close(ovPfile)
-  close(voPfile)
-  close(ooPfile)
-  close(vvPfile)
-
+  close(ovLfile)
+  close(voLfile)
+  close(ooLfile)
+  close(vvLfile)
+  # end #buf
   save!(EC, "R_XXX", R3decomp)
   GC.gc()
   #println(40)
