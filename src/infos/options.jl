@@ -140,8 +140,8 @@ Base.@kwdef mutable struct CcOptions
   shiftt::Float64 = 0.2
   """`⟨false⟩` calculate properties. """
   properties::Bool = false
-  """`⟨1.e-3⟩` amplitude decomposition threshold. """
-  ampsvdtol::Float64 = 1.e-3
+  """`⟨1.e-5⟩` amplitude decomposition threshold. """
+  ampsvdtol::Float64 = 1.e-5
   """`⟨1.e-2⟩` tightening amplitude decomposition factor 
       (for the two-step decomposition). """
   ampsvdfac::Float64 = 1.e-2

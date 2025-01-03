@@ -196,10 +196,15 @@ function mioload!(fname::String, arrs::AbstractArray{T,N}...; skip_error=false) 
         error("Inconsistency in reading dimensions of data! Expected $N, got $ndim.")
       end
       dims = Int[]
+      size_arr = size(arrs[ia])
+      same = true
       for idim in 1:ndim
         append!(dims, read(io, Int))
+        if dims[idim] != size_arr[idim]
+          same = false
+        end
       end
-      if size(arrs[ia]) != Tuple(dims)
+      if !same
         if skip_error
           return false
         end

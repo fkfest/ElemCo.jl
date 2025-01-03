@@ -375,7 +375,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   # TODO: add shifted Laplace transform!
   mmLfile, mmL = mmap3idx(EC, "mmL")
   nL = size(mmL, 3)
-  tol2 = (EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
+  tol2 = sqrt(EC.options.cc.ampsvdtol)*EC.options.cc.ampsvdfac
   voL = mmL[SP['v'],SP['o'],:]
   shifti = EC.options.cc.deco_ishiftp
   fullEMP2 = calc_MP2_from_3idx(EC, voL, shifti)
@@ -413,7 +413,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   t1 = print_time(EC, t1, "half-decomposed MP2", 2)
   naux = size(voX, 3)
   # decompose T^i_{aX}
-  UaiX = svd_decompose(reshape(voX, (nvirt*nocc,naux)), nvirt, nocc, EC.options.cc.ampsvdtol)
+  UaiX = svd_decompose(reshape(voX, (nvirt*nocc,naux)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol))
   t1 = print_time(EC, t1, "T^i_{aX} SVD decomposition", 2)
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
@@ -462,7 +462,7 @@ function calc_doubles_decomposition_with_doubles(EC::ECInfo)
   t1 = print_time(EC, t1, "MP2 from 3idx", 2)
   println("decompose full doubles (can be slow!)")
   flush_output()
-  UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, EC.options.cc.ampsvdtol)
+  UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol))
   t1 = print_time(EC, t1, "SVD decomposition", 2)
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)

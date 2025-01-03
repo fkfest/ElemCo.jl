@@ -4,6 +4,8 @@
 
 ### Breaking
 
+* the definition of `ampsvdtol` threshold for SVD methods has been changed. Now it corresponds to the threshold for the density matrix (i.e., square of the previous definition).
+
 ### Changed
 
 * faster closed-shell and unrestricted CCSDT and DC-CCSDT implementations.

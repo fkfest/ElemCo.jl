@@ -3,6 +3,7 @@
 """
 module TensorTools
 using LinearAlgebra
+using TensorOperations
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
@@ -16,6 +17,18 @@ export ints2!, detri_int2!
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
 export print_nonzeros
+export @mtensor
+
+"""
+    mtensor(ex)
+
+Macro for tensor operations with manual allocator.
+"""
+macro mtensor(ex)
+  # TODO: activate manual allocator
+  # return esc(:(@tensor allocator = TensorOperations.ManualAllocator() $ex))
+  return esc(:(@tensor $ex))
+end
 
 
 """
