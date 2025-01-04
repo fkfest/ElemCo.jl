@@ -3,6 +3,7 @@ This module contains various utils for density fitting.
 """
 module DFTools
 using LinearAlgebra, TensorOperations
+using Buffers
 # using TSVD
 using IterativeSolvers
 using ..ElemCo.ECInfos
@@ -13,41 +14,7 @@ using ..ElemCo.MSystem
 using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
 
-export get_auxblks, generate_AO_DF_integrals, generate_DF_integrals
-
-"""
-    get_auxblks(naux::Int, maxblocksize::Int=128, strict=false)
-
-  Generate ranges for block indices for auxiliary basis (for loop over blocks).
-
-  If `strict` is true, the blocks will be of size `maxblocksize` (except for the last block).
-  Otherwise the actual block size will be as close as possible to `blocksize` such that
-  the resulting blocks are of similar size.
-"""
-function get_auxblks(naux::Int, maxblocksize::Int=128, strict=false)
-  nauxblks = naux ÷ maxblocksize
-  if nauxblks*maxblocksize < naux
-    nauxblks += 1
-  end
-  auxblks = Vector{UnitRange{Int}}(undef, nauxblks)
-  if strict 
-    for i in 1:nauxblks
-      start = (i-1)*maxblocksize+1
-      stop = (i == nauxblks) ? naux : i*maxblocksize
-      auxblks[i] = start:stop
-    end
-  else
-    blocksize = naux ÷ nauxblks
-    n_largeblks = mod(naux, nauxblks)
-    auxblks[1:n_largeblks] = [ (i-1)*(blocksize+1)+1 : i*(blocksize+1) for i in 1:n_largeblks ]
-    start = n_largeblks*(blocksize+1)+1
-    for i = n_largeblks+1:nauxblks
-      auxblks[i] = start:start+blocksize-1
-      start += blocksize
-    end
-  end
-  return auxblks
-end
+export generate_AO_DF_integrals, generate_DF_integrals
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -73,11 +40,11 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
     nA = size(AAP,1)
     nL = size(M,2)
     AALfile, AAL = newmmap(EC, "AAL", (nA,nA,nL))
-    LBlks = get_auxblks(nL)
+    LBlks = get_spaceblocks(1:nL)
     for L in LBlks
-      V_M = @view M[:,L]
-      V_AAL = @view AAL[:,:,L]
-      @tensoropt V_AAL[p,q,L] = AAP[p,q,P] * V_M[P,L]
+      v!M = @view M[:,L]
+      v!AAL = @view AAL[:,:,L]
+      @tensoropt v!AAL[p,q,L] = AAP[p,q,P] * v!M[P,L]
     end
     closemmap(EC, AALfile, AAL)
   else
@@ -102,15 +69,23 @@ function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit")
   PQ = eri_2e2idx(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
   μνP = eri_2e3idx(bao,bfit)
-  nm = size(cMO1,2)
-  nL = size(M,2)
-  mmLfile, mmL = newmmap(EC, "mmL", (nm,nm,nL))
-  LBlks = get_auxblks(nL)
+  nao = size(μνP, 1)
+  nmo = size(cMO1, 2)
+  nL = size(M, 2)
+  mmLfile, mmL = newmmap(EC, "mmL", (nmo,nmo,nL))
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  buf = Buffer((nao+nmo)*nao*maxL)
   for L in LBlks
-    V_M = @view M[:,L]
-    V_mmL = @view mmL[:,:,L]
-    @tensoropt μνL[μ,ν,L] := μνP[μ,ν,P] * V_M[P,L]
-    @tensoropt V_mmL[p,q,L] = cMO1[μ,p] * μνL[μ,ν,L] * cMO1[ν,q]
+    v!M = @view M[:,L]
+    v!mmL = @view mmL[:,:,L]
+    AAL = alloc!(buf, nao, nao, nL)
+    @mtensor AAL[μ,ν,L] = μνP[μ,ν,P] * v!M[P,L]
+    mAL = alloc!(buf, nmo, nao, nL)
+    n!mAL = neuralyze(mAL)
+    @mtensor n!mAL[p,ν,L] = cMO1[μ,p] * AAL[μ,ν,L]
+    @mtensor v!mmL[p,q,L] = mAL[p,ν,L] * cMO1[ν,q]
+    drop!(buf, AAL, mAL)
   end
   closemmap(EC, mmLfile, mmL)
 end
