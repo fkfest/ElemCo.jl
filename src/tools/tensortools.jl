@@ -378,7 +378,7 @@ function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float
 end
 
 """ 
-    get_spaceblocks(space, maxblocksize=100, strict=false)
+    get_spaceblocks(space, maxblocksize=128, strict=false)
 
   Generate ranges for block indices for space (for loop over blocks).
 
@@ -388,7 +388,7 @@ end
   Otherwise the actual block size will be as close as possible to `blocksize` such that
   the resulting blocks are of similar size.
 """
-function get_spaceblocks(space, maxblocksize=100, strict=false)
+function get_spaceblocks(space, maxblocksize=128, strict=false)
   if length(space) == 0
     return []
   end

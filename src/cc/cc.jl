@@ -72,7 +72,6 @@ using ..ElemCo.DecompTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
-using ..ElemCo.DFTools: get_auxblks
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy 
 export calc_cc, calc_pertT
@@ -2976,7 +2975,7 @@ function calc_intermediates4triples(EC::ECInfo)
   nX = size(UvoX, 3)
   nL = size(ovL, 3)
 
-  LBlks = get_auxblks(nL)
+  LBlks = get_spaceblocks(1:nL)
 
   A_XL = zeros(nX, nL)
   B_XX = zeros(nX, nX)
@@ -3126,10 +3125,10 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   nX = size(T_XXX, 1)
   nL = size(voL, 3)
 
-  LBlks = get_auxblks(nL)
-  XBlks = get_auxblks(nX)
-  XBigBlks = get_auxblks(nX, 256)
-  virtBlks = get_auxblks(nvirt)
+  LBlks = get_spaceblocks(1:nL)
+  XBlks = get_spaceblocks(1:nX)
+  XBigBlks = get_spaceblocks(1:nX, 256)
+  virtBlks = get_spaceblocks(1:nvirt)
 
   maxL = maximum(length, LBlks)
   maxX = maximum(length, XBlks)
