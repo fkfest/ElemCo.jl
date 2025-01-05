@@ -297,7 +297,7 @@ function dress_df_fock(EC::ECInfo, T1)
   LBlks = get_spaceblocks(1:nL)
 
   maxL = maximum(length, LBlks)
-  buf = Buffer(nmo*nocc*maxL)
+  buf = Buffer(nmo*(nocc+max(nocc,nvirt))*maxL)
 
   dfockc = zeros(size(dfock))
   dfocke = zeros(size(dfock))
@@ -305,15 +305,20 @@ function dress_df_fock(EC::ECInfo, T1)
   for L in LBlks
     lenL = length(L)
     v!mmL = @view mmL[:,:,L]
-    mvL = @view v!mmL[:,virt,:]
     vt_moL = alloc!(buf, nmo, nocc, lenL)
-    @mtensor vt_moL[p,i,L] = mvL[p,a,L]*T1[a,i]
+    mvL = alloc!(buf, nmo, nvirt, lenL)
+    mvL .= @view v!mmL[:,virt,:]
+    n!vt_moL = neuralyze(vt_moL)
+    @mtensor n!vt_moL[p,i,L] = mvL[p,a,L]*T1[a,i]
+    drop!(buf, mvL)
     vt_L = reshape_buf!(vt_L_buf, lenL)
-    @mtensor vt_L[L] = vt_moL[occ,:,:][i,i,L]
+    vt_ooL = @view vt_moL[occ,:,:]
+    @mtensor vt_L[L] = vt_ooL[i,i,L]
     # exchange
-    omL = @view v!mmL[occ,:,:]
+    omL = alloc!(buf, nocc, nmo, lenL)
+    omL .= @view v!mmL[occ,:,:]
     @mtensor dfocke[p,q] += vt_moL[p,i,L]*omL[i,q,L]
-    drop!(buf, vt_moL)
+    drop!(buf, vt_moL, omL)
     # coulomb
     @mtensor dfockc[p,q] += v!mmL[p,q,L]*vt_L[L]
   end
