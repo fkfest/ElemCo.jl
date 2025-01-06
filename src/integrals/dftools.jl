@@ -28,23 +28,49 @@ export generate_AO_DF_integrals, generate_DF_integrals
 function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
   bao = generate_basis(EC, "ao")
   bfit = generate_basis(EC, fitbasis)
-  save!(EC,"S_AA",overlap(bao))
-  save!(EC,"h_AA",kinetic(bao) + nuclear(bao))  
+  S_AA = overlap(bao)
+  t_AA = kinetic(bao)
+  v_AA = nuclear(bao)
+  save!(EC, "S_AA", S_AA)
+  save!(EC, "h_AA", t_AA + v_AA)  
   if EC.options.wf.npositron > 0
-    save!(EC,"h_positron_AA",kinetic(bao) - nuclear(bao))
+    save!(EC, "h_positron_AA", t_AA - v_AA)
   end
   PQ = eri_2e2idx(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
+  M = sqrtinvchol(PQ, tol=EC.options.cholesky.thred, verbose=true)
   if save3idx
-    AAP = eri_2e3idx(bao,bfit)
-    nA = size(AAP,1)
-    nL = size(M,2)
+    Pbatches = BasisBatcher(bao, bfit, EC.options.int.target_batch_length)
+    lencbuf = buffer_size_3idx(Pbatches)
+    cbuf = Buffer{Cdouble}(lencbuf)
+    maxP = max_batch_length(Pbatches)
+    nA = size(S_AA, 1)
+    nL = size(M, 2)
     AALfile, AAL = newmmap(EC, "AAL", (nA,nA,nL))
+    buf = Buffer(nA*nA*maxP + nL*maxP)
     LBlks = get_spaceblocks(1:nL)
-    for L in LBlks
-      v!M = @view M[:,L]
-      v!AAL = @view AAL[:,:,L]
-      @tensoropt v!AAL[p,q,L] = AAP[p,q,P] * v!M[P,L]
+    first = true
+    for Pblk in Pbatches
+      P = range(Pblk)
+      lenP = length(P)
+      AAP = alloc!(buf, nA, nA, lenP)
+      eri_2e3idx!(AAP, cbuf, Pblk)
+      M_PL = alloc!(buf, lenP, nL)
+      M_PL .= @view M[P,:]
+      if first
+        for L in LBlks
+          v!M = @view M_PL[:,L]
+          v!AAL = @view AAL[:,:,L]
+          @mtensor v!AAL[p,q,L] = AAP[p,q,P] * v!M[P,L]
+        end
+        first = false
+      else
+        for L in LBlks
+          v!M = @view M_PL[:,L]
+          v!AAL = @view AAL[:,:,L]
+          @mtensor v!AAL[p,q,L] += AAP[p,q,P] * v!M[P,L]
+        end
+      end
+      drop!(buf, AAP, M_PL) 
     end
     closemmap(EC, AALfile, AAL)
   else

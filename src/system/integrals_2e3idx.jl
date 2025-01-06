@@ -66,6 +66,13 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2E3IDX
       Compute the $descr integral.
       The result is stored in `out`. 
     """
+  docstr_ex_batch = """
+        $jname_ex(out, buffer, batch::BasisBatch)
+
+      Compute the $descr integral in batch mode (see [`BasisBatcher`](@ref)).
+      The result is stored in `out`. 
+      `buffer` is a preallocated buffer `Buffer{Cdouble}` of size `buffer_size_3idx(batch.bb)`.
+    """
   @eval begin
     @doc $docstr
     function $jname(ao_basis::BasisSet, fit_basis::BasisSet) 
@@ -84,6 +91,15 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2E3IDX
         calc_2e3idx!(out, $jname_cart, ao_basis, fit_basis)
       else
         calc_2e3idx!(out, $jname_sph, ao_basis, fit_basis)
+      end
+    end
+
+    @doc $docstr_ex_batch
+    function $jname_ex(out, buffer, batch::BasisBatch)
+      if is_cartesian(batch.bb.basis) 
+        calc_2e3idx!(out, buffer, $jname_cart, batch)
+      else
+        calc_2e3idx!(out, buffer, $jname_sph, batch)
       end
     end
   end
@@ -138,5 +154,48 @@ function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::Ba
       end #inbounds
     end #spwan
   end #sync
+  return out
+end
+
+function calc_2e3idx!(out, buffer, callback::Function, batch::BasisBatch)
+  # Number of orbitals per shell
+  nao4sh = n4sh(batch, 1)
+  nfit4sh = n4sh(batch, 2)
+
+  bs = batch.bb.basis
+
+  # Offset list for each shell, used to map shell index to orbital index
+  ao_offset = bas_offset(batch, 1)
+  fit_offset = bas_offset(batch, 2)
+
+  fit_sh_offset = shell_range(bs, 2).start - 1
+  fit_out_offset = batch.range.start - 1
+
+  for Pb in batch.shrange
+    @inbounds begin
+      buf = neuralyze(reshape_buf!(buffer, length(buffer)))
+      P = Pb - fit_sh_offset
+      nP = nfit4sh[P]
+      Pblk = (1:nP) .+ (fit_offset[P] - fit_out_offset)
+      for (j, jb) in enumerate(shell_range(bs, 1))
+        nj = nao4sh[j]
+        jblk = (1:nj) .+ ao_offset[j]
+        for (i, ib) in enumerate(shell_range(bs, 1).start:jb) # Only upper triangle
+          ni = nao4sh[i]
+          iblk = (1:ni) .+ ao_offset[i]
+
+          # Call libcint
+          callback(buf, ib, jb, Pb, bs)
+          
+          # save elements
+          vbuf = reshape_buf!(buffer, ni, nj, nP)
+          out[iblk, jblk, Pblk] = vbuf
+          v_jiP = @view out[jblk, iblk, Pblk]
+          permutedims!(v_jiP, vbuf, (2,1,3))
+        end
+      end
+      reset!(buffer)
+    end #inbounds
+  end
   return out
 end

@@ -13,12 +13,14 @@
 * memory buffers are now handled by functions and types in `Buffers` module.
 * the precompilation is disabled for development versions.
 * Buffers is moved to a separate package Buffers.jl.
+* reduce memory demand in df-hf.
 
 ### Added
 
 * a macro `@dummy` has been added to set some atoms to dummy atoms. 
 * a `neuralize` function to trick `Base.mightalias` in `TensorOperations` for reshaped-buffer arrays.
 * `Buffer` and `ThreadsBuffer` types and `alloc!`, `drop!`, `reset!`, `reshape_buf!` functions.
+* `BasisBatcher` structure to calculate 3-index integrals in batches.
 
 ### Fixed
 
