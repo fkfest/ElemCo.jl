@@ -234,6 +234,8 @@ Base.@kwdef mutable struct IntOptions
   fcidump::String = ""
   """`⟨false⟩` use Cartesian subshells instead of Spherical. """
   cartesian::Bool = false
+  """`⟨1000⟩` target batch length for the integral transformation. """
+  target_batch_length::Int = 1000
 end
 
 """ 

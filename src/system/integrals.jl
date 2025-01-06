@@ -15,7 +15,9 @@ export overlap, kinetic, nuclear
 export eri_2e4idx!, eri_2e3idx!, eri_2e2idx!
 export eri_2e4idx, eri_2e3idx, eri_2e2idx
 export n_ao4sphshell, n_ao4cartshell
+export BasisBatcher, BasisBatch, buffer_size_3idx, max_batch_length
 
+include("basisbatcher.jl")
 
 """
     n_ao4sphshell(id::Integer, info::ILibcint5)

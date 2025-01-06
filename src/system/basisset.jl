@@ -121,6 +121,7 @@ end
   in the combined set.
 """
 function combine(bs1::BasisSet, bs2::BasisSet)
+  @assert bs1.cartesian == bs2.cartesian "Basis sets must be both cartesian or both spherical"
   centers = vcat(bs1.centers, bs2.centers)
   set_id!(centers, 1)
   center_ranges = vcat(bs1.center_ranges, [r .+ length(bs1.centers) for r in bs2.center_ranges])

@@ -31,6 +31,15 @@ Pages = ["integrals_2e3idx.jl"]
 Order = [:constant, :type, :function]
 ```
 
+#### Calculation in batches
+
+```@autodocs
+Modules = [ElemCo.Integrals]
+Private = false
+Pages = ["basisbatcher.jl"]
+Order = [:constant, :type, :function]
+```
+
 ## Internal functions
 
 ```@autodocs
