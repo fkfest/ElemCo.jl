@@ -306,14 +306,16 @@ function dress_df_fock(EC::ECInfo, T1)
     lenL = length(L)
     v!mmL = @view mmL[:,:,L]
     vt_moL = alloc!(buf, nmo, nocc, lenL)
-    mvL = alloc!(buf, nmo, nvirt, lenL)
-    mvL .= @view v!mmL[:,virt,:]
+    mLv = alloc!(buf, nmo, lenL, nvirt)
+    permutedims!(mLv, @view(v!mmL[:,virt,:]), (1,3,2))
     n!vt_moL = neuralyze(vt_moL)
-    @mtensor n!vt_moL[p,i,L] = mvL[p,a,L]*T1[a,i]
-    drop!(buf, mvL)
+    @mtensor n!vt_moL[p,i,L] = mLv[p,L,a]*T1[a,i]
+    drop!(buf, mLv)
     vt_L = reshape_buf!(vt_L_buf, lenL)
-    vt_ooL = @view vt_moL[occ,:,:]
+    vt_ooL = alloc!(buf, nocc, nocc, lenL)
+    vt_ooL .= @view vt_moL[occ,:,:]
     @mtensor vt_L[L] = vt_ooL[i,i,L]
+    drop!(buf, vt_ooL)
     # exchange
     omL = alloc!(buf, nocc, nmo, lenL)
     omL .= @view v!mmL[occ,:,:]
