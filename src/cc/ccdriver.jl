@@ -81,29 +81,33 @@ end
 function dfccdriver(EC::ECInfo, method)
   setup_space_system!(EC)
   closed_shell = (EC.space['o'] == EC.space['O'])
+  ecmethod = ECMethod(method)
   
   energies = OutDict()
-  energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies)
+  root_name = method_name(ecmethod, root=true)
+  onthefly = root_name == "MP2" 
+  energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies; save3idx=!onthefly)
   t1 = time_ns()
   space_save = save_space(EC)
   freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
   freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
   t1 = print_time(EC, t1, "freeze core and virt", 2)
 
-  ecmethod = ECMethod(method)
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
-
-  if !closed_shell_method
-    error("Only closed-shell density fitting methods implemented!")
-  end
 
   main_name = method_name(ecmethod)
   if has_prefix(ecmethod, "SVD")
     @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
+    if !closed_shell_method
+      error("Only closed-shell SVD methods implemented!")
+    end
     ECC = calc_svd_dc(EC, ecmethod)
     energies = output_energy(EC, ECC, energies, main_name)
+  elseif root_name == "MP2"
+    ECC = calc_dfmp2(EC)
+    energies = output_energy(EC, ECC, energies, main_name)
   else
-    error("Only SVD DF methods implemented!")
+    error("$main_name DF method not implemented!")
   end
 
   delete_temporary_files!(EC)
@@ -419,53 +423,25 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
 end
 
 """
-    eval_df_mo_integrals(EC::ECInfo, energies::OutDict)
+    eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
 
   Evaluate the density-fitted integrals in MO basis 
   and store in the correct file.
+  If `save3idx` is true, save the 3-index integrals, otherwise only the 2-index integrals.
 
   Return the reference energy as `HF` key in OutDict and 
-  `true` if the integrals are calculated using unresctricted orbitals.
+  `true` if the integrals are calculated using unrestricted orbitals.
 """
-function eval_df_mo_integrals(EC::ECInfo, energies::OutDict)
+function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   t1 = time_ns()
   cMO = load_orbitals(EC, EC.options.wf.orb)
   unrestricted = !is_restricted(cMO)
-  ERef = generate_DF_integrals(EC, cMO)
+  ERef = generate_DF_integrals(EC, cMO; save3idx)
   t1 = print_time(EC, t1, "generate DF integrals", 2)
   cMO = nothing
   output_E_method(ERef, "Reference energy:")
   println()
   return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
-end
-
-"""
-    eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict)
-
-  Evaluate the coupled-cluster ground-state energy for the DF integrals,
-  which have to be calculated before.
-  Return the updated `energies::OutDict` with the correlation energy (`method*"c"`) and 
-  the total energy (key `method`).
-"""
-function eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict)
-  t1 = time_ns()
-  energies = copy(energies_in)
-  if ecmethod.exclevel[3] != :none
-    error("no triples implemented yet...")
-  end
-  if ecmethod.exclevel[4] != :none
-    error("no quadruples implemented yet...")
-  end
-  main_name = method_name(ecmethod)
-  if has_prefix(ecmethod, "SVD")
-    @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
-    ECC = calc_svd_dc(EC, ECMethod(main_name))
-    energies = output_energy(EC, ECC, energies, main_name)
-  else
-    error("Only SVD DF methods implemented!")
-  end
-  t1 = print_time(EC, t1,"CC",1)
-  return energies
 end
 
 """

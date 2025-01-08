@@ -35,6 +35,10 @@ orbital_printout = read(rd, String)
 close(rd)
 println(orbital_printout)
 @test orbital_printout == orbital_printout_test 
+
+energies = @dfmp2
+@test abs(energies["MP2"]-EMP2_test) < epsilon
+
 fcidump = "DF_HF_TEST.FCIDUMP"
 @set int fcidump=fcidump
 @dfints

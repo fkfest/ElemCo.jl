@@ -21,6 +21,7 @@
 * a `neuralize` function to trick `Base.mightalias` in `TensorOperations` for reshaped-buffer arrays.
 * `Buffer` and `ThreadsBuffer` types and `alloc!`, `drop!`, `reset!`, `reshape_buf!` functions.
 * `BasisBatcher` structure to calculate 3-index integrals in batches.
+* `@dfmp2` to calculate df-mp2 energy without storing integrals.
 
 ### Fixed
 

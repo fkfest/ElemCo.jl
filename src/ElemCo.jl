@@ -87,7 +87,7 @@ export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
-export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
 # from Utils
 export last_energy
@@ -557,6 +557,21 @@ macro dfcc(method="svd-dcsd")
 end
 
 """ 
+    @dfmp2()
+
+  Run density-fitted MP2 calculation.
+
+  If `save` is set in [`CcOptions.save`](@ref ECInfos.CcOptions), 
+  the MP2 doubles amplitudes are saved to `save`*"_2" file.
+"""
+macro dfmp2()
+  return quote
+    $(esc(:@tryECinit))
+    dfccdriver($(esc(:EC)), "MP2")
+  end
+end
+
+""" 
     @bohf()
 
   Run bi-orthogonal HF calculation using FCIDUMP integrals.
@@ -779,6 +794,7 @@ if last(__VERSION__) != '+'
       @cc dcsd
       @cc uccsd
       @dfcc svd-dcsd
+      @dfmp2
     end
     redirect_stdout(savestd)
   end

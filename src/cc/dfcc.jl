@@ -9,7 +9,9 @@ using Buffers
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
+using ..ElemCo.QMTensors
 using ..ElemCo.MSystem
+using ..ElemCo.Integrals
 using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
 using ..ElemCo.DecompTools
@@ -19,6 +21,8 @@ using ..ElemCo.CCTools
 using ..ElemCo.DIIS
 
 export calc_dressed_3idx, save_pseudodressed_3idx, calc_svd_dc
+export calc_dfmp2
+include("dfmp2.jl")
 
 """
     get_ssv_osvˣˣ(EC::ECInfo)
