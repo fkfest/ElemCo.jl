@@ -7,6 +7,7 @@ using ..ElemCo.DescDict
 using ..ElemCo.Outputs
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
+export warn
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
 export substr
@@ -52,6 +53,22 @@ function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
   end
   return t2
 end
+
+"""
+    warn(msg::AbstractString)
+
+  Print a warning message.
+
+  The message is printed with a scull emoji.
+  # Example
+```julia
+julia> warn("This is a warning message.")
+```
+"""
+function warn(msg::AbstractString)
+  println("☠️ Warning: ", msg)
+end
+
 
 """
     OutDict

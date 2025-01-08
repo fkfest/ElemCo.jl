@@ -6,6 +6,7 @@ using LinearAlgebra, TensorOperations
 using Buffers
 # using TSVD
 using IterativeSolvers
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
@@ -14,7 +15,7 @@ using ..ElemCo.MSystem
 using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
 
-export generate_AO_DF_integrals, generate_DF_integrals
+export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -74,50 +75,64 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
     end
     closemmap(EC, AALfile, AAL)
   else
-    save!(EC,"C_PL",M)
+    save!(EC, "C_PL", M)
   end
   return nuclear_repulsion(EC.system)
 end
 
 """
-    generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit")
+    generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit"; save3idx=true)
 
   Generate ``v_p^{qL}`` with
   ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``
   and store in file `mmL`.
+  If `save3idx` is false, no 3-index integrals are calculated, only save pseudo-square-root-inverse Cholesky decomposition.
 """
-function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit")
-  @assert is_restricted(cMO) "unrestricted not implemented yet"
-  cMO1 = cMO[1]
-  bao = generate_basis(EC, "ao")
-  bfit = generate_basis(EC, fitbasis)
-
-  PQ = eri_2e2idx(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
-  μνP = eri_2e3idx(bao,bfit)
-  nao = size(μνP, 1)
-  nmo = size(cMO1, 2)
-  nL = size(M, 2)
+function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit"; save3idx=true)
+  generate_AO_DF_integrals(EC, fitbasis; save3idx)
+  if !save3idx
+    return
+  end
+  AALfile, AAL = mmap3idx(EC, "AAL")
+  nao = size(cMO[1], 1)
+  nmo = size(cMO[1], 2)
+  nL = size(AAL, 3)
+  unrestricted = !is_restricted(cMO)
   mmLfile, mmL = newmmap(EC, "mmL", (nmo,nmo,nL))
+  if unrestricted
+    MMLfile, MML = newmmap(EC, "MML", (nmo,nmo,nL))
+  end
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  buf = Buffer((nao+nmo)*nao*maxL)
+  buf = Buffer(nmo*nao*maxL)
+  c_Am = cMO[1]
+  c_AM = cMO[2]
   for L in LBlks
-    v!M = @view M[:,L]
+    lenL = length(L)
+    v!AAL = @view AAL[:,:,L]
     v!mmL = @view mmL[:,:,L]
-    AAL = alloc!(buf, nao, nao, nL)
-    @mtensor AAL[μ,ν,L] = μνP[μ,ν,P] * v!M[P,L]
-    mAL = alloc!(buf, nmo, nao, nL)
-    n!mAL = neuralyze(mAL)
-    @mtensor n!mAL[p,ν,L] = cMO1[μ,p] * AAL[μ,ν,L]
-    @mtensor v!mmL[p,q,L] = mAL[p,ν,L] * cMO1[ν,q]
-    drop!(buf, AAL, mAL)
+    mAL = alloc!(buf, nmo, nao, lenL)
+    @mtensor mAL[p,ν,L] = c_Am[μ,p] * v!AAL[μ,ν,L]
+    @mtensor v!mmL[p,q,L] = mAL[p,ν,L] * c_Am[ν,q]
+    drop!(buf, mAL)
+    if unrestricted
+      v!MML = @view MML[:,:,L]
+      MAL = alloc!(buf, nmo, nao, lenL)
+      @mtensor MAL[p,ν,L] = c_AM[μ,p] * v!AAL[μ,ν,L]
+      @mtensor v!MML[p,q,L] = MAL[p,ν,L] * c_AM[ν,q]
+      drop!(buf, MAL)
+    end
   end
+  close(AALfile)
   closemmap(EC, mmLfile, mmL)
+  if unrestricted
+    closemmap(EC, MMLfile, MML)
+  end
+  return
 end
 
 """
-    generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix)
+    generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix; save3idx=true)
 
   Generate ``v_p^{qL}`` and ``f_p^q`` with
   ``v_{pr}^{qs} = v_p^{qL} δ_{LL'} v_r^{sL'}``.
@@ -127,29 +142,76 @@ end
 
   Return reference energy (calculated using `jkfit` fitting basis).
 """
-function generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix)
-  @assert is_restricted(cMO) "unrestricted not implemented yet"
+function generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix; save3idx=true)
   if !system_exists(EC.system)
     error("Molecular system not specified!")
   end
   # calculate fock matrix in AO basis (integral direct)
-  generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
-  bao = generate_basis(EC, "ao")
-  bfit = generate_basis(EC, "jkfit")
-  fock = gen_dffock(EC, cMO[1], bao, bfit)
-  fock_MO = cMO[1]' * fock * cMO[1]
-  save!(EC,"f_mm",fock_MO)
-  eps = diag(fock_MO)
-  println("Occupied orbital energies: ", eps[EC.space['o']])
-  save!(EC, "e_m", eps)
-  save!(EC, "e_M", eps)
-  occ = EC.space['o']
-  hsmall = cMO[1]' * load2idx(EC,"h_AA") * cMO[1]
-  EHF = sum(eps[occ]) + sum(diag(hsmall)[occ]) + nuclear_repulsion(EC.system)
+  EHF = generate_DF_Fock(EC, cMO)
   # calculate 3-index integrals
-  generate_3idx_integrals(EC, cMO, "mpfit")
+  generate_3idx_integrals(EC, cMO, "mpfit"; save3idx)
   return EHF
 end
 
+"""
+    generate_DF_Fock(EC::ECInfo, cMO::SpinMatrix; check_diagonal=false)
+
+  Generate DF Fock matrix in MO basis.
+  If `check_diagonal` is true, check the off-diagonal elements of the Fock matrix to be small.
+  The Fock matrix is saved in files `f_mm`/`f_MM` and orbital energies in `e_m`/`e_M`.
+
+  Return reference energy.
+"""
+function generate_DF_Fock(EC::ECInfo, cMO::SpinMatrix; check_diagonal=false)
+  if !system_exists(EC.system)
+    error("Molecular system not specified!")
+  end
+  occα = EC.space['o']
+  occβ = EC.space['O']
+  # calculate fock matrix in AO basis (integral direct)
+  generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, "jkfit")
+  h_AA = load2idx(EC, "h_AA")
+  if is_restricted(cMO) && occα == occβ
+    # restricted closed-shell
+    fock = SpinMatrix(gen_dffock(EC, cMO[1], bao, bfit))
+    nspin = 1
+  else
+    # unrestricted
+    fock = gen_dffock(EC, cMO, bao, bfit)
+    nspin = 2
+  end
+  EHF = 0.0
+  for isp in 1:nspin
+    fock_MO = cMO[isp]' * fock[isp] * cMO[isp]
+    m = ('m','M')[isp]
+    occ = (occα, occβ)[isp]
+    save!(EC, "f_$m$m", fock_MO)
+    eps = diag(fock_MO)
+    println("Occupied orbital energies: ", eps[occ])
+    save!(EC, "e_$m", eps)
+    if nspin == 1
+      save!(EC, "e_M", eps)
+    end
+    if check_diagonal
+      # Checking off-diagonal elements of fock matrix
+      maxoff = maximum(abs, fock_MO - Diagonal(fock_MO))
+      if maxoff > 1e-8
+        if EC.options.wf.ignore_error
+          warn("The largest off-diagonal element of fock matrix is $maxoff > 1e-8")
+        else
+          error("The largest off-diagonal element of fock matrix is $maxoff > 1e-8 
+          The error can be ignored by setting wf,ignore_error=true.")
+        end
+      end
+    end
+    hsmall = cMO[isp]' * h_AA * cMO[isp]
+    EHF += sum(eps[occ]) + sum(diag(hsmall)[occ])
+  end
+  EHF /= nspin
+  EHF += nuclear_repulsion(EC.system)
+  return EHF
+end
 
 end #module

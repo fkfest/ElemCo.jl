@@ -18,7 +18,7 @@ export update_singles, update_doubles, update_singles!, update_doubles!, update_
 export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles
 export transform_amplitudes2lagrange_multipliers!
-export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
+export save_or_start_file, try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
 export contra2covariant
 export spin_project!, spin_project_amplitudes
 export clean_cs_triples!
