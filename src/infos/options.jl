@@ -155,6 +155,10 @@ Base.@kwdef mutable struct CcOptions
   calc_d_vovv::Bool = false
   """`⟨false⟩` calculate dressed <vv|oo>. """
   calc_d_vvoo::Bool = false
+  """`⟨true⟩` use density fitting in SVD-DC-CCSDT instead of the integral decomposition. """
+  usedf::Bool = true
+  """`⟨true⟩` use Cholesky decomposition in SVD-DC-CCSDT instead of SVD in the integral decomposition. """
+  usecholesky::Bool = true
   """`⟨false⟩` calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
   """`⟨0.0⟩` imaginary shift for denominator in doubles decomposition. """

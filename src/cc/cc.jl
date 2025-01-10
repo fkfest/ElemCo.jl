@@ -67,6 +67,7 @@ using ..ElemCo.ECMethods
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDumps
+using ..ElemCo.MSystem
 using ..ElemCo.DIIS
 using ..ElemCo.DecompTools
 using ..ElemCo.DFCoupledCluster
@@ -2602,7 +2603,13 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
       println("SVD-DC-CCSDT with SVD-(T)")
     end
   end
-  calc_integrals_decomposition(EC)
+  if EC.options.cc.usedf && system_exists(EC.system)
+    println("Using density fitting")
+    calc_df_integrals(EC)
+  else
+    println("Decomposing integrals")
+    calc_integrals_decomposition(EC)
+  end
   T1 = read_starting_guess4amplitudes(EC, Val(1))
   T2 = read_starting_guess4amplitudes(EC, Val(2))
   if useT3

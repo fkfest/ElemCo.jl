@@ -16,6 +16,7 @@ using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
 
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
+export generate_3idx_integrals
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
