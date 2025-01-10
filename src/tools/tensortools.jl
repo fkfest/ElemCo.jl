@@ -390,14 +390,14 @@ end
 """
 function get_spaceblocks(space, maxblocksize=128, strict=false)
   if length(space) == 0
-    return []
+    return UnitRange{Int}[]
   end
   if last(space) - first(space) + 1 == length(space)
     # contiguous
-    cblks = [ first(space):last(space) ]
+    cblks = UnitRange{Int}[ first(space):last(space) ]
   else
     # create an array of contiguous ranges
-    cblks = []
+    cblks = UnitRange{Int}[]
     begr = first(space)
     endr = begr - 1
     for idx in space
@@ -411,18 +411,18 @@ function get_spaceblocks(space, maxblocksize=128, strict=false)
     push!(cblks, begr:endr)
   end  
 
-  allblks = []
+  allblks = UnitRange{Int}[]
   for range in cblks
-    nblks = length(range) ÷ maxblocksize
+    nblks::Int = length(range) ÷ maxblocksize
     if nblks*maxblocksize < length(range)
       nblks += 1
     end
     if strict 
-      blks = [ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
+      blks = UnitRange{Int}[ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
     else
       blocksize = length(range) ÷ nblks
       n_largeblks = mod(length(range), nblks)
-      blks = [ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
+      blks = UnitRange{Int}[ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
       start = n_largeblks*(blocksize+1)+first(range)
       for i = n_largeblks+1:nblks
         push!(blks, start:start+blocksize-1)

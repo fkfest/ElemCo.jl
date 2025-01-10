@@ -130,8 +130,6 @@ function calc_1e!(out, callback::Function, bs::BasisSet)
           ioff = ao_offset[i]
           # Call libcint
           callback(buf, i, j, bs)
-          flush(stdout)
-
           # save elements
           vbuf = reshape_buf!(tbufs, leni, lenj)
           out[ioff+1:ioff+leni, joff+1:joff+lenj] = vbuf

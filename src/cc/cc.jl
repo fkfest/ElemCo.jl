@@ -1261,11 +1261,11 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   # a function that can calculate the eigenvectors & eigenvalues of a matrix
   # CU[i,j,k,l] -> CU[ij,kl], Y[a,i,b,j] -> Y[ai,bj], W[a,i,b,j] -> W[ai,bj]
   # corresponding to \pre{_C}U^{ij}_{kl}, Y^{aj}_{bi}, W^{aj}_{bi}
-  Ae, AX = eigen(AU)
-  Be, BX = eigen(BU)
-  Ce, CX = eigen(reshape(CU, nocc^2, nocc^2))
-  Ye, YX = eigen(reshape(Y, nvirt*nocc, nvirt*nocc))
-  We, WX = eigen(reshape(W, nvirt*nocc, nvirt*nocc))
+  Ae, AX = eigen(Hermitian(AU))
+  Be, BX = eigen(Hermitian(BU))
+  Ce, CX = eigen(Hermitian(reshape(CU, nocc^2, nocc^2)))
+  Ye, YX = eigen(Hermitian(reshape(Y, nvirt*nocc, nvirt*nocc)))
+  We, WX = eigen(Hermitian(reshape(W, nvirt*nocc, nvirt*nocc)))
   G2 = zeros(nvirt, nvirt, nocc, nocc)
   E_qvccd = 0.0
   for q in [1.0, 2.0]
