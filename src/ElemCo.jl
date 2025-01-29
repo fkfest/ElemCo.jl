@@ -284,7 +284,7 @@ macro tryECinit()
   return quote
     runECinit = [false]
     try
-      $(esc(:EC)).verbosity
+      $(esc(:EC)).options
     catch
       runECinit[1] = true
     end

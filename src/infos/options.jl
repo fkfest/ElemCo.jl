@@ -161,6 +161,12 @@ Base.@kwdef mutable struct CcOptions
   usecholesky::Bool = true
   """`⟨false⟩` calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
+  """`⟨true⟩` project out the T^iii contribution from the density matrix in decomposition in SVD-DC-CCSDT. """
+  project_t3iii::Bool = true
+  """`⟨false⟩` calculated ``V_{aX}^{iL}`` in SVD-DC-CCSDT using a projection to the X space as
+  ``V_{XZ}^{L} U^{iZ}_{a}``. This is an additional approximation, which reduces the scaling of the 
+  most expensive steps and is useful for large systems. """
+  project_voXL::Bool = false
   """`⟨0.0⟩` imaginary shift for denominator in doubles decomposition. """
   deco_ishiftp::Float64 = 0.0
   """`⟨0.0⟩` imaginary shift for denominator in triples decomposition. """
@@ -271,6 +277,18 @@ Base.@kwdef mutable struct DiisOptions
   maxcrop::Int = 3
 end
 
+"""
+  Options for printing.
+
+  $(TYPEDFIELDS)
+"""
+Base.@kwdef mutable struct PrintOptions
+  """`⟨2⟩` verbosity level for printing timings. """
+  time::Int = 2
+  """`⟨2⟩` verbosity level for printing memory usage. """
+  memory::Int = 2
+end
+
 """ 
   Options for ElemCo.jl.
 
@@ -291,4 +309,6 @@ Base.@kwdef mutable struct Options
   cholesky::CholeskyOptions = CholeskyOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
+  """ Print options ([`PrintOptions`](@ref)). """
+  print::PrintOptions = PrintOptions()
 end
