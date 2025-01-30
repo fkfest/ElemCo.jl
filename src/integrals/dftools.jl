@@ -4,8 +4,6 @@ This module contains various utils for density fitting.
 module DFTools
 using LinearAlgebra, TensorOperations
 using Buffers
-# using TSVD
-using IterativeSolvers
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors

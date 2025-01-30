@@ -2625,6 +2625,10 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   diis = Diis(EC)
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
 
+  if EC.options.cc.project_voXL
+    calc_space4project_voXL(EC, T2)
+    t0 = print_time(EC, t0, "space for project_voXL", 1)
+  end
   # calc intermediates for SVD-T
   calc_intermediates4triples(EC)
   t0 = print_time(EC, t0, "intermediates for SVD-T", 1)
@@ -2988,10 +2992,12 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
 
   # first approx for U^iX_a from doubles decomposition
   tol2 = sqrt(EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
-  UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nocc*nvirt, nocc*nvirt)), nvirt, nocc, tol2)
+  UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nocc*nvirt, nocc*nvirt)), 
+                       nvirt, nocc, tol2; description="Intermediate triples")
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX) 
-  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), nvirt, nocc, EC.options.cc.ampsvdtol)
+  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), 
+                       nvirt, nocc, EC.options.cc.ampsvdtol; description="Triples")
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -3008,7 +3014,6 @@ end
 """
 function calc_triples_decomposition(EC::ECInfo)
   println("T^ijk_abc-decomposition")
-  use_svd = true 
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
 
@@ -3025,12 +3030,8 @@ function calc_triples_decomposition(EC::ECInfo)
     Triples_Amplitudes[:,k,:,i,:,j] = permutedims(T3[:,:,:,ijk],(3,1,2))
   end
   close(t3file)
-  if use_svd
-    UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol))
-  else
-    naux = nvirt * 2 
-    UaiX = iter_svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), nvirt, nocc, naux)
-  end
+  UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), 
+                      nvirt, nocc, sqrt(EC.options.cc.ampsvdtol); description="Triples")
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -3132,9 +3133,9 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     W_XL = alloc!(buf, nX, lenL)
     @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
     n!V_vvX = neuralyze(V_vvX)
-    @mtensor n!V_vvX[a,d,X] += vvL[a,d,L] * W_XL[X,L]
+    @mtensor n!V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
     n!V_ooX = neuralyze(V_ooX)
-    @mtensor n!V_ooX[l,j,X] += ooL[l,j,L] * W_XL[X,L]
+    @mtensor n!V_ooX[l,j,X] += v!ooL[l,j,L] * W_XL[X,L]
     drop!(buf, W_XL)
   end
   D2 = zeros(nvirt, nocc, nvirt, nocc)
@@ -3341,6 +3342,59 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
 end
 
 """
+    calc_space4project_voXL(EC::ECInfo, T2)
+
+  Calculate space for `project_voXL=true` approximation.
+  
+  It is a combination of spaces for triples and contravariant doubles. 
+"""
+function calc_space4project_voXL(EC::ECInfo, T2)
+  nvirt = size(T2, 1)
+  nocc = size(T2, 3)
+  UvoX = load3idx(EC, "C_voX")
+  if EC.options.cc.space4voXL == :triples
+    println("Triples space for project_voXL")
+    nbX = size(UvoX, 3) 
+    UvobX = UvoX
+  elseif EC.options.cc.space4voXL == :full
+    println("Full space for project_voXL (not recommended, use project_voXL=false instead)")
+    nbX = nvirt*nocc
+    UvobX = reshape(Matrix{Float64}(I, nbX, nbX), (nvirt, nocc, nbX))
+  elseif EC.options.cc.space4voXL in [:combined, :symcombined]
+    @mtensor tT2[a,i,b,j] := 2.0 * T2[a,b,i,j] - T2[a,b,j,i]
+    println("Combined space for project_voXL (triples + contravariant doubles space)")
+    if EC.options.cc.space4voXL == :combined
+      println("project the triples space from the doubles")
+      # project the triples space contribution from \tilde T2
+      @mtensor tT2X[X,b,j] := UvoX[a,i,X] * tT2[a,i,b,j]
+      @mtensor tT2[a,i,b,j] -= UvoX[a,i,X] * tT2X[X,b,j]
+      tT2X = nothing
+    end
+    # decompose ``\tilde T_2``
+    tol2 = sqrt(EC.options.cc.ampsvdtol)
+    UvoY = svd_decompose(reshape(tT2, (nocc*nvirt, nocc*nvirt)), 
+                      nvirt, nocc, tol2; description="Contravariant doubles")
+    # overlap of spaces
+    @mtensor S_XY[X,Y] := UvoX[a,i,X] * UvoY[a,i,Y]
+    nX, nY = size(S_XY)
+    # full overlap
+    S = Matrix{Float64}(I, nX+nY, nX+nY) 
+    S[1:nX,nX+1:end] = S_XY
+    S[nX+1:end,1:nX] = S_XY'
+    TU_ZbX, Sigma = svd_decompose(S, tol2*tol2; description="Combined")
+    # display(Sigma)
+    TU_ZbX ./= sqrt.(Sigma')
+    UvoZ = Array{Float64}(undef, nvirt, nocc, nX+nY)
+    UvoZ[:,:,1:nX] = UvoX
+    UvoZ[:,:,nX+1:end] = UvoY
+    @mtensor UvobX[a,i,bX] := UvoZ[a,i,Z] * TU_ZbX[Z,bX]
+  else
+    error("Unknown space4voXL option: $(EC.options.cc.space4voXL)")
+  end
+  save!(EC, "C_vo{bX}", UvobX)
+end
+
+"""
     calc_intermediates4triples(EC::ECInfo)
 
   Calculate intermediates for decomposed triples independent of the amplitudes.
@@ -3379,11 +3433,8 @@ function calc_intermediates4triples(EC::ECInfo)
   save!(EC, "B_XX", B_XX)
   save!(EC, "w_ovX", w_ovX)
   if EC.options.cc.project_voXL
-    nbX = nX
-    bUvoX = UvoX
-    # nbX = nvirt*nocc
-    # bUvoX = reshape(Matrix{Float64}(I, nbX, nbX), (nvirt, nocc, nbX))
-    save!(EC, "C_vo{bX}", bUvoX)
+    bUvoX = load3idx(EC, "C_vo{bX}")
+    nbX = size(bUvoX, 3)
     # ``UU^{iX}_{j\bar X} = U^{iX}_a \bar U^{\dagger a}_{j\bar X}``
     UU_oXobXfile, UU_oXobX = newmmap(EC, "UU_oXo{bX}", (nocc,nX,nocc,nbX))
     bXBlks = get_spaceblocks(1:nbX)

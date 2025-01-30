@@ -167,6 +167,8 @@ Base.@kwdef mutable struct CcOptions
   ``V_{XZ}^{L} U^{iZ}_{a}``. This is an additional approximation, which reduces the scaling of the 
   most expensive steps and is useful for large systems. """
   project_voXL::Bool = false
+  """`⟨:combined⟩` type of space for project_voXL. Possible values are :combined, :symcombined, :triples, :full. """ 
+  space4voXL::Symbol = :combined
   """`⟨0.0⟩` imaginary shift for denominator in doubles decomposition. """
   deco_ishiftp::Float64 = 0.0
   """`⟨0.0⟩` imaginary shift for denominator in triples decomposition. """
