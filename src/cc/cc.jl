@@ -2614,11 +2614,11 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   T1 = read_starting_guess4amplitudes(EC, Val(1))
   T2 = read_starting_guess4amplitudes(EC, Val(2))
   t0 = print_time(EC, t0, "starting guess", 2) 
+  # calc_dressed_3idx(EC,zeros(size(T1)))
+  calc_dressed_3idx(EC, T1)
   if useT3
     calc_triples_decomposition(EC)
   else
-    # calc_dressed_3idx(EC,zeros(size(T1)))
-    calc_dressed_3idx(EC, T1)
     calc_triples_decomposition_without_triples(EC, T2)
   end
   t0 = print_time(EC, t0, "triples decomposition", 1)
