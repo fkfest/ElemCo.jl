@@ -32,8 +32,6 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
   """`⟨".bin"⟩` extension of temporary files. """
   ext::String = ".bin"
-  """`⟨2⟩` verbosity level. """
-  verbosity::Int = 2
   """ options. """
   options::Options = Options()
   """ molecular system. """
@@ -74,6 +72,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   For example, `T_vo` contains the singles amplitudes ``T_{a}^{i}``.
   Disambiguity can be resolved by introducing `^` to separate the subscripts from the superscripts,
   e.g., `d_XX` contains ``\\hat v_{XY}`` and `d_^XX` contains ``\\hat v^{XY}`` integrals.
+  Subspaces with multiple characters are possible using `{}`, e.g., `C_vo{bX}` contains ``U_{a}^{i\\bar X}``.
   """
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """

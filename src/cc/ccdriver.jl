@@ -413,8 +413,8 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
     output_E_method(ecorr + EHF, "(T)-corrected SVD-DC-CCSDT", "total energy:      ")
     energies = merge(energies, "SVD-CCSD(T)c"=>(ECC["SVD-CCSD(T)"], "SVD-CCSD(T) correlation energy"),
                     "SVD-CCSD(T)"=>(ECC["SVD-CCSD(T)"]+EHF, "SVD-CCSD(T) total energy"),
-                    main_name*"+"=>(ecorr, "$main_name correlation energy with SVD-CCSD(T) correction"),
-                    main_name*"+c"=>(ecorr+EHF, "$main_name total energy with SVD-CCSD(T) correction"))
+                    main_name*"+c"=>(ecorr, "$main_name correlation energy with SVD-CCSD(T) correction"),
+                    main_name*"+"=>(ecorr+EHF, "$main_name total energy with SVD-CCSD(T) correction"))
   end
   t1 = print_time(EC, t1,"SVD-T",1)
   println()

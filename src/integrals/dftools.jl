@@ -4,8 +4,6 @@ This module contains various utils for density fitting.
 module DFTools
 using LinearAlgebra, TensorOperations
 using Buffers
-# using TSVD
-using IterativeSolvers
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
@@ -39,7 +37,9 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
     save!(EC, "h_positron_AA", t_AA - v_AA)
   end
   PQ = eri_2e2idx(bfit)
+  println("Number of fitting functions in $fitbasis: ", size(PQ, 2))
   M = sqrtinvchol(PQ, tol=EC.options.cholesky.thred, verbose=true)
+  println("Number of fitting functions in $fitbasis after Cholesky: ", size(M, 2))
   if save3idx
     Pbatches = BasisBatcher(bao, bfit, EC.options.int.target_batch_length)
     lencbuf = buffer_size_3idx(Pbatches)
