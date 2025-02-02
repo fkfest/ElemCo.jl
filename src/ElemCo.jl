@@ -94,7 +94,8 @@ export last_energy
 # from DescDict
 export ODDict
 
-const __VERSION__ = "0.13.1+"
+devel() = true
+const __VERSION__ = "0.13.1" * (devel() ? "+" : "")
 
 """
     __init__()
@@ -782,7 +783,7 @@ macro export_molden(filename)
 end
 
 # precompile if not in development mode
-if last(__VERSION__) != '+'
+if !devel()
   @setup_workload begin
     savestd = stdout
     redirect_stdout(devnull)
