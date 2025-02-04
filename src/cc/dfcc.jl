@@ -4,7 +4,7 @@
   Density-fitted coupled-cluster methods.
 """
 module DFCoupledCluster
-using LinearAlgebra, TensorOperations
+using LinearAlgebra, ElemCoTensorOperations
 using Buffers
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
@@ -51,12 +51,12 @@ function get_ssv_osvˣˣ(EC::ECInfo)
   vdagger_vvoo = zeros(nvirt,nvirt,nocc,nocc)
   for L in LBlks
     v!ovL = @view ovL[:,:,L]
-    @tensoropt vdagger_vvoo[a,b,i,j] += v!ovL[i,a,L] * v!ovL[j,b,L]
+    @mtensor vdagger_vvoo[a,b,i,j] += v!ovL[i,a,L] * v!ovL[j,b,L]
   end
   close(ovLfile)
-  @tensoropt begin
-    ssvxx[X,Y] := (vdagger_vvoo[a,b,i,j] - vdagger_vvoo[a,b,j,i]) * UvoX[a,i,X] * UvoX[b,j,Y]
-    osvxx[X,Y] := vdagger_vvoo[a,b,i,j] * UvoX[a,i,X] * UvoX[b,j,Y]
+  @mtensor begin
+    ssvxx[X,Y] := ((vdagger_vvoo[a,b,i,j] - vdagger_vvoo[a,b,j,i]) * UvoX[a,i,X]) * UvoX[b,j,Y]
+    osvxx[X,Y] := (vdagger_vvoo[a,b,i,j] * UvoX[a,i,X]) * UvoX[b,j,Y]
   end
   save!(EC, "ssd_^XX", ssvxx)
   save!(EC, "osd_^XX", osvxx)
@@ -87,7 +87,7 @@ function gen_vₓˣᴸ(EC::ECInfo)
     for X in XBlks
       v!UvoX = @view UvoX[:,:,X]
       # ``v_{X'}^{XL} = (v_a^{cL} U^{kX}_{c}) U^{†a}_{kX'}``
-      @tensoropt v_XXL[:,X,L][X',X,L] = (vvL[a,c,L] * v!UvoX[c,k,X]) * UvoX[a,k,X'] 
+      @mtensor v_XXL[:,X,L][X',X,L] = (vvL[a,c,L] * v!UvoX[c,k,X]) * UvoX[a,k,X'] 
     end
   end
   closemmap(EC, vXXLfile, v_XXL)
@@ -107,7 +107,7 @@ end
 """
 function calc_deco_hylleraas(EC::ECInfo, T1, T2::Array{Float64,4}, R1, R2::Array{Float64,4}) 
   ovL = load3idx(EC, "d_ovL")
-  @tensoropt begin
+  @mtensor begin
     int2[a,b,i,j] := R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L]
     ET2d = T2[a,b,i,j] * int2[a,b,i,j]
     ET2ex = T2[a,b,j,i] * int2[a,b,i,j]
@@ -126,12 +126,12 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2::Array{Float64,4}, R1, R2::Array
 end
 function calc_deco_hylleraas(EC::ECInfo, T1, T2::Matrix{Float64}, R1, R2::Matrix{Float64})
   ssvxx, osvxx = get_ssv_osvˣˣ(EC)
-  @tensoropt begin
+  @mtensor begin
     ET2OS = T2[X,Y] * (osvxx[X,Y] + R2[X,Y])
     ET2SS = T2[Y,X] * (ssvxx[X,Y] + R2[X,Y])
   end
   UvoX = load3idx(EC, "C_voX")
-  @tensoropt ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
+  @mtensor ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
   UvoX = nothing
   ET2 = ET2SS + ET2OS
   if length(T1) > 0
@@ -146,7 +146,7 @@ function calc_deco_hylleraas_singles(EC::ECInfo, T1, R1)
   SP = EC.space
   dfockc_ov = load2idx(EC, "dfc_ov")
   dfocke_ov = load2idx(EC, "dfe_ov")
-  @tensoropt begin
+  @mtensor begin
     ET1d = T1[a,i] * dfockc_ov[i,a] 
     ET1ex = T1[a,i] * dfocke_ov[i,a]
   end
@@ -154,7 +154,7 @@ function calc_deco_hylleraas_singles(EC::ECInfo, T1, R1)
   ET1OS = ET1d
   ET1 = ET1SS + ET1OS
   fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
-  @tensoropt ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
+  @mtensor ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
   return ET1, ET1SS, ET1OS
 end
 
@@ -173,7 +173,7 @@ function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,4})
 end
 function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,2})
   ssvxx, osvxx = get_ssv_osvˣˣ(EC)
-  @tensoropt begin
+  @mtensor begin
     ET2OS = T2[X,Y] * osvxx[X,Y] 
     ET2SS = T2[Y,X] * ssvxx[X,Y]
   end
@@ -195,7 +195,7 @@ function calc_df_doubles_energy(EC::ECInfo, T2)
     error("File d_ovL does not exist!")
   end
   ovL = load3idx(EC, "d_ovL")
-  @tensoropt begin
+  @mtensor begin
     int2[a,b,i,j] := ovL[i,a,L] * ovL[j,b,L]
     ET2d = T2[a,b,i,j] * int2[a,b,i,j]
     ET2ex = T2[b,a,i,j] * int2[a,b,i,j]
@@ -932,7 +932,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
       end
       # ``v_X^{YL} -= \hat v_{j}^{iL} U_{iX}^{jY}``
       n!v_XXL = neuralyze(v_XXL)
-      @tensoropt n!v_XXL[X,Y,L] -= v!ooL[j,i,L] * UUooXX[j,i,X,Y]
+      @mtensor n!v_XXL[X,Y,L] -= v!ooL[j,i,L] * UUooXX[j,i,X,Y]
       t1 = print_time(EC, t1, "``v_X^{YL} -= \\hat v_{j}^{iL} U_{iX}^{jY}``", 2)
       d_XXL[:,X,L] = v_XXL
       drop!(buf, v_XXL, UUooXX)

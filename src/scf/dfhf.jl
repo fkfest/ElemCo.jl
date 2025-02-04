@@ -1,5 +1,5 @@
 module DFHF
-using LinearAlgebra, TensorOperations
+using LinearAlgebra, ElemCoTensorOperations
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
@@ -62,7 +62,7 @@ function dfhf(EC::ECInfo)
     t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
     cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
-    @tensoropt efhsmall = cMO2[p,i]*fhsmall[p,q]*cMO2[q,i]
+    @mtensor efhsmall = (cMO2[p,i]*fhsmall[p,q])*cMO2[q,i]
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
@@ -140,8 +140,8 @@ function dfhf_positron(EC::ECInfo)
     fock, fock_pos, Jp = gen_dffock(EC, cMO, cPO)
     fhsmall = fock + hsmall + Jp
     t1 = print_time(EC, t1, "generate DF-Fock matrices for e and e+", 2)
-    @tensoropt E_el = eden[p,q] * fhsmall[p,q]
-    @tensoropt E_pos = pden[p,q] * fock_pos[p,q]
+    @mtensor E_el = eden[p,q] * fhsmall[p,q]
+    @mtensor E_pos = pden[p,q] * fock_pos[p,q]
     EHF = E_el + E_pos + Enuc
     ΔE = EHF - previousEHF
     previousEHF = EHF
@@ -227,7 +227,7 @@ function dfuhf(EC::ECInfo)
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])
       fhsmall = fock[ispin] + hsmall
-      @tensoropt efh = 0.5 * (den[p,q] * fhsmall[p,q])
+      @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
       efhsmall[ispin] = efh
       Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
       var += sum(abs2,Δfock[ispin])

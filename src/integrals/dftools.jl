@@ -2,7 +2,7 @@
 This module contains various utils for density fitting.
 """
 module DFTools
-using LinearAlgebra, TensorOperations
+using LinearAlgebra, ElemCoTensorOperations
 using Buffers
 # using TSVD
 using IterativeSolvers

@@ -58,7 +58,7 @@ end
 using LinearAlgebra
 using Printf # to be removed
 #BLAS.set_num_threads(1)
-using TensorOperations
+using ElemCoTensorOperations
 using Buffers
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
@@ -102,15 +102,15 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   if length(T1) > 0
     if !fock_only
       oovv = ints2(EC,"oovv")
-      @tensoropt begin
-        ET1d = T1[a,i] * T1[b,j] * oovv[i,j,a,b]
-        ET1ex = T1[b,i] * T1[a,j] * oovv[i,j,a,b]
+      @mtensor begin
+        ET1d = T1[a,i] * (T1[b,j] * oovv[i,j,a,b])
+        ET1ex = T1[b,i] * (T1[a,j] * oovv[i,j,a,b])
       end
       ET1SS = ET1d - ET1ex
       ET1OS = ET1d
       ET1 = ET1SS + ET1OS
     end
-    @tensoropt ET1 += 2.0*(T1[a,i] * load2idx(EC,"f_mm")[SP['o'],SP['v']][i,a])
+    @mtensor ET1 += 2.0*(T1[a,i] * load2idx(EC,"f_mm")[SP['o'],SP['v']][i,a])
   end
   return OutDict("E"=>ET1, "ESS"=>ET1SS, "EOS"=>ET1OS, "EO"=>0.0)
 end
@@ -127,20 +127,20 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   ET1 = ET1aa = ET1bb = ET1ab = 0.0
   if !fock_only
     if length(T1a) > 0
-      @tensoropt ET1aa = 0.5*((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b])
+      @mtensor ET1aa = 0.5*((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b])
     end
     if length(T1b) > 0
-      @tensoropt ET1bb = 0.5*((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b])
+      @mtensor ET1bb = 0.5*((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b])
       if length(T1a) > 0
-        @tensoropt ET1ab = T1a[a,i]*T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b]
+        @mtensor ET1ab = T1a[a,i]*(T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b])
       end
     end
   end
   if length(T1a) > 0
-    @tensoropt ET1 += T1a[a,i] * load2idx(EC,"f_mm")[SP['o'],SP['v']][i,a]
+    @mtensor ET1 += T1a[a,i] * load2idx(EC,"f_mm")[SP['o'],SP['v']][i,a]
   end
   if length(T1b) > 0
-    @tensoropt ET1 += T1b[a,i] * load2idx(EC,"f_MM")[SP['O'],SP['V']][i,a]
+    @mtensor ET1 += T1b[a,i] * load2idx(EC,"f_MM")[SP['O'],SP['V']][i,a]
   end
   ET1 += ET1aa + ET1bb + ET1ab
   ET1SS = ET1aa + ET1bb
@@ -158,7 +158,7 @@ end
 """
 function calc_doubles_energy(EC::ECInfo, T2)
   oovv = ints2(EC,"oovv")
-  @tensoropt begin
+  @mtensor begin
     ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
     ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
   end
@@ -176,7 +176,7 @@ end
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
-  @tensoropt begin
+  @mtensor begin
     ET2aa = 0.5*(T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b])
     ET2bb = 0.5*(T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b])
     ET2OS = T2ab[a,b,i,j] * ints2(EC,"oOvV")[i,j,a,b]
@@ -199,15 +199,15 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   int2 = ints2(EC,"oovv")
   ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
-    @tensoropt begin
-      ET1d = T1[a,i] * T1[b,j] * int2[i,j,a,b]
-      ET1ex = T1[b,i] * T1[a,j] * int2[i,j,a,b]
+    @mtensor begin
+      ET1d = T1[a,i] * (T1[b,j] * int2[i,j,a,b])
+      ET1ex = T1[b,i] * (T1[a,j] * int2[i,j,a,b])
     end
     ET1SS = ET1d - ET1ex
     ET1OS = ET1d
     ET1 = ET1SS + ET1OS
   end
-  @tensoropt begin
+  @mtensor begin
     pET2d = T2[a,b,i,j] * int2[i,j,a,b]
     pET2ex = T2[b,a,i,j] * int2[i,j,a,b]
     rET2d = T2[a,b,i,j] * R2[a,b,i,j]
@@ -223,7 +223,7 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   pET2 = pET2SS + pET2OS
   if length(T1) > 0
     fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
-    @tensoropt begin
+    @mtensor begin
       pET1 = 2.0*(fov[i,a] * T1[a,i])
       rET1 = 2.0*(R1[a,i] * T1[a,i])
     end
@@ -260,20 +260,20 @@ function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R
   ET1 = ET1_2 = 0.0
   if length(T1) > 0
     if o1 == o2
-      @tensoropt ET1_2 = 0.5*((T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j]) * int2[i,j,a,b])
+      @mtensor ET1_2 = 0.5*((T1[a,i]*T1[b,j]-T1[b,i]*T1[a,j]) * int2[i,j,a,b])
     else
-      @tensoropt ET1_2 = T1[a,i] * T1OS[b,j] * int2[i,j,a,b]
+      @mtensor ET1_2 = T1[a,i] * (T1OS[b,j] * int2[i,j,a,b])
     end
   end
-  @tensoropt begin
+  @mtensor begin
     pET2 = fac*(T2[a,b,i,j] * int2[i,j,a,b])
     rET2 = fac*fac*(T2[a,b,i,j] * R2[a,b,i,j])
   end
   ET2 = pET2 + rET2
   pET1 = 0.0
   if length(R1) > 0
-    @tensoropt pET1 = fov[i,a] * T1[a,i]
-    @tensoropt ET1 = (fov[i,a] + R1[a,i]) * T1[a,i]
+    @mtensor pET1 = fov[i,a] * T1[a,i]
+    @mtensor ET1 = (fov[i,a] + R1[a,i]) * T1[a,i]
   end
   return OutDict("pE2"=>pET2, "pE1"=>pET1, "pE1_2"=>ET1_2, "E2"=>ET2, "E1"=>ET1, "E1_2"=>ET1_2)
 end
@@ -460,9 +460,8 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   no1, no2, nv1, nv2 = len_spaces(EC,o1*o2*v1*v2)
   lenbuf1, lenbuf2 = auto_buf_length4calc_dressed_ints(no1, no2, nv1, nv2, calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo, mixed)
   # println("Allocate buffer buf1: ", lenbuf1)
-  buf1 = Buffer(lenbuf1)
   # println("Allocate buffer buf2: ", lenbuf2)
-  buf2 = Buffer(lenbuf2)
+  @buffer buf1(lenbuf1) buf2(lenbuf2) begin
   # @print_buffer_usage buf1 buf2 begin
   # first make half-transformed integrals
   if calc_d_vvvv
@@ -471,7 +470,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     ints2!(hd_vvvv, EC, v1*v2*v1*v2)
     vovv = alloc!(buf2, nv1,no2,nv1,nv2)
     ints2!(vovv, EC, v1*o2*v1*v2)
-    @tensoropt hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T12[c,k]
+    @mtensor hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T12[c,k]
     save!(EC, "hd_"*v1*v2*v1*v2, hd_vvvv)
     drop!(buf2, vovv)
     drop!(buf1, hd_vvvv)
@@ -486,12 +485,12 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     hd_oooo2 .= hd_oooo
     oovo = alloc!(buf2, no1,no2,nv1,no2)
     ints2!(oovo, EC, o1*o2*v1*o2)
-    @tensoropt hd_oooo2[i,j,k,l] += oovo[i,j,d,l] * T1[d,k]
+    @mtensor hd_oooo2[i,j,k,l] += oovo[i,j,d,l] * T1[d,k]
     drop!(buf2, oovo)
   end
   ooov = alloc!(buf2, no1,no2,no1,nv2)
   ints2!(ooov, EC, o1*o2*o1*v2)
-  @tensoropt hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
+  @mtensor hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
   drop!(buf2, ooov)
   t1 = print_time(EC, t1, "dress hd_"*o1*o2*o1*o2, 3)
   if calc_d_vvoo
@@ -502,7 +501,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     ints2!(vooo, EC, v1*o2*o1*o2)
     voov = alloc!(buf1, nv1,no2,no1,nv2)
     ints2!(voov, EC, v1*o2*o1*v2)
-    @tensoropt begin
+    @mtensor begin
       vooo[a,k,j,l] += voov[a,k,j,d] * T12[d,l]
       hd_vvoo[a,c,j,l] -= vooo[a,k,j,l] * T12[c,k]
     end
@@ -510,7 +509,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     drop!(buf2, vooo)
     vvov = alloc!(buf2, nv1,nv2,no1,nv2)
     ints2!(vvov, EC, v1*v2*o1*v2)
-    @tensoropt hd_vvoo[a,c,j,l] += vvov[a,c,j,d] * T12[d,l]
+    @mtensor hd_vvoo[a,c,j,l] += vvov[a,c,j,d] * T12[d,l]
     drop!(buf2, vvov)
     save!(EC, "hd_"*v1*v2*o1*o2, hd_vvoo)
     drop!(buf1, hd_vvoo)
@@ -520,15 +519,15 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   hd_vooo = alloc!(buf2, nv1,no2,no1,no2)
   ints2!(hd_vooo, EC, v1*o2*o1*o2)
   if !mixed
-    @tensoropt hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
+    @mtensor hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
   else
-    @tensoropt hd_vooo[a,k,j,l] -= hd_oooo2[i,k,j,l] * T1[a,i]
+    @mtensor hd_vooo[a,k,j,l] -= hd_oooo2[i,k,j,l] * T1[a,i]
     drop!(buf1, hd_oooo2)
   end
   if no2 > 0
     vovo = alloc!(buf1, nv1,no2,nv1,no2)
     ints2!(vovo, EC, v1*o2*v1*o2)
-    @tensoropt hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
+    @mtensor hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
     drop!(buf1, vovo)
   end
   t1 = print_time(EC, t1, "dress hd_"*v1*o2*o1*o2, 3)
@@ -539,7 +538,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     ovov = alloc!(buf1, no1,nv2,no1,nv2)
     ints2!(ovov, EC, o1*v2*o1*v2)
     if no1 > 0 && no2 > 0
-      @tensoropt begin
+      @mtensor begin
         hd_ovoo[k,a,l,j] -= hd_oooo[k,i,l,j] * T12[a,i]
         hd_ovoo[k,a,l,j] += ovov[k,a,l,b] * T12[b,j]
       end
@@ -553,12 +552,12 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   ints2!(d_oovo, EC, o1*o2*v1*o2)
   oovv = alloc!(buf1, no1,no2,nv1,nv2)
   ints2!(oovv, EC, o1*o2*v1*v2)
-  @tensoropt d_oovo[k,i,d,j] += oovv[k,i,d,b] * T12[b,j]
+  @mtensor d_oovo[k,i,d,j] += oovv[k,i,d,b] * T12[b,j]
   save!(EC, "d_"*o1*o2*v1*o2, d_oovo)
   drop!(buf1, oovv)
   t1 = print_time(EC, t1, "dress d_"*o1*o2*v1*o2, 3)
   # <ij\hat|kl>
-  @tensoropt hd_oooo[i,k,j,l] += d_oovo[i,k,b,l] * T1[b,j]
+  @mtensor hd_oooo[i,k,j,l] += d_oovo[i,k,b,l] * T1[b,j]
   save!(EC, "d_"*o1*o2*o1*o2, hd_oooo)
   drop!(buf1, hd_oooo)
   if mixed
@@ -574,12 +573,12 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     # <oo|ov>
     oOvV = alloc!(buf1, no1,no2,nv1,nv2)
     ints2!(oOvV, EC, o1*o2*v1*v2)
-    @tensoropt d_ooov[k,l,j,d] += oOvV[k,l,b,d] * T1[b,j]
+    @mtensor d_ooov[k,l,j,d] += oOvV[k,l,b,d] * T1[b,j]
     drop!(buf1, oOvV)
     save!(EC, "d_"*o1*o2*o1*v2, d_ooov)
     t1 = print_time(EC, t1, "dress d_"*o1*o2*o1*v2, 3)
     if no1 > 0 && no2 > 0
-      @tensoropt begin
+      @mtensor begin
         d_voov[a,i,j,d] -= d_ooov[k,i,j,d] * T1[a,k]
         d_voov[a,i,j,d] += vovv[a,i,b,d] * T1[b,j]
       end
@@ -587,7 +586,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     save!(EC, "d_"*v1*o2*o1*v2, d_voov)
   else
     if no1 > 0 && no2 > 0
-      @tensoropt begin
+      @mtensor begin
         d_voov[a,k,j,d] -= d_oovo[k,i,d,j] * T1[a,i]
         d_voov[a,k,j,d] += vovv[a,k,b,d] * T1[b,j]
       end
@@ -604,14 +603,14 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   hd_vovo = alloc!(buf1, nv1,no2,nv1,no2)
   ints2!(hd_vovo, EC, v1*o2*v1*o2)
   if no2 > 0
-    @tensoropt hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
+    @mtensor hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
   end
   drop!(buf2, vovv)
   if mixed
     # <k\hat a|dj>
     ovvv = alloc!(buf2, no1,nv2,nv1,nv2)
     ints2!(ovvv, EC, o1*v2*v1*v2)
-    @tensoropt begin
+    @mtensor begin
       d_ovvo[i,A,b,J] -= d_oovo[i,K,b,J] * T12[A,K]
       d_ovvo[i,A,b,J] += ovvv[i,A,b,C] * T12[C,J]
     end
@@ -620,7 +619,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
 
     hd_ovov = alloc!(buf1, no1,nv2,no1,nv2)
     ints2!(hd_ovov, EC, o1*v2*o1*v2)
-    @tensoropt hd_ovov[k,a,l,b] += ovvv[k,a,d,b] * T1[d,l]
+    @mtensor hd_ovov[k,a,l,b] += ovvv[k,a,d,b] * T1[d,l]
     drop!(buf2, ovvv)
   end
   t1 = print_time(EC, t1, "dress hd_"*v1*o2*v1*o2, 3)
@@ -630,7 +629,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     ints2!(vvvv, EC, v1*v2*v1*v2)
     hd_vvvo = alloc!(buf2, nv1,nv2,nv1,no2)
     ints2!(hd_vvvo, EC, v1*v2*v1*o2)
-    @tensoropt begin
+    @mtensor begin
       hd_vvvo[a,c,b,l] -= hd_vovo[a,k,b,l] * T12[c,k]
       hd_vvvo[a,c,b,l] += vvvv[a,c,b,d] * T12[d,l]
     end
@@ -639,7 +638,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     if mixed
       hd_vvov = alloc!(buf2, nv1,nv2,no1,nv2)
       ints2!(hd_vvov, EC, v1*v2*o1*v2)
-      @tensoropt begin
+      @mtensor begin
         hd_vvov[a,c,l,b] -= hd_ovov[k,c,l,b] * T1[a,k]
         hd_vvov[a,c,l,b] += vvvv[a,c,d,b] * T1[d,l]
       end
@@ -653,11 +652,11 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   # fully dressed
   # <ak\hat|bl>
   if mixed
-    @tensoropt hd_ovov[k,a,l,b] -= d_ooov[k,i,l,b] * T12[a,i]
+    @mtensor hd_ovov[k,a,l,b] -= d_ooov[k,i,l,b] * T12[a,i]
     save!(EC, "d_"*o1*v2*o1*v2, hd_ovov)
     drop!(buf1, hd_ovov)
   end
-  @tensoropt hd_vovo[a,k,b,l] -= d_oovo[i,k,b,l] * T1[a,i]
+  @mtensor hd_vovo[a,k,b,l] -= d_oovo[i,k,b,l] * T1[a,i]
   save!(EC, "d_"*v1*o2*v1*o2, hd_vovo)
   drop!(buf1, hd_vovo)
   if mixed
@@ -671,14 +670,14 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     ints2!(d_vovv, EC, v1*o2*v1*v2)
     oovv = alloc!(buf1, no1,no2,nv1,nv2)
     ints2!(oovv, EC, o1*o2*v1*v2)
-    @tensoropt d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
+    @mtensor d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
     save!(EC, "d_"*v1*o2*v1*v2, d_vovv)
     t1 = print_time(EC, t1, "dress d_"*v1*o2*v1*v2, 3)
     if mixed
       drop!(buf2, d_vovv)
       d_ovvv = alloc!(buf2, no1,nv2,nv1,nv2)
       ints2!(d_ovvv, EC, o1*v2*v1*v2)
-      @tensoropt d_ovvv[i,b,a,c] -= oovv[i,j,a,c] * T12[b,j]
+      @mtensor d_ovvv[i,b,a,c] -= oovv[i,j,a,c] * T12[b,j]
       save!(EC, "d_"*o1*v2*v1*v2, d_ovvv)
       t1 = print_time(EC, t1, "dress d_"*o1*v2*v1*v2, 3)
     end
@@ -692,10 +691,10 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
       error("for calc_d_vvvv calc_d_vovv has to be True")
     end
     if !mixed
-      @tensoropt d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i]
+      @mtensor d_vvvv[a,c,b,d] -= d_vovv[c,i,d,b] * T1[a,i]
       drop!(buf2, d_vovv)
     else
-      @tensoropt d_vvvv[a,c,b,d] -= d_ovvv[i,c,b,d] * T1[a,i]
+      @mtensor d_vvvv[a,c,b,d] -= d_ovvv[i,c,b,d] * T1[a,i]
       drop!(buf2, d_ovvv)
     end
     save!(EC, "d_"*v1*v2*v1*v2, d_vvvv)
@@ -711,12 +710,12 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   # <aj\hat|kl>
   d_vooo = hd_vooo
   if no1 > 0 && no2 > 0
-    @tensoropt d_vooo[a,k,j,l] += d_voov[a,k,j,d] * T12[d,l]
+    @mtensor d_vooo[a,k,j,l] += d_voov[a,k,j,d] * T12[d,l]
   end
   save!(EC, "d_"*v1*o2*o1*o2, d_vooo)
   if mixed
     d_ovoo = hd_ovoo
-    @tensoropt d_ovoo[k,a,l,j] += d_ovvo[k,a,d,j] * T1[d,l]
+    @mtensor d_ovoo[k,a,l,j] += d_ovvo[k,a,d,j] * T1[d,l]
     save!(EC, "d_"*o1*v2*o1*o2, d_ovoo)
   end
   t1 = print_time(EC, t1, "dress d_"*v1*o2*o1*o2, 3)
@@ -725,16 +724,16 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     d_vvvo = alloc!(buf2, nv1,nv2,nv1,no2)
     load!(EC, "hd_"*v1*v2*v1*o2, d_vvvo)
     if !mixed
-      @tensoropt d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i]
+      @mtensor d_vvvo[a,c,b,l] -= d_voov[c,i,l,b] * T1[a,i]
     else
-      @tensoropt d_vvvo[c,a,b,l] -= d_ovvo[i,a,b,l] * T1[c,i]
+      @mtensor d_vvvo[c,a,b,l] -= d_ovvo[i,a,b,l] * T1[c,i]
     end
     save!(EC, "d_"*v1*v2*v1*o2, d_vvvo)
     drop!(buf2, d_vvvo)
     if mixed
       d_vvov = alloc!(buf2, nv1,nv2,no1,nv2)
       load!(EC, "hd_"*v1*v2*o1*v2, d_vvov)
-      @tensoropt d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T12[c,i]
+      @mtensor d_vvov[a,c,l,b] -= d_voov[a,i,l,b] * T12[c,i]
       save!(EC, "d_"*v1*v2*o1*v2, d_vvov)
       drop!(buf2, d_vvov)
     end
@@ -754,12 +753,12 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     load!(EC, "hd_"*v1*v2*o1*o2, d_vvoo)
     hd_vvvo = alloc!(buf2, nv1,nv2,nv1,no2)
     load!(EC, "hd_"*v1*v2*v1*o2, hd_vvvo)
-    @tensoropt d_vvoo[a,c,j,l] += hd_vvvo[a,c,b,l] * T1[b,j]
+    @mtensor d_vvoo[a,c,j,l] += hd_vvvo[a,c,b,l] * T1[b,j]
     drop!(buf2, hd_vvvo)
     if !mixed
-      @tensoropt d_vvoo[a,c,j,l] -= d_vooo[c,i,l,j] * T1[a,i] 
+      @mtensor d_vvoo[a,c,j,l] -= d_vooo[c,i,l,j] * T1[a,i] 
     else
-      @tensoropt d_vvoo[a,c,j,l] -= d_ovoo[i,c,j,l] * T1[a,i] 
+      @mtensor d_vvoo[a,c,j,l] -= d_ovoo[i,c,j,l] * T1[a,i] 
     end
     save!(EC, "d_"*v1*v2*o1*o2, d_vvoo)
     drop!(buf1, d_vvoo)
@@ -769,7 +768,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     drop!(buf2, hd_ovoo)
   end
   drop!(buf2, hd_vooo)
-  # end
+  end # buffer
 end
 
 """ 
@@ -784,9 +783,9 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   d_int1 = deepcopy(integ1(EC.fd))
   # display(d_int1[SP['v'],SP['o']])
   dinter = ints1(EC,":v")
-  @tensoropt d_int1[:,SP['o']][p,j] += dinter[p,b] * T1[b,j]
+  @mtensor d_int1[:,SP['o']][p,j] += dinter[p,b] * T1[b,j]
   dinter = d_int1[SP['o'],:]
-  @tensoropt d_int1[SP['v'],:][b,p] -= dinter[j,p] * T1[b,j]
+  @mtensor d_int1[SP['v'],:][b,p] -= dinter[j,p] * T1[b,j]
   # display(d_int1[SP['v'],SP['o']])
   save!(EC,"dh_mm",d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
@@ -796,16 +795,16 @@ function dress_fock_closedshell(EC::ECInfo, T1)
   d_oooo = load4idx(EC,"d_oooo")
   d_vooo = load4idx(EC,"d_vooo")
   d_oovo = load4idx(EC,"d_oovo")
-  @tensoropt begin
+  @mtensor begin
     foo[i,j] := 2.0*d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
     fvo[a,i] := 2.0*d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
     fov[i,a] := 2.0*d_oovo[i,k,a,k] - d_oovo[k,i,a,k]
   end
   d_vovo = load4idx(EC,"d_vovo")
-  @tensoropt fvv[a,b] := 2.0*d_vovo[a,k,b,k]
+  @mtensor fvv[a,b] := 2.0*d_vovo[a,k,b,k]
   d_vovo = NOTHING4idx
   d_voov = load4idx(EC,"d_voov")
-  @tensoropt fvv[a,b] -= d_voov[a,k,k,b]
+  @mtensor fvv[a,b] -= d_voov[a,k,k,b]
   dfock[SP['o'],SP['o']] += foo
   dfock[SP['v'],SP['o']] += fvo
   dfock[SP['o'],SP['v']] += fov
@@ -835,9 +834,9 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   # dress 1-el part
   d_int1 = deepcopy(integ1(EC.fd,spin))
   dinter = ints1(EC,":"*v1)
-  @tensoropt d_int1[:,SP[o1]][p,j] += dinter[p,b] * T1[b,j]
+  @mtensor d_int1[:,SP[o1]][p,j] += dinter[p,b] * T1[b,j]
   dinter = d_int1[SP[o1],:]
-  @tensoropt d_int1[SP[v1],:][b,p] -= dinter[j,p] * T1[b,j]
+  @mtensor d_int1[SP[v1],:][b,p] -= dinter[j,p] * T1[b,j]
   save!(EC,"dh_"*mo*mo,d_int1)
   t1 = print_time(EC,t1,"dress int1",3)
   # calc dressed fock
@@ -845,17 +844,17 @@ function dress_fock_samespin(EC::ECInfo, T1, o1::Char, v1::Char)
   d_oooo = load4idx(EC,"d_"*o1*o1*o1*o1)
   d_vooo = load4idx(EC,"d_"*v1*o1*o1*o1)
   d_oovo = load4idx(EC,"d_"*o1*o1*v1*o1)
-  @tensoropt begin
+  @mtensor begin
     foo[i,j] := d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
     fvo[a,i] := d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
     fov[i,a] := d_oovo[i,k,a,k] - d_oovo[k,i,a,k] 
   end
   d_vovo = load4idx(EC,"d_"*v1*o1*v1*o1)
-  @tensoropt fvv[a,b] := d_vovo[a,k,b,k]
+  @mtensor fvv[a,b] := d_vovo[a,k,b,k]
   d_vovo = NOTHING4idx
   if no1 > 0 
     d_voov = load4idx(EC,"d_"*v1*o1*o1*v1)
-    @tensoropt fvv[a,b] -= d_voov[a,k,k,b]
+    @mtensor fvv[a,b] -= d_voov[a,k,k,b]
     d_voov = NOTHING4idx
   end
   dfock[SP[o1],SP[o1]] += foo
@@ -875,28 +874,28 @@ function dress_fock_oppositespin(EC::ECInfo)
   t1 = time_ns()
   SP = EC.space
   d_oooo = load4idx(EC,"d_oOoO")
-  @tensoropt begin
+  @mtensor begin
     foo[i,j] := d_oooo[i,k,j,k]
     fOO[i,j] := d_oooo[k,i,k,j]
   end
   d_oooo = NOTHING4idx
   d_vooo = load4idx(EC,"d_vOoO")
-  @tensoropt fvo[a,i] := d_vooo[a,k,i,k]
+  @mtensor fvo[a,i] := d_vooo[a,k,i,k]
   d_vooo = NOTHING4idx
   d_ovoo = load4idx(EC,"d_oVoO")
-  @tensoropt fVO[a,i] := d_ovoo[k,a,k,i]
+  @mtensor fVO[a,i] := d_ovoo[k,a,k,i]
   d_ovoo = NOTHING4idx
   d_oovo = load4idx(EC,"d_oOvO")
-  @tensoropt fov[i,a] := d_oovo[i,k,a,k]
+  @mtensor fov[i,a] := d_oovo[i,k,a,k]
   d_oovo = NOTHING4idx
   d_ooov = load4idx(EC,"d_oOoV")
-  @tensoropt fOV[i,a] := d_ooov[k,i,k,a]
+  @mtensor fOV[i,a] := d_ooov[k,i,k,a]
   d_ooov = NOTHING4idx
   d_vovo = load4idx(EC,"d_vOvO")
-  @tensoropt fvv[a,b] := d_vovo[a,k,b,k]
+  @mtensor fvv[a,b] := d_vovo[a,k,b,k]
   d_vovo = NOTHING4idx
   d_ovov = load4idx(EC,"d_oVoV")
-  @tensoropt fVV[a,b] := d_ovov[k,a,k,b]
+  @mtensor fVV[a,b] := d_ovov[k,a,k,b]
   d_ovov = NOTHING4idx
 
   dfocka = load2idx(EC,"df_mm")
@@ -1095,12 +1094,12 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
   else
     D2 = zeros(norb,norb,nocc,nocc)
   end
-  @tensoropt begin
+  @mtensor begin
     D2[SP['v'],SP['v'],:,:][a,b,i,j] = T2[a,b,i,j] 
     D2[SP['o'],SP['o'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k]
   end
   if length(T1) > 0
-    @tensoropt begin
+    @mtensor begin
       D2[SP['v'],SP['v'],:,:][a,b,i,j] += T1[a,i] * T1[b,j]
       D2[SP['o'],SP['v'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
       D2[SP['v'],SP['o'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
@@ -1136,12 +1135,12 @@ function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
   else
     D2 = zeros(norb,norb,nocc,nocc)
   end
-  @tensoropt begin
+  @mtensor begin
     D2[virt,virt,:,:][a,b,i,j] = T2[a,b,i,j] 
     D2[occ,occ,:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k] - Matrix(I,nocc,nocc)[k,j] * Matrix(I,nocc,nocc)[l,i]
   end
   if length(T1) > 0
-    @tensoropt begin
+    @mtensor begin
       D2[virt,virt,:,:][a,b,i,j] += T1[a,i] * T1[b,j] - T1[b,i] * T1[a,j]
       D2[occ,virt,:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k] - Matrix(I,nocc,nocc)[k,j] * T1[a,i]
       D2[virt,occ,:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k] - Matrix(I,nocc,nocc)[k,j] * T1[a,i]
@@ -1168,12 +1167,12 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
   else
     D2ab = zeros(norb,norb,nocca,noccb)
   end
-  @tensoropt begin
+  @mtensor begin
     D2ab[SP['v'],SP['V'],:,:][a,B,i,J] = T2ab[a,B,i,J] 
     D2ab[SP['o'],SP['O'],:,:][i,k,j,l] = Matrix(I,nocca,nocca)[i,j] * Matrix(I,noccb,noccb)[l,k]
   end
   if length(T1a) > 0
-    @tensoropt begin
+    @mtensor begin
       D2ab[SP['v'],SP['V'],:,:][a,b,i,j] += T1a[a,i] * T1b[b,j]
       D2ab[SP['o'],SP['V'],:,:][j,a,i,k] = Matrix(I,nocca,nocca)[i,j] * T1b[a,k]
       D2ab[SP['v'],SP['O'],:,:][a,j,k,i] = Matrix(I,noccb,noccb)[i,j] * T1a[a,k]
@@ -1245,7 +1244,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   nvirt = n_virt_orbs(EC)
   I_ab = Matrix(I,nvirt,nvirt)
   I_ij = Matrix(I,nocc,nocc)
-  @tensoropt begin
+  @mtensor begin
     AU[b,a] := I_ab[b,a] + 2.0 * T2[a,c,i,j] * T2[b,c,i,j] - T2[a,c,i,j] * T2[c,b,i,j]
     BU[i,j] := I_ij[i,j] +  2.0 * T2[a,b,i,k] * T2[a,b,j,k] - T2[a,b,i,k] * T2[a,b,k,j]
     CU[i,j,k,l] := I_ij[i,k] * I_ij[j,l] + T2[a,b,k,l] * T2[a,b,i,j]
@@ -1276,7 +1275,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
     W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
 
-    @tensoropt begin
+    @mtensor begin
       YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 
                     0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,j] * T2[c,b,i,k]
       qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
@@ -1292,7 +1291,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     qV .= 2.0 * qV .- permutedims(qV, (2,1,3,4))
     E_qvccd += sum(qV .* qT) * q
 
-    @tensoropt begin
+    @mtensor begin
       qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
       qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
       qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
@@ -1320,7 +1319,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
     q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
 
-    @tensoropt qG[a,b,i,j] := 2.0 * qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
+    @mtensor qG[a,b,i,j] := 2.0 * qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] + 
                               2.0 * qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] +
                               (-0.5) * (2.0 * qCR[m,n,i,j] * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) +
                               (-0.5) * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
@@ -1355,7 +1354,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   else
     pseudo_dressed_ints(EC)
   end
-  @tensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
+  @mtensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   dfock = load2idx(EC,"df_mm")
   if length(T1) > 0
     if EC.options.cc.use_kext
@@ -1367,11 +1366,11 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
         error("for not use_kext calc_d_vovv has to be True")
       end
       int2 = load4idx(EC,"d_vovv")
-      @tensoropt R1[a,i] += int2[a,k,b,c] * T2t[c,b,k,i]
+      @mtensor R1[a,i] += int2[a,k,b,c] * T2t[c,b,k,i]
     end
     int2 = load4idx(EC,"d_oovo")
     fov = dfock[SP['o'],SP['v']]
-    @tensoropt begin
+    @mtensor begin
       R1[a,i] += T2t[a,b,i,j] * fov[j,b]
       R1[a,i] -= int2[k,j,c,i] * T2t[c,a,k,j]
     end
@@ -1395,10 +1394,10 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   int2 = load4idx(EC,"d_oooo")
   if !dc && !linearized
     # I_klij = <kl|ij>+<kl|cd>T^ij_cd
-    @tensoropt int2[k,l,i,j] += klcd[k,l,c,d] * T2[c,d,i,j]
+    @mtensor int2[k,l,i,j] += klcd[k,l,c,d] * T2[c,d,i,j]
   end
   # I_klij T^kl_ab
-  @tensoropt R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
+  @mtensor R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
   t1 = print_time(EC,t1,"I_klij T^kl_ab",2)
   if EC.options.cc.use_kext
     int2 = integ2_ss(EC.fd)
@@ -1406,17 +1405,17 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
     D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
     # <pq|rs> D^ij_rs
-    @tensoropt rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
+    @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
     D2 = nothing
     # symmetrize R
-    @tensoropt K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
+    @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
     rK2pq = nothing
     R2 += K2pq[SP['v'],SP['v'],:,:]
     if length(T1) > 0
-      @tensoropt begin
+      @mtensor begin
         R2[a,b,i,j] -= K2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
         R2[a,b,i,j] -= K2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
-        R2[a,b,i,j] += K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k] * T1[b,l]
+        R2[a,b,i,j] += (K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k]) * T1[b,l]
         # singles residual contributions
         R1[a,i] +=  2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
         x1[k,i] := 2.0 * K2pq[SP['o'],SP['o'],:,:][k,l,i,l] - K2pq[SP['o'],SP['o'],:,:][k,l,l,i]
@@ -1432,12 +1431,12 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     end
     int2 = load4idx(EC,"d_vvvv")
     # <ab|cd> T^ij_cd
-    @tensoropt R2[a,b,i,j] += int2[a,b,c,d] * T2[c,d,i,j]
+    @mtensor R2[a,b,i,j] += int2[a,b,c,d] * T2[c,d,i,j]
     t1 = print_time(EC,t1,"<ab|cd> T^ij_cd",2)
   end
   if !dc && !linearized
     # <kl|cd> T^kj_ad T^il_cb
-    @tensoropt R2[a,b,i,j] += klcd[k,l,c,d] * T2[a,d,k,j] * T2[c,b,i,l]
+    @mtensor R2[a,b,i,j] += (klcd[k,l,c,d] * T2[a,d,k,j]) * T2[c,b,i,l]
     t1 = print_time(EC,t1,"<kl|cd> T^kj_ad T^il_cb",2)
   end
 
@@ -1447,15 +1446,15 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   xad = dfock[SP['v'],SP['v']]
   xki = dfock[SP['o'],SP['o']]
   if !linearized
-    @tensoropt begin
-      xad[a,d] -= fac * klcd[k,l,c,d] * T2t[c,a,k,l]
-      xki[k,i] += fac * klcd[k,l,c,d] * T2t[c,d,i,l]
+    @mtensor begin
+      xad[a,d] -= fac * (klcd[k,l,c,d] * T2t[c,a,k,l])
+      xki[k,i] += fac * (klcd[k,l,c,d] * T2t[c,d,i,l])
     end
     t1 = print_time(EC,t1,"xad, xki",2)
   end
 
   # terms for P(ia;jb)
-  @tensoropt begin
+  @mtensor begin
     # x_ad T^ij_db
     R2r[a,b,i,j] := xad[a,d] * T2[d,b,i,j]
     # -x_ki T^kj_ab
@@ -1465,19 +1464,19 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   int2 = load4idx(EC,"d_voov")
   if !linearized
     # <kl|cd>\tilde T^ki_ca \tilde T^lj_db
-    @tensoropt int2[a,k,i,c] += 0.5*klcd[k,l,c,d] * T2t[a,d,i,l] 
+    @mtensor int2[a,k,i,c] += 0.5*klcd[k,l,c,d] * T2t[a,d,i,l] 
   end
   # <ak|ic> \tilde T^kj_cb
-  @tensoropt R2r[a,b,i,j] += int2[a,k,i,c] * T2t[c,b,k,j]
+  @mtensor R2r[a,b,i,j] += int2[a,k,i,c] * T2t[c,b,k,j]
   t1 = print_time(EC,t1,"<ak|ic> tT^kj_cb",2)
   if !dc && !linearized
     # -<kl|cd> T^ki_da (T^lj_cb - T^lj_bc)
     T2t -= T2
-    @tensoropt R2r[a,b,i,j] -= klcd[k,l,c,d] * T2[d,a,k,i] * T2t[c,b,l,j]
+    @mtensor R2r[a,b,i,j] -= (klcd[k,l,c,d] * T2[d,a,k,i]) * T2t[c,b,l,j]
     t1 = print_time(EC,t1,"-<kl|cd> T^ki_da (T^lj_cb - T^lj_bc)",2)
   end
   int2 = load4idx(EC,"d_vovo")
-  @tensoropt begin
+  @mtensor begin
     # -<ka|ic> T^kj_cb
     R2r[a,b,i,j] -= int2[a,k,c,i] * T2[c,b,k,j]
     # -<kb|ic> T^kj_ac
@@ -1538,27 +1537,27 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     else
       fai = dfock[SP['v'],SP['o']]
       fAI = dfockb[SP['V'],SP['O']]
-      @tensoropt begin
+      @mtensor begin
         R1a[a,i] :=  fai[a,i]
         R1b[a,i] :=  fAI[a,i]
       end
       d_vovv = load4idx(EC,"d_vovv")
-      @tensoropt R1a[a,i] += d_vovv[a,k,b,d] * T2a[b,d,i,k]
+      @mtensor R1a[a,i] += d_vovv[a,k,b,d] * T2a[b,d,i,k]
       d_vovv = nothing
       d_VOVV = load4idx(EC,"d_VOVV")
-      @tensoropt R1b[A,I] += d_VOVV[A,K,B,D] * T2b[B,D,I,K]
+      @mtensor R1b[A,I] += d_VOVV[A,K,B,D] * T2b[B,D,I,K]
       d_VOVV = nothing
       d_vOvV = load4idx(EC,"d_vOvV")
-      @tensoropt R1a[a,i] += d_vOvV[a,K,b,D] * T2ab[b,D,i,K]
+      @mtensor R1a[a,i] += d_vOvV[a,K,b,D] * T2ab[b,D,i,K]
       d_vOvV = nothing
       d_oVvV = load4idx(EC,"d_oVvV")
-      @tensoropt R1b[A,I] += d_oVvV[k,A,d,B] * T2ab[d,B,k,I]
+      @mtensor R1b[A,I] += d_oVvV[k,A,d,B] * T2ab[d,B,k,I]
       d_oVvV = nothing
       t1 = print_time(EC,t1,"``R_a^i += v_{ak}^{bd} T_{bd}^{ik}``",2)
     end
     fia = dfock[SP['o'],SP['v']]
     fIA = dfockb[SP['O'],SP['V']]
-    @tensoropt begin
+    @mtensor begin
       R1a[a,i] += fia[j,b] * T2a[a,b,i,j]
       R1b[A,I] += fIA[J,B] * T2b[A,B,I,J]
       R1a[a,i] += fIA[J,B] * T2ab[a,B,i,J]
@@ -1567,18 +1566,18 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     t1 = print_time(EC,t1,"``R_a^i += f_j^b T_{ab}^{ij}``",2)
     if n_occ_orbs(EC) > 0 
       d_oovo = load4idx(EC,"d_oovo")
-      @tensoropt R1a[a,i] -= d_oovo[k,j,d,i] * T2a[a,d,j,k]
+      @mtensor R1a[a,i] -= d_oovo[k,j,d,i] * T2a[a,d,j,k]
       d_oovo = nothing
     end
     if n_occb_orbs(EC) > 0
       d_OOVO = load4idx(EC,"d_OOVO")
-      @tensoropt R1b[A,I] -= d_OOVO[K,J,D,I] * T2b[A,D,J,K]
+      @mtensor R1b[A,I] -= d_OOVO[K,J,D,I] * T2b[A,D,J,K]
       d_OOVO = nothing
       d_oOoV = load4idx(EC,"d_oOoV")
-      @tensoropt R1a[a,i] -= d_oOoV[j,K,i,D] * T2ab[a,D,j,K]
+      @mtensor R1a[a,i] -= d_oOoV[j,K,i,D] * T2ab[a,D,j,K]
       d_oOoV = nothing
       d_oOvO = load4idx(EC,"d_oOvO")
-      @tensoropt R1b[A,I] -= d_oOvO[k,J,d,I] * T2ab[d,A,k,J]
+      @mtensor R1b[A,I] -= d_oOvO[k,J,d,I] * T2ab[d,A,k,J]
     end
     t1 = print_time(EC,t1,"``R_a^i -= v_{kj}^{di} T_{ad}^{jk}``",2)
   end
@@ -1591,11 +1590,11 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   else
     d_vvoo = load4idx(EC,"d_vvoo")
     R2a = deepcopy(d_vvoo)
-    @tensoropt R2a[a,b,i,j] -= d_vvoo[b,a,i,j]
+    @mtensor R2a[a,b,i,j] -= d_vvoo[b,a,i,j]
     d_vvoo = nothing
     d_VVOO = load4idx(EC,"d_VVOO")
     R2b = deepcopy(d_VVOO)
-    @tensoropt R2b[A,B,I,J] -= d_VVOO[B,A,I,J]
+    @mtensor R2b[A,B,I,J] -= d_VVOO[B,A,I,J]
     d_VVOO = nothing
     R2ab = load4idx(EC,"d_vVoO")
   end
@@ -1608,28 +1607,28 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       # αα
       int2a = integ2_ss(EC.fd, :α)
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @tensoropt rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
+      @mtensor rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
       D2a = nothing
       int2a = nothing
       # symmetrize R
-      @tensoropt K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
+      @mtensor K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
       rK2pqa = nothing
       R2a += K2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
         int2b = integ2_ss(EC.fd, :β)
         D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @tensoropt rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
+        @mtensor rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
         D2b = nothing
         int2b = nothing
         # symmetrize R
-        @tensoropt K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
+        @mtensor K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
         rK2pqb = nothing
         R2b += K2pqb[SP['V'],SP['V'],:,:]
         # αβ
         int2ab = integ2_os(EC.fd)
         D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
-        @tensoropt K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
+        @mtensor K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
         D2ab = nothing
         int2ab = nothing
         R2ab += K2pqab[SP['v'],SP['V'],:,:]
@@ -1638,19 +1637,19 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       int2 = integ2_ss(EC.fd)
       # αα
       D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @tensoropt rK2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
+      @mtensor rK2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
       D2a = nothing
       # symmetrize R
-      @tensoropt K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
+      @mtensor K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
       rK2pqa = nothing
       R2a += K2pqa[SP['v'],SP['v'],:,:]
       if n_occb_orbs(EC) > 0
         # ββ
         D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @tensoropt rK2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
+        @mtensor rK2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
         D2b = nothing
         # symmetrize R
-        @tensoropt K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
+        @mtensor K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
         rK2pqb = nothing
         R2b += K2pqb[SP['V'],SP['V'],:,:]
         # αβ
@@ -1658,15 +1657,15 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
         D2ab = D2ab_full[tripp,:,:] 
         D2abT = permutedims(D2ab_full,(2,1,4,3))[tripp,:,:]
         D2ab_full = nothing
-        @tensoropt K2pqab[p,r,i,j] := int2[p,r,x] * D2ab[x,i,j]
-        @tensoropt K2pqab[p,r,i,j] += int2[r,p,x] * D2abT[x,j,i]
+        @mtensor K2pqab[p,r,i,j] := int2[p,r,x] * D2ab[x,i,j]
+        @mtensor K2pqab[p,r,i,j] += int2[r,p,x] * D2abT[x,j,i]
         D2ab = nothing
         D2abT = nothing
         R2ab += K2pqab[SP['v'],SP['V'],:,:]
       end
     end
     if length(T1a) > 0
-      @tensoropt begin
+      @mtensor begin
         R2a[a,b,i,j] -= K2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
         R2a[a,b,i,j] -= K2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
         R2a[a,b,i,j] += K2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
@@ -1677,7 +1676,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       end
     end
     if length(T1b) > 0
-      @tensoropt begin
+      @mtensor begin
         R2b[a,b,i,j] -= K2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
         R2b[a,b,i,j] -= K2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
         R2b[a,b,i,j] += K2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
@@ -1688,7 +1687,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       end
     end
     if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
-      @tensoropt begin
+      @mtensor begin
         R2ab[a,b,i,j] -= K2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
         R2ab[a,b,i,j] -= K2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
         R2ab[a,b,i,j] += K2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
@@ -1705,18 +1704,18 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     t1 = print_time(EC,t1,"kext",2)
   else
     d_vvvv = load4idx(EC,"d_vvvv")
-    @tensoropt R2a[a,b,i,j] += d_vvvv[a,b,c,d] * T2a[c,d,i,j]
+    @mtensor R2a[a,b,i,j] += d_vvvv[a,b,c,d] * T2a[c,d,i,j]
     d_vvvv = nothing
     d_VVVV = load4idx(EC,"d_VVVV")
-    @tensoropt R2b[A,B,I,J] += d_VVVV[A,B,C,D] * T2b[C,D,I,J]
+    @mtensor R2b[A,B,I,J] += d_VVVV[A,B,C,D] * T2b[C,D,I,J]
     d_VVVV = nothing
     d_vVvV = load4idx(EC,"d_vVvV")
-    @tensoropt R2ab[a,B,i,J] += d_vVvV[a,B,c,D] * T2ab[c,D,i,J]
+    @mtensor R2ab[a,B,i,J] += d_vVvV[a,B,c,D] * T2ab[c,D,i,J]
     d_vVvV = nothing
     t1 = print_time(EC,t1,"``R_{ab}^{ij} += v_{ab}^{cd} T_{cd}^{ij}``",2)
   end
 
-  @tensoropt begin
+  @mtensor begin
     xij[i,j] := fij[i,j]
     xIJ[i,j] := fIJ[i,j]
     xab[i,j] := fab[i,j]
@@ -1728,57 +1727,57 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   if !linearized
     dcfac = dc ? 0.5 : 1.0
     oovv = ints2(EC,"oovv")
-    @tensoropt begin
-      xij[i,j] += dcfac * oovv[i,k,b,d] * T2a[b,d,j,k]
-      xab[a,b] -= dcfac * oovv[i,k,b,d] * T2a[a,d,i,k]
+    @mtensor begin
+      xij[i,j] += dcfac * (oovv[i,k,b,d] * T2a[b,d,j,k])
+      xab[a,b] -= dcfac * (oovv[i,k,b,d] * T2a[a,d,i,k])
     end
     t1 = print_time(EC,t1,"``x_i^j and x_a^b``",2)
-    !dc && @tensoropt x_klij[k,l,i,j] += 0.5 * oovv[k,l,c,d] * T2a[c,d,i,j]
+    !dc && @mtensor x_klij[k,l,i,j] += 0.5 * oovv[k,l,c,d] * T2a[c,d,i,j]
     if n_occb_orbs(EC) > 0
-      @tensoropt x_dAlI[d,A,l,I] := oovv[k,l,c,d] * T2ab[c,A,k,I]
-      !dc && @tensoropt x_dAlI[d,A,l,I] -= oovv[k,l,d,c] * T2ab[c,A,k,I]
-      @tensoropt begin
+      @mtensor x_dAlI[d,A,l,I] := oovv[k,l,c,d] * T2ab[c,A,k,I]
+      !dc && @mtensor x_dAlI[d,A,l,I] -= oovv[k,l,d,c] * T2ab[c,A,k,I]
+      @mtensor begin
         rR2b[A,B,I,J] := x_dAlI[d,A,l,I] * T2ab[d,B,l,J]
         R2b[A,B,I,J] += rR2b[A,B,I,J] - rR2b[A,B,J,I]
       end
       x_dAlI, rR2b = nothing, nothing
       t1 = print_time(EC,t1,"``R_{AB}^{IJ} += x_{dA}^{lI} T_{dB}^{lJ}``",2)
     end
-    @tensoropt x_adil[a,d,i,l] := 0.5 * oovv[k,l,c,d] *  T2a[a,c,i,k]
-    !dc && @tensoropt x_adil[a,d,i,l] -= 0.5 * oovv[k,l,d,c] * T2a[a,c,i,k]
-    @tensoropt R2ab[a,B,i,J] += x_adil[a,d,i,l] * T2ab[d,B,l,J]
+    @mtensor x_adil[a,d,i,l] := 0.5 * oovv[k,l,c,d] *  T2a[a,c,i,k]
+    !dc && @mtensor x_adil[a,d,i,l] -= 0.5 * oovv[k,l,d,c] * T2a[a,c,i,k]
+    @mtensor R2ab[a,B,i,J] += x_adil[a,d,i,l] * T2ab[d,B,l,J]
     oovv = nothing
     t1 = print_time(EC,t1,"``R_{aB}^{iJ} += x_{ad}^{il} T_{dB}^{lJ}``",2)
     if n_occb_orbs(EC) > 0
       OOVV = ints2(EC,"OOVV")
-      @tensoropt begin
-        xIJ[I,J] += dcfac * OOVV[I,K,B,D] * T2b[B,D,J,K]
-        xAB[A,B] -= dcfac * OOVV[I,K,B,D] * T2b[A,D,I,K]
+      @mtensor begin
+        xIJ[I,J] += dcfac * (OOVV[I,K,B,D] * T2b[B,D,J,K])
+        xAB[A,B] -= dcfac * (OOVV[I,K,B,D] * T2b[A,D,I,K])
       end
       t1 = print_time(EC,t1,"``x_I^J and x_A^B``",2)
-      !dc && @tensoropt x_KLIJ[K,L,I,J] += 0.5 * OOVV[K,L,C,D] * T2b[C,D,I,J]
-      @tensoropt x_ADIL[A,D,I,L] := 0.5 * OOVV[K,L,C,D] * T2b[A,C,I,K]
-      !dc && @tensoropt x_ADIL[A,D,I,L] -= 0.5 * OOVV[K,L,D,C] * T2b[A,C,I,K]
-      @tensoropt R2ab[b,A,j,I] += 2.0 * x_ADIL[A,D,I,L] * T2ab[b,D,j,L]
+      !dc && @mtensor x_KLIJ[K,L,I,J] += 0.5 * (OOVV[K,L,C,D] * T2b[C,D,I,J])
+      @mtensor x_ADIL[A,D,I,L] := 0.5 * (OOVV[K,L,C,D] * T2b[A,C,I,K])
+      !dc && @mtensor x_ADIL[A,D,I,L] -= 0.5 * (OOVV[K,L,D,C] * T2b[A,C,I,K])
+      @mtensor R2ab[b,A,j,I] += 2.0 * x_ADIL[A,D,I,L] * T2ab[b,D,j,L]
       t1 = print_time(EC,t1,"``R_{bA}^{jI} += 2 x_{AD}^{IL} T_{bD}^{jL}``",2)
-      @tensoropt x_vVoO[a,D,i,L] := OOVV[K,L,C,D] * T2ab[a,C,i,K]
-      !dc && @tensoropt x_vVoO[a,D,i,L] -= OOVV[K,L,D,C] * T2ab[a,C,i,K]
-      @tensoropt begin      
+      @mtensor x_vVoO[a,D,i,L] := OOVV[K,L,C,D] * T2ab[a,C,i,K]
+      !dc && @mtensor x_vVoO[a,D,i,L] -= OOVV[K,L,D,C] * T2ab[a,C,i,K]
+      @mtensor begin      
         rR2a[a,b,i,j] := x_vVoO[a,D,i,L] * T2ab[b,D,j,L]
         R2a[a,b,i,j] += rR2a[a,b,i,j] - rR2a[a,b,j,i] 
       end
       OOVV, x_vVoO, rR2a = nothing, nothing, nothing
       t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{aL}^{Di} T_{bD}^{jL}``",2)
       oOvV = ints2(EC,"oOvV")
-      @tensoropt begin
-        xij[i,j] += dcfac * oOvV[i,K,b,D] * T2ab[b,D,j,K]
-        xab[a,b] -= dcfac * oOvV[i,K,b,D] * T2ab[a,D,i,K]
-        xIJ[I,J] += dcfac * oOvV[k,I,d,B] * T2ab[d,B,k,J]
-        xAB[A,B] -= dcfac * oOvV[k,I,d,B] * T2ab[d,A,k,I]
+      @mtensor begin
+        xij[i,j] += dcfac * (oOvV[i,K,b,D] * T2ab[b,D,j,K])
+        xab[a,b] -= dcfac * (oOvV[i,K,b,D] * T2ab[a,D,i,K])
+        xIJ[I,J] += dcfac * (oOvV[k,I,d,B] * T2ab[d,B,k,J])
+        xAB[A,B] -= dcfac * (oOvV[k,I,d,B] * T2ab[d,A,k,I])
       end
       t1 = print_time(EC,t1,"``opposite spin for x_i^j, x_a^b, x_I^J, x_A^B``",2)
-      !dc && @tensoropt x_kLiJ[k,L,i,J] += oOvV[k,L,c,D] * T2ab[c,D,i,J]
-      @tensoropt begin
+      !dc && @mtensor x_kLiJ[k,L,i,J] += oOvV[k,L,c,D] * T2ab[c,D,i,J]
+      @mtensor begin
         x_adil[a,d,i,l] += oOvV[l,K,d,C] * T2ab[a,C,i,K]
         R2ab[a,B,i,J] += x_adil[a,d,i,l] * T2ab[d,B,l,J]
         rR2a[a,b,i,j] := x_adil[a,d,i,l] *  T2a[b,d,j,l]
@@ -1786,21 +1785,21 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       end
       x_adil, rR2a = nothing, nothing
       t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{al}^{id} T_{db}^{lj}``",2)
-      @tensoropt begin
+      @mtensor begin
         x_ADIL[A,D,I,L] += oOvV[k,L,c,D] * T2ab[c,A,k,I]
         rR2b[A,B,I,J] := x_ADIL[A,D,I,L] * T2b[B,D,J,L]
         R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
       end 
       X_ADIL, rR2b = nothing, nothing
       t1 = print_time(EC,t1,"``R_{AB}^{IJ} += x_{AL}^{ID} T_{BD}^{JL}``",2)
-      @tensoropt begin
+      @mtensor begin
         x_vVoO[a,D,i,L] := oOvV[k,L,c,D] * T2a[a,c,i,k]
         R2ab[a,B,i,J] += x_vVoO[a,D,i,L] * T2b[B,D,J,L]
       end
       x_vVoO = nothing
       t1 = print_time(EC,t1,"``R_{aB}^{iJ} += x_{aL}^{iD} T_{BD}^{JL}``",2)
       if !dc
-        @tensoropt begin
+        @mtensor begin
           x_DBik[D,B,i,k] := oOvV[k,L,c,D] * T2ab[c,B,i,L]
           R2ab[a,B,i,J] += x_DBik[D,B,i,k] * T2ab[a,D,k,J]
         end
@@ -1811,9 +1810,9 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     end
   end
 
-  @tensoropt R2a[a,b,i,j] += x_klij[k,l,i,j] *  T2a[a,b,k,l]
+  @mtensor R2a[a,b,i,j] += x_klij[k,l,i,j] *  T2a[a,b,k,l]
   if n_occb_orbs(EC) > 0
-    @tensoropt begin
+    @mtensor begin
       R2b[A,B,I,J] += x_KLIJ[K,L,I,J] *  T2b[A,B,K,L]
       R2ab[a,B,i,J] += x_kLiJ[k,L,i,J] * T2ab[a,B,k,L]
     end
@@ -1821,20 +1820,20 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   x_klij, x_KLIJ, x_kLiJ = nothing, nothing, nothing
   t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{kl}^{ij} T_{ab}^{kl}``",2)
 
-  @tensoropt begin
+  @mtensor begin
     rR2a[a,b,i,j] := xab[a,c] * T2a[c,b,i,j]
     rR2a[a,b,i,j] -= xij[k,i] * T2a[a,b,k,j]
     R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i]
   end
   rR2a = nothing
   if n_occb_orbs(EC) > 0
-    @tensoropt begin
+    @mtensor begin
       rR2b[A,B,I,J] := xAB[A,C] * T2b[C,B,I,J]
       rR2b[A,B,I,J] -= xIJ[K,I] * T2b[A,B,K,J]
       R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I]
     end
     rR2b = nothing
-    @tensoropt begin
+    @mtensor begin
       R2ab[a,B,i,J] -= xij[k,i] * T2ab[a,B,k,J]
       R2ab[a,B,i,J] -= xIJ[K,J] * T2ab[a,B,i,K]
       R2ab[a,B,i,J] += xab[a,c] * T2ab[c,B,i,J]
@@ -1846,47 +1845,47 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   #ph-ab-ladder
   if n_occb_orbs(EC) > 0
     d_vOvO = load4idx(EC,"d_vOvO")
-    @tensoropt R2ab[a,B,i,J] -= d_vOvO[a,K,c,J] * T2ab[c,B,i,K]
+    @mtensor R2ab[a,B,i,J] -= d_vOvO[a,K,c,J] * T2ab[c,B,i,K]
     d_vOvO = nothing
     d_oVoV = load4idx(EC,"d_oVoV")
-    @tensoropt R2ab[a,B,i,J] -= d_oVoV[k,B,i,C] * T2ab[a,C,k,J]
+    @mtensor R2ab[a,B,i,J] -= d_oVoV[k,B,i,C] * T2ab[a,C,k,J]
     d_oVoV = nothing
     t1 = print_time(EC,t1,"``R_{aB}^{iJ} -= v_{aK}^{cJ} T_{cB}^{iK}``",2)
   end
 
   #ring terms
   A_d_voov = load4idx(EC,"d_voov") - permutedims(load4idx(EC,"d_vovo"),(1,2,4,3))
-  @tensoropt begin
+  @mtensor begin
     rR2a[a,b,i,j] := A_d_voov[b,k,j,c] * T2a[a,c,i,k]
     R2ab[a,B,i,J] += A_d_voov[a,k,i,c] * T2ab[c,B,k,J]
   end
   A_d_voov = nothing
   t1 = print_time(EC,t1,"``R_{ab}^{ij} += \\bar v_{bk}^{jc} T_{ac}^{ik}``",2)
   d_vOoV = load4idx(EC,"d_vOoV")
-  @tensoropt begin
+  @mtensor begin
     rR2a[a,b,i,j] += d_vOoV[b,K,j,C] * T2ab[a,C,i,K]
     R2ab[a,B,i,J] += d_vOoV[a,K,i,C] * T2b[B,C,J,K]
   end
   d_vOoV = nothing
   t1 = print_time(EC,t1,"``R_{ab}^{ij} += v_{bK}^{jC} T_{aC}^{iK}``",2)
-  @tensoropt R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
+  @mtensor R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
   rR2a = nothing
   if n_occb_orbs(EC) > 0
     A_d_VOOV = load4idx(EC,"d_VOOV") - permutedims(load4idx(EC,"d_VOVO"),(1,2,4,3))
-    @tensoropt begin
+    @mtensor begin
       rR2b[A,B,I,J] := A_d_VOOV[B,K,J,C] * T2b[A,C,I,K]
       R2ab[a,B,i,J] += A_d_VOOV[B,K,J,C] * T2ab[a,C,i,K]
     end
     A_d_VOOV = nothing
     t1 = print_time(EC,t1,"``R_{AB}^{IJ} += \\bar v_{BK}^{JC} T_{AC}^{IK}``",2)
     d_oVvO = load4idx(EC,"d_oVvO")
-    @tensoropt begin
+    @mtensor begin
       rR2b[A,B,I,J] += d_oVvO[k,B,c,J] * T2ab[c,A,k,I]
       R2ab[a,B,i,J] += d_oVvO[k,B,c,J] * T2a[a,c,i,k]
     end
     d_oVvO = nothing
     t1 = print_time(EC,t1,"``R_{AB}^{IJ} += v_{kB}^{cJ} T_{cA}^{kI}``",2)
-    @tensoropt R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
+    @mtensor R2b[A,B,I,J] += rR2b[A,B,I,J] + rR2b[B,A,J,I] - rR2b[A,B,J,I] - rR2b[B,A,I,J]
     rR2b = nothing
   end
 
@@ -1910,17 +1909,17 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       if length(T1a) > 0
         M1a = calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
         M1b = calc_M1b(occcore, virtuals, T1a, T1b, T2a, T2ab, activeorbs)
-        @tensoropt R1a[a,i] += M1a[a,i] * W
-        @tensoropt R1b[a,i] += M1b[a,i] * W
+        @mtensor R1a[a,i] += M1a[a,i] * W
+        @mtensor R1b[a,i] += M1b[a,i] * W
       end
       if !isempty(occcorea) && !isempty(occcoreb)
         M2a = calc_M2a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
         M2b = calc_M2b(occcore, virtuals, T1a, T1b, T2a, T2ab, activeorbs)
-        @tensoropt R2a[a,b,i,j] += M2a[a,b,i,j] * W
-        @tensoropt R2b[a,b,i,j] += M2b[a,b,i,j] * W
+        @mtensor R2a[a,b,i,j] += M2a[a,b,i,j] * W
+        @mtensor R2b[a,b,i,j] += M2b[a,b,i,j] * W
       end
       M2ab = calc_M2ab(occcore, virtuals, T1a, T1b, T2a, T2b, T2ab, activeorbs)
-      @tensoropt R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
+      @mtensor R2ab[a,b,i,j] += M2ab[a,b,i,j] * W
       save!(EC,"2d_ccsd_W",[W])
       t1 = print_time(EC,t1,"``2D-CCSD additional terms``",2)
     elseif fixref
@@ -2074,16 +2073,24 @@ function calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
   virtualsa, virtualsb = virtuals
   internalT1a = T1a[norba,morba]
   M1 = zeros(Float64,size(T1a))
+  T2_nVmN = T2ab[norba,virtualsb,morba,norbb]
+  T1_VN = T1b[virtualsb,norbb]
   if !isempty(occcorea) && !isempty(occcoreb)
-    @tensoropt M1[norba,occcorea][i] += T2ab[norba,morbb,morba,occcoreb][i]
-    @tensoropt M1[norba,occcorea][i] += internalT1a * T1b[morbb,occcoreb][i]
-    @tensoropt M1[virtualsa,occcorea][a,i] += T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a]
-    @tensoropt M1[virtualsa,occcorea][a,i] += internalT1a * T2b[morbb,virtualsb,occcoreb,norbb][a,i]
-    @tensoropt M1[virtualsa,occcorea][a,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i]
-    @tensoropt M1[virtualsa,occcorea][a,i] += internalT1a * T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][i]
+    T2_nMmO = T2ab[norba,morbb,morba,occcoreb]
+    T1_MO = T1b[morbb,occcoreb]
+    @mtensor M1_no[i] := T2_nMmO[i]
+    @mtensor M1_no[i] += internalT1a * T1_MO[i]
+    @view(M1[norba,occcorea]) .+= M1_no 
+    T2_MVON = T2b[morbb,virtualsb,occcoreb,norbb]
+    @mtensor M1_vo[a,i] := T2_nMmO[i] * T1_VN[a]
+    @mtensor M1_vo[a,i] += internalT1a * T2_MVON[a,i]
+    @mtensor M1_vo[a,i] += T2_nVmN[a] * T1_MO[i]
+    @mtensor M1_vo[a,i] += internalT1a * T1_VN[a] * T1_MO[i]
+    @view(M1[virtualsa,occcorea]) .+= M1_vo
   end
-  @tensoropt M1[virtualsa,morba][a] -= T2ab[norba,virtualsb,morba,norbb][a]
-  @tensoropt M1[virtualsa,morba][a] -= internalT1a * T1b[virtualsb,norbb][a]
+  @mtensor M1_vm[a] := T2_nVmN[a]
+  @mtensor M1_vm[a] += internalT1a * T1_VN[a]
+  @view(M1[virtualsa,morba]) .-= M1_vm
   M1[norba,morba] += internalT1a
   return M1
 end
@@ -2094,16 +2101,24 @@ function calc_M1b(occcore, virtuals, T1a, T1b, T2a, T2ab, activeorbs)
   virtualsa, virtualsb = virtuals
   M1 = zeros(Float64,size(T1b))
   internalT1b = T1b[morbb,norbb]
+  T2_vMmN = T2ab[virtualsa,morbb,morba,norbb]
+  T1_vm = T1a[virtualsa,morba]
   if !isempty(occcorea) && !isempty(occcoreb)
-    @tensoropt M1[morbb,occcoreb][i] += T2ab[norba,morbb,occcorea,norbb][i]
-    @tensoropt M1[morbb,occcoreb][i] += internalT1b * T1a[norba,occcorea][i]
-    @tensoropt M1[virtualsb,occcoreb][a,i] += T2ab[norba,morbb,occcorea,norbb][i] * T1a[virtualsa,morba][a]
-    @tensoropt M1[virtualsb,occcoreb][a,i] += internalT1b * T2a[norba,virtualsa,occcorea,morba][a,i]
-    @tensoropt M1[virtualsb,occcoreb][a,i] += T2ab[virtualsa,morbb,morba,norbb][a] * T1a[norba,occcorea][i]
-    @tensoropt M1[virtualsb,occcoreb][a,i] += internalT1b * T1a[virtualsa,morba][a] * T1a[norba,occcorea][i]
+    T2_nMoN = T2ab[norba,morbb,occcorea,norbb]
+    T1_no = T1a[norba,occcorea]
+    @mtensor M1_MO[i] := T2_nMoN[i]
+    @mtensor M1_MO[i] += internalT1b * T1_no[i]
+    @view(M1[morbb,occcoreb]) .+= M1_MO
+    T2_nvom = T2a[norba,virtualsa,occcorea,morba]
+    @mtensor M1_VO[a,i] := T2_nMoN[i] * T1_vm[a]
+    @mtensor M1_VO[a,i] += internalT1b * T2_nvom[a,i]
+    @mtensor M1_VO[a,i] += T2_vMmN[a] * T1_no[i]
+    @mtensor M1_VO[a,i] += internalT1b * T1_vm[a] * T1_no[i]
+    @view(M1[virtualsb,occcoreb]) .+= M1_VO
   end
-  @tensoropt M1[virtualsb,norbb][a] -= T2ab[virtualsa,morbb,morba,norbb][a]
-  @tensoropt M1[virtualsb,norbb][a] -= internalT1b * T1a[virtualsa,morba][a]
+  @mtensor M1_VN[a] := T2_vMmN[a]
+  @mtensor M1_VN[a] += internalT1b * T1_vm[a]
+  @view(M1[virtualsb,norbb]) .-= M1_VN
   M1[morbb,norbb] += internalT1b
   return M1
 end
@@ -2113,83 +2128,93 @@ function calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab,activeorbs)
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
   M2 = zeros(Float64,size(T2b))
+  T2_nMmO = T2ab[norba,morbb,morba,occcoreb]
+  T2_nVmO = T2ab[norba,virtualsb,morba,occcoreb]
+  T2_MVOO = T2b[morbb,virtualsb,occcoreb,occcoreb]
+  T2_nVmN = T2ab[norba,virtualsb,morba,norbb]
+  T2_VVNO = T2b[virtualsb,virtualsb,norbb,occcoreb]
+  @mtensor M2_vvoo[a,b,j,i] := T2_nMmO[j] * T2_VVNO[a,b,i]
+  @mtensor M2_vvoo[a,b,i,j] -= T2_nMmO[j] * T2_VVNO[a,b,i]
+  @mtensor M2_vvoo[b,a,i,j] += T2_nVmN[b] * T2_MVOO[a,i,j]
+  @mtensor M2_vvoo[a,b,i,j] -= T2_nVmN[b] * T2_MVOO[a,i,j]
+  @mtensor M2_vnom[a,i] := -T2_nVmO[a,i]
+  @mtensor M2_vnmo[a,i] := T2_nVmO[a,i]
+  @mtensor M2_nvom[a,i] := T2_nVmO[a,i]
+  @mtensor M2_nvmo[a,i] := -T2_nVmO[a,i]
   if length(T1a) > 0
     internalT1a = T1a[norba,morba]
     internalT1b = T1b[morbb,norbb]
-    @tensoropt TT1a[a,i] := T1a[virtualsa,occcorea][a,i] - T1b[virtualsb,occcoreb][a,i]
-    @tensoropt TT1b[a,i] := T1b[virtualsb,occcoreb][a,i] - T1a[virtualsa,occcorea][a,i]
+    T1_vo = T1a[virtualsa,occcorea]
+    T1_VO = T1b[virtualsb,occcoreb]
+    @mtensor TT1a[a,i] := T1_vo[a,i] - T1_VO[a,i]
+    @mtensor TT1b[a,i] := T1_VO[a,i] - T1_vo[a,i]
+    @mtensor M2_nvoo[a,j,i] := T2_nMmO[i] * TT1a[a,j]
+    @mtensor M2_nvoo[a,i,j] -= T2_nMmO[i] * TT1a[a,j]
+    @mtensor M2_vnoo[a,i,j] := T2_nMmO[i] * TT1a[a,j]
+    @mtensor M2_vnoo[a,j,i] -= T2_nMmO[i] * TT1a[a,j]
+    T1_MO = T1b[morbb,occcoreb]
+    @mtensor M2_nvoo[a,i,j] -= T2_nVmO[a,i] * T1_MO[j]
+    @mtensor M2_nvoo[a,j,i] += T2_nVmO[a,i] * T1_MO[j]
+    @mtensor M2_vnoo[a,i,j] += T2_nVmO[a,i] * T1_MO[j]
+    @mtensor M2_vnoo[a,j,i] -= T2_nVmO[a,i] * T1_MO[j]
+    @mtensor M2_nvoo[a,i,j] -= internalT1a * T2_MVOO[a,i,j]
+    @mtensor M2_vnoo[a,i,j] += internalT1a * T2_MVOO[a,i,j]
+    @view(M2[norba,virtualsa,occcorea,occcorea]) .+= M2_nvoo
+    @view(M2[virtualsa,norba,occcorea,occcorea]) .+= M2_vnoo
 
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * TT1a[a,j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += T2ab[norba,morbb,morba,occcoreb][i] * TT1a[a,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * TT1a[a,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= T2ab[norba,morbb,morba,occcoreb][i] * TT1a[a,j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[morbb,occcoreb][j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= internalT1a * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += internalT1a * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
+    @mtensor M2_vvmo[a,b,i] := T2_nVmN[a] * TT1a[b,i]
+    @mtensor M2_vvmo[b,a,i] -= T2_nVmN[a] * TT1a[b,i]
+    @mtensor M2_vvom[b,a,i] := T2_nVmN[a] * TT1a[b,i]
+    @mtensor M2_vvom[a,b,i] -= T2_nVmN[a] * TT1a[b,i]
+    T1_VN = T1b[virtualsb,norbb]
+    @mtensor M2_vvmo[a,b,i] += T2_nVmO[a,i] * T1_VN[b] 
+    @mtensor M2_vvmo[b,a,i] -= T2_nVmO[a,i] * T1_VN[b]
+    @mtensor M2_vvom[a,b,i] -= T2_nVmO[a,i] * T1_VN[b] 
+    @mtensor M2_vvom[b,a,i] += T2_nVmO[a,i] * T1_VN[b] 
+    @mtensor M2_vvmo[a,b,i] += internalT1a * T2_VVNO[b,a,i]
+    @mtensor M2_vvom[a,b,i] -= internalT1a * T2_VVNO[b,a,i]
+    @view(M2[virtualsa,virtualsa,morba,occcorea]) .+= M2_vvmo
+    @view(M2[virtualsa,virtualsa,occcorea,morba]) .+= M2_vvom
 
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += T2ab[norba,virtualsb,morba,norbb][a] * TT1a[b,i]
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= T2ab[norba,virtualsb,morba,norbb][a] * TT1a[b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][a,b,i] -= T2ab[norba,virtualsb,morba,norbb][a] * TT1a[b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][b,a,i] += T2ab[norba,virtualsb,morba,norbb][a] * TT1a[b,i]
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][a,b,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][b,a,i] += T2ab[norba,virtualsb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += internalT1a * T2b[virtualsb,virtualsb,norbb,occcoreb][b,a,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][a,b,i] -= internalT1a * T2b[virtualsb,virtualsb,norbb,occcoreb][b,a,i]
-  
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * TT1a[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * TT1a[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * TT1a[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * TT1a[b,j]
-
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * TT1a[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * TT1a[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * TT1a[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * TT1a[b,j]
-
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][j] * T2ab[norba,virtualsb,morba,occcoreb][b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][j] * T2ab[norba,virtualsb,morba,occcoreb][b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][j] * T2ab[norba,virtualsb,morba,occcoreb][b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][j] * T2ab[norba,virtualsb,morba,occcoreb][b,i]
-
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1b * TT1b[a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += internalT1b * TT1b[a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += internalT1b * TT1b[a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= internalT1b * TT1b[a,i] * T2ab[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1a * TT1b[a,i] * T2b[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += internalT1a * TT1b[a,i] * T2b[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += internalT1a * TT1b[a,i] * T2b[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= internalT1a * TT1b[a,i] * T2b[morbb,virtualsb,norbb,occcoreb][b,j]
-
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1a * T1b[morbb,occcoreb][j] * T2b[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += internalT1a * T1b[morbb,occcoreb][j] * T2b[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-    
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1a * T1b[virtualsb,norbb][b] * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += internalT1a * T1b[virtualsb,norbb][b] * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-    
-    @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= internalT1a * TT1b[a,i]
-    @tensoropt M2[norba,virtualsa,occcorea,morba][a,i] += internalT1a * TT1b[a,i]
-    @tensoropt M2[virtualsa,norba,morba,occcorea][a,i] += internalT1a * TT1b[a,i]
-    @tensoropt M2[norba,virtualsa,morba,occcorea][a,i] -= internalT1a * TT1b[a,i]
+    @mtensor M2_vvoo[a,b,i,j] -= (T2_nMmO[i] * T1_VN[a]) * TT1a[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += (T2_nMmO[i] * T1_VN[a]) * TT1a[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += (T2_nMmO[i] * T1_VN[a]) * TT1a[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= (T2_nMmO[i] * T1_VN[a]) * TT1a[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= (T2_nVmN[a] * T1_MO[i]) * TT1a[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += (T2_nVmN[a] * T1_MO[i]) * TT1a[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += (T2_nVmN[a] * T1_MO[i]) * TT1a[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= (T2_nVmN[a] * T1_MO[i]) * TT1a[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= (T1_VN[a] * T1_MO[j]) * T2_nVmO[b,i]
+    @mtensor M2_vvoo[b,a,i,j] += (T1_VN[a] * T1_MO[j]) * T2_nVmO[b,i]
+    @mtensor M2_vvoo[a,b,j,i] += (T1_VN[a] * T1_MO[j]) * T2_nVmO[b,i]
+    @mtensor M2_vvoo[b,a,j,i] -= (T1_VN[a] * T1_MO[j]) * T2_nVmO[b,i]
+    T2_MVNO = T2b[morbb,virtualsb,norbb,occcoreb]
+    @mtensor M2_vvoo[a,b,i,j] -= T2_MVNO[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += T2_MVNO[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += T2_MVNO[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= T2_MVNO[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1b * TT1b[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += internalT1b * TT1b[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += internalT1b * TT1b[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= internalT1b * TT1b[a,i] * T2_nVmO[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1a * TT1b[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += internalT1a * TT1b[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += internalT1a * TT1b[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= internalT1a * TT1b[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1a * T1_MO[j] * T2_VVNO[a,b,i]
+    @mtensor M2_vvoo[a,b,j,i] += internalT1a * T1_MO[j] * T2_VVNO[a,b,i]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1a * T1_VN[b] * T2_MVOO[a,i,j]
+    @mtensor M2_vvoo[b,a,i,j] += internalT1a * T1_VN[b] * T2_MVOO[a,i,j]
+    @mtensor M2_vnom[a,i] -= internalT1a * TT1b[a,i]
+    @mtensor M2_nvom[a,i] += internalT1a * TT1b[a,i]
+    @mtensor M2_vnmo[a,i] += internalT1a * TT1b[a,i]
+    @mtensor M2_nvmo[a,i] -= internalT1a * TT1b[a,i]
   end
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][j] * T2b[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[norba,morbb,morba,occcoreb][j] * T2b[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][b] * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[norba,virtualsb,morba,norbb][b] * T2b[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-
-  @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i]
-  @tensoropt M2[virtualsa,norba,morba,occcorea][a,i] += T2ab[norba,virtualsb,morba,occcoreb][a,i]
-  @tensoropt M2[norba,virtualsa,occcorea,morba][a,i] += T2ab[norba,virtualsb,morba,occcoreb][a,i]
-  @tensoropt M2[norba,virtualsa,morba,occcorea][a,i] -= T2ab[norba,virtualsb,morba,occcoreb][a,i]
+  @view(M2[virtualsa,virtualsa,occcorea,occcorea]) .+= M2_vvoo
+  @view(M2[virtualsa,norba,occcorea,morba]) .+= M2_vnom
+  @view(M2[virtualsa,norba,morba,occcorea]) .+= M2_vnmo
+  @view(M2[norba,virtualsa,occcorea,morba]) .+= M2_nvom
+  @view(M2[norba,virtualsa,morba,occcorea]) .+= M2_nvmo
   return M2
 end
 
@@ -2200,90 +2225,97 @@ function calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab,activeorbs)
   occcoreb, occcorea = occcore
   virtualsb, virtualsa = virtuals
 #ENDNOTE
-  P12 = (2,1,4,3)
   M2 = zeros(Float64,size(T2a))
+  T2_VVNO = T2a[virtualsb,virtualsb,norbb,occcoreb]
+  T2_VnNm = T2ab[virtualsb,norba,norbb,morba]
+  T2_VnOm = T2ab[virtualsb,norba,occcoreb,morba]
+  T2_MnOm = T2ab[morbb,norba,occcoreb,morba]
+  T2_MVOO = T2a[morbb,virtualsb,occcoreb,occcoreb]
+  @mtensor M2_vvoo[a,b,j,i] := T2_MnOm[j] * T2_VVNO[a,b,i]
+  @mtensor M2_vvoo[a,b,i,j] -= T2_MnOm[j] * T2_VVNO[a,b,i]
+  @mtensor M2_vvoo[b,a,i,j] += T2_VnNm[b] * T2_MVOO[a,i,j]
+  @mtensor M2_vvoo[a,b,i,j] -= T2_VnNm[b] * T2_MVOO[a,i,j]
+  @mtensor M2_vnom[a,i] := -T2_VnOm[a,i]
+  @mtensor M2_vnmo[a,i] := T2_VnOm[a,i]
+  @mtensor M2_nvom[a,i] := T2_VnOm[a,i]
+  @mtensor M2_nvmo[a,i] := -T2_VnOm[a,i]
   if length(T1a) > 0
     internalT1a = T1a[morbb,norbb]
     internalT1b = T1b[norba,morba]
     T1a_ai = T1a[virtualsb,occcoreb]
     T1b_ai = T1b[virtualsa,occcorea]
-    @tensoropt TT1a[a,i] := T1a_ai[a,i] - T1b_ai[a,i]
-    @tensoropt TT1b[a,i] := T1b_ai[a,i] - T1a_ai[a,i]
-    T2ab_i = T2ab[morbb,norba,occcoreb,morba]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab_i[i] * TT1b[a,j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += T2ab_i[i] * TT1b[a,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += T2ab_i[i] * TT1b[a,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= T2ab_i[i] * TT1b[a,j]
-    T2ab_ai = T2ab[virtualsb,norba,occcoreb,morba]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,j,i] += T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,j,i] -= T2ab_ai[a,i] * T1a[morbb,occcoreb][j]
-    T2a_aij = T2a[morbb,virtualsb,occcoreb,occcoreb]
-    @tensoropt M2[norba,virtualsa,occcorea,occcorea][a,i,j] -= internalT1b * T2a_aij[a,i,j]
-    @tensoropt M2[virtualsa,norba,occcorea,occcorea][a,i,j] += internalT1b * T2a_aij[a,i,j]
-    T2a_aij = nothing
-    #TODO remove permutedims
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][a,b,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][b,a,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[virtualsb,norbb][b] 
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][b,a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[virtualsb,norbb][b]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][a,b,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[virtualsb,norbb][b] 
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][b,a,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i] * T1a[virtualsb,norbb][b] 
-    @tensoropt M2[virtualsa,virtualsa,morba,occcorea][a,b,i] += internalT1b * T2a[virtualsb,virtualsb,norbb,occcoreb][b,a,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,morba][a,b,i] -= internalT1b * T2a[virtualsb,virtualsb,norbb,occcoreb][b,a,i]
+    @mtensor TT1a[a,i] := T1a_ai[a,i] - T1b_ai[a,i]
+    @mtensor TT1b[a,i] := T1b_ai[a,i] - T1a_ai[a,i]
+    @mtensor M2_nvoo[a,j,i] := T2_MnOm[i] * TT1b[a,j]
+    @mtensor M2_nvoo[a,i,j] -= T2_MnOm[i] * TT1b[a,j]
+    @mtensor M2_vnoo[a,i,j] := T2_MnOm[i] * TT1b[a,j]
+    @mtensor M2_vnoo[a,j,i] -= T2_MnOm[i] * TT1b[a,j]
+    T1_MO = T1a[morbb,occcoreb]
+    @mtensor M2_nvoo[a,i,j] -= T2_VnOm[a,i] * T1_MO[j]
+    @mtensor M2_nvoo[a,j,i] += T2_VnOm[a,i] * T1_MO[j]
+    @mtensor M2_vnoo[a,i,j] += T2_VnOm[a,i] * T1_MO[j]
+    @mtensor M2_vnoo[a,j,i] -= T2_VnOm[a,i] * T1_MO[j]
+    @mtensor M2_nvoo[a,i,j] -= internalT1b * T2_MVOO[a,i,j]
+    @mtensor M2_vnoo[a,i,j] += internalT1b * T2_MVOO[a,i,j]
+    @view(M2[norba,virtualsa,occcorea,occcorea]) .+= M2_nvoo
+    @view(M2[virtualsa,norba,occcorea,occcorea]) .+= M2_vnoo
 
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][i] * T1a[virtualsb,norbb][a] * TT1b[b,j]
-
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][a] * T1a[morbb,occcoreb][i] * TT1b[b,j]
+    @mtensor M2_vvmo[a,b,i] := T2_VnNm[a] * TT1b[b,i]
+    @mtensor M2_vvmo[b,a,i] -= T2_VnNm[a] * TT1b[b,i]
+    @mtensor M2_vvom[b,a,i] := T2_VnNm[a] * TT1b[b,i]
+    @mtensor M2_vvom[a,b,i] -= T2_VnNm[a] * TT1b[b,i]
+    T1_VN = T1a[virtualsb,norbb]
+    @mtensor M2_vvmo[a,b,i] += T2_VnOm[a,i] * T1_VN[b] 
+    @mtensor M2_vvmo[b,a,i] -= T2_VnOm[a,i] * T1_VN[b]
+    @mtensor M2_vvom[a,b,i] -= T2_VnOm[a,i] * T1_VN[b] 
+    @mtensor M2_vvom[b,a,i] += T2_VnOm[a,i] * T1_VN[b] 
+    @mtensor M2_vvmo[a,b,i] += internalT1b * T2_VVNO[b,a,i]
+    @mtensor M2_vvom[a,b,i] -= internalT1b * T2_VVNO[b,a,i]
+    @view(M2[virtualsa,virtualsa,morba,occcorea]) .+= M2_vvmo
+    @view(M2[virtualsa,virtualsa,occcorea,morba]) .+= M2_vvom
+   
+    @mtensor M2_vvoo[a,b,i,j] -= (T2_MnOm[i] * T1_VN[a]) * TT1b[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += (T2_MnOm[i] * T1_VN[a]) * TT1b[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += (T2_MnOm[i] * T1_VN[a]) * TT1b[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= (T2_MnOm[i] * T1_VN[a]) * TT1b[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= (T2_VnNm[a] * T1_MO[i]) * TT1b[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += (T2_VnNm[a] * T1_MO[i]) * TT1b[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += (T2_VnNm[a] * T1_MO[i]) * TT1b[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= (T2_VnNm[a] * T1_MO[i]) * TT1b[b,j]
     
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T1a[virtualsb,norbb][a] * T1a[morbb,occcoreb][j] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T1a[virtualsb,norbb][a] * T1a[morbb,occcoreb][j] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T1a[virtualsb,norbb][a] * T1a[morbb,occcoreb][j] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T1a[virtualsb,norbb][a] * T1a[morbb,occcoreb][j] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,i]
-
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= T2ab[virtualsb,norba,occcoreb,morba][a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += T2ab[virtualsb,norba,occcoreb,morba][a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += T2ab[virtualsb,norba,occcoreb,morba][a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= T2ab[virtualsb,norba,occcoreb,morba][a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1a * TT1a[a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += internalT1a * TT1a[a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += internalT1a * TT1a[a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= internalT1a * TT1a[a,i] * permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1b * TT1a[a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += internalT1b * TT1a[a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += internalT1b * TT1a[a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,j,i] -= internalT1b * TT1a[a,i] * T2a[morbb,virtualsb,norbb,occcoreb][b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= (T1_VN[a] * T1_MO[j]) * T2_VnOm[b,i]
+    @mtensor M2_vvoo[b,a,i,j] += (T1_VN[a] * T1_MO[j]) * T2_VnOm[b,i]
+    @mtensor M2_vvoo[a,b,j,i] += (T1_VN[a] * T1_MO[j]) * T2_VnOm[b,i]
+    @mtensor M2_vvoo[b,a,j,i] -= (T1_VN[a] * T1_MO[j]) * T2_VnOm[b,i]
+    T2_MVNO = T2a[morbb,virtualsb,norbb,occcoreb]
+    @mtensor M2_vvoo[a,b,i,j] -= T2_VnOm[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += T2_VnOm[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += T2_VnOm[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= T2_VnOm[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1a * TT1a[a,i] * T2_VnOm[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += internalT1a * TT1a[a,i] * T2_VnOm[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += internalT1a * TT1a[a,i] * T2_VnOm[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= internalT1a * TT1a[a,i] * T2_VnOm[b,j]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1b * TT1a[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[b,a,i,j] += internalT1b * TT1a[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[a,b,j,i] += internalT1b * TT1a[a,i] * T2_MVNO[b,j]
+    @mtensor M2_vvoo[b,a,j,i] -= internalT1b * TT1a[a,i] * T2_MVNO[b,j]
     
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1b * T1a[morbb,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += internalT1b * T1a[morbb,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1b * T1_MO[j] * T2_VVNO[a,b,i]
+    @mtensor M2_vvoo[a,b,j,i] += internalT1b * T1_MO[j] * T2_VVNO[a,b,i]
+    @mtensor M2_vvoo[a,b,i,j] -= internalT1b * T1_VN[b] * T2_MVOO[a,i,j]
+    @mtensor M2_vvoo[b,a,i,j] += internalT1b * T1_VN[b] * T2_MVOO[a,i,j]
 
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= internalT1b * T1a[virtualsb,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-    @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += internalT1b * T1a[virtualsb,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-
-    @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= internalT1b * TT1a[a,i]
-    @tensoropt M2[norba,virtualsa,occcorea,morba][a,i] += internalT1b * TT1a[a,i]
-    @tensoropt M2[virtualsa,norba,morba,occcorea][a,i] += internalT1b * TT1a[a,i]
-    @tensoropt M2[norba,virtualsa,morba,occcorea][a,i] -= internalT1b * TT1a[a,i]
+    @mtensor M2_vnom[a,i] -= internalT1b * TT1a[a,i]
+    @mtensor M2_nvom[a,i] += internalT1b * TT1a[a,i]
+    @mtensor M2_vnmo[a,i] += internalT1b * TT1a[a,i]
+    @mtensor M2_nvmo[a,i] -= internalT1b * TT1a[a,i]
   end
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,j,i] += permutedims(T2ab,P12)[norba,morbb,morba,occcoreb][j] * T2a[virtualsb,virtualsb,norbb,occcoreb][a,b,i]
-
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][a,b,i,j] -= permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-  @tensoropt M2[virtualsa,virtualsa,occcorea,occcorea][b,a,i,j] += permutedims(T2ab,P12)[norba,virtualsb,morba,norbb][b] * T2a[morbb,virtualsb,occcoreb,occcoreb][a,i,j]
-
-  @tensoropt M2[virtualsa,norba,occcorea,morba][a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i]
-  @tensoropt M2[virtualsa,norba,morba,occcorea][a,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i]
-  @tensoropt M2[norba,virtualsa,occcorea,morba][a,i] += permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i]
-  @tensoropt M2[norba,virtualsa,morba,occcorea][a,i] -= permutedims(T2ab,P12)[norba,virtualsb,morba,occcoreb][a,i]
+  @view(M2[virtualsa,virtualsa,occcorea,occcorea]) .+= M2_vvoo
+  @view(M2[virtualsa,norba,occcorea,morba]) .+= M2_vnom
+  @view(M2[virtualsa,norba,morba,occcorea]) .+= M2_vnmo
+  @view(M2[norba,virtualsa,occcorea,morba]) .+= M2_nvom
+  @view(M2[norba,virtualsa,morba,occcorea]) .+= M2_nvmo
   return M2
 end
 
@@ -2296,75 +2328,110 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
   # @assert isapprox(T2a[norba,virtualsa,morba,occcorea],-T2a[norba,virtualsa,occcorea,morba];atol=1.e-8)
   # @assert isapprox(T2b[morbb,virtualsb,norbb,occcoreb],-T2b[virtualsb,morbb,norbb,occcoreb];atol=1.e-8)
   # @assert isapprox(T2b[morbb,virtualsb,norbb,occcoreb],-T2b[morbb,virtualsb,occcoreb,norbb];atol=1.e-8)
+  T2_nMmO = T2ab[norba,morbb,morba,occcoreb]
+  T2_nVmN = T2ab[norba,virtualsb,morba,norbb]
+  T2_MVNO = T2b[morbb,virtualsb,norbb,occcoreb]
+  T2_nMoN = T2ab[norba,morbb,occcorea,norbb]
+  T2_vMmO = T2ab[virtualsa,morbb,morba,occcoreb]
+  T2_nVoN = T2ab[norba,virtualsb,occcorea,norbb]
+  T2_vMoO = T2ab[virtualsa,morbb,occcorea,occcoreb]
+  T2_nVoO = T2ab[norba,virtualsb,occcorea,occcoreb]
+  T2_vMmN = T2ab[virtualsa,morbb,morba,norbb]
+  T2_vVoN = T2ab[virtualsa,virtualsb,occcorea,norbb]
+  T2_vVmO = T2ab[virtualsa,virtualsb,morba,occcoreb]
+  T2_nvmo = T2a[norba,virtualsa,morba,occcorea]
+  if !isempty(occcorea) && !isempty(occcoreb)
+    T2_nVmO = T2ab[norba,virtualsb,morba,occcoreb]
+    @mtensor M2_vVoO[a,b,i,j] := T2_nMoN[j] * T2_vVmO[b,a,i]
+    @mtensor M2_vVoO[a,b,i,j] += T2_nMmO[i] * T2_vVoN[b,a,j]
+    @mtensor M2_vVoO[a,b,i,j] += T2_vMmN[b] * T2_nVoO[a,j,i]
+    @mtensor M2_vVoO[a,b,i,j] += T2_nVmN[a] * T2_vMoO[b,j,i]
+    @mtensor M2_vVoO[a,b,i,j] -= T2_MVNO[a,i] * T2_nvmo[b,j]
+    T2_vMoN = T2ab[virtualsa,morbb,occcorea,norbb]
+    @mtensor M2_vVoO[a,b,i,j] -= T2_nVmO[a,i] * T2_vMoN[b,j]
+    @mtensor M2_vVoO[a,b,i,j] -= T2_nVoN[a,j] * T2_vMmO[b,i]
+  end
   if length(T1a) > 0
     internalT1a = T1a[norba,morba]
     internalT1b = T1b[morbb,norbb]
-    @tensoropt TT1a[a,i] := T1a[virtualsa,occcorea][a,i] - T1b[virtualsb,occcoreb][a,i]
-    @tensoropt TT1b[a,i] := T1b[virtualsb,occcoreb][a,i] - T1a[virtualsa,occcorea][a,i]
-    @tensoropt T2ta[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
-    @tensoropt T2tb[a,b,i,j] := T2b[a,b,i,j] + T1b[a,i] * T1b[b,j]
-    @tensoropt T2tab[a,b,i,j] := T2ab[a,b,i,j] + T1a[a,i] * T1b[b,j]
-    @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * TT1b[a,j]
-    @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2ab[norba,morbb,occcorea,norbb][i] * TT1a[a,j]
-    @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1a[norba,occcorea][j]
-    @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2ab[norba,virtualsb,occcorea,norbb][a,i] * T1b[morbb,occcoreb][j]
-    @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i] * T1a[virtualsa,morba][a]
-    @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2tab[norba,morbb,occcorea,occcoreb][i,j] * T1b[virtualsb,norbb][a]
-    @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] -= T2a[virtualsa,norba,morba,occcorea][a,j] * T1b[morbb,occcoreb][i]
-    @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] -= T2b[morbb,virtualsb,occcoreb,norbb][a,j] * T1a[norba,occcorea][i]
-    @tensoropt M2[norba,virtualsb,occcorea,occcoreb][a,i,j] += internalT1a * T2ab[virtualsa,morbb,occcorea,occcoreb][a,j,i]
-    @tensoropt M2[virtualsa,morbb,occcorea,occcoreb][a,j,i] += internalT1b * T2ab[norba,virtualsb,occcorea,occcoreb][a,i,j]
+    T1_vo = T1a[virtualsa,occcorea]
+    T1_VO = T1b[virtualsb,occcoreb]
+    @mtensor TT1a[a,i] := T1_vo[a,i] - T1_VO[a,i]
+    @mtensor TT1b[a,i] := T1_VO[a,i] - T1_vo[a,i]
+    @mtensor T2ta[a,b,i,j] := T2a[a,b,i,j] + T1a[a,i] * T1a[b,j]
+    @mtensor T2tb[a,b,i,j] := T2b[a,b,i,j] + T1b[a,i] * T1b[b,j]
+    @mtensor T2tab[a,b,i,j] := T2ab[a,b,i,j] + T1a[a,i] * T1b[b,j]
+    T1_no = T1a[norba,occcorea]
+    T1_MO = T1b[morbb,occcoreb]
+    T1_vm = T1a[virtualsa,morba]
+    T1_VN = T1b[virtualsb,norbb]
+    @mtensor M2_nVoO[a,i,j] := internalT1a * T2_vMoO[a,j,i]
+    @mtensor M2_vMoO[a,j,i] := internalT1b * T2_nVoO[a,i,j]
+    @mtensor M2_nVoO[a,i,j] -= T2_nMmO[i] * TT1b[a,j]
+    @mtensor M2_vMoO[a,j,i] -= T2_nMoN[i] * TT1a[a,j]
+    @mtensor M2_nVoO[a,i,j] -= T2_vMmO[a,i] * T1_no[j]
+    @mtensor M2_vMoO[a,j,i] -= T2_nVoN[a,i] * T1_MO[j]
+    T2t_nMoO = T2tab[norba,morbb,occcorea,occcoreb]
+    @mtensor M2_nVoO[a,i,j] -= T2t_nMoO[j,i] * T1_vm[a]
+    @mtensor M2_vMoO[a,j,i] -= T2t_nMoO[i,j] * T1_VN[a]
+    T2_vnmo = T2a[virtualsa,norba,morba,occcorea]
+    @mtensor M2_nVoO[a,i,j] -= T2_vnmo[a,j] * T1_MO[i]
+    T2_MVON = T2b[morbb,virtualsb,occcoreb,norbb]
+    @mtensor M2_vMoO[a,j,i] -= T2_MVON[a,j] * T1_no[i]
+    @view(M2[norba,virtualsb,occcorea,occcoreb]) .+= M2_nVoO
+    @view(M2[virtualsa,morbb,occcorea,occcoreb]) .+= M2_vMoO
 
-    @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,morba,norbb][a] * TT1b[b,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2ab[virtualsa,morbb,morba,norbb][a] * TT1a[b,i]
-    @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2ab[norba,virtualsb,occcorea,norbb][a,i] * T1a[virtualsa,morba][b] 
-    @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2ab[virtualsa,morbb,morba,occcoreb][a,i] * T1b[virtualsb,norbb][b] 
-    @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2tab[virtualsa,virtualsb,morba,norbb][b,a] * T1a[norba,occcorea][i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2tab[virtualsa,virtualsb,morba,norbb][a,b] * T1b[morbb,occcoreb][i] 
-    @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] += T2a[norba,virtualsa,occcorea,morba][b,i] * T1b[virtualsb,norbb][a]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] += T2b[morbb,virtualsb,occcoreb,norbb][b,i] * T1a[virtualsa,morba][a]
-    @tensoropt M2[virtualsa,virtualsb,morba,occcoreb][a,b,i] -= internalT1a * T2ab[virtualsa,virtualsb,occcorea,norbb][b,a,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,norbb][b,a,i] -= internalT1b * T2ab[virtualsa,virtualsb,morba,occcoreb][a,b,i]
+    @mtensor M2_vVmO[a,b,i] := T2_nVmN[a] * TT1b[b,i]
+    @mtensor M2_vVoN[b,a,i] := T2_vMmN[a] * TT1a[b,i]
+    @mtensor M2_vVmO[a,b,i] += T2_nVoN[a,i] * T1_vm[b] 
+    @mtensor M2_vVoN[b,a,i] += T2_vMmO[a,i] * T1_VN[b] 
+    T2t_vVmN = T2tab[virtualsa,virtualsb,morba,norbb]
+    @mtensor M2_vVmO[a,b,i] += T2t_vVmN[b,a] * T1_no[i]
+    @mtensor M2_vVoN[b,a,i] += T2t_vVmN[a,b] * T1_MO[i] 
+    T2_nvom = T2a[norba,virtualsa,occcorea,morba]
+    @mtensor M2_vVmO[a,b,i] += T2_nvom[b,i] * T1_VN[a]
+    @mtensor M2_vVoN[b,a,i] += T2_MVON[b,i] * T1_vm[a]
+    @mtensor M2_vVmO[a,b,i] -= internalT1a * T2_vVoN[b,a,i]
+    @mtensor M2_vVoN[b,a,i] -= internalT1b * T2_vVmO[a,b,i]
+    @view(M2[virtualsa,virtualsb,morba,occcoreb]) .+= M2_vVmO
+    @view(M2[virtualsa,virtualsb,occcorea,norbb]) .+= M2_vVoN
 
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,morbb,morba,occcoreb][i] * T1b[virtualsb,norbb][a] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,morbb,occcorea,norbb][j] * T1a[virtualsa,morba][b] * TT1a[a,i]
+    @mtensor M2_vVoO[a,b,i,j] -= (T2_nMmO[i] * T1_VN[a]) * TT1b[b,j]
+    @mtensor M2_vVoO[a,b,i,j] -= (T2_nMoN[j] * T1_vm[b]) * TT1a[a,i]
 
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,morba,norbb][a] * T1b[morbb,occcoreb][i] * TT1b[b,j]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[virtualsa,morbb,morba,norbb][b] * T1a[norba,occcorea][j] * TT1a[a,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2a[norba,virtualsa,morba,occcorea][b,j] * T1b[virtualsb,norbb][a] * T1b[morbb,occcoreb][i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T1a[norba,occcorea][j] * T1a[virtualsa,morba][b]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[virtualsa,morbb,morba,occcoreb][b,i] * T1a[norba,occcorea][j] * T1b[virtualsb,norbb][a]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,occcorea,norbb][a,j] * T1a[virtualsa,morba][b] * T1b[morbb,occcoreb][i]
-
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= internalT1a * TT1b[b,j] * T2b[virtualsb,morbb,norbb,occcoreb][a,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= internalT1b * TT1a[a,i] * T2a[norba,virtualsa,occcorea,morba][b,j]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += internalT1a * T1b[morbb,occcoreb][i] * T2ab[virtualsa,virtualsb,occcorea,norbb][b,a,j]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += internalT1a * T1b[virtualsb,norbb][a] * T2ab[virtualsa,morbb,occcorea,occcoreb][b,j,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += internalT1b * T1a[virtualsa,morba][b] * T2ab[norba,virtualsb,occcorea,occcoreb][a,j,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += internalT1b * T1a[norba,occcorea][j] * T2ab[virtualsa,virtualsb,morba,occcoreb][b,a,i]
-
-    @tensoropt M2[norba,morbb,morba,occcoreb][i] += T1a[norba,occcorea][i]
-    @tensoropt M2[norba,morbb,occcorea,norbb][i] += T1b[morbb,occcoreb][i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i] * T2tab[virtualsa,virtualsb,morba,norbb][b,a]
-    @tensoropt M2[norba,morbb,occcorea,occcoreb][i,j] -= T2tab[norba,morbb,occcorea,occcoreb][j,i]
-    @tensoropt M2[norba,virtualsb,morba,occcoreb][a,i] += T2ta[norba,virtualsa,occcorea,morba][a,i]
-    @tensoropt M2[virtualsa,morbb,occcorea,norbb][a,i] += T2tb[morbb,virtualsb,occcoreb,norbb][a,i]
-    @tensoropt M2[virtualsa,morbb,morba,occcoreb][a,i] += T2tab[norba,virtualsb,occcorea,norbb][a,i]
-    @tensoropt M2[norba,virtualsb,occcorea,norbb][a,i] += T2tab[virtualsa,morbb,morba,occcoreb][a,i]
+    @mtensor M2_vVoO[a,b,i,j] -= T2_nVmN[a] * T1_MO[i] * TT1b[b,j]
+    @mtensor M2_vVoO[a,b,i,j] -= T2_vMmN[b] * T1_no[j] * TT1a[a,i]
+    @mtensor M2_vVoO[a,b,i,j] += T2_nvmo[b,j] * (T1_VN[a] * T1_MO[i])
+    @mtensor M2_vVoO[a,b,i,j] += T2_MVNO[a,i] * (T1_no[j] * T1_vm[b])
+    @mtensor M2_vVoO[a,b,i,j] -= T2_vMmO[b,i] * (T1_no[j] * T1_VN[a])
+    @mtensor M2_vVoO[a,b,i,j] -= T2_nVoN[a,j] * (T1_vm[b] * T1_MO[i])
+    T2_VMNO = T2b[virtualsb,morbb,norbb,occcoreb]
+    @mtensor M2_vVoO[a,b,i,j] -= internalT1a * TT1b[b,j] * T2_VMNO[a,i]
+    @mtensor M2_vVoO[a,b,i,j] -= internalT1b * TT1a[a,i] * T2_nvom[b,j]
+    @mtensor M2_vVoO[a,b,i,j] += internalT1a * T1_MO[i] * T2_vVoN[b,a,j]
+    @mtensor M2_vVoO[a,b,i,j] += internalT1a * T1_VN[a] * T2_vMoO[b,j,i]
+    @mtensor M2_vVoO[a,b,i,j] += internalT1b * T1_vm[b] * T2_nVoO[a,j,i]
+    @mtensor M2_vVoO[a,b,i,j] += internalT1b * T1_no[j] * T2_vVmO[b,a,i]
+    @mtensor M2[norba,morbb,morba,occcoreb][i] += T1_no[i]
+    @mtensor M2[norba,morbb,occcorea,norbb][i] += T1_MO[i]
+    @mtensor M2_vVoO[a,b,i,j] -= T2t_nMoO[j,i] * T2t_vVmN[b,a]
+    @mtensor M2[norba,morbb,occcorea,occcoreb][i,j] -= T2t_nMoO[j,i]
+    T2t_nvom = T2ta[norba,virtualsa,occcorea,morba]
+    @mtensor M2[norba,virtualsb,morba,occcoreb][a,i] += T2t_nvom[a,i]
+    T2t_MVON = T2tb[morbb,virtualsb,occcoreb,norbb]
+    @mtensor M2[virtualsa,morbb,occcorea,norbb][a,i] += T2t_MVON[a,i]
+    T2t_nVoN = T2tab[norba,virtualsb,occcorea,norbb]
+    @mtensor M2[virtualsa,morbb,morba,occcoreb][a,i] += T2t_nVoN[a,i]
+    T2t_vMmO  = T2tab[virtualsa,morbb,morba,occcoreb]
+    @mtensor M2[norba,virtualsb,occcorea,norbb][a,i] += T2t_vMmO[a,i]
     if !isempty(occcorea) && !isempty(occcoreb)
-      @tensoropt M2[norba,virtualsb,morba,norbb][a] -= T1a[virtualsa,morba][a]
-      @tensoropt M2[virtualsa,morbb,morba,norbb][a] -= T1b[virtualsb,norbb][a]
-      @tensoropt M2[virtualsa,virtualsb,morba,norbb][a,b] -= T2tab[virtualsa,virtualsb,morba,norbb][b,a]
+      @mtensor M2[norba,virtualsb,morba,norbb][a] -= T1_vm[a]
+      @mtensor M2[virtualsa,morbb,morba,norbb][a] -= T1_VN[a]
+      @mtensor M2[virtualsa,virtualsb,morba,norbb][a,b] -= T2t_vVmN[b,a]
     end
   end
   if !isempty(occcorea) && !isempty(occcoreb)
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,morbb,occcorea,norbb][j] * T2ab[virtualsa,virtualsb,morba,occcoreb][b,a,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,morbb,morba,occcoreb][i] * T2ab[virtualsa,virtualsb,occcorea,norbb][b,a,j]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[virtualsa,morbb,morba,norbb][b] * T2ab[norba,virtualsb,occcorea,occcoreb][a,j,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] += T2ab[norba,virtualsb,morba,norbb][a] * T2ab[virtualsa,morbb,occcorea,occcoreb][b,j,i]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2b[morbb,virtualsb,norbb,occcoreb][a,i] * T2a[norba,virtualsa,morba,occcorea][b,j]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,morba,occcoreb][a,i] * T2ab[virtualsa,morbb,occcorea,norbb][b,j]
-    @tensoropt M2[virtualsa,virtualsb,occcorea,occcoreb][a,b,i,j] -= T2ab[norba,virtualsb,occcorea,norbb][a,j] * T2ab[virtualsa,morbb,morba,occcoreb][b,i]
+    @view(M2[virtualsa,virtualsb,occcorea,occcoreb]) .+= M2_vVoO
   end
   return M2
 end
@@ -2716,27 +2783,27 @@ function SVD_pert_T_add_to_singles_and_doubles_residuals(EC, R1, R2)
   U = load3idx(EC, "C_voX")
   # println(size(U))
 
-  @tensoropt Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
-  @tensoropt A[P,X] := Boo[i,i,P,X]
-  @tensoropt BBU[Z,d,j] := (ovP[j,c,P] * ovP[k,d,P]) * U[c,k,Z]
-  @tensoropt R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
-  @tensoropt R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,d,j] ))
+  @mtensor Boo[i,j,P,X] := ovP[i,a,P] * U[a,j,X]
+  @mtensor A[P,X] := Boo[i,i,P,X]
+  @mtensor BBU[Z,d,j] := (ovP[j,c,P] * ovP[k,d,P]) * U[c,k,Z]
+  @mtensor R1[a,i] += U[a,i,X] *(Txyz[X,Y,Z] *( 2.0*A[P,Y] * A[P,Z] - Boo[j,k,P,Z] * Boo[k,j,P,Y] ))
+  @mtensor R1[a,i] -= U[a,j,Y] *( 2.0*Boo[j,i,P,X]*(Txyz[X,Y,Z] * A[P,Z]) - Txyz[X,Y,Z] *(U[d,i,X]*BBU[Z,d,j] ))
 
   BBU = nothing
 
-  @tensoropt Bov[i,a,P,X] := ooP[j,i,P] * U[a,j,X]
+  @mtensor Bov[i,a,P,X] := ooP[j,i,P] * U[a,j,X]
   vvPfile, vvP = mmap3idx(EC, "d_vvL")
-  @tensoropt Bvo[a,i,P,X] := vvP[a,b,P] * U[b,i,X]
+  @mtensor Bvo[a,i,P,X] := vvP[a,b,P] * U[b,i,X]
   close(vvPfile)
   vvP = nothing
   #dfock = load2idx(EC, "df_mm")
   #fov = dfock[SP['o'], SP['v']]
   # R2[abij] = RR2[abij] + RR2[baji]
-  #@tensoropt RR2[a,b,i,j] := U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
-  @tensoropt RR2[a,b,i,j] := 2.0*U[b,j,Y] * ((Bvo[a,i,P,Z] - Bov[i,a,P,Z])*(Txyz[X,Y,Z] * A[P,X]))
-  @tensoropt RR2[a,b,i,j] += (Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Boo[k,j,P,Y] * (Txyz[X,Y,Z] * U[b,k,X]))
-  @tensoropt RR2[a,b,i,j] -= U[b,j,Z] * (Txyz[X,Y,Z] * (Bvo[a,k,P,X] * Boo[k,i,P,Y] - U[a,k,Y] * (Bov[i,c,P,X] * ovP[k,c,P])))
-  @tensoropt R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
+  #@mtensor RR2[a,b,i,j] := U[a,i,X] * (U[b,j,Y] * (Txyz[X,Y,Z] * (fov[k,c]*U[c,k,Z])) - (Txyz[X,Y,Z] * U[b,k,Z])* (fov[k,c]*U[c,j,Y]))
+  @mtensor RR2[a,b,i,j] := 2.0*U[b,j,Y] * ((Bvo[a,i,P,Z] - Bov[i,a,P,Z])*(Txyz[X,Y,Z] * A[P,X]))
+  @mtensor RR2[a,b,i,j] += (Bov[i,a,P,Z]  - Bvo[a,i,P,Z])*(Boo[k,j,P,Y] * (Txyz[X,Y,Z] * U[b,k,X]))
+  @mtensor RR2[a,b,i,j] -= U[b,j,Z] * (Txyz[X,Y,Z] * (Bvo[a,k,P,X] * Boo[k,i,P,Y] - U[a,k,Y] * (Bov[i,c,P,X] * ovP[k,c,P])))
+  @mtensor R2[a,b,i,j] += RR2[a,b,i,j] + RR2[b,a,j,i]
   close(ovPfile)
   close(ooPfile)
 
@@ -2807,13 +2874,13 @@ function calc_triples_decomposition(EC::ECInfo)
   #display(UaiX)
   save!(EC,"C_voX",UaiX)
 
-  @tensoropt begin
+  @mtensor begin
     T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX[a,i,X]) * UaiX[b,j,Y]) * UaiX[c,k,Z])
   end
   save!(EC,"T_XXX",T3_decomp_starting_guess)
   #display(T3_decomp_starting_guess)
 
-  # @tensoropt begin
+  # @mtensor begin
   #  T3_decomp_check[a,i,b,j,c,k] := T3_decomp_starting_guess[X,Y,Z] * UaiX2[a,i,X] * UaiX2[b,j,Y] * UaiX2[c,k,Z]
   # end
   # test_calc_pertT_from_T3(EC,T3_decomp_check)
@@ -2830,22 +2897,22 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   ooPfile, ooP = mmap3idx(EC, "d_ooL")
   vvPfile, vvP = mmap3idx(EC, "d_vvL")
 
-  @tensoropt TXai[X,a,i] := UvoX[b,j,X] * T2[a,b,i,j]
-  @tensoropt dU[P,X] := voP[c,k,P] * UvoX[c,k,X]
+  @mtensor TXai[X,a,i] := UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor dU[P,X] := voP[c,k,P] * UvoX[c,k,X]
 
-  @tensoropt RR[X,Y,a,i] := ((TXai[X,c,j] * vvP[b,c,P]) * UvoX[b,j,Y]) * voP[a,i,P]
-  @tensoropt RR[X,Y,a,i] -= ((TXai[X,b,l] * ooP[l,j,P]) * UvoX[b,j,Y]) * voP[a,i,P]
-  @tensoropt ddUv[a,d,X] := vvP[a,d,P] * dU[P,X]
-  @tensoropt ddUo[l,j,X] := ooP[l,j,P] * dU[P,X]
-  @tensoropt RR[X,Y,a,i] += ddUv[a,d,X] * TXai[Y,d,i]
-  @tensoropt RR[X,Y,a,i] -= ddUo[l,i,X] * TXai[Y,a,l]
+  @mtensor RR[X,Y,a,i] := ((TXai[X,c,j] * vvP[b,c,P]) * UvoX[b,j,Y]) * voP[a,i,P]
+  @mtensor RR[X,Y,a,i] -= ((TXai[X,b,l] * ooP[l,j,P]) * UvoX[b,j,Y]) * voP[a,i,P]
+  @mtensor ddUv[a,d,X] := vvP[a,d,P] * dU[P,X]
+  @mtensor ddUo[l,j,X] := ooP[l,j,P] * dU[P,X]
+  @mtensor RR[X,Y,a,i] += ddUv[a,d,X] * TXai[Y,d,i]
+  @mtensor RR[X,Y,a,i] -= ddUo[l,i,X] * TXai[Y,a,l]
   TXai = nothing
   dU = nothing
-  @tensoropt ddUU[X,Y,d,l] := ddUv[a,d,X] * UvoX[a,l,Y]
-  @tensoropt ddUU[X,Y,d,l] -= ddUo[l,i,X] * UvoX[d,i,Y]
-  @tensoropt RR[X,Y,a,i] += ddUU[X,Y,d,l] * T2[a,d,i,l]
+  @mtensor ddUU[X,Y,d,l] := ddUv[a,d,X] * UvoX[a,l,Y]
+  @mtensor ddUU[X,Y,d,l] -= ddUo[l,i,X] * UvoX[d,i,Y]
+  @mtensor RR[X,Y,a,i] += ddUU[X,Y,d,l] * T2[a,d,i,l]
   ddUU = nothing
-  @tensoropt R[X,Y,a,i] := RR[X,Y,a,i] + RR[Y,X,a,i]
+  @mtensor R[X,Y,a,i] := RR[X,Y,a,i] + RR[Y,X,a,i]
   RR = nothing
   close(voPfile)
   close(ooPfile)
@@ -2867,26 +2934,26 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   end
   nocc = n_occ_orbs(EC)
   naux = length(ϵX)
-  # @tensoropt T3_decomp_check[a,i,b,j,c,k] := R[X,Y,a,i] * UvoX[c,k,X] * UvoX[b,j,Y]
+  # @mtensor T3_decomp_check[a,i,b,j,c,k] := R[X,Y,a,i] * UvoX[c,k,X] * UvoX[b,j,Y]
   # for i = 1:nocc
   #   T3_decomp_check[:,i,:,i,:,i] .= 0.0
   # end
   # test_calc_pertT_from_T3(EC,T3_decomp_check)
-  @tensoropt D2[a,i,b,j] := R[X,Y,a,i] * R[X,Y,b,j]
+  @mtensor D2[a,i,b,j] := R[X,Y,a,i] * R[X,Y,b,j]
   # remove T^iii contributions from D2
   UU = zeros(naux,naux,nocc)
   for i = 1:nocc
-    @tensoropt UU[:,:,i][X,Y] = UvoX[:,i,:][a,X] * UvoX[:,i,:][a,Y]
+    @mtensor UU[:,:,i][X,Y] = UvoX[:,i,:][a,X] * UvoX[:,i,:][a,Y]
   end
   TUU4i = zeros(naux,naux,size(UvoX,1))
   ΔD2 = zeros(size(D2,1),size(D2,3))
   for i = 1:nocc
-    @tensoropt TUU4i[X',Y',a] = (R[:,:,:,i][X,Y,a] * UU[:,:,i][X,X']) * UU[:,:,i][Y,Y']
+    @mtensor TUU4i[X',Y',a] = (R[:,:,:,i][X,Y,a] * UU[:,:,i][X,X']) * UU[:,:,i][Y,Y']
     for j = 1:nocc
-      @tensoropt ΔD2[a,b] = TUU4i[X,Y,a] * R[:,:,:,j][X,Y,b]
-      @tensoropt D2[:,i,:,j][a,b] -= ΔD2[a,b]
+      @mtensor ΔD2[a,b] = TUU4i[X,Y,a] * R[:,:,:,j][X,Y,b]
+      @mtensor D2[:,i,:,j][a,b] -= ΔD2[a,b]
       if i != j
-        @tensoropt D2[:,j,:,i][b,a] -= ΔD2[a,b]
+        @mtensor D2[:,j,:,i][b,a] -= ΔD2[a,b]
       end
     end
   end
@@ -2914,18 +2981,18 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   voPfile, voP = mmap3idx(EC, "d_voL")
   vvPfile, vvP = mmap3idx(EC, "d_vvL")
 
-  @tensoropt Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #virt1
+  @mtensor Thetavirt[b,d,Z] := vvP[b,d,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #virt1
   vvP = nothing
   #println(1)
   #flush(stdout)
   
-  @tensoropt Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #occ1
+  @mtensor Thetaocc[l,j,Z] := ooP[l,j,Q] * (voP[c,k,Q] * UvoX[c,k,Z]) #occ1
   voP = nothing
   ooP = nothing
   #println(4)
   #flush(stdout)
 
-  @tensoropt TaiX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor TaiX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
   #println(16)
   #flush(stdout)
   
@@ -2934,13 +3001,13 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   Term1 = zeros(nsvd,nsvd,nsvd)
   for j in 1:nocc
     ThetaoccCut = Thetaocc[:,j,:]
-    @tensoropt IntermediateTerm11[b,X,Z] := TaiX[b,l,X] * ThetaoccCut[l,Z]
+    @mtensor IntermediateTerm11[b,X,Z] := TaiX[b,l,X] * ThetaoccCut[l,Z]
     ThetaoccCut = nothing
     TaiXCut = TaiX[:,j,:]
-    @tensoropt IntermediateTerm11[b,X,Z] -= Thetavirt[b,d,Z] * TaiXCut[d,X]
+    @mtensor IntermediateTerm11[b,X,Z] -= Thetavirt[b,d,Z] * TaiXCut[d,X]
     TaiXCut = nothing
     UvoXCut = UvoX[:,j,:]
-    @tensoropt Term1[X,Y,Z] += IntermediateTerm11[b,X,Z] * UvoXCut[b,Y]
+    @mtensor Term1[X,Y,Z] += IntermediateTerm11[b,X,Z] * UvoXCut[b,Y]
     IntermediateTerm11 = nothing
     UvoXCut = nothing
   end
@@ -2951,7 +3018,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   TaiX = nothing
   t1 = print_time(EC, t1, "Theta terms in R3(T3)", 2)
 
-  @tensoropt R3decomp[X,Y,Z] := Term1[X,Y,Z] + Term1[Y,X,Z] + Term1[X,Z,Y] + Term1[Z,Y,X] + Term1[Z,X,Y] + Term1[Y,Z,X]
+  @mtensor R3decomp[X,Y,Z] := Term1[X,Y,Z] + Term1[Y,X,Z] + Term1[X,Z,Y] + Term1[Z,Y,X] + Term1[Z,X,Y] + Term1[Y,Z,X]
   #println(24)
   #flush(stdout)
   Term1 = nothing
@@ -2989,12 +3056,12 @@ function calc_intermediates4triples(EC::ECInfo)
   w_ovX = zeros(nocc, nvirt, nX)
   B_ooXLfile, B_ooXL = newmmap(EC, "B_ooXL", (nocc,nocc,nX,nL))
   for L in LBlks
-    v!ovL = @view ovL[:,:,L]	  
-    v!B_ooXL = @view B_ooXL[:,:,:,L]
+    v!ovL = @mview ovL[:,:,L]	  
+    v!B_ooXL = @mview B_ooXL[:,:,:,L]
     # ``B_i^{jXL} = v_i^{aL} U^{jX}_a``
     @mtensor v!B_ooXL[i,j,X,L] = v!ovL[i,a,L] * UvoX[a,j,X]
     # ``A^{XL} = B_i^{iXL}``
-    v!A_XL = @view A_XL[:,L]
+    v!A_XL = @mview A_XL[:,L]
     @mtensor v!A_XL[X,L] = v!B_ooXL[i,i,X,L]
     # ``B^{XY} = B_j^{kXL} B_k^{jYL}``
     @mtensor B_XX[X,Y] += v!B_ooXL[j,k,X,L] * v!B_ooXL[k,j,Y,L]
@@ -3099,7 +3166,6 @@ function auto_buf_length4calc_triples_residuals(nvirt, nX, nocc, nL, lenL, lenX,
     pseudo_drop!(buf, A_XL)
     return buf[2]
 end
-
 """
     calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
 
@@ -3142,7 +3208,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   maxXBig = maximum(length, XBigBlks)
   maxa = maximum(length, virtBlks)
   lenbuf = auto_buf_length4calc_triples_residuals(nvirt, nX, nocc, nL, maxL, maxXBig, maxX, maxX, nX, maxa)
-  buf = Buffer(lenbuf)
+  @buffer buf(lenbuf) begin
   # @print_buffer_usage buf begin
 
   Y_XL = zeros(nX, nL)
@@ -3155,9 +3221,9 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   @mtensor tT2[a,i,j,b] = 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   for L in LBlks
     lenL = length(L)
-    v!ovL = @view ovL[:,:,L]
-    v!voL = @view voL[:,:,L]
-    v!Y_XL = @view Y_XL[:,L]
+    v!ovL = @mview ovL[:,:,L]
+    v!voL = @mview voL[:,:,L]
+    v!Y_XL = @mview Y_XL[:,L]
     V_voL = alloc!(buf, nvirt, nocc, lenL)
     # ``V_{a}^{iL} = v_k^{cL} (2T^{ik}_{ac}- T^{ik}_{ca})``
     n!V_voL = neuralyze(V_voL)
@@ -3188,9 +3254,9 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   @mtensor X_vvX[b,d,Z] := - dfov[l,d] * T_voX[b,l,Z]
   X_ooX = zeros(nocc, nocc, nX)
   for L in LBlks
-    v!vvL = @view vvL[:,:,L]
-    v!ooL = @view ooL[:,:,L]
-    v!Y_XL = @view Y_XL[:,L]
+    v!vvL = @mview vvL[:,:,L]
+    v!ooL = @mview ooL[:,:,L]
+    v!Y_XL = @mview Y_XL[:,L]
     # ``X_{bZ}^d += \hat v_b^{dL} Y_Z^{L}``
     @mtensor X_vvX[b,d,Z] += v!vvL[b,d,L] * v!Y_XL[Z,L]
     # ``X_{lZ}^j += \hat v_l^{jL} Y_Z^{L}``
@@ -3220,25 +3286,25 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   @mtensor fU_X[X] = dfov[k,c] * UvoX[c,k,X]
   for X in XBigBlks
     lenX = length(X)
-    v!T_XXX = @view T_XXX[:,:,X]
-    v!UvoX = @view UvoX[:,:,X]
+    v!T_XXX = @mview T_XXX[:,:,X]
+    v!UvoX = @mview UvoX[:,:,X]
     # ``T^i_{aYX} = U^{iZ}_a T_{ZYX}``
     TvoXX = alloc!(buf, nvirt, nocc, nX, lenX)
     @mtensor TvoXX[a,i,Y,X] = UvoX[a,i,Z] * v!T_XXX[Z,Y,X]
     # ``R_{aY}^i += T_{aYX}^i fU^X``
-    v!fU_X = @view fU_X[X]
+    v!fU_X = @mview fU_X[X]
     n!R_voX = neuralyze(R_voX)
     @mtensor n!R_voX[a,i,Y] += TvoXX[a,i,Y,X] * v!fU_X[X]
     # ``X_{bZ}^d += 0.5 T^k_{bYX} w_{k}^{dY}``
-    v!X_vvX = @view X_vvX[:,:,X]
+    v!X_vvX = @mview X_vvX[:,:,X]
     @mtensor v!X_vvX[b,d,X] += 0.5 * TvoXX[b,k,Y,X] * w_ovX[k,d,Y]
     # ``G_{jX}^i = T_{dYX}^i w_j^{dY}``
-    v!G_ooX = @view G_ooX[:,:,X]
+    v!G_ooX = @mview G_ooX[:,:,X]
     n!v!G_ooX = neuralyze(v!G_ooX)
     @mtensor n!v!G_ooX[j,i,X] = TvoXX[d,i,Y,X] * w_ovX[j,d,Y]
     for Y in XBlks
       lenY = length(Y)
-      v!UvY_oXoX = @view UvY_oXoX[:,:,:,Y]
+      v!UvY_oXoX = @mview UvY_oXoX[:,:,:,Y]
       # ``TUvY^j_{bYX} = T_{bZX}^l UvY_{Yl}^{jZ}``
       TUvY_voXX = alloc!(buf, nvirt, nocc, lenY, lenX)
       n!TUvY_voXX = neuralyze(TUvY_voXX)
@@ -3255,12 +3321,12 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     Bv_vvX .= 0.0
     Bv_ooX = alloc!(buf, nocc, nocc, lenX)
     Bv_ooX .= 0.0
-    v!R_ooX = @view R_ooX[:,:,X]
+    v!R_ooX = @mview R_ooX[:,:,X]
     for L in LBlks
       lenL = length(L)
-      v!ooL = @view ooL[:,:,L]
-      v!vvL = @view vvL[:,:,L]
-      v!ovL = @view ovL[:,:,L]
+      v!ooL = @mview ooL[:,:,L]
+      v!vvL = @mview vvL[:,:,L]
+      v!ovL = @mview ovL[:,:,L]
       # ``\bar B_a^{iXL} = \hat v_a^{bL} U^{iX}_b``
       bB_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
       @mtensor bB_voXL[a,i,X,L] = v!vvL[a,b,L] * v!UvoX[b,i,X]
@@ -3284,8 +3350,8 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       W_XXL[:,X,L] = a!W_XXL
       drop!(buf, a!W_XXL)
 
-      v!B_ooXL = @view B_ooXL[:,:,:,L]
-      v!A_XL = @view A_XL[:,L]
+      v!B_ooXL = @mview B_ooXL[:,:,:,L]
+      v!A_XL = @mview A_XL[:,L]
       # ``V_{YX}^{L} = T_{ZYX} A^{ZL}``
       V_XXL = alloc!(buf, nX, lenX, lenL)
       @mtensor V_XXL[Y,X,L] = v!T_XXX[Z,Y,X] * v!A_XL[Z,L]
@@ -3366,12 +3432,12 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     vV_XXov = alloc!(buf, nX, lenX, nocc, nvirt)
     vV_XXov .= 0.0
     for L in LBlks
-      v!ovL = @view ovL[:,:,L]
-      v!tV_XXL = @view tV_XXL[:,X,L]
+      v!ovL = @mview ovL[:,:,L]
+      v!tV_XXL = @mview tV_XXL[:,X,L]
       @mtensor vV_XXov[Y,X,l,d] += v!ovL[l,d,L] * v!tV_XXL[Y,X,L]
     end
     # ``X_{lY}^j += vV_{YXl}^d U^{jX}_d``
-    v!UvoX = @view UvoX[:,:,X]
+    v!UvoX = @mview UvoX[:,:,X]
     @mtensor X_ooX[l,j,Y] += vV_XXov[Y,X,l,d] * v!UvoX[d,j,X]
     # ``X_{bY}^d -= vV_{YXl}^d U^{lX}_b``
     @mtensor X_vvX[b,d,Y] -= vV_XXov[Y,X,l,d] * v!UvoX[b,l,X]
@@ -3384,14 +3450,14 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   @mtensor oovo[l,k,d,i] = ovL[l,d,L] * ooL[k,i,L]
   for a in virtBlks
     lena = length(a)
-    v!vvL = @view vvL[a,:,:]
+    v!vvL = @mview vvL[a,:,:]
     # vvov[acld] = ``\hat v_{al}^{cd} = \hat v_{a}^{cL} v_{l}^{dL}``
     vvov = alloc!(buf, lena, nvirt, nocc, nvirt)
     @mtensor vvov[a,c,l,d] = v!vvL[a,c,L] * ovL[l,d,L]
     a!UvoX = alloc!(buf, lena, nocc, nX)
-    a!UvoX .= @view UvoX[a,:,:]
+    a!UvoX .= @mview UvoX[a,:,:]
     a!T2 = alloc!(buf, nvirt, lena, nocc, nocc)
-    a!T2 .= @view T2[:,a,:,:]
+    a!T2 .= @mview T2[:,a,:,:]
     # ``vT_{al}^{ij} = \hat v_{al}^{cd} T_{cd}^{ij} - \hat v_{lk}^{di} T_{da}^{jk}``
     vT_vooo = alloc!(buf, lena, nocc, nocc, nocc)
     n!vT_vooo = neuralyze(vT_vooo)
@@ -3410,7 +3476,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     drop!(buf, vT_vvvo)
     drop!(buf, a!T2, a!UvoX)
     # ``X_{aY}^d -= \hat v_{al}^{cd} T_{cY}^{l}``
-    v!X_vvX = @view X_vvX[a,:,:]
+    v!X_vvX = @mview X_vvX[a,:,:]
     @mtensor v!X_vvX[a,d,Y] -= vvov[a,c,l,d] * T_voX[c,l,Y]
     drop!(buf, vvov)
   end
@@ -3421,8 +3487,8 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   # ``Q_{XYZ} += U^{\dagger b}_{jX} (X_{lY}^j T_{bZ}^l - X_{bY}^d T_{dZ}^j)``
   for Z in XBlks
     lenZ = length(Z)
-    v!T_voX = @view T_voX[:,:,Z]
-    v!Q_XXX = @view Q_XXX[:,:,Z]
+    v!T_voX = @mview T_voX[:,:,Z]
+    v!Q_XXX = @mview Q_XXX[:,:,Z]
     XT_voXX = alloc!(buf, nvirt, nocc, nX, lenZ)
     @mtensor XT_voXX[b,j,Y,Z] = X_ooX[l,j,Y] * v!T_voX[b,l,Z]
     @mtensor XT_voXX[b,j,Y,Z] -= X_vvX[b,d,Y] * v!T_voX[d,j,Z]
@@ -3439,16 +3505,16 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   W_LXX = alloc!(buf, nL, nX, nX)
   W_XXLfile, W_XXL = mmap3idx(EC, "W_XXL")
   for L in LBlks
-    v!W_XXL = @view W_XXL[:,:,L]
-    v!W_LXX = @view W_LXX[L,:,:]
+    v!W_XXL = @mview W_XXL[:,:,L]
+    v!W_LXX = @mview W_LXX[L,:,:]
     permutedims!(v!W_LXX, v!W_XXL, (3,2,1))
   end
   close(W_XXLfile)
   for iY in 1:nX
-    v!W_LX = @view W_LXX[:,:,iY]
+    v!W_LX = @mview W_LXX[:,:,iY]
     X = 1:iY # only upper triangular part
     lenXt = length(X)
-    v!W_LXX = @view W_LXX[:,:,X]
+    v!W_LXX = @mview W_LXX[:,:,X]
     W_XXX = alloc!(buf, nX, nX, lenXt)
     n!W_XXX = neuralyze(W_XXX)
     @mtensor n!W_XXX[Y',X',X] = v!W_LXX[L,X',X] * v!W_LX[L,Y']
@@ -3468,8 +3534,8 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   vvoo = alloc!(buf, nvirt, nvirt, nocc, nocc)
   vvoo .= 0.0
   for L in LBlks
-    v!vvL = @view vvL[:,:,L]
-    v!ooL = @view ooL[:,:,L]
+    v!vvL = @mview vvL[:,:,L]
+    v!ooL = @mview ooL[:,:,L]
     @mtensor vvoo[a,d,l,i] += v!vvL[a,d,L] * v!ooL[l,i,L]
   end
   n!q_voX = neuralyze(q_voX)
@@ -3491,9 +3557,8 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   close(voLfile)
   close(ooLfile)
   close(vvLfile)
-  # end #buf
+  end #buf
   save!(EC, "R_XXX", R3decomp)
-  GC.gc()
   #println(40)
   #flush(stdout)
 

@@ -2,7 +2,7 @@
 This module contains functions for tensor decomposition methods.
 """
 module DecompTools
-using LinearAlgebra, TensorOperations
+using LinearAlgebra, ElemCoTensorOperations
 # using TSVD
 using IterativeSolvers
 using ..ElemCo.Utils
@@ -177,10 +177,10 @@ function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
     end
   end
 
-  @tensoropt Fdiff[X,Y] := UaiX[a,i,X] * UaiX2[a,i,Y]
+  @mtensor Fdiff[X,Y] := UaiX[a,i,X] * UaiX2[a,i,Y]
   diagFdiff = eigen(Symmetric(Fdiff))
 
-  @tensoropt UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
+  @mtensor UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
   return diagFdiff.values, UaiX2
 end
 

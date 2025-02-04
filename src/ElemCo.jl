@@ -56,7 +56,7 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
-using TensorOperations
+using ElemCoTensorOperations
 using PrecompileTools
 using .Utils
 using .ECInfos
@@ -85,7 +85,7 @@ using .Interfaces
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string, @dummy
+export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
@@ -255,8 +255,26 @@ Occupied orbitals:[1]
 ```
 """
 macro ECinit()
+  if @istoplevel
+    return quote
+      const $(esc(:EC)) = ECInfo()
+      $(esc(:@setupEC))
+    end
+  else
+    return quote
+      $(esc(:EC)) = ECInfo()
+      $(esc(:@setupEC))
+    end
+  end
+end
+
+""" 
+    @setupEC()
+
+  Setup `EC::ECInfo` with geometry, basis, and fcidump if defined.
+"""
+macro setupEC()
   return quote
-    $(esc(:EC)) = ECInfo()
     try
       (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))

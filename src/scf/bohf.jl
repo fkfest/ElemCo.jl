@@ -2,7 +2,7 @@
     (using a similarity-transformed FciDump)
 """
 module BOHF
-using LinearAlgebra, TensorOperations
+using LinearAlgebra, ElemCoTensorOperations
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.Constants
@@ -243,7 +243,7 @@ function bohf(EC::ECInfo)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
     den = gen_density_matrix(EC, cMOl[1], cMOr[1], SP['o'])
     fhsmall = fock + hsmall
-    @tensoropt efhsmall = den[p,q]*fhsmall[p,q]
+    @mtensor efhsmall = den[p,q]*fhsmall[p,q]
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
@@ -330,7 +330,7 @@ function bouhf(EC::ECInfo)
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMOl[ispin], cMOr[ispin], SP[sp])
       fhsmall = fock[ispin] + hsmall[ispin]
-      @tensoropt efh = 0.5 * (den[p,q] * fhsmall[p,q])
+      @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
       efhsmall[ispin] = efh
       Δfock[ispin] = den'*fock[ispin] - fock[ispin]*den'
       var += sum(abs2,Δfock[ispin])

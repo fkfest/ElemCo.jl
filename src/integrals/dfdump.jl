@@ -1,6 +1,6 @@
 """ generate fcidump using df integrals and store in dumpfile """
 module DfDump
-using LinearAlgebra, TensorOperations
+using LinearAlgebra, ElemCoTensorOperations
 using Buffers
 using ..ElemCo.ECInfos
 using ..ElemCo.BasisSets

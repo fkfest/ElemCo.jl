@@ -8,7 +8,7 @@ module FciDumps
 
 # using LinearAlgebra
 # using NPZ
-using TensorOperations
+using ElemCoTensorOperations
 using DocStringExtensions
 using Printf
 using ..ElemCo.MNPY

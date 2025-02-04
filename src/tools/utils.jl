@@ -10,6 +10,7 @@ export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6
 export warn
 export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
+export @istoplevel
 export substr
 export amdmkl
 # from DescDict
@@ -287,6 +288,21 @@ function argmaxN(vals, N; by::Function=identity)
     end
   end
   return perm
+end
+
+"""
+    @istoplevel
+
+  Macro to check if the current scope is the top level scope.
+
+  (from https://discourse.julialang.org/t/is-there-a-way-to-determine-whether-code-is-toplevel)
+"""
+macro istoplevel()
+  canary = gensym("canary")
+  quote
+    $(esc(canary)) = true
+    Base.isdefined($__module__, $(QuoteNode(canary)))
+  end
 end
 
 """

@@ -7,7 +7,7 @@ catch
 end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
-using TensorOperations
+using ElemCoTensorOperations
 using Buffers
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
@@ -26,7 +26,7 @@ export gen_density_matrix, gen_frac_density_matrix
   Calculate closed-shell fock matrix from FCIDump integrals. 
 """
 function gen_fock(EC::ECInfo)
-  @tensoropt fock[p,q] := integ1(EC.fd,:α)[p,q] + 2.0*ints2(EC,":o:o",:α)[p,i,q,i] - ints2(EC,":oo:",:α)[p,i,i,q]
+  @mtensor fock[p,q] := integ1(EC.fd,:α)[p,q] + 2.0*ints2(EC,":o:o",:α)[p,i,q,i] - ints2(EC,":oo:",:α)[p,i,i,q]
   return fock
 end
 
@@ -36,24 +36,24 @@ end
   Calculate UHF fock matrix from FCIDump integrals for `spincase`∈{`:α`,`:β`}. 
 """
 function gen_fock(EC::ECInfo, spincase::Symbol)
-  @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] 
+  @mtensor fock[p,q] := integ1(EC.fd,spincase)[p,q] 
   if spincase == :α
     if n_occb_orbs(EC) > 0 
-      @tensoropt fock[p,q] += ints2(EC,":O:O",:αβ)[p,i,q,i]
+      @mtensor fock[p,q] += ints2(EC,":O:O",:αβ)[p,i,q,i]
     end
     spo='o'
     spv='v'
     nocc = n_occ_orbs(EC)
   else
     if n_occ_orbs(EC) > 0 
-      @tensoropt fock[p,q] += ints2(EC,"o:o:",:αβ)[i,p,i,q]
+      @mtensor fock[p,q] += ints2(EC,"o:o:",:αβ)[i,p,i,q]
     end
     spo='O'
     spv='V'
     nocc = n_occb_orbs(EC)
   end
   if nocc > 0
-    @tensoropt begin
+    @mtensor begin
       fock[p,q] += ints2(EC,":"*spo*":"*spo,spincase)[p,i,q,i]
       fock[p,q] -= ints2(EC,":"*spo*spo*":",spincase)[p,i,i,q]
     end
@@ -70,7 +70,7 @@ end
 function gen_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occvec)
   CMOlo = CMOl[:,occvec]
   CMOro = CMOr[:,occvec]
-  @tensoropt den[r,s] := CMOlo[r,i]*CMOro[s,i]
+  @mtensor den[r,s] := CMOlo[r,i]*CMOro[s,i]
   denr = real.(den)
   if sum(abs2,den) - sum(abs2,denr) > EC.options.scf.imagtol
     println("Large imaginary part in density matrix neglected!")
@@ -88,7 +88,7 @@ end
 function gen_frac_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occupation)
   @assert length(occupation) == size(CMOr,2) "Wrong occupation vector length!"
   CMOrn = CMOr .* occupation'
-  @tensoropt den[r,s] := CMOl[r,i]*CMOrn[s,i]
+  @mtensor den[r,s] := CMOl[r,i]*CMOrn[s,i]
   denr = real.(den)
   if sum(abs2,den) - sum(abs2,denr) > EC.options.scf.imagtol
     println("Large imaginary part in density matrix neglected!")
@@ -103,10 +103,10 @@ end
   Calculate closed-shell fock matrix from FCIDump integrals and density matrix `den`. 
 """
 function gen_fock(EC::ECInfo, den::Matrix)
-  @tensoropt begin 
+  @mtensor begin 
     fock[p,q] := integ1(EC.fd,:α)[p,q] 
     fock[p,q] += ints2(EC,"::::",:α)[p,r,q,s] * den[r,s]
-    fock[p,q] -= 0.5*ints2(EC,"::::",:α)[p,r,s,q] * den[r,s]
+    fock[p,q] -= 0.5*(ints2(EC,"::::",:α)[p,r,s,q] * den[r,s])
   end
   return fock
 end
@@ -120,7 +120,7 @@ function gen_fock(EC::ECInfo, CMOl::Matrix, CMOr::Matrix)
   @assert EC.space['o'] == EC.space['O'] # closed-shell
   occ2 = EC.space['o']
   den = gen_density_matrix(EC, CMOl, CMOr, occ2)
-  @tensoropt begin 
+  @mtensor begin 
     fock[p,q] := integ1(EC.fd,:α)[p,q] 
     fock[p,q] += 2.0*ints2(EC,"::::",:α)[p,r,q,s] * den[r,s]
     fock[p,q] -= ints2(EC,"::::",:α)[p,r,s,q] * den[r,s]
@@ -138,18 +138,18 @@ function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::Matrix, CMOr::Matrix,
                   CMOlOS::Matrix, CMOrOS::Matrix)
   if spincase == :α
     denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['O'])
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
     spo = 'o'
   else
     denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['o'])
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
     spo = 'O'
   end
   den =  gen_density_matrix(EC, CMOl, CMOr, EC.space[spo])
   ints = ints2(EC,"::::",spincase)
-  @tensoropt fock[p,q] += ints[p,r,q,s] * den[r,s] 
-  @tensoropt fock[p,q] -= ints[p,r,s,q] * den[r,s]
-  @tensoropt fock[p,q] += integ1(EC.fd,spincase)[p,q] 
+  @mtensor fock[p,q] += ints[p,r,q,s] * den[r,s] 
+  @mtensor fock[p,q] -= ints[p,r,s,q] * den[r,s]
+  @mtensor fock[p,q] += integ1(EC.fd,spincase)[p,q] 
   return fock
 end
 
@@ -162,14 +162,14 @@ end
 function gen_fock(EC::ECInfo, spincase::Symbol, 
                   den::Matrix, denOS::Matrix)
   if spincase == :α
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
   else
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
   end
   ints = ints2(EC,"::::",spincase)
-  @tensoropt fock[p,q] += ints[p,r,q,s] * den[r,s] 
-  @tensoropt fock[p,q] -= ints[p,r,s,q] * den[r,s]
-  @tensoropt fock[p,q] += integ1(EC.fd,spincase)[p,q] 
+  @mtensor fock[p,q] += ints[p,r,q,s] * den[r,s] 
+  @mtensor fock[p,q] -= ints[p,r,s,q] * den[r,s]
+  @mtensor fock[p,q] += integ1(EC.fd,spincase)[p,q] 
   return fock
 end
 
@@ -361,14 +361,14 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
   hsmall_pos = load2idx(EC,"h_positron_AA")
   μνL = load3idx(EC,"AAL")
   # Electron
-  @tensoropt begin 
+  @mtensor begin 
     μjL[p,j,L] := μνL[p,q,L] * CMO2[q,j]
     L[L] := μjL[p,j,L] * CMO2[p,j]
     J[p,q] := μνL[p,q,L] * L[L]
     K[p,q] := μjL[p,j,L] * μjL[q,j,L] 
   end
   # Positron
-  @tensoropt begin
+  @mtensor begin
     μjLpos[p,j,L] := μνL[p,q,L] * CMO2p[q,j]
     P[L] := μjLpos[p,j,L] * CMO2p[p,j]
     Jp[p,q] := μνL[p,q,L] * P[L] 

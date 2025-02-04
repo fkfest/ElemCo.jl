@@ -3,7 +3,8 @@
 """
 module TensorTools
 using LinearAlgebra
-using TensorOperations
+using ElemCoTensorOperations
+using StridedViews
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
@@ -17,8 +18,10 @@ export ints2!, detri_int2!
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
 export print_nonzeros
-export @mtensor
+export @mtensor, @mtensoropt
+export @mview
 
+# const TENIO = open("tensorcalls.jl","w")
 """
     mtensor(ex)
 
@@ -26,10 +29,26 @@ Macro for tensor operations with manual allocator.
 """
 macro mtensor(ex)
   # TODO: activate manual allocator
-  # return esc(:(@tensor allocator = TensorOperations.ManualAllocator() $ex))
+  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
+  # println(TENIO, "@mtensor ", ex)
   return esc(:(@tensor $ex))
 end
 
+macro mtensoropt(args::Vararg{Expr})
+  # TODO: activate manual allocator
+  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
+  # println(TENIO, "@mtensoropt ", join(args, " "))
+  return esc(:(@tensoropt $(args...)))
+end
+
+"""
+    @mview(ex)
+
+  Return a StridedView of `ex`.
+"""
+macro mview(ex)
+  return :(StridedView($(esc(:(@view $ex)))))
+end
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
