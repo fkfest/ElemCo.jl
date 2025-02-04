@@ -5,6 +5,7 @@
 ### Breaking
 
 * the definition of `ampsvdtol` threshold for SVD methods has been changed. Now it corresponds to the threshold for the density matrix (i.e., square of the previous definition).
+* `verbosity` has been moved from `ECInfo` to `Options.print.time`.
 
 ### Changed
 
@@ -14,6 +15,7 @@
 * the precompilation is disabled for development versions.
 * Buffers is moved to a separate package Buffers.jl.
 * reduce memory demand in df-hf.
+* remove `IterativeSolvers` dependency.
 
 ### Added
 

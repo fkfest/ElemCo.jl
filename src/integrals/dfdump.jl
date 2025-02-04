@@ -36,6 +36,8 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
 
   PQ = eri_2e2idx(bfit)
   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
+  println("Number of fitting functions in mpfit: ", size(PQ, 2))
+  println("Number of fitting functions in mpfit after Cholesky: ", size(M, 2))
   PQ = nothing
   μνP = eri_2e3idx(bao, bfit)
   cMOval = cMO[:,wocore]

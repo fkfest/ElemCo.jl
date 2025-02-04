@@ -4,7 +4,6 @@ This module contains functions for tensor decomposition methods.
 module DecompTools
 using LinearAlgebra, ElemCoTensorOperations
 # using TSVD
-using IterativeSolvers
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
@@ -13,7 +12,7 @@ using ..ElemCo.DFTools
 using ..ElemCo.QMTensors
 
 export calc_integrals_decomposition, calc_df_integrals
-export eigen_decompose, svd_decompose, iter_svd_decompose
+export eigen_decompose, svd_decompose
 export rotate_U2pseudocanonical
 
 """
@@ -98,12 +97,12 @@ function eigen_decompose(T2mat, nvirt, nocc, tol=1e-6)
 end
 
 """
-    svd_decompose(Amat, nvirt, nocc, tol=1e-6)
+    svd_decompose(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
 
   SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``.
   Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`
 """
-function svd_decompose(Amat, nvirt, nocc, tol=1e-6)
+function svd_decompose(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
   U, S, = svd(Amat)
   # display(S)
   naux = 0
@@ -115,17 +114,19 @@ function svd_decompose(Amat, nvirt, nocc, tol=1e-6)
     end
   end
   # display(S[1:naux])
-  println("SVD-basis size: ",naux)
+  if verbose
+    println(description, " SVD-basis size: ", naux)
+  end
   return reshape(U[:,1:naux], (nvirt,nocc,naux))
 end
 
 """
-    svd_decompose(Amat, tol=1e-6)
+    svd_decompose(Amat, tol=1e-6; verbose=true, description="")
 
   SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} Σ_X δ_{XY} V^{Y}_{ξ'}``.
   Return ``U^{X}_{ξ}`` as `U[ξ,X]` for ``Σ_X`` > `tol`
 """
-function svd_decompose(Amat, tol=1e-6)
+function svd_decompose(Amat, tol=1e-6; verbose=true, description="")
   U, S, = svd(Amat)
   # display(S)
   naux = 0
@@ -137,26 +138,10 @@ function svd_decompose(Amat, tol=1e-6)
     end
   end
   # display(S[1:naux])
-  println("SVD-basis size: ",naux)
+  if verbose
+    println(description, " SVD-basis size: ", naux)
+  end
   return U[:,1:naux], S[1:naux]
-end
-
-"""
-    iter_svd_decompose(Amat, nvirt, nocc, naux)
-
-  Iteratively decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^Y_ξ``.
-  Return ``U^{iX}_a`` as `U[a,i,X]` for first `naux` ``Σ_X``
-"""
-function iter_svd_decompose(Amat, nvirt, nocc, naux)
-  # U, S2, Vt = tsvd(Amat, naux )
-  # UaiX = reshape(U[:,1:naux], (nvirt,nocc,naux))
-  # U = nothing
-  # S2 = nothing
-  # Vt = nothing
-  S2, L = svdl(Amat, nsv = naux )
-  # display(S2[1:naux])
-  return reshape(L.P[:,1:naux], (nvirt,nocc,naux))
-  # display(UaiX)
 end
 
 """ 
