@@ -456,13 +456,13 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
               calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
               calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
   t1 = time_ns()
+  mem1 = free_memory()
   mixed = (o1 != o2)
   no1, no2, nv1, nv2 = len_spaces(EC,o1*o2*v1*v2)
   lenbuf1, lenbuf2 = auto_buf_length4calc_dressed_ints(no1, no2, nv1, nv2, calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo, mixed)
-  # println("Allocate buffer buf1: ", lenbuf1)
-  # println("Allocate buffer buf2: ", lenbuf2)
   @buffer buf1(lenbuf1) buf2(lenbuf2) begin
   # @print_buffer_usage buf1 buf2 begin
+  mem2 = print_memory(EC, mem1, "for buffers for dressed integrals", 2)
   # first make half-transformed integrals
   if calc_d_vvvv
     # <a\hat c|bd>
@@ -2841,6 +2841,7 @@ end
 """
 function SVD_triples_to_singles_and_doubles_residuals(EC)
   t1 = time_ns()
+  mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
   #display(UvoX)
 
@@ -2878,7 +2879,8 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
   maxbX = maximum(length, bXBlks)
   maxXBig = maximum(length, XBigBlks)
   lenbuf = auto_buf_length4SVD_triples_to_singles_and_doubles_residuals(EC, nvirt, nX, nbX, nocc, nL, maxL, maxXBig, maxbX)
-  buf = Buffer(lenbuf)
+  @buffer buf(lenbuf) begin
+  mem2 = print_memory(EC, mem1, "for buffer in SVD triples to singles and doubles residuals", 2)
   # @print_buffer_usage buf begin
 
   # RR[aibj] = ``RR^{ij}_{ab}``
@@ -2908,12 +2910,10 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
     @mtensor TvoXX[a,i,Y,X] = UvoX[a,i,Z] * v!T_XXX[Z,Y,X]
     # ``R_{aY}^i += T_{aYX}^i fU^X``
     v!fU_X = @view fU_X[X]
-    n!R_voX = neuralyze(R_voX)
-    @mtensor n!R_voX[a,i,Y] += TvoXX[a,i,Y,X] * v!fU_X[X]
+    @mtensor R_voX[a,i,Y] += TvoXX[a,i,Y,X] * v!fU_X[X]
     # ``R_{jX}^i -= T_{dYX}^i w_j^{dY}``
     v!R_ooX = @view R_ooX[:,:,X]
-    n!v!R_ooX = neuralyze(v!R_ooX)
-    @mtensor n!v!R_ooX[j,i,X] = -TvoXX[d,i,Y,X] * w_ovX[j,d,Y]
+    @mtensor v!R_ooX[j,i,X] = -TvoXX[d,i,Y,X] * w_ovX[j,d,Y]
     Bv_vvX = alloc!(buf, nvirt, nvirt, lenX)
     Bv_vvX .= 0.0
     Bv_ooX = alloc!(buf, nocc, nocc, lenX)
@@ -2925,11 +2925,10 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
         v!UU_oXobX = @view UU_oXobX[:,:,:,bX]
         # ``TUU^j_{b\bar XX} = T_{bZX}^l UU_{\bar Xl}^{jZ}``
         TUU_XbXov = alloc!(buf, lenX, lenbX, nocc, nvirt)
-        n!TUU_XbXov = neuralyze(TUU_XbXov)
-        @mtensor n!TUU_XbXov[X,bX,j,b] = TvoXX[b,l,Z,X] * v!UU_oXobX[j,Z,l,bX]
+        @mtensor TUU_XbXov[X,bX,j,b] = TvoXX[b,l,Z,X] * v!UU_oXobX[j,Z,l,bX]
         # ``\bar V_{\bar XX}^{L} = TUU^j_{b\bar XX} v_j^{bL}``
         v!bV_XbXL = @view bV_XbXL[:,bX,:]
-        @mtensor v!bV_XbXL[X,bX,L] = n!TUU_XbXov[X,bX,j,b] * ovL[j,b,L]
+        @mtensor v!bV_XbXL[X,bX,L] = TUU_XbXov[X,bX,j,b] * ovL[j,b,L]
         drop!(buf, TUU_XbXov)
       end
     end
@@ -2945,14 +2944,11 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
       B_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
       @mtensor B_voXL[a,i,X,L] = v!ooL[j,i,L] * v!UvoX[a,j,X]
       # ``Bv_a^{cX} = \bar B_a^{kXL} v_k^{cL}``
-      n!Bv_vvX = neuralyze(Bv_vvX)
-      @mtensor n!Bv_vvX[a,c,X] += bB_voXL[a,k,X,L] * v!ovL[k,c,L]
+      @mtensor Bv_vvX[a,c,X] += bB_voXL[a,k,X,L] * v!ovL[k,c,L]
       # ``Bv_k^{iX} = B_c^{iXL} v_k^{cL}``
-      n!Bv_ooX = neuralyze(Bv_ooX)
-      @mtensor n!Bv_ooX[k,i,X] += B_voXL[c,i,X,L] * v!ovL[k,c,L]
+      @mtensor Bv_ooX[k,i,X] += B_voXL[c,i,X,L] * v!ovL[k,c,L]
       # ``\bar B_a^{iXL} -= B_a^{iXL}``
-      n!bB_voXL = neuralyze(bB_voXL)
-      @mtensor n!bB_voXL[a,i,X,L] -= B_voXL[a,i,X,L]
+      @mtensor bB_voXL[a,i,X,L] -= B_voXL[a,i,X,L]
       drop!(buf, B_voXL)
 
       v!B_ooXL = @view B_ooXL[:,:,:,L]
@@ -2961,24 +2957,19 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
       V_XXL = alloc!(buf, nX, lenX, lenL)
       @mtensor V_XXL[Y,X,L] = v!T_XXX[Z,Y,X] * v!A_XL[Z,L]
       # ``R_{jX}^{i} = 2 B_j^{iYL} V_{YX}^{L}``
-      n!v!R_ooX = neuralyze(v!R_ooX)
-      @mtensor n!v!R_ooX[j,i,X] += 2.0 * v!B_ooXL[j,i,Y,L] * V_XXL[Y,X,L]
+      @mtensor v!R_ooX[j,i,X] += 2.0 * v!B_ooXL[j,i,Y,L] * V_XXL[Y,X,L]
       # ``R_{aZ}^i = 2 (\bar B - B)_a^{LiX} V_{ZX}^{L}``
-      n!R_voX = neuralyze(R_voX)
-      @mtensor n!R_voX[a,i,Z] += 2.0 * bB_voXL[a,i,X,L] * V_XXL[Z,X,L]
+      @mtensor R_voX[a,i,Z] += 2.0 * bB_voXL[a,i,X,L] * V_XXL[Z,X,L]
       if EC.options.cc.project_voXL
         v!bV_XbXL = @view bV_XbXL[:,:,L]
         # ``RR^{i}_{a\bar X} -= (\bar B - B)_a^{LiX} \bar V_{X\bar X}^{L}``
-        n!RR_vobX = neuralyze(RR_vobX)
-        @mtensor n!RR_vobX[a,i,bX] -= bB_voXL[a,i,X,L] * v!bV_XbXL[X,bX,L]
+        @mtensor RR_vobX[a,i,bX] -= bB_voXL[a,i,X,L] * v!bV_XbXL[X,bX,L]
       else
         # V[ajXL]=``V_{aX}^{jL} = T^i_{aYX} B_i^{jYL}``
         V_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
-        n!V_voXL = neuralyze(V_voXL)
-        @mtensor n!V_voXL[a,j,X,L] = TvoXX[a,i,Y,X] * v!B_ooXL[i,j,Y,L]
+        @mtensor V_voXL[a,j,X,L] = TvoXX[a,i,Y,X] * v!B_ooXL[i,j,Y,L]
         # ``RR^{ij}_{ab} -= (\bar B - B)_a^{LiX} V_{bX}^{jL}``
-        n!RR_vovo = neuralyze(RR_vovo)
-        @mtensor n!RR_vovo[a,i,b,j] -= bB_voXL[a,i,X,L] * V_voXL[b,j,X,L]
+        @mtensor RR_vovo[a,i,b,j] -= bB_voXL[a,i,X,L] * V_voXL[b,j,X,L]
         drop!(buf, V_voXL)
       end
       drop!(buf, V_XXL)
@@ -2991,13 +2982,11 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
     @mtensor Bv_ooX[k,i,X] -= dfov[k,c] * v!UvoX[c,i,X]
     # ``UBv_a^{iYX} = U^{iY}_c Bv_a^{cX}``
     UBv = alloc!(buf, nvirt, nocc, nX, lenX)
-    n!UBv = neuralyze(UBv)
-    @mtensor n!UBv[a,i,Y,X] = UvoX[c,i,Y] * Bv_vvX[a,c,X]
+    @mtensor UBv[a,i,Y,X] = UvoX[c,i,Y] * Bv_vvX[a,c,X]
     # ``UBv_a^{iYX} -= U^{kY}_a Bv_k^{iX}``
-    @mtensor n!UBv[a,i,Y,X] -= UvoX[a,k,Y] * Bv_ooX[k,i,X]
+    @mtensor UBv[a,i,Y,X] -= UvoX[a,k,Y] * Bv_ooX[k,i,X]
     # ``R_{aZ}^i -= T_{ZYX} UBv_a^{iYX}``
-    n!R_voX = neuralyze(R_voX)
-    @mtensor n!R_voX[a,i,Z] -= v!T_XXX[Z,Y,X] * UBv[a,i,Y,X]
+    @mtensor R_voX[a,i,Z] -= v!T_XXX[Z,Y,X] * UBv[a,i,Y,X]
     drop!(buf, UBv)
     drop!(buf, Bv_ooX, Bv_vvX)
     drop!(buf, TvoXX)
@@ -3007,8 +2996,7 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
     close(UU_oXobXfile)
     bUvoX = alloc!(buf, nvirt, nocc, nbX)
     load!(EC, "C_vo{bX}", bUvoX)
-    n!RR_vovo = neuralyze(RR_vovo)
-    @mtensor n!RR_vovo[a,i,b,j] += RR_vobX[a,i,bX] * bUvoX[b,j,bX]
+    @mtensor RR_vovo[a,i,b,j] += RR_vobX[a,i,bX] * bUvoX[b,j,bX]
     drop!(buf, bUvoX, RR_vobX)
   end
   drop!(buf, w_ovX)
@@ -3018,8 +3006,7 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
   @mtensor R1[a,i] := -(R_ooX[j,i,Y] * UvoX[a,j,Y])
   drop!(buf, R_ooX)
   # ``RR^{ij}_{ab} += R_{aZ}^i U^{jZ}_b``
-  n!RR_vovo = neuralyze(RR_vovo)
-  @mtensor n!RR_vovo[a,i,b,j] += R_voX[a,i,Z] * UvoX[b,j,Z]
+  @mtensor RR_vovo[a,i,b,j] += R_voX[a,i,Z] * UvoX[b,j,Z]
   drop!(buf, R_voX)
   # ``R^{ij}_{ab} = RR^{ij}_{ab} + RR^{ji}_{ba}``
   @mtensor R2[a,b,i,j] := RR_vovo[a,i,b,j] + RR_vovo[b,j,a,i]
@@ -3030,8 +3017,7 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
   B_XX = alloc!(buf, nX, nX)
   load!(EC, "B_XX", B_XX)
   # ``B^{XY} -= 2 A^{XL} A^{YL}``
-  n!B_XX = neuralyze(B_XX)
-  @mtensor n!B_XX[X,Y] -= 2.0 * A_XL[X,L] * A_XL[Y,L]
+  @mtensor B_XX[X,Y] -= 2.0 * A_XL[X,L] * A_XL[Y,L]
   # ``R^i_a -= U^{iX}_a (T_{XYZ} B^{YZ})
   @mtensor R1[a,i] -= UvoX[a,i,X] * (T_XXX[X,Y,Z] * B_XX[Y,Z])
   drop!(buf, A_XL, B_XX)
@@ -3039,8 +3025,7 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
   close(ovLfile)
   close(ooLfile)
   close(vvLfile)
-  # end #buf
-  GC.gc()
+  end #buffer
   return R1, R2
 end
 
@@ -3158,6 +3143,7 @@ end
   ``T^i_{aXY}`` from `T2` (and `UvoX`)
 """
 function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
+  mem1 = free_memory()
   voLfile, voL = mmap3idx(EC, "d_voL")
   ooLfile, ooL = mmap3idx(EC, "d_ooL")
   vvLfile, vvL = mmap3idx(EC, "d_vvL")
@@ -3169,7 +3155,8 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   maxL = maximum(length, LBlks)
 
   lenbuf = auto_buf_length4calc_4idx_T3T3_XY(EC, nvirt, nocc, nX, nL, maxL, nX)
-  buf = Buffer(lenbuf)
+  @buffer buf(lenbuf) begin
+  mem2 = print_memory(EC, mem1, "for buffer in half-decomposed T3 calculation", 2)
   # @print_buffer_usage buf begin
   # ``T^i_{aX} = U^{†b}_{jX} T^{ij}_{ab}``
   T_voX = alloc!(buf, nvirt, nocc, nX)
@@ -3186,23 +3173,19 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     v!ooL = ooL[:,:,L]
     # ``X_{bX}^{jL} = T^j_{cX} \hat v_{b}^{cL} - T^l_{bX} \hat v_{l}^{jL}``
     X_voXL = alloc!(buf, nvirt, nocc, nX, lenL)
-    n!X_voXL = neuralyze(X_voXL)
-    @mtensor n!X_voXL[b,j,X,L] = T_voX[c,j,X] * v!vvL[b,c,L] 
-    @mtensor n!X_voXL[b,j,X,L] -= T_voX[b,l,X] * v!ooL[l,j,L]
+    @mtensor X_voXL[b,j,X,L] = T_voX[c,j,X] * v!vvL[b,c,L] 
+    @mtensor X_voXL[b,j,X,L] -= T_voX[b,l,X] * v!ooL[l,j,L]
     # ``UX_{XY}^L = X_{bX}^{jL} U^{†b}_{jY}``
     UX_LXX = alloc!(buf, lenL, nX, nX)
-    n!UX_LXX = neuralyze(UX_LXX)
-    @mtensor n!UX_LXX[L,X,Y] = X_voXL[b,j,X,L] * UvoX[b,j,Y]
+    @mtensor UX_LXX[L,X,Y] = X_voXL[b,j,X,L] * UvoX[b,j,Y]
     v!X_LXX = @view X_LXX[L,:,:]
-    @mtensor v!X_LXX[L,X,Y] = n!UX_LXX[L,X,Y] + n!UX_LXX[L,Y,X]
+    @mtensor v!X_LXX[L,X,Y] = UX_LXX[L,X,Y] + UX_LXX[L,Y,X]
     drop!(buf, UX_LXX, X_voXL)
     # ``W_{X}^{L} = \hat v_c^{kL} U^{†c}_{kX}``
     W_XL = alloc!(buf, nX, lenL)
     @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
-    n!V_vvX = neuralyze(V_vvX)
-    @mtensor n!V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
-    n!V_ooX = neuralyze(V_ooX)
-    @mtensor n!V_ooX[l,j,X] += v!ooL[l,j,L] * W_XL[X,L]
+    @mtensor V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
+    @mtensor V_ooX[l,j,X] += v!ooL[l,j,L] * W_XL[X,L]
     drop!(buf, W_XL)
   end
   D2 = zeros(nvirt, nocc, nvirt, nocc)
@@ -3218,30 +3201,27 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     lenX = length(X)
     R = alloc!(buf, nvirt, nocc, lenX)
     v!X_LXY = @view X_LXX[:,X,Y]
-    n!R = neuralyze(R)
-    @mtensor n!R[a,i,X] = v!X_LXY[L,X] * voL[a,i,L]
+    @mtensor R[a,i,X] = v!X_LXY[L,X] * voL[a,i,L]
     v!T_voX = @view T_voX[:,:,X]
     v!V_vvY = @view V_vvX[:,:,Y]
     v!V_ooY = @view V_ooX[:,:,Y]
-    @mtensor n!R[a,i,X] += v!T_voX[c,i,X] * v!V_vvY[a,c]
-    @mtensor n!R[a,i,X] -= v!T_voX[a,l,X] * v!V_ooY[l,i]
+    @mtensor R[a,i,X] += v!T_voX[c,i,X] * v!V_vvY[a,c]
+    @mtensor R[a,i,X] -= v!T_voX[a,l,X] * v!V_ooY[l,i]
     v!T_voY = @view T_voX[:,:,Y]
     v!V_vvX = @view V_vvX[:,:,X]
     v!V_ooX = @view V_ooX[:,:,X]
-    @mtensor n!R[a,i,X] += v!T_voY[c,i] * v!V_vvX[a,c,X]
-    @mtensor n!R[a,i,X] -= v!T_voY[a,l] * v!V_ooX[l,i,X]
+    @mtensor R[a,i,X] += v!T_voY[c,i] * v!V_vvX[a,c,X]
+    @mtensor R[a,i,X] -= v!T_voY[a,l] * v!V_ooX[l,i,X]
     # ``E^d_{lXY} = V_{aX}^{d} U^{†a}_{lY} - V_{lX}^{i} U^{†d}_{iY}``
     E_voXY = alloc!(buf, nvirt, nocc, lenX)
     v!UvoY = @view UvoX[:,:,Y]
-    n!E_voXY = neuralyze(E_voXY)
-    @mtensor n!E_voXY[d,l,X] = v!V_vvX[a,d,X] * v!UvoY[a,l] 
-    @mtensor n!E_voXY[d,l,X] -= v!V_ooX[l,i,X] * v!UvoY[d,i]
+    @mtensor E_voXY[d,l,X] = v!V_vvX[a,d,X] * v!UvoY[a,l] 
+    @mtensor E_voXY[d,l,X] -= v!V_ooX[l,i,X] * v!UvoY[d,i]
     v!UvoX = @view UvoX[:,:,X]
-    @mtensor n!E_voXY[d,l,X] += v!V_vvY[a,d] * v!UvoX[a,l,X] 
-    @mtensor n!E_voXY[d,l,X] -= v!V_ooY[l,i] * v!UvoX[d,i,X]
+    @mtensor E_voXY[d,l,X] += v!V_vvY[a,d] * v!UvoX[a,l,X] 
+    @mtensor E_voXY[d,l,X] -= v!V_ooY[l,i] * v!UvoX[d,i,X]
     # ``R^i_{aXY} += E^d_{lXY} T^il_{ad}``
-    n!R = neuralyze(R)
-    @mtensor n!R[a,i,X] += E_voXY[d,l,X] * T2[a,d,i,l]
+    @mtensor R[a,i,X] += E_voXY[d,l,X] * T2[a,d,i,l]
     drop!(buf, E_voXY)
     # calc T^i_{aXY} = R^i_{aXY} / (ϵ_X + ϵ_Y + ϵ_v[a] - ϵ_o[i])
     if shifti > 1.e-10
@@ -3288,14 +3268,11 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     for i = 1:nocc
       v!UUi = @view UU[:,:,i]
       v!T_i = @view T3[:,:,:,i]
-      n!TU = neuralyze(TU)
-      @mtensor n!TU[X',Y,a] = v!T_i[X,Y,a] * v!UUi[X,X']
-      n!TUU4i = neuralyze(TUU4i)
-      @mtensor n!TUU4i[X',Y',a] = TU[X',Y,a] * v!UUi[Y,Y']
+      @mtensor TU[X',Y,a] = v!T_i[X,Y,a] * v!UUi[X,X']
+      @mtensor TUU4i[X',Y',a] = TU[X',Y,a] * v!UUi[Y,Y']
       for j = 1:nocc
         v!T_j = @view T3[:,:,:,j]
-        n!ΔD2 = neuralyze(ΔD2)
-        @mtensor n!ΔD2[a,b] = TUU4i[X,Y,a] * v!T_j[X,Y,b]
+        @mtensor ΔD2[a,b] = TUU4i[X,Y,a] * v!T_j[X,Y,b]
         v!D2 = @view D2[:,i,:,j]
         @mtensor v!D2[a,b] -= ΔD2[a,b]
         if i != j
@@ -3307,7 +3284,7 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     drop!(buf, UU, TU, TUU4i, ΔD2)
   end
   reset!(buf)
-  # end # buffer
+  end # buffer
   # display(D2)
   return D2
 end
@@ -3342,6 +3319,7 @@ end
 
 function calc_SVD_pert_T(EC::ECInfo, T2)
   t1 = time_ns()
+  mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
   #display(UvoX)
   nvirt, nocc, nX = size(UvoX)
@@ -3359,7 +3337,8 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   maxX = maximum(length, XBlks)
 
   lenbuf = auto_buf_length4calc_SVD_pert_T(nvirt, nocc, nX, nL, maxL, maxX)
-  buf = Buffer(lenbuf)
+  @buffer buf(lenbuf) begin
+  mem2 = print_memory(EC, mem1, "for buffer in SVD-CCSD(T) calculation", 2)
   # @print_buffer_usage buf begin
   V_vvX = alloc!(buf, nvirt, nvirt, nX)
   V_vvX .= 0.0
@@ -3374,11 +3353,9 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
     W_XL = alloc!(buf, nX, lenL)
     @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
     # ``V_{aX}^{d} = v_{a}^{dL} W_{X}^{L}``
-    n!V_vvX = neuralyze(V_vvX)
-    @mtensor n!V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
+    @mtensor V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
     # ``V_{lX}^{i} = v_{l}^{iL} W_{X}^{L}``
-    n!V_ooX = neuralyze(V_ooX)
-    @mtensor n!V_ooX[l,i,X] += v!ooL[l,i,L] * W_XL[X,L]
+    @mtensor V_ooX[l,i,X] += v!ooL[l,i,L] * W_XL[X,L]
     drop!(buf, W_XL)
   end
   close(vvLfile)
@@ -3393,19 +3370,17 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
     v!TvoX = @view TvoX[:,:,X]
     v!RR = @view RR[:,:,X]
     RvoXX = alloc!(buf, nvirt, nocc, nX, lenX)
-    n!RvoXX = neuralyze(RvoXX)
-    @mtensor n!RvoXX[a,i,Y,X] = v!TvoX[a,k,X] * V_ooX[k,i,Y]
-    @mtensor n!RvoXX[a,i,Y,X] -= v!TvoX[c,i,X] * V_vvX[a,c,Y]
-    @mtensor v!RR[Z,Y,X] = n!RvoXX[a,i,Y,X] * UvoX[a,i,Z]
+    @mtensor RvoXX[a,i,Y,X] = v!TvoX[a,k,X] * V_ooX[k,i,Y]
+    @mtensor RvoXX[a,i,Y,X] -= v!TvoX[c,i,X] * V_vvX[a,c,Y]
+    @mtensor v!RR[Z,Y,X] = RvoXX[a,i,Y,X] * UvoX[a,i,Z]
     drop!(buf, RvoXX)
   end
   R = alloc!(buf, nX, nX, nX)
-  n!R = neuralyze(R)
-  @mtensor n!R[X,Y,Z] = RR[X,Y,Z] + RR[Y,X,Z] + RR[X,Z,Y] + RR[Z,Y,X] + RR[Z,X,Y] + RR[Y,Z,X]
+  @mtensor R[X,Y,Z] = RR[X,Y,Z] + RR[Y,X,Z] + RR[X,Z,Y] + RR[Z,Y,X] + RR[Z,X,Y] + RR[Y,Z,X]
 
   save!(EC, "R_XXX", R)
   reset!(buf)
-  # end # buffer
+  end # buffer
 end
 
 """
@@ -3638,6 +3613,7 @@ end
 """
 function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   t1 = time_ns()
+  mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
   #display(UvoX)
 
@@ -3682,7 +3658,8 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   maxXBig = maximum(length, XBigBlks)
   maxa = maximum(length, virtBlks)
   lenbuf = auto_buf_length4calc_triples_residuals(EC, nvirt, nX, nbX, nocc, nL, maxL, maxXBig, maxX, maxX, nX, maxbX, maxa)
-  buf = Buffer(lenbuf)
+  @buffer buf(lenbuf) begin
+  mem2 = print_memory(EC, mem1, "for buffer in SVD-DC-CCSDT triples residuals calculation", 2)
   # @print_buffer_usage buf begin
 
   Y_XL = zeros(nX, nL)
@@ -3700,8 +3677,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     v!Y_XL = @mview Y_XL[:,L]
     V_voL = alloc!(buf, nvirt, nocc, lenL)
     # ``V_{a}^{iL} = v_k^{cL} (2T^{ik}_{ac}- T^{ik}_{ca})``
-    n!V_voL = neuralyze(V_voL)
-    @mtensor n!V_voL[a,i,L] = tT2[a,i,k,c] * v!ovL[k,c,L]
+    @mtensor V_voL[a,i,L] = tT2[a,i,k,c] * v!ovL[k,c,L]
     # ``x_l^i = \hat f_l^i + 0.5 V_{d}^{iL} v_{l}^{dL}``
     @mtensor x_oo[l,i] += 0.5 * v!ovL[l,d,L] * V_voL[d,i,L]
     # ``x_a^d = \hat f_a^d - 0.5 V_{a}^{lL} v_{l}^{dL}``
@@ -3716,8 +3692,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   drop!(buf, tT2)
   # UvY[lYjX] = ``UvY_{lX}^{jY} = U^{jY}_d vY_{lX}^{d}``
   UvY_oXoX = alloc!(buf, nocc, nX, nocc, nX)
-  n!UvY_oXoX = neuralyze(UvY_oXoX)
-  @mtensor n!UvY_oXoX[l,Y,j,X] = UvoX[d,j,Y] * vY_ovX[l,d,X]
+  @mtensor UvY_oXoX[l,Y,j,X] = UvoX[d,j,Y] * vY_ovX[l,d,X]
   save!(EC, "UvY_oXoX", UvY_oXoX)
   drop!(buf, UvY_oXoX)
   drop!(buf, vY_ovX)
@@ -3773,26 +3748,22 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor TvoXX[a,i,Y,X] = UvoX[a,i,Z] * v!T_XXX[Z,Y,X]
     # ``R_{aY}^i += T_{aYX}^i fU^X``
     v!fU_X = @mview fU_X[X]
-    n!R_voX = neuralyze(R_voX)
-    @mtensor n!R_voX[a,i,Y] += TvoXX[a,i,Y,X] * v!fU_X[X]
+    @mtensor R_voX[a,i,Y] += TvoXX[a,i,Y,X] * v!fU_X[X]
     # ``X_{bZ}^d += 0.5 T^k_{bYX} w_{k}^{dY}``
     v!X_vvX = @mview X_vvX[:,:,X]
     @mtensor v!X_vvX[b,d,X] += 0.5 * TvoXX[b,k,Y,X] * w_ovX[k,d,Y]
     # ``G_{jX}^i = T_{dYX}^i w_j^{dY}``
     v!G_ooX = @mview G_ooX[:,:,X]
-    n!v!G_ooX = neuralyze(v!G_ooX)
-    @mtensor n!v!G_ooX[j,i,X] = TvoXX[d,i,Y,X] * w_ovX[j,d,Y]
+    @mtensor v!G_ooX[j,i,X] = TvoXX[d,i,Y,X] * w_ovX[j,d,Y]
     for Y in XBlks
       lenY = length(Y)
       v!UvY_oXoX = @mview UvY_oXoX[:,:,:,Y]
       # ``TUvY^j_{bYX} = T_{bZX}^l UvY_{Yl}^{jZ}``
       TUvY_voXX = alloc!(buf, nvirt, nocc, lenY, lenX)
-      n!TUvY_voXX = neuralyze(TUvY_voXX)
-      @mtensor n!TUvY_voXX[b,j,Y,X] = TvoXX[b,l,Z,X] * v!UvY_oXoX[l,Z,j,Y]
+      @mtensor TUvY_voXX[b,j,Y,X] = TvoXX[b,l,Z,X] * v!UvY_oXoX[l,Z,j,Y]
       # ``Q_{ZYX} = U^{\dagger b}_{jZ} TUvY^j_{bYX}``
       a!Q_XXX = alloc!(buf, nX, lenY, lenX)
-      n!Q_XXX = neuralyze(a!Q_XXX)
-      @mtensor n!Q_XXX[Z,Y,X] = UvoX[b,j,Z] * TUvY_voXX[b,j,Y,X]
+      @mtensor a!Q_XXX[Z,Y,X] = UvoX[b,j,Z] * TUvY_voXX[b,j,Y,X]
       Q_XXX[:,Y,X] = a!Q_XXX
       drop!(buf, a!Q_XXX)
       drop!(buf, TUvY_voXX)
@@ -3808,11 +3779,10 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
         v!UU_oXobX = @view UU_oXobX[:,:,:,bX]
         # ``TUU^j_{b\bar XX} = T_{bZX}^l UU_{\bar Xl}^{jZ}``
         TUU_XbXov = alloc!(buf, lenX, lenbX, nocc, nvirt)
-        n!TUU_XbXov = neuralyze(TUU_XbXov)
-        @mtensor n!TUU_XbXov[X,bX,j,b] = TvoXX[b,l,Z,X] * v!UU_oXobX[j,Z,l,bX]
+        @mtensor TUU_XbXov[X,bX,j,b] = TvoXX[b,l,Z,X] * v!UU_oXobX[j,Z,l,bX]
         # ``\bar V_{\bar XX}^{L} = TUU^j_{b\bar XX} v_j^{bL}``
         v!bV_XbXL = @view bV_XbXL[:,bX,:]
-        @mtensor v!bV_XbXL[X,bX,L] = n!TUU_XbXov[X,bX,j,b] * ovL[j,b,L]
+        @mtensor v!bV_XbXL[X,bX,L] = TUU_XbXov[X,bX,j,b] * ovL[j,b,L]
         drop!(buf, TUU_XbXov)
       end
     end
@@ -3829,19 +3799,15 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       B_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
       @mtensor B_voXL[a,i,X,L] = v!ooL[j,i,L] * v!UvoX[a,j,X]
       # ``Bv_a^{cX} = \bar B_a^{kXL} v_k^{cL}``
-      n!Bv_vvX = neuralyze(Bv_vvX)
-      @mtensor n!Bv_vvX[a,c,X] += bB_voXL[a,k,X,L] * v!ovL[k,c,L]
+      @mtensor Bv_vvX[a,c,X] += bB_voXL[a,k,X,L] * v!ovL[k,c,L]
       # ``Bv_k^{iX} = B_c^{iXL} v_k^{cL}``
-      n!Bv_ooX = neuralyze(Bv_ooX)
-      @mtensor n!Bv_ooX[k,i,X] += B_voXL[c,i,X,L] * v!ovL[k,c,L]
+      @mtensor Bv_ooX[k,i,X] += B_voXL[c,i,X,L] * v!ovL[k,c,L]
       # ``\bar B_a^{iXL} -= B_a^{iXL}``
-      n!bB_voXL = neuralyze(bB_voXL)
-      @mtensor n!bB_voXL[a,i,X,L] -= B_voXL[a,i,X,L]
+      @mtensor bB_voXL[a,i,X,L] -= B_voXL[a,i,X,L]
       drop!(buf, B_voXL)
       # ``W_{Y}^{XL} = (\bar B - B)_b^{jXL} U^{\dagger b}_{jY}
       a!W_XXL = alloc!(buf, nX, lenX, lenL)
-      n!W_XXL = neuralyze(a!W_XXL)
-      @mtensor n!W_XXL[Y,X,L] = bB_voXL[b,j,X,L] * UvoX[b,j,Y]
+      @mtensor a!W_XXL[Y,X,L] = bB_voXL[b,j,X,L] * UvoX[b,j,Y]
       W_XXL[:,X,L] = a!W_XXL
       drop!(buf, a!W_XXL)
 
@@ -3851,30 +3817,23 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       V_XXL = alloc!(buf, nX, lenX, lenL)
       @mtensor V_XXL[Y,X,L] = v!T_XXX[Z,Y,X] * v!A_XL[Z,L]
       # ``R_{jX}^{i} = 2 B_j^{iYL} V_{YX}^{L}``
-      n!v!R_ooX = neuralyze(v!R_ooX)
-      @mtensor n!v!R_ooX[j,i,X] += 2.0 * v!B_ooXL[j,i,Y,L] * V_XXL[Y,X,L]
+      @mtensor v!R_ooX[j,i,X] += 2.0 * v!B_ooXL[j,i,Y,L] * V_XXL[Y,X,L]
       # ``R_{aZ}^i = 2 (\bar B - B)_a^{LiX} V_{ZX}^{L}``
-      n!R_voX = neuralyze(R_voX)
-      @mtensor n!R_voX[a,i,Z] += 2.0 * bB_voXL[a,i,X,L] * V_XXL[Z,X,L]
+      @mtensor R_voX[a,i,Z] += 2.0 * bB_voXL[a,i,X,L] * V_XXL[Z,X,L]
       if EC.options.cc.project_voXL
         v!bV_XbXL = @view bV_XbXL[:,:,L]
         # ``\tilde V_{YX}^{L} -= 0.5 \bar V_{X\bar X}^{L} C^{\bar X}_{Y}``
-        n!V_XXL = neuralyze(V_XXL)
-        @mtensor n!V_XXL[Y,X,L] -= 0.5 * v!bV_XbXL[X,bX,L] * C_bXX[bX,Y]
+        @mtensor V_XXL[Y,X,L] -= 0.5 * v!bV_XbXL[X,bX,L] * C_bXX[bX,Y]
         # ``RR^{i}_{a\bar X} -= (\bar B - B)_a^{LiX} \bar V_{X\bar X}^{L}``
-        n!RR_vobX = neuralyze(RR_vobX)
-        @mtensor n!RR_vobX[a,i,bX] -= bB_voXL[a,i,X,L] * v!bV_XbXL[X,bX,L]
+        @mtensor RR_vobX[a,i,bX] -= bB_voXL[a,i,X,L] * v!bV_XbXL[X,bX,L]
       else
         # V[ajXL]=``V_{aX}^{jL} = T^i_{aYX} B_i^{jYL}``
         V_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
-        n!V_voXL = neuralyze(V_voXL)
-        @mtensor n!V_voXL[a,j,X,L] = TvoXX[a,i,Y,X] * v!B_ooXL[i,j,Y,L]
+        @mtensor V_voXL[a,j,X,L] = TvoXX[a,i,Y,X] * v!B_ooXL[i,j,Y,L]
         # ``\tilde V_{YX}^{L} -= 0.5 V_{aX}^{jL} U^{\dagger a}_{jY}``
-        n!V_XXL = neuralyze(V_XXL)
-        @mtensor n!V_XXL[Y,X,L] -= 0.5 * V_voXL[a,j,X,L] * UvoX[a,j,Y]
+        @mtensor V_XXL[Y,X,L] -= 0.5 * V_voXL[a,j,X,L] * UvoX[a,j,Y]
         # ``RR^{ij}_{ab} -= (\bar B - B)_a^{LiX} V_{bX}^{jL}``
-        n!RR_vovo = neuralyze(RR_vovo)
-        @mtensor n!RR_vovo[a,i,b,j] -= bB_voXL[a,i,X,L] * V_voXL[b,j,X,L]
+        @mtensor RR_vovo[a,i,b,j] -= bB_voXL[a,i,X,L] * V_voXL[b,j,X,L]
         drop!(buf, V_voXL)
       end
       tV_XXL[:,X,L] = V_XXL
@@ -3888,13 +3847,11 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor Bv_ooX[k,i,X] -= dfov[k,c] * v!UvoX[c,i,X]
     # ``UBv_a^{iYX} = U^{iY}_c Bv_a^{cX}``
     UBv = alloc!(buf, nvirt, nocc, nX, lenX)
-    n!UBv = neuralyze(UBv)
-    @mtensor n!UBv[a,i,Y,X] = UvoX[c,i,Y] * Bv_vvX[a,c,X]
+    @mtensor UBv[a,i,Y,X] = UvoX[c,i,Y] * Bv_vvX[a,c,X]
     # ``UBv_a^{iYX} -= U^{kY}_a Bv_k^{iX}``
-    @mtensor n!UBv[a,i,Y,X] -= UvoX[a,k,Y] * Bv_ooX[k,i,X]
+    @mtensor UBv[a,i,Y,X] -= UvoX[a,k,Y] * Bv_ooX[k,i,X]
     # ``R_{aZ}^i -= T_{ZYX} UBv_a^{iYX}``
-    n!R_voX = neuralyze(R_voX)
-    @mtensor n!R_voX[a,i,Z] -= v!T_XXX[Z,Y,X] * UBv[a,i,Y,X]
+    @mtensor R_voX[a,i,Z] -= v!T_XXX[Z,Y,X] * UBv[a,i,Y,X]
     drop!(buf, UBv)
     drop!(buf, Bv_ooX, Bv_vvX)
     drop!(buf, TvoXX)
@@ -3905,8 +3862,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     close(UU_oXobXfile)
     bUvoX = alloc!(buf, nvirt, nocc, nbX)
     load!(EC, "C_vo{bX}", bUvoX)
-    n!RR_vovo = neuralyze(RR_vovo)
-    @mtensor n!RR_vovo[a,i,b,j] += RR_vobX[a,i,bX] * bUvoX[b,j,bX]
+    @mtensor RR_vovo[a,i,b,j] += RR_vobX[a,i,bX] * bUvoX[b,j,bX]
     drop!(buf, bUvoX, RR_vobX)
   end
   drop!(buf, w_ovX)
@@ -3916,16 +3872,14 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   closemmap(EC, W_XXLfile, W_XXL)
   closemmap(EC, tV_XXLfile, tV_XXL)
   # ``R_{jZ}^{i} -= G_{jZ}^{i}``
-  n!R_ooX = neuralyze(R_ooX)
-  @mtensor n!R_ooX[j,i,Z] -= G_ooX[j,i,Z]
+  @mtensor R_ooX[j,i,Z] -= G_ooX[j,i,Z]
   # ``R^i_a -= R_{jY}^{i} U^{jY}_a``
   @mtensor R1[a,i] -= R_ooX[j,i,Y] * UvoX[a,j,Y]
   # ``X_{jZ}^i -= 0.5 G_{jZ}^{i}``
   @mtensor X_ooX[j,i,Z] -= 0.5 * G_ooX[j,i,Z]
   drop!(buf, G_ooX, R_ooX)
   # ``RR^{ij}_{ab} += R_{aZ}^i U^{jZ}_b``
-  n!RR_vovo = neuralyze(RR_vovo)
-  @mtensor n!RR_vovo[a,i,b,j] += R_voX[a,i,Z] * UvoX[b,j,Z]
+  @mtensor RR_vovo[a,i,b,j] += R_voX[a,i,Z] * UvoX[b,j,Z]
   drop!(buf, R_voX)
   # ``R^{ij}_{ab} = RR^{ij}_{ab} + RR^{ji}_{ba}``
   @mtensor R2[a,b,i,j] += RR_vovo[a,i,b,j] + RR_vovo[b,j,a,i]
@@ -3936,8 +3890,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   B_XX = alloc!(buf, nX, nX)
   load!(EC, "B_XX", B_XX)
   # ``B^{XY} -= 2 A^{XL} A^{YL}``
-  n!B_XX = neuralyze(B_XX)
-  @mtensor n!B_XX[X,Y] -= 2.0 * A_XL[X,L] * A_XL[Y,L]
+  @mtensor B_XX[X,Y] -= 2.0 * A_XL[X,L] * A_XL[Y,L]
   # ``R^i_a -= U^{iX}_a (T_{XYZ} B^{YZ})
   @mtensor R1[a,i] -= UvoX[a,i,X] * (T_XXX[X,Y,Z] * B_XX[Y,Z])
   drop!(buf, A_XL, B_XX)
@@ -3977,17 +3930,15 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     a!T2 .= @mview T2[:,a,:,:]
     # ``vT_{al}^{ij} = \hat v_{al}^{cd} T_{cd}^{ij} - \hat v_{lk}^{di} T_{da}^{jk}``
     vT_vooo = alloc!(buf, lena, nocc, nocc, nocc)
-    n!vT_vooo = neuralyze(vT_vooo)
-    @mtensor n!vT_vooo[a,l,i,j] = vvov[a,c,l,d] * T2[c,d,i,j]
-    @mtensor n!vT_vooo[a,l,i,j] -= oovo[l,k,d,i] * a!T2[d,a,j,k]
+    @mtensor vT_vooo[a,l,i,j] = vvov[a,c,l,d] * T2[c,d,i,j]
+    @mtensor vT_vooo[a,l,i,j] -= oovo[l,k,d,i] * a!T2[d,a,j,k]
     # ``X_{lY}^j += vT_{al}^{ij} U^{\dagger a}_{iY}``
     @mtensor X_ooX[l,j,Y] += vT_vooo[a,l,i,j] * a!UvoX[a,i,Y]
     drop!(buf, vT_vooo)
     # vT[adbi] = ``vT_{ab}^{di} = \hat v_{lk}^{di} T_{ba}^{lk} - \hat v_{al}^{cd} T_{bc}^{li}``
     vT_vvvo = alloc!(buf, lena, nvirt, nvirt, nocc)
-    n!vT_vvvo = neuralyze(vT_vvvo)
-    @mtensor n!vT_vvvo[a,d,b,i] = oovo[l,k,d,i] * a!T2[b,a,l,k]
-    @mtensor n!vT_vvvo[a,d,b,i] -= vvov[a,c,l,d] * a!T2[b,c,l,i]
+    @mtensor vT_vvvo[a,d,b,i] = oovo[l,k,d,i] * a!T2[b,a,l,k]
+    @mtensor vT_vvvo[a,d,b,i] -= vvov[a,c,l,d] * a!T2[b,c,l,i]
     # ``X_{bY}^d += vT_{ab}^{di} U^{\dagger a}_{iY}``
     @mtensor X_vvX[b,d,Y] += vT_vvvo[a,d,b,i] * a!UvoX[a,i,Y]
     drop!(buf, vT_vvvo)
@@ -4033,12 +3984,10 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     lenXt = length(X)
     v!W_LXX = @mview W_LXX[:,:,X]
     W_XXX = alloc!(buf, nX, nX, lenXt)
-    n!W_XXX = neuralyze(W_XXX)
-    @mtensor n!W_XXX[Y',X',X] = v!W_LXX[L,X',X] * v!W_LX[L,Y']
+    @mtensor W_XXX[Y',X',X] = v!W_LXX[L,X',X] * v!W_LX[L,Y']
     # ``qq_{ZXY} += T_{ZX'Y'} W^{X'Y'}_{XY}``
     qq_XX = alloc!(buf, nX, lenXt)
-    n!qq_XX = neuralyze(qq_XX)
-    @mtensor n!qq_XX[Z,X] = T_XXX[Z,X',Y'] * W_XXX[X',Y',X]
+    @mtensor qq_XX[Z,X] = T_XXX[Z,X',Y'] * W_XXX[X',Y',X]
     q_XXX[:,X,iY] = -qq_XX
     q_XXX[:,iY,X] = -qq_XX
     drop!(buf, qq_XX, W_XXX)
@@ -4055,8 +4004,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     v!ooL = @mview ooL[:,:,L]
     @mtensor vvoo[a,d,l,i] += v!vvL[a,d,L] * v!ooL[l,i,L]
   end
-  n!q_voX = neuralyze(q_voX)
-  @mtensor n!q_voX[a,i,X] = vvoo[a,d,l,i] * UvoX[d,l,X]
+  @mtensor q_voX[a,i,X] = vvoo[a,d,l,i] * UvoX[d,l,X]
   drop!(buf, vvoo)
   @mtensor q_voX[a,i,X] += x_oo[l,i] * UvoX[a,l,X] - x_vv[a,d] * UvoX[d,i,X]
   @mtensor q_XX[X,X'] := q_voX[a,i,X'] * UvoX[a,i,X]
@@ -4074,11 +4022,8 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   close(voLfile)
   close(ooLfile)
   close(vvLfile)
-  # end #buf
   save!(EC, "R_XXX", R3decomp)
-  #println(40)
-  #flush(stdout)
-
+  end #buffer
 end
 
 end #module

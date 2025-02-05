@@ -71,7 +71,7 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2E3IDX
 
       Compute the $descr integral in batch mode (see [`BasisBatcher`](@ref)).
       The result is stored in `out`. 
-      `buffer` is a preallocated buffer `Buffer{Cdouble}` of size `buffer_size_3idx(batch.bb)`.
+      `buffer` is a preallocated buffer `[MAlloc]Buffer{Cdouble}` of size `buffer_size_3idx(batch.bb)`.
     """
   @eval begin
     @doc $docstr
@@ -125,12 +125,12 @@ function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::Ba
   ao_offset = cumsum(vcat(0, nao4sh)) 
   fit_offset = cumsum(vcat(0, nfit4sh))
 
-  tbufs = ThreadsBuffer{Cdouble}(nao_max^2*nfit_max)
+  @threadsbuffer tbufs(Cdouble, nao_max^2*nfit_max) begin
 
   @sync for (P, Pb) in enumerate(shell_range(bs,2))
     Threads.@spawn begin
       @inbounds begin
-        buf = neuralyze(reshape_buf!(tbufs, length(tbufs)))
+        buf = reshape_buf!(tbufs, length(tbufs))
         nP = nfit4sh[P]
         Pblk = (1:nP) .+ fit_offset[P]
         for (j, jb) in enumerate(shell_range(bs,1))
@@ -154,6 +154,7 @@ function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::Ba
       end #inbounds
     end #spwan
   end #sync
+  end #threadsbuffer
   return out
 end
 

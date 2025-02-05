@@ -49,7 +49,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
   nL = size(M,2)
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  buf = Buffer(max(nao, norbs)^2*maxL+norbs*nao*maxL)
+  @buffer buf(max(nao, norbs)^2*maxL+norbs*nao*maxL) begin
   first = true
   for L in LBlks
     lenL = length(L)
@@ -84,7 +84,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
     drop!(buf, Lmm, mAL)
     first = false
   end
-  buf = nothing
+  end #buffer
   μνP = nothing
   M = nothing
   flushmmap(EC, int2)
@@ -157,7 +157,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
   nL = size(M,2)
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  buf = Buffer((nao^2 + norbs*nao + 2*norbs^2)*maxL)
+  @buffer buf((nao^2 + norbs*nao + 2*norbs^2)*maxL) begin
   first = true
   for L in LBlks
     lenL = length(L)
@@ -209,7 +209,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
     drop!(buf, Lmm, LMM)
     first = false
   end
-  buf = nothing
+  end #buffer
   μνP = nothing
   M = nothing
   flushmmap(EC, int2ab)

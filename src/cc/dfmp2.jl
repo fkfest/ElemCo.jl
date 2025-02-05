@@ -34,10 +34,10 @@ function calc_dfmp2(EC::ECInfo)
   Pbatches = BasisBatcher(bao, bfit)
   maxP = max_batch_length(Pbatches)
   lenbuf = auto_calc_buffer_length4calc_dfmp2(nocc, nvir, nA, nL, maxP, nocc)
-  buf = Buffer(lenbuf)
-  # @print_buffer_usage buf begin
   lencbuf = buffer_size_3idx(Pbatches)
-  cbuf = Buffer{Cdouble}(lencbuf)
+  @buffer buf(lenbuf) begin
+  @buffer cbuf(Cdouble, lencbuf) begin
+  # @print_buffer_usage buf begin
   for Pblk in Pbatches
     P = range(Pblk)
     lenP = length(P)
@@ -55,7 +55,7 @@ function calc_dfmp2(EC::ECInfo)
     @mtensor Lvo[L,a,i] += voP[a,i,P] * M_PL[P,L]
     drop!(buf, oAP, voP, M_PL)
   end
-  cbuf = nothing
+  end #cbuf buffer
   t1 = print_time(EC, t1, "DF-MP2: 3-index integrals", 1)
   # Compute MP2 energy
   eps = load1idx(EC, "e_m")
@@ -106,6 +106,7 @@ function calc_dfmp2(EC::ECInfo)
   end
   t1 = print_time(EC, t1, "energy calculation", 1)
   # end # print_buffer_usage
+  end # buf buffer
   EMP2SS = 2*EMP2d - 2*EMP2ex
   EMP2OS = 2*EMP2d + EMP2diag
   EMP2 = EMP2SS + EMP2OS

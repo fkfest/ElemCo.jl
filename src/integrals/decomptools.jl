@@ -3,7 +3,6 @@ This module contains functions for tensor decomposition methods.
 """
 module DecompTools
 using LinearAlgebra, ElemCoTensorOperations
-# using TSVD
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools

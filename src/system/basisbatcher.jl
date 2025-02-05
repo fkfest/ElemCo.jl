@@ -45,7 +45,7 @@ end
 
   Return the buffer size needed in the 3-index integral calculation.
   
-  The buffer has to be of type `Buffer{Cdouble}(lenbuf)` or `ThreadsBuffer{Cdouble}(lenbuf)`.
+  The buffer has to be of type `[MAlloc]Buffer{Cdouble}(lenbuf)` or `[MAlloc]ThreadsBuffer{Cdouble}(lenbuf)`.
 """
 buffer_size_3idx(bb::BasisBatcher) = bb.n_max[1]^2*bb.n_max[2]
 

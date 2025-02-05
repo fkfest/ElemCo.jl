@@ -213,9 +213,8 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
   maxP = max_batch_length(Pbatches)
   LoA = zeros(nL, nocc, nA)
   lenbuf = (nocc*nA + max(nA*nA, nL))*maxP
-  buf = Buffer(lenbuf)
   lencbuf = buffer_size_3idx(Pbatches)
-  cbuf = Buffer{Cdouble}(lencbuf)
+  @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
   for Pblk in Pbatches
     P = range(Pblk)
     lenP = length(P)
@@ -242,6 +241,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
     @mtensor fock[μ,ν] += 2.0*v!cP[P]*AAP[μ,ν,P]
     drop!(buf, AAP)
   end
+  end #buffer
   return fock
 end
 
@@ -268,9 +268,8 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
   LoA = zeros(nL, nocc, nA)
   LOA = zeros(nL, nOcc, nA)
   lenbuf = ((nocc+nOcc)*nA + max(nA*nA, nL))*maxP
-  buf = Buffer(lenbuf)
   lencbuf = buffer_size_3idx(Pbatches)
-  cbuf = Buffer{Cdouble}(lencbuf)
+  @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
   for Pblk in Pbatches
     P = range(Pblk)
     lenP = length(P)
@@ -305,6 +304,7 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
   end
   fock[1] += coulfock
   fock[2] += coulfock
+  end #buffer
   return fock
 end
 
@@ -327,7 +327,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
   fock = hsmall
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  buf = Buffer((nocc*nA+1)*maxL)
+  @buffer buf((nocc*nA+1)*maxL) begin
   for L in LBlks
     lenL = length(L)
     v!AAL = @view AAL[:,:,L]
@@ -341,6 +341,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
     drop!(buf, oAL, cL)
   end
   close(AALfile)
+  end #buffer
   return fock
 end
 
@@ -400,7 +401,7 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
   nL = size(AAL, 3)
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  buf = Buffer((nocc+nOcc)*nA*maxL + maxL)
+  @buffer buf((nocc+nOcc)*nA*maxL + maxL) begin
   coulfock = zeros(nA, nA)
   for L in LBlks
     lenL = length(L)
@@ -421,6 +422,7 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
   close(AALfile)
   fock[1] += coulfock
   fock[2] += coulfock
+  end #buffer
   return fock
 end
 

@@ -301,11 +301,11 @@ function dress_df_fock(EC::ECInfo, T1)
   LBlks = get_spaceblocks(1:nL)
 
   maxL = maximum(length, LBlks)
-  buf = Buffer(nmo*(nocc+max(nocc,nvirt))*maxL)
+  @buffer buf(nmo*(nocc+max(nocc,nvirt))*maxL) begin
 
   dfockc = zeros(size(dfock))
   dfocke = zeros(size(dfock))
-  vt_L_buf = Buffer(maxL)
+  @buffer vt_L_buf(maxL) begin
   for L in LBlks
     lenL = length(L)
     v!mmL = @view mmL[:,:,L]
@@ -328,6 +328,8 @@ function dress_df_fock(EC::ECInfo, T1)
     # coulomb
     @mtensor dfockc[p,q] += v!mmL[p,q,L]*vt_L[L]
   end
+  end # vt_L_buf buffer
+  end # buffer
   close(mmLfile)
   dfock += 2.0*dfockc - dfocke
   save!(EC, "dfc_ov", dfockc[occ,virt], description="tmp Coulomb-Dressed-Part-Fock")
@@ -832,7 +834,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
 
   lenbuf = auto_calc_buffer_length4calc_svd_dcsd_residual(nvirt, nocc, nX, nL, maxL, maxX,
     full_t2, full_tt2, project_resid_vovo_t2, project_amps_vovo_t2, length(R1) > 0, EC.options.cc.project_vovo_t2)
-  buf = Buffer(lenbuf)
+  @buffer buf(lenbuf) begin
   # @print_buffer_usage buf begin
   for L in LBlks
     lenL = length(L)
@@ -1017,6 +1019,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     t1 = print_time(EC, t1, "``R_{XY} += W_X^{X'} T_{X'Y} + T_{XY'} W_{Y}^{Y'}``", 2)
   end
   # end # print buffer usage
+  end # buffer
   return R1, R2
 end
 

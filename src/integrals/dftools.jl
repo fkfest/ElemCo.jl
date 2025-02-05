@@ -43,12 +43,11 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
   if save3idx
     Pbatches = BasisBatcher(bao, bfit, EC.options.int.target_batch_length)
     lencbuf = buffer_size_3idx(Pbatches)
-    cbuf = Buffer{Cdouble}(lencbuf)
     maxP = max_batch_length(Pbatches)
     nA = size(S_AA, 1)
     nL = size(M, 2)
     AALfile, AAL = newmmap(EC, "AAL", (nA,nA,nL))
-    buf = Buffer(nA*nA*maxP + nL*maxP)
+    @buffer buf(nA*nA*maxP + nL*maxP) cbuf(Cdouble, lencbuf) begin
     LBlks = get_spaceblocks(1:nL)
     first = true
     for Pblk in Pbatches
@@ -75,6 +74,7 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
       drop!(buf, AAP, M_PL) 
     end
     closemmap(EC, AALfile, AAL)
+    end #buffer
   else
     save!(EC, "C_PL", M)
   end
@@ -105,7 +105,7 @@ function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit"; 
   end
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  buf = Buffer(nmo*nao*maxL)
+  @buffer buf(nmo*nao*maxL) begin
   c_Am = cMO[1]
   c_AM = cMO[2]
   for L in LBlks
@@ -129,6 +129,7 @@ function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit"; 
   if unrestricted
     closemmap(EC, MMLfile, MML)
   end
+  end #buffer
   return
 end
 
