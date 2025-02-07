@@ -4,7 +4,7 @@
 A collection of tools for working with coupled cluster theory.
 """
 module CCTools
-using LinearAlgebra, ElemCoTensorOperations, Printf
+using LinearAlgebra, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods

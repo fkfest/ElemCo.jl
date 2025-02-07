@@ -2,7 +2,7 @@
     (using a similarity-transformed FciDump)
 """
 module BOHF
-using LinearAlgebra, ElemCoTensorOperations
+using LinearAlgebra
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.Constants

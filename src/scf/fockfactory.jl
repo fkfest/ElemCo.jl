@@ -7,7 +7,6 @@ catch
 end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
-using ElemCoTensorOperations
 using Buffers
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
@@ -221,8 +220,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
     oAP = alloc!(buf, nocc, nA, lenP)
     AAP = alloc!(buf, nA, nA, lenP)
     eri_2e3idx!(AAP, cbuf, Pblk)
-    n!oAP = neuralyze(oAP)
-    @mtensor n!oAP[j,ν,P] = AAP[μ,ν,P] * CMO2[μ,j]
+    @mtensor oAP[j,ν,P] = AAP[μ,ν,P] * CMO2[μ,j]
     drop!(buf, AAP)
     M_PL = alloc!(buf, lenP, nL)
     M_PL .= @view PL[P,:]
@@ -236,7 +234,7 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
     P = range(Pblk)
     lenP = length(P)
     AAP = alloc!(buf, nA, nA, lenP)
-    v!cP = @view cP[P]
+    v!cP = @mview cP[P]
     eri_2e3idx!(AAP, cbuf, Pblk)
     @mtensor fock[μ,ν] += 2.0*v!cP[P]*AAP[μ,ν,P]
     drop!(buf, AAP)
@@ -277,9 +275,8 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
     OAP = alloc!(buf, nOcc, nA, lenP)
     AAP = alloc!(buf, nA, nA, lenP)
     eri_2e3idx!(AAP, cbuf, Pblk)
-    n!AAP = neuralyze(AAP)
-    @mtensor oAP[j,ν,P] = n!AAP[μ,ν,P] * CMOo[1][μ,j]
-    @mtensor OAP[j,ν,P] = n!AAP[μ,ν,P] * CMOo[2][μ,j]
+    @mtensor oAP[j,ν,P] = AAP[μ,ν,P] * CMOo[1][μ,j]
+    @mtensor OAP[j,ν,P] = AAP[μ,ν,P] * CMOo[2][μ,j]
     drop!(buf, AAP)
     M_PL = alloc!(buf, lenP, nL)
     M_PL .= @view PL[P,:]
@@ -297,7 +294,7 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
     P = range(Pblk)
     lenP = length(P)
     AAP = alloc!(buf, nA, nA, lenP)
-    v!cP = @view cP[P]
+    v!cP = @mview cP[P]
     eri_2e3idx!(AAP, cbuf, Pblk)
     @mtensor coulfock[μ,ν] += v!cP[P]*AAP[μ,ν,P]
     drop!(buf, AAP)
@@ -330,12 +327,11 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
   @buffer buf((nocc*nA+1)*maxL) begin
   for L in LBlks
     lenL = length(L)
-    v!AAL = @view AAL[:,:,L]
+    v!AAL = @mview AAL[:,:,L]
     oAL = alloc!(buf, nocc, nA, lenL)
     @mtensor oAL[j,ν,L] = v!AAL[μ,ν,L] * CMO2[μ,j]
     cL = alloc!(buf, lenL)
-    n!cL = neuralyze(cL)
-    @mtensor n!cL[L] = oAL[j,ν,L] * CMO2d[j,ν]
+    @mtensor cL[L] = oAL[j,ν,L] * CMO2d[j,ν]
     @mtensor fock[μ,ν] += 2.0 * cL[L] * v!AAL[μ,ν,L]
     @mtensor fock[μ,ν] -= oAL[j,μ,L] * oAL[j,ν,L]
     drop!(buf, oAL, cL)
@@ -405,15 +401,14 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
   coulfock = zeros(nA, nA)
   for L in LBlks
     lenL = length(L)
-    v!AAL = @view AAL[:,:,L]
+    v!AAL = @mview AAL[:,:,L]
     oAL = alloc!(buf, nocc, nA, lenL)
     OAL = alloc!(buf, nOcc, nA, lenL)
     @mtensor oAL[j,ν,L] = v!AAL[μ,ν,L] * CMOo[1][μ,j]
     @mtensor OAL[j,ν,L] = v!AAL[μ,ν,L] * CMOo[2][μ,j]
     cL = alloc!(buf, lenL)
-    n!cL = neuralyze(cL)
-    @mtensor n!cL[L] = oAL[j,ν,L] * CMOod[1][j,ν]
-    @mtensor n!cL[L] += OAL[j,ν,L] * CMOod[2][j,ν]
+    @mtensor cL[L] = oAL[j,ν,L] * CMOod[1][j,ν]
+    @mtensor cL[L] += OAL[j,ν,L] * CMOod[2][j,ν]
     @mtensor coulfock[μ,ν] += cL[L] * v!AAL[μ,ν,L]
     @mtensor fock[1][μ,ν] -= oAL[j,μ,L] * oAL[j,ν,L]
     @mtensor fock[2][μ,ν] -= OAL[j,μ,L] * OAL[j,ν,L]

@@ -1,6 +1,6 @@
 """ generate fcidump using df integrals and store in dumpfile """
 module DfDump
-using LinearAlgebra, ElemCoTensorOperations
+using LinearAlgebra
 using Buffers
 using ..ElemCo.ECInfos
 using ..ElemCo.BasisSets
@@ -53,31 +53,29 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
   first = true
   for L in LBlks
     lenL = length(L)
-    v!M = @view M[:,L]
+    v!M = @mview M[:,L]
     mAL = alloc!(buf, norbs, nao, lenL)
     AAL = alloc!(buf, nao, nao, lenL)
     @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
-    n!mAL = neuralyze(mAL)
-    @mtensor n!mAL[p,ν,L] = cMOval[μ,p] * AAL[μ,ν,L]
+    @mtensor mAL[p,ν,L] = cMOval[μ,p] * AAL[μ,ν,L]
     drop!(buf, AAL)
     Lmm = alloc!(buf, lenL, norbs, norbs)
-    n!Lmm = neuralyze(Lmm)
-    @mtensor n!Lmm[L,p,q] = mAL[p,ν,L] * cMOval[ν,q]
+    @mtensor Lmm[L,p,q] = mAL[p,ν,L] * cMOval[ν,q]
     # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
     if first
       for s = 1:norbs
         q = 1:s # only upper triangle
         Iq = uppertriangular_range(s)
-        v!Lmm_q = @view Lmm[:,:,q]
-        v!Lmm_s = @view Lmm[:,:,s]
+        v!Lmm_q = @mview Lmm[:,:,q]
+        v!Lmm_s = @mview Lmm[:,:,s]
         @mtensor int2[:,:,Iq][p,r,q] = v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
       end
     else
       for s = 1:norbs
         q = 1:s # only upper triangle
         Iq = uppertriangular_range(s)
-        v!Lmm_q = @view Lmm[:,:,q]
-        v!Lmm_s = @view Lmm[:,:,s]
+        v!Lmm_q = @mview Lmm[:,:,q]
+        v!Lmm_s = @mview Lmm[:,:,s]
         @mtensor int2[:,:,Iq][p,r,q] += v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
       end
     end
@@ -161,20 +159,16 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
   first = true
   for L in LBlks
     lenL = length(L)
-    v!M = @view M[:,L]
+    v!M = @mview M[:,L]
     Lmm = alloc!(buf, lenL, norbs, norbs)
     LMM = alloc!(buf, lenL, norbs, norbs)
     AAL = alloc!(buf, nao, nao, lenL)
     MAL = mAL = alloc!(buf, norbs, nao, lenL)
     @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
-    n!mAL = neuralyze(mAL)
-    @mtensor n!mAL[p,ν,L] = cMOaval[μ,p] * AAL[μ,ν,L]
-    n!Lmm = neuralyze(Lmm)
-    @mtensor n!Lmm[L,p,q] = mAL[p,ν,L] * cMOaval[ν,q]
-    n!MAL = neuralyze(MAL)
-    @mtensor n!MAL[p,ν,L] = cMObval[μ,p] * AAL[μ,ν,L]
-    n!LMM = neuralyze(LMM)
-    @mtensor n!LMM[L,p,q] = MAL[p,ν,L] * cMObval[ν,q]
+    @mtensor mAL[p,ν,L] = cMOaval[μ,p] * AAL[μ,ν,L]
+    @mtensor Lmm[L,p,q] = mAL[p,ν,L] * cMOaval[ν,q]
+    @mtensor MAL[p,ν,L] = cMObval[μ,p] * AAL[μ,ν,L]
+    @mtensor LMM[L,p,q] = MAL[p,ν,L] * cMObval[ν,q]
     drop!(buf, AAL, mAL)
     # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
     if first

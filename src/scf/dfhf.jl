@@ -1,5 +1,5 @@
 module DFHF
-using LinearAlgebra, ElemCoTensorOperations
+using LinearAlgebra
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos

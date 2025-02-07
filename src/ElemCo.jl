@@ -56,7 +56,6 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
-using ElemCoTensorOperations
 using PrecompileTools
 using .Utils
 using .ECInfos

@@ -56,9 +56,7 @@ catch
   #println("MKL package not found, using OpenBLAS.")
 end
 using LinearAlgebra
-using Printf # to be removed
 #BLAS.set_num_threads(1)
-using ElemCoTensorOperations
 using Buffers
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
@@ -2903,16 +2901,16 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
   @mtensor fU_X[X] = dfov[k,c] * UvoX[c,k,X]
   for X in XBigBlks
     lenX = length(X)
-    v!T_XXX = @view T_XXX[:,:,X]
-    v!UvoX = @view UvoX[:,:,X]
+    v!T_XXX = @mview T_XXX[:,:,X]
+    v!UvoX = @mview UvoX[:,:,X]
     # ``T^i_{aYX} = U^{iZ}_a T_{ZYX}``
     TvoXX = alloc!(buf, nvirt, nocc, nX, lenX)
     @mtensor TvoXX[a,i,Y,X] = UvoX[a,i,Z] * v!T_XXX[Z,Y,X]
     # ``R_{aY}^i += T_{aYX}^i fU^X``
-    v!fU_X = @view fU_X[X]
+    v!fU_X = @mview fU_X[X]
     @mtensor R_voX[a,i,Y] += TvoXX[a,i,Y,X] * v!fU_X[X]
     # ``R_{jX}^i -= T_{dYX}^i w_j^{dY}``
-    v!R_ooX = @view R_ooX[:,:,X]
+    v!R_ooX = @mview R_ooX[:,:,X]
     @mtensor v!R_ooX[j,i,X] = -TvoXX[d,i,Y,X] * w_ovX[j,d,Y]
     Bv_vvX = alloc!(buf, nvirt, nvirt, lenX)
     Bv_vvX .= 0.0
@@ -2922,21 +2920,21 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
       bV_XbXL = alloc!(buf, lenX, nbX, nL)
       for bX in bXBlks
         lenbX = length(bX)
-        v!UU_oXobX = @view UU_oXobX[:,:,:,bX]
+        v!UU_oXobX = @mview UU_oXobX[:,:,:,bX]
         # ``TUU^j_{b\bar XX} = T_{bZX}^l UU_{\bar Xl}^{jZ}``
         TUU_XbXov = alloc!(buf, lenX, lenbX, nocc, nvirt)
         @mtensor TUU_XbXov[X,bX,j,b] = TvoXX[b,l,Z,X] * v!UU_oXobX[j,Z,l,bX]
         # ``\bar V_{\bar XX}^{L} = TUU^j_{b\bar XX} v_j^{bL}``
-        v!bV_XbXL = @view bV_XbXL[:,bX,:]
+        v!bV_XbXL = @mview bV_XbXL[:,bX,:]
         @mtensor v!bV_XbXL[X,bX,L] = TUU_XbXov[X,bX,j,b] * ovL[j,b,L]
         drop!(buf, TUU_XbXov)
       end
     end
     for L in LBlks
       lenL = length(L)
-      v!ooL = @view ooL[:,:,L]
-      v!vvL = @view vvL[:,:,L]
-      v!ovL = @view ovL[:,:,L]
+      v!ooL = @mview ooL[:,:,L]
+      v!vvL = @mview vvL[:,:,L]
+      v!ovL = @mview ovL[:,:,L]
       # ``\bar B_a^{iXL} = \hat v_a^{bL} U^{iX}_b``
       bB_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
       @mtensor bB_voXL[a,i,X,L] = v!vvL[a,b,L] * v!UvoX[b,i,X]
@@ -2951,8 +2949,8 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
       @mtensor bB_voXL[a,i,X,L] -= B_voXL[a,i,X,L]
       drop!(buf, B_voXL)
 
-      v!B_ooXL = @view B_ooXL[:,:,:,L]
-      v!A_XL = @view A_XL[:,L]
+      v!B_ooXL = @mview B_ooXL[:,:,:,L]
+      v!A_XL = @mview A_XL[:,L]
       # ``V_{YX}^{L} = T_{ZYX} A^{ZL}``
       V_XXL = alloc!(buf, nX, lenX, lenL)
       @mtensor V_XXL[Y,X,L] = v!T_XXX[Z,Y,X] * v!A_XL[Z,L]
@@ -2961,7 +2959,7 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
       # ``R_{aZ}^i = 2 (\bar B - B)_a^{LiX} V_{ZX}^{L}``
       @mtensor R_voX[a,i,Z] += 2.0 * bB_voXL[a,i,X,L] * V_XXL[Z,X,L]
       if EC.options.cc.project_voXL
-        v!bV_XbXL = @view bV_XbXL[:,:,L]
+        v!bV_XbXL = @mview bV_XbXL[:,:,L]
         # ``RR^{i}_{a\bar X} -= (\bar B - B)_a^{LiX} \bar V_{X\bar X}^{L}``
         @mtensor RR_vobX[a,i,bX] -= bB_voXL[a,i,X,L] * v!bV_XbXL[X,bX,L]
       else
@@ -3168,9 +3166,9 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   V_ooX .= 0.0
   for L in LBlks
     lenL = length(L)
-    v!voL = voL[:,:,L]
-    v!vvL = vvL[:,:,L]
-    v!ooL = ooL[:,:,L]
+    v!voL = @mview voL[:,:,L]
+    v!vvL = @mview vvL[:,:,L]
+    v!ooL = @mview ooL[:,:,L]
     # ``X_{bX}^{jL} = T^j_{cX} \hat v_{b}^{cL} - T^l_{bX} \hat v_{l}^{jL}``
     X_voXL = alloc!(buf, nvirt, nocc, nX, lenL)
     @mtensor X_voXL[b,j,X,L] = T_voX[c,j,X] * v!vvL[b,c,L] 
@@ -3178,7 +3176,7 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     # ``UX_{XY}^L = X_{bX}^{jL} U^{†b}_{jY}``
     UX_LXX = alloc!(buf, lenL, nX, nX)
     @mtensor UX_LXX[L,X,Y] = X_voXL[b,j,X,L] * UvoX[b,j,Y]
-    v!X_LXX = @view X_LXX[L,:,:]
+    v!X_LXX = @mview X_LXX[L,:,:]
     @mtensor v!X_LXX[L,X,Y] = UX_LXX[L,X,Y] + UX_LXX[L,Y,X]
     drop!(buf, UX_LXX, X_voXL)
     # ``W_{X}^{L} = \hat v_c^{kL} U^{†c}_{kX}``
@@ -3200,24 +3198,24 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     X = 1:Y
     lenX = length(X)
     R = alloc!(buf, nvirt, nocc, lenX)
-    v!X_LXY = @view X_LXX[:,X,Y]
+    v!X_LXY = @mview X_LXX[:,X,Y]
     @mtensor R[a,i,X] = v!X_LXY[L,X] * voL[a,i,L]
-    v!T_voX = @view T_voX[:,:,X]
-    v!V_vvY = @view V_vvX[:,:,Y]
-    v!V_ooY = @view V_ooX[:,:,Y]
+    v!T_voX = @mview T_voX[:,:,X]
+    v!V_vvY = @mview V_vvX[:,:,Y]
+    v!V_ooY = @mview V_ooX[:,:,Y]
     @mtensor R[a,i,X] += v!T_voX[c,i,X] * v!V_vvY[a,c]
     @mtensor R[a,i,X] -= v!T_voX[a,l,X] * v!V_ooY[l,i]
-    v!T_voY = @view T_voX[:,:,Y]
-    v!V_vvX = @view V_vvX[:,:,X]
-    v!V_ooX = @view V_ooX[:,:,X]
+    v!T_voY = @mview T_voX[:,:,Y]
+    v!V_vvX = @mview V_vvX[:,:,X]
+    v!V_ooX = @mview V_ooX[:,:,X]
     @mtensor R[a,i,X] += v!T_voY[c,i] * v!V_vvX[a,c,X]
     @mtensor R[a,i,X] -= v!T_voY[a,l] * v!V_ooX[l,i,X]
     # ``E^d_{lXY} = V_{aX}^{d} U^{†a}_{lY} - V_{lX}^{i} U^{†d}_{iY}``
     E_voXY = alloc!(buf, nvirt, nocc, lenX)
-    v!UvoY = @view UvoX[:,:,Y]
+    v!UvoY = @mview UvoX[:,:,Y]
     @mtensor E_voXY[d,l,X] = v!V_vvX[a,d,X] * v!UvoY[a,l] 
     @mtensor E_voXY[d,l,X] -= v!V_ooX[l,i,X] * v!UvoY[d,i]
-    v!UvoX = @view UvoX[:,:,X]
+    v!UvoX = @mview UvoX[:,:,X]
     @mtensor E_voXY[d,l,X] += v!V_vvY[a,d] * v!UvoX[a,l,X] 
     @mtensor E_voXY[d,l,X] -= v!V_ooY[l,i] * v!UvoX[d,i,X]
     # ``R^i_{aXY} += E^d_{lXY} T^il_{ad}``
@@ -3238,11 +3236,11 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
       end
     end
     if Y > 1
-      v!R = @view R[:,:,1:(Y-1)]
+      v!R = @mview R[:,:,1:(Y-1)]
       @mtensor D2[a,i,b,j] += 2.0 * v!R[a,i,X] * v!R[b,j,X]
     end
     # diagonal contribution X=Y
-    v!RYY = @view R[:,:,Y]
+    v!RYY = @mview R[:,:,Y]
     @mtensor D2[a,i,b,j] += v!RYY[a,i] * v!RYY[b,j]
     if EC.options.cc.project_t3iii 
       permutedims!(@view(T3[X,Y,:,:]), R, (3,1,2))
@@ -3258,25 +3256,25 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     # remove T^iii contributions from D2
     UU = alloc!(buf, nX, nX, nocc)
     for i = 1:nocc
-      v!UvoX = @view UvoX[:,i,:]
-      v!UU = @view UU[:,:,i]
+      v!UvoX = @mview UvoX[:,i,:]
+      v!UU = @mview UU[:,:,i]
       @mtensor v!UU[X,Y] = v!UvoX[a,X] * v!UvoX[a,Y]
     end
     TUU4i = alloc!(buf, nX, nX, nvirt)
     TU = alloc!(buf, nX, nX, nvirt)
     ΔD2 = alloc!(buf, nvirt, nvirt)
     for i = 1:nocc
-      v!UUi = @view UU[:,:,i]
-      v!T_i = @view T3[:,:,:,i]
+      v!UUi = @mview UU[:,:,i]
+      v!T_i = @mview T3[:,:,:,i]
       @mtensor TU[X',Y,a] = v!T_i[X,Y,a] * v!UUi[X,X']
       @mtensor TUU4i[X',Y',a] = TU[X',Y,a] * v!UUi[Y,Y']
       for j = 1:nocc
-        v!T_j = @view T3[:,:,:,j]
+        v!T_j = @mview T3[:,:,:,j]
         @mtensor ΔD2[a,b] = TUU4i[X,Y,a] * v!T_j[X,Y,b]
-        v!D2 = @view D2[:,i,:,j]
+        v!D2 = @mview D2[:,i,:,j]
         @mtensor v!D2[a,b] -= ΔD2[a,b]
         if i != j
-          v!D2 = @view D2[:,j,:,i]
+          v!D2 = @mview D2[:,j,:,i]
           @mtensor v!D2[b,a] -= ΔD2[a,b]
         end
       end
@@ -3346,9 +3344,9 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   V_ooX .= 0.0
   for L in LBlks
     lenL = length(L)
-    v!ooL = ooL[:,:,L]
-    v!voL = voL[:,:,L]
-    v!vvL = vvL[:,:,L]
+    v!ooL = @mview ooL[:,:,L]
+    v!voL = @mview voL[:,:,L]
+    v!vvL = @mview vvL[:,:,L]
     # ``W_{X}^{L} = v_c^{kL} U^{†c}_{kX}``
     W_XL = alloc!(buf, nX, lenL)
     @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
@@ -3367,8 +3365,8 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   RR = alloc!(buf, nX, nX, nX)
   for X in XBlks
     lenX = length(X)
-    v!TvoX = @view TvoX[:,:,X]
-    v!RR = @view RR[:,:,X]
+    v!TvoX = @mview TvoX[:,:,X]
+    v!RR = @mview RR[:,:,X]
     RvoXX = alloc!(buf, nvirt, nocc, nX, lenX)
     @mtensor RvoXX[a,i,Y,X] = v!TvoX[a,k,X] * V_ooX[k,i,Y]
     @mtensor RvoXX[a,i,Y,X] -= v!TvoX[c,i,X] * V_vvX[a,c,Y]
@@ -3481,8 +3479,8 @@ function calc_intermediates4triples(EC::ECInfo)
     UU_oXobXfile, UU_oXobX = newmmap(EC, "UU_oXo{bX}", (nocc,nX,nocc,nbX))
     bXBlks = get_spaceblocks(1:nbX)
     for bX in bXBlks
-      v!bUvoX = @view bUvoX[:,:,bX]
-      v!UU_oXobX = @view UU_oXobX[:,:,:,bX]
+      v!bUvoX = @mview bUvoX[:,:,bX]
+      v!UU_oXobX = @mview UU_oXobX[:,:,:,bX]
       @mtensor v!UU_oXobX[i,X,j,bX] = UvoX[a,i,X] * v!bUvoX[a,j,bX]
     end
     closemmap(EC, UU_oXobXfile, UU_oXobX)
@@ -3776,17 +3774,17 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       bV_XbXL = alloc!(buf, lenX, nbX, nL)
       for bX in bXBlks
         lenbX = length(bX)
-        v!UU_oXobX = @view UU_oXobX[:,:,:,bX]
+        v!UU_oXobX = @mview UU_oXobX[:,:,:,bX]
         # ``TUU^j_{b\bar XX} = T_{bZX}^l UU_{\bar Xl}^{jZ}``
         TUU_XbXov = alloc!(buf, lenX, lenbX, nocc, nvirt)
         @mtensor TUU_XbXov[X,bX,j,b] = TvoXX[b,l,Z,X] * v!UU_oXobX[j,Z,l,bX]
         # ``\bar V_{\bar XX}^{L} = TUU^j_{b\bar XX} v_j^{bL}``
-        v!bV_XbXL = @view bV_XbXL[:,bX,:]
+        v!bV_XbXL = @mview bV_XbXL[:,bX,:]
         @mtensor v!bV_XbXL[X,bX,L] = TUU_XbXov[X,bX,j,b] * ovL[j,b,L]
         drop!(buf, TUU_XbXov)
       end
     end
-    v!R_ooX = @view R_ooX[:,:,X]
+    v!R_ooX = @mview R_ooX[:,:,X]
     for L in LBlks
       lenL = length(L)
       v!ooL = @mview ooL[:,:,L]
@@ -3821,7 +3819,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       # ``R_{aZ}^i = 2 (\bar B - B)_a^{LiX} V_{ZX}^{L}``
       @mtensor R_voX[a,i,Z] += 2.0 * bB_voXL[a,i,X,L] * V_XXL[Z,X,L]
       if EC.options.cc.project_voXL
-        v!bV_XbXL = @view bV_XbXL[:,:,L]
+        v!bV_XbXL = @mview bV_XbXL[:,:,L]
         # ``\tilde V_{YX}^{L} -= 0.5 \bar V_{X\bar X}^{L} C^{\bar X}_{Y}``
         @mtensor V_XXL[Y,X,L] -= 0.5 * v!bV_XbXL[X,bX,L] * C_bXX[bX,Y]
         # ``RR^{i}_{a\bar X} -= (\bar B - B)_a^{LiX} \bar V_{X\bar X}^{L}``

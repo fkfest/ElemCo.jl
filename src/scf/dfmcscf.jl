@@ -1,5 +1,5 @@
 module DFMCSCF
-using LinearAlgebra, ElemCoTensorOperations, Printf
+using LinearAlgebra, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.Integrals

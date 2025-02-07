@@ -2,7 +2,7 @@
 This module contains various utils for density fitting.
 """
 module DFTools
-using LinearAlgebra, ElemCoTensorOperations
+using LinearAlgebra
 using Buffers
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
@@ -59,15 +59,15 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
       M_PL .= @view M[P,:]
       if first
         for L in LBlks
-          v!M = @view M_PL[:,L]
-          v!AAL = @view AAL[:,:,L]
+          v!M = @mview M_PL[:,L]
+          v!AAL = @mview AAL[:,:,L]
           @mtensor v!AAL[p,q,L] = AAP[p,q,P] * v!M[P,L]
         end
         first = false
       else
         for L in LBlks
-          v!M = @view M_PL[:,L]
-          v!AAL = @view AAL[:,:,L]
+          v!M = @mview M_PL[:,L]
+          v!AAL = @mview AAL[:,:,L]
           @mtensor v!AAL[p,q,L] += AAP[p,q,P] * v!M[P,L]
         end
       end
@@ -110,14 +110,14 @@ function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit"; 
   c_AM = cMO[2]
   for L in LBlks
     lenL = length(L)
-    v!AAL = @view AAL[:,:,L]
-    v!mmL = @view mmL[:,:,L]
+    v!AAL = @mview AAL[:,:,L]
+    v!mmL = @mview mmL[:,:,L]
     mAL = alloc!(buf, nmo, nao, lenL)
     @mtensor mAL[p,ν,L] = c_Am[μ,p] * v!AAL[μ,ν,L]
     @mtensor v!mmL[p,q,L] = mAL[p,ν,L] * c_Am[ν,q]
     drop!(buf, mAL)
     if unrestricted
-      v!MML = @view MML[:,:,L]
+      v!MML = @mview MML[:,:,L]
       MAL = alloc!(buf, nmo, nao, lenL)
       @mtensor MAL[p,ν,L] = c_AM[μ,p] * v!AAL[μ,ν,L]
       @mtensor v!MML[p,q,L] = MAL[p,ν,L] * c_AM[ν,q]

@@ -4,7 +4,7 @@
 A collection of tools for working with orbitals
 """ 
 module OrbTools
-using LinearAlgebra, ElemCoTensorOperations, Printf
+using LinearAlgebra, Printf
 
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos

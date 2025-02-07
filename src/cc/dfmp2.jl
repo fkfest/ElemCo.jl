@@ -44,12 +44,10 @@ function calc_dfmp2(EC::ECInfo)
     oAP = alloc!(buf, nocc, nA, lenP)
     AAP = alloc!(buf, nA, nA, lenP)
     eri_2e3idx!(AAP, cbuf, Pblk)
-    n!oAP = neuralyze(oAP)
-    @mtensor n!oAP[i,ν,P] = c_Ao[μ,i] * AAP[μ,ν,P]
+    @mtensor oAP[i,ν,P] = c_Ao[μ,i] * AAP[μ,ν,P]
     drop!(buf, AAP)
     voP = alloc!(buf, nvir, nocc, lenP)
-    n!voP = neuralyze(voP)
-    @mtensor n!voP[a,i,P] = c_Av[ν,a] * oAP[i,ν,P]
+    @mtensor voP[a,i,P] = c_Av[ν,a] * oAP[i,ν,P]
     M_PL = alloc!(buf, lenP, nL)
     M_PL .= @view C_PL[P,:]
     @mtensor Lvo[L,a,i] += voP[a,i,P] * M_PL[P,L]
@@ -74,8 +72,8 @@ function calc_dfmp2(EC::ECInfo)
   for j = 1:nocc
     irange = 1:j
     leni = length(irange)
-    v!Lvj = @view Lvo[:,:,j]
-    v!Lvi = @view Lvo[:,:,irange]
+    v!Lvj = @mview Lvo[:,:,j]
+    v!Lvi = @mview Lvo[:,:,irange]
     vvij = alloc!(buf, nvir, nvir, leni)
     @mtensor vvij[a,b,i] = v!Lvi[L,a,i] * v!Lvj[L,b]
     t_vvij = alloc!(buf, nvir, nvir, leni)
@@ -87,13 +85,13 @@ function calc_dfmp2(EC::ECInfo)
     end
     drop!(buf, eij)
     if leni > 1
-      v!vvij = @view vvij[:,:,1:leni-1]
-      v!t_vvij = @view t_vvij[:,:,1:leni-1]
+      v!vvij = @mview vvij[:,:,1:leni-1]
+      v!t_vvij = @mview t_vvij[:,:,1:leni-1]
       @mtensor EMP2d += v!vvij[a,b,i] * v!t_vvij[a,b,i]
       @mtensor EMP2ex += v!vvij[a,b,i] * v!t_vvij[b,a,i]
     end
-    v!vvii = @view vvij[:,:,j]
-    v!t_vvii = @view t_vvij[:,:,j]
+    v!vvii = @mview vvij[:,:,j]
+    v!t_vvii = @mview t_vvij[:,:,j]
     @mtensor EMP2diag += v!vvii[a,b] * v!t_vvii[a,b]
     drop!(buf, vvij, t_vvij)
     if savet2
