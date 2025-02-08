@@ -3087,14 +3087,14 @@ function calc_triples_decomposition(EC::ECInfo)
   #display(UaiX)
   save!(EC,"C_voX",UaiX)
 
-  @mtensor begin
-    T3_decomp_starting_guess[X,Y,Z] := (((Triples_Amplitudes[a,i,b,j,c,k] * UaiX[a,i,X]) * UaiX[b,j,Y]) * UaiX[c,k,Z])
-  end
-  save!(EC,"T_XXX",T3_decomp_starting_guess)
-  #display(T3_decomp_starting_guess)
+  @mtensor T3_vovoX[b,j,c,k,X] := Triples_Amplitudes[a,i,b,j,c,k] * UaiX[a,i,X]
+  @mtensor T3_voXX[c,k,X,Y] := T3_vovoX[b,j,c,k,X] * UaiX[b,j,Y]
+  @mtensor T3_XXX[X,Y,Z] := T3_voXX[c,k,X,Y] * UaiX[c,k,Z]
+  save!(EC,"T_XXX",T3_XXX)
+  #display(T3_XXX)
 
   # @mtensor begin
-  #  T3_decomp_check[a,i,b,j,c,k] := T3_decomp_starting_guess[X,Y,Z] * UaiX2[a,i,X] * UaiX2[b,j,Y] * UaiX2[c,k,Z]
+  #  T3_decomp_check[a,i,b,j,c,k] := T3_XXX[X,Y,Z] * UaiX2[a,i,X] * UaiX2[b,j,Y] * UaiX2[c,k,Z]
   # end
   # test_calc_pertT_from_T3(EC,T3_decomp_check)
 end
