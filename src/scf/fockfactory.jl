@@ -408,7 +408,9 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
     @mtensor OAL[j,ν,L] = v!AAL[μ,ν,L] * CMOo[2][μ,j]
     cL = alloc!(buf, lenL)
     @mtensor cL[L] = oAL[j,ν,L] * CMOod[1][j,ν]
-    @mtensor cL[L] += OAL[j,ν,L] * CMOod[2][j,ν]
+    if nOcc > 0
+      @mtensor cL[L] += OAL[j,ν,L] * CMOod[2][j,ν]
+    end
     @mtensor coulfock[μ,ν] += cL[L] * v!AAL[μ,ν,L]
     @mtensor fock[1][μ,ν] -= oAL[j,μ,L] * oAL[j,ν,L]
     @mtensor fock[2][μ,ν] -= OAL[j,μ,L] * OAL[j,ν,L]
