@@ -4,7 +4,7 @@
   Density-fitted coupled-cluster methods.
 """
 module DFCoupledCluster
-using LinearAlgebra, TensorOperations
+using LinearAlgebra
 using Buffers
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
@@ -50,13 +50,13 @@ function get_ssv_osvˣˣ(EC::ECInfo)
   LBlks = get_spaceblocks(1:nL)
   vdagger_vvoo = zeros(nvirt,nvirt,nocc,nocc)
   for L in LBlks
-    v!ovL = @view ovL[:,:,L]
-    @tensoropt vdagger_vvoo[a,b,i,j] += v!ovL[i,a,L] * v!ovL[j,b,L]
+    v!ovL = @mview ovL[:,:,L]
+    @mtensor vdagger_vvoo[a,b,i,j] += v!ovL[i,a,L] * v!ovL[j,b,L]
   end
   close(ovLfile)
-  @tensoropt begin
-    ssvxx[X,Y] := (vdagger_vvoo[a,b,i,j] - vdagger_vvoo[a,b,j,i]) * UvoX[a,i,X] * UvoX[b,j,Y]
-    osvxx[X,Y] := vdagger_vvoo[a,b,i,j] * UvoX[a,i,X] * UvoX[b,j,Y]
+  @mtensor begin
+    ssvxx[X,Y] := ((vdagger_vvoo[a,b,i,j] - vdagger_vvoo[a,b,j,i]) * UvoX[a,i,X]) * UvoX[b,j,Y]
+    osvxx[X,Y] := (vdagger_vvoo[a,b,i,j] * UvoX[a,i,X]) * UvoX[b,j,Y]
   end
   save!(EC, "ssd_^XX", ssvxx)
   save!(EC, "osd_^XX", osvxx)
@@ -85,9 +85,9 @@ function gen_vₓˣᴸ(EC::ECInfo)
   for L in LBlks
     vvL = mmL[SP['v'],SP['v'],L]
     for X in XBlks
-      v!UvoX = @view UvoX[:,:,X]
+      v!UvoX = @mview UvoX[:,:,X]
       # ``v_{X'}^{XL} = (v_a^{cL} U^{kX}_{c}) U^{†a}_{kX'}``
-      @tensoropt v_XXL[:,X,L][X',X,L] = (vvL[a,c,L] * v!UvoX[c,k,X]) * UvoX[a,k,X'] 
+      @mtensor v_XXL[:,X,L][X',X,L] = (vvL[a,c,L] * v!UvoX[c,k,X]) * UvoX[a,k,X'] 
     end
   end
   closemmap(EC, vXXLfile, v_XXL)
@@ -107,7 +107,7 @@ end
 """
 function calc_deco_hylleraas(EC::ECInfo, T1, T2::Array{Float64,4}, R1, R2::Array{Float64,4}) 
   ovL = load3idx(EC, "d_ovL")
-  @tensoropt begin
+  @mtensor begin
     int2[a,b,i,j] := R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L]
     ET2d = T2[a,b,i,j] * int2[a,b,i,j]
     ET2ex = T2[a,b,j,i] * int2[a,b,i,j]
@@ -126,12 +126,12 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2::Array{Float64,4}, R1, R2::Array
 end
 function calc_deco_hylleraas(EC::ECInfo, T1, T2::Matrix{Float64}, R1, R2::Matrix{Float64})
   ssvxx, osvxx = get_ssv_osvˣˣ(EC)
-  @tensoropt begin
+  @mtensor begin
     ET2OS = T2[X,Y] * (osvxx[X,Y] + R2[X,Y])
     ET2SS = T2[Y,X] * (ssvxx[X,Y] + R2[X,Y])
   end
   UvoX = load3idx(EC, "C_voX")
-  @tensoropt ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
+  @mtensor ET2SS -= T2[X,Y] * ((((R2[X',Y'] * UvoX[a,i,X']) * UvoX[b,j,Y']) * UvoX[a,j,X]) * UvoX[b,i,Y])
   UvoX = nothing
   ET2 = ET2SS + ET2OS
   if length(T1) > 0
@@ -146,7 +146,7 @@ function calc_deco_hylleraas_singles(EC::ECInfo, T1, R1)
   SP = EC.space
   dfockc_ov = load2idx(EC, "dfc_ov")
   dfocke_ov = load2idx(EC, "dfe_ov")
-  @tensoropt begin
+  @mtensor begin
     ET1d = T1[a,i] * dfockc_ov[i,a] 
     ET1ex = T1[a,i] * dfocke_ov[i,a]
   end
@@ -154,7 +154,7 @@ function calc_deco_hylleraas_singles(EC::ECInfo, T1, R1)
   ET1OS = ET1d
   ET1 = ET1SS + ET1OS
   fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
-  @tensoropt ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
+  @mtensor ET1 += 2.0*((fov[i,a] + 2.0 * R1[a,i])*T1[a,i])
   return ET1, ET1SS, ET1OS
 end
 
@@ -173,7 +173,7 @@ function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,4})
 end
 function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,2})
   ssvxx, osvxx = get_ssv_osvˣˣ(EC)
-  @tensoropt begin
+  @mtensor begin
     ET2OS = T2[X,Y] * osvxx[X,Y] 
     ET2SS = T2[Y,X] * ssvxx[X,Y]
   end
@@ -195,7 +195,7 @@ function calc_df_doubles_energy(EC::ECInfo, T2)
     error("File d_ovL does not exist!")
   end
   ovL = load3idx(EC, "d_ovL")
-  @tensoropt begin
+  @mtensor begin
     int2[a,b,i,j] := ovL[i,a,L] * ovL[j,b,L]
     ET2d = T2[a,b,i,j] * int2[a,b,i,j]
     ET2ex = T2[b,a,i,j] * int2[a,b,i,j]
@@ -226,15 +226,15 @@ function calc_dressed_3idx(EC::ECInfo, T1)
 
   LBlks = get_spaceblocks(1:nL)
   for L in LBlks
-    v!ovL = @view ovL[:,:,L]
+    v!ovL = @mview ovL[:,:,L]
     v!ovL .= mmL[SP['o'],SP['v'],L]
-    v!vvL = @view vvL[:,:,L]
+    v!vvL = @mview vvL[:,:,L]
     v!vvL .= mmL[SP['v'],SP['v'],L]
     @mtensor v!vvL[a,b,L] -= T1[a,i] * v!ovL[i,b,L]
-    v!voL = @view voL[:,:,L]
+    v!voL = @mview voL[:,:,L]
     v!voL .= mmL[SP['v'],SP['o'],L]
     @mtensor v!voL[a,i,L] += T1[b,i] * v!vvL[a,b,L]
-    v!ooL = @view ooL[:,:,L]
+    v!ooL = @mview ooL[:,:,L]
     v!ooL .= mmL[SP['o'],SP['o'],L]
     @mtensor v!voL[a,i,L] -= T1[a,j] * v!ooL[j,i,L]
     @mtensor v!ooL[i,j,L] += T1[b,j] * v!ovL[i,b,L]
@@ -301,19 +301,18 @@ function dress_df_fock(EC::ECInfo, T1)
   LBlks = get_spaceblocks(1:nL)
 
   maxL = maximum(length, LBlks)
-  buf = Buffer(nmo*(nocc+max(nocc,nvirt))*maxL)
+  @buffer buf(nmo*(nocc+max(nocc,nvirt))*maxL) begin
 
   dfockc = zeros(size(dfock))
   dfocke = zeros(size(dfock))
-  vt_L_buf = Buffer(maxL)
+  @buffer vt_L_buf(maxL) begin
   for L in LBlks
     lenL = length(L)
-    v!mmL = @view mmL[:,:,L]
+    v!mmL = @mview mmL[:,:,L]
     vt_moL = alloc!(buf, nmo, nocc, lenL)
     mLv = alloc!(buf, nmo, lenL, nvirt)
     permutedims!(mLv, @view(v!mmL[:,virt,:]), (1,3,2))
-    n!vt_moL = neuralyze(vt_moL)
-    @mtensor n!vt_moL[p,i,L] = mLv[p,L,a]*T1[a,i]
+    @mtensor vt_moL[p,i,L] = mLv[p,L,a]*T1[a,i]
     drop!(buf, mLv)
     vt_L = reshape_buf!(vt_L_buf, lenL)
     vt_ooL = alloc!(buf, nocc, nocc, lenL)
@@ -328,6 +327,8 @@ function dress_df_fock(EC::ECInfo, T1)
     # coulomb
     @mtensor dfockc[p,q] += v!mmL[p,q,L]*vt_L[L]
   end
+  end # vt_L_buf buffer
+  end # buffer
   close(mmLfile)
   dfock += 2.0*dfockc - dfocke
   save!(EC, "dfc_ov", dfockc[occ,virt], description="tmp Coulomb-Dressed-Part-Fock")
@@ -520,7 +521,7 @@ function calc_3idx_svd_decomposition(EC::ECInfo, voL::AbstractArray, tol2)
   # generate ``W^{LL'} = v_a^{iL} v_a^{iL'}`` for SVD
   oBlks = get_spaceblocks(1:length(SP['o']))
   for oblk in oBlks
-    v!voL = @view voL[:,oblk,:]
+    v!voL = @mview voL[:,oblk,:]
     @mtensor W_LL[L,L'] += v!voL[a,i,L] * v!voL[a,i,L']
   end
   # decompose W^{LL'} = V_{LX} Σ^{XX'} V^†_{X'L}
@@ -530,7 +531,7 @@ function calc_3idx_svd_decomposition(EC::ECInfo, voL::AbstractArray, tol2)
   nX = length(Σ)
   UaiX = zeros(nvirt,nocc,nX)
   for L in LBlks
-    v!voL = @view voL[:,:,L]
+    v!voL = @mview voL[:,:,L]
     @mtensor UaiX[a,i,X] += v!voL[a,i,L] * Vmat[L,:][L,X] 
   end
   UaiX = reshape(reshape(UaiX, nvirt*nocc, nX) ./= sqrt.(Σ)', nvirt, nocc, nX)
@@ -652,8 +653,8 @@ function calc_voX(EC::ECInfo; calc_vᵥᵒˣ=false, calc_vᵛₒₓ=false)
   vvoo = zeros(nvirt,nvirt,nocc,nocc) 
   LBlks = get_spaceblocks(1:nL)
   for L in LBlks
-    v!vvL = @view vvL[:,:,L]
-    v!ooL = @view ooL[:,:,L]
+    v!vvL = @mview vvL[:,:,L]
+    v!ooL = @mview ooL[:,:,L]
     # ``v_{ak}^{ci} = v_a^{cL} v_k^{iL}``
     @mtensor vvoo[a,c,k,i] += v!vvL[a,c,L] * v!ooL[k,i,L]
   end
@@ -832,11 +833,11 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
 
   lenbuf = auto_calc_buffer_length4calc_svd_dcsd_residual(nvirt, nocc, nX, nL, maxL, maxX,
     full_t2, full_tt2, project_resid_vovo_t2, project_amps_vovo_t2, length(R1) > 0, EC.options.cc.project_vovo_t2)
-  buf = Buffer(lenbuf)
+  @buffer buf(lenbuf) begin
   # @print_buffer_usage buf begin
   for L in LBlks
     lenL = length(L)
-    v!ovL = @view ovL[:,:,L]
+    v!ovL = @mview ovL[:,:,L]
     Y_voL = alloc!(buf, nvirt, nocc, lenL)
     W_XL = alloc!(buf, nX, lenL)
     if full_tt2
@@ -845,21 +846,18 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
       t1 = print_time(EC, t1, "``Y_a^{iL} = v_k^{cL} \\tilde T^{ik}_{ac}``", 2)
       if !full_t2
         # ``Y_X^L = Y_a^{iL} U^{†a}_{iX}``
-        n!W_XL = neuralyze(W_XL) 
-        @mtensor n!W_XL[X,L] = Y_voL[a,i,L] * UvoX[a,i,X]
+        @mtensor W_XL[X,L] = Y_voL[a,i,L] * UvoX[a,i,X]
         t1 = print_time(EC, t1, "``Y_X^L = Y_a^{iL} U^{†a}_{iX}``", 2)
       end
     else
       # ``Y_X^L = (v_k^{cL} U^{kY}_c) \tilde T_{XY}``) 
       Uv_XL = alloc!(buf, nX, nL)
       @mtensor Uv_XL[X,L] = UvoX[c,k,X] * v!ovL[k,c,L]
-      n!W_XL = neuralyze(W_XL)
-      @mtensor n!W_XL[X,L] = Uv_XL[Y,L] * tT2[X,Y]
+      @mtensor W_XL[X,L] = Uv_XL[Y,L] * tT2[X,Y]
       drop!(buf, Uv_XL)
       t1 = print_time(EC, t1, "``Y_X^L = (v_k^{cL} U^{kY}_c) \\tilde T_{XY}``", 2)
       # ``Y_a^{kL} = Y_X^L U^{kX}_a``
-      n!Y_voL = neuralyze(Y_voL)
-      @mtensor n!Y_voL[a,k,L] = UvoX[a,k,X] * W_XL[X,L]
+      @mtensor Y_voL[a,k,L] = UvoX[a,k,X] * W_XL[X,L]
       t1 = print_time(EC, t1, "``Y_a^{kL} = Y_X^L U^{kX}_a``", 2)
     end
     # ``x_a^c -= 0.5 Y_a^{kL} v_k^{cL}``
@@ -869,7 +867,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     @mtensor x_oo[k,i] += 0.5 * Y_voL[c,i,L] * v!ovL[k,c,L]
     t1 = print_time(EC, t1, "``x_k^i += 0.5 Y_c^{iL} v_k^{cL}``", 2)
     # ``v_X^L = U^{†a}_{iX} v_a^{iL}``
-    v!voL = @view voL[:,:,L]
+    v!voL = @mview voL[:,:,L]
     if full_t2
       drop!(buf, W_XL)
       vY_voL = alloc!(buf, nvirt, nocc, lenL)
@@ -910,29 +908,27 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   d_XXLfile, d_XXL = newmmap(EC, "d_X^XL", (nX,nX,nL))
   for X in XBigBlks
     lenX = length(X)
-    v!UvoX = @view UvoX[:,:,X]
+    v!UvoX = @mview UvoX[:,:,X]
     # ``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``
     UUooXX = alloc!(buf, nocc, nocc, nX, lenX)
     @mtensor UUooXX[j,i,X,Y] = UvoX[c,i,X] * v!UvoX[c,j,Y]
     t1 = print_time(EC, t1, "``U_{iX}^{jY} = U^{†c}_{iX} U^{jY}_{c}``", 2)
     for L in LBlks
       lenL = length(L)
-      v!ooL = @view ooL[:,:,L]
-      v!ovL = @view ovL[:,:,L]
+      v!ooL = @mview ooL[:,:,L]
+      v!ovL = @mview ovL[:,:,L]
       v_XXL = alloc!(buf, nX, lenX, lenL)
       v_XXL .= @view XXL[:,X,L]
       if length(T1) > 0
         # ``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``
         vU_ooXL = alloc!(buf, nocc, nocc, lenX, lenL)
         @mtensor vU_ooXL[l,k,Y,L] = v!ovL[l,c,L] * v!UvoX[c,k,Y]
-        n!v_XXL = neuralyze(v_XXL)
-        @mtensor n!v_XXL[X,Y,L] -= vU_ooXL[l,k,Y,L] * UTooX[l,k,X]
+        @mtensor v_XXL[X,Y,L] -= vU_ooXL[l,k,Y,L] * UTooX[l,k,X]
         drop!(buf, vU_ooXL)
         t1 = print_time(EC, t1, "``v_X^{YL} -= v_{l}^{cL} U^{kY}_c U^{l}_{kX}``", 2)
       end
       # ``v_X^{YL} -= \hat v_{j}^{iL} U_{iX}^{jY}``
-      n!v_XXL = neuralyze(v_XXL)
-      @tensoropt n!v_XXL[X,Y,L] -= v!ooL[j,i,L] * UUooXX[j,i,X,Y]
+      @mtensor v_XXL[X,Y,L] -= v!ooL[j,i,L] * UUooXX[j,i,X,Y]
       t1 = print_time(EC, t1, "``v_X^{YL} -= \\hat v_{j}^{iL} U_{iX}^{jY}``", 2)
       d_XXL[:,X,L] = v_XXL
       drop!(buf, v_XXL, UUooXX)
@@ -948,7 +944,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
   d_XXLfile, d_XXL = mmap3idx(EC, "d_X^XL")
   for L in LBlks
     lenL = length(L)
-    v!d_XXL = @view d_XXL[:,:,L]
+    v!d_XXL = @mview d_XXL[:,:,L]
     # ``R_{XY} += v_X^{X'L} T_{X'Y'} v_Y^{Y'L}``
     Tv_XXL = alloc!(buf, nX, nX, lenL)
     @mtensor Tv_XXL[Y,X',L] = dT2[X',Y'] * v!d_XXL[Y,Y',L]
@@ -989,8 +985,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
       else
         T_voX = alloc!(buf, nvirt, nocc, nX)
         @mtensor T_voX[a,i,X] = T2[a,b,i,j] * UvoX[b,j,X]
-        n!RR2 = neuralyze(RR2)
-        @mtensor n!RR2[a,b,i,j] -= vᵥᵒˣ[a,i,X] * T_voX[b,j,X]
+        @mtensor RR2[a,b,i,j] -= vᵥᵒˣ[a,i,X] * T_voX[b,j,X]
         drop!(buf, T_voX)
         t1 = print_time(EC, t1, "``R_{ab}^{ij} -= v_a^{iX} T_{cb}^{kj} U^{c}_{kX}``", 2)
       end
@@ -1007,8 +1002,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     W_XX = alloc!(buf, nX, nX)
     W_voX = alloc!(buf, nvirt, nocc, nX)
     @mtensor W_voX[a,i,X] = x_vv[a,c] * UvoX[c,i,X] - x_oo[k,i] * UvoX[a,k,X] - vᵥᵒˣ[a,i,X]
-    n!W_XX = neuralyze(W_XX)
-    @mtensor n!W_XX[X,X'] = W_voX[a,i,X'] * UvoX[a,i,X]
+    @mtensor W_XX[X,X'] = W_voX[a,i,X'] * UvoX[a,i,X]
     drop!(buf, W_voX)
     t1 = print_time(EC, t1, "``W_X^{X'} = (x_a^c U^{iX'}_{c} - x_k^i U^{kX'}_{a} - v_a^{iX'}) U^{†a}_{iX}``", 2)
     # ``R_{XY} += W_X^{X'} T_{X'Y} + T_{XY'} W_{Y}^{Y'}``
@@ -1017,6 +1011,7 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
     t1 = print_time(EC, t1, "``R_{XY} += W_X^{X'} T_{X'Y} + T_{XY'} W_{Y}^{Y'}``", 2)
   end
   # end # print buffer usage
+  end # buffer
   return R1, R2
 end
 

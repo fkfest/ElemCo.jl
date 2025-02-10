@@ -2,8 +2,7 @@
 This module contains functions for tensor decomposition methods.
 """
 module DecompTools
-using LinearAlgebra, TensorOperations
-# using TSVD
+using LinearAlgebra
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
@@ -24,7 +23,7 @@ function calc_integrals_decomposition(EC::ECInfo)
   pqrs = permutedims(ints2(EC,"::::",:α),(1,3,2,4))
   n = size(pqrs,1)
   if EC.options.cc.usecholesky
-    CA = cholesky(Symmetric(reshape(pqrs, (n^2,n^2))), RowMaximum(), check = false, tol = EC.options.cholesky.thr)
+    CA = cholesky(Hermitian(reshape(pqrs, (n^2,n^2))), RowMaximum(), check = false, tol = EC.options.cholesky.thr)
     pqrs = nothing
     naux1 = CA.rank
     pqP = CA.U[1:naux1,invperm(CA.p)]'
@@ -83,7 +82,7 @@ end
   Return ``U^iX_a`` as `U[a,i,X]` for ``T_{XX}`` > `tol`
 """
 function eigen_decompose(T2mat, nvirt, nocc, tol=1e-6)
-  Tval, U = eigen(Symmetric(-T2mat))
+  Tval, U = eigen(Hermitian(-T2mat))
   naux = 0
   for s in Tval
     if -s < tol
@@ -162,10 +161,10 @@ function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
     end
   end
 
-  @tensoropt Fdiff[X,Y] := UaiX[a,i,X] * UaiX2[a,i,Y]
-  diagFdiff = eigen(Symmetric(Fdiff))
+  @mtensor Fdiff[X,Y] := UaiX[a,i,X] * UaiX2[a,i,Y]
+  diagFdiff = eigen(Hermitian(Fdiff))
 
-  @tensoropt UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
+  @mtensor UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
   return diagFdiff.values, UaiX2
 end
 

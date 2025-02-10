@@ -34,28 +34,26 @@ function calc_dfmp2(EC::ECInfo)
   Pbatches = BasisBatcher(bao, bfit)
   maxP = max_batch_length(Pbatches)
   lenbuf = auto_calc_buffer_length4calc_dfmp2(nocc, nvir, nA, nL, maxP, nocc)
-  buf = Buffer(lenbuf)
-  # @print_buffer_usage buf begin
   lencbuf = buffer_size_3idx(Pbatches)
-  cbuf = Buffer{Cdouble}(lencbuf)
+  @buffer buf(lenbuf) begin
+  @buffer cbuf(Cdouble, lencbuf) begin
+  # @print_buffer_usage buf begin
   for Pblk in Pbatches
     P = range(Pblk)
     lenP = length(P)
     oAP = alloc!(buf, nocc, nA, lenP)
     AAP = alloc!(buf, nA, nA, lenP)
     eri_2e3idx!(AAP, cbuf, Pblk)
-    n!oAP = neuralyze(oAP)
-    @mtensor n!oAP[i,ν,P] = c_Ao[μ,i] * AAP[μ,ν,P]
+    @mtensor oAP[i,ν,P] = c_Ao[μ,i] * AAP[μ,ν,P]
     drop!(buf, AAP)
     voP = alloc!(buf, nvir, nocc, lenP)
-    n!voP = neuralyze(voP)
-    @mtensor n!voP[a,i,P] = c_Av[ν,a] * oAP[i,ν,P]
+    @mtensor voP[a,i,P] = c_Av[ν,a] * oAP[i,ν,P]
     M_PL = alloc!(buf, lenP, nL)
     M_PL .= @view C_PL[P,:]
     @mtensor Lvo[L,a,i] += voP[a,i,P] * M_PL[P,L]
     drop!(buf, oAP, voP, M_PL)
   end
-  cbuf = nothing
+  end #cbuf buffer
   t1 = print_time(EC, t1, "DF-MP2: 3-index integrals", 1)
   # Compute MP2 energy
   eps = load1idx(EC, "e_m")
@@ -74,8 +72,8 @@ function calc_dfmp2(EC::ECInfo)
   for j = 1:nocc
     irange = 1:j
     leni = length(irange)
-    v!Lvj = @view Lvo[:,:,j]
-    v!Lvi = @view Lvo[:,:,irange]
+    v!Lvj = @mview Lvo[:,:,j]
+    v!Lvi = @mview Lvo[:,:,irange]
     vvij = alloc!(buf, nvir, nvir, leni)
     @mtensor vvij[a,b,i] = v!Lvi[L,a,i] * v!Lvj[L,b]
     t_vvij = alloc!(buf, nvir, nvir, leni)
@@ -87,13 +85,13 @@ function calc_dfmp2(EC::ECInfo)
     end
     drop!(buf, eij)
     if leni > 1
-      v!vvij = @view vvij[:,:,1:leni-1]
-      v!t_vvij = @view t_vvij[:,:,1:leni-1]
+      v!vvij = @mview vvij[:,:,1:leni-1]
+      v!t_vvij = @mview t_vvij[:,:,1:leni-1]
       @mtensor EMP2d += v!vvij[a,b,i] * v!t_vvij[a,b,i]
       @mtensor EMP2ex += v!vvij[a,b,i] * v!t_vvij[b,a,i]
     end
-    v!vvii = @view vvij[:,:,j]
-    v!t_vvii = @view t_vvij[:,:,j]
+    v!vvii = @mview vvij[:,:,j]
+    v!t_vvii = @mview t_vvij[:,:,j]
     @mtensor EMP2diag += v!vvii[a,b] * v!t_vvii[a,b]
     drop!(buf, vvij, t_vvij)
     if savet2
@@ -106,6 +104,7 @@ function calc_dfmp2(EC::ECInfo)
   end
   t1 = print_time(EC, t1, "energy calculation", 1)
   # end # print_buffer_usage
+  end # buf buffer
   EMP2SS = 2*EMP2d - 2*EMP2ex
   EMP2OS = 2*EMP2d + EMP2diag
   EMP2 = EMP2SS + EMP2OS

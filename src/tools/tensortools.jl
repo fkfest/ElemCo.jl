@@ -4,6 +4,8 @@
 module TensorTools
 using LinearAlgebra
 using TensorOperations
+# using ElemCoTensorOperations
+using StridedViews
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
@@ -17,7 +19,16 @@ export ints2!, detri_int2!
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
 export print_nonzeros
-export @mtensor
+export @mtensor, @mtensoropt
+export @tensor, @tensoropt # reexport @tensor, @tensoropt
+export @mview, mview
+
+save_tensorcalls() = false
+
+if save_tensorcalls()
+  include("tensoranalyzer.jl")
+  write_header4tensorcalls()
+end
 
 """
     mtensor(ex)
@@ -25,11 +36,68 @@ export @mtensor
 Macro for tensor operations with manual allocator.
 """
 macro mtensor(ex)
-  # TODO: activate manual allocator
-  # return esc(:(@tensor allocator = TensorOperations.ManualAllocator() $ex))
+  if save_tensorcalls()
+    print_tensor4tensorcalls(Symbol("@tensor"), ex)
+  end
   return esc(:(@tensor $ex))
+  # TODO: activate manual allocator
+  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
 end
 
+macro mtensoropt(args::Vararg{Expr})
+  if save_tensorcalls()
+    print_tensor4tensorcalls(Symbol("@tensoropt"), args...)
+  end
+  return esc(:(@tensoropt $(args...)))
+  # TODO: activate manual allocator
+  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
+end
+
+"""
+    @mview(ex)
+
+  StridedView based version of `@view`.
+"""
+macro mview(ex)
+  # NOTE it's largely based on the @view macro from Base.
+  Meta.isexpr(ex, :ref) || throw(ArgumentError(
+      "Invalid use of @mview macro: argument must be a reference expression A[...]."))
+  ex = Base.replace_ref_begin_end!(ex)
+  # NOTE We embed `view` as a function object itself directly into the AST.
+  #      By doing this, we prevent the creation of function definitions like
+  #      `view(A, idx) = xxx` in cases such as `@view(A[idx]) = xxx.`
+  if Meta.isexpr(ex, :ref)
+      ex = Expr(:call, mview, ex.args...)
+  elseif Meta.isexpr(ex, :let) && (arg2 = ex.args[2]; Meta.isexpr(arg2, :ref))
+      # ex replaced by let ...; foo[...]; end
+      ex.args[2] = Expr(:call, mview, arg2.args...)
+  else
+      error("invalid expression")
+  end
+  return esc(ex)
+end
+
+"""
+    mview(arr, args...)
+
+  `StridedView` based version of `view`.
+
+  The data array is enforced to be a vector, such that the view is always a `StridedView{..., Vector{...},...}`.
+"""
+function mview(arr, args...)
+  return sview(reshape(view(vec(arr),:), size(arr)), args...)
+end
+
+"""
+    mview(arr::StridedView, args...)
+
+  StridedView based version of `view`, for `StridedView` input.
+
+  Simply calls `StridedViews.sview`.
+"""
+function mview(arr::StridedView, args...)
+  return sview(arr, args...)
+end
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)

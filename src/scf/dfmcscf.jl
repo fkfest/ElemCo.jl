@@ -1,5 +1,5 @@
 module DFMCSCF
-using LinearAlgebra, TensorOperations, Printf
+using LinearAlgebra, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.Integrals
@@ -26,8 +26,8 @@ function denMatCreate(EC::ECInfo)
   SP = EC.space
   nact = length(SP['o'])- length(SP['O']) 
   D1 = 1.0 * Matrix(I, nact, nact)
-  @tensoropt D2[t,u,v,w] := (D1[t,u]*D1[v,w] - D1[t,w]*D1[v,u]) * 0.5
-  @tensoropt D2[t,u,v,w] += (D1[u,t]*D1[v,w] - D1[u,w]*D1[v,t]) * 0.5
+  @mtensor D2[t,u,v,w] := (D1[t,u]*D1[v,w] - D1[t,w]*D1[v,u]) * 0.5
+  @mtensor D2[t,u,v,w] += (D1[u,t]*D1[v,w] - D1[u,w]*D1[v,t]) * 0.5
   return D1, D2
 end
 
@@ -48,19 +48,19 @@ function dffockCAS(EC::ECInfo, μνL, μjL, μuL, cMO::Matrix, D1::Matrix)
 
   # fockClosed
   hsmall = TensorTools.load(EC,"h_AA")
-  @tensoropt L[L] := μjL[μ,j,L] * CMO2[μ,j]
-  @tensoropt fockClosed[μ,ν] := hsmall[μ,ν] - μjL[μ,j,L]*μjL[ν,j,L]
-  @tensoropt fockClosed[μ,ν] += 2.0*L[L]*μνL[μ,ν,L]
+  @mtensor L[L] := μjL[μ,j,L] * CMO2[μ,j]
+  @mtensor fockClosed[μ,ν] := hsmall[μ,ν] - μjL[μ,j,L]*μjL[ν,j,L]
+  @mtensor fockClosed[μ,ν] += 2.0*L[L]*μνL[μ,ν,L]
 
   # fock
   fock =  deepcopy(fockClosed)
-  @tensoropt μuLD[μ,t,L] := μuL[μ,u,L] * D1[t,u]
-  @tensoropt fock[μ,ν] -= 0.5 * μuLD[μ,t,L] * μuL[ν,t,L]
-  @tensoropt LD[L] := μuLD[μ,t,L] * CMOa[μ,t]
-  @tensoropt fock[μ,ν] += LD[L] * μνL[μ,ν,L]
+  @mtensor μuLD[μ,t,L] := μuL[μ,u,L] * D1[t,u]
+  @mtensor fock[μ,ν] -= 0.5 * (μuLD[μ,t,L] * μuL[ν,t,L])
+  @mtensor LD[L] := μuLD[μ,t,L] * CMOa[μ,t]
+  @mtensor fock[μ,ν] += LD[L] * μνL[μ,ν,L]
 
-  @tensoropt fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
-  @tensoropt fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
+  @mtensor fock_MO[r,s] := (fock[μ,ν] * cMO[μ,r]) * cMO[ν,s]
+  @mtensor fockClosed_MO[r,s] := (fockClosed[μ,ν] * cMO[μ,r]) * cMO[ν,s]
   return fock_MO, fockClosed_MO
 end
 
@@ -77,8 +77,8 @@ function dfACAS(EC::ECInfo, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO::Matrix, 
   # Apj
   Apj = fock_MO[:, occ2] .* 2.0
   # Apu
-  @tensoropt Apu[p,u] := fockClosed_MO[:,occ1o][p,v] * D1[v,u]
-  @tensoropt Apu[p,u] += (((μuL[ν,v,L] * CMOa[ν,w]) * D2[t,u,v,w]) * μuL[μ,t,L]) * cMO[μ,p]
+  @mtensor Apu[p,u] := fockClosed_MO[:,occ1o][p,v] * D1[v,u]
+  @mtensor Apu[p,u] += (((μuL[ν,v,L] * CMOa[ν,w]) * D2[t,u,v,w]) * μuL[μ,t,L]) * cMO[μ,p]
   A = zeros((size(cMO,2),size(cMO,2)))
   A[:,occ2] = Apj
   A[:,occ1o] = Apu
@@ -94,7 +94,7 @@ among which g21 = g[occ1o,occ2], g31 = g[occv,occ2], g22 = g[occ1o,occ1o], g32 =
 return vector g_blockwise
 """
 function calc_g(EC::ECInfo, A::Matrix)
-  @tensoropt g[r,s] := A[r,s] - A[s,r]
+  @mtensor g[r,s] := A[r,s] - A[s,r]
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
   occv = setdiff(1:size(A,1), EC.space['o'])
@@ -128,10 +128,10 @@ function G_risj_calc(typer::Integer, types::Integer, num_MO, index_MO, fock_MO::
   sjL = DFint_MO[types][1] #2,3
   rsL = DFint_MO[typer][types] #22,32,33
   ijL = DFint_MO[1][1]
-  @tensoropt G_risj[r,i,s,j] += fock_rs[r,s] * Iij[i,j] * 2.0
-  @tensoropt G_risj[r,i,s,j] += riL[r,i,L] * sjL[s,j,L] * 8.0
-  @tensoropt G_risj[r,i,s,j] -= sjL[s,i,L] * riL[r,j,L] * 2.0
-  @tensoropt G_risj[r,i,s,j] -= rsL[r,s,L] * ijL[i,j,L] * 2.0
+  @mtensor G_risj[r,i,s,j] += fock_rs[r,s] * Iij[i,j] * 2.0
+  @mtensor G_risj[r,i,s,j] += riL[r,i,L] * sjL[s,j,L] * 8.0
+  @mtensor G_risj[r,i,s,j] -= sjL[s,i,L] * riL[r,j,L] * 2.0
+  @mtensor G_risj[r,i,s,j] -= rsL[r,s,L] * ijL[i,j,L] * 2.0
   return G_risj
 end
 
@@ -151,17 +151,17 @@ function G_rtsj_calc(typer::Integer,types::Integer, num_MO, DFint_MO, D1::Matrix
   rsL = DFint_MO[typer][types] #12,13,22,23,32,33 
   vjL = DFint_MO[2][1]
   if typer < 2
-    @tensoropt G_rvsj[r,v,s,j] += rvL[v,r,L] * sjL[s,j,L] * 4.0
+    @mtensor G_rvsj[r,v,s,j] += rvL[v,r,L] * sjL[s,j,L] * 4.0
   else
-    @tensoropt G_rvsj[r,v,s,j] += rvL[r,v,L] * sjL[s,j,L] * 4.0
+    @mtensor G_rvsj[r,v,s,j] += rvL[r,v,L] * sjL[s,j,L] * 4.0
   end
-  @tensoropt G_rvsj[r,v,s,j] -= svL[s,v,L] * rjL[r,j,L]
+  @mtensor G_rvsj[r,v,s,j] -= svL[s,v,L] * rjL[r,j,L]
   if typer < types
-    @tensoropt G_rvsj[r,v,s,j] -= rsL[s,r,L] * vjL[v,j,L]
+    @mtensor G_rvsj[r,v,s,j] -= rsL[s,r,L] * vjL[v,j,L]
   else
-    @tensoropt G_rvsj[r,v,s,j] -= rsL[r,s,L] * vjL[v,j,L]
+    @mtensor G_rvsj[r,v,s,j] -= rsL[r,s,L] * vjL[v,j,L]
   end
-  @tensoropt G_rtsj[r,t,s,j] := D1[t,v] * G_rvsj[r,v,s,j]
+  @mtensor G_rtsj[r,t,s,j] := D1[t,v] * G_rvsj[r,v,s,j]
   G_rvsj = 0 
   return G_rtsj
 end  
@@ -180,19 +180,19 @@ function G_rtsu_calc(typer::Integer,types::Integer, num_MO, index_MO, DFint_MO, 
   vwL = DFint_MO[2][2]
   swL = DFint_MO[types][2] #1,2,3 
   rvL = DFint_MO[typer][2] #1,2,3 
-  @tensoropt G_rtsu[r,t,s,u] += fockClosed_rs[r,s] * D1[t,u]
-  @tensoropt G_rtsu[r,t,s,u] += rsL[r,s,L] * vwL[v,w,L] * D2[t,u,v,w]
+  @mtensor G_rtsu[r,t,s,u] += fockClosed_rs[r,s] * D1[t,u]
+  @mtensor G_rtsu[r,t,s,u] += rsL[r,s,L] * (vwL[v,w,L] * D2[t,u,v,w])
   if types < 2
     if typer < 2
-      @tensoropt G_rtsu[r,t,s,u] += rvL[v,r,L] * swL[w,s,L] * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += (rvL[v,r,L] * swL[w,s,L]) * D2[t,v,u,w] * 2.0
     else
-      @tensoropt G_rtsu[r,t,s,u] += rvL[r,v,L] * swL[w,s,L] * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += (rvL[r,v,L] * swL[w,s,L]) * D2[t,v,u,w] * 2.0
     end
   else
     if typer < 2
-      @tensoropt G_rtsu[r,t,s,u] += rvL[v,r,L] * swL[s,w,L] * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += (rvL[v,r,L] * swL[s,w,L]) * D2[t,v,u,w] * 2.0
     else
-      @tensoropt G_rtsu[r,t,s,u] += rvL[r,v,L] * swL[s,w,L] * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += (rvL[r,v,L] * swL[s,w,L]) * D2[t,v,u,w] * 2.0
     end
   end
   fockClosed_rs = 0
@@ -213,31 +213,31 @@ function h_calc_fixed(num_MO, index_MO, D1::Matrix, D2, fockClosed_MO::Matrix, A
 
   # h_2221 --> G2221, G2212 each for twice
   G_2221 = G_rtsj_calc(2,2, num_MO, DFint_MO, D1)
-  @tensoropt h_2221[t,u,v,i] := G_2221[t,u,v,i] * 2.0 - G_2221[u,t,v,i] * 2.0
+  @mtensor h_2221[t,u,v,i] := G_2221[t,u,v,i] * 2.0 - G_2221[u,t,v,i] * 2.0
   G_2212 = G_rtsu_calc(2,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  @tensoropt h_2221[t,u,v,i] += -2.0 * G_2212[t,u,i,v] + 2.0 * G_2212[u,t,i,v]
-  @tensoropt h_2221[t,u,v,i] += Itu[u,v] * A[occ1o,occ2][t,i]
-  @tensoropt h_2221[t,u,v,i] -= Itu[t,v] * A[occ1o,occ2][u,i]
+  @mtensor h_2221[t,u,v,i] += -2.0 * G_2212[t,u,i,v] + 2.0 * G_2212[u,t,i,v]
+  @mtensor h_2221[t,u,v,i] += Itu[u,v] * A[occ1o,occ2][t,i]
+  @mtensor h_2221[t,u,v,i] -= Itu[t,v] * A[occ1o,occ2][u,i]
   G_2221 = 0
   G_2212 = 0
 
   # h_2231 --> G2231 twice
   G_2231 = G_rtsj_calc(2,3, num_MO, DFint_MO, D1)
-  @tensoropt h_2231[t,u,a,i] := G_2231[t,u,a,i] * 2.0 - G_2231[u,t,a,i] * 2.0
+  @mtensor h_2231[t,u,a,i] := G_2231[t,u,a,i] * 2.0 - G_2231[u,t,a,i] * 2.0
   G_2231 = 0
 
   # h_2222 --> G2222
   G_2222 = G_rtsu_calc(2,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
   G_2222 .= G_2222 .* 2.0
-  @tensoropt G_2222[t,u,v,w] -= Itu[u,w] * A[occ1o,occ1o][t,v]
-  @tensoropt h_2222[t,u,v,w] := G_2222[t,u,v,w] - G_2222[u,t,v,w] - G_2222[t,u,w,v] + G_2222[u,t,w,v]
+  @mtensor G_2222[t,u,v,w] -= Itu[u,w] * A[occ1o,occ1o][t,v]
+  @mtensor h_2222[t,u,v,w] := G_2222[t,u,v,w] - G_2222[u,t,v,w] - G_2222[t,u,w,v] + G_2222[u,t,w,v]
   G_2222 = 0
 
   # h_3222 --> G3222 twice
   G_3222 = G_rtsu_calc(3,2, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
   G_3222 .= G_3222 .* 2.0
-  @tensoropt G_3222[a,t,u,v] -= Itu[t,v] * A[occv,occ1o][a,u]
-  @tensoropt h_3222[a,t,u,v] := G_3222[a,t,u,v] - G_3222[a,t,v,u]
+  @mtensor G_3222[a,t,u,v] -= Itu[t,v] * A[occv,occ1o][a,u]
+  @mtensor h_3222[a,t,u,v] := G_3222[a,t,u,v] - G_3222[a,t,v,u]
   G_3222 = 0 
   return h_2221, h_2231, h_2222, h_3222
 end
@@ -257,18 +257,18 @@ function h_calc_SOpart(num_MO, index_MO, DFint_MO, D1::Matrix, D2, fock_MO::Matr
   h_3221 = G_rtsj_calc(3,2, num_MO, DFint_MO, D1)
   h_3221 .= h_3221 .* 2
   G_3212 = G_rtsu_calc(3,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  @tensoropt h_3221[a,t,u,i] -= G_3212[a,t,i,u] * 2.0 - Itu[t,u] * A[occv,occ2][a,i]
+  @mtensor h_3221[a,t,u,i] -= G_3212[a,t,i,u] * 2.0 - Itu[t,u] * A[occv,occ2][a,i]
   G_3212 = 0
 
   h_2121 = G_risj_calc(2,2, num_MO, index_MO, fock_MO, DFint_MO)
   h_2121 .= h_2121 .* 2.0
-  @tensoropt h_2121[t,i,u,j] -= Iij[i,j] * A[occ1o,occ1o][t,u]
+  @mtensor h_2121[t,i,u,j] -= Iij[i,j] * A[occ1o,occ1o][t,u]
   G_1221 = G_rtsj_calc(1,2, num_MO, DFint_MO, D1)
-  @tensoropt h_2121[t,i,u,j] -= G_1221[i,t,u,j] * 2.0
-  @tensoropt h_2121[t,i,u,j] -= G_1221[j,u,t,i] * 2.0
+  @mtensor h_2121[t,i,u,j] -= G_1221[i,t,u,j] * 2.0
+  @mtensor h_2121[t,i,u,j] -= G_1221[j,u,t,i] * 2.0
   G_1212 = G_rtsu_calc(1,1, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
-  @tensoropt h_2121[t,i,u,j] += G_1212[i,t,j,u] * 2.0
-  @tensoropt h_2121[t,i,u,j] -= Itu[t,u] * A[occ2,occ2][i,j]
+  @mtensor h_2121[t,i,u,j] += G_1212[i,t,j,u] * 2.0
+  @mtensor h_2121[t,i,u,j] -= Itu[t,u] * A[occ2,occ2][i,j]
   G_1221 = 0
   G_1212 = 0
 
@@ -294,11 +294,11 @@ function calc_h_SO(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Matrix, D2, foc
   A = A + A'
 
   # precalculate the density fitting integrals in molecular orbital basis
-  @tensoropt ijL[i,j,L] := μjL[μ,j,L] * cMO[:,occ2][μ,i]
-  @tensoropt tiL[t,i,L] := μjL[μ,i,L] * cMO[:,occ1o][μ,t]
-  @tensoropt aiL[a,i,L] := μjL[μ,i,L] * cMO[:,occv][μ,a]
-  @tensoropt tuL[t,u,L] := μuL[μ,u,L] * cMO[:,occ1o][μ,t]
-  @tensoropt atL[a,t,L] := μuL[μ,t,L] * cMO[:,occv][μ,a]
+  @mtensor ijL[i,j,L] := μjL[μ,j,L] * cMO[:,occ2][μ,i]
+  @mtensor tiL[t,i,L] := μjL[μ,i,L] * cMO[:,occ1o][μ,t]
+  @mtensor aiL[a,i,L] := μjL[μ,i,L] * cMO[:,occv][μ,a]
+  @mtensor tuL[t,u,L] := μuL[μ,u,L] * cMO[:,occ1o][μ,t]
+  @mtensor atL[a,t,L] := μuL[μ,t,L] * cMO[:,occv][μ,a]
 
   DFint_MO = [[ijL,tiL,aiL],[tiL,tuL,atL],[aiL,atL,abL]]
   Iij = 1.0 * Matrix(I,n_2,n_2)
@@ -309,24 +309,24 @@ function calc_h_SO(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Matrix, D2, foc
   # h_3131 ==> G3131 needed, the largest and most memory consuming part
   h_3131 = G_risj_calc(3,3, num_MO, index_MO, fock_MO, DFint_MO)
   h_3131 .= h_3131 .* 2.0
-  @tensoropt h_3131[a,i,b,j] -= Iab[a,b] * A[occ2,occ2][i,j]
+  @mtensor h_3131[a,i,b,j] -= Iab[a,b] * A[occ2,occ2][i,j]
 
   # h_3121 --> G3121, G1231 needed
   h_3121 = G_risj_calc(3,2, num_MO, index_MO, fock_MO, DFint_MO)
   h_3121 .= h_3121 .* 2.0
-  @tensoropt h_3121[a,i,t,j] -= Iij[i,j] * A[occv,occ1o][a,t]
+  @mtensor h_3121[a,i,t,j] -= Iij[i,j] * A[occv,occ1o][a,t]
   G_1231 = G_rtsj_calc(1,3, num_MO, DFint_MO, D1)
-  @tensoropt h_3121[a,i,t,j] -= G_1231[j,t,a,i] * 2.0
+  @mtensor h_3121[a,i,t,j] -= G_1231[j,t,a,i] * 2.0
 
   # h_3231 --> G3231
   h_3231 = G_rtsj_calc(3,3, num_MO, DFint_MO, D1)
   h_3231 .= 2.0 .* h_3231
-  @tensoropt h_3231[a,t,b,i] -= Iab[a,b] * A[occ1o,occ2][t,i]
+  @mtensor h_3231[a,t,b,i] -= Iab[a,b] * A[occ1o,occ2][t,i]
 
   # h_3232 --> G3232
   h_3232 = G_rtsu_calc(3,3, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
   h_3232 .= h_3232 .* 2.0
-  @tensoropt h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
+  @mtensor h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
 
   h_2221, h_2231, h_2222, h_3222 = h_calc_fixed(num_MO, index_MO, D1, D2, fockClosed_MO, A, DFint_MO)
 
@@ -363,11 +363,11 @@ function calc_h_SO_SCI_original(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Ma
   A = A + A'
 
   # precalculate the density fitting integrals in molecular orbital basis
-  @tensoropt ijL[i,j,L] := μjL[μ,j,L] * cMO[:,occ2][μ,i]
-  @tensoropt tiL[t,i,L] := μjL[μ,i,L] * cMO[:,occ1o][μ,t]
-  @tensoropt aiL[a,i,L] := μjL[μ,i,L] * cMO[:,occv][μ,a]
-  @tensoropt tuL[t,u,L] := μuL[μ,u,L] * cMO[:,occ1o][μ,t]
-  @tensoropt atL[a,t,L] := μuL[μ,t,L] * cMO[:,occv][μ,a]
+  @mtensor ijL[i,j,L] := μjL[μ,j,L] * cMO[:,occ2][μ,i]
+  @mtensor tiL[t,i,L] := μjL[μ,i,L] * cMO[:,occ1o][μ,t]
+  @mtensor aiL[a,i,L] := μjL[μ,i,L] * cMO[:,occv][μ,a]
+  @mtensor tuL[t,u,L] := μuL[μ,u,L] * cMO[:,occ1o][μ,t]
+  @mtensor atL[a,t,L] := μuL[μ,t,L] * cMO[:,occv][μ,a]
 
   DFint_MO = [[ijL,tiL,aiL],[tiL,tuL,atL],[aiL,atL,abL]]
   Iab = 1.0 * Matrix(I,n_v,n_v)
@@ -379,7 +379,7 @@ function calc_h_SO_SCI_original(EC::ECInfo, μjL, μuL, abL, cMO::Matrix, D1::Ma
   # h_3232 --> G3232
   h_3232 = G_rtsu_calc(3,3, num_MO, index_MO, DFint_MO, D1, D2, fockClosed_MO)
   h_3232 .= h_3232 .* 2.0
-  @tensoropt h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
+  @mtensor h_3232[a,t,b,u] -= Iab[a,b] * A[occ1o,occ1o][t,u]
   
   h_3221, h_2121 = h_calc_SOpart(num_MO, index_MO, DFint_MO, D1, D2, fock_MO, fockClosed_MO, A)
   h_2221, h_2231, h_2222, h_3222 = h_calc_fixed(num_MO, index_MO, D1, D2, fockClosed_MO, A, DFint_MO)
@@ -415,11 +415,11 @@ function calc_h_SCI(EC::ECInfo, μjL, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO
   A = A + A'
 
   # precalculate the density fitting integrals in molecular orbital basis
-  @tensoropt ijL[i,j,L] := μjL[μ,j,L] * cMO[:,occ2][μ,i]
-  @tensoropt tiL[t,i,L] := μjL[μ,i,L] * cMO[:,occ1o][μ,t]
-  @tensoropt aiL[a,i,L] := μjL[μ,i,L] * cMO[:,occv][μ,a]
-  @tensoropt tuL[t,u,L] := μuL[μ,u,L] * cMO[:,occ1o][μ,t]
-  @tensoropt atL[a,t,L] := μuL[μ,t,L] * cMO[:,occv][μ,a]
+  @mtensor ijL[i,j,L] := μjL[μ,j,L] * cMO[:,occ2][μ,i]
+  @mtensor tiL[t,i,L] := μjL[μ,i,L] * cMO[:,occ1o][μ,t]
+  @mtensor aiL[a,i,L] := μjL[μ,i,L] * cMO[:,occv][μ,a]
+  @mtensor tuL[t,u,L] := μuL[μ,u,L] * cMO[:,occ1o][μ,t]
+  @mtensor atL[a,t,L] := μuL[μ,t,L] * cMO[:,occv][μ,a]
 
   DFint_MO = [[ijL,tiL,aiL],[tiL,tuL,atL],[aiL,atL,abL]]
   Iij = 1.0 * Matrix(I,n_2,n_2)
@@ -432,8 +432,8 @@ function calc_h_SCI(EC::ECInfo, μjL, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO
 
   if HessianType == :SCI
     h_3221 = zeros(n_v,n_1o,n_1o,n_2)
-    @tensoropt h_2121[t,i,u,j] := (2*D1[t,u] - 4*Itu[t,u]) * fock_MO[occ2,occ2][i,j] 
-    @tensoropt h_2121[t,i,u,j] += 2 * Iij[i,j] * (2*fock_MO[occ1o,occ1o][t,u] 
+    @mtensor h_2121[t,i,u,j] := (2*D1[t,u] - 4*Itu[t,u]) * fock_MO[occ2,occ2][i,j] 
+    @mtensor h_2121[t,i,u,j] += 2 * Iij[i,j] * (2*fock_MO[occ1o,occ1o][t,u] 
       -(D2[t,u,v,w] - D1[t,u]*D1[v,w]) * fock_MO[occ1o,occ1o][v,w]
       -D1[t,v] * fock_MO[occ1o,occ1o][v,u] - D1[v,u] * fock_MO[occ1o,occ1o][t,v])    
   elseif HessianType == :SO_SCI
@@ -441,8 +441,8 @@ function calc_h_SCI(EC::ECInfo, μjL, μuL, cMO::Matrix, D1::Matrix, D2, fock_MO
   end
 
   # h_3232
-  @tensoropt h_3232[a,t,b,u] := 2.0 * Iab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock_MO[occ1o,occ1o][v,w] 
-  @tensoropt h_3232[a,t,b,u] += 2.0 * D1[t,u] * fock_MO[occv,occv][a,b]
+  @mtensor h_3232[a,t,b,u] := 2.0 * Iab[a,b] * (D2[t,u,v,w] - D1[t,u] * D1[v,w]) * fock_MO[occ1o,occ1o][v,w] 
+  @mtensor h_3232[a,t,b,u] += 2.0 * D1[t,u] * fock_MO[occv,occv][a,b]
 
   h_2221, h_2231, h_2222, h_3222 = h_calc_fixed(num_MO, index_MO, D1, D2, fockClosed_MO, A, DFint_MO)
 
@@ -468,11 +468,11 @@ function calc_realE(EC::ECInfo, μuL, fockClosed_MO::Matrix, D1::Matrix, D2, cMO
   hsmall = TensorTools.load(EC,"h_AA")
   CMO2 = cMO[:,occ2] 
   CMOa = cMO[:,occ1o]
-  @tensoropt E = CMO2[μ,i] * hsmall[μ,ν] * CMO2[ν,i]
+  @mtensor E = CMO2[μ,i] * hsmall[μ,ν] * CMO2[ν,i]
   E += tr(fockClosed_MO[occ2,occ2])
   E += sum(fockClosed_MO[occ1o, occ1o] .* D1)
-  @tensoropt tuL[t,u,L] := μuL[μ,u,L] * CMOa[μ,t]
-  @tensoropt tuvw[t,u,v,w] := tuL[t,u,L] * tuL[v,w,L]
+  @mtensor tuL[t,u,L] := μuL[μ,u,L] * CMOa[μ,t]
+  @mtensor tuvw[t,u,v,w] := tuL[t,u,L] * tuL[v,w,L]
   E += 0.5 * sum(D2 .* tuvw)
   return E
 end
@@ -490,17 +490,17 @@ function Hx_common(h_2121, h_2221, h_3221, h_2231, h_2222, h_3222, h_3232, x)
   x31 = x[n21+1:n21+n31]
   x22 = x[n21+n31+1:n21+n31+n22]
   x32 = x[n21+n31+n22+1:end]
-  @tensoropt σ21[n] := h_2121[n,m] * x21[m]
-  @tensoropt σ21[n] += h_2221[m,n] * x22[m]
-  @tensoropt σ21[n] += h_3221[m,n] * x32[m]
-  @tensoropt σ31[n] := h_2231[m,n] * x22[m]
-  @tensoropt σ22[n] := h_2221[n,m] * x21[m]
-  @tensoropt σ22[n] += h_2231[n,m] * x31[m]
-  @tensoropt σ22[n] += h_2222[n,m] * x22[m]
-  @tensoropt σ22[n] += h_3222[m,n] * x32[m]
-  @tensoropt σ32[n] := h_3221[n,m] * x21[m]
-  @tensoropt σ32[n] += h_3222[n,m] * x22[m]
-  @tensoropt σ32[n] += h_3232[n,m] * x32[m]
+  @mtensor σ21[n] := h_2121[n,m] * x21[m]
+  @mtensor σ21[n] += h_2221[m,n] * x22[m]
+  @mtensor σ21[n] += h_3221[m,n] * x32[m]
+  @mtensor σ31[n] := h_2231[m,n] * x22[m]
+  @mtensor σ22[n] := h_2221[n,m] * x21[m]
+  @mtensor σ22[n] += h_2231[n,m] * x31[m]
+  @mtensor σ22[n] += h_2222[n,m] * x22[m]
+  @mtensor σ22[n] += h_3222[m,n] * x32[m]
+  @mtensor σ32[n] := h_3221[n,m] * x21[m]
+  @mtensor σ32[n] += h_3222[n,m] * x22[m]
+  @mtensor σ32[n] += h_3232[n,m] * x32[m]
   return [σ21;σ31;σ22;σ32]
 end
 
@@ -518,12 +518,12 @@ function Hx_SO(h_3131, h_3231, h_3121, x, num_MO)
   x21 = x[1:n21] 
   x31 = x[n21+1:n21+n31]
   x32 = x[n21+n31+n22+1:end]
-  @tensoropt σ21[n] := h_3121[m,n] * x31[m]
-  @tensoropt σ31[n] := h_3131[n,m] * x31[m]
-  @tensoropt σ31[n] += h_3231[m,n] * x32[m]
-  @tensoropt σ31[n] += h_3121[n,m] * x21[m]
+  @mtensor σ21[n] := h_3121[m,n] * x31[m]
+  @mtensor σ31[n] := h_3131[n,m] * x31[m]
+  @mtensor σ31[n] += h_3231[m,n] * x32[m]
+  @mtensor σ31[n] += h_3121[n,m] * x21[m]
   σ22 = zeros(n22)
-  @tensoropt σ32[n] := h_3231[n,m] * x31[m]
+  @mtensor σ32[n] := h_3231[n,m] * x31[m]
   return [σ21;σ31;σ22;σ32]
 end
 
@@ -554,15 +554,15 @@ function Hx_SCI(EC::ECInfo, fock_MO::Matrix, cMO::Matrix, x::Vector, num_MO, D1:
   x32_r = reshape(x32, n_v, n_1o)
   x21_r = reshape(x21, n_1o, n_2)
   # σ21 = H_2131 * x31
-  @tensoropt σ21[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
+  @mtensor σ21[u,i] := (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x31_r[a,i]
   σ21 = reshape(σ21, n_2*n_1o)
   # σ31 = H_3131 * x31 + H_3231 * x32 + H_3121 * x21
-  @tensoropt σ31[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
-  @tensoropt σ31[a,i] += -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
-  @tensoropt σ31[a,i] += (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
+  @mtensor σ31[a,i] := 4.0 * Fab[a,b] * x31_r[b,i] - 4.0 * Fij[i,j] * x31_r[a,j]
+  @mtensor σ31[a,i] += -2.0 * Fiv[i,v] * x32_r[a,u] * D1[v,u]
+  @mtensor σ31[a,i] += (-2.0 * Fav[a,v] * D1[v,u] + 4.0 * Fau[a,u])* x21_r[u,i]
   σ31 = reshape(σ31, n_2*n_v)
   # σ32 = H_3231 * x31
-  @tensoropt σ32[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
+  @mtensor σ32[b,u] := -2.0 * Fiv[i,v] * x31_r[b,i] * D1[v,u]
   σ22 = zeros(n22)
   σ32 = reshape(σ32, n_1o*n_v)
   return [σ21;σ31;σ22;σ32]
@@ -945,8 +945,8 @@ function dfmcscf(EC::ECInfo; direct=false)
   # macro loop, g and h updated
   while iteration_times < maxit && iteration_times < convIter
     # calc energy E with updated cMO
-    @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
-    @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
+    @mtensor μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
+    @mtensor μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
     fock_MO, fockClosed_MO= dffockCAS(EC, μνL, μjL, μuL, cMO, D1)
     E_former = E
     E = calc_realE(EC, μuL, fockClosed_MO, D1, D2, cMO)
@@ -977,8 +977,8 @@ function dfmcscf(EC::ECInfo; direct=false)
       if reject
         iteration_times -= 1
         cMO = prev_cMO
-        @tensoropt μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
-        @tensoropt μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
+        @mtensor μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
+        @mtensor μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
         g = deepcopy(prev_g)
         A = deepcopy(prev_A)
         E = E_former
@@ -1013,11 +1013,11 @@ function dfmcscf(EC::ECInfo; direct=false)
     end
     # calculate h with updated cMO
     if HessianType == :SO
-      @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
+      @mtensor abL[a,b,L] := (μνL[μ,ν,L] * cMO[:,occv][μ,a]) * cMO[:,occv][ν,b]
       h_block = calc_h_SO(EC, μjL, μuL, abL, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     elseif HessianType == :SO_SCI && EC.options.scf.SO_SCI_origin== true
-      @tensoropt abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
+      @mtensor abL[a,b,L] := (μνL[μ,ν,L] * cMO[:,occv][μ,a]) * cMO[:,occv][ν,b]
       h_block = calc_h_SO_SCI_original(EC, μjL, μuL, abL, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     else

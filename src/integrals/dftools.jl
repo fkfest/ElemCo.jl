@@ -2,7 +2,7 @@
 This module contains various utils for density fitting.
 """
 module DFTools
-using LinearAlgebra, TensorOperations
+using LinearAlgebra
 using Buffers
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
@@ -43,12 +43,11 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
   if save3idx
     Pbatches = BasisBatcher(bao, bfit, EC.options.int.target_batch_length)
     lencbuf = buffer_size_3idx(Pbatches)
-    cbuf = Buffer{Cdouble}(lencbuf)
     maxP = max_batch_length(Pbatches)
     nA = size(S_AA, 1)
     nL = size(M, 2)
     AALfile, AAL = newmmap(EC, "AAL", (nA,nA,nL))
-    buf = Buffer(nA*nA*maxP + nL*maxP)
+    @buffer buf(nA*nA*maxP + nL*maxP) cbuf(Cdouble, lencbuf) begin
     LBlks = get_spaceblocks(1:nL)
     first = true
     for Pblk in Pbatches
@@ -60,21 +59,22 @@ function generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
       M_PL .= @view M[P,:]
       if first
         for L in LBlks
-          v!M = @view M_PL[:,L]
-          v!AAL = @view AAL[:,:,L]
+          v!M = @mview M_PL[:,L]
+          v!AAL = @mview AAL[:,:,L]
           @mtensor v!AAL[p,q,L] = AAP[p,q,P] * v!M[P,L]
         end
         first = false
       else
         for L in LBlks
-          v!M = @view M_PL[:,L]
-          v!AAL = @view AAL[:,:,L]
+          v!M = @mview M_PL[:,L]
+          v!AAL = @mview AAL[:,:,L]
           @mtensor v!AAL[p,q,L] += AAP[p,q,P] * v!M[P,L]
         end
       end
       drop!(buf, AAP, M_PL) 
     end
     closemmap(EC, AALfile, AAL)
+    end #buffer
   else
     save!(EC, "C_PL", M)
   end
@@ -105,19 +105,19 @@ function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit"; 
   end
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  buf = Buffer(nmo*nao*maxL)
+  @buffer buf(nmo*nao*maxL) begin
   c_Am = cMO[1]
   c_AM = cMO[2]
   for L in LBlks
     lenL = length(L)
-    v!AAL = @view AAL[:,:,L]
-    v!mmL = @view mmL[:,:,L]
+    v!AAL = @mview AAL[:,:,L]
+    v!mmL = @mview mmL[:,:,L]
     mAL = alloc!(buf, nmo, nao, lenL)
     @mtensor mAL[p,ν,L] = c_Am[μ,p] * v!AAL[μ,ν,L]
     @mtensor v!mmL[p,q,L] = mAL[p,ν,L] * c_Am[ν,q]
     drop!(buf, mAL)
     if unrestricted
-      v!MML = @view MML[:,:,L]
+      v!MML = @mview MML[:,:,L]
       MAL = alloc!(buf, nmo, nao, lenL)
       @mtensor MAL[p,ν,L] = c_AM[μ,p] * v!AAL[μ,ν,L]
       @mtensor v!MML[p,q,L] = MAL[p,ν,L] * c_AM[ν,q]
@@ -129,6 +129,7 @@ function generate_3idx_integrals(EC::ECInfo, cMO::SpinMatrix, fitbasis="mpfit"; 
   if unrestricted
     closemmap(EC, MMLfile, MML)
   end
+  end #buffer
   return
 end
 

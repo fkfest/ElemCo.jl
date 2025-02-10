@@ -29,6 +29,7 @@ ints2
 
 ```@docs
 @mtensor
+@mview
 sqrtinvchol
 invchol
 rotate_eigenvectors_to_real
