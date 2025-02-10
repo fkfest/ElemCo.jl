@@ -96,6 +96,10 @@ export ODDict
 devel() = true
 const __VERSION__ = "0.13.1" * (devel() ? "+" : "")
 
+# const __VERSION__ = "0.13.1+"
+# devel() = last(__VERSION__) == "+"
+
+
 """
     __init__()
 
