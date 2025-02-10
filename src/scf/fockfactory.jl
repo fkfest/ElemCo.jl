@@ -276,12 +276,16 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
     AAP = alloc!(buf, nA, nA, lenP)
     eri_2e3idx!(AAP, cbuf, Pblk)
     @mtensor oAP[j,ν,P] = AAP[μ,ν,P] * CMOo[1][μ,j]
-    @mtensor OAP[j,ν,P] = AAP[μ,ν,P] * CMOo[2][μ,j]
+    if nOcc > 0
+      @mtensor OAP[j,ν,P] = AAP[μ,ν,P] * CMOo[2][μ,j]
+    end
     drop!(buf, AAP)
     M_PL = alloc!(buf, lenP, nL)
     M_PL .= @view PL[P,:]
     @mtensor LoA[L,j,ν] += oAP[j,ν,P] * M_PL[P,L]
-    @mtensor LOA[L,j,ν] += OAP[j,ν,P] * M_PL[P,L]
+    if nOcc > 0
+      @mtensor LOA[L,j,ν] += OAP[j,ν,P] * M_PL[P,L]
+    end
     reset!(buf)
   end
   @mtensor cL[L] := LoA[L,j,ν] * CMOo[1][ν,j]
