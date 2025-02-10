@@ -3,8 +3,8 @@
 """
 module TensorTools
 using LinearAlgebra
-# using TensorOperations
-using ElemCoTensorOperations
+using TensorOperations
+# using ElemCoTensorOperations
 using StridedViews
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
@@ -77,10 +77,24 @@ macro mview(ex)
   return esc(ex)
 end
 
+"""
+    mview(arr, args...)
+
+  `StridedView` based version of `view`.
+
+  The data array is enforced to be a vector, such that the view is always a `StridedView{..., Vector{...},...}`.
+"""
 function mview(arr, args...)
   return sview(reshape(view(vec(arr),:), size(arr)), args...)
 end
 
+"""
+    mview(arr::StridedView, args...)
+
+  StridedView based version of `view`, for `StridedView` input.
+
+  Simply calls `StridedViews.sview`.
+"""
 function mview(arr::StridedView, args...)
   return sview(arr, args...)
 end
