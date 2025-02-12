@@ -6,6 +6,7 @@
 
 * the definition of `ampsvdtol` threshold for SVD methods has been changed. Now it corresponds to the threshold for the density matrix (i.e., square of the previous definition).
 * `verbosity` has been moved from `ECInfo` to `Options.print.time`.
+* increase versions of dependencies: julia>1.9 
 
 ### Changed
 

@@ -1240,8 +1240,8 @@ end
 function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
-  I_ab = Matrix(I,nvirt,nvirt)
-  I_ij = Matrix(I,nocc,nocc)
+  I_ab = Matrix{Float64}(I,nvirt,nvirt)
+  I_ij = Matrix{Float64}(I,nocc,nocc)
   @mtensor begin
     AU[b,a] := I_ab[b,a] + 2.0 * T2[a,c,i,j] * T2[b,c,i,j] - T2[a,c,i,j] * T2[c,b,i,j]
     BU[i,j] := I_ij[i,j] +  2.0 * T2[a,b,i,k] * T2[a,b,j,k] - T2[a,b,i,k] * T2[a,b,k,j]
