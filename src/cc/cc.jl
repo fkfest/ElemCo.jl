@@ -3936,7 +3936,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     # vT[adbi] = ``vT_{ab}^{di} = \hat v_{lk}^{di} T_{ba}^{lk} - \hat v_{al}^{cd} T_{bc}^{li}``
     vT_vvvo = alloc!(buf, lena, nvirt, nvirt, nocc)
     @mtensor vT_vvvo[a,d,b,i] = oovo[l,k,d,i] * a!T2[b,a,l,k]
-    @mtensor vT_vvvo[a,d,b,i] -= vvov[a,c,l,d] * a!T2[b,c,l,i]
+    @mtensor vT_vvvo[a,d,b,i] -= vvov[a,c,l,d] * T2[b,c,l,i]
     # ``X_{bY}^d += vT_{ab}^{di} U^{\dagger a}_{iY}``
     @mtensor X_vvX[b,d,Y] += vT_vvvo[a,d,b,i] * a!UvoX[a,i,Y]
     drop!(buf, vT_vvvo)
