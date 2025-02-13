@@ -422,7 +422,7 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
     end
     if abs(imag(evals[i])) > 0.0
       println("complex: ",evals[i], " ",i)
-      if evals[i] == conj(evals[i+1])
+      if evals[i] ≈ conj(evals[i+1])
         @assert  evecs_real[:,i] == real.(evecs[:,i+1])
         evecs_real[:,i+1] = imag.(evecs[:,i+1])
         normalize!(evecs_real[:,i])
