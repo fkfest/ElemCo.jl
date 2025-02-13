@@ -202,6 +202,7 @@ end
 function generate_basis(ms::FlexibleSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
   array_of_centers = BasisCenter[]
   id = 1
+  first
   for atom in ms
     if basisset != ""
       basisname = basisset
@@ -211,7 +212,7 @@ function generate_basis(ms::FlexibleSystem, type="ao"; cartesian::Bool=false, ba
         basisname = guess_basis_name(atom, type)
       end
     end
-    basisfunctions = parse_basis(basisname, atom)
+    basisfunctions = parse_basis(basisname, atom; fallback=(type=="jkfit"))
     id = set_id!(basisfunctions, id)
     push!(array_of_centers, BasisCenter(atom, basisname, basisfunctions))
   end

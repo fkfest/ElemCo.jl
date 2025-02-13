@@ -17,6 +17,7 @@
 * Buffers is moved to a separate package Buffers.jl.
 * reduce memory demand in df-hf.
 * remove `IterativeSolvers` dependency.
+* `jkfit` basis now falls back to `def2-universal-jkfit` if not found (e.g. for avXz basis sets).
 
 ### Added
 
