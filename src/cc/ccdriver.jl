@@ -35,7 +35,7 @@ export ccdriver, dfccdriver
   Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
 """
 function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
-  t0 = time_ns()
+  t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
   check_fcidump(EC, fcidump)
   setup_space_fd!(EC)
@@ -43,13 +43,14 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
 
   energies = OutDict()
   energies = eval_hf_energy(EC, energies, closed_shell)
-
+  # t1 = print_time(EC, t1, "HF energy", 1)
   ecmethod = ECMethod(method)
   unrestricted_orbs = EC.fd.uhf
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
   # calculate MP2
   if EC.options.cc.nomp2 == 0
     energies = eval_mp2_energy(EC, energies, closed_shell_method, has_prefix(ecmethod, "R"))
+    # t1 = print_time(EC, t1, "MP2", 1)
   end
 
   if ecmethod.theory == "MP"
@@ -57,12 +58,15 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # do nothing
   elseif ecmethod.theory == "DMRG"
     energies = eval_dmrg_groundstate(EC, energies)
+    t1 = print_time(EC, t1, "DMRG", 1)
   else
     energies = eval_cc_groundstate(EC, ecmethod, energies)
+    t1 = print_time(EC, t1, "ground state CC", 1)
   end
 
   if EC.options.cc.properties
     calc_lm_cc(EC, ecmethod)
+    t1 = print_time(EC, t1, "CC Lagrange multipliers", 1)
   end
   delete_temporary_files!(EC)
   draw_endline()
@@ -360,11 +364,11 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   else
     energies = output_energy(EC, ECC, energies, main_name)
   end
-  t1 = print_time(EC, t1,"CC",1)
+  t1 = print_time(EC, t1, "CC", 1)
 
   if has_prefix(ecmethod, "Λ")
     calc_lm_cc(EC, ecmethod)
-    t1 = print_time(EC, t1,"ΛCC",1)
+    t1 = print_time(EC, t1, "ΛCC", 1)
   end
 
   if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
@@ -374,6 +378,7 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
     output_E_method(ECC["E"]+ET3, main_name*"(T)", "correlation energy:")
     output_E_method(ECC["E"]+ET3+EHF, main_name*"(T)", "total energy:       ")
     println()
+    t1 = print_time(EC, t1, "(T)", 1)
     push!(energies, "[T]"=>(ET3b,"[T] energy contribution"), 
                     "(T)"=>(ET3,"(T) energy contribution"),
                     main_name*"(T)c"=>(ECC["E"]+ET3,"$main_name(T) correlation energy"),
