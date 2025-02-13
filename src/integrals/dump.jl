@@ -328,15 +328,16 @@ function read_fcidump(fcidump::String, ::Val{N}) where N
   if simtra
     println("Non-Hermitian")
   end
-  if isnothing(headvar(fd, "NPY2", String)) && isnothing(headvar(fd, "NPY2AA", String))
+  done = false
+  if !isnothing(headvar(fd, "NPY2", String)) || !isnothing(headvar(fd, "NPY2AA", String))
+    # try to read integrals from npy files
+    done = read_integrals!(fd, dirname(fcidump))
+  end
+  if !done
     # read integrals from fcidump file
     read_integrals!(fd, fdf)
-    close(fdf)
-  else
-    close(fdf)
-    # read integrals from npy files
-    read_integrals!(fd, dirname(fcidump))
   end
+  close(fdf)
   return fd
 end
 
@@ -430,25 +431,30 @@ end
 """
     read_integrals!(fd::FDump, dir::AbstractString)
 
-  Read integrals from npy files.
+  Read integrals from npy files. 
+
+Returns `true` if successful.
 """
 function read_integrals!(fd::FDump, dir::AbstractString)
   println("Read npy files")
   if !fd.uhf
-    fd.int2 = mmap_integrals(fd, dir, "NPY2", fd.int2)
-    fd.int1 = mmap_integrals(fd, dir, "NPY1", fd.int1)
+    fd.int2, success = mmap_integrals(fd, dir, "NPY2", fd.int2)
+    fd.int1, success = mmap_integrals(fd, dir, "NPY1", fd.int1)
+    success = length(fd.int2) > 0 && length(fd.int1) > 0
   else
     fd.int2aa = mmap_integrals(fd, dir, "NPY2AA", fd.int2aa)
     fd.int2bb = mmap_integrals(fd, dir, "NPY2BB", fd.int2bb)
     fd.int2ab = mmap_integrals(fd, dir, "NPY2AB", fd.int2ab)
     fd.int1a = mmap_integrals(fd, dir, "NPY1A", fd.int1a)
     fd.int1b = mmap_integrals(fd, dir, "NPY1B", fd.int1b)
+    success = length(fd.int2aa) > 0 && length(fd.int2bb) > 0 && length(fd.int2ab) > 0 && length(fd.int1a) > 0 && length(fd.int1b) > 0
   end
   enuc = headvar(fd, "ENUC", Float64)
   if isnothing(enuc)
     error("ENUC option not found in fcidump")
   end
   fd.int0 = enuc
+  return success
 end
 
 """
@@ -537,6 +543,8 @@ end
     read_integrals!(fd::FDump{N}, fdfile::IOStream)
 
   Read integrals from fcidump file
+
+Returns `true` if successful.
 """
 function read_integrals!(fd::FDump{N}, fdfile::IOStream) where N
   norb = headvar(fd, "NORB", Int)
@@ -555,10 +563,12 @@ function read_integrals!(fd::FDump{N}, fdfile::IOStream) where N
   else
     fd.int0 = read_integrals!(fd.int1, fd.int2, norb, fdfile, simtra)
   end
+  return true
 end
 
 function read_integrals!(int1, int2, norb, fdfile, simtra)
   int0 = 0.0
+  readint0 = false
   for linestr in eachline(fdfile)
     line = split(linestr)
     if length(line) != 5
@@ -580,13 +590,18 @@ function read_integrals!(int1, int2, norb, fdfile, simtra)
       set_int1!(int1, i1, i2, integ, simtra)
     elseif i1 <= 0
       int0 = integ
+      readint0 = true
     end
+  end
+  if !readint0
+    error("No core energy found in fcidump. Incomplete file?")
   end
   return int0
 end
 
 function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, simtra)
   int0 = 0.0
+  readint0 = false
   spincase = 0 # aa, bb, ab, a, b
   for linestr in eachline(fdfile)
     line = split(linestr)
@@ -626,8 +641,12 @@ function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, sim
         spincase += 1
       else
         int0 = integ
+        readint0 = true
       end
     end
+  end
+  if !readint0
+    error("No core energy found in fcidump. Incomplete file?")
   end
   return int0
 end
@@ -712,6 +731,10 @@ function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString, ::A
   end
   if !isabspath(file)
     file = joinpath(dir,file)
+  end
+  if !isfile(file)
+    println("NPY-file $file not found. Continue with fcidump file.")
+    return Array{T,N}(undef, ntuple(i->0, Val(N)))
   end
   # return npzread(file)
   return mnpymmap(file, Array{T,N})

@@ -7,6 +7,7 @@
 * the definition of `ampsvdtol` threshold for SVD methods has been changed. Now it corresponds to the threshold for the density matrix (i.e., square of the previous definition).
 * `verbosity` has been moved from `ECInfo` to `Options.print.time`.
 * increase versions of dependencies: julia>1.9 
+* The core-entry is now required for (non-npy) FCIDUMP files in order to check whether the file is complete.
 
 ### Changed
 
@@ -33,6 +34,7 @@
 * SAD orbital guess for Li and Be has been fixed.
 * molden export functionality has been fixed.
 * thread-safe handling of buffers using ThreadsBuffer.
+* if some of the npy files are not found, the integrals are read from the fcidump file ([#250])
 
 ## Version [v0.13.1] - 2024.07.11
 
