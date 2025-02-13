@@ -27,6 +27,7 @@
 * `Buffer` and `ThreadsBuffer` types and `alloc!`, `drop!`, `reset!`, `reshape_buf!` functions.
 * `BasisBatcher` structure to calculate 3-index integrals in batches.
 * `@dfmp2` to calculate df-mp2 energy without storing integrals.
+* `@freeze_orbs` also accepts now a string of indices using the +/- or :/; syntax ([#186])
 
 ### Fixed
 
