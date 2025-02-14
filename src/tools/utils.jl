@@ -80,9 +80,9 @@ function print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
 end
 
 """
-    warn(msg::AbstractString)
+    warn(msg::AbstractString, err=false)
 
-  Print a warning message.
+  Print a warning message. If `err` is `true`, the message is printed as an error message.
 
   The message is printed with a scull emoji.
   # Example
@@ -90,7 +90,10 @@ end
 julia> warn("This is a warning message.")
 ```
 """
-function warn(msg::AbstractString)
+function warn(msg::AbstractString, err=false)
+  if err
+    error(msg)
+  end
   println("☠️ Warning: ", msg)
 end
 

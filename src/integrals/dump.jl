@@ -19,6 +19,7 @@ export fd_exists, read_fcidump, write_fcidump, transform_fcidump
 export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
+export is_similarity_transformed
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -206,6 +207,13 @@ end
 function fd_exists(fd::FDump)
   return !isempty(fd.head)
 end
+
+"""
+    is_similarity_transformed(fd::FDump)
+
+  Return true if the fcidump is similarity transformed
+"""
+is_similarity_transformed(fd::FDump) = headvar(fd, "ST", Int) > 0
 
 """
     set_zero!(fd::FDump, norb::Int=0)
