@@ -216,6 +216,8 @@ Base.@kwdef mutable struct CcOptions
   dcsd_osfac::Float64 = 1.05
   """`⟨0.15⟩` Factor for open-shell component in SCS-DCSD. """
   dcsd_ofac::Float64 = 0.15
+  """`⟨false⟩` ignore various errors in sanity checks. """
+  ignore_error::Bool = false
 end
 
 """ 

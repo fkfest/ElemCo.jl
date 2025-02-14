@@ -372,6 +372,11 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   end
 
   if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
+    if is_similarity_transformed(EC.fd) && !has_prefix(ecmethod, "Λ")
+      warn("Perturbative triples for similarity transformed Hamiltonians must be calculated
+      with ΛCCSD(T) method! The error can be ignored by setting the option `cc.ignore_error=true`.",
+      !EC.options.cc.ignore_error)
+    end
     ET3, ET3b = values(calc_pertT(EC, ecmethod; save_t3=save_pert_t3))
     println()
     output_E_method(ECC["E"]+ET3b+EHF, main_name*"[T]", "total energy:      ")
