@@ -27,7 +27,7 @@ include("options.jl")
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct ECInfo <: AbstractECInfo
+@kwdef mutable struct ECInfo <: AbstractECInfo
   """`⟨"system-tmpdir/elemcojlscr/jl_*"⟩` path to scratch directory. """
   scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
   """`⟨".bin"⟩` extension of temporary files. """
