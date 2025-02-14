@@ -5,7 +5,7 @@
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct WfOptions
+@kwdef mutable struct WfOptions
   """`⟨-1⟩` spin magnetic quantum number times two (2×mₛ) of the system. """
   ms2::Int = -1
   """`⟨-1⟩` number of electrons. If < 0, the number of electrons is 
@@ -55,7 +55,7 @@ end
 
   $(TYPEDFIELDS)    
 """
-Base.@kwdef mutable struct ScfOptions
+@kwdef mutable struct ScfOptions
   """`⟨1.e-10⟩` convergence threshold. """
   thr::Float64 = 1.e-10
   """`⟨sqrt(thr)*0.1⟩` energy convergence threshold (used additionally to `thr`). """
@@ -125,7 +125,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct CcOptions
+@kwdef mutable struct CcOptions
   """`⟨1.e-10⟩` convergence threshold. """
   thr::Float64 = 1.e-10
   """`⟨0.1⟩` energy convergence factor. The energy convergence threshold is `sqrt(thr) * conven`. """
@@ -225,7 +225,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct DmrgOptions
+@kwdef mutable struct DmrgOptions
   """`⟨10⟩` number of sweeps. """
   nsweeps::Int = 10
   """`⟨[100, 200]⟩` maximum size for the bond dimension. """
@@ -241,7 +241,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct IntOptions
+@kwdef mutable struct IntOptions
   """`⟨true⟩` use density-fitted integrals. """
   df::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """
@@ -257,7 +257,7 @@ end
     
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct CholeskyOptions
+@kwdef mutable struct CholeskyOptions
   """`⟨1.e-6⟩` threshold for elimination of redundancies in the auxiliary basis. """
   thred::Float64 = 1.e-6
   """`⟨1.e-4⟩` threshold for integral decomposition. """
@@ -269,7 +269,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct DiisOptions
+@kwdef mutable struct DiisOptions
   """`⟨6⟩` maximum number of DIIS vectors. """
   maxdiis::Int = 6
   """`⟨10.0⟩` DIIS residual threshold. """
@@ -286,7 +286,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct PrintOptions
+@kwdef mutable struct PrintOptions
   """`⟨2⟩` verbosity level for printing timings. """
   time::Int = 2
   """`⟨2⟩` verbosity level for printing memory usage. """
@@ -298,7 +298,7 @@ end
 
   $(TYPEDFIELDS)
 """  
-Base.@kwdef mutable struct Options
+@kwdef mutable struct Options
   """ Wavefunction options ([`WfOptions`](@ref)). """
   wf::WfOptions = WfOptions()
   """ SCF options ([`ScfOptions`](@ref)). """

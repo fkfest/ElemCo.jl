@@ -32,7 +32,7 @@ const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
 
   Header of fcidump file
 """
-Base.@kwdef mutable struct FDumpHeader
+@kwdef mutable struct FDumpHeader
   ihead::Dict{String,Vector{Int}} = Dict{String,Vector{Int}}()
   fhead::Dict{String,Vector{Float64}} = Dict{String,Vector{Float64}}()
   shead::Dict{String,Vector{String}} = Dict{String,Vector{String}}()
@@ -108,7 +108,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct FDump{N}
+@kwdef mutable struct FDump{N}
   """ 2-e⁻ integrals for restricted orbitals fcidump. """
   int2::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
   """ αα 2-e⁻ integrals for unrestricted orbitals fcidump. """
