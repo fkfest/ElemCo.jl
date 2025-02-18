@@ -1,13 +1,9 @@
-#!/usr/bin/env julia
-
 """
 Read and write fcidump format integrals.
 Individual arrays of integrals can also be in *.npy format
 """
 module FciDumps
 
-# using LinearAlgebra
-# using NPZ
 using DocStringExtensions
 using TensorOperations
 using Printf
