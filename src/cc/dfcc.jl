@@ -931,8 +931,9 @@ function calc_svd_dcsd_residual(EC::ECInfo, T1, T2)
       @mtensor v_XXL[X,Y,L] -= v!ooL[j,i,L] * UUooXX[j,i,X,Y]
       t1 = print_time(EC, t1, "``v_X^{YL} -= \\hat v_{j}^{iL} U_{iX}^{jY}``", 2)
       d_XXL[:,X,L] = v_XXL
-      drop!(buf, v_XXL, UUooXX)
+      drop!(buf, v_XXL)
     end
+    drop!(buf, UUooXX)
   end
   closemmap(EC, d_XXLfile, d_XXL)
   close(ovLfile)
