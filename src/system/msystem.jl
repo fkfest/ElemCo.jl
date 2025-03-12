@@ -12,6 +12,7 @@ using DocStringExtensions
 using ..ElemCo.Elements
 using ..ElemCo.Constants
 export parse_geometry, system_exists, genxyz, nuclear_repulsion, bond_length, electron_distribution
+export atomic_position
 export guess_nelec, guess_norb, guess_ncore
 export atomic_center_symbol, element_name, element_symbol, element_SYMBOL, is_dummy, set_dummy!, unset_dummy!
 
@@ -304,6 +305,13 @@ function system_exists(ms::FlexibleSystem)
   return n > 0
 end
 
+"""
+    atomic_position(at::Atom; unit=u"bohr")
+
+  Return the position of the atom in the specified unit.
+"""
+atomic_position(at::Atom; unit=u"bohr") = uconvert.(unit, at.position)/unit
+
 """ 
     genxyz(ac::Atom; unit=u"angstrom")
 
@@ -311,7 +319,7 @@ end
 """
 function genxyz(ac::Atom; unit=u"angstrom")
   name = element_symbol(ac)
-  coord = uconvert.(unit, ac.position)/unit
+  coord = atomic_position(ac, unit=unit)
   return @sprintf("%-3s %16.10f %16.10f %16.10f",name,coord[1],coord[2],coord[3]) 
 end
 

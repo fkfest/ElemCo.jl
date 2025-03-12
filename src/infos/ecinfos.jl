@@ -2,7 +2,10 @@
 module ECInfos
 using Unitful, UnitfulAtomic
 using AtomsBase
+using HDF5
+using Dates
 using DocStringExtensions
+using ..ElemCo.VersionInfo
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDumps
@@ -17,8 +20,62 @@ export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
+export get_options
 
 include("options.jl")
+
+mutable struct ECDump
+  """ file name of the HDF5 dump. """
+  filename::String
+  """ an HDF5 file with calculation information (for restarts etc). 
+  The structure of the HDF5 file is as follows (with `track_order=true`):
+```
+/EC
+  /Molecule1
+    <name>
+    <geometry>
+    /BasisSet1
+      <basis set information>
+      /State1
+        <number of electrons>
+        <spin multiplicity>
+        <occupation (alpha/beta)>
+        <MO coefficients>
+        <list of frozen orbitals>
+        <CC amplitudes>
+        <other information>
+      /State2
+      ...
+    /BasisSet2
+    ...
+  /Molecule2
+    ...
+```
+  """
+  file::HDF5.Group
+  function ECDump(filename::AbstractString)
+    return new(filename, create_empty_dump(filename))
+  end
+end
+
+"""
+    create_empty_dump(filename::AbstractString)
+
+  Create an empty HDF5 dump file with the given `filename` and information about the package.
+
+  Returns an "EC" group in HDF5 file.
+"""
+function create_empty_dump(filename)
+  file = h5open(filename, "w")
+  g = create_group(file, "EC", track_order=true)
+  g["version"] = version()
+  g["git_hash"] = git_hash()
+  g["julia"] = "$VERSION"
+  g["hostname"] = gethostname()
+  g["scratch"] = tempdir()
+  g["date"] = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+  return file["EC"]
+end
 
 """
     ECInfo
@@ -38,6 +95,8 @@ include("options.jl")
   system::FlexibleSystem = create_empty_system()
   """ fcidump. """
   fd::TFDump = TFDump()
+  """ dump with calculation information (for restarts etc). """
+  dump::ECDump = ECDump(joinpath(scr,"ec.h5"))
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -651,5 +710,6 @@ function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
 end
 
 
+include("ecdump.jl")
 
 end #module
