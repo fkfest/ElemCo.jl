@@ -316,21 +316,3 @@ end
   """ Print options ([`PrintOptions`](@ref)). """
   print::PrintOptions = PrintOptions()
 end
-
-"""
-    get_options(opt::Options)
-
-Return a nested `NamedTuple` with the current options.
-"""
-function get_options(opt::Options)
-  return NamedTuple(key => get_options(getfield(opt, key)) for key ∈ propertynames(opt))
-end
-
-"""
-    get_options(opt)
-
-Return a `NamedTuple` with the current options for options `opt`.
-"""
-function get_options(opt)
-  return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
-end

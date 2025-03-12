@@ -57,6 +57,7 @@ makedocs(
       "tensortools.md",
       "descdict.md",
       "utils.md",
+      "versioninfo.md",
       "interfaces.md",
       "molpro.md",
       "molden.md"
