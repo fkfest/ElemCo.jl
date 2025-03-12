@@ -9,7 +9,7 @@ using ..ElemCo.VersionInfo
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDumps
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.BasisSets
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
@@ -339,7 +339,7 @@ end
   Freeze `freeze_nocc` occupied orbitals or orbitals on the `freeze_orbs` list. 
   If `freeze_nocc` is negative and `freeze_orbs` is empty: guess the number of core orbitals.
 
-  `core` as in [`MSystem.guess_ncore`](@ref).
+  `core` as in [`MSystems.guess_ncore`](@ref).
 """
 function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[]; verbose=true)
   if freeze_nocc < 0 && isempty(freeze_orbs)

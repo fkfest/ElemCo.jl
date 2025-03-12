@@ -6,7 +6,7 @@ Module for handling elements and their electron configurations.
 module Elements
 using DocStringExtensions
 
-export ELEMENTS, nuclear_charge_of_center, element_name_from_symbol
+export ELEMENTS, nuclear_charge_of_centre, element_name_from_symbol
 export SUBSHELLS_NAMES, SUBSHELL2L, ncoreorbs, electron_distribution4element
 """
   Elements with corresponding atomic numbers, 
@@ -134,11 +134,11 @@ const ELEMENTS::Dict{String,Tuple{Int,Float64,String,String,String,String}} = Di
   )
 
 """
-    nuclear_charge_of_center(elem::AbstractString)
+    nuclear_charge_of_centre(elem::AbstractString)
 
   Return the nuclear charge of the element.
 """
-function nuclear_charge_of_center(elem::AbstractString)
+function nuclear_charge_of_centre(elem::AbstractString)
   return get(ELEMENTS, uppercase(elem), [0])[1]
 end
 
@@ -246,7 +246,7 @@ end
 """
 function electron_distribution4element(elem::AbstractString, nsh4l::Vector{Int})
   eldist = Float64[]
-  n = nuclear_charge_of_center(elem)
+  n = nuclear_charge_of_centre(elem)
   if n == 0
     return eldist
   end

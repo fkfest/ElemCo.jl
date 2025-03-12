@@ -48,12 +48,12 @@ function dump_geometry(EC::ECInfo)
   natom = 0
   for at in EC.system
     natom += 1
-    dump_atomcenter(geom, at, natom)
+    dump_atomcentre(geom, at, natom)
   end
 end
 
-function dump_atomcenter(file::HDF5.Group, at::Atom, natom::Int)
-  atom = create_group(file, lpad(natom, 3, '0')*":$(atomic_center_symbol(at))")
+function dump_atomcentre(file::HDF5.Group, at::Atom, natom::Int)
+  atom = create_group(file, lpad(natom, 3, '0')*":$(atomic_centre_symbol(at))")
   write(atom, "position", Vector(atomic_position(at)))
   basis = create_group(atom, "basis")
   basis2hdf5(basis, at[:basis])

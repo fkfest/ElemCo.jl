@@ -41,14 +41,14 @@ mutable struct AngularShell
 end
 
 """
-    BasisCenter
+    BasisCentre
 
-  A basis center (atom) with basis functions.
+  A basis centre (atom) with basis functions.
 
   $(TYPEDFIELDS)
 """
-struct BasisCenter
-  """ basis center name (e.g., "H1")"""
+struct BasisCentre
+  """ basis centre name (e.g., "H1")"""
   name::String
   """ atomic position in Bohr (3D vector)"""
   position::SVector{3, Float64}
@@ -62,8 +62,8 @@ struct BasisCenter
   shells::Vector{AngularShell}
 end
 
-function BasisCenter(atom::Atom, basis="", basisfunctions=[])
-  return BasisCenter(string(atomic_center_symbol(atom)), uconvert.(u"bohr", atom.position)/u"bohr", 
+function BasisCentre(atom::Atom, basis="", basisfunctions=[])
+  return BasisCentre(string(atomic_centre_symbol(atom)), uconvert.(u"bohr", atom.position)/u"bohr", 
                     atomic_number(atom), is_dummy(atom) ? 0 : atomic_number(atom),
                     basis, basisfunctions)
 end
@@ -92,19 +92,19 @@ function Base.length(ashell::AngularShell)
   return length(ashell.subshells)
 end
 
-function Base.getindex(bc::BasisCenter, i::Int)
+function Base.getindex(bc::BasisCentre, i::Int)
   return bc.shells[i]
 end
 
-function Base.setindex!(bc::BasisCenter, val, i::Int)
+function Base.setindex!(bc::BasisCentre, val, i::Int)
   bc.shells[i] = val
 end
 
-function Base.length(bc::BasisCenter)
+function Base.length(bc::BasisCentre)
   return length(bc.shells)
 end
 
-function Base.iterate(bc::BasisCenter, state=1)
+function Base.iterate(bc::BasisCentre, state=1)
   if state > length(bc.shells)
     return nothing
   else
@@ -136,14 +136,14 @@ function Base.show(io::IO, ashs::Vector{<:AngularShell})
   end
 end
 
-function Base.show(io::IO, bc::BasisCenter)
+function Base.show(io::IO, bc::BasisCentre)
   println(io, "! ", bc.name, " (", bc.atomic_number, ") ", bc.basis, " at ", bc.position)
   for shell in bc.shells
     println(io, shell)
   end
 end
 
-angularshells(cen::BasisCenter) = cen.shells
+angularshells(cen::BasisCentre) = cen.shells
 
 """
     n_subshells(ashell::AngularShell)
@@ -204,20 +204,20 @@ n_ao4subshell(ashell::AngularShell, cartesian::Bool) = cartesian ? (ashell.l + 1
 n_ao(ashell::AngularShell, cartesian::Bool) = n_ao4subshell(ashell, cartesian) * n_subshells(ashell)
 
 """
-    n_angularshells(atom::BasisCenter)
+    n_angularshells(atom::BasisCentre)
 
   Return the number of angular shells in the basis set for `atom`.
 """
-function n_angularshells(atom::BasisCenter)
+function n_angularshells(atom::BasisCentre)
   return length(atom.shells)
 end
 
 """
-    n_subshells(atom::BasisCenter)
+    n_subshells(atom::BasisCentre)
 
   Return the number of subshells in the basis set for `atom`.
 """
-function n_subshells(atom::BasisCenter)
+function n_subshells(atom::BasisCentre)
   # return sum(n_subshells, atom.shells)
   n = 0
   for ashell in atom.shells
@@ -227,11 +227,11 @@ function n_subshells(atom::BasisCenter)
 end
 
 """
-    n_primitives(atom::BasisCenter)
+    n_primitives(atom::BasisCentre)
 
   Return the number of primitives in the basis set for `atom`.
 """
-function n_primitives(atom::BasisCenter)
+function n_primitives(atom::BasisCentre)
   # return sum(n_primitives, atom.shells)
   n = 0
   for ashell in atom.shells
@@ -241,11 +241,11 @@ function n_primitives(atom::BasisCenter)
 end
 
 """
-    n_ao(atom::BasisCenter, cartesian::Bool)
+    n_ao(atom::BasisCentre, cartesian::Bool)
 
   Return the number of atomic orbitals in the basis set for `atom`.
 """
-function n_ao(atom::BasisCenter, cartesian::Bool)
+function n_ao(atom::BasisCentre, cartesian::Bool)
   # return sum(x->n_ao(x, cartesian), atom.shells)
   n = 0
   for ashell in atom.shells
@@ -380,15 +380,15 @@ function set_id!(ashells::AbstractArray{AngularShell}, start_id)
 end
 
 """
-    set_id!(centers::AbstractArray{BasisCenter}, start_id)
+    set_id!(centres::AbstractArray{BasisCentre}, start_id)
 
-  Set the id for each angular shell in the array of centers.
+  Set the id for each angular shell in the array of centres.
   Return the next id.
 """
-function set_id!(centers::AbstractArray{BasisCenter}, start_id)
+function set_id!(centres::AbstractArray{BasisCentre}, start_id)
   id = start_id
-  for center in centers
-    id = set_id!(center.shells, id)
+  for centre in centres
+    id = set_id!(centre.shells, id)
   end
   return id
 end

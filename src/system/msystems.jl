@@ -4,9 +4,10 @@ Info about molecular system (geometry/basis).
 `Atom` and `FlexibleSystem` from `AtomsBase` package are used
 for the atoms and the molecular system, respectively.
 """
-module MSystem
+module MSystems
 using Unitful, UnitfulAtomic
 using AtomsBase
+using StaticArrays
 using Printf
 using DocStringExtensions
 using ..ElemCo.Elements
@@ -14,9 +15,42 @@ using ..ElemCo.Constants
 export parse_geometry, system_exists, genxyz, nuclear_repulsion, bond_length, electron_distribution
 export atomic_position
 export guess_nelec, guess_norb, guess_ncore
-export atomic_center_symbol, element_name, element_symbol, element_SYMBOL, is_dummy, set_dummy!, unset_dummy!
+export atomic_centre_symbol, element_name, element_symbol, element_SYMBOL, is_dummy, set_dummy!, unset_dummy!
 
 include("minbas.jl")
+
+"""
+    ACentre
+
+  An atomic centre with basis set information.
+
+  $(TYPEDFIELDS)
+"""
+struct ACentre
+  """ atomic centre name (e.g., "H1")"""
+  name::String
+  """ atomic position in Bohr (3D vector)"""
+  position::SVector{3, Float64}
+  """ atomic number"""
+  atomic_number::Int
+  """ nuclear charge (= 0 for dummy atoms)"""
+  charge::Int
+  """ basis sets (e.g., "ao"=>"cc-pVDZ")"""
+  basis::Dict{String,String}
+end
+
+"""
+    MSystem
+
+  A molecular system with atomic centres.
+
+  $(TYPEDFIELDS)
+"""
+struct MSystem
+  """ atomic centres"""
+  centres::Vector{ACentre}
+end
+
 
 """ 
     genbasis4element(basis::Dict, elem::AbstractString)
@@ -52,7 +86,7 @@ function genbasis4element(basis::Dict, elem::AbstractString)
         else
           elSYM = element_SYMBOL(eldef[1])
           elUP = uppercase(eldef[1])
-          # check whether the basis is defined for the center or its element symbol
+          # check whether the basis is defined for the centre or its element symbol
           if elUP == elemUP || (elUP == elSYM && elSYM == elemSYM)
             elbas = eldef[2]
           end
@@ -110,12 +144,12 @@ function element_name(atom::Atom)
 end
 
 """
-    atomic_center_symbol(atom::Atom)
+    atomic_centre_symbol(atom::Atom)
 
-  Return atomic center symbol (i.e., element symbol possibly with a number).
+  Return atomic centre symbol (i.e., element symbol possibly with a number).
 """
-function atomic_center_symbol(atom::Atom)
-  return atom[:atomic_center_symbol]
+function atomic_centre_symbol(atom::Atom)
+  return atom[:atomic_centre_symbol]
 end
 
 """
@@ -124,8 +158,8 @@ end
   Create `Atom` from a line `<Atom> x y z`. 
   
   `unit` is the unit of the coordinates.
-  Returns the center and a bool success variable. 
-  If the line has a different format: return dummy center and false.
+  Returns the centre and a bool success variable. 
+  If the line has a different format: return dummy centre and false.
 """
 function try2create_atom(line::AbstractString, basis::Dict, unit=u"bohr")
   coords = split(line)
@@ -135,12 +169,12 @@ function try2create_atom(line::AbstractString, basis::Dict, unit=u"bohr")
     zcoord = tryparse(Float64,coords[4])
     if !isnothing(xcoord) && !isnothing(ycoord) && !isnothing(zcoord)
       basis4a = genbasis4element(basis,coords[1])
-      anum = nuclear_charge_of_center(element_SYMBOL(coords[1]))
-      return Atom(anum, [xcoord,ycoord,zcoord]*unit, atomic_center_symbol=Symbol(coords[1]), basis=basis4a), true
+      anum = nuclear_charge_of_centre(element_SYMBOL(coords[1]))
+      return Atom(anum, [xcoord,ycoord,zcoord]*unit, atomic_centre_symbol=Symbol(coords[1]), basis=basis4a), true
     end
   end
-  # not a center
-  return Atom(1, atomic_center_symbol=:X, [0.0,0.0,0.0]u"bohr"), false
+  # not a centre
+  return Atom(1, atomic_centre_symbol=:X, [0.0,0.0,0.0]u"bohr"), false
 end
 
 """
@@ -190,7 +224,7 @@ function set_dummy!(sys::FlexibleSystem, list)
     else
       found = false
       for at in sys
-        if uppercase(String(atomic_center_symbol(at))) == uppercase(String(a))
+        if uppercase(String(atomic_centre_symbol(at))) == uppercase(String(a))
           set_dummy!(at)
           found = true
         end
@@ -335,7 +369,7 @@ end
 """
     bond_length(cen1::Atom, cen2::Atom)
 
-  Calculate bond length in bohr between two centers.
+  Calculate bond length in bohr between two centres.
 """
 function bond_length(cen1::Atom, cen2::Atom)
   return sqrt(sum(abs2,uconvert.(u"bohr", cen1.position-cen2.position)/u"bohr"))
@@ -348,8 +382,8 @@ end
 """
 function nuclear_repulsion(ms::FlexibleSystem)
   enuc::Float64 = 0.0
-  ncenter::Int = length(ms.particles)
-  for i = 2:ncenter
+  ncentre::Int = length(ms.particles)
+  for i = 2:ncentre
     at1 = ms[i]
     if is_dummy(at1)
       continue

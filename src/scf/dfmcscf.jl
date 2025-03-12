@@ -3,7 +3,7 @@ using LinearAlgebra, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.Integrals
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 using ..ElemCo.OrbTools

@@ -8,7 +8,7 @@ using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools

@@ -10,7 +10,7 @@ using Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.BasisSets
 using ..ElemCo.Wavefunctions
 using ..ElemCo.OrbTools
@@ -101,12 +101,12 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     for (iat,atom) in enumerate(EC.system)
       coord = uconvert.(distunit, atom.position)/distunit
       @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
-              atomic_center_symbol(atom), iat, basisset.centers[iat].charge, coord[1], coord[2], coord[3])
+              atomic_centre_symbol(atom), iat, basisset.centres[iat].charge, coord[1], coord[2], coord[3])
     end
     println(f, "[GTO]")
-    for ic in center_range(basisset)
+    for ic in centre_range(basisset)
       println(f, "   ", ic, " ", 0)
-      for ash in basisset.centers[ic].shells
+      for ash in basisset.centres[ic].shells
         for con in ash.subshells
           println(f, " ", subshell_char(ash.l), " ", length(con.exprange))
           for (i, iex) in enumerate(con.exprange)
@@ -149,12 +149,12 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
       for (iat,atom) in enumerate(EC.system)
         coord = uconvert.(distunit, atom.position)/distunit
         @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
-                atomic_center_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
+                atomic_centre_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
       end
       println(f, "[GTO]")
-      for ic in center_range(basisset)
+      for ic in centre_range(basisset)
         println(f, "   ", ic, " ", 0)
-        for ash in basisset.centers[ic].shells
+        for ash in basisset.centres[ic].shells
           for con in ash.subshells
             println(f, " ", subshell_char(ash.l), " ", length(con.exprange))
             for (i, iex) in enumerate(con.exprange)

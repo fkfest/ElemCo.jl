@@ -16,7 +16,7 @@ function parse_basis(basis_name::String, atom::Atom; fallback=false)
     basisfile = basis_file(basis_name) 
     if basisfile == ""
       if fallback
-        println(atomic_center_symbol(atom),": Basis set $basis_name not found, using def2-universal-jkfit as a fallback.")
+        println(atomic_centre_symbol(atom),": Basis set $basis_name not found, using def2-universal-jkfit as a fallback.")
         basisfile = basis_file("def2-universal-jkfit")
       else
         error("Basis set $basis_name not found!")

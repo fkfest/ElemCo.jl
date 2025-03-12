@@ -9,7 +9,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 using ..ElemCo.Integrals
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
 

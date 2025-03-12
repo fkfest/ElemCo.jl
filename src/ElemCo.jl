@@ -16,7 +16,7 @@ include("tools/mnpy.jl")
 include("tools/qmtensors.jl")
 include("integrals/dump.jl")
 include("system/elements.jl")
-include("system/msystem.jl")
+include("system/msystems.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
@@ -74,7 +74,7 @@ using .FciDumps
 using .DumpTools
 using .OrbTools
 using .Elements
-using .MSystem
+using .MSystems
 using .BasisSets
 using .BOHF
 using .DFHF
