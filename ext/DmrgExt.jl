@@ -4,16 +4,16 @@
 Density Matrix Renormalization Group (DMRG) calculations
 using `ITensors.jl` package.
 """
-module DMRG
+module DmrgExt
+using ElemCo
 using ITensors
 using Printf
-using ..ElemCo.Utils
-using ..ElemCo.ECInfos
-using ..ElemCo.QMTensors
-using ..ElemCo.TensorTools
-using ..ElemCo.FciDumps
-
-export calc_dmrg
+using ElemCo.Utils
+using ElemCo.ECInfos
+using ElemCo.QMTensors
+using ElemCo.TensorTools
+using ElemCo.FciDumps
+using ElemCo.DMRG
 
 """
     gen_hamiltonian(EC::ECInfo)
@@ -113,4 +113,4 @@ function calc_dmrg(EC::ECInfo)
   return OutDict("E"=>E-Eref, "Expect"=>E2-Eref)
 end
 
-end # module DMRG
+end # module 

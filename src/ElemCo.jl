@@ -34,7 +34,7 @@ include("integrals/decomptools.jl")
 include("cc/cctools.jl")
 include("cc/dfcc.jl")
 include("cc/cc.jl")
-include("dmrg/dmrg.jl")
+include("cc/dmrg.jl")
 include("cc/ccdriver.jl")
 
 include("scf/bohf.jl")
