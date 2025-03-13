@@ -62,9 +62,9 @@ struct BasisCentre
   shells::Vector{AngularShell}
 end
 
-function BasisCentre(atom::Atom, basis="", basisfunctions=[])
-  return BasisCentre(string(atomic_centre_symbol(atom)), uconvert.(u"bohr", atom.position)/u"bohr", 
-                    atomic_number(atom), is_dummy(atom) ? 0 : atomic_number(atom),
+function BasisCentre(atom::ACentre, basis="", basisfunctions=[])
+  return BasisCentre(atomic_centre_label(atom), atom.position, 
+                    atom.atomic_number, is_dummy(atom) ? 0 : atom.charge,
                     basis, basisfunctions)
 end
 

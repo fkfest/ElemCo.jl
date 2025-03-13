@@ -7,8 +7,6 @@
   The basis set can be generated using the [`generate_basis`](@ref) function.
 """
 module BasisSets
-using Unitful, UnitfulAtomic
-using AtomsBase
 using StaticArrays
 using Printf
 using DocStringExtensions
@@ -164,14 +162,13 @@ centre_range(bs::BasisSet, i::Int=1) = bs.centre_ranges[i]
 is_cartesian(bs::BasisSet) = bs.cartesian
 
 """
-    basis_name(atoms, type="ao")
+    basis_name(atom::ACentre, type="ao")
 
   Return the name of the basis set (or `unknown` if not found).
-  `atoms` can be a single atom `::Atom` or a system `::FlexibleSystem`.
 """
-function basis_name(atoms, type="ao")
-  if haskey(atoms, :basis) && haskey(atoms[:basis], type)
-    return lowercase(atoms[:basis][type])
+function basis_name(atom::ACentre, type="ao")
+  if haskey(atom.basis, type)
+    return lowercase(atom.basis[type])
   else
     return "unknown"
   end
@@ -191,7 +188,7 @@ function generate_basis(EC::AbstractECInfo, type="ao"; basisset::AbstractString=
 end
 
 """
-    generate_basis(ms::FlexibleSystem, type="ao"; cartesian=false, basisset::AbstractString="")
+    generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::AbstractString="")
 
   Generate basis sets for integral calculations.
 
@@ -199,10 +196,9 @@ end
   `type` can be `"ao"`, `"mpfit"` or `"jkfit"`.
   If `basisset` is provided, it is used as the basis set.
 """
-function generate_basis(ms::FlexibleSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
+function generate_basis(ms::MSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
   array_of_centres = BasisCentre[]
   id = 1
-  first
   for atom in ms
     if basisset != ""
       basisname = basisset
@@ -313,14 +309,14 @@ function print_ao(ao::AbstractAtomicOrbital, basis::BasisSet)
 end
 
 """
-    guess_basis_name(atom::Atom, type)
+    guess_basis_name(atom::ACentre, type)
 
   Guess the name of the basis set.
   `type` can be `"ao"`, `"mpfit"` or `"jkfit"`.
 """
-function guess_basis_name(atom::Atom, type)
+function guess_basis_name(atom::ACentre, type)
   if type == "ao"
-    error("AO basis set for atom $(atomic_centre_symbol(atom)) not defined!")
+    error("AO basis set for atom $(atomic_centre_label(atom)) not defined!")
   end
   aobasis = basis_name(atom, "ao")
   return aobasis * "-" * type

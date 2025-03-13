@@ -6,7 +6,7 @@ Module for handling elements and their electron configurations.
 module Elements
 using DocStringExtensions
 
-export ELEMENTS, nuclear_charge_of_centre, element_name_from_symbol
+export ELEMENTS, nuclear_charge_of_centre, element_fullname_from_label
 export SUBSHELLS_NAMES, SUBSHELL2L, ncoreorbs, electron_distribution4element
 """
   Elements with corresponding atomic numbers, 
@@ -143,11 +143,11 @@ function nuclear_charge_of_centre(elem::AbstractString)
 end
 
 """
-    element_name_from_symbol(elem::AbstractString)
+    element_fullname_from_label(elem::AbstractString)
 
-  Return the element name
+  Return the element full name
 """
-function element_name_from_symbol(elem::AbstractString)
+function element_fullname_from_label(elem::AbstractString)
   return get(ELEMENTS, uppercase(elem), [0,0,"Unknown"])[3]
 end
 

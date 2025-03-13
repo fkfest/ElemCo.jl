@@ -4,8 +4,6 @@ Molden interface
 This module provides an interface to Molden to read and write orbitals and other data.
 """
 module MoldenInterface
-using Unitful, UnitfulAtomic
-using AtomsBase
 using Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
@@ -91,17 +89,11 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   end
   open(filename, "w") do f
     println(f, "[Molden Format]")
-    distunit = unit(EC.system[1].position[1])
-    if distunit == u"bohr"
-      println(f, "[Atoms] AU")
-    else
-      distunit = u"angstrom"
-      println(f, "[Atoms] Angs")
-    end
+    println(f, "[Atoms] AU")
     for (iat,atom) in enumerate(EC.system)
-      coord = uconvert.(distunit, atom.position)/distunit
+      coord = atom.position
       @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
-              atomic_centre_symbol(atom), iat, basisset.centres[iat].charge, coord[1], coord[2], coord[3])
+              atomic_centre_label(atom), iat, basisset.centres[iat].charge, coord[1], coord[2], coord[3])
     end
     println(f, "[GTO]")
     for ic in centre_range(basisset)
@@ -139,17 +131,11 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
     println("Writing also positron orbitals to $(filename)_positron")
     open(filename*"_positron", "w") do f
       println(f, "[Molden Format]")
-      distunit = unit(EC.system[1].position[1])
-      if distunit == u"bohr"
-        println(f, "[Atoms] AU")
-      else
-        distunit = u"angstrom"
-        println(f, "[Atoms] Angs")
-      end
+      println(f, "[Atoms] AU")
       for (iat,atom) in enumerate(EC.system)
-        coord = uconvert.(distunit, atom.position)/distunit
+        coord = atom.position
         @printf(f, "%s %i %i %16.10f %16.10f %16.10f\n", 
-                atomic_centre_symbol(atom), iat, atomic_number(atom), coord[1], coord[2], coord[3])
+                atomic_centre_label(atom), iat, atom.charge, coord[1], coord[2], coord[3])
       end
       println(f, "[GTO]")
       for ic in centre_range(basisset)

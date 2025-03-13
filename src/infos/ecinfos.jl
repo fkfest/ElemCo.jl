@@ -1,7 +1,5 @@
 """ Various global infos """
 module ECInfos
-using Unitful, UnitfulAtomic
-using AtomsBase
 using HDF5
 using Dates
 using DocStringExtensions
@@ -110,7 +108,7 @@ end
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  system::FlexibleSystem = create_empty_system()
+  system::MSystem = MSystem()
   """ fcidump. """
   fd::TFDump = TFDump()
   """ dump with calculation information (for restarts etc). """
@@ -154,17 +152,6 @@ end
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
   space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}()
-end
-
-"""
-    create_empty_system()
-
-  Create an empty molecular system of type `FlexibleSystem`.
-"""
-function create_empty_system() 
-  fs = isolated_system([:H => [0, 0, 0]u"bohr"])
-  deleteat!(fs.particles, 1)
-  return fs
 end
 
 """
