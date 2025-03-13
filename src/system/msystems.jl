@@ -61,6 +61,19 @@ function Base.show(io::IO, at::ACentre)
   @printf(io, "%-3s %16.10f %16.10f %16.10f", at.label, at.position[1], at.position[2], at.position[3])
 end
 
+function Base.:(==)(at1::ACentre, at2::ACentre)
+  return at1.label == at2.label && at1.position == at2.position && 
+        at1.atomic_number == at2.atomic_number && at1.charge == at2.charge && 
+        at1.basis == at2.basis && at1.dummy == at2.dummy
+end
+
+function Base.isapprox(at1::ACentre, at2::ACentre; kwargs...)
+  return at1.label == at2.label && isapprox(at1.position, at2.position; kwargs...) && 
+        at1.atomic_number == at2.atomic_number && isapprox(at1.charge, at2.charge; kwargs...) && 
+        at1.basis == at2.basis && at1.dummy == at2.dummy
+end
+
+
 """
     MSystem
 
@@ -88,6 +101,21 @@ function Base.iterate(ms::MSystem, state::Int=1)
     return nothing
   end
 end
+function Base.:(==)(ms1::MSystem, ms2::MSystem)
+  return ms1.centres == ms2.centres
+end
+function Base.isapprox(ms1::MSystem, ms2::MSystem; atol=1e-10, rtol=atol>0 ? 0 : 1e-8)
+  if length(ms1) != length(ms2)
+    return false
+  end
+  for (at1,at2) in zip(ms1,ms2)
+    if !isapprox(at1, at2; atol, rtol)
+      return false
+    end
+  end
+  return true
+end
+
 function Base.show(io::IO, ms::MSystem)
   for at in ms
     println(io, at)
