@@ -31,7 +31,7 @@ DmrgExt = "ITensors"
 AtomsBaseExt = ["AtomsBase", "Unitful", "UnitfulAtomic"]
 
 [compat]
-AtomsBase = "0.3.5 - 0.4"
+AtomsBase = "0.3.5 - 0.5"
 Buffers = "0.2"
 DocStringExtensions = "0.9"
 HDF5 = "0.17"

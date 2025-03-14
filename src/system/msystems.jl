@@ -210,14 +210,16 @@ end
     genbasis4element(basis::Dict, elem::AbstractString)
 
   Set element specific basis from, e.g., 
-  Dict("ao"=>"cc-pVDZ; o=aug-cc-pVDZ; 
-    h={! hydrogen             (4s,1p) -> [2s,1p]
-      s, H , 13.0100000, 1.9620000, 0.4446000, 0.1220000
-      c, 1.4, 0.0196850, 0.1379770, 0.4781480, 0.5012400
-      c, 4.4, 1.0000000
-      p, H , 0.7270000
-      c, 1.1, 1.0000000}",
-      "jkfit"=>"cc-pvdz-jkfit")
+```julia
+Dict("ao"=>"cc-pVDZ; o=aug-cc-pVDZ; 
+  h={! hydrogen             (4s,1p) -> [2s,1p]
+    s, H , 13.0100000, 1.9620000, 0.4446000, 0.1220000
+    c, 1.4, 0.0196850, 0.1379770, 0.4781480, 0.5012400
+    c, 4.4, 1.0000000
+    p, H , 0.7270000
+    c, 1.1, 1.0000000}",
+    "jkfit"=>"cc-pvdz-jkfit")
+```
 """
 function genbasis4element(basis::Dict, elem::AbstractString)
   elembasis = Dict{String,String}()

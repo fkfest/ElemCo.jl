@@ -187,7 +187,7 @@ end
     parse_electron_configuration(e::AbstractString)
 
   Parse the electron configuration string and return the number of electrons in each subshell.
-  e.g. "[He] 2s^2 2p^6 3s^2 3p^6" -> [SubShell(1,0,2), SubShell(2,0,2), SubShell(2,1,6), SubShell(3,0,2), SubShell(3,1,6)] 
+  e.g. `"[He] 2s^2 2p^6 3s^2 3p^6"` -> `[SubShell(1,0,2), SubShell(2,0,2), SubShell(2,1,6), SubShell(3,0,2), SubShell(3,1,6)]` 
 """
 function parse_electron_configuration(e::AbstractString)
   subshells = SubShell[]

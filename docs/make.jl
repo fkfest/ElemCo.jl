@@ -51,7 +51,7 @@ makedocs(
       "integrals.md",
       "mio.md",
       "mnpy.md",
-      "msystem.md",
+      "msystems.md",
       "orbtools.md",
       "qmtensors.md",
       "tensortools.md",
