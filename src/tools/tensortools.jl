@@ -414,30 +414,42 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
   evecs_real::Matrix{Float64} = real.(evecs)
   evals_real::Vector{Float64} = real.(evals)
   npairs = 0
-  skip = false
-  for i in eachindex(evals)
-    if skip 
-      skip = false
+  # indices of complex eigenvalues
+  idx = findall(x -> abs(imag(x)) > 0.0, evals)
+  if length(idx) == 0
+    return evecs_real, evals_real
+  end
+  if length(idx) % 2 != 0
+    error("odd number of complex eigenvalues")
+  end
+  # find pairs of complex eigenvalues
+  # and rotate the eigenvectors to the real space
+  for ii in eachindex(idx)
+    if idx[ii] < 0
+      # skip this eigenvalue
       continue
     end
-    if abs(imag(evals[i])) > 0.0
-      println("complex: ",evals[i], " ",i)
-      if evals[i] ≈ conj(evals[i+1])
-        @assert  evecs_real[:,i] == real.(evecs[:,i+1])
-        evecs_real[:,i+1] = imag.(evecs[:,i+1])
-        normalize!(evecs_real[:,i])
-        normalize!(evecs_real[:,i+1])
-        evals_real[i+1] = real(evals[i+1])
-        npairs += 1
-        skip = true
-      else
-        error("eigenvalue pair expected but not found: conj(",evals[i], ") != ",evals[i+1])
-      end
+    i = idx[ii]
+    println("complex eigenvalue: ", evals[i], " ", i)
+    # find the complex conjugate eigenvalue
+    # and the corresponding eigenvector
+    iicc = ii+1
+    while iicc <= length(idx) && !(evals[i] ≈ conj(evals[idx[iicc]]) && evecs_real[:,i] ≈ real.(evecs[:,idx[iicc]]))
+      iicc += 1
     end
+    if iicc > length(idx)
+      error("complex eigenvalue pair expected but not found: conj(",evals[i], ") != ",evals[idx[ii+1]])
+    end
+    inext = idx[iicc]
+    idx[iicc] = -inext
+    evecs_real[:,inext] = imag.(evecs[:,inext])
+    normalize!(evecs_real[:,i])
+    normalize!(evecs_real[:,inext])
+    evals_real[inext] = real(evals[inext])
+    npairs += 1
   end
-  if npairs > 0
-    println("$npairs eigenvector pairs rotated to the real space")
-  end
+
+  println("$npairs eigenvector pairs rotated to the real space")
   return evecs_real, evals_real
 end
 
