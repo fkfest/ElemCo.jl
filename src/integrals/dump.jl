@@ -442,8 +442,8 @@ Returns `true` if successful.
 function read_integrals!(fd::FDump, dir::AbstractString)
   println("Read npy files")
   if !fd.uhf
-    fd.int2, success = mmap_integrals(fd, dir, "NPY2", fd.int2)
-    fd.int1, success = mmap_integrals(fd, dir, "NPY1", fd.int1)
+    fd.int2 = mmap_integrals(fd, dir, "NPY2", fd.int2)
+    fd.int1 = mmap_integrals(fd, dir, "NPY1", fd.int1)
     success = length(fd.int2) > 0 && length(fd.int1) > 0
   else
     fd.int2aa = mmap_integrals(fd, dir, "NPY2AA", fd.int2aa)
