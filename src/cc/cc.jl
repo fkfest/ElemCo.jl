@@ -1080,18 +1080,6 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
     
     # calculate the qT
-    
-    # if dc && q==2.0
-    #   @tensoropt YWT[a,b,i,j] := 2.0 * Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j])
-    #   @tensoropt qTAB[a,b,i,j] := 0.5 * (AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k])
-    #   @tensoropt qTD[a,b,i,j]:= - (YWT[a,b,i,j] + YWT[b,a,j,i])
-    # else
-    #   @tensoropt YWT[a,b,i,j] := Y1[c,k,a,i]* (T2[c,b,k,j] - 0.5 * T2[b,c,k,j]) + 0.5*W1[c,k,a,i] * T2[b,c,k,j] + W1[c,k,a,j] * T2[c,b,i,k]
-    #   @tensoropt qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] + BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k] - 
-    #                             CU1[i,j,k,l] * T2[a,b,k,l] - 0.5* YWT[a,b,i,j] - 0.5 * YWT[b,a,j,i]
-    # end
-    
-    # alternative
 
     @tensoropt T2_1[a,b,i,j] :=  2.0 * T2[a,b,i,j] - T2[a,b,j,i]
     if dc && q==2.0
@@ -1107,27 +1095,6 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
       @tensoropt temp_perm[a,b,i,j] :=  qT[b,a,j,i]
       qT .= qT .+ temp_perm
     end
-  
-    #####################################  
-    # #TEST
-    # if dc && q==2.0
-    #   if norm(qTAB.- qT) < 1e-8
-    #     println("     q=2.0 qTAB passed")
-    #   end
-    #   if norm(qTDa.- qTD) < 1e-8
-    #     println("     q=2.0 qTD passed")
-    #   end
-    # else
-    #   if norm(qTa.- qT) < 1e-8
-    #     println("     q="*string(q)*" qT passed")
-    #   end
-    # end
-
-
-
-    #####################################
-    E_cur = E_qvccd
-    #####################################
 
     #calculate the energy
 
@@ -1136,7 +1103,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
       # if !dc
       R1, qV = calc_cc_resid(EC, T1_0, qT; linearized=true) 
       # elseif dc
-      #   R1, qV = calc_cc_resid(EC, T1_0, qT.+qTD; linearized=true) 
+      #   R1, qV = calc_cc_resid(EC, T1_0, qTAB.+qTD; linearized=true) 
       # end
       qV .-= ints2(EC, "vvoo")
     elseif q == 2.0
@@ -1152,194 +1119,67 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
       E_qvccd += sum(qV .* qT) * q
     end
 
- #####################################
-    # Test the energy contribution
-
-    @tensoropt qTA[a,b,i,j]:= AU1[a,c] * T2[c,b,i,j] + AU1[b,c] * T2[a,c,i,j] 
-    @tensoropt qTB[a,b,i,j]:= BU1[k,i] * T2[a,b,k,j] + BU1[k,j] * T2[a,b,i,k]
-    @tensoropt qTC[a,b,i,j]:= - CU1[i,j,k,l] * T2[a,b,k,l]
-    if !dc || q==1.0
-      @tensoropt qTD[a,b,i,j] := -0.25 * (Y1[c,k,a,i] * T2_1[c,b,k,j] + W1[c,k,a,i] * T2[b,c,k,j] + 2.0 * W1[c,k,a,j] * T2[c,b,i,k])
-      @tensoropt temp_perm[a,b,i,j] =  qTD[b,a,j,i]
-      qTD .= qTD .+ temp_perm
-    end
-    qVD = ints2(EC, "vvoo")
-    E_A_qvccd = sum(qTA .* qV) * q
-    E_B_qvccd = sum(qTB .* qV) * q
-    E_C_qvccd = sum(qTC .* qV) * q
-    E_D_qvccd = sum(qTD .* qV) * q
-    E_A_qvdcd = sum(0.5 .* qTA .* qV) * q
-    E_B_qvdcd = sum(0.5 .* qTB .* qV) * q
-    E_D_qvdcd = sum(qTD .* qVD)
-
-    if !dc
-      if E_qvccd - E_cur ≈ E_A_qvccd + E_B_qvccd + E_C_qvccd + E_D_qvccd
-        println("E_qvccd passed")
-      else
-        println("E_qvccd failed")
-      end
-    else
-      if q == 2.0 
-        if E_qvccd - E_cur ≈ E_A_qvdcd + E_B_qvdcd + E_D_qvdcd
-          println("E_qvdcd q=2 passed")
-        else
-          println("E_qvdcd q=2 failed")
-        end
-      elseif q == 1.0 && E_qvccd - E_cur ≈ E_A_qvccd + E_B_qvccd + E_C_qvccd + E_D_qvccd
-        println("E_qvdcd q=1 passed")
-      else
-        println("E_qvdcd q=1 failed")
-      end
-    end
-
-    # println("E_A_qvdcd = 1/2 E_A_qvccd: ", E_A_qvdcd ≈ 0.5 * E_A_qvccd)
-    # println("E_B_qvdcd = 1/2 E_B_qvccd: ", E_B_qvdcd ≈ 0.5 * E_B_qvccd)
-    # println("E_B_qvccd = -2 E_C_qvccd: ", E_B_qvccd ≈ -2.0 * E_C_qvccd)
-    # println("E_D_qvdcd = 1/2 E_D_qvccd: ", E_D_qvdcd ≈ 0.5 * E_D_qvccd)
-    # println("E_D_qvdcd = 1/4 E_D_qvccd: ", E_D_qvdcd ≈ 0.25 * E_D_qvccd)
-    # println("E_A_qvdcd + 2 E_D_qvdcd = 0: ", E_A_qvdcd + 2.0 * E_D_qvdcd ≈ 0)
-    # println(E_A_qvccd)
-    # println(E_B_qvccd)
-    # println(E_C_qvccd)
-    # println(E_D_qvccd)
-    # println(E_A_qvdcd)
-    # println(E_B_qvdcd)
-    # println(E_D_qvdcd)
-
-  #####################################
     # calculate residual
-    qG_bench = zeros(nvirt, nvirt, nocc, nocc)
-    qG_test =  zeros(nvirt, nvirt, nocc, nocc)
-    for i in [1,2]
-      if i == 1
-        @tensoropt begin
-          qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
-          qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
-          qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
-          q1DF[a,i,c,k] := qV[a,b,i,j] * (T2[c,b,k,j] - 0.5*T2[b,c,k,j])
-        end
-        if q==2.0 && dc
-          @tensoropt q1DF[a,i,c,k] = qVD[a,b,i,j] * (T2[c,b,k,j] - 0.5*T2[b,c,k,j]) 
-        end
-        if !dc
-          @tensoropt q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j] + qV[a,b,j,i] * T2[c,b,j,k]
-        else
-          @tensoropt q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j] + qV[a,b,j,i] * T2[c,b,j,k]
-        end
+    @tensoropt qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
+    @tensoropt qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
+    qAR = calc_R_from_U_F(Ae, AX, qAF, q)
+    qBR = calc_R_from_U_F(Be, BX, qBF, q)
 
-        qCF = reshape(qCF, nocc^2, nocc^2)
-        q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
-        q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
+    if dc && q==2.0
+      @tensoropt qDF[a,i,c,k] := qVD[a,b,i,j] * T2_1[c,b,k,j]
+      qDF = reshape(qDF, nvirt*nocc, nvirt*nocc)
+      qDR = calc_R_from_U_F(Ye, YX, qDF, q)
+      qDR = reshape(qDR, nvirt, nocc, nvirt, nocc)
+    else
+      @tensoropt qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
+      @tensoropt q1DF[a,i,c,k] := qV[a,b,i,j] * 0.5 * T2_1[c,b,k,j]
+      @tensoropt q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j] + qV[a,b,j,i] * T2[c,b,j,k]
 
-        qAR = calc_R_from_U_F(Ae, AX, qAF, q)
-        qBR = calc_R_from_U_F(Be, BX, qBF, q)
-        qCR = calc_R_from_U_F(Ce, CX, qCF, q)
-        q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
-        q2DR = calc_R_from_U_F(We, WX, q2DF, q)
+      qCF = reshape(qCF, nocc^2, nocc^2)
+      q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
+      q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
 
-        qAR .= 0.5 .* (qAR .+ qAR')
-        qBR .= 0.5 .* (qBR .+ qBR')
-        qCR .= 0.5 .* (qCR .+ qCR')
-        q1DR .= 0.5 .* (q1DR .+ q1DR')
-        q2DR .= 0.5 .* (q2DR .+ q2DR')
+      qCR = calc_R_from_U_F(Ce, CX, qCF, q)
+      q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
+      q2DR = calc_R_from_U_F(We, WX, q2DF, q)
 
-        qCR = reshape(qCR, nocc, nocc, nocc, nocc)
-        q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
-        q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
+      qCR = reshape(qCR, nocc, nocc, nocc, nocc)
+      q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
+      q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
+    end
 
-        if dc && q==2.0
-          @tensoropt qG[a,b,i,j] := qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + 0.5 * qV[c,b,i,j] * AU1[c,a] + 
-                                    qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + 0.5 * qV[a,b,k,j] * BU1[i,k] -
-                                    (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
-                                    - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j])
-                                    + qVD[c,b,k,j] * Y1[a,i,c,k] 
-                                    - 0.5 * qVD[c,a,k,j] * Y1[b,i,c,k] )
-        else
-          @tensoropt qG[a,b,i,j] := 2.0 * qAR[d,a] * (2.0*T2[d,b,i,j] - T2[b,d,i,j]) + qV[c,b,i,j] * AU1[c,a] +
-                                    2.0 * qBR[l,i] * (2.0*T2[a,b,l,j] - T2[b,a,l,j]) + qV[a,b,k,j] * BU1[i,k] +
-                                     (-0.5) * (2.0 * qCR[m,n,i,j] * T2[a,b,m,n] + qV[a,b,k,l] * CU1[k,l,i,j]) +
-                                    (-0.5) * (q1DR[a,i,c,k] * (8.0 * T2[c,b,k,j] - 4.0 * T2[b,c,k,j]) 
-                                    - q1DR[b,i,c,k]* (4.0 * T2[c,a,k,j] - 2.0 * T2[a,c,k,j]) 
-                                    + 2.0 * q2DR[b,i,c,k] * T2[a,c,k,j] 
-                                    + qV[c,b,k,j] * Y1[a,i,c,k] 
-                                    - 0.5 * qV[c,a,k,j] * Y1[b,i,c,k]
-                                    + 0.5 * qV[c,a,k,j] * W1[b,i,c,k] 
-                                    + qV[c,b,i,k] * W1[a,j,c,k]) 
-        end
-        qG_bench = deepcopy(qG)
-      else
-        # alternative
-        @tensoropt qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
-        @tensoropt qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
-        qAR = calc_R_from_U_F(Ae, AX, qAF, q)
-        qBR = calc_R_from_U_F(Be, BX, qBF, q)
+    if dc && q==2.0
+      @tensoropt begin 
+        qG[a,b,i,j] := 0.5 * (qAR[a,c] + qAR[c,a]) * T2_1[c,b,i,j] 
+        qG[a,b,i,j] += 0.5 * qV[c,b,i,j] * AU1[c,a] 
+        qG[a,b,i,j] += 0.5 * (qBR[k,i] + qBR[i,k]) * T2_1[a,b,k,j]
+        qG[a,b,i,j] += 0.5 * qV[a,b,k,j] * BU1[i,k]
 
-        if dc && q==2.0
-          @tensoropt qDF[a,i,c,k] := qVD[a,b,i,j] * T2_1[c,b,k,j]
-          qDF = reshape(qDF, nvirt*nocc, nvirt*nocc)
-          qDR = calc_R_from_U_F(Ye, YX, qDF, q)
-          qDR = reshape(qDR, nvirt, nocc, nvirt, nocc)
-        else
-          @tensoropt qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
-          @tensoropt q1DF[a,i,c,k] := qV[a,b,i,j] * 0.5 * T2_1[c,b,k,j]
-          @tensoropt q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j] + qV[a,b,j,i] * T2[c,b,j,k]
+        qG[a,b,i,j] -= (qDR[a,i,c,k] + qDR[c,k,a,i]) * T2_1[c,b,k,j] 
+        qG[a,b,i,j] += 0.5 * (qDR[b,i,c,k] + qDR[c,k,b,i]) * T2_1[c,a,k,j] 
+        qG[a,b,i,j] -= qVD[c,b,k,j] * Y1[a,i,c,k] 
+        qG[a,b,i,j] += 0.5 * qVD[c,a,k,j] * Y1[b,i,c,k] #qVD[c,b,k,i] * Y1[a,j,c,k] 
+      end
+    else      
+      @tensoropt begin 
+        qG[a,b,i,j] :=  (qAR[a,c] + qAR[c,a]) * T2_1[c,b,i,j] 
+        qG[a,b,i,j] +=  qV[c,b,i,j] * AU1[c,a] 
+        qG[a,b,i,j] += (qBR[k,i] + qBR[i,k]) * T2_1[a,b,k,j]
+        qG[a,b,i,j] +=  qV[a,b,k,j] * BU1[i,k]
 
-          qCF = reshape(qCF, nocc^2, nocc^2)
-          q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
-          q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
+        qG[a,b,i,j] -= 0.5 * (qCR[k,l,i,j] + qCR[i,j,k,l]) * T2[a,b,k,l]
+        qG[a,b,i,j] -= 0.5 * qV[a,b,k,l] * CU1[k,l,i,j]
+        
+        qG[a,b,i,j] -= (q1DR[a,i,c,k] + q1DR[c,k,a,i]) * T2_1[c,b,k,j]
+        qG[a,b,i,j] += 0.5 * (q1DR[b,i,c,k] + q1DR[c,k,b,i]) * T2_1[c,a,k,j]
+        qG[a,b,i,j] -= 0.5 * (q2DR[b,i,c,k] + q2DR[c,k,b,i]) * T2[a,c,k,j]
 
-          qCR = calc_R_from_U_F(Ce, CX, qCF, q)
-          q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
-          q2DR = calc_R_from_U_F(We, WX, q2DF, q)
-
-          qCR = reshape(qCR, nocc, nocc, nocc, nocc)
-          q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
-          q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
-        end
-
-        if dc && q==2.0
-          @tensoropt begin 
-            qG[a,b,i,j] := 0.5 * (qAR[a,c] + qAR[c,a]) * T2_1[c,b,i,j] 
-            qG[a,b,i,j] += 0.5 * qV[c,b,i,j] * AU1[c,a] 
-            qG[a,b,i,j] += 0.5 * (qBR[k,i] + qBR[i,k]) * T2_1[a,b,k,j]
-            qG[a,b,i,j] += 0.5 * qV[a,b,k,j] * BU1[i,k]
-
-            qG[a,b,i,j] -= (qDR[a,i,c,k] + qDR[c,k,a,i]) * T2_1[c,b,k,j] 
-            qG[a,b,i,j] += 0.5 * (qDR[b,i,c,k] + qDR[c,k,b,i]) * T2_1[c,a,k,j] 
-            qG[a,b,i,j] -= qVD[c,b,k,j] * Y1[a,i,c,k] 
-            qG[a,b,i,j] += 0.5 * qVD[c,a,k,j] * Y1[b,i,c,k] #qVD[c,b,k,i] * Y1[a,j,c,k] 
-          end
-        else      
-          @tensoropt begin 
-            qG[a,b,i,j] :=  (qAR[a,c] + qAR[c,a]) * T2_1[c,b,i,j] 
-            qG[a,b,i,j] +=  qV[c,b,i,j] * AU1[c,a] 
-            qG[a,b,i,j] += (qBR[k,i] + qBR[i,k]) * T2_1[a,b,k,j]
-            qG[a,b,i,j] +=  qV[a,b,k,j] * BU1[i,k]
-
-            qG[a,b,i,j] -= 0.5 * (qCR[k,l,i,j] + qCR[i,j,k,l]) * T2[a,b,k,l]
-            qG[a,b,i,j] -= 0.5 * qV[a,b,k,l] * CU1[k,l,i,j]
-            
-            qG[a,b,i,j] -= (q1DR[a,i,c,k] + q1DR[c,k,a,i]) * T2_1[c,b,k,j]
-            qG[a,b,i,j] += 0.5 * (q1DR[b,i,c,k] + q1DR[c,k,b,i]) * T2_1[c,a,k,j]
-            qG[a,b,i,j] -= 0.5 * (q2DR[b,i,c,k] + q2DR[c,k,b,i]) * T2[a,c,k,j]
-
-            qG[a,b,i,j] -= 0.5 * qV[c,b,k,j] * Y1[a,i,c,k]
-            qG[a,b,i,j] += 0.25 *  qV[c,a,k,j] * Y1[b,i,c,k] # qV[c,b,k,i] * Y1[a,j,c,k]
-            qG[a,b,i,j] -= 0.25 * qV[c,a,k,j] * W1[b,i,c,k]
-            qG[a,b,i,j] -= 0.5 * qV[c,b,i,k] * W1[a,j,c,k]
-          end
-        end
-        qG_test = deepcopy(qG)
+        qG[a,b,i,j] -= 0.5 * qV[c,b,k,j] * Y1[a,i,c,k]
+        qG[a,b,i,j] += 0.25 *  qV[c,a,k,j] * Y1[b,i,c,k] # qV[c,b,k,i] * Y1[a,j,c,k]
+        qG[a,b,i,j] -= 0.25 * qV[c,a,k,j] * W1[b,i,c,k]
+        qG[a,b,i,j] -= 0.5 * qV[c,b,i,k] * W1[a,j,c,k]
       end
     end
-    # display(qG_bench)
-    # display(qG_test)
-    if norm(qG_bench.- qG_test)  ≈ 0.0
-      println("q= "*string(q)*" test residual passed")
-    else
-      println("q= "*string(q)*" test residual failed")
-    end
-    qG = qG_test
     @tensoropt temp_perm[a,b,i,j] = qG[b,a,j,i]
     qG .= qG .+ temp_perm
     G2 += qG
