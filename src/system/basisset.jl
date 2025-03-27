@@ -121,6 +121,7 @@ end
   in the combined set.
 """
 function combine(bs1::BasisSet, bs2::BasisSet)
+  @assert bs1.cartesian == bs2.cartesian "Basis sets must be both cartesian or both spherical"
   centers = vcat(bs1.centers, bs2.centers)
   set_id!(centers, 1)
   center_ranges = vcat(bs1.center_ranges, [r .+ length(bs1.centers) for r in bs2.center_ranges])
@@ -201,6 +202,7 @@ end
 function generate_basis(ms::FlexibleSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
   array_of_centers = BasisCenter[]
   id = 1
+  first
   for atom in ms
     if basisset != ""
       basisname = basisset
@@ -210,7 +212,7 @@ function generate_basis(ms::FlexibleSystem, type="ao"; cartesian::Bool=false, ba
         basisname = guess_basis_name(atom, type)
       end
     end
-    basisfunctions = parse_basis(basisname, atom)
+    basisfunctions = parse_basis(basisname, atom; fallback=(type=="jkfit"))
     id = set_id!(basisfunctions, id)
     push!(array_of_centers, BasisCenter(atom, basisname, basisfunctions))
   end

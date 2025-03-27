@@ -3,19 +3,101 @@
 """
 module TensorTools
 using LinearAlgebra
+using TensorOperations
+# using ElemCoTensorOperations
+using StridedViews
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
 
-export save!, load, load_all, mmap, newmmap, closemmap, flushmmap
+export save!, load, load_all, load!, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
 export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, load6idx_all
 export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
+export ints2!, detri_int2!
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
 export get_spaceblocks
 export print_nonzeros
+export @mtensor, @mtensoropt
+export @tensor, @tensoropt # reexport @tensor, @tensoropt
+export @mview, mview
 
+save_tensorcalls() = false
+
+if save_tensorcalls()
+  include("tensoranalyzer.jl")
+  write_header4tensorcalls()
+end
+
+"""
+    mtensor(ex)
+
+Macro for tensor operations with manual allocator.
+"""
+macro mtensor(ex)
+  if save_tensorcalls()
+    print_tensor4tensorcalls(Symbol("@tensor"), ex)
+  end
+  return esc(:(@tensor $ex))
+  # TODO: activate manual allocator
+  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
+end
+
+macro mtensoropt(args::Vararg{Expr})
+  if save_tensorcalls()
+    print_tensor4tensorcalls(Symbol("@tensoropt"), args...)
+  end
+  return esc(:(@tensoropt $(args...)))
+  # TODO: activate manual allocator
+  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
+end
+
+"""
+    @mview(ex)
+
+  StridedView based version of `@view`.
+"""
+macro mview(ex)
+  # NOTE it's largely based on the @view macro from Base.
+  Meta.isexpr(ex, :ref) || throw(ArgumentError(
+      "Invalid use of @mview macro: argument must be a reference expression A[...]."))
+  ex = Base.replace_ref_begin_end!(ex)
+  # NOTE We embed `view` as a function object itself directly into the AST.
+  #      By doing this, we prevent the creation of function definitions like
+  #      `view(A, idx) = xxx` in cases such as `@view(A[idx]) = xxx.`
+  if Meta.isexpr(ex, :ref)
+      ex = Expr(:call, mview, ex.args...)
+  elseif Meta.isexpr(ex, :let) && (arg2 = ex.args[2]; Meta.isexpr(arg2, :ref))
+      # ex replaced by let ...; foo[...]; end
+      ex.args[2] = Expr(:call, mview, arg2.args...)
+  else
+      error("invalid expression")
+  end
+  return esc(ex)
+end
+
+"""
+    mview(arr, args...)
+
+  `StridedView` based version of `view`.
+
+  The data array is enforced to be a vector, such that the view is always a `StridedView{..., Vector{...},...}`.
+"""
+function mview(arr, args...)
+  return sview(reshape(view(vec(arr),:), size(arr)), args...)
+end
+
+"""
+    mview(arr::StridedView, args...)
+
+  StridedView based version of `view`, for `StridedView` input.
+
+  Simply calls `StridedViews.sview`.
+"""
+function mview(arr::StridedView, args...)
+  return sview(arr, args...)
+end
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
@@ -73,6 +155,18 @@ for N in 1:6
       return load_all(EC, fname, Val($N), T; skip_error)
     end
   end
+end
+
+"""
+    load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_error=false)
+
+  Load array(s) from file `fname` in EC.scr directory.
+
+  The type and number of dimensions are deduced from the first array in `arrs`.
+  If `skip_error` is true, return false if the dimension/type is wrong.
+"""
+function load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_error=false) where {T,N}
+  return mioload!(joinpath(EC.scr, fname*EC.ext), arrs...; skip_error)
 end
 
 """
@@ -216,17 +310,57 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing)
 end
 
 """ 
+    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+
+  Return subset of 2e⁻ integrals according to spaces. 
+  
+  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
+  from upper/lower case of spaces specification.
+  If the last two indices are stored as triangular - make them full.
+  The result is stored in `out`.
+"""
+function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+  if isnothing(spincase)
+    sc = spincase_from_4spaces(spaces)
+  else 
+    sc::Symbol = spincase
+  end
+  SP = EC.space
+  if EC.fd.uhf && sc == :αβ
+    @assert size(out) == (length(SP[spaces[1]]),length(SP[spaces[2]]),length(SP[spaces[3]]),length(SP[spaces[4]]))
+    out .= @view integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
+    return out
+  end
+  allint = integ2_ss(EC.fd, sc)
+  @assert ndims(allint) == 3
+  norb = length(EC.space[':'])
+  # last two indices as a triangular index, desymmetrize
+  return detri_int2!(out, allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+end
+
+""" 
     detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
 
   Return full 2e⁻ integrals <sp1 sp2 | sp3 sp4> from allint2 with last two indices as a triangular index.
 """
 function detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
-  @assert ndims(allint2) == 3
   out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+  return detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
+end
+
+"""
+    detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
+
+  Return full 2e⁻ integrals <sp1 sp2 | sp3 sp4> from allint2 with last two indices as a triangular index.
+  The result is stored in `out`.
+"""
+function detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
+  @assert ndims(allint2) == 3
+  @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
   cio, maski = triinds(norb, sp3, sp4)
-  out[:,:,cio] = allint2[sp1,sp2,maski]
+  out[:,:,cio] .= @view(allint2[sp1,sp2,maski])
   cio, maski = triinds(norb, sp4, sp3, true)
-  out[:,:,cio] = permutedims(allint2[sp2,sp1,maski], (2,1,3))
+  permutedims!(@view(out[:,:,cio]), @view(allint2[sp2,sp1,maski]), (2,1,3))
   return out
 end
 
@@ -280,30 +414,42 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
   evecs_real::Matrix{Float64} = real.(evecs)
   evals_real::Vector{Float64} = real.(evals)
   npairs = 0
-  skip = false
-  for i in eachindex(evals)
-    if skip 
-      skip = false
+  # indices of complex eigenvalues
+  idx = findall(x -> abs(imag(x)) > 0.0, evals)
+  if length(idx) == 0
+    return evecs_real, evals_real
+  end
+  if length(idx) % 2 != 0
+    error("odd number of complex eigenvalues")
+  end
+  # find pairs of complex eigenvalues
+  # and rotate the eigenvectors to the real space
+  for ii in eachindex(idx)
+    if idx[ii] < 0
+      # skip this eigenvalue
       continue
     end
-    if abs(imag(evals[i])) > 0.0
-      println("complex: ",evals[i], " ",i)
-      if evals[i] == conj(evals[i+1])
-        @assert  evecs_real[:,i] == real.(evecs[:,i+1])
-        evecs_real[:,i+1] = imag.(evecs[:,i+1])
-        normalize!(evecs_real[:,i])
-        normalize!(evecs_real[:,i+1])
-        evals_real[i+1] = real(evals[i+1])
-        npairs += 1
-        skip = true
-      else
-        error("eigenvalue pair expected but not found: conj(",evals[i], ") != ",evals[i+1])
-      end
+    i = idx[ii]
+    println("complex eigenvalue: ", evals[i], " ", i)
+    # find the complex conjugate eigenvalue
+    # and the corresponding eigenvector
+    iicc = ii+1
+    while iicc <= length(idx) && !(evals[i] ≈ conj(evals[idx[iicc]]) && evecs_real[:,i] ≈ real.(evecs[:,idx[iicc]]))
+      iicc += 1
     end
+    if iicc > length(idx)
+      error("complex eigenvalue pair expected but not found: conj(",evals[i], ") != ",evals[idx[ii+1]])
+    end
+    inext = idx[iicc]
+    idx[iicc] = -inext
+    evecs_real[:,inext] = imag.(evecs[:,inext])
+    normalize!(evecs_real[:,i])
+    normalize!(evecs_real[:,inext])
+    evals_real[inext] = real(evals[inext])
+    npairs += 1
   end
-  if npairs > 0
-    println("$npairs eigenvector pairs rotated to the real space")
-  end
+
+  println("$npairs eigenvector pairs rotated to the real space")
   return evecs_real, evals_real
 end
 
@@ -312,7 +458,7 @@ function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float
 end
 
 """ 
-    get_spaceblocks(space, maxblocksize=100, strict=false)
+    get_spaceblocks(space, maxblocksize=128, strict=false)
 
   Generate ranges for block indices for space (for loop over blocks).
 
@@ -322,16 +468,16 @@ end
   Otherwise the actual block size will be as close as possible to `blocksize` such that
   the resulting blocks are of similar size.
 """
-function get_spaceblocks(space, maxblocksize=100, strict=false)
+function get_spaceblocks(space, maxblocksize=128, strict=false)
   if length(space) == 0
-    return []
+    return UnitRange{Int}[]
   end
   if last(space) - first(space) + 1 == length(space)
     # contiguous
-    cblks = [ first(space):last(space) ]
+    cblks = UnitRange{Int}[ first(space):last(space) ]
   else
     # create an array of contiguous ranges
-    cblks = []
+    cblks = UnitRange{Int}[]
     begr = first(space)
     endr = begr - 1
     for idx in space
@@ -345,18 +491,18 @@ function get_spaceblocks(space, maxblocksize=100, strict=false)
     push!(cblks, begr:endr)
   end  
 
-  allblks = []
+  allblks = UnitRange{Int}[]
   for range in cblks
-    nblks = length(range) ÷ maxblocksize
+    nblks::Int = length(range) ÷ maxblocksize
     if nblks*maxblocksize < length(range)
       nblks += 1
     end
     if strict 
-      blks = [ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
+      blks = UnitRange{Int}[ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
     else
       blocksize = length(range) ÷ nblks
       n_largeblks = mod(length(range), nblks)
-      blks = [ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
+      blks = UnitRange{Int}[ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
       start = n_largeblks*(blocksize+1)+first(range)
       for i = n_largeblks+1:nblks
         push!(blks, start:start+blocksize-1)

@@ -28,6 +28,8 @@ ints2
 ## Tensor manipulation
 
 ```@docs
+@mtensor
+@mview
 sqrtinvchol
 invchol
 rotate_eigenvectors_to_real

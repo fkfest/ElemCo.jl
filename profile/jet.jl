@@ -10,6 +10,7 @@ basis="vdz"
 
 @time @ECinit
 @time @dfhf
+#@time @dfcc mp2
 @time @cc dcsd
 #@time @dfcc svd-dcsd
 
@@ -51,7 +52,9 @@ basis="vdz"
                             ElemCo.MSystem
                             #) ElemCo.DfDump.dfdump(EC)
                             #) ElemCo.DFHF.dfhf(EC)
-                            ) ElemCo.CCDriver.ccdriver(EC,"λCCSD")
+                            #) ElemCo.CCDriver.dfccdriver(EC,"MP2")
+                            #) ElemCo.CCDriver.ccdriver(EC,"λCCSD")
+                            ) ElemCo.CCDriver.ccdriver(EC,"SVD-DC-CCSDT")
                             #) ElemCo.CCDriver.dfccdriver(EC,"SVD-DCSD")
                             
 end

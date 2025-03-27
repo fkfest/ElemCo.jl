@@ -7,7 +7,6 @@ module ElemCo
 
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
-include("tools/buffers.jl")
 include("tools/outputs.jl")
 include("tools/utils.jl")
 include("tools/constants.jl")
@@ -57,9 +56,7 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
-using TensorOperations
 using PrecompileTools
-using .Buffers
 using .Utils
 using .ECInfos
 using .QMTensors
@@ -87,16 +84,21 @@ using .Interfaces
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string, @dummy
+export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
-export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
 # from Utils
 export last_energy
 # from DescDict
 export ODDict
 
-const __VERSION__ = "0.13.1+"
+devel() = true
+const __VERSION__ = "0.13.1" * (devel() ? "+" : "")
+
+# const __VERSION__ = "0.13.1+"
+# devel() = last(__VERSION__) == "+"
+
 
 """
     __init__()
@@ -257,8 +259,26 @@ Occupied orbitals:[1]
 ```
 """
 macro ECinit()
+  if @istoplevel
+    return quote
+      const $(esc(:EC)) = ECInfo()
+      $(esc(:@setupEC))
+    end
+  else
+    return quote
+      $(esc(:EC)) = ECInfo()
+      $(esc(:@setupEC))
+    end
+  end
+end
+
+""" 
+    @setupEC()
+
+  Setup `EC::ECInfo` with geometry, basis, and fcidump if defined.
+"""
+macro setupEC()
   return quote
-    $(esc(:EC)) = ECInfo()
     try
       (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))
@@ -286,7 +306,7 @@ macro tryECinit()
   return quote
     runECinit = [false]
     try
-      $(esc(:EC)).verbosity
+      $(esc(:EC)).options
     catch
       runECinit[1] = true
     end
@@ -439,7 +459,11 @@ end
 macro dfhf()
   return quote
     $(esc(:@tryECinit))
-    dfhf($(esc(:EC)))
+    if $(esc(:EC)).options.wf.npositron > 0
+      dfhf_positron($(esc(:EC)))
+    else
+      dfhf($(esc(:EC)))
+    end
   end
 end
 
@@ -551,6 +575,21 @@ macro dfcc(method="svd-dcsd")
     $(esc(:@tryECinit))
     strmethod = @var2string($(esc(method)), $(esc(strmethod)))
     dfccdriver($(esc(:EC)), strmethod)
+  end
+end
+
+""" 
+    @dfmp2()
+
+  Run density-fitted MP2 calculation.
+
+  If `save` is set in [`CcOptions.save`](@ref ECInfos.CcOptions), 
+  the MP2 doubles amplitudes are saved to `save`*"_2" file.
+"""
+macro dfmp2()
+  return quote
+    $(esc(:@tryECinit))
+    dfccdriver($(esc(:EC)), "MP2")
   end
 end
 
@@ -674,6 +713,9 @@ end
   Freeze orbitals in the integrals according to an array or range 
   `freeze_orbs`.
 
+  Alternatively, the orbitals can be specified as a String with the +/- or :/; syntax, e.g.,
+  "1-5+7-8", or "1:5;7-8".
+
   # Examples
 ```julia
 fcidump = "FCIDUMP"
@@ -765,7 +807,7 @@ macro export_molden(filename)
 end
 
 # precompile if not in development mode
-if last(__VERSION__) != '+'
+if !devel()
   @setup_workload begin
     savestd = stdout
     redirect_stdout(devnull)
@@ -777,6 +819,7 @@ if last(__VERSION__) != '+'
       @cc dcsd
       @cc uccsd
       @dfcc svd-dcsd
+      @dfmp2
     end
     redirect_stdout(savestd)
   end

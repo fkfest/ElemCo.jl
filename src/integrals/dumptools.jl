@@ -56,4 +56,17 @@ function freeze_orbs_in_dump(EC::ECInfo, freeze_orbs)
   modify_header!(EC.fd, norbs, nelec)
 end
 
+"""
+    freeze_orbs_in_dump(EC::ECInfo, freeze_orbs::AbstractString)
+
+  Freeze orbitals in FCIDump file `EC.fd` according to a string of indices `freeze_orbs`.
+
+  `freeze_orbs` is a string of indices in format `"1-4+6-8"` where `-` denotes a range and `+` 
+  denotes a list of indices or `"1:4;6:8"` where `:` denotes a range and `;` denotes a list of indices 
+  (== `[1,2,3,4,6,7,8]`).
+"""
+function freeze_orbs_in_dump(EC::ECInfo, freeze_orbs::AbstractString)
+  freeze_orbs = parse_orbstring(freeze_orbs)
+  freeze_orbs_in_dump(EC, freeze_orbs)
+end
 end #module

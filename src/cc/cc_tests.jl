@@ -8,7 +8,7 @@ function test_dressed_ints(EC, T1)
   calc_dressed_ints(EC, T1)
   ooPfile, ooP = mmap(EC,"d_ooP")
   vvPfile, vvP = mmap(EC,"d_vvP")
-  @tensoropt abij[a,b,i,j] := vvP[a,b,P] * ooP[i,j,P]
+  @mtensor abij[a,b,i,j] := vvP[a,b,P] * ooP[i,j,P]
   close(vvPfile)
   if isapprox(permutedims(abij,(1,3,2,4)), load(EC,"d_vovo"), atol = 1e-6)
     println("dressed integrals (ab|ij) ok")
@@ -16,14 +16,14 @@ function test_dressed_ints(EC, T1)
     println("dressed integrals (ab|ij) not ok")
   end
   voPfile, voP = mmap(EC,"d_voP")
-  @tensoropt aijk[a,i,j,k] := voP[a,i,P] * ooP[j,k,P]
+  @mtensor aijk[a,i,j,k] := voP[a,i,P] * ooP[j,k,P]
   if isapprox(permutedims(aijk,(1,3,2,4)), load(EC,"d_vooo"), atol = 1e-4)
     println("dressed integrals (ai|jk) ok")
   else
     println("dressed integrals (ai|jk) not ok")
   end
   ovPfile, ovP = mmap(EC,"d_ovP")
-  @tensoropt aijb[a,i,j,b] := voP[a,i,P] * ovP[j,b,P]
+  @mtensor aijb[a,i,j,b] := voP[a,i,P] * ovP[j,b,P]
   if isapprox(permutedims(aijb,(1,3,2,4)), load(EC,"d_voov"), atol = 1e-6)
     println("dressed integrals (ai|jb) ok")
   else
@@ -40,9 +40,9 @@ end
   Test R1(T3) and R2(T3)
 """
 function test_add_to_singles_and_doubles_residuals(R1, R2, T1, T2) 
-  @tensoropt ETb3 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j]
+  @mtensor ETb3 = (2.0*T2[a,b,i,j] - T2[b,a,i,j]) * R2[a,b,i,j]
   println("ETb3: ",ETb3)
-  @tensoropt ETT1 = 2.0*(T1[a,i] * R1[a,i])
+  @mtensor ETT1 = 2.0*(T1[a,i] * R1[a,i])
   println("ETT1: ",ETT1)
 end
 
@@ -90,7 +90,7 @@ function test_UaiX(EC::ECInfo, UaiX)
     end
   end
 
-  @tensoropt begin
+  @mtensor begin
     TestIntermediate1[X,Y] := UaiX[a,i,X] * rescaledU[a,i,Y]
   end
   if TestIntermediate1 ≈ diagm(load(EC,"e_X"))

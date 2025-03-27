@@ -7,8 +7,11 @@ using ..ElemCo.DescDict
 using ..ElemCo.Outputs
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
-export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+export warn
+export mainname, print_time, print_memory, free_memory
+export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
+export @istoplevel
 export substr
 export amdmkl
 # from DescDict
@@ -43,15 +46,57 @@ end
 """ 
     print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
 
-  Print time with message `info` if verbosity `verb` is smaller than EC.verbosity.
+  Print time with message `info` if verbosity `verb` is smaller than `PrintOptions.time`.
 """
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
-  if verb < EC.verbosity
-    output_time(t2-t1, info)
+  if verb < EC.options.print.time
+    output_time(t2 - t1, info)
   end
   return t2
 end
+
+"""
+    free_memory()
+
+  Return the amount of free memory in bytes.
+"""
+free_memory() = Sys.free_memory()
+
+""" 
+    print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
+
+  Print memory usage with message `info` if verbosity `verb` is smaller than `PrintOptions.memory`.
+
+  Note that memory is also used by other processes and the operating system, so the memory usage
+  reported here is merely an estimate. 
+"""
+function print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
+  mem2 = free_memory()
+  if verb < EC.options.print.memory
+    output_memory(mem2 - mem1, info)
+  end
+  return mem2
+end
+
+"""
+    warn(msg::AbstractString, err=false)
+
+  Print a warning message. If `err` is `true`, the message is printed as an error message.
+
+  The message is printed with a scull emoji.
+  # Example
+```julia
+julia> warn("This is a warning message.")
+```
+"""
+function warn(msg::AbstractString, err=false)
+  if err
+    error(msg)
+  end
+  println("☠️ Warning: ", msg)
+end
+
 
 """
     OutDict
@@ -270,6 +315,21 @@ function argmaxN(vals, N; by::Function=identity)
     end
   end
   return perm
+end
+
+"""
+    @istoplevel
+
+  Macro to check if the current scope is the top level scope.
+
+  (from https://discourse.julialang.org/t/is-there-a-way-to-determine-whether-code-is-toplevel)
+"""
+macro istoplevel()
+  canary = gensym("canary")
+  quote
+    $(esc(canary)) = true
+    Base.isdefined($__module__, $(QuoteNode(canary)))
+  end
 end
 
 """

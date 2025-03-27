@@ -36,7 +36,7 @@ The integrals are obtained from a FCIDUMP file or calculated using an interface 
 
 ## Getting started
 
-Requirements: julia (>1.8)
+Requirements: julia (>1.9)
 
 ## Usage
 

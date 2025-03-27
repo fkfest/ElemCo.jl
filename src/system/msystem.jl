@@ -18,15 +18,24 @@ export atomic_center_symbol, element_name, element_symbol, element_SYMBOL, is_du
 include("minbas.jl")
 
 """ 
-    genbasis4element(basis::Dict,elem::AbstractString)
+    genbasis4element(basis::Dict, elem::AbstractString)
 
-  Set element specific basis from, e.g., Dict("ao"=>"cc-pVDZ; o=aug-cc-pVDZ","jkfit"=>"cc-pvdz-jkfit")
+  Set element specific basis from, e.g., 
+  Dict("ao"=>"cc-pVDZ; o=aug-cc-pVDZ; 
+    h={! hydrogen             (4s,1p) -> [2s,1p]
+      s, H , 13.0100000, 1.9620000, 0.4446000, 0.1220000
+      c, 1.4, 0.0196850, 0.1379770, 0.4781480, 0.5012400
+      c, 4.4, 1.0000000
+      p, H , 0.7270000
+      c, 1.1, 1.0000000}",
+      "jkfit"=>"cc-pvdz-jkfit")
 """
-function genbasis4element(basis::Dict,elem::AbstractString)
+function genbasis4element(basis::Dict, elem::AbstractString)
   elembasis = Dict{String,String}()
   elemUP = uppercase(elem)
+  elemSYM = element_SYMBOL(elem)
   for (type,name) in basis
-    names = strip.(split(name,[';',',']))
+    names = strip.(split(name,[';']))
     elbas = ""
     if length(names) == 0
       error("Basis $type not defined!")
@@ -40,7 +49,10 @@ function genbasis4element(basis::Dict,elem::AbstractString)
         elseif length(eldef) != 2
           error("Something wrong in the basis definition $bas in $name")
         else
-          if uppercase(eldef[1]) == elemUP
+          elSYM = element_SYMBOL(eldef[1])
+          elUP = uppercase(eldef[1])
+          # check whether the basis is defined for the center or its element symbol
+          if elUP == elemUP || (elUP == elSYM && elSYM == elemSYM)
             elbas = eldef[2]
           end
         end
