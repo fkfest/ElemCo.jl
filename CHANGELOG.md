@@ -8,6 +8,7 @@
 * `verbosity` has been moved from `ECInfo` to `Options.print.time`.
 * increase versions of dependencies: julia>1.9 
 * The core-entry is now required for (non-npy) FCIDUMP files in order to check whether the file is complete.
+* DMRG and AtomsBase interface have been moved to extensions. In order to run DMRG, the `ITensors` package has to be installed and loaded; and in order to use `AtomsBase` interface, the `AtomsBase`, `Unitful` and `UnitfulAtomic` packages have to be installed and loaded. 
 
 ### Changed
 

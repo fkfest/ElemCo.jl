@@ -5,6 +5,7 @@
 """
 module ElemCo
 
+include("version.jl")
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
 include("tools/outputs.jl")
@@ -15,7 +16,7 @@ include("tools/mnpy.jl")
 include("tools/qmtensors.jl")
 include("integrals/dump.jl")
 include("system/elements.jl")
-include("system/msystem.jl")
+include("system/msystems.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
@@ -33,7 +34,7 @@ include("integrals/decomptools.jl")
 include("cc/cctools.jl")
 include("cc/dfcc.jl")
 include("cc/cc.jl")
-include("dmrg/dmrg.jl")
+include("cc/dmrg.jl")
 include("cc/ccdriver.jl")
 
 include("scf/bohf.jl")
@@ -57,6 +58,7 @@ using Printf
 using Dates
 #BLAS.set_num_threads(1)
 using PrecompileTools
+using .VersionInfo
 using .Utils
 using .ECInfos
 using .QMTensors
@@ -72,7 +74,7 @@ using .FciDumps
 using .DumpTools
 using .OrbTools
 using .Elements
-using .MSystem
+using .MSystems
 using .BasisSets
 using .BOHF
 using .DFHF
@@ -93,12 +95,6 @@ export last_energy
 # from DescDict
 export ODDict
 
-devel() = true
-const __VERSION__ = "0.13.1" * (devel() ? "+" : "")
-
-# const __VERSION__ = "0.13.1+"
-# devel() = last(__VERSION__) == "+"
-
 
 """
     __init__()
@@ -109,25 +105,8 @@ function __init__()
   draw_line(15)
   println("   ElemCo.jl")
   draw_line(15)
-  println("Version: ", __VERSION__)
-  srcpath = @__DIR__
-  if isdir(joinpath(srcpath,"..",".git"))
-    # get hash from git
-    try
-      hash = read(`git -C $srcpath rev-parse HEAD`, String)
-      println("Git hash: ", hash[1:end-1])
-    catch
-      # get hash from .git/HEAD
-      try
-        head = read(joinpath(srcpath,"..",".git","HEAD"), String)
-        head = split(head)[2]
-        hash = read(joinpath(srcpath,"..",".git",head), String)
-        println("Git hash: ", hash[1:end-1])
-      catch
-        println("Git hash: unknown")
-      end
-    end
-  end
+  println("Version: ", version())
+  println("Git hash: ", git_hash())
   println("Website: elem.co.il")
   println("Julia version: ",VERSION)
   println("BLAS threads: ",BLAS.get_num_threads())
@@ -272,6 +251,19 @@ macro ECinit()
   end
 end
 
+# """ 
+#     @checkEC()
+
+#   Check current molecular system and/or fcidump in `EC::ECInfo` vs the defined variables.
+#   If variables `geometry::String` and `basis::Dict{String,Any}`
+#   and/or `fcidump::String` have changed, update `EC`.
+# """
+# macro checkEC()
+#   return quote
+#     $(esc(:@setupEC))
+#   end
+# end
+
 """ 
     @setupEC()
 
@@ -288,7 +280,7 @@ macro setupEC()
       isa(err, UndefVarError) || rethrow(err)
     end
     try
-      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:geometry))
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
       println("FCIDump: ",$(esc(:fcidump)))
       $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
     catch err

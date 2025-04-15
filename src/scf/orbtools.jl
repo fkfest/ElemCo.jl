@@ -10,7 +10,7 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.BasisSets
 using ..ElemCo.Integrals
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions

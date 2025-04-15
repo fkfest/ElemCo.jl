@@ -1,12 +1,13 @@
 """ Various global infos """
 module ECInfos
-using Unitful, UnitfulAtomic
-using AtomsBase
+using HDF5
+using Dates
 using DocStringExtensions
+using ..ElemCo.VersionInfo
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDumps
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.BasisSets
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
@@ -17,8 +18,80 @@ export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
+export get_options
 
 include("options.jl")
+
+"""
+    get_options(opt::Options)
+
+Return a nested `NamedTuple` with the current options.
+"""
+function get_options(opt::Options)
+  return NamedTuple(key => get_options(getfield(opt, key)) for key ∈ propertynames(opt))
+end
+
+"""
+    get_options(opt)
+
+Return a `NamedTuple` with the current options for options `opt`.
+"""
+function get_options(opt)
+  return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
+end
+
+mutable struct ECDump
+  """ file name of the HDF5 dump. """
+  filename::String
+  """ an HDF5 file with calculation information (for restarts etc). 
+  The structure of the HDF5 file is as follows (with `track_order=true`):
+```
+/EC
+  /Molecule1
+    <name>
+    <geometry>
+    /BasisSet1
+      <basis set information>
+      /State1
+        <number of electrons>
+        <spin multiplicity>
+        <occupation (alpha/beta)>
+        <MO coefficients>
+        <list of frozen orbitals>
+        <CC amplitudes>
+        <other information>
+      /State2
+      ...
+    /BasisSet2
+    ...
+  /Molecule2
+    ...
+```
+  """
+  file::HDF5.Group
+  function ECDump(filename::AbstractString)
+    return new(filename, create_empty_dump(filename))
+  end
+end
+
+"""
+    create_empty_dump(filename::AbstractString)
+
+  Create an empty HDF5 dump file with the given `filename` and information about the package.
+
+  Returns an "EC" group in HDF5 file.
+"""
+function create_empty_dump(filename)
+  file = h5open(filename, "w")
+  g = create_group(file, "EC", track_order=true)
+  g["version"] = version()
+  g["git_hash"] = git_hash()
+  g["julia"] = "$VERSION"
+  g["hostname"] = gethostname()
+  g["scratch"] = tempdir()
+  g["date"] = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+  return file["EC"]
+end
 
 """
     ECInfo
@@ -35,9 +108,11 @@ include("options.jl")
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  system::FlexibleSystem = create_empty_system()
+  system::MSystem = MSystem()
   """ fcidump. """
   fd::TFDump = TFDump()
+  """ dump with calculation information (for restarts etc). """
+  dump::ECDump = ECDump(joinpath(scr,"ec.h5"))
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -77,17 +152,6 @@ include("options.jl")
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
   space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}()
-end
-
-"""
-    create_empty_system()
-
-  Create an empty molecular system of type `FlexibleSystem`.
-"""
-function create_empty_system() 
-  fs = isolated_system([:H => [0, 0, 0]u"bohr"])
-  deleteat!(fs.particles, 1)
-  return fs
 end
 
 """
@@ -262,7 +326,7 @@ end
   Freeze `freeze_nocc` occupied orbitals or orbitals on the `freeze_orbs` list. 
   If `freeze_nocc` is negative and `freeze_orbs` is empty: guess the number of core orbitals.
 
-  `core` as in [`MSystem.guess_ncore`](@ref).
+  `core` as in [`MSystems.guess_ncore`](@ref).
 """
 function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[]; verbose=true)
   if freeze_nocc < 0 && isempty(freeze_orbs)
@@ -651,5 +715,6 @@ function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
 end
 
 
+include("ecdump.jl")
 
 end #module
