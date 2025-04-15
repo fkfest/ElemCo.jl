@@ -251,6 +251,19 @@ macro ECinit()
   end
 end
 
+# """ 
+#     @checkEC()
+
+#   Check current molecular system and/or fcidump in `EC::ECInfo` vs the defined variables.
+#   If variables `geometry::String` and `basis::Dict{String,Any}`
+#   and/or `fcidump::String` have changed, update `EC`.
+# """
+# macro checkEC()
+#   return quote
+#     $(esc(:@setupEC))
+#   end
+# end
+
 """ 
     @setupEC()
 
@@ -267,7 +280,7 @@ macro setupEC()
       isa(err, UndefVarError) || rethrow(err)
     end
     try
-      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:geometry))
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
       println("FCIDump: ",$(esc(:fcidump)))
       $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
     catch err
