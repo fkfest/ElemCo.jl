@@ -15,7 +15,9 @@ jobs:
       pull-requests: read
       statuses: write
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         julia-version: ['1.10']
         julia-arch: [x64]
@@ -28,17 +30,17 @@ jobs:
           version: ${{ matrix.julia-version }}
           arch: ${{ matrix.julia-arch }}
       - uses: julia-actions/cache@v2
-      - name: Install dependencies
-        shell: julia --color=yes --project=docs {0}
-        run: |
-          using Pkg
-          Pkg.develop(PackageSpec(path=pwd()))
-          Pkg.instantiate()
-      - name: Build and deploy
-        run: julia --color=yes --project=docs docs/make.jl
-      #- uses: julia-actions/julia-buildpkg@latest
-      #- name: Switch off precompilation
-        #run: cp profile/LocalPreferences.toml .
-      #- uses: julia-actions/julia-docdeploy@v1
+      #- name: Install dependencies
+        #shell: julia --color=yes --project=docs {0}
+        #run: |
+          #using Pkg
+          #Pkg.develop(PackageSpec(path=pwd()))
+          #Pkg.instantiate()
+      #- name: Build and deploy
+        #run: julia --color=yes --project=docs docs/make.jl
+      - uses: julia-actions/julia-buildpkg@latest
+      - name: Switch off precompilation
+        run: cp profile/LocalPreferences.toml .
+      - uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # If authenticating with GitHub Actions token
