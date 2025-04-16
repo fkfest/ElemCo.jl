@@ -7,7 +7,7 @@
 module MIO
 using Mmap
 
-export miosave, mioload, miommap, mionewmmap, mioclosemmap, mioflushmmap
+export miosave, mioload, mioload!, miommap, mionewmmap, mioclosemmap, mioflushmmap
 
 const Types = [
   Bool,
@@ -146,6 +146,77 @@ function mioload(fname::String; array_of_arrays=false)
   end
   close(io)
   return (narray == 1 && !array_of_arrays) ? arrs[1] : arrs
+end
+
+"""
+    mioload!(fname::String, arrs::AbstractArray{T,N}...; skip_error=false)
+
+  Load arrays from a file `fname` into pre-allocated arrays `arrs`.
+  Return true if successful, false otherwise.
+  If `skip_error` is set to true, the function will not throw an error if
+  the type of the data/number of dimensions in the file does not match `T`/`N`.
+"""
+function mioload!(fname::String, arrs::AbstractArray{T,N}...; skip_error=false) where {T,N}
+  io = open(fname)
+  # type of numbers
+  itype = read(io, Int)
+  if itype > length(Types)
+    if skip_error
+      return false
+    end
+    error("Inconsistency in reading type of data!")
+  end
+  @assert T == Types[itype] "Inconsistency in reading type of data!"
+  # number of arrays in the file
+  narray = read(io, Int)
+  if narray != length(arrs)
+    if skip_error
+      return false
+    end
+    error("Inconsistency in reading number of arrays! Expected $(length(arrs)), got $narray.")
+  end
+  for ia in 1:narray
+    ndim = read(io, Int)
+    if N == 1
+      len = 1
+      for idim in 1:ndim
+        len *= read(io, Int)
+      end
+      if length(arrs[ia]) != len
+        if skip_error
+          return false
+        end
+        error("Inconsistency in reading dimensions of data! Expected $(length(arrs[ia])), got $len.")
+      end
+    else
+      if ndim != N
+        if skip_error
+          return false
+        end
+        error("Inconsistency in reading dimensions of data! Expected $N, got $ndim.")
+      end
+      dims = Int[]
+      size_arr = size(arrs[ia])
+      same = true
+      for idim in 1:ndim
+        append!(dims, read(io, Int))
+        if dims[idim] != size_arr[idim]
+          same = false
+        end
+      end
+      if !same
+        if skip_error
+          return false
+        end
+        error("Inconsistency in reading dimensions of data! Expected $(size(arrs[ia])), got $(Tuple(dims)).")
+      end
+    end
+  end
+  for ia in 1:narray
+    read!(io, arrs[ia])
+  end
+  close(io)
+  return true
 end
 
 """

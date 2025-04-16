@@ -35,7 +35,7 @@ export ccdriver, dfccdriver
   Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
 """
 function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
-  t0 = time_ns()
+  t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
   check_fcidump(EC, fcidump)
   setup_space_fd!(EC)
@@ -43,13 +43,14 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
 
   energies = OutDict()
   energies = eval_hf_energy(EC, energies, closed_shell)
-
+  # t1 = print_time(EC, t1, "HF energy", 1)
   ecmethod = ECMethod(method)
   unrestricted_orbs = EC.fd.uhf
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
   # calculate MP2
   if EC.options.cc.nomp2 == 0
     energies = eval_mp2_energy(EC, energies, closed_shell_method, has_prefix(ecmethod, "R"))
+    # t1 = print_time(EC, t1, "MP2", 1)
   end
 
   if ecmethod.theory == "MP"
@@ -57,12 +58,15 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # do nothing
   elseif ecmethod.theory == "DMRG"
     energies = eval_dmrg_groundstate(EC, energies)
+    t1 = print_time(EC, t1, "DMRG", 1)
   else
     energies = eval_cc_groundstate(EC, ecmethod, energies)
+    t1 = print_time(EC, t1, "ground state CC", 1)
   end
 
   if EC.options.cc.properties
     calc_lm_cc(EC, ecmethod)
+    t1 = print_time(EC, t1, "CC Lagrange multipliers", 1)
   end
   delete_temporary_files!(EC)
   draw_endline()
@@ -81,29 +85,33 @@ end
 function dfccdriver(EC::ECInfo, method)
   setup_space_system!(EC)
   closed_shell = (EC.space['o'] == EC.space['O'])
+  ecmethod = ECMethod(method)
   
   energies = OutDict()
-  energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies)
+  root_name = method_name(ecmethod, root=true)
+  onthefly = root_name == "MP2" 
+  energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies; save3idx=!onthefly)
   t1 = time_ns()
   space_save = save_space(EC)
   freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
   freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
   t1 = print_time(EC, t1, "freeze core and virt", 2)
 
-  ecmethod = ECMethod(method)
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
-
-  if !closed_shell_method
-    error("Only closed-shell density fitting methods implemented!")
-  end
 
   main_name = method_name(ecmethod)
   if has_prefix(ecmethod, "SVD")
     @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
+    if !closed_shell_method
+      error("Only closed-shell SVD methods implemented!")
+    end
     ECC = calc_svd_dc(EC, ecmethod)
     energies = output_energy(EC, ECC, energies, main_name)
+  elseif root_name == "MP2"
+    ECC = calc_dfmp2(EC)
+    energies = output_energy(EC, ECC, energies, main_name)
   else
-    error("Only SVD DF methods implemented!")
+    error("$main_name DF method not implemented!")
   end
 
   delete_temporary_files!(EC)
@@ -356,20 +364,26 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   else
     energies = output_energy(EC, ECC, energies, main_name)
   end
-  t1 = print_time(EC, t1,"CC",1)
+  t1 = print_time(EC, t1, "CC", 1)
 
   if has_prefix(ecmethod, "Λ")
     calc_lm_cc(EC, ecmethod)
-    t1 = print_time(EC, t1,"ΛCC",1)
+    t1 = print_time(EC, t1, "ΛCC", 1)
   end
 
   if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
+    if is_similarity_transformed(EC.fd) && !has_prefix(ecmethod, "Λ")
+      warn("Perturbative triples for similarity transformed Hamiltonians must be calculated
+      with ΛCCSD(T) method! The error can be ignored by setting the option `cc.ignore_error=true`.",
+      !EC.options.cc.ignore_error)
+    end
     ET3, ET3b = values(calc_pertT(EC, ecmethod; save_t3=save_pert_t3))
     println()
     output_E_method(ECC["E"]+ET3b+EHF, main_name*"[T]", "total energy:      ")
     output_E_method(ECC["E"]+ET3, main_name*"(T)", "correlation energy:")
     output_E_method(ECC["E"]+ET3+EHF, main_name*"(T)", "total energy:       ")
     println()
+    t1 = print_time(EC, t1, "(T)", 1)
     push!(energies, "[T]"=>(ET3b,"[T] energy contribution"), 
                     "(T)"=>(ET3,"(T) energy contribution"),
                     main_name*"(T)c"=>(ECC["E"]+ET3,"$main_name(T) correlation energy"),
@@ -401,6 +415,17 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
   ECC = CoupledCluster.calc_ccsdt(EC, EC.options.cc.calc_t3_for_decomposition, cc3)
   output_E_method(ECC["E"], main_name, "correlation energy:")
   output_E_method(ECC["E"]+EHF, main_name, "total energy:      ")
+  if haskey(ECC, "SVD-CCSD(T)")
+    output_E_method(ECC["E"] - ECC["SVD-CCSD(T)"], "SVD-DC-CCSDT - SVD-CCSD(T):")
+    output_E_method(ECC["SVD-CCSD(T)"] - energies["CCSD(T)c"], "SVD-CCSD(T) - CCSD(T):")
+    ecorr = ECC["E"] - ECC["SVD-CCSD(T)"] + energies["CCSD(T)c"]
+    output_E_method(ecorr, "(T)-corrected SVD-DC-CCSDT", "correlation energy:")
+    output_E_method(ecorr + EHF, "(T)-corrected SVD-DC-CCSDT", "total energy:      ")
+    energies = merge(energies, "SVD-CCSD(T)c"=>(ECC["SVD-CCSD(T)"], "SVD-CCSD(T) correlation energy"),
+                    "SVD-CCSD(T)"=>(ECC["SVD-CCSD(T)"]+EHF, "SVD-CCSD(T) total energy"),
+                    main_name*"+c"=>(ecorr, "$main_name correlation energy with SVD-CCSD(T) correction"),
+                    main_name*"+"=>(ecorr+EHF, "$main_name total energy with SVD-CCSD(T) correction"))
+  end
   t1 = print_time(EC, t1,"SVD-T",1)
   println()
   return merge(energies, main_name*"c"=>(ECC["E"], "$main_name correlation energy"), 
@@ -408,53 +433,25 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
 end
 
 """
-    eval_df_mo_integrals(EC::ECInfo, energies::OutDict)
+    eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
 
   Evaluate the density-fitted integrals in MO basis 
   and store in the correct file.
+  If `save3idx` is true, save the 3-index integrals, otherwise only the 2-index integrals.
 
   Return the reference energy as `HF` key in OutDict and 
-  `true` if the integrals are calculated using unresctricted orbitals.
+  `true` if the integrals are calculated using unrestricted orbitals.
 """
-function eval_df_mo_integrals(EC::ECInfo, energies::OutDict)
+function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   t1 = time_ns()
   cMO = load_orbitals(EC, EC.options.wf.orb)
   unrestricted = !is_restricted(cMO)
-  ERef = generate_DF_integrals(EC, cMO)
+  ERef = generate_DF_integrals(EC, cMO; save3idx)
   t1 = print_time(EC, t1, "generate DF integrals", 2)
   cMO = nothing
   output_E_method(ERef, "Reference energy:")
   println()
   return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
-end
-
-"""
-    eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict)
-
-  Evaluate the coupled-cluster ground-state energy for the DF integrals,
-  which have to be calculated before.
-  Return the updated `energies::OutDict` with the correlation energy (`method*"c"`) and 
-  the total energy (key `method`).
-"""
-function eval_dfcc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDict)
-  t1 = time_ns()
-  energies = copy(energies_in)
-  if ecmethod.exclevel[3] != :none
-    error("no triples implemented yet...")
-  end
-  if ecmethod.exclevel[4] != :none
-    error("no quadruples implemented yet...")
-  end
-  main_name = method_name(ecmethod)
-  if has_prefix(ecmethod, "SVD")
-    @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
-    ECC = calc_svd_dc(EC, ECMethod(main_name))
-    energies = output_energy(EC, ECC, energies, main_name)
-  else
-    error("Only SVD DF methods implemented!")
-  end
-  t1 = print_time(EC, t1,"CC",1)
-  return energies
 end
 
 """
@@ -467,7 +464,12 @@ end
 """
 function eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
   t1 = time_ns()
-  ECC = calc_dmrg(EC)
+  ext = Base.get_extension(@__MODULE__, :DmrgExt)
+  if isnothing(ext)
+    ECC = calc_dmrg()
+  else
+    ECC = ext.calc_dmrg(EC)
+  end
   energies = output_energy(EC, ECC, energies, "DMRG")
   t1 = print_time(EC, t1,"DMRG",1)
   return energies

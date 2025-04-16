@@ -5,6 +5,7 @@
 """
 module ElemCo
 
+include("version.jl")
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
 include("tools/outputs.jl")
@@ -15,7 +16,7 @@ include("tools/mnpy.jl")
 include("tools/qmtensors.jl")
 include("integrals/dump.jl")
 include("system/elements.jl")
-include("system/msystem.jl")
+include("system/msystems.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
@@ -33,7 +34,7 @@ include("integrals/decomptools.jl")
 include("cc/cctools.jl")
 include("cc/dfcc.jl")
 include("cc/cc.jl")
-include("dmrg/dmrg.jl")
+include("cc/dmrg.jl")
 include("cc/ccdriver.jl")
 
 include("scf/bohf.jl")
@@ -56,8 +57,8 @@ using LinearAlgebra
 using Printf
 using Dates
 #BLAS.set_num_threads(1)
-using TensorOperations
 using PrecompileTools
+using .VersionInfo
 using .Utils
 using .ECInfos
 using .QMTensors
@@ -73,7 +74,7 @@ using .FciDumps
 using .DumpTools
 using .OrbTools
 using .Elements
-using .MSystem
+using .MSystems
 using .BasisSets
 using .BOHF
 using .DFHF
@@ -85,16 +86,15 @@ using .Interfaces
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @ECinit, @tryECinit, @set, @opt, @reset, @run, @var2string
+export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
-export @dfhf, @dfuhf, @cc, @dfcc, @bohf, @bouhf, @dfmcscf
+export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
 # from Utils
 export last_energy
 # from DescDict
 export ODDict
 
-const __VERSION__ = "0.13.1"
 
 """
     __init__()
@@ -105,25 +105,8 @@ function __init__()
   draw_line(15)
   println("   ElemCo.jl")
   draw_line(15)
-  println("Version: ", __VERSION__)
-  srcpath = @__DIR__
-  if isdir(joinpath(srcpath,"..",".git"))
-    # get hash from git
-    try
-      hash = read(`git -C $srcpath rev-parse HEAD`, String)
-      println("Git hash: ", hash[1:end-1])
-    catch
-      # get hash from .git/HEAD
-      try
-        head = read(joinpath(srcpath,"..",".git","HEAD"), String)
-        head = split(head)[2]
-        hash = read(joinpath(srcpath,"..",".git",head), String)
-        println("Git hash: ", hash[1:end-1])
-      catch
-        println("Git hash: unknown")
-      end
-    end
-  end
+  println("Version: ", version())
+  println("Git hash: ", git_hash())
   println("Website: elem.co.il")
   println("Julia version: ",VERSION)
   println("BLAS threads: ",BLAS.get_num_threads())
@@ -191,7 +174,7 @@ orbs = @loadfile("C_Am")
 ```
 """
 macro loadfile(filename)
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     load($(esc(:EC)), strfilename)
@@ -209,7 +192,7 @@ end
 """
 macro savefile(filename, arr, kwargs...)
   ekwa = [esc(a) for a in kwargs]
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     save!($(esc(:EC)), strfilename, $(esc(arr)); $(ekwa...))
@@ -226,8 +209,8 @@ end
 """
 macro copyfile(from_file, to_file, kwargs...)
   ekwa = [esc(a) for a in kwargs]
-  strfrom=replace("$from_file", " " => "")
-  strto=replace("$to_file", " " => "")
+  strfrom = clean_exprstring(from_file)
+  strto = clean_exprstring(to_file)
   return quote
     strfrom = @var2string($(esc(from_file)), $(esc(strfrom)))
     strto = @var2string($(esc(to_file)), $(esc(strto)))
@@ -255,8 +238,39 @@ Occupied orbitals:[1]
 ```
 """
 macro ECinit()
+  if @istoplevel
+    return quote
+      const $(esc(:EC)) = ECInfo()
+      $(esc(:@setupEC))
+    end
+  else
+    return quote
+      $(esc(:EC)) = ECInfo()
+      $(esc(:@setupEC))
+    end
+  end
+end
+
+# """ 
+#     @checkEC()
+
+#   Check current molecular system and/or fcidump in `EC::ECInfo` vs the defined variables.
+#   If variables `geometry::String` and `basis::Dict{String,Any}`
+#   and/or `fcidump::String` have changed, update `EC`.
+# """
+# macro checkEC()
+#   return quote
+#     $(esc(:@setupEC))
+#   end
+# end
+
+""" 
+    @setupEC()
+
+  Setup `EC::ECInfo` with geometry, basis, and fcidump if defined.
+"""
+macro setupEC()
   return quote
-    $(esc(:EC)) = ECInfo()
     try
       (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
       println("Geometry: ",$(esc(:geometry)))
@@ -266,7 +280,7 @@ macro ECinit()
       isa(err, UndefVarError) || rethrow(err)
     end
     try
-      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:geometry))
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
       println("FCIDump: ",$(esc(:fcidump)))
       $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
     catch err
@@ -284,7 +298,7 @@ macro tryECinit()
   return quote
     runECinit = [false]
     try
-      $(esc(:EC)).verbosity
+      $(esc(:EC)).options
     catch
       runECinit[1] = true
     end
@@ -374,6 +388,26 @@ macro run(method, kwargs...)
 end
 
 """
+    clean_exprstring(expr)
+
+  Return a clean string from an expression, i.e., without empty spaces and extra parentheses.
+
+  # Examples
+```julia
+julia> clean_exprstring(:(SVD-CCSD))
+"SVD-CCSD"
+julia> clean_exprstring(:(eom-svd-df-ccsd(t)))
+"eom-svd-df-ccsd(t)"
+```
+"""
+function clean_exprstring(expr)
+  if !(expr isa Expr) || expr.head != :call || expr.args[1] ∉ [:-, :+, :*, :/]
+    return string(expr)
+  end
+  return join([clean_exprstring(a) for a in expr.args[2:end]], string(expr.args[1]))
+end
+
+"""
     @var2string(var, strvar="")
 
   Return string representation of `var`.
@@ -392,7 +426,7 @@ julia> @var2string(CCSD)
 """
 macro var2string(var, strvar="")
   if strvar == ""
-    strvar = replace("$var", " " => "")
+    strvar = clean_exprstring(var)
   end
   valvar = :($(esc(var)))
   return quote
@@ -417,7 +451,11 @@ end
 macro dfhf()
   return quote
     $(esc(:@tryECinit))
-    dfhf($(esc(:EC)))
+    if $(esc(:EC)).options.wf.npositron > 0
+      dfhf_positron($(esc(:EC)))
+    else
+      dfhf($(esc(:EC)))
+    end
   end
 end
 
@@ -483,7 +521,7 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 ```
 """
 macro cc(method, kwargs...)
-  strmethod=replace("$method", " " => "")
+  strmethod = clean_exprstring(method)
   ekwa = [esc(a) for a in kwargs]
   if kwarg_provided_in_macro(kwargs, :fcidump)
     return quote
@@ -524,11 +562,26 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 ```
 """
 macro dfcc(method="svd-dcsd")
-  strmethod=replace("$method", " " => "")
+  strmethod = clean_exprstring(method)
   return quote
     $(esc(:@tryECinit))
     strmethod = @var2string($(esc(method)), $(esc(strmethod)))
     dfccdriver($(esc(:EC)), strmethod)
+  end
+end
+
+""" 
+    @dfmp2()
+
+  Run density-fitted MP2 calculation.
+
+  If `save` is set in [`CcOptions.save`](@ref ECInfos.CcOptions), 
+  the MP2 doubles amplitudes are saved to `save`*"_2" file.
+"""
+macro dfmp2()
+  return quote
+    $(esc(:@tryECinit))
+    dfccdriver($(esc(:EC)), "MP2")
   end
 end
 
@@ -587,7 +640,7 @@ end
   read from [`WfOptions.orb`](@ref ECInfos.WfOptions)*[`WfOptions.left`](@ref ECInfos.WfOptions).
 """
 macro transform_ints(type="")
-  strtype=replace("$type", " " => "")
+  strtype = clean_exprstring(type)
   return quote
     $(esc(:@tryECinit))
     if !fd_exists($(esc(:EC)).fd)
@@ -624,10 +677,36 @@ macro write_ints(file="FCIDUMP", tol=-1.0)
 end
 
 """
+    @dummy(atoms)
+
+  Set atoms as dummy atoms in the system.
+  `atoms` is a list of atom indices or atomic symbols.
+
+  After running the macro, only the atoms in the list are set as dummy atoms in the system.
+
+  # Examples
+```julia
+@dummy [1,2,3]
+@dummy ["H1","H2"]
+@dummy [1,"H2",:H3]
+@dummy [] # unset all dummy atoms
+```
+"""
+macro dummy(atoms)
+  return quote
+    $(esc(:@tryECinit))
+    set_dummy!($(esc(:EC)).system, $(esc(atoms)))
+  end
+end
+
+"""
     @freeze_orbs(freeze_orbs)
 
   Freeze orbitals in the integrals according to an array or range 
   `freeze_orbs`.
+
+  Alternatively, the orbitals can be specified as a String with the +/- or :/; syntax, e.g.,
+  "1-5+7-8", or "1:5;7-8".
 
   # Examples
 ```julia
@@ -698,7 +777,7 @@ end
   The type of the matrix is determined automatically.
 """
 macro import_matrix(filename)
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     $(esc(:@tryECinit))
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
@@ -712,26 +791,30 @@ end
   Export current orbitals to Molden file `filename`.
 """
 macro export_molden(filename)
-  strfilename=replace("$filename", " " => "")
+  strfilename = clean_exprstring(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
   end
 end
 
-@setup_workload begin
-  savestd = stdout
-  redirect_stdout(devnull)
-  geometry = "H 0.0 0.0 0.0
-              H 0.0 0.0 1.0"
-  basis = "vdz"
-  @compile_workload begin
-    @dfhf
-    @cc dcsd
-    @cc uccsd
-    @dfcc svd-dcsd
+# precompile if not in development mode
+if !devel()
+  @setup_workload begin
+    savestd = stdout
+    redirect_stdout(devnull)
+    geometry = "H 0.0 0.0 0.0
+                H 0.0 0.0 1.0"
+    basis = "vdz"
+    @compile_workload begin
+      @dfhf
+      @cc dcsd
+      @cc uccsd
+      @dfcc svd-dcsd
+      @dfmp2
+    end
+    redirect_stdout(savestd)
   end
-  redirect_stdout(savestd)
 end
 
 end #module

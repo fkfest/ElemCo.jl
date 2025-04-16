@@ -2,7 +2,7 @@
     (using a similarity-transformed FciDump)
 """
 module BOHF
-using LinearAlgebra, TensorOperations
+using LinearAlgebra
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.Constants
@@ -18,7 +18,7 @@ export bohf, bouhf
 export guess_boorb
 
 """
-    left_from_right(cMOr::MOs)
+    left_from_right(cMOr::SpinMatrix)
 
   Calculate left BO-MO coefficients from right BO-MO coefficients.
 """
@@ -116,11 +116,11 @@ function guess_bo_gwh(EC::ECInfo, uhf)
 end
 
 """
-    heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+    heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 
   Heat up BO-MO coefficients to `temperature` according to Fermi-Dirac.
   
-  Returns new BO-MO coefficients `cMOl::MOs, cMOr::MOs`
+  Returns new BO-MO coefficients `cMOl::SpinMatrix, cMOr::SpinMatrix`
 """
 function heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
   if temperature < 1.e-10
@@ -135,7 +135,7 @@ function heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 end
 
 """
-    closed_shell_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+    closed_shell_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 
   Heat up closed-shell BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """
@@ -154,7 +154,7 @@ function closed_shell_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, tem
 end
 
 """
-    unrestricted_heatup(EC::ECInfo, cMOl::MOs, cMOr::MOs, temperature)
+    unrestricted_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
 
   Heat up unrestricted BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """
@@ -243,7 +243,7 @@ function bohf(EC::ECInfo)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
     den = gen_density_matrix(EC, cMOl[1], cMOr[1], SP['o'])
     fhsmall = fock + hsmall
-    @tensoropt efhsmall = den[p,q]*fhsmall[p,q]
+    @mtensor efhsmall = den[p,q]*fhsmall[p,q]
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
@@ -330,7 +330,7 @@ function bouhf(EC::ECInfo)
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMOl[ispin], cMOr[ispin], SP[sp])
       fhsmall = fock[ispin] + hsmall[ispin]
-      @tensoropt efh = 0.5 * (den[p,q] * fhsmall[p,q])
+      @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
       efhsmall[ispin] = efh
       Δfock[ispin] = den'*fock[ispin] - fock[ispin]*den'
       var += sum(abs2,Δfock[ispin])

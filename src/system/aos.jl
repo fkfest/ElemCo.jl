@@ -22,8 +22,8 @@ abstract type AbstractAtomicOrbital end
   $(TYPEDFIELDS)
 """
 struct SphericalAtomicOrbital <: AbstractAtomicOrbital
-  """ index of the center in the basis set object """
-  icenter::UInt16
+  """ index of the centre in the basis set object """
+  icentre::UInt16
   """ index of the angular shell in the basis set object """
   iangularshell::UInt16
   """ index of the contraction in the angular shell """
@@ -44,8 +44,8 @@ end
   $(TYPEDFIELDS)
 """
 struct CartesianAtomicOrbital <: AbstractAtomicOrbital
-  """ index of the center in the basis set object """
-  icenter::UInt16
+  """ index of the centre in the basis set object """
+  icentre::UInt16
   """ index of the angular shell in the basis set object """
   iangularshell::UInt16
   """ index of the subshell in the angular shell """

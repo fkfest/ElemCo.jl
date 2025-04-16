@@ -7,7 +7,7 @@ catch
 end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
-using TensorOperations
+using Buffers
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
@@ -25,7 +25,7 @@ export gen_density_matrix, gen_frac_density_matrix
   Calculate closed-shell fock matrix from FCIDump integrals. 
 """
 function gen_fock(EC::ECInfo)
-  @tensoropt fock[p,q] := integ1(EC.fd,:α)[p,q] + 2.0*ints2(EC,":o:o",:α)[p,i,q,i] - ints2(EC,":oo:",:α)[p,i,i,q]
+  @mtensor fock[p,q] := integ1(EC.fd,:α)[p,q] + 2.0*ints2(EC,":o:o",:α)[p,i,q,i] - ints2(EC,":oo:",:α)[p,i,i,q]
   return fock
 end
 
@@ -35,24 +35,24 @@ end
   Calculate UHF fock matrix from FCIDump integrals for `spincase`∈{`:α`,`:β`}. 
 """
 function gen_fock(EC::ECInfo, spincase::Symbol)
-  @tensoropt fock[p,q] := integ1(EC.fd,spincase)[p,q] 
+  @mtensor fock[p,q] := integ1(EC.fd,spincase)[p,q] 
   if spincase == :α
     if n_occb_orbs(EC) > 0 
-      @tensoropt fock[p,q] += ints2(EC,":O:O",:αβ)[p,i,q,i]
+      @mtensor fock[p,q] += ints2(EC,":O:O",:αβ)[p,i,q,i]
     end
     spo='o'
     spv='v'
     nocc = n_occ_orbs(EC)
   else
     if n_occ_orbs(EC) > 0 
-      @tensoropt fock[p,q] += ints2(EC,"o:o:",:αβ)[i,p,i,q]
+      @mtensor fock[p,q] += ints2(EC,"o:o:",:αβ)[i,p,i,q]
     end
     spo='O'
     spv='V'
     nocc = n_occb_orbs(EC)
   end
   if nocc > 0
-    @tensoropt begin
+    @mtensor begin
       fock[p,q] += ints2(EC,":"*spo*":"*spo,spincase)[p,i,q,i]
       fock[p,q] -= ints2(EC,":"*spo*spo*":",spincase)[p,i,i,q]
     end
@@ -69,7 +69,7 @@ end
 function gen_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occvec)
   CMOlo = CMOl[:,occvec]
   CMOro = CMOr[:,occvec]
-  @tensoropt den[r,s] := CMOlo[r,i]*CMOro[s,i]
+  @mtensor den[r,s] := CMOlo[r,i]*CMOro[s,i]
   denr = real.(den)
   if sum(abs2,den) - sum(abs2,denr) > EC.options.scf.imagtol
     println("Large imaginary part in density matrix neglected!")
@@ -87,7 +87,7 @@ end
 function gen_frac_density_matrix(EC::ECInfo, CMOl::Matrix, CMOr::Matrix, occupation)
   @assert length(occupation) == size(CMOr,2) "Wrong occupation vector length!"
   CMOrn = CMOr .* occupation'
-  @tensoropt den[r,s] := CMOl[r,i]*CMOrn[s,i]
+  @mtensor den[r,s] := CMOl[r,i]*CMOrn[s,i]
   denr = real.(den)
   if sum(abs2,den) - sum(abs2,denr) > EC.options.scf.imagtol
     println("Large imaginary part in density matrix neglected!")
@@ -102,10 +102,10 @@ end
   Calculate closed-shell fock matrix from FCIDump integrals and density matrix `den`. 
 """
 function gen_fock(EC::ECInfo, den::Matrix)
-  @tensoropt begin 
+  @mtensor begin 
     fock[p,q] := integ1(EC.fd,:α)[p,q] 
     fock[p,q] += ints2(EC,"::::",:α)[p,r,q,s] * den[r,s]
-    fock[p,q] -= 0.5*ints2(EC,"::::",:α)[p,r,s,q] * den[r,s]
+    fock[p,q] -= 0.5*(ints2(EC,"::::",:α)[p,r,s,q] * den[r,s])
   end
   return fock
 end
@@ -119,7 +119,7 @@ function gen_fock(EC::ECInfo, CMOl::Matrix, CMOr::Matrix)
   @assert EC.space['o'] == EC.space['O'] # closed-shell
   occ2 = EC.space['o']
   den = gen_density_matrix(EC, CMOl, CMOr, occ2)
-  @tensoropt begin 
+  @mtensor begin 
     fock[p,q] := integ1(EC.fd,:α)[p,q] 
     fock[p,q] += 2.0*ints2(EC,"::::",:α)[p,r,q,s] * den[r,s]
     fock[p,q] -= ints2(EC,"::::",:α)[p,r,s,q] * den[r,s]
@@ -137,18 +137,18 @@ function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::Matrix, CMOr::Matrix,
                   CMOlOS::Matrix, CMOrOS::Matrix)
   if spincase == :α
     denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['O'])
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
     spo = 'o'
   else
     denOS = gen_density_matrix(EC, CMOlOS, CMOrOS, EC.space['o'])
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
     spo = 'O'
   end
   den =  gen_density_matrix(EC, CMOl, CMOr, EC.space[spo])
   ints = ints2(EC,"::::",spincase)
-  @tensoropt fock[p,q] += ints[p,r,q,s] * den[r,s] 
-  @tensoropt fock[p,q] -= ints[p,r,s,q] * den[r,s]
-  @tensoropt fock[p,q] += integ1(EC.fd,spincase)[p,q] 
+  @mtensor fock[p,q] += ints[p,r,q,s] * den[r,s] 
+  @mtensor fock[p,q] -= ints[p,r,s,q] * den[r,s]
+  @mtensor fock[p,q] += integ1(EC.fd,spincase)[p,q] 
   return fock
 end
 
@@ -161,19 +161,19 @@ end
 function gen_fock(EC::ECInfo, spincase::Symbol, 
                   den::Matrix, denOS::Matrix)
   if spincase == :α
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[p,r,q,s]*denOS[r,s]
   else
-    @tensoropt fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
+    @mtensor fock[p,q] := ints2(EC,"::::",:αβ)[r,p,s,q]*denOS[r,s]
   end
   ints = ints2(EC,"::::",spincase)
-  @tensoropt fock[p,q] += ints[p,r,q,s] * den[r,s] 
-  @tensoropt fock[p,q] -= ints[p,r,s,q] * den[r,s]
-  @tensoropt fock[p,q] += integ1(EC.fd,spincase)[p,q] 
+  @mtensor fock[p,q] += ints[p,r,q,s] * den[r,s] 
+  @mtensor fock[p,q] -= ints[p,r,s,q] * den[r,s]
+  @mtensor fock[p,q] += integ1(EC.fd,spincase)[p,q] 
   return fock
 end
 
 """ 
-    gen_ufock(EC::ECInfo, CMOl::MOs, CMOr::MOs)
+    gen_ufock(EC::ECInfo, CMOl::SpinMatrix, CMOr::SpinMatrix)
 
   Calculate UHF fock matrix from FCIDump integrals and orbitals `cMOl`, `cMOr`
   with `cMOl[1]` and `cMOr[1]` - α-MO transformation coefficients and 
@@ -200,31 +200,55 @@ end
   Compute closed-shell DF-HF Fock matrix (integral direct) in AO basis.
 """
 function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
-  AAP = eri_2e3idx(bao,bfit)
   PL = load2idx(EC, "C_PL")
   hsmall = load2idx(EC, "h_AA")
-  # println(size(Ppq))
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
   occ2 = EC.space['o']
   CMO2 = cMO[:,occ2]
-  @tensoropt begin 
-    AoP[p,j,P] := AAP[p,q,P] * CMO2[q,j]
-    c_AoL[p,j,L] := AoP[p,j,P] * PL[P,L]
-    cL[L] := c_AoL[p,j,L] * CMO2[p,j]
-    fock[p,q] := hsmall[p,q] - c_AoL[p,j,L]*c_AoL[q,j,L]
-    cP[P] := cL[L] * PL[P,L]
-    fock[p,q] += 2.0*cP[P]*AAP[p,q,P]
+  nA = size(CMO2, 1)
+  nocc = size(CMO2, 2)
+  nL = size(PL, 2)
+  Pbatches = BasisBatcher(bao, bfit)
+  maxP = max_batch_length(Pbatches)
+  LoA = zeros(nL, nocc, nA)
+  lenbuf = (nocc*nA + max(nA*nA, nL))*maxP
+  lencbuf = buffer_size_3idx(Pbatches)
+  @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
+  for Pblk in Pbatches
+    P = range(Pblk)
+    lenP = length(P)
+    oAP = alloc!(buf, nocc, nA, lenP)
+    AAP = alloc!(buf, nA, nA, lenP)
+    eri_2e3idx!(AAP, cbuf, Pblk)
+    @mtensor oAP[j,ν,P] = AAP[μ,ν,P] * CMO2[μ,j]
+    drop!(buf, AAP)
+    M_PL = alloc!(buf, lenP, nL)
+    M_PL .= @view PL[P,:]
+    @mtensor LoA[L,j,ν] += oAP[j,ν,P] * M_PL[P,L]
+    drop!(buf, oAP, M_PL)
   end
+  @mtensor cL[L] := LoA[L,j,ν] * CMO2[ν,j]
+  @mtensor fock[μ,ν] := hsmall[μ,ν] - LoA[L,j,μ]*LoA[L,j,ν] 
+  @mtensor cP[P] := cL[L] * PL[P,L]
+  for Pblk in Pbatches
+    P = range(Pblk)
+    lenP = length(P)
+    AAP = alloc!(buf, nA, nA, lenP)
+    v!cP = @mview cP[P]
+    eri_2e3idx!(AAP, cbuf, Pblk)
+    @mtensor fock[μ,ν] += 2.0*v!cP[P]*AAP[μ,ν,P]
+    drop!(buf, AAP)
+  end
+  end #buffer
   return fock
 end
 
 """ 
-    gen_dffock(EC::ECInfo, cMO::MOs, bao, bfit)
+    gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
 
   Compute unrestricted DF-HF Fock matrices `SpinMatrix(Fα, Fβ)` in AO basis (integral direct).
 """
 function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
-  AAP = eri_2e3idx(bao, bfit)
   PL = load2idx(EC, "C_PL")
   hsmall = load2idx(EC, "h_AA")
   # println(size(Ppq))
@@ -233,21 +257,55 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
   CMOo = SpinMatrix(cMO[1][:,occa], cMO[2][:,occb])
   fock = SpinMatrix(hsmall)
   unrestrict!(fock)
-  cL = zeros(size(PL,2))
-  for isp = 1:2 # loop over [α, β]
-    @tensoropt begin 
-      AoP[p,j,P] := AAP[p,q,P] * CMOo[isp][q,j]
-      c_AoL[p,j,L] := AoP[p,j,P] * PL[P,L]
-      cL[L] += c_AoL[p,j,L] * CMOo[isp][p,j]
-      fock[isp][p,q] -= c_AoL[p,j,L]*c_AoL[q,j,L]
+  nA = size(CMOo[1], 1)
+  nocc = size(CMOo[1], 2)
+  nOcc = size(CMOo[2], 2)
+  nL = size(PL, 2)
+  Pbatches = BasisBatcher(bao, bfit)
+  maxP = max_batch_length(Pbatches)
+  LoA = zeros(nL, nocc, nA)
+  LOA = zeros(nL, nOcc, nA)
+  lenbuf = ((nocc+nOcc)*nA + max(nA*nA, nL))*maxP
+  lencbuf = buffer_size_3idx(Pbatches)
+  @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
+  for Pblk in Pbatches
+    P = range(Pblk)
+    lenP = length(P)
+    oAP = alloc!(buf, nocc, nA, lenP)
+    OAP = alloc!(buf, nOcc, nA, lenP)
+    AAP = alloc!(buf, nA, nA, lenP)
+    eri_2e3idx!(AAP, cbuf, Pblk)
+    @mtensor oAP[j,ν,P] = AAP[μ,ν,P] * CMOo[1][μ,j]
+    if nOcc > 0
+      @mtensor OAP[j,ν,P] = AAP[μ,ν,P] * CMOo[2][μ,j]
     end
+    drop!(buf, AAP)
+    M_PL = alloc!(buf, lenP, nL)
+    M_PL .= @view PL[P,:]
+    @mtensor LoA[L,j,ν] += oAP[j,ν,P] * M_PL[P,L]
+    if nOcc > 0
+      @mtensor LOA[L,j,ν] += OAP[j,ν,P] * M_PL[P,L]
+    end
+    reset!(buf)
   end
-  @tensoropt begin
-    cP[P] := cL[L] * PL[P,L]
-    coulfock[p,q] := cP[P] * AAP[p,q,P]
+  @mtensor cL[L] := LoA[L,j,ν] * CMOo[1][ν,j]
+  @mtensor cL[L] += LOA[L,j,ν] * CMOo[2][ν,j]
+  @mtensor fock[1][μ,ν] -= LoA[L,j,μ]*LoA[L,j,ν] 
+  @mtensor fock[2][μ,ν] -= LOA[L,j,μ]*LOA[L,j,ν] 
+  @mtensor cP[P] := cL[L] * PL[P,L]
+  coulfock = zeros(nA, nA)
+  for Pblk in Pbatches
+    P = range(Pblk)
+    lenP = length(P)
+    AAP = alloc!(buf, nA, nA, lenP)
+    v!cP = @mview cP[P]
+    eri_2e3idx!(AAP, cbuf, Pblk)
+    @mtensor coulfock[μ,ν] += v!cP[P]*AAP[μ,ν,P]
+    drop!(buf, AAP)
   end
   fock[1] += coulfock
   fock[2] += coulfock
+  end #buffer
   return fock
 end
 
@@ -261,15 +319,65 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64})
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
   occ2 = EC.space['o']
   CMO2 = cMO[:,occ2]
-  μνL = load3idx(EC,"AAL")
+  CMO2d = permutedims(CMO2, [2,1])
+  hsmall = load2idx(EC, "h_AA")
+  AALfile, AAL = mmap3idx(EC, "AAL")
+  nocc = size(CMO2, 2)
+  nA = size(AAL, 1)
+  nL = size(AAL, 3)
+  fock = hsmall
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  @buffer buf((nocc*nA+1)*maxL) begin
+  for L in LBlks
+    lenL = length(L)
+    v!AAL = @mview AAL[:,:,L]
+    oAL = alloc!(buf, nocc, nA, lenL)
+    @mtensor oAL[j,ν,L] = v!AAL[μ,ν,L] * CMO2[μ,j]
+    cL = alloc!(buf, lenL)
+    @mtensor cL[L] = oAL[j,ν,L] * CMO2d[j,ν]
+    @mtensor fock[μ,ν] += 2.0 * cL[L] * v!AAL[μ,ν,L]
+    @mtensor fock[μ,ν] -= oAL[j,μ,L] * oAL[j,ν,L]
+    drop!(buf, oAL, cL)
+  end
+  close(AALfile)
+  end #buffer
+  return fock
+end
+
+"""
+    gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
+
+  Compute closed-shell DF-HF Fock matrix and the positron
+  Fock matrix in AO basis  (using precalculated Cholesky-
+  decomposed integrals and density matrices).
+"""
+function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
+  #TODO: rewrite with loops to reduce memory usage
+  @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
+  occ2 = EC.space['o']
+  CMO2 = cMO[:,occ2]
+  CMO2p = cPO[:,1:1]
   hsmall = load2idx(EC,"h_AA")
-  @tensoropt begin 
+  hsmall_pos = load2idx(EC,"h_positron_AA")
+  μνL = load3idx(EC,"AAL")
+  # Electron
+  @mtensor begin 
     μjL[p,j,L] := μνL[p,q,L] * CMO2[q,j]
     L[L] := μjL[p,j,L] * CMO2[p,j]
-    fock[p,q] := hsmall[p,q] - μjL[p,j,L]*μjL[q,j,L]
-    fock[p,q] += 2.0*L[L]*μνL[p,q,L]
+    J[p,q] := μνL[p,q,L] * L[L]
+    K[p,q] := μjL[p,j,L] * μjL[q,j,L] 
   end
-  return fock
+  # Positron
+  @mtensor begin
+    μjLpos[p,j,L] := μνL[p,q,L] * CMO2p[q,j]
+    P[L] := μjLpos[p,j,L] * CMO2p[p,j]
+    Jp[p,q] := μνL[p,q,L] * P[L] 
+  end
+  fock = hsmall + 2*J - K - Jp
+  fock_pos = hsmall_pos - 2*J
+  return fock, fock_pos, Jp
+  #return fock
 end
 
 """
@@ -281,22 +389,41 @@ end
 function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
   occa = EC.space['o']
   occb = EC.space['O']
-  CMOo = [cMO[1][:,occa], cMO[2][:,occb]]
+  CMOo = SpinMatrix(cMO[1][:,occa], cMO[2][:,occb])
+  CMOod = SpinMatrix(permutedims(CMOo[1], [2,1]), permutedims(CMOo[2], [2,1]))
   hsmall = load2idx(EC,"h_AA")
   fock = SpinMatrix(hsmall)
   unrestrict!(fock)
-  μνL = load3idx(EC,"AAL")
-  L = zeros(size(μνL,3))
-  for isp = 1:2 # loop over [α, β]
-    @tensoropt begin 
-      μjL[p,j,L] := μνL[p,q,L] * CMOo[isp][q,j]
-      fock[isp][p,q] -= μjL[p,j,L]*μjL[q,j,L]
-      L[L] += μjL[p,j,L] * CMOo[isp][p,j]
+  AALfile, AAL = mmap3idx(EC, "AAL")
+  nocc = size(CMOo[1], 2)
+  nOcc = size(CMOo[2], 2)
+  nA = size(AAL, 1)
+  nL = size(AAL, 3)
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  @buffer buf((nocc+nOcc)*nA*maxL + maxL) begin
+  coulfock = zeros(nA, nA)
+  for L in LBlks
+    lenL = length(L)
+    v!AAL = @mview AAL[:,:,L]
+    oAL = alloc!(buf, nocc, nA, lenL)
+    OAL = alloc!(buf, nOcc, nA, lenL)
+    @mtensor oAL[j,ν,L] = v!AAL[μ,ν,L] * CMOo[1][μ,j]
+    @mtensor OAL[j,ν,L] = v!AAL[μ,ν,L] * CMOo[2][μ,j]
+    cL = alloc!(buf, lenL)
+    @mtensor cL[L] = oAL[j,ν,L] * CMOod[1][j,ν]
+    if nOcc > 0
+      @mtensor cL[L] += OAL[j,ν,L] * CMOod[2][j,ν]
     end
+    @mtensor coulfock[μ,ν] += cL[L] * v!AAL[μ,ν,L]
+    @mtensor fock[1][μ,ν] -= oAL[j,μ,L] * oAL[j,ν,L]
+    @mtensor fock[2][μ,ν] -= OAL[j,μ,L] * OAL[j,ν,L]
+    reset!(buf)
   end
-  @tensoropt coulfock[p,q] := L[L] * μνL[p,q,L]
+  close(AALfile)
   fock[1] += coulfock
   fock[2] += coulfock
+  end #buffer
   return fock
 end
 

@@ -3,7 +3,8 @@
 """ ANO-R0 minimal basis set. """
 const NSHELL4L_ANO_R0 = [ 
   fill([1], 2)...,      # H, HE 
-  fill([2,1], 8)...,    # LI, BE, B, C, N, O, NE 
+  fill([2], 2)...,      # LI, BE
+  fill([2,1], 6)...,    # B, C, N, O, F, NE 
   fill([3,1], 2)...,    # NA, MG
   fill([3,2], 6)...,    # AL, SI, P, S, CL, AR
   fill([4,2], 2)...,    # K, CA

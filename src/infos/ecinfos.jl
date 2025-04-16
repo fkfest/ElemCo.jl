@@ -1,11 +1,13 @@
 """ Various global infos """
 module ECInfos
-using AtomsBase
+using HDF5
+using Dates
 using DocStringExtensions
+using ..ElemCo.VersionInfo
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDumps
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.BasisSets
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
@@ -16,8 +18,80 @@ export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
+export get_options
 
 include("options.jl")
+
+"""
+    get_options(opt::Options)
+
+Return a nested `NamedTuple` with the current options.
+"""
+function get_options(opt::Options)
+  return NamedTuple(key => get_options(getfield(opt, key)) for key ∈ propertynames(opt))
+end
+
+"""
+    get_options(opt)
+
+Return a `NamedTuple` with the current options for options `opt`.
+"""
+function get_options(opt)
+  return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
+end
+
+mutable struct ECDump
+  """ file name of the HDF5 dump. """
+  filename::String
+  """ an HDF5 file with calculation information (for restarts etc). 
+  The structure of the HDF5 file is as follows (with `track_order=true`):
+```
+/EC
+  /Molecule1
+    <name>
+    <geometry>
+    /BasisSet1
+      <basis set information>
+      /State1
+        <number of electrons>
+        <spin multiplicity>
+        <occupation (alpha/beta)>
+        <MO coefficients>
+        <list of frozen orbitals>
+        <CC amplitudes>
+        <other information>
+      /State2
+      ...
+    /BasisSet2
+    ...
+  /Molecule2
+    ...
+```
+  """
+  file::HDF5.Group
+  function ECDump(filename::AbstractString)
+    return new(filename, create_empty_dump(filename))
+  end
+end
+
+"""
+    create_empty_dump(filename::AbstractString)
+
+  Create an empty HDF5 dump file with the given `filename` and information about the package.
+
+  Returns an "EC" group in HDF5 file.
+"""
+function create_empty_dump(filename)
+  file = h5open(filename, "w")
+  g = create_group(file, "EC", track_order=true)
+  g["version"] = version()
+  g["git_hash"] = git_hash()
+  g["julia"] = "$VERSION"
+  g["hostname"] = gethostname()
+  g["scratch"] = tempdir()
+  g["date"] = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+  return file["EC"]
+end
 
 """
     ECInfo
@@ -26,19 +100,19 @@ include("options.jl")
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct ECInfo <: AbstractECInfo
+@kwdef mutable struct ECInfo <: AbstractECInfo
   """`⟨"system-tmpdir/elemcojlscr/jl_*"⟩` path to scratch directory. """
   scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
   """`⟨".bin"⟩` extension of temporary files. """
   ext::String = ".bin"
-  """`⟨2⟩` verbosity level. """
-  verbosity::Int = 2
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  system::FlexibleSystem = FlexibleSystem(Atom[], infinite_box(3), fill(DirichletZero(), 3))
+  system::MSystem = MSystem()
   """ fcidump. """
   fd::TFDump = TFDump()
+  """ dump with calculation information (for restarts etc). """
+  dump::ECDump = ECDump(joinpath(scr,"ec.h5"))
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -73,6 +147,7 @@ Base.@kwdef mutable struct ECInfo <: AbstractECInfo
   For example, `T_vo` contains the singles amplitudes ``T_{a}^{i}``.
   Disambiguity can be resolved by introducing `^` to separate the subscripts from the superscripts,
   e.g., `d_XX` contains ``\\hat v_{XY}`` and `d_^XX` contains ``\\hat v^{XY}`` integrals.
+  Subspaces with multiple characters are possible using `{}`, e.g., `C_vo{bX}` contains ``U_{a}^{i\\bar X}``.
   """
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
@@ -89,15 +164,17 @@ function reset_wf_info!(EC::ECInfo)
 end
 
 """
-    setup_space_fd!(EC::ECInfo)
+    setup_space_fd!(EC::ECInfo; verbose=true)
 
   Setup EC.space from fcidump EC.fd.
 """
-function setup_space_fd!(EC::ECInfo)
+function setup_space_fd!(EC::ECInfo; verbose=true)
   @assert fd_exists(EC.fd) "EC.fd is not set up!"
   nelec = EC.options.wf.nelec
+  npositron = EC.options.wf.npositron
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
+  @assert npositron == 0 "Positron calculation not supported for post-HF yet."
 
   norb = headvar(EC.fd, "NORB", Int)
   @assert !isnothing(norb)
@@ -111,15 +188,15 @@ function setup_space_fd!(EC::ECInfo)
   ms2 = (ms2 < 0) ? ms2_default : ms2
   orbsym = headvars(EC.fd, "ORBSYM", Int)
   @assert !isnothing(orbsym)
-  setup_space!(EC, norb, nelec, ms2, orbsym)
+  setup_space!(EC, norb, nelec, ms2, orbsym; verbose=verbose)
 end
 
 """
-    setup_space_system(EC::ECInfo)
+    setup_space_system(EC::ECInfo; verbose=true)
 
   Setup EC.space from molecular system EC.system.
 """
-function setup_space_system!(EC::ECInfo)
+function setup_space_system!(EC::ECInfo; verbose=true)
   @assert system_exists(EC.system) "EC.system is not set up!"
   nelec = EC.options.wf.nelec
   charge = EC.options.wf.charge
@@ -130,23 +207,35 @@ function setup_space_system!(EC::ECInfo)
   nelec -= charge
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
   orbsym = ones(Int,norb)
-  println("Number of orbitals: ", norb)
-  println("Number of electrons: ", nelec)
-  println("Spin: ", ms2)
-  setup_space!(EC, norb, nelec, ms2, orbsym)
+  if verbose
+    println("Number of orbitals: ", norb)
+    println("Number of electrons: ", nelec)
+  end
+  if EC.options.wf.npositron > 0
+    if verbose
+      println("Number of positrons: ", EC.options.wf.npositron)
+    end
+    @assert ms2 == 0 "Cannot have positrons and spin > 0."
+  end
+  if verbose
+    println("Spin: ", ms2)
+  end
+  setup_space!(EC, norb, nelec, ms2, orbsym; verbose=verbose)
 end
 
 """
-    setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
+    setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym; verbose=true)
 
   Setup EC.space from `norb`, `nelec`, `ms2`, `orbsym` or `occa`/`occb`.
 """
-function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym)
+function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym; verbose=true)
   occa = EC.options.wf.occa
   occb = EC.options.wf.occb
   SP = EC.space
-  println("Number of orbitals: ", norb)
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(occa, occb, norb, nelec; ms2, orbsym, EC.options.wf.ignore_error)
+  if verbose
+    println("Number of orbitals: ", norb)
+  end
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(occa, occb, norb, nelec; ms2, orbsym, EC.options.wf.ignore_error, verbose)
   SP['d'] = intersect(SP['o'], SP['O'])
   SP['s'] = setdiff(SP['o'], SP['d'])
   SP['S'] = setdiff(SP['O'], SP['d'])
@@ -232,14 +321,14 @@ end
 
 
 """
-    freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
+    freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[]; verbose=true)
 
   Freeze `freeze_nocc` occupied orbitals or orbitals on the `freeze_orbs` list. 
   If `freeze_nocc` is negative and `freeze_orbs` is empty: guess the number of core orbitals.
 
-  `core` as in [`MSystem.guess_ncore`](@ref).
+  `core` as in [`MSystems.guess_ncore`](@ref).
 """
-function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[])
+function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[]; verbose=true)
   if freeze_nocc < 0 && isempty(freeze_orbs)
     freeze_orbs = 1:guess_ncore(EC.system, core)
   elseif freeze_nocc >= 0 && isempty(freeze_orbs)
@@ -247,16 +336,16 @@ function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[]
   elseif freeze_nocc >= 0 && !isempty(freeze_orbs)
     error("Cannot specify both freeze_nocc and freeze_orbs in freeze_core!.")
   end
-  freeze_nocc!(EC, freeze_orbs)
+  freeze_nocc!(EC, freeze_orbs; verbose=verbose)
   return length(freeze_orbs)
 end
 
 """
-    freeze_nocc!(EC::ECInfo, freeze)
+    freeze_nocc!(EC::ECInfo, freeze; verbose=true)
 
   Freeze occupied orbitals from the `freeze` list.
 """
-function freeze_nocc!(EC::ECInfo, freeze)
+function freeze_nocc!(EC::ECInfo, freeze; verbose=true)
   nfreeze = length(freeze)
   if nfreeze != length(intersect(EC.space['o'],freeze)) || nfreeze != length(intersect(EC.space['O'],freeze)) 
     error("Cannot freeze more occupied orbitals than there are.")
@@ -264,19 +353,21 @@ function freeze_nocc!(EC::ECInfo, freeze)
   if isempty(freeze)
     return 0
   end
-  println("Freezing ", nfreeze, " occupied orbitals")
-  println()
+  if verbose
+    println("Freezing ", nfreeze, " occupied orbitals")
+    println()
+  end
   setdiff!(EC.space['o'], freeze)
   setdiff!(EC.space['O'], freeze)
   return nfreeze
 end
 
 """
-    freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[])
+    freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[]; verbose=true)
 
   Freeze `nfreeze` virtual orbitals or orbitals on the `freeze_orbs` list.
 """
-function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[])
+function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[]; verbose=true)
   if nfreeze > 0 
     if isempty(freeze_orbs)
       freeze_orbs = 1:nfreeze
@@ -291,8 +382,10 @@ function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[])
   if isempty(freeze_orbs)
     return 0
   end
-  println("Freezing ", nfreeze, " virtual orbitals")
-  println()
+  if verbose
+    println("Freezing ", nfreeze, " virtual orbitals")
+    println()
+  end
   setdiff!(EC.space['v'], freeze_orbs)
   setdiff!(EC.space['V'], freeze_orbs)
   return nfreeze
@@ -515,7 +608,9 @@ function parse_orbstring(orbs::String; orbsym=Vector{Int}())
   orbs1 = replace(orbs,"-"=>":")
   orbs1 = replace(orbs1,"+"=>";")
   orbs1 = replace(orbs1," "=>"")
-  if maximum(orbsym) > 1 && occursin(".", orbs1)
+  if length(orbsym) == 0
+    symoffset = zeros(Int,1)
+  elseif maximum(orbsym) > 1 && occursin(".", orbs1)
     @assert(issorted(orbsym),"Orbital symmetries are not sorted. Specify occa and occb without symmetry.")
     symoffset = zeros(Int, maximum(orbsym))
     symlist = zeros(Int, maximum(orbsym))
@@ -580,13 +675,14 @@ function symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
 end
 
 """
-    get_occvirt(occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}, ignore_error=false)
+    get_occvirt(occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}, ignore_error=false, verbose=true)
 
   Use a +/- string to specify the occupation. If `occbs`=="-", the occupation from `occas` is used (closed-shell).
   If both are "-", the occupation is deduced from `nelec` and `ms2`.
   The optional argument `orbsym` is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
 """
-function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int; ms2=0, orbsym=Vector{Int}(), ignore_error=false)
+function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int; 
+                     ms2=0, orbsym=Vector{Int}(), ignore_error=false, verbose=true)
   @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   occa = Int[]
   occb = Int[]
@@ -607,15 +703,18 @@ function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int; ms2=0,
   end
   virta = [ i for i in 1:norb if i ∉ occa ]
   virtb = [ i for i in 1:norb if i ∉ occb ]
-  if occa == occb
-    println("Occupied orbitals:", occa)
-  else
-    println("Occupied α orbitals:", occa)
-    println("Occupied β orbitals:", occb)
+  if verbose
+    if occa == occb
+      println("Occupied orbitals:", occa)
+    else
+      println("Occupied α orbitals:", occa)
+      println("Occupied β orbitals:", occb)
+    end
   end
   return occa, virta, occb, virtb
 end
 
 
+include("ecdump.jl")
 
 end #module
