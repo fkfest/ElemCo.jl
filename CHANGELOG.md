@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## Version [v0.14.0] - 2025.04.16
 
 ### Breaking
 
