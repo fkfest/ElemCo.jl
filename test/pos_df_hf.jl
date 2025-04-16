@@ -30,5 +30,11 @@ EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_LiH,basis_LiH))
 @set wf npositron=1
 E_LiH=@dfhf
 @test abs(E_LiH["HF"]-EHF_LiH_test) < epsilon
+EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_LiH,basis_LiH))
+@set wf charge=0
+@set wf npositron=1
+@set scf direct=1
+E_LiH_direct=@dfhf
+@test abs(E_LiH_direct["HF"]-EHF_LiH_test) < epsilon
 
 end

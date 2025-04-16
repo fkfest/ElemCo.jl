@@ -244,6 +244,74 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
 end
 
 """ 
+    gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
+
+  Compute closed-shell DF-HF electron and positron Fock matrices
+  (integral direct) in AO basis.
+"""
+function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64}, bao, bfit)
+  PL = load2idx(EC, "C_PL")
+  hsmall = load2idx(EC, "h_AA")
+  hsmall_pos = load2idx(EC, "h_positron_AA")
+  @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
+  occ2 = EC.space['o']
+  occp = 1:1
+  CMO2 = cMO[:,occ2]
+  CPO2 = cPO[:,occp]
+  nA = size(CMO2, 1)
+  nocc = size(CMO2, 2)
+  noccp = size(CPO2, 2) # = 1
+  nL = size(PL, 2)
+  Pbatches = BasisBatcher(bao, bfit)
+  maxP = max_batch_length(Pbatches)
+  LoA = zeros(nL, nocc, nA)
+  LpA = zeros(nL, noccp, nA)
+  J = zeros(nA, nA)
+  Jp = zeros(nA, nA)
+  fock_pos = hsmall_pos
+  # FIXME: lenbuf is twice the RHF case without positron – just a guess
+  lenbuf = 2*(nocc*nA + max(nA*nA, nL))*maxP
+  lencbuf = buffer_size_3idx(Pbatches)
+  @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
+  for Pblk in Pbatches
+    P = range(Pblk)
+    lenP = length(P)
+    oAP = alloc!(buf, nocc, nA, lenP)
+    pAP = alloc!(buf, noccp, nA, lenP)
+    AAP = alloc!(buf, nA, nA, lenP)
+    eri_2e3idx!(AAP, cbuf, Pblk)
+    @mtensor oAP[j,ν,P] = AAP[μ,ν,P] * CMO2[μ,j]
+    @mtensor pAP[j,ν,P] = AAP[μ,ν,P] * CPO2[μ,j]
+    drop!(buf, AAP)
+    M_PL = alloc!(buf, lenP, nL)
+    M_PL .= @view PL[P,:]
+    @mtensor LoA[L,j,ν] += oAP[j,ν,P] * M_PL[P,L]
+    @mtensor LpA[L,j,ν] += pAP[j,ν,P] * M_PL[P,L]
+    reset!(buf)
+  end
+  @mtensor cL[L] := LoA[L,j,ν] * CMO2[ν,j]
+  @mtensor cL_p[L] := LpA[L,j,ν] * CPO2[ν,j]
+  @mtensor fock[μ,ν] := hsmall[μ,ν] - LoA[L,j,μ]*LoA[L,j,ν] 
+  @mtensor cP[P] := cL[L] * PL[P,L]
+  @mtensor cP_p[P] := cL_p[L] * PL[P,L]
+  for Pblk in Pbatches
+    P = range(Pblk)
+    lenP = length(P)
+    AAP = alloc!(buf, nA, nA, lenP)
+    v!cP = @mview cP[P]
+    v!cP_p = @mview cP_p[P]
+    eri_2e3idx!(AAP, cbuf, Pblk)
+    @mtensor J[μ,ν] += v!cP[P]*AAP[μ,ν,P]
+    @mtensor Jp[μ,ν] += v!cP_p[P]*AAP[μ,ν,P]
+    @mtensor fock[μ,ν] += 2.0*J[μ,ν] - Jp[μ,ν]
+    @mtensor fock_pos[μ,ν] -= 2.0*J[μ,ν]
+    drop!(buf, AAP)
+  end
+  end #buffer
+  return fock, fock_pos, Jp
+end
+
+""" 
     gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
 
   Compute unrestricted DF-HF Fock matrices `SpinMatrix(Fα, Fβ)` in AO basis (integral direct).
@@ -360,22 +428,23 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64})
   CMO2p = cPO[:,1:1]
   hsmall = load2idx(EC,"h_AA")
   hsmall_pos = load2idx(EC,"h_positron_AA")
-  μνL = load3idx(EC,"AAL")
+  AALfile, AAL = mmap3idx(EC, "AAL")
   # Electron
   @mtensor begin 
-    μjL[p,j,L] := μνL[p,q,L] * CMO2[q,j]
+    μjL[p,j,L] := AAL[p,q,L] * CMO2[q,j]
     L[L] := μjL[p,j,L] * CMO2[p,j]
-    J[p,q] := μνL[p,q,L] * L[L]
+    J[p,q] := AAL[p,q,L] * L[L]
     K[p,q] := μjL[p,j,L] * μjL[q,j,L] 
   end
   # Positron
   @mtensor begin
-    μjLpos[p,j,L] := μνL[p,q,L] * CMO2p[q,j]
+    μjLpos[p,j,L] := AAL[p,q,L] * CMO2p[q,j]
     P[L] := μjLpos[p,j,L] * CMO2p[p,j]
-    Jp[p,q] := μνL[p,q,L] * P[L] 
+    Jp[p,q] := AAL[p,q,L] * P[L] 
   end
   fock = hsmall + 2*J - K - Jp
   fock_pos = hsmall_pos - 2*J
+  close(AALfile)
   return fock, fock_pos, Jp
   #return fock
 end
