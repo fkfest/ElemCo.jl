@@ -46,6 +46,7 @@ function git_hash()
       end
     end
   end
+  return "unknown"
 end
 
 end # module
