@@ -23,11 +23,11 @@ end
 Base.show(io::IO, ilib::ILibcint5) = print(io, "libcint v5")
 
 """
-    ILibcint5(atoms::Vector{BasisCenter}, cartesian::Bool)
+    ILibcint5(atoms::Vector{BasisCentre}, cartesian::Bool)
 
   Prepare the infos for Libcint5 integral library.
 """
-function ILibcint5(atoms::Vector{BasisCenter}, cartesian::Bool)
+function ILibcint5(atoms::Vector{BasisCentre}, cartesian::Bool)
   ATM_SLOTS = 6
   BAS_SLOTS = 8
 
@@ -48,8 +48,9 @@ function ILibcint5(atoms::Vector{BasisCenter}, cartesian::Bool)
   off = 20
   for (i, atom) in enumerate(atoms)
     # lc_atom has ATM_SLOTS (6) "spaces" for each atom
-    # The first one (Z_INDEX) is the atomic number
-    lc_atm[1 + ATM_SLOTS*(i-1)] = atom.atomic_number
+    # The first one (Z_INDEX) is the atomic number (nuclear charge)
+    # lc_atm[1 + ATM_SLOTS*(i-1)] = atom.atomic_number
+    lc_atm[1 + ATM_SLOTS*(i-1)] = atom.charge
     # The second one is the env index address for xyz
     lc_atm[2 + ATM_SLOTS*(i-1)] = off
     env[off+1:off+3] .= atom.position

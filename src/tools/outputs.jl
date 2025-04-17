@@ -7,7 +7,7 @@ The main purpose of this module is to hide the output functions from the JET.jl 
 """
 module Outputs
 using Printf
-export output_time, flush_output
+export output_time, output_memory, flush_output
 export output_iteration
 export output_E_var, output_E_method, output_norms
 
@@ -18,6 +18,28 @@ export output_E_var, output_E_method, output_norms
 """
 function output_time(Δtime, info::AbstractString)
   @printf "Time for %s:\t %8.2f \n" info Δtime/10^9
+  flush(stdout)
+end
+
+"""
+    output_memory(Δmemory, info::AbstractString)
+
+  Output memory usage (`Δmemory` in bytes) with message `info`.
+"""
+function output_memory(Δmemory, info::AbstractString)
+  letters = " KMGTP"
+  x = Δmemory
+  i = 1
+  y = x/1024
+  while y > 1 && i < 6
+    x = y
+    y = x/1024
+    i += 1
+  end
+  if i > 1
+    x = round(x, digits=2)
+  end
+  println("Memory usage $info: $x$(letters[i])B")
   flush(stdout)
 end
 
@@ -65,15 +87,15 @@ function output_E_method(En, method::AbstractString, info::AbstractString="")
 end
 
 """
-    output_norms(norms::Vector{Pair{String,Float64}})
+    output_norms(norms::Pair{String,Float64}...)
 
-  Output norms. 
+  Output squared norms. 
 
-  The norms are a vector of pairs of strings and floats.
+  The norms are pairs of strings and floats.
 """
-function output_norms(norms::Vector{Pair{String,Float64}})
+function output_norms(norms::Pair{String,Float64}...)
   for norm in norms
-    @printf "Norm of %s: %12.8f " norm.first norm.second
+    @printf "|%s|²: %12.8f   " norm.first norm.second
   end
   println()
   flush(stdout)

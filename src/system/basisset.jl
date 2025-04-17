@@ -7,19 +7,17 @@
   The basis set can be generated using the [`generate_basis`](@ref) function.
 """
 module BasisSets
-using Unitful, UnitfulAtomic
-using AtomsBase
 using StaticArrays
 using Printf
 using DocStringExtensions
 using ..ElemCo.Utils
 using ..ElemCo.Elements
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.AbstractEC
 
-export BasisCenter, BasisSet
+export BasisCentre, BasisSet
 export BasisContraction, AngularShell
-export shell_range, center_range, is_cartesian, combine
+export shell_range, centre_range, is_cartesian, combine
 export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao
 export normalize_contraction
 export coefficients_1mat, n_coefficients_1mat
@@ -29,7 +27,7 @@ export subshell_char, max_l
 
 export ILibcint5
 
-include("basiscenter.jl")  
+include("basiscentre.jl")  
 include("parse_basis.jl")
 include("intlibs.jl")
 include("aos.jl")
@@ -37,17 +35,17 @@ include("aos.jl")
 """
     BasisSet
 
-  A basis set with basis centers (atoms) and basis functions.
+  A basis set with basis centres (atoms) and basis functions.
 
   $(TYPEDFIELDS)
 """
 struct BasisSet
-  """ array of basis centers (atoms) with basis functions."""
-  centers::Vector{BasisCenter}
+  """ array of basis centres (atoms) with basis functions."""
+  centres::Vector{BasisCentre}
   """ indices for angular shells."""
   shell_indices::Vector{CartesianIndex{2}}
-  """ center ranges for each basis set in a combined set."""
-  center_ranges::Vector{UnitRange{Int}}
+  """ centre ranges for each basis set in a combined set."""
+  centre_ranges::Vector{UnitRange{Int}}
   """ angular shell ranges for each basis sets in a combined set."""
   shell_ranges::Vector{UnitRange{Int}}
   """ cartesian basis set """
@@ -56,16 +54,16 @@ struct BasisSet
   lib::ILibcint5
 end
 
-function BasisSet(centers::Vector{BasisCenter}, cartesian::Bool, lib::AbstractILib)
-  shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centers) for j in 1:n_angularshells(c)]
-  center_ranges = [1:length(centers)]
+function BasisSet(centres::Vector{BasisCentre}, cartesian::Bool, lib::AbstractILib)
+  shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centres) for j in 1:n_angularshells(c)]
+  centre_ranges = [1:length(centres)]
   shell_ranges = [1:length(shell_indices)]
-  return BasisSet(centers, shell_indices, center_ranges, shell_ranges, cartesian, lib)
+  return BasisSet(centres, shell_indices, centre_ranges, shell_ranges, cartesian, lib)
 end
 
-function BasisSet(centers::Vector{BasisCenter}, center_ranges, shell_ranges, cartesian::Bool, lib::AbstractILib)
-  shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centers) for j in 1:n_angularshells(c)]
-  return BasisSet(centers, shell_indices, center_ranges, shell_ranges, cartesian, lib)
+function BasisSet(centres::Vector{BasisCentre}, centre_ranges, shell_ranges, cartesian::Bool, lib::AbstractILib)
+  shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centres) for j in 1:n_angularshells(c)]
+  return BasisSet(centres, shell_indices, centre_ranges, shell_ranges, cartesian, lib)
 end
 
 """
@@ -80,7 +78,7 @@ Base.length(bs::BasisSet) = length(bs.shell_indices)
 
   Return the the angular shell.
 """
-Base.getindex(bs::BasisSet, i::Int, j::Int) = bs.centers[i].shells[j]
+Base.getindex(bs::BasisSet, i::Int, j::Int) = bs.centres[i].shells[j]
 
 """
     Base.getindex(bs::BasisSet, i::CartesianIndex{2})
@@ -114,24 +112,25 @@ end
 
   Combine two basis sets. 
 
-  The centers are concatenated. 
-  The center/shell ranges (`center_ranges`/`shell_ranges`) corresponding to the centers/shells 
-  for each basis set   can be used to access the centers/shells in the combined basis set, e.g.
-  `bs.centers[i] for i in bs.center_ranges[1]` gives the centers of the first basis set 
+  The centres are concatenated. 
+  The centre/shell ranges (`centre_ranges`/`shell_ranges`) corresponding to the centres/shells 
+  for each basis set   can be used to access the centres/shells in the combined basis set, e.g.
+  `bs.centres[i] for i in bs.centre_ranges[1]` gives the centres of the first basis set 
   in the combined set.
 """
 function combine(bs1::BasisSet, bs2::BasisSet)
-  centers = vcat(bs1.centers, bs2.centers)
-  set_id!(centers, 1)
-  center_ranges = vcat(bs1.center_ranges, [r .+ length(bs1.centers) for r in bs2.center_ranges])
+  @assert bs1.cartesian == bs2.cartesian "Basis sets must be both cartesian or both spherical"
+  centres = vcat(bs1.centres, bs2.centres)
+  set_id!(centres, 1)
+  centre_ranges = vcat(bs1.centre_ranges, [r .+ length(bs1.centres) for r in bs2.centre_ranges])
   shell_ranges = vcat(bs1.shell_ranges, [r .+ length(bs1.shell_indices) for r in bs2.shell_ranges])
   cartesian = bs1.cartesian && bs2.cartesian
-  return BasisSet(centers, center_ranges, shell_ranges, cartesian, ILibcint5(centers, cartesian))
+  return BasisSet(centres, centre_ranges, shell_ranges, cartesian, ILibcint5(centres, cartesian))
 end
 
 function Base.show(io::IO, bs::BasisSet)
-  for center in bs.centers
-    println(io, center)
+  for centre in bs.centres
+    println(io, centre)
   end
 end
 
@@ -146,14 +145,14 @@ end
 shell_range(bs::BasisSet, i::Int=1) = bs.shell_ranges[i]
 
 """
-    center_range(bs::BasisSet, i::Int=1)
+    centre_range(bs::BasisSet, i::Int=1)
 
-  Return the range of centers for the `i`th basis set.
+  Return the range of centres for the `i`th basis set.
 
-  The range is used to access the centers in the basis set, e.g.,
-  `bs.centers[i] for i in center_range(bs, 1)` gives the centers of the first basis set.
+  The range is used to access the centres in the basis set, e.g.,
+  `bs.centres[i] for i in centre_range(bs, 1)` gives the centres of the first basis set.
 """
-center_range(bs::BasisSet, i::Int=1) = bs.center_ranges[i]
+centre_range(bs::BasisSet, i::Int=1) = bs.centre_ranges[i]
 
 """
     is_cartesian(bs::BasisSet)
@@ -163,14 +162,13 @@ center_range(bs::BasisSet, i::Int=1) = bs.center_ranges[i]
 is_cartesian(bs::BasisSet) = bs.cartesian
 
 """
-    basis_name(atoms, type="ao")
+    basis_name(atom::ACentre, type="ao")
 
   Return the name of the basis set (or `unknown` if not found).
-  `atoms` can be a single atom `::Atom` or a system `::AbstractSystem`.
 """
-function basis_name(atoms, type="ao")
-  if haskey(atoms, :basis) && haskey(atoms[:basis], type)
-    return lowercase(atoms[:basis][type])
+function basis_name(atom::ACentre, type="ao")
+  if haskey(atom.basis, type)
+    return lowercase(atom.basis[type])
   else
     return "unknown"
   end
@@ -190,7 +188,7 @@ function generate_basis(EC::AbstractECInfo, type="ao"; basisset::AbstractString=
 end
 
 """
-    generate_basis(ms::AbstractSystem, type="ao"; cartesian=false, basisset::AbstractString="")
+    generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::AbstractString="")
 
   Generate basis sets for integral calculations.
 
@@ -198,8 +196,8 @@ end
   `type` can be `"ao"`, `"mpfit"` or `"jkfit"`.
   If `basisset` is provided, it is used as the basis set.
 """
-function generate_basis(ms::AbstractSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
-  array_of_centers = BasisCenter[]
+function generate_basis(ms::MSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
+  array_of_centres = BasisCentre[]
   id = 1
   for atom in ms
     if basisset != ""
@@ -210,11 +208,11 @@ function generate_basis(ms::AbstractSystem, type="ao"; cartesian::Bool=false, ba
         basisname = guess_basis_name(atom, type)
       end
     end
-    basisfunctions = parse_basis(basisname, atom)
+    basisfunctions = parse_basis(basisname, atom; fallback=(type=="jkfit"))
     id = set_id!(basisfunctions, id)
-    push!(array_of_centers, BasisCenter(atom, basisname, basisfunctions))
+    push!(array_of_centres, BasisCentre(atom, basisname, basisfunctions))
   end
-  return BasisSet(array_of_centers, cartesian, ILibcint5(array_of_centers, cartesian))
+  return BasisSet(array_of_centres, cartesian, ILibcint5(array_of_centres, cartesian))
 end
 
 """
@@ -235,7 +233,7 @@ end
 
   Return the number of angular shells in the basis set.
 """
-n_angularshells(atoms::BasisSet) = sum(n_angularshells, atoms.centers)
+n_angularshells(atoms::BasisSet) = sum(n_angularshells, atoms.centres)
 n_angularshells(atoms) = sum(n_angularshells, atoms)
 
 """
@@ -243,7 +241,7 @@ n_angularshells(atoms) = sum(n_angularshells, atoms)
 
   Return the number of subshells in the basis set.
 """
-n_subshells(atoms::BasisSet) = sum(n_subshells, atoms.centers)
+n_subshells(atoms::BasisSet) = sum(n_subshells, atoms.centres)
 n_subshells(atoms) = sum(n_subshells, atoms)
 
 """
@@ -251,7 +249,7 @@ n_subshells(atoms) = sum(n_subshells, atoms)
 
   Return the number of primitives in the basis set.
 """
-n_primitives(atoms::BasisSet) = sum(n_primitives, atoms.centers)
+n_primitives(atoms::BasisSet) = sum(n_primitives, atoms.centres)
 n_primitives(atoms) = sum(n_primitives, atoms)
 
 """
@@ -259,7 +257,7 @@ n_primitives(atoms) = sum(n_primitives, atoms)
 
   Return the number of atomic orbitals in the basis set.
 """
-n_ao(atoms::BasisSet) = sum(x->n_ao(x, atoms.cartesian), atoms.centers)
+n_ao(atoms::BasisSet) = sum(x->n_ao(x, atoms.cartesian), atoms.centres)
 n_ao(atoms, cartesian) = sum(x->n_ao(x, cartesian), atoms)
 
 
@@ -278,9 +276,9 @@ function ao_list(basis::BasisSet, ibas=1)
   end
   out = AtomicOrbital[]
   nnumber = zeros(Int, length(SUBSHELL2L))
-  for ic in center_range(basis, ibas)
+  for ic in centre_range(basis, ibas)
     nnumber .= 0
-    for ash in basis.centers[ic].shells
+    for ash in basis.centres[ic].shells
       for (isubshell, con) in enumerate(ash.subshells)
         nnumber[ash.l+1] += 1
         for iao in 1:n_ao4subshell(ash, basis.cartesian)
@@ -299,26 +297,26 @@ end
   Print the atomic orbital.
 """
 function print_ao(ao::AbstractAtomicOrbital, basis::BasisSet)
-  @assert ao.icenter <= length(basis.centers) "AO center index out of range! Use the same basis in print_ao as in ao_list!" 
+  @assert ao.icentre <= length(basis.centres) "AO centre index out of range! Use the same basis in print_ao as in ao_list!" 
   icen = 0
-  for r in basis.center_ranges
-    if ao.icenter in r
-      icen = ao.icenter - r.start + 1
+  for r in basis.centre_ranges
+    if ao.icentre in r
+      icen = ao.icentre - r.start + 1
       break
     end
   end
-  print(basis.centers[ao.icenter].name, "[", icen, "]", ao)
+  print(basis.centres[ao.icentre].name, "[", icen, "]", ao)
 end
 
 """
-    guess_basis_name(atom::Atom, type)
+    guess_basis_name(atom::ACentre, type)
 
   Guess the name of the basis set.
   `type` can be `"ao"`, `"mpfit"` or `"jkfit"`.
 """
-function guess_basis_name(atom::Atom, type)
+function guess_basis_name(atom::ACentre, type)
   if type == "ao"
-    error("AO basis set for atom $(atomic_symbol(atom)) not defined!")
+    error("AO basis set for atom $(atomic_centre_label(atom)) not defined!")
   end
   aobasis = basis_name(atom, "ao")
   return aobasis * "-" * type

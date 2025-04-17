@@ -1,15 +1,29 @@
 const BASIS_LIB = joinpath(@__DIR__, "..", "..", "lib", "basis_sets")
 
 """
-    parse_basis(basis_name::String, atom::Atom) 
+    parse_basis(basis_name::String, atom::ACentre; fallback=false) 
 
   Search and parse the basis set for a given atom.
+  If fallback is `true`, use `def2-universal-jkfit` as a fallback basis set.
 
   Return a list of angular shells [`AngularShell`](@ref).
 """
-function parse_basis(basis_name::String, atom::Atom)
-  basisfile = basis_file(basis_name)
-  basisblock = read_basis_block(basisfile, atom)
+function parse_basis(basis_name::String, atom::ACentre; fallback=false)
+  if startswith(basis_name, "{")
+    # the basis block is given explicitly, parse basis set from string
+    return parse_basis_block(strip(basis_name, ['{','}'] ) , atom)
+  else
+    basisfile = basis_file(basis_name) 
+    if basisfile == ""
+      if fallback
+        println(atomic_centre_label(atom),": Basis set $basis_name not found, using def2-universal-jkfit as a fallback.")
+        basisfile = basis_file("def2-universal-jkfit")
+      else
+        error("Basis set $basis_name not found!")
+      end
+    end
+    basisblock = read_basis_block(basisfile, atom)
+  end
   return parse_basis_block(basisblock, atom)
 end
 
@@ -33,7 +47,8 @@ function basis_file(basis_name::AbstractString)
     end
   end 
   if version < 0
-    error("Basis set $basis_name not found!")
+    # Basis set not found
+    return ""
   end
   filename = "$mainname.$version.mpro"
   if !isfile(filename)
@@ -75,7 +90,7 @@ function full_basis_name(basis_name::AbstractString)
 end
 
 """
-    read_basis_block(basisfile::AbstractString, atom::Atom) 
+    read_basis_block(basisfile::AbstractString, atom::ACentre) 
 
   Read the basis block for a given atom.
 
@@ -99,8 +114,8 @@ c, 1.1, 1.0000000
 !
 ```
 """
-function read_basis_block(basisfile::AbstractString, atom::Atom)
-  elem = lowercase(element_name(atom))
+function read_basis_block(basisfile::AbstractString, atom::ACentre)
+  elem = lowercase(element_fullname(atom))
   # search for `! $elem  ....`
   reg_start = Regex("^!\\s$elem\\s+")
   reg_end = Regex("^\\s*[!}]\\s*")
@@ -126,7 +141,7 @@ function read_basis_block(basisfile::AbstractString, atom::Atom)
 end
 
 """
-    parse_basis_block(basisblock::AbstractString, atom::Atom) 
+    parse_basis_block(basis_block::AbstractString, atom::ACentre) 
 
   Parse the basis block for a given atom.
 
@@ -158,8 +173,9 @@ p, H , 0.8000000
 c, 1.1, 1.0000000
 ```
 """
-function parse_basis_block(basisblock::AbstractString, atom::Atom)
-  elem = element_SYMBOL(atom)
+function parse_basis_block(basis_block::AbstractString, atom::ACentre)
+  basisblock = lowercase(basis_block)
+  elem = lowercase(element_LABEL(atom))
   # search for ` s, $elem , 13...`
   reg_exp = Regex("^\\s*[$SUBSHELLS_NAMES]\\s*,\\s*$elem\\s*,")
   reg_con = Regex("^\\s*c,\\s*")

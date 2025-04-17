@@ -5,7 +5,7 @@
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct WfOptions
+@kwdef mutable struct WfOptions
   """`⟨-1⟩` spin magnetic quantum number times two (2×mₛ) of the system. """
   ms2::Int = -1
   """`⟨-1⟩` number of electrons. If < 0, the number of electrons is 
@@ -16,6 +16,13 @@ Base.@kwdef mutable struct WfOptions
   """`⟨"C_Am"⟩` filename of MO coefficients. 
   Used by all programs to read and write orbitals from/to file. """
   orb::String = "C_Am"
+  """`⟨0⟩` Number of positrons. """
+  npositron::Int = 0
+  """`⟨"e_m_pos"⟩` filename of the positron orbital energies. """
+  eps_pos::String = "e_m_pos"
+  """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 
+  Used by all programs to read and write positron orbitals from/to file. """
+  orb_pos::String = "C_Am_pos"
   """`⟨"-left"⟩` addition to the filename for left orbitals (for biorthogonal calculations). """
   left::String = "-left"
   """`⟨:large⟩` core type for frozen-core approximation: 
@@ -48,7 +55,7 @@ end
 
   $(TYPEDFIELDS)    
 """
-Base.@kwdef mutable struct ScfOptions
+@kwdef mutable struct ScfOptions
   """`⟨1.e-10⟩` convergence threshold. """
   thr::Float64 = 1.e-10
   """`⟨sqrt(thr)*0.1⟩` energy convergence threshold (used additionally to `thr`). """
@@ -66,6 +73,8 @@ Base.@kwdef mutable struct ScfOptions
   - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
+  """`⟨:HCORE⟩` positron orbital guess. Only `:HCORE` is implemented. """
+  guess_pos::Symbol = :HCORE
   """`⟨0.5⟩` damping factor for bisection search in augmented Hessian tuning. """
   bisecdamp::Float64 = 0.5
   """`⟨3⟩` maximum number of iterations for searching for lambda value to get a reasonalbe guess within trust radius for MCSCF. """
@@ -116,9 +125,11 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct CcOptions
+@kwdef mutable struct CcOptions
   """`⟨1.e-10⟩` convergence threshold. """
   thr::Float64 = 1.e-10
+  """`⟨0.1⟩` energy convergence factor. The energy convergence threshold is `sqrt(thr) * conven`. """
+  conven::Float64 = 0.1
   """`⟨50⟩` maximum number of iterations. """
   maxit::Int = 50
   """`⟨0.15⟩` level shift for singles. """
@@ -129,8 +140,8 @@ Base.@kwdef mutable struct CcOptions
   shiftt::Float64 = 0.2
   """`⟨false⟩` calculate properties. """
   properties::Bool = false
-  """`⟨1.e-3⟩` amplitude decomposition threshold. """
-  ampsvdtol::Float64 = 1.e-3
+  """`⟨1.e-5⟩` amplitude decomposition threshold. """
+  ampsvdtol::Float64 = 1.e-5
   """`⟨1.e-2⟩` tightening amplitude decomposition factor 
       (for the two-step decomposition). """
   ampsvdfac::Float64 = 1.e-2
@@ -144,8 +155,20 @@ Base.@kwdef mutable struct CcOptions
   calc_d_vovv::Bool = false
   """`⟨false⟩` calculate dressed <vv|oo>. """
   calc_d_vvoo::Bool = false
+  """`⟨true⟩` use density fitting in SVD-DC-CCSDT instead of the integral decomposition. """
+  usedf::Bool = true
+  """`⟨true⟩` use Cholesky decomposition in SVD-DC-CCSDT instead of SVD in the integral decomposition. """
+  usecholesky::Bool = true
   """`⟨false⟩` calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
+  """`⟨true⟩` project out the T^iii contribution from the density matrix in decomposition in SVD-DC-CCSDT. """
+  project_t3iii::Bool = true
+  """`⟨false⟩` calculated ``V_{aX}^{iL}`` in SVD-DC-CCSDT using a projection to the X space as
+  ``V_{XZ}^{L} U^{iZ}_{a}``. This is an additional approximation, which reduces the scaling of the 
+  most expensive steps and is useful for large systems. """
+  project_voXL::Bool = false
+  """`⟨:combined⟩` type of space for project_voXL. Possible values are :combined, :symcombined, :triples, :full. """ 
+  space4voXL::Symbol = :combined
   """`⟨0.0⟩` imaginary shift for denominator in doubles decomposition. """
   deco_ishiftp::Float64 = 0.0
   """`⟨0.0⟩` imaginary shift for denominator in triples decomposition. """
@@ -193,6 +216,8 @@ Base.@kwdef mutable struct CcOptions
   dcsd_osfac::Float64 = 1.05
   """`⟨0.15⟩` Factor for open-shell component in SCS-DCSD. """
   dcsd_ofac::Float64 = 0.15
+  """`⟨false⟩` ignore various errors in sanity checks. """
+  ignore_error::Bool = false
 end
 
 """ 
@@ -200,7 +225,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct DmrgOptions
+@kwdef mutable struct DmrgOptions
   """`⟨10⟩` number of sweeps. """
   nsweeps::Int = 10
   """`⟨[100, 200]⟩` maximum size for the bond dimension. """
@@ -216,13 +241,15 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct IntOptions
+@kwdef mutable struct IntOptions
   """`⟨true⟩` use density-fitted integrals. """
   df::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """
   fcidump::String = ""
   """`⟨false⟩` use Cartesian subshells instead of Spherical. """
   cartesian::Bool = false
+  """`⟨1000⟩` target batch length for the integral transformation. """
+  target_batch_length::Int = 1000
 end
 
 """ 
@@ -230,7 +257,7 @@ end
     
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct CholeskyOptions
+@kwdef mutable struct CholeskyOptions
   """`⟨1.e-6⟩` threshold for elimination of redundancies in the auxiliary basis. """
   thred::Float64 = 1.e-6
   """`⟨1.e-4⟩` threshold for integral decomposition. """
@@ -242,7 +269,7 @@ end
 
   $(TYPEDFIELDS)
 """
-Base.@kwdef mutable struct DiisOptions
+@kwdef mutable struct DiisOptions
   """`⟨6⟩` maximum number of DIIS vectors. """
   maxdiis::Int = 6
   """`⟨10.0⟩` DIIS residual threshold. """
@@ -254,12 +281,24 @@ Base.@kwdef mutable struct DiisOptions
   maxcrop::Int = 3
 end
 
+"""
+  Options for printing.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct PrintOptions
+  """`⟨2⟩` verbosity level for printing timings. """
+  time::Int = 2
+  """`⟨2⟩` verbosity level for printing memory usage. """
+  memory::Int = 2
+end
+
 """ 
   Options for ElemCo.jl.
 
   $(TYPEDFIELDS)
 """  
-Base.@kwdef mutable struct Options
+@kwdef mutable struct Options
   """ Wavefunction options ([`WfOptions`](@ref)). """
   wf::WfOptions = WfOptions()
   """ SCF options ([`ScfOptions`](@ref)). """
@@ -274,4 +313,6 @@ Base.@kwdef mutable struct Options
   cholesky::CholeskyOptions = CholeskyOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
+  """ Print options ([`PrintOptions`](@ref)). """
+  print::PrintOptions = PrintOptions()
 end

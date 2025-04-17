@@ -1,5 +1,43 @@
 # Release notes
 
+## Version [v0.14.0] - 2025.04.16
+
+### Breaking
+
+* the definition of `ampsvdtol` threshold for SVD methods has been changed. Now it corresponds to the threshold for the density matrix (i.e., square of the previous definition).
+* `verbosity` has been moved from `ECInfo` to `Options.print.time`.
+* increase versions of dependencies: julia>1.9 
+* The core-entry is now required for (non-npy) FCIDUMP files in order to check whether the file is complete.
+* DMRG and AtomsBase interface have been moved to extensions. In order to run DMRG, the `ITensors` package has to be installed and loaded; and in order to use `AtomsBase` interface, the `AtomsBase`, `Unitful` and `UnitfulAtomic` packages have to be installed and loaded. 
+
+### Changed
+
+* faster closed-shell and unrestricted CCSDT and DC-CCSDT implementations.
+* ANO-RCC-MB basis is now used as the minimal AO basis for the SAD orbital starting guess.
+* memory buffers are now handled by functions and types in `Buffers` module.
+* the precompilation is disabled for development versions.
+* Buffers is moved to a separate package Buffers.jl.
+* reduce memory demand in df-hf.
+* remove `IterativeSolvers` dependency.
+* `jkfit` basis now falls back to `def2-universal-jkfit` if not found (e.g. for avXz basis sets).
+
+### Added
+
+* a macro `@dummy` has been added to set some atoms to dummy atoms. 
+* a `neuralize` function to trick `Base.mightalias` in `TensorOperations` for reshaped-buffer arrays.
+* `Buffer` and `ThreadsBuffer` types and `alloc!`, `drop!`, `reset!`, `reshape_buf!` functions.
+* `BasisBatcher` structure to calculate 3-index integrals in batches.
+* `@dfmp2` to calculate df-mp2 energy without storing integrals.
+* `@freeze_orbs` also accepts now a string of indices using the +/- or :/; syntax ([#186])
+
+### Fixed
+
+* Improve parsing method names in macros. Now the parser is not confused by multiple dashes in the name and, e.g., `@cc svd-dc-ccsdt` is evaluated correctly.
+* SAD orbital guess for Li and Be has been fixed.
+* molden export functionality has been fixed.
+* thread-safe handling of buffers using ThreadsBuffer.
+* if some of the npy files are not found, the integrals are read from the fcidump file ([#250])
+
 ## Version [v0.13.1] - 2024.07.11
 
 ### Added

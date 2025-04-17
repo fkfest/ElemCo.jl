@@ -118,28 +118,28 @@ function calc_1e!(out, callback::Function, bs::BasisSet)
   # Offset list for each shell, used to map shell index to AO index
   ao_offset = cumsum(vcat(0, nao4sh)) 
 
-  buf_arrays = [zeros(Cdouble, nao_max^2) for _ = 1:Threads.nthreads()]
+  @threadsbuffer tbufs(Cdouble, nao_max^2) begin
 
   @sync for (j, lenj) in enumerate(nao4sh)
     Threads.@spawn begin
       @inbounds begin
-        buf = buf_arrays[Threads.threadid()]
+        buf = reshape_buf!(tbufs, length(tbufs))
         joff = ao_offset[j]
         for i in 1:j
           leni = nao4sh[i]
           ioff = ao_offset[i]
-
           # Call libcint
           callback(buf, i, j, bs)
-
           # save elements
-          vbuf = reshape_buf(buf, leni, lenj)
+          vbuf = reshape_buf!(tbufs, leni, lenj)
           out[ioff+1:ioff+leni, joff+1:joff+lenj] = vbuf
           out[joff+1:joff+lenj, ioff+1:ioff+leni] = vbuf'
         end
+        reset!(tbufs)
       end #inbounds
     end #spawn
   end #sync
+  end #threadsbuffer
   return out
 end
 
@@ -164,12 +164,12 @@ function calc_1e!(out, callback::Function, bs1::BasisSet, bs2::BasisSet)
   ao_offset1 = cumsum(vcat(0, nao4sh1)) 
   ao_offset2 = cumsum(vcat(0, nao4sh2))
 
-  buf_arrays = [zeros(Cdouble, nao_max1*nao_max2) for _ = 1:Threads.nthreads()]
+  @threadsbuffer tbufs(Cdouble, nao_max1*nao_max2) begin
 
   @sync for (j, jb) in enumerate(shell_range(bs,2))
     Threads.@spawn begin
       @inbounds begin
-        buf = buf_arrays[Threads.threadid()]
+        buf = reshape_buf!(tbufs, length(tbufs))
         lenj = nao4sh2[j]
         joff = ao_offset2[j]
         for (i, ib) in enumerate(shell_range(bs,1))
@@ -180,11 +180,13 @@ function calc_1e!(out, callback::Function, bs1::BasisSet, bs2::BasisSet)
           callback(buf, ib, jb, bs)
 
           # save elements
-          vbuf = reshape_buf(buf, leni, lenj)
+          vbuf = reshape_buf!(tbufs, leni, lenj)
           out[ioff+1:ioff+leni, joff+1:joff+lenj] = vbuf
         end
+        reset!(tbufs)
       end #inbounds
     end #spawn
   end #sync
+  end #threadsbuffer
   return out
 end

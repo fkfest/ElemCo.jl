@@ -10,7 +10,7 @@ export has_suffix, set_suffix!
 
 const ExcLevels = "SDTQP"
 
-const Prefix4Methods = String["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R"]
+const Prefix4Methods = String["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R","QV-"]
 const Suffix4Methods = String[]
 
 """
@@ -23,7 +23,7 @@ $(FIELDS)
 mutable struct ECMethod
   """theory level: `"MP"`, `"CC"`, `"DC"`."""
   theory::String
-  """prefix of the methods, e.g., `"EOM"`, `"U"`, `"R"`, `"2D"`, `"FRS"`, `"FRT"`."""
+  """prefix of the methods, e.g., `"EOM"`, `"U"`, `"R"`, `"2D"`, `"FRS"`, `"FRT"`, `"QV"`."""
   prefix::Vector{String}
   """suffix of the methods."""
   suffix::Vector{String}
