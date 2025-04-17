@@ -3,15 +3,15 @@ using ElemCo
 @testset "SVD-DCSD Closed-Shell Test" begin
 epsilon    =  1.e-6
 EHF_test   =      -76.02145513971418
-ESVDDCSD_test =   -0.220331906783324 + EHF_test
-ESVDDCD_test =   -76.240776272982
-ESVDDCSD_px_test = -0.220423917054 + EHF_test
-ESVDDCSD_ft_test =-0.219961375476643 + EHF_test
-ESVDDCSD_ft0_test =-0.220062044710 + EHF_test
-ESVDDCSD_ft1_test =-0.220069358696 + EHF_test
-ESVDDCSD_ft2_test =-0.219961375476643 + EHF_test
-ESVDDCSD_ft3_test =-0.220069165297 + EHF_test
-ESVDDCSD_fd_test =-0.220238449366 + EHF_test
+ESVDDCSD_test =   -0.220661291247 + EHF_test
+ESVDDCD_test =   -76.241089281118
+ESVDDCSD_px_test =-0.220830437755 + EHF_test
+ESVDDCSD_ft_test =-0.220278613409 + EHF_test
+ESVDDCSD_ft0_test =-0.220558230549 + EHF_test
+ESVDDCSD_ft1_test =-0.220409714654 + EHF_test
+ESVDDCSD_ft2_test =-0.220278618537 + EHF_test
+ESVDDCSD_ft3_test =-0.220277504113 + EHF_test
+ESVDDCSD_fd_test =-0.220141774414 + EHF_test
 
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -56,7 +56,7 @@ energies = @dfcc svd-dcsd
 energies = @dfcc svd-dcsd
 @test abs(energies["SVD-DCSD"]-ESVDDCSD_ft3_test) < epsilon
 
-@opt cc ampsvdtol=1.e-3
+@opt cc ampsvdtol=1.e-6
 @opt cc decompose_full_doubles=true
 energies = @dfcc svd-dcsd
 @test abs(energies["SVD-DCSD"]-ESVDDCSD_fd_test) < epsilon

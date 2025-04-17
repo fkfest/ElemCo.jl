@@ -7,9 +7,12 @@ using ..ElemCo.DescDict
 using ..ElemCo.Outputs
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
-export mainname, print_time, draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+export warn
+export mainname, print_time, print_memory, free_memory
+export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
-export substr, reshape_buf, create_buf
+export @istoplevel
+export substr
 export amdmkl
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
@@ -43,15 +46,57 @@ end
 """ 
     print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
 
-  Print time with message `info` if verbosity `verb` is smaller than EC.verbosity.
+  Print time with message `info` if verbosity `verb` is smaller than `PrintOptions.time`.
 """
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
-  if verb < EC.verbosity
-    output_time(t2-t1, info)
+  if verb < EC.options.print.time
+    output_time(t2 - t1, info)
   end
   return t2
 end
+
+"""
+    free_memory()
+
+  Return the amount of free memory in bytes.
+"""
+free_memory() = Sys.free_memory()
+
+""" 
+    print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
+
+  Print memory usage with message `info` if verbosity `verb` is smaller than `PrintOptions.memory`.
+
+  Note that memory is also used by other processes and the operating system, so the memory usage
+  reported here is merely an estimate. 
+"""
+function print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
+  mem2 = free_memory()
+  if verb < EC.options.print.memory
+    output_memory(mem2 - mem1, info)
+  end
+  return mem2
+end
+
+"""
+    warn(msg::AbstractString, err=false)
+
+  Print a warning message. If `err` is `true`, the message is printed as an error message.
+
+  The message is printed with a scull emoji.
+  # Example
+```julia
+julia> warn("This is a warning message.")
+```
+"""
+function warn(msg::AbstractString, err=false)
+  if err
+    error(msg)
+  end
+  println("☠️ Warning: ", msg)
+end
+
 
 """
     OutDict
@@ -226,37 +271,6 @@ function substr(string::AbstractString, range::UnitRange{Int})
 end
 
 """
-    create_buf(len::Int, T=Float64)
-
-  Create a buffer of length `len` of type `T`.
-"""
-function create_buf(len::Int, T=Float64)
-  return Vector{T}(undef, len)
-end
-
-"""
-    reshape_buf(buf::Vector{T}, dims...; offset=0)
-
-  Reshape (part of) a buffer to given dimensions (without copying),
-  using `offset`.
-
-  It can be used, e.g., for itermediates in tensor contractions.
-
-# Example
-```julia
-julia> buf = Vector{Float64}(undef, 100000)
-julia> A = reshape_buf(buf, 10, 10, 20) # 10x10x20 tensor
-julia> B = reshape_buf(buf, 10, 10, 10, offset=2000) # 10x10x10 tensor starting at 2001
-julia> B .= rand(10,10,10)
-julia> C = rand(10,20)
-julia> @tensor A[i,j,k] = B[i,j,l] * C[l,k]
-```
-"""
-function reshape_buf(buf::Vector{T}, dims...; offset=0) where {T}
-  return reshape(view(buf, 1+offset:prod(dims)+offset), dims)
-end
-
-"""
     argmaxN(vals, N; by::Function=identity)
 
   Return the indices of the `N` largest elements in `vals`.
@@ -304,6 +318,21 @@ function argmaxN(vals, N; by::Function=identity)
 end
 
 """
+    @istoplevel
+
+  Macro to check if the current scope is the top level scope.
+
+  (from https://discourse.julialang.org/t/is-there-a-way-to-determine-whether-code-is-toplevel)
+"""
+macro istoplevel()
+  canary = gensym("canary")
+  quote
+    $(esc(canary)) = true
+    Base.isdefined($__module__, $(QuoteNode(canary)))
+  end
+end
+
+"""
     amdmkl(reset::Bool=false)
 
   Create a modified `libmkl_rt.so` and `libmkl_core.so` to make MKL work
@@ -328,17 +357,41 @@ function amdmkl(reset::Bool=false)
 
   cd(mklpath)
 
-  rm("libmkl_rt.so")
-  rm("libmkl_core.so")
+  # check if a different process is modifying the files right now (e.g., another call to amdmkl)
+  # and wait until the other process is done (max 5 minutes)
+  while isfile("libamdmkl.c") && 0 < time() - mtime("libamdmkl.c") < 300
+    sleep(5)
+  end
+
+  original = islink("libmkl_core.so") && islink("libmkl_rt.so")
   
   if reset
-    symlink("libmkl_core.so.2","libmkl_core.so")
-    symlink("libmkl_rt.so.2","libmkl_rt.so")
+    if !original || isfile("libamdmkl.c")
+      rm("libmkl_rt.so", force=true)
+      rm("libmkl_core.so", force=true)
+      rm("libamdmkl.c", force=true)
+      symlink("libmkl_core.so.2","libmkl_core.so")
+      symlink("libmkl_rt.so.2","libmkl_rt.so")
+    end
   else
-    write("libamdmkl.c","int mkl_serv_intel_cpu_true() {return 1;}")
-    run(`gcc -shared -o libmkl_core.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_core.so.2`)
-    run(`gcc -shared -o libmkl_rt.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_rt.so.2`)
-    rm("libamdmkl.c")
+    if original || isfile("libamdmkl.c")
+      try
+        write("libamdmkl.c","int mkl_serv_intel_cpu_true() {return 1;}")
+        rm("libmkl_core.so", force=true)
+        run(`gcc -shared -o libmkl_core.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_core.so.2`)
+        rm("libmkl_rt.so", force=true)
+        run(`gcc -shared -o libmkl_rt.so -Wl,-rpath=''\$ORIGIN'' libamdmkl.c libmkl_rt.so.2`)
+        rm("libamdmkl.c")
+      catch
+        # if something goes wrong, revert to original
+        println("Error: Reverting to original MKL libraries.")
+        rm("libmkl_rt.so", force=true)
+        rm("libmkl_core.so", force=true)
+        rm("libamdmkl.c", force=true)
+        symlink("libmkl_core.so.2","libmkl_core.so")
+        symlink("libmkl_rt.so.2","libmkl_rt.so")
+      end
+    end
   end
 end
 

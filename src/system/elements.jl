@@ -6,7 +6,7 @@ Module for handling elements and their electron configurations.
 module Elements
 using DocStringExtensions
 
-export ELEMENTS, nuclear_charge_of_center, element_name_from_symbol
+export ELEMENTS, nuclear_charge_of_centre, element_fullname_from_label
 export SUBSHELLS_NAMES, SUBSHELL2L, ncoreorbs, electron_distribution4element
 """
   Elements with corresponding atomic numbers, 
@@ -134,20 +134,20 @@ const ELEMENTS::Dict{String,Tuple{Int,Float64,String,String,String,String}} = Di
   )
 
 """
-    nuclear_charge_of_center(elem::AbstractString)
+    nuclear_charge_of_centre(elem::AbstractString)
 
   Return the nuclear charge of the element.
 """
-function nuclear_charge_of_center(elem::AbstractString)
+function nuclear_charge_of_centre(elem::AbstractString)
   return get(ELEMENTS, uppercase(elem), [0])[1]
 end
 
 """
-    element_name_from_symbol(elem::AbstractString)
+    element_fullname_from_label(elem::AbstractString)
 
-  Return the element name
+  Return the element full name
 """
-function element_name_from_symbol(elem::AbstractString)
+function element_fullname_from_label(elem::AbstractString)
   return get(ELEMENTS, uppercase(elem), [0,0,"Unknown"])[3]
 end
 
@@ -187,7 +187,7 @@ end
     parse_electron_configuration(e::AbstractString)
 
   Parse the electron configuration string and return the number of electrons in each subshell.
-  e.g. "[He] 2s^2 2p^6 3s^2 3p^6" -> [SubShell(1,0,2), SubShell(2,0,2), SubShell(2,1,6), SubShell(3,0,2), SubShell(3,1,6)] 
+  e.g. `"[He] 2s^2 2p^6 3s^2 3p^6"` -> `[SubShell(1,0,2), SubShell(2,0,2), SubShell(2,1,6), SubShell(3,0,2), SubShell(3,1,6)]` 
 """
 function parse_electron_configuration(e::AbstractString)
   subshells = SubShell[]
@@ -246,7 +246,7 @@ end
 """
 function electron_distribution4element(elem::AbstractString, nsh4l::Vector{Int})
   eldist = Float64[]
-  n = nuclear_charge_of_center(elem)
+  n = nuclear_charge_of_centre(elem)
   if n == 0
     return eldist
   end

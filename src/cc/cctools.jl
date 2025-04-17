@@ -4,7 +4,7 @@
 A collection of tools for working with coupled cluster theory.
 """
 module CCTools
-using LinearAlgebra, TensorOperations, Printf
+using LinearAlgebra, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
@@ -18,13 +18,14 @@ export update_singles, update_doubles, update_singles!, update_doubles!, update_
 export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles
 export transform_amplitudes2lagrange_multipliers!
-export try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
+export save_or_start_file, try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
 export contra2covariant
 export spin_project!, spin_project_amplitudes
 export clean_cs_triples!
 export calc_cs_singles_dot, calc_u_singles_dot
 export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
 export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
+export triples_4ext!
 
 """ 
     calc_fock_matrix(EC::ECInfo, closed_shell)
@@ -95,33 +96,33 @@ function spin_project!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
   # calc closed-shell part of spin-restricted T2
   # ``T^{ij}_{ab} = \frac{1}{6} ( ^{αα}T^{ij}_{ab} + ^{ββ}T^{ij}_{ab} + 2 ^{αβ}T^{ij}_{ab} + ^{αβ}T^{ij}_{ba} +2 ^{αβ}T^{ji}_{ba} + ^{αβ}T^{ji}_{ab})``
   T2abc = T2ab[:,dvb,doa,:]
-  @tensoropt T2ab[:,dvb,doa,:][a,b,i,j] = (1/6) * (T2a[:,:,doa,doa][a,b,i,j] + T2b[dvb,dvb,:,:][a,b,i,j] + 2*T2abc[a,b,i,j] + T2abc[b,a,i,j] + 2*T2abc[b,a,j,i] + T2abc[a,b,j,i])
+  @mtensor T2ab[:,dvb,doa,:][a,b,i,j] = (1/6) * (T2a[:,:,doa,doa][a,b,i,j] + T2b[dvb,dvb,:,:][a,b,i,j] + 2*T2abc[a,b,i,j] + T2abc[b,a,i,j] + 2*T2abc[b,a,j,i] + T2abc[a,b,j,i])
   T2abc = nothing
   # calc ``T^{ij}_{at} = \frac{1}{3} ( ^{ββ}T^{ij}_{at} + 2 ^{αβ}T^{ij}_{at} + ^{αβ}T^{ji}_{at})``
   Tvsdd = T2ab[:,svb,doa,:]
-  @tensoropt T2ab[:,svb,doa,:][a,t,i,j] = (1/3) * (T2b[dvb,svb,:,:][a,t,i,j] + 2*Tvsdd[a,t,i,j] + Tvsdd[a,t,j,i])
+  @mtensor T2ab[:,svb,doa,:][a,t,i,j] = (1/3) * (T2b[dvb,svb,:,:][a,t,i,j] + 2*Tvsdd[a,t,i,j] + Tvsdd[a,t,j,i])
   Tvsdd = nothing
   # calc ``T^{tj}_{ab} = \frac{1}{3} ( ^{αα}T^{tj}_{ab} + 2 ^{αβ}T^{tj}_{ab} + ^{αβ}T^{tj}_{ba})``
   Tvvsd = T2ab[:,dvb,soa,:]
-  @tensoropt T2ab[:,dvb,soa,:][a,b,t,j] = (1/3) * (T2a[:,:,soa,doa][a,b,t,j] + 2*Tvvsd[a,b,t,j] + Tvvsd[b,a,t,j])
+  @mtensor T2ab[:,dvb,soa,:][a,b,t,j] = (1/3) * (T2a[:,:,soa,doa][a,b,t,j] + 2*Tvvsd[a,b,t,j] + Tvvsd[b,a,t,j])
   Tvvsd = nothing
 
   if length(T1b) > 0
     ms2 = length(soa)
-    @tensoropt T1add[a,i] := T2ab[:,svb,soa,:][a,t,t,i]
+    @mtensor T1add[a,i] := T2ab[:,svb,soa,:][a,t,t,i]
     T1c = (1/(2+ms2))*(T1b[dvb,:] - T1a[:,doa] - T1add)
     for i in 1:length(doa)
       T2ab[:,svb,soa,i] .+= T1c[:,i]
     end
-    @tensoropt T1add[a,i] = 0.5*T2ab[:,svb,soa,:][a,t,t,i]
+    @mtensor T1add[a,i] = 0.5*T2ab[:,svb,soa,:][a,t,t,i]
     T1 = 0.5 * (T1a[:,doa] + T1b[dvb,:])
     T1a[:,doa] .= T1 - T1add
     T1b[dvb,:] .= T1 + T1add
   end
-  @tensoropt T2a[:,:,:,doa][a,b,i,j] = T2ab[:,dvb,:,:][a,b,i,j] - T2ab[:,dvb,:,:][b,a,i,j]
-  @tensoropt T2a[:,:,doa,soa][a,b,i,j] = T2a[:,:,soa,doa][b,a,j,i]
-  @tensoropt T2b[dvb,:,:,:][a,b,i,j] = T2ab[:,:,doa,:][a,b,i,j] - T2ab[:,:,doa,:][a,b,j,i]
-  @tensoropt T2b[svb,dvb,:,:][a,b,i,j] = T2b[dvb,svb,:,:][b,a,j,i]
+  @mtensor T2a[:,:,:,doa][a,b,i,j] = T2ab[:,dvb,:,:][a,b,i,j] - T2ab[:,dvb,:,:][b,a,i,j]
+  @mtensor T2a[:,:,doa,soa][a,b,i,j] = T2a[:,:,soa,doa][b,a,j,i]
+  @mtensor T2b[dvb,:,:,:][a,b,i,j] = T2ab[:,:,doa,:][a,b,i,j] - T2ab[:,:,doa,:][a,b,j,i]
+  @mtensor T2b[svb,dvb,:,:][a,b,i,j] = T2b[dvb,svb,:,:][b,a,j,i]
 end
 
 """
@@ -165,6 +166,7 @@ function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
   SP = EC.space
   ET1 = 0.0
   if length(T1) > 0
+    fock = load2idx(EC, "f_mm")
     if fock_only
       ET1SS = ET1OS = ET1 = 0.0
     else
@@ -173,7 +175,7 @@ function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
       end
       dfockc_ov = load2idx(EC, "dfc_ov")
       dfocke_ov = load2idx(EC, "dfe_ov")
-      @tensoropt begin
+      @mtensor begin
         ET1d = T1[a,i] * dfockc_ov[i,a] 
         ET1ex = T1[a,i] * dfocke_ov[i,a]
       end
@@ -181,8 +183,8 @@ function calc_singles_energy_using_dfock(EC::ECInfo, T1; fock_only=false)
       ET1OS = ET1d
       ET1 = ET1SS + ET1OS
     end
-    fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
-    @tensoropt ET1 += 2.0*(fov[i,a] * T1[a,i])
+    fov = fock[SP['o'],SP['v']] 
+    @mtensor ET1 += 2.0*(fov[i,a] * T1[a,i])
   end
   return OutDict("E"=>ET1, "ESS"=>ET1SS, "EOS"=>ET1OS, "EO"=>0.0)
 end
@@ -406,7 +408,7 @@ end
   Calculate squared norm of closed-shell singles amplitudes.
 """
 function calc_singles_norm(T1)
-  @tensor NormT1 = 2.0*T1[a,i]*T1[a,i]
+  @mtensor NormT1 = 2.0*T1[a,i]*T1[a,i]
   return NormT1
 end
 
@@ -416,7 +418,7 @@ end
   Calculate squared norm of closed-shell contravariant singles amplitudes.
 """
 function calc_contra_singles_norm(T1)
-  @tensor NormT1 = 0.5*T1[a,i]*T1[a,i]
+  @mtensor NormT1 = 0.5*T1[a,i]*T1[a,i]
   return NormT1
 end
 
@@ -426,7 +428,7 @@ end
   Calculate squared norm of unrestricted singles amplitudes.
 """
 function calc_singles_norm(T1a, T1b)
-  @tensor begin
+  @mtensor begin
     NormT1 = T1a[a,i]*T1a[a,i]
     NormT1 += T1b[a,i]*T1b[a,i]
   end
@@ -449,7 +451,7 @@ end
   Calculate dot product of closed-shell singles amplitudes.
 """
 function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
-  @tensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
+  @mtensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
   return DotT1::Float64
 end
 calc_cs_singles_dot(T1, T1_) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
@@ -460,7 +462,7 @@ calc_cs_singles_dot(T1, T1_) = error("calc_cs_singles_dot: T1 and T1_ must be ma
   Calculate dot of unrestricted singles amplitudes.
 """
 function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
-  @tensor begin
+  @mtensor begin
     DotT1 = T1[a,i]*T1_[a,i]
   end
   return DotT1::Float64
@@ -473,7 +475,7 @@ calc_u_singles_dot(T1, T1_) = error("calc_u_singles_dot: T1 and T1_ must be matr
   Calculate squared norm of closed-shell doubles amplitudes.
 """
 function calc_doubles_norm(T2)
-  @tensoropt NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j]
+  @mtensor NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j]
   return NormT2
 end
 
@@ -483,7 +485,7 @@ end
   Calculate squared norm of closed-shell contravariant doubles amplitudes.
 """
 function calc_contra_doubles_norm(T2)
-  @tensoropt NormT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2[a,b,i,j]
+  @mtensor NormT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2[a,b,i,j]
   return NormT2/3.0
 end
 
@@ -493,7 +495,7 @@ end
   Calculate squared norm of unrestricted doubles amplitudes.
 """
 function calc_doubles_norm(T2a, T2b, T2ab)
-  @tensoropt begin
+  @mtensor begin
     NormT2 = 0.25*(T2a[a,b,i,j]*T2a[a,b,i,j])
     NormT2 += 0.25*(T2b[a,b,i,j]*T2b[a,b,i,j])
     NormT2 += T2ab[a,b,i,j]*T2ab[a,b,i,j]
@@ -507,7 +509,7 @@ end
   Calculate dot of closed-shell doubles amplitudes.
 """
 function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
-  @tensoropt DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
+  @mtensor DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
   return DotT2::Float64
 end
 calc_cs_doubles_dot(T2, T2_) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
@@ -518,7 +520,7 @@ calc_cs_doubles_dot(T2, T2_) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D
   Calculate dot of unrestricted same-spin doubles amplitudes.
 """
 function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
-  @tensoropt begin
+  @mtensor begin
     DotT2 = 0.25*(T2[a,b,i,j]*T2_[a,b,i,j])
   end
   return DotT2::Float64
@@ -531,7 +533,7 @@ calc_samespin_doubles_dot(T2, T2_) = error("calc_samespin_doubles_dot: T2 and T2
   Calculate dot of unrestricted αβ doubles amplitudes.
 """
 function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
-  @tensoropt begin
+  @mtensor begin
     DotT2 = T2[a,b,i,j]*T2_[a,b,i,j]
   end
   return DotT2::Float64
@@ -544,7 +546,7 @@ calc_ab_doubles_dot(T2, T2_) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D
   Calculate squared norm of unrestricted triples amplitudes.
 """
 function calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
-  @tensoropt begin
+  @mtensor begin
     NormT3 = (1/36)*(T3aaa[a,b,c,i,j,k]*T3aaa[a,b,c,i,j,k])
     NormT3 += (1/36)*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
     NormT3 += 0.25*(T3abb[a,b,c,i,j,k]*T3abb[a,b,c,i,j,k])
@@ -573,7 +575,7 @@ function calc_triples_norm(T3)
           fac = 1.0
         end
         T3_ijk = @view T3[:,:,:,i,j,k]
-        @tensoropt begin
+        @mtensor begin
           NormT3_ = 4*(T3_ijk[a,b,c]*T3_ijk[a,b,c])
           NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[a,c,b])
           NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[c,b,a])
@@ -609,7 +611,7 @@ function calc_cs_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
         end
         T3_ijk = @view T3[:,:,:,i,j,k]
         T3_ijk_ = @view T3_[:,:,:,i,j,k]
-        @tensoropt begin
+        @mtensor begin
           DotT3_ = 4*(T3_ijk[a,b,c]*T3_ijk_[a,b,c])
           DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[a,c,b])
           DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[c,b,a])
@@ -631,7 +633,7 @@ calc_cs_triples_dot(T3, T3_) = error("calc_cs_triples_dot not implemented for th
   Calculate dot of unrestricted same-spin triples amplitudes.
 """
 function calc_samespin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
-  @tensoropt begin
+  @mtensor begin
     DotT3 = (1/36)*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
   end
   return DotT3::Float64
@@ -644,7 +646,7 @@ calc_samespin_triples_dot(T3, T3_) = error("calc_samespin_triples_dot not implem
   Calculate dot of unrestricted mixed-spin triples amplitudes.
 """
 function calc_mixedspin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
-  @tensoropt begin
+  @mtensor begin
     DotT3 = 0.25*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
   end
   return DotT3::Float64
@@ -690,9 +692,9 @@ function calc_deco_doubles_norm(T2, tT2=Float64[])
     normT2 = calc_doubles_norm(T2)
   else
     if length(tT2) > 0
-      @tensoropt normT2 = T2[X,Y] * tT2[X,Y]
+      @mtensor normT2 = T2[X,Y] * tT2[X,Y]
     else
-      @tensoropt normT2 = T2[X,Y] * T2[X,Y]
+      @mtensor normT2 = T2[X,Y] * T2[X,Y]
     end
   end
   return normT2
@@ -704,7 +706,7 @@ end
   Calculate a *simple* norm of triples (without contravariant!)
 """
 function calc_deco_triples_norm(T3)
-  @tensoropt NormT3 = T3[X,Y,Z] * T3[X,Y,Z]
+  @mtensor NormT3 = T3[X,Y,Z] * T3[X,Y,Z]
   return NormT3
 end
 
@@ -897,13 +899,13 @@ end
 """
 function add_singles2doubles!(T2aa, T2bb, T2ab, T1a, T1b)
   if length(T1a) > 0
-    @tensoropt T2aa[a,b,i,j] += T1a[a,i] * T1a[b,j] - T1a[b,i] * T1a[a,j]
+    @mtensor T2aa[a,b,i,j] += T1a[a,i] * T1a[b,j] - T1a[b,i] * T1a[a,j]
   end
   if length(T1b) > 0
-  @tensoropt T2bb[a,b,i,j] += T1b[a,i] * T1b[b,j] - T1b[b,i] * T1b[a,j]
+  @mtensor T2bb[a,b,i,j] += T1b[a,i] * T1b[b,j] - T1b[b,i] * T1b[a,j]
   end
   if length(T1a) > 0 && length(T1b) > 0
-    @tensoropt T2ab[a,b,i,j] += T1a[a,i] * T1b[b,j]
+    @mtensor T2ab[a,b,i,j] += T1a[a,i] * T1b[b,j]
   end 
 end
 
@@ -916,11 +918,11 @@ end
 """
 function add_singles2doubles!(T2, T1; make_contravariant=true)
   if length(T1) > 0
-    @tensoropt T2[a,b,i,j] += T1[a,i] * T1[b,j]
+    @mtensor T2[a,b,i,j] += T1[a,i] * T1[b,j]
   end
   if make_contravariant
-    @tensoropt tT2[a,b,i,j] := T2[a,b,i,j] - T2[a,b,j,i]
-    @tensoropt T2[a,b,i,j] += tT2[a,b,i,j]
+    @mtensor tT2[a,b,i,j] := T2[a,b,i,j] - T2[a,b,j,i]
+    @mtensor T2[a,b,i,j] += tT2[a,b,i,j]
     T1 .+= T1
   end
 end
@@ -931,8 +933,37 @@ end
   Transform contravariant doubles amplitudes to covariant.
 """
 function contra2covariant(T2)
-  @tensoropt U2[a,b,i,j] := (1/3) * (2*T2[a,b,i,j] + T2[b,a,i,j])
+  @mtensor U2[a,b,i,j] := (1/3) * (2*T2[a,b,i,j] + T2[b,a,i,j])
   return U2
+end
+
+"""
+    triples_4ext!(EC::ECInfo, R3, T3)
+
+  Calculate 4-external contraction with triples amplitudes
+  and store the result in `R3`.
+"""
+function triples_4ext!(EC::ECInfo, R3, T3)
+  nocc = size(T3, 6)
+  nvirt = size(T3, 3)
+  d_vvvv = load4idx(EC,"d_vvvv")
+  diagindx = [CartesianIndex(i,i) for i in 1:nvirt]
+  d_vvvv[:,:,diagindx] *= 0.5
+  trivv = [CartesianIndex(i,j) for j in 1:nvirt for i in 1:j]
+  d_vvvv = d_vvvv[:,:,trivv]
+  X3 = Array{Float64}(undef, nvirt, nvirt, nvirt, nocc, nocc)
+  T3k = Array{Float64}(undef, length(trivv), nvirt, nocc, nocc)
+  for k = 1:nocc
+    T3k .= T3[trivv,:,:,:,k]
+    @mtensor X3[a,b,c,i,j] = d_vvvv[a,b,x] * T3k[x,c,i,j]
+    vR3 = selectdim(R3, 6, k)
+    @mtensor vR3[a,b,c,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
+    vR3 = selectdim(R3, 5, k)
+    @mtensor vR3[a,c,b,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
+    vR3 = selectdim(R3, 4, k)
+    @mtensor vR3[c,a,b,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
+  end
+  return R3
 end
 
 end # module

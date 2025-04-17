@@ -3,6 +3,21 @@ Interfaces module
 
 This module provides functions to import (export) matrices from (to) external programs.
 
+Some interfaces are implemented as extensions of the package, e.g., the interface to 
+`AtomsBase`. In order to use them, you need to import the corresponding packages:
+```julia
+using ElemCo
+using AtomsBase, Unitful, UnitfulAtomic
+using ElemCo.MSystems
+geometry = ...
+basis = ...
+@ECinit
+# Create a AtomsBase.FlexibleSystem object from a MSystem
+fs = FlexibleSystem(EC.system)
+# Create a MSystem object from a AtomsBase.FlexibleSystem object
+ms = MSystem(fs, basis)
+```
+
 See also: [MolproInterface](@ref)
 """
 module Interfaces
