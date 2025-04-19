@@ -55,6 +55,11 @@ mutable struct Davidson
   end
 end
 
+"""
+    hermitian(dav::Davidson)
+
+  Check if Davidson object is hermitian.
+"""
 hermitian(dav::Davidson) = length(dav.smat) == 0
 
 """
@@ -238,6 +243,12 @@ function addtrialvecs4allstates!(dav::Davidson, tvecs_nst)
   end
 end
 
+
+"""
+    addprodvecs!(dav::Davidson, prods)
+
+  Add product vectors to Davidson object and update effective Hamiltonian matrix.
+"""
 function addprodvecs!(dav::Davidson, prods)
   @assert dav.nDim < dav.maxdav*dav.nstates "Davidson: maximum number of product vectors reached, but no restart done"
   dav.nDim += 1
