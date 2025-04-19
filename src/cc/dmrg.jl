@@ -4,12 +4,13 @@
 Density Matrix Renormalization Group (DMRG) calculations
 using `ITensors.jl` package.
 
-The functionality is moved to an extension, i.e., one has to load `ITensors.jl` package 
-to use DMRG calculations.
+The functionality is moved to an extension, i.e., one has to load `ITensors.jl` 
+and `ITensorMPS.jl` packages to run DMRG calculations.
 
 # Example
 ```julia
-using ElemCo, ITensors
+using ITensors, ITensorMPS
+using ElemCo 
 fcidump = "h2o.fcidump"
 @cc dmrg
 ```
@@ -24,7 +25,7 @@ export calc_dmrg
   Perform DMRG calculation
 """
 function calc_dmrg()
-  warn("For DMRG calculations, please load ITensors.jl package.", true)
+  warn("For DMRG calculations, please load ITensors.jl and ITensorMPS.jl packages.", true)
 end
 
 end # module DMRG

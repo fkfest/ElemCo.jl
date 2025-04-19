@@ -1,4 +1,5 @@
-using ElemCo, ITensors
+using ITensors, ITensorMPS
+using ElemCo 
 
 @testset "DMRG Closed-Shell Test" begin
 epsilon    =  1.e-6
