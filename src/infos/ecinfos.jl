@@ -105,6 +105,8 @@ end
   scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
   """`⟨".bin"⟩` extension of temporary files. """
   ext::String = ".bin"
+  """`⟨2⟩` verbosity level. """
+  verbosity::Int = 2
   """ options. """
   options::Options = Options()
   """ molecular system. """
@@ -240,7 +242,24 @@ function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym; verbose=true)
   SP['s'] = setdiff(SP['o'], SP['d'])
   SP['S'] = setdiff(SP['O'], SP['d'])
   SP[':'] = SP['m'] = SP['M'] = [1:norb;]
+  SP['a'], SP['d'] = active_space(EC)
   return
+end
+
+"""
+    remove_orbs_from_spaces!(EC::ECInfo, orbs; exclude=[':', 'm', 'M'])
+
+  Remove `orbs` from all subspaces in EC.space.
+
+  `exclude` is a list of subspaces to exclude (by default, exclude full MO spaces).
+"""
+function remove_orbs_from_spaces!(EC::ECInfo, orbs; exclude=[':', 'm', 'M'])
+  SP = EC.space
+  for sp in keys(SP)
+    if sp ∉ exclude
+      setdiff!(SP[sp], orbs)
+    end
+  end
 end
 
 """
@@ -263,6 +282,44 @@ function is_closed_shell(EC::ECInfo)
     restore_space!(EC, SP_save)
   end
   return cs
+end
+
+"""
+    active_space(EC::ECInfo)
+
+  Return active space and the new doubly-occupied (closed-shell) space.
+
+  EC.space has to be set up.
+  The active space is defined either
+  - from the option [`wf.active`](@ref ECInfos.WfOptions), if set up.
+    The format is either an occupation string, or `(#elec, #orb)`.
+  - from the singly-occupied orbitals in the reference occupation (from `EC.space`).
+"""
+function active_space(EC::ECInfo)
+  SP = EC.space
+  if EC.options.wf.active == "-"
+    @assert haskey(SP, 's') "EC.space is not set up!"
+    return union(SP['s'], SP['S']), SP['d']
+  end
+  #regular expression to check for the format " ( #elec , #orb ) "
+  if occursin(r"^\s*\(\s*\d+\s*,\s*\d+\s*\)\s*$", EC.options.wf.active)
+    nelec, norb = [ strip(a, [' ', '(', ')'] ) for a in split(EC.options.wf.active, ",")]
+    nelec = parse(Int, nelec)
+    norb = parse(Int, norb)
+    totnelec = length(SP['o']) + length(SP['O'])
+    totnorb = length(SP[':'])
+    @assert nelec <= totnelec && norb <= totnorb "Invalid active space"
+    nclosed = (totnelec - nelec) ÷ 2
+    @assert nclosed*2 == totnelec - nelec "Encountered single occupancy outside active space"
+    active = [nclosed+1:nclosed+norb;]
+  else
+    active = parse_orbstring(EC.options.wf.active)
+    norb = length(active)
+    nelec = length(intersect(active, SP['o'])) + length(intersect(active, SP['O']))
+  end
+  @assert length(union(active, SP['s'])) == norb "α singly occupied orbitals outside active space"
+  @assert length(union(active, SP['S'])) == norb "β singly occupied orbitals outside active space"
+  return active, setdiff(SP['d'], active)
 end
 
 """
@@ -357,8 +414,7 @@ function freeze_nocc!(EC::ECInfo, freeze; verbose=true)
     println("Freezing ", nfreeze, " occupied orbitals")
     println()
   end
-  setdiff!(EC.space['o'], freeze)
-  setdiff!(EC.space['O'], freeze)
+  remove_orbs_from_spaces!(EC, freeze)
   return nfreeze
 end
 
@@ -386,8 +442,7 @@ function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[]; verbose=true)
     println("Freezing ", nfreeze, " virtual orbitals")
     println()
   end
-  setdiff!(EC.space['v'], freeze_orbs)
-  setdiff!(EC.space['V'], freeze_orbs)
+  remove_orbs_from_spaces!(EC, freeze_orbs)
   return nfreeze
 end
 

@@ -41,6 +41,7 @@ makedocs(
       "dfmcscf.md",
       "dftools.md",
       "diis.md",
+      "davidson.md",
       "dmrg.md",
       "dump.md",
       "dumptools.md",
