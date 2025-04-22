@@ -1276,39 +1276,108 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     # calculate the qT
 
     @tensoropt T2_1[a,b,i,j] :=  2.0 * T2[a,b,i,j] - T2[a,b,j,i]
-    if dc && q==2.0
+    #if dc
+    if dc #&& q==2.0
       @tensoropt qTAB[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j]
       @tensoropt temp_perm[a,b,i,j] :=  qTAB[b,a,j,i]
       qTAB .= 0.5 .* (qTAB .+ temp_perm)
-      @tensoropt qTD[a,b,i,j]:= - Y1[c,k,a,i] * T2_1[c,b,k,j]
-      @tensoropt temp_perm[a,b,i,j] =  qTD[b,a,j,i]
+      @tensoropt qTD[a,b,i,j]:= - Y1[c,k,a,i] * T2_1[c,b,k,j] * 0.5
+      @tensoropt temp_perm[a,b,i,j] =  qTD[b,a,j,i] 
       qTD .= qTD .+ temp_perm
-    else
-      @tensoropt qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j] - 0.5 * CU1[i,j,k,l] * T2[a,b,k,l] -
-                              0.25 * (Y1[c,k,a,i] * T2_1[c,b,k,j] + W1[c,k,a,i] * T2[b,c,k,j] + 2.0 * W1[c,k,a,j] * T2[c,b,i,k])
-      @tensoropt temp_perm[a,b,i,j] :=  qT[b,a,j,i]
-      qT .= qT .+ temp_perm
     end
+    @tensoropt qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j] - 0.5 * CU1[i,j,k,l] * T2[a,b,k,l] -
+                            0.25 * (Y1[c,k,a,i] * T2_1[c,b,k,j] + W1[c,k,a,i] * T2[b,c,k,j] + 2.0 * W1[c,k,a,j] * T2[c,b,i,k])
+    @tensoropt temp_perm[a,b,i,j] :=  qT[b,a,j,i]
+    qT .= qT .+ temp_perm
+    
+
+    #############
+    #test
+    if dc #&& q==2.0
+      @tensoropt qTA_test_DC[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] 
+      @tensoropt temp_perm[a,b,i,j] :=  qTA_test_DC[b,a,j,i]
+      qTA_test_DC .= 0.5 .* (qTA_test_DC .+ temp_perm)
+
+      @tensoropt qTB_test_DC[a,b,i,j] := BU1[k,i] * T2[a,b,k,j]
+      @tensoropt temp_perm[a,b,i,j] :=  qTB_test_DC[b,a,j,i]
+      qTB_test_DC .= 0.5 .* (qTB_test_DC .+ temp_perm)
+
+      @tensoropt qTD_test_DC[a,b,i,j]:= qTD[a,b,i,j]
+
+      if norm(qTD_test_DC .+  qTA_test_DC) < 1e-10
+        println("DC: qTA +  qTD = 0")
+      else
+        println("DC: qTA +  qTD != 0")
+      end
+
+      @tensoropt qTA_test_CC[a,b,i,j] := AU1[a,c] * T2[c,b,i,j]
+      @tensoropt temp_perm[a,b,i,j] :=  qTA_test_CC[b,a,j,i]
+      qTA_test_CC .= qTA_test_CC .+ temp_perm
+
+      @tensoropt qTB_test_CC[a,b,i,j] := BU1[k,i] * T2[a,b,k,j]
+      @tensoropt temp_perm[a,b,i,j] :=  qTB_test_CC[b,a,j,i]
+      qTB_test_CC .= qTB_test_CC .+ temp_perm
+
+      @tensoropt qTC_test_CC[a,b,i,j] := - 0.5 * CU1[i,j,k,l] * T2[a,b,k,l]
+      @tensoropt temp_perm[a,b,i,j] :=  qTC_test_CC[b,a,j,i]
+      qTC_test_CC .= qTC_test_CC .+ temp_perm
+
+      @tensoropt qTD_test_CC[a,b,i,j]:= - 0.25 * (Y1[c,k,a,i] * T2_1[c,b,k,j] + W1[c,k,a,i] * T2[b,c,k,j] + 2.0 * W1[c,k,a,j] * T2[c,b,i,k])
+      @tensoropt temp_perm[a,b,i,j] :=  qTD_test_CC[b,a,j,i]
+      qTD_test_CC .= qTD_test_CC .+ temp_perm
+
+      if norm(qTD_test_CC .+  qTA_test_CC) < 1e-10
+        println("CC: qTA + qTD = 0")
+      else
+        println("CC: qTA + qTD != 0")
+      end
+
+      if norm(qTB_test_CC .+ 2.0 .* qTC_test_CC) < 1e-10
+        println("CC: qTB + 2.0 qTC = 0")
+      else
+        println("CC: qTB + 2.0 qTC != 0")
+      end
+
+      if norm(qTB_test_CC .+ qTC_test_CC - qTB_test_DC) < 1e-10
+        println("qTB_CC + qTC_CC = qTB_DC")
+      else
+        println("qTB_CC + qTC_CC != qTB_DC")
+      end
+
+      if norm(qTA_test_CC .+ qTB_test_CC .+ qTC_test_CC .+qTD_test_CC .- qTA_test_DC .- qTB_test_DC.- qTD_test_DC) < 1e-10
+        println("qTB_CC + qTC_CC = qTB_DC")
+      else
+        println("qTB_CC + qTC_CC != qTB_DC")
+      end
+  
+    end
+
+    #############
 
     #calculate the energy
 
     if q == 1.0
       T1_0 = zeros(0,0)
-      # if !dc
-      R1, qV = calc_cc_resid(EC, T1_0, qT; linearized=true) 
-      # elseif dc
-      #   R1, qV = calc_cc_resid(EC, T1_0, qTAB.+qTD; linearized=true) 
+      # if dc
+      #   qT = qTAB .+  qTD
       # end
-      qV .-= ints2(EC, "vvoo")
+      qVD = 2.0 .* calc_cc_resid(EC, T1_0, qT; dc = true, linearized=true)[2]
+      qV_test = 2.0 .*  calc_1V(EC, T1_0, qT)[2]
+      if norm(qVD .- qV_test) < 1e-10
+        println("qVD == qV_test")
+      else 
+        println("qVD != qV_test")
+      end
+      qVD .-= ints2(EC, "vvoo") .* 2.0
     elseif q == 2.0
-      qV = ints2(EC, "vvoo")
+      qVD = ints2(EC, "vvoo") .* 2.0
     end
-    qV .= 2.0 * qV .- permutedims(qV, (2,1,3,4))
+    #qV = 2.0 * qVD .- permutedims(qVD, (2,1,3,4))
+    qV = qVD .- 0.5 *  permutedims(qVD, (2,1,3,4))
 
-    if dc && q == 2.0
-      qVD = ints2(EC, "vvoo")
-      E_qvccd += sum(qV .* qTAB) * 2.0
-      E_qvccd += sum(qVD .* qTD)
+    if dc # && q==2.0
+      E_qvccd += sum(qV .* qTAB) * q
+      E_qvccd += sum(qVD .* qTD) * q * 0.5
     else
       E_qvccd += sum(qV .* qT) * q
     end
@@ -1319,7 +1388,9 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     qAR = calc_R_from_U_F(Ae, AX, qAF, q)
     qBR = calc_R_from_U_F(Be, BX, qBF, q)
 
-    if dc && q==2.0
+
+    #if dc
+    if dc #&& q==2.0
       @tensoropt qDF[a,i,c,k] := qVD[a,b,i,j] * T2_1[c,b,k,j]
       qDF = reshape(qDF, nvirt*nocc, nvirt*nocc)
       qDR = calc_R_from_U_F(Ye, YX, qDF, q)
@@ -1342,17 +1413,18 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
       q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
     end
 
-    if dc && q==2.0
+    #if dc
+    if dc #&& q==2.0
       @tensoropt begin 
         qG[a,b,i,j] := 0.5 * (qAR[a,c] + qAR[c,a]) * T2_1[c,b,i,j] 
         qG[a,b,i,j] += 0.5 * qV[c,b,i,j] * AU1[c,a] 
         qG[a,b,i,j] += 0.5 * (qBR[k,i] + qBR[i,k]) * T2_1[a,b,k,j]
         qG[a,b,i,j] += 0.5 * qV[a,b,k,j] * BU1[i,k]
 
-        qG[a,b,i,j] -= (qDR[a,i,c,k] + qDR[c,k,a,i]) * T2_1[c,b,k,j] 
-        qG[a,b,i,j] += 0.5 * (qDR[b,i,c,k] + qDR[c,k,b,i]) * T2_1[c,a,k,j] 
-        qG[a,b,i,j] -= qVD[c,b,k,j] * Y1[a,i,c,k] 
-        qG[a,b,i,j] += 0.5 * qVD[c,a,k,j] * Y1[b,i,c,k] #qVD[c,b,k,i] * Y1[a,j,c,k] 
+        qG[a,b,i,j] -= (qDR[a,i,c,k] + qDR[c,k,a,i]) * T2_1[c,b,k,j] * 0.5
+        qG[a,b,i,j] += 0.5 * (qDR[b,i,c,k] + qDR[c,k,b,i]) * T2_1[c,a,k,j] * 0.5
+        qG[a,b,i,j] -= qVD[c,b,k,j] * 0.5 * Y1[a,i,c,k] 
+        qG[a,b,i,j] += 0.5 * qVD[c,a,k,j] * 0.5 * Y1[b,i,c,k] #qVD[c,b,k,i] * Y1[a,j,c,k] 
       end
     else      
       @tensoropt begin 
@@ -1382,6 +1454,71 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   return (T1,G2), E_qvccd
 end
 
+
+function calc_1V(EC::ECInfo, T1, T2)
+  SP = EC.space
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  norb = n_orbs(EC)
+  pseudo_dressed_ints(EC)
+  R1 = zero(T1)
+
+  # <ab|ij>
+  R2 = zeros(eltype(T2), nvirt,nvirt,nocc,nocc)
+
+  ############------------------------------------------------------------------------
+
+  int2 = load4idx(EC,"d_oooo")
+  # I_klij T^kl_ab
+  @mtensor R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
+
+
+  ############------------------------------------------------------------------------
+
+  int2 = integ2_ss(EC.fd)
+  # last two indices of integrals are stored as upper triangular 
+  tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+
+  D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
+  # <pq|rs> D^ij_rs
+  @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
+  # symmetrize R
+  @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
+  R2 += K2pq[SP['v'],SP['v'],:,:]
+
+  ############------------------------------------------------------------------------
+  dfock = load2idx(EC,"df_mm")
+  # x_ad = f_ad - <kl|cd> \tilde T^kl_ca
+  # x_ki = f_ki + <kl|cd> \tilde T^il_cd
+  xad = dfock[SP['v'],SP['v']]
+  xki = dfock[SP['o'],SP['o']]
+  # terms for P(ia;jb)
+  @mtensor begin
+    # x_ad T^ij_db
+    R2r[a,b,i,j] := xad[a,d] * T2[d,b,i,j]
+    # -x_ki T^kj_ab
+    R2r[a,b,i,j] -= xki[k,i] * T2[a,b,k,j]
+  end
+
+  ##------------------------------------------------------------------------
+  int2 = load4idx(EC,"d_voov")
+  # <ak|ic> \tilde T^kj_cb
+  @mtensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
+  @mtensor R2r[a,b,i,j] += int2[a,k,i,c] * T2t[c,b,k,j]
+
+  ##------------------------------------------------------------------------
+  int2 = load4idx(EC,"d_vovo")
+  @mtensor begin
+    # -<ka|ic> T^kj_cb
+    R2r[a,b,i,j] -= int2[a,k,c,i] * T2[c,b,k,j]
+    # -<kb|ic> T^kj_ac
+    R2r[a,b,i,j] -= int2[b,k,c,i] * T2[a,c,k,j]
+
+    R2[a,b,i,j] += R2r[a,b,i,j] + R2r[b,a,j,i]
+  end
+
+  return R1,R2
+end
 
 """
     calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false)
