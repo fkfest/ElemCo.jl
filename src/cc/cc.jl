@@ -1281,14 +1281,17 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
       @tensoropt qTAB[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j]
       @tensoropt temp_perm[a,b,i,j] :=  qTAB[b,a,j,i]
       qTAB .= 0.5 .* (qTAB .+ temp_perm)
-      @tensoropt qTD[a,b,i,j]:= - Y1[c,k,a,i] * T2_1[c,b,k,j] * 0.5
+      @tensoropt qTD[a,b,i,j]:= - Y1[c,k,a,i] * T2_1[c,b,k,j] 
       @tensoropt temp_perm[a,b,i,j] =  qTD[b,a,j,i] 
-      qTD .= qTD .+ temp_perm
-    end
-    @tensoropt qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j] - 0.5 * CU1[i,j,k,l] * T2[a,b,k,l] -
+      qTD .= 0.5 .* (qTD .+ temp_perm)
+      qTD .= 2.0/3.0 * qTD .+ 1.0/3.0 * permutedims(qTD, (2,1,3,4))
+      qT = qTAB .+ qTD
+    else
+      @tensoropt qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j] - 0.5 * CU1[i,j,k,l] * T2[a,b,k,l] -
                             0.25 * (Y1[c,k,a,i] * T2_1[c,b,k,j] + W1[c,k,a,i] * T2[b,c,k,j] + 2.0 * W1[c,k,a,j] * T2[c,b,i,k])
-    @tensoropt temp_perm[a,b,i,j] :=  qT[b,a,j,i]
-    qT .= qT .+ temp_perm
+      @tensoropt temp_perm[a,b,i,j] :=  qT[b,a,j,i]
+      qT .= qT .+ temp_perm
+    end
     
 
     #############
@@ -1375,12 +1378,12 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     #qV = 2.0 * qVD .- permutedims(qVD, (2,1,3,4))
     qV = qVD .- 0.5 *  permutedims(qVD, (2,1,3,4))
 
-    if dc # && q==2.0
-      E_qvccd += sum(qV .* qTAB) * q
-      E_qvccd += sum(qVD .* qTD) * q * 0.5
-    else
+    # if dc && q==2.0
+    #   E_qvccd += sum(qV .* qTAB) * q
+    #   E_qvccd += sum(qVD .* qTD) * q * 0.5
+    # else
       E_qvccd += sum(qV .* qT) * q
-    end
+    # end
 
     # calculate residual
     @tensoropt qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
