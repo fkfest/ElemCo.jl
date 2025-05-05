@@ -11,7 +11,7 @@ The integrals are obtained from a FCIDUMP file or calculated using an interface 
 | UHF      |    :x:             |:heavy_check_mark:|                        |
 | BO-HF    |:heavy_check_mark:  |                  |                        |
 | MCSCF    |   :x:              |:wrench:          |                        |
-| MP2      |:heavy_check_mark:  |                  |                        |
+| MP2      |:heavy_check_mark:  |:heavy_check_mark:|                        |
 | CCSD     | :heavy_check_mark: |                  |:heavy_check_mark:      |
 | RCCSD    | :heavy_check_mark: |                  |                        |
 | UCCSD    | :heavy_check_mark: |                  |                        |
@@ -53,6 +53,13 @@ For a development version of `ElemCo.jl`, clone the [ElemCo.jl-devel](https://gi
 
 ```bash
 alias jlm='julia --project=<path_to_ElemCo.jl>'
+```
+
+Start `jlm` in the terminal and run the following command to install the dependencies,
+
+```julia
+julia> using Pkg
+julia> Pkg.instantiate()
 ```
 
 Now the command `jlm` can be used to start the calculations,

@@ -41,6 +41,9 @@
   """`⟨"-"⟩` occupied β orbitals. 
   If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
   occb::String = "-"
+  """`⟨"-"⟩` active space.
+  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format. """
+  active::String = "-"
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
   """`⟨5⟩` number of largest orbitals to print. """
@@ -86,7 +89,6 @@ end
   """
   HessianType::Symbol = :SO_SCI
   """`⟨:GRADIENT_SETPLUS⟩` Initial Vectors Type for MCSCF:
-  - `:RANDOM` one random vector
   - `:INHERIT` from last macro/micro iterations
   - `:GRADIENT_SET` b0 as [1,0,0,...], b1 as gradient
   - `:GRADIENT_SETPLUS` b0, b1 as GRADIENT_SET, b2 as zeros but 1 at the first closed-virtual rotation parameter
@@ -282,6 +284,17 @@ end
 end
 
 """
+  Options for Davidson.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct DavidsonOptions
+  """`⟨10⟩` maximum number of Davidson vectors per state. """
+  maxdav::Int = 10
+end
+
+
+"""
   Options for printing.
 
   $(TYPEDFIELDS)
@@ -313,6 +326,8 @@ end
   cholesky::CholeskyOptions = CholeskyOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
+  """ Davidson options ([`DavidsonOptions`](@ref)). """
+  davidson::DavidsonOptions = DavidsonOptions()
   """ Print options ([`PrintOptions`](@ref)). """
   print::PrintOptions = PrintOptions()
 end

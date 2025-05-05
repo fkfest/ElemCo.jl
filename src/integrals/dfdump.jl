@@ -8,7 +8,7 @@ using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
@@ -194,9 +194,9 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
         Lmm_q = @view Lmm[:,:,q]
         Iq = uppertriangular_range(s)
         @mtensor begin
-          int2ab[:,:,:,s][p,r,q] = Lmm[L,p,q] * LMM_s[L,r]
-          int2aa[:,:,Iq][p,r,q] = Lmm_q[L,p,q] * Lmm_s[L,r]
-          int2bb[:,:,Iq][p,r,q] = LMM_q[L,p,q] * LMM_s[L,r]
+          int2ab[:,:,:,s][p,r,q] += Lmm[L,p,q] * LMM_s[L,r]
+          int2aa[:,:,Iq][p,r,q] += Lmm_q[L,p,q] * Lmm_s[L,r]
+          int2bb[:,:,Iq][p,r,q] += LMM_q[L,p,q] * LMM_s[L,r]
         end
       end
     end

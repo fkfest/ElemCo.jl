@@ -1,16 +1,16 @@
 # Molecular system
 
 ```@meta
-CurrentModule = ElemCo.MSystem
+CurrentModule = ElemCo.MSystems
 ```
 
 ```@docs
-MSystem
+MSystems
 ```
 
 The molecular system is the core of the simulation. It contains all the
 information about the molecule, including the geometry and basis sets.
-The molecular system is an instance of `FlexibleSystem` from the `AtomsBase.jl` package, and the basis set information is stored in `:basis` field of the molecular system and each atom.
+The molecular system is an instance of `MSystem`, and the basis set information is stored in `basis` field of each atom (`ACentre`).
 The molecular system is defined using the `parse_geometry` function:
 
 ```julia
@@ -51,7 +51,7 @@ function.
 ## Exported functions and types
 
 ```@autodocs
-Modules = [MSystem]
+Modules = [MSystems]
 Private = false
 Order = [:type, :function]
 ```
@@ -59,7 +59,7 @@ Order = [:type, :function]
 ## Internal functions and types
 
 ```@autodocs
-Modules = [MSystem]
+Modules = [MSystems]
 Public = false
 Order = [:type, :function]
 ```
