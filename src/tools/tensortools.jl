@@ -243,6 +243,10 @@ function ints1(EC::ECInfo, spaces::String, spincase = nothing)
       sc = :β
     end
   end
+  if sc == :p
+    sp_pos=1:1
+    return integ1(EC.fd, sc)[sp_pos,sp_pos]
+  end
   return integ1(EC.fd, sc)[EC.space[spaces[1]],EC.space[spaces[2]]]
 end
 
@@ -299,6 +303,13 @@ function ints2(EC::ECInfo, spaces::String, spincase = nothing)
     sc::Symbol = spincase
   end
   SP = EC.space
+  if EC.options.wf.npositron > 0 && sc == :p
+    sp1 = spaces[1] == 'p' ? (1:1) : SP[spaces[1]]
+    sp2 = spaces[2] == 'p' ? (1:1) : SP[spaces[2]]
+    sp3 = spaces[3] == 'p' ? (1:1) : SP[spaces[3]]
+    sp4 = spaces[4] == 'p' ? (1:1) : SP[spaces[4]]
+    return integ2(EC.fd,sc)[sp1,sp2,sp3,sp4]
+  end
   if EC.fd.uhf && sc == :αβ 
     return integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
   end

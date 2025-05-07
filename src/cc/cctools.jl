@@ -42,6 +42,14 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
     println("Occupied orbital energies: ", eps[EC.space['o']])
     save!(EC, "e_m", eps)
     save!(EC, "e_M", eps)
+    if EC.options.wf.npositron > 0
+      pfock = gen_pfock(EC)
+      save!(EC, "f_pp", pfock)
+      sp_pos=1:1
+      peps = diag(pfock)
+      println("Occupied positron orbital energies: ", peps[sp_pos])
+      save!(EC, "e_p", peps)
+    end
   else
     fock = gen_fock(EC, :α)
     eps = diag(fock)
@@ -66,7 +74,12 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
     ϵo = load1idx(EC,"e_m")[SP['o']]
-    EHF = sum(ϵo) + sum(diag(ints1(EC,"oo"))) + EC.fd.int0
+    EHF = sum(ϵo) + sum(diag(ints1(EC,"oo")))
+    if EC.options.wf.npositron > 0
+      ϵp = load1idx(EC,"e_p")[1:1]
+      EHF += 0.5*(sum(ϵp) + sum(diag(ints1(EC,"1111",:p))))
+    end
+    EHF = EHF + EC.fd.int0
   else
     ϵo = load1idx(EC,"e_m")[SP['o']]
     ϵob = load1idx(EC,"e_M")[SP['O']]

@@ -110,7 +110,6 @@ function setup_space_fd!(EC::ECInfo; verbose=true)
   npositron = EC.options.wf.npositron
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
-  @assert npositron == 0 "Positron calculation not supported for post-HF yet."
 
   norb = headvar(EC.fd, "NORB", Int)
   @assert !isnothing(norb)
@@ -122,6 +121,12 @@ function setup_space_fd!(EC::ECInfo; verbose=true)
   @assert !isnothing(ms2_from_fcidump)
   ms2_default = (nelec == nelec_from_fcidump) ? ms2_from_fcidump : mod(nelec,2)
   ms2 = (ms2 < 0) ? ms2_default : ms2
+  if npositron > 0
+    if verbose
+      println("Number of positrons: ", npositron)
+    end
+    @assert ms2 == 0 "Cannot have positrons and spin > 0."
+  end
   orbsym = headvars(EC.fd, "ORBSYM", Int)
   @assert !isnothing(orbsym)
   setup_space!(EC, norb, nelec, ms2, orbsym; verbose=verbose)

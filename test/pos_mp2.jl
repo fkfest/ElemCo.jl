@@ -12,7 +12,11 @@ basis = Dict("ao"=>"sto-3g",
 @ECinit
 @set wf charge=0
 @set wf npositron=1
+@set wf freeze_nocc=0
 E_LiH=@dfhf
 @dfints
+@write_ints
+@cc mp2
+
 
 

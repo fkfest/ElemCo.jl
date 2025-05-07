@@ -128,115 +128,132 @@ end
   used for `int1` and `int0` integrals. 
   `full_spaces` is a dictionary with spaces without frozen orbitals.
 """
-# function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, cPO::Matrix)
-#   @assert !fdump.uhf "Use generate_integrals(EC, fdump, cMO::SpinMatrix, full_spaces) for UHF"
-#   bao = generate_basis(EC, "ao")
-#   bfit = generate_basis(EC, "mpfit")
-#   jkfit = generate_basis(EC, "jkfit")
+function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, cPO::Matrix, full_spaces)
+  @assert !fdump.uhf "Use generate_integrals(EC, fdump, cMO::SpinMatrix, full_spaces) for UHF"
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, "mpfit")
+  jkfit = generate_basis(EC, "jkfit")
 
-#   PQ = eri_2e2idx(bfit)
-#   M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
-#   println("Number of fitting functions in mpfit: ", size(PQ, 2))
-#   println("Number of fitting functions in mpfit after Cholesky: ", size(M, 2))
-#   PQ = nothing
-#   μνP = eri_2e3idx(bao, bfit)
-#   cMOval = cMO[:,1:end]
-#   cPOval = cPO[:,1:end]
-#   nao = size(cMO, 1)
-#   norbs = nao
-#   println("norbs: ", norbs)
-#   filename2 = int2_npy_filename(fdump)
-#   int2_file, int2 = newmmap(EC, filename2, (norbs,norbs,(norbs+1)*norbs÷2), description="int2")
-#   filename2ep = int2_npy_filename(fdump, :ep)
-#   int2ep_file, int2ep = newmmap(EC, filename2ep, (norbs,norbs,norbs,norbs), description="int2ep")
-#   nL = size(M,2)
-#   LBlks = get_spaceblocks(1:nL)
-#   maxL = maximum(length, LBlks)
-#   # FIXME: The buffer size is twice the RHF case; no analytic justification.
-#   @buffer buf(2*(max(nao, norbs)^2*maxL+norbs*nao*maxL)) begin
-#   first = true
-#   for L in LBlks
-#     lenL = length(L)
-#     v!M = @mview M[:,L]
-#     Lmm = alloc!(buf, lenL, norbs, norbs)
-#     Lmm_p = alloc!(buf, lenL, norbs, norbs)
-#     AAL = alloc!(buf, nao, nao, lenL)
-#     mAL = mAL_p = alloc!(buf, norbs, nao, lenL)
-#     @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
-#     @mtensor mAL[p,ν,L] = cMOval[μ,p] * AAL[μ,ν,L]
-#     @mtensor Lmm[L,p,q] = mAL[p,ν,L] * cMOval[ν,q]
-#     @mtensor mAL_p[p,ν,L] = cPOval[μ,p] * AAL[μ,ν,L]
-#     @mtensor Lmm_p[L,p,q] = mAL_p[p,ν,L] * cPOval[ν,q]
-#     drop!(buf, AAL)
-#     # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
-#     if first
-#       for s = 1:norbs
-#         q = 1:s # only upper triangle
-#         Iq = uppertriangular_range(s)
-#         Lmm_q = @mview Lmm[:,:,q]
-#         Lmm_s = @mview Lmm[:,:,s]
-#         Lmm_p_s = @mview Lmm_p[:,:,s]
-#         @mtensor begin
-#           int2[:,:,Iq][p,r,q] = Lmm_q[L,p,q] * Lmm_s[L,r]
-#           int2ep[:,:,:,s][p,r,q] = Lmm[L,p,q] * Lmm_p_s[L,r]
-#         end
-#       end
-#     else
-#       for s = 1:norbs
-#         q = 1:s # only upper triangle
-#         Iq = uppertriangular_range(s)
-#         Lmm_q = @mview Lmm[:,:,q]
-#         Lmm_s = @mview Lmm[:,:,s]
-#         Lmm_p_s = @mview Lmm_p[:,:,s]
-#         @mtensor begin
-#           int2[:,:,Iq][p,r,q] += Lmm_q[L,p,q] * Lmm_s[L,r]
-#           int2ep[:,:,:,s][p,r,q] += Lmm[L,p,q] * Lmm_p_s[L,r]
-#         end
-#       end
-#     end
-#     drop!(buf, Lmm, mAL)
-#     first = false
-#   end
-#   end #buffer
-#   μνP = nothing
-#   M = nothing
-#   flushmmap(EC, int2)
-#   flushmapm(EC, int2ep)
-#   fdump.int2 = int2
-#   fdump.int2ep = int2ep
+  PQ = eri_2e2idx(bfit)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
+  println("Number of fitting functions in mpfit: ", size(PQ, 2))
+  println("Number of fitting functions in mpfit after Cholesky: ", size(M, 2))
+  PQ = nothing
+  μνP = eri_2e3idx(bao, bfit)
+  cMOval = cMO[:,1:end]
+  cPOval = cPO[:,1:end]
+  nao = size(cMO, 1)
+  norbs = nao
+  println("norbs: ", norbs)
+  filename2 = int2_npy_filename(fdump)
+  int2_file, int2 = newmmap(EC, filename2, (norbs,norbs,(norbs+1)*norbs÷2), description="int2")
+  filename2ep = int2_npy_filename(fdump, :ep)
+  int2ep_file, int2ep = newmmap(EC, filename2ep, (norbs,norbs,norbs,norbs), description="int2ep")
+  nL = size(M,2)
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  # FIXME: The buffer size is twice the RHF case; no analytic justification.
+  @buffer buf(2*(max(nao, norbs)^2*maxL+norbs*nao*maxL)) begin
+  first = true
+  for L in LBlks
+    lenL = length(L)
+    v!M = @mview M[:,L]
+    Lmm = alloc!(buf, lenL, norbs, norbs)
+    Lmm_p = alloc!(buf, lenL, norbs, norbs)
+    AAL = alloc!(buf, nao, nao, lenL)
+    mAL = mAL_p = alloc!(buf, norbs, nao, lenL)
+    @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
+    @mtensor mAL[p,ν,L] = cMOval[μ,p] * AAL[μ,ν,L]
+    @mtensor Lmm[L,p,q] = mAL[p,ν,L] * cMOval[ν,q]
+    @mtensor mAL_p[p,ν,L] = cPOval[μ,p] * AAL[μ,ν,L]
+    @mtensor Lmm_p[L,p,q] = mAL_p[p,ν,L] * cPOval[ν,q]
+    drop!(buf, AAL,mAL)
+    # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
+    if first
+      for s = 1:norbs
+        q = 1:s # only upper triangle
+        Iq = uppertriangular_range(s)
+        Lmm_q = @mview Lmm[:,:,q]
+        Lmm_s = @mview Lmm[:,:,s]
+        Lmm_p_s = @mview Lmm_p[:,:,s]
+        @mtensor begin
+          int2[:,:,Iq][p,r,q] = Lmm_q[L,p,q] * Lmm_s[L,r]
+          int2ep[:,:,:,s][p,r,q] = Lmm[L,p,q] * Lmm_p_s[L,r]
+        end
+      end
+    else
+      for s = 1:norbs
+        q = 1:s # only upper triangle
+        Iq = uppertriangular_range(s)
+        Lmm_q = @mview Lmm[:,:,q]
+        Lmm_s = @mview Lmm[:,:,s]
+        Lmm_p_s = @mview Lmm_p[:,:,s]
+        @mtensor begin
+          int2[:,:,Iq][p,r,q] += Lmm_q[L,p,q] * Lmm_s[L,r]
+          int2ep[:,:,:,s][p,r,q] += Lmm[L,p,q] * Lmm_p_s[L,r]
+        end
+      end
+    end
+    drop!(buf, Lmm, Lmm_p)
+    first = false
+  end
+  end #buffer
+  μνP = nothing
+  M = nothing
+  flushmmap(EC, int2)
+  flushmmap(EC, int2ep)
+  fdump.int2 = int2
+  fdump.int2ep = int2ep
 
-#   hAO = kinetic(bao) + nuclear(bao)
-#   cMO2 = cMO[:,full_spaces['o']]
-#   @mtensor hii = (cMO2[μ,i] * hAO[μ,ν]) * cMO2[ν,i]
-#   cPO2 = cPO[:,1:end]
-#   @mtensor hii_p = (cPO2[μ,i] * hAO[μ,ν]) * cPO2[ν,i]
+  hAO = kinetic(bao) + nuclear(bao)
+  hAO_p = kinetic(bao) - nuclear(bao)
+  cMO2 = cMO[:,full_spaces['o']]
+  @mtensor hii = (cMO2[μ,i] * hAO[μ,ν]) * cMO2[ν,i]
+  cPO2 = cPO[:,1:1]
+  @mtensor hii_p = (cPO2[μ,i] * hAO_p[μ,ν]) * cPO2[ν,i]
 
-#   spm = 1:norbs
-#   spo = EC.space['o']
-#   sp_pos = 1:1
-#   @mtensor begin 
-#     fock[p,q] := 2.0*detri_int2(int2, norbs, spm, spo, spm, spo)[p,i,q,i]
-#     fock[p,q] -= int2ep[spm,sp_pos,spm,sp_pos][p,I,q,I] 
-#     fock[p,q] -= detri_int2(int2, norbs, spm, spo, spo, spm)[p,i,i,q]
-#     fock_p[p,q] := -2.0*detri_int2(int2, norbs, spm, spo, spm, spo)[p,i,q,i]
-#   end
-#   space_save = save_space(EC)
-#   restore_space!(EC, full_spaces)
-#   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
-#   fock_jkfit = gen_dffock(EC, cMO, bao, jkfit)
-#   restore_space!(EC, space_save)
-#   fock_jkfitMO = cMO' * fock_jkfit * cMO
-#   filename1 = int1_npy_filename(fdump)
-#   int1_file, int1 = newmmap(EC, filename1, (norbs,norbs), description="int1")
-#   int1 .= fock_jkfitMO[wocore,wocore] - fock
-#   flushmmap(EC, int1)
-#   fdump.int1 = int1
-#   fdump.int0 = Enuc + hii + sum(diag(fock_jkfitMO)[core_orbs]) - sum(diag(int1)[spo])
+  spm = 1:norbs
+  spo = EC.space['o']
+  sp_pos = 1:1
+  @mtensor begin 
+    fock[p,q] := 2.0*detri_int2(int2, norbs, spm, spo, spm, spo)[p,i,q,i]
+    fockjp[p,q] := int2ep[spm,sp_pos,spm,sp_pos][p,I,q,I] 
+    fock[p,q] -= fockjp[p,q]
+    fock[p,q] -= detri_int2(int2, norbs, spm, spo, spo, spm)[p,i,i,q]
+    fock_p[p,q] := -2.0*int2ep[spo, spm, spo, spm][i,p,i,q]
+  end
+  space_save = save_space(EC)
+  restore_space!(EC, full_spaces)
+  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
+  fock_jkfit, fock_jkfit_pos, jp = gen_dffock(EC, cMO, cPO, bao, jkfit)
+  restore_space!(EC, space_save)
+  fock_jkfitMO = cMO' * fock_jkfit  * cMO
+  fock_jkfitMO_pos = cPO' * fock_jkfit_pos * cPO
+  jpMO = cMO' * jp * cMO
+  filename1 = int1_npy_filename(fdump)
+  int1_file, int1 = newmmap(EC, filename1, (norbs,norbs), description="int1")
+  int1 .= fock_jkfitMO - fock
+  filename1p = int1_npy_filename(fdump, :p)
+  int1p_file, int1p = newmmap(EC, filename1p, (norbs,norbs), description="int1p")
+  int1p .= fock_jkfitMO_pos - fock_p
+  flushmmap(EC, int1)
+  flushmmap(EC, int1p)
+  fdump.int1 = int1
+  fdump.int1p = int1p
+  int0 = Enuc + hii + hii_p - sum(diag(int1)[spo]) - sum(diag(int1p)[sp_pos])
+  fdump.int0 = int0
 
-#   # reference energy
-#   eRef = Enuc + hii + sum(diag(fock_jkfitMO)[full_spaces['o']]) 
-#   println("Reference energy: ", eRef)
-# end
+  eRef_hii = Enuc+ hii
+
+  eRef_fock = sum(diag(fock_jkfitMO)[full_spaces['o']])
+  eRef_jp = sum(diag(jpMO)[full_spaces['o']])
+  eRef_jp_pos = sum(diag(fock_jkfitMO_pos)[1:1])
+
+  eRef = eRef_hii + eRef_fock + eRef_jp + eRef_jp_pos
+
+  println("Reference energy: ", eRef)
+
+end
 
 
 """
@@ -408,16 +425,17 @@ function dfdump(EC::ECInfo)
   norbs -= ncore_orbs + nfrozvirt
   ms2 = EC.options.wf.ms2
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
-  fdump = FDump{3}(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO))
+  fdump = FDump{3}(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO), npos=npos)
   if fdump.uhf
     generate_integrals(EC, fdump, cMO[:,1:end-nfrozvirt], space_save)
   else
-    generate_integrals(EC, fdump, cMO[1][:,1:end-nfrozvirt], space_save)
-    # if EC.options.wf.npositron > 0
-    #   @assert nfrozvirt == 0 "Frozen virtual orbitals not implemented for positron"
-    #   generate_integrals(EC, fdump, cMO[1][:,1:end], 
-    #     cPO[1][:,1:end], space_save)
-    # else
+    if npos > 0
+      @assert nfrozvirt == 0 "Frozen virtual orbitals not implemented for positron"
+      generate_integrals(EC, fdump, cMO[1][:,1:end], 
+        cPO[1][:,1:end], space_save)
+    else
+      generate_integrals(EC, fdump, cMO[1][:,1:end-nfrozvirt], space_save)
+    end
   end
   restore_space!(EC, space_save)
   if length(dumpfile) > 0
