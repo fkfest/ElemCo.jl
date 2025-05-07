@@ -94,7 +94,8 @@ The virtual orbitals are denoted by $a,b,c,\ldots$, the occupied orbitals by $i,
 the active (open-shell) orbitals by $t,u,v,\ldots$,
 and the general orbital indices are denoted by $p,q,r,s$.
 The Einstein summation convention is used for repeated indices (repeated lower and upper indices are summed over).
-The $\alpha$ and $\beta$ spin orbitals are denoted by $\spa{p}$ and $\spb{p}$.
+The $\alpha$ and $\beta$ spin orbitals are denoted by $\spa{p}$ and $\spb{p}$. For RHF with positron, we 
+use $\spa{p}$ for the electron orbitals and $\spb{p}$ for the positron orbitals.
 
 The integrals are \textbf{not antisymmetrized} and denoted by $v_{pq}^{rs}$, where $p,q,r,s$ are indices of orbitals,
 and the lower indices correspond to the creation and the upper indices to the annihilation operators in the Hamiltonian,
@@ -280,6 +281,77 @@ The residual of the Hartree-Fock equations, which can be used in DIIS, is given 
   \quad \mbox{ with } \quad D_{\mu}^{\nu} = C_{\mu}^i C_i^{\dagger\nu}.
 \end{aligned}
 \end{equation}
+
+\section{Positron Hartree--Fock}
+\label{sec:positron-hf}
+
+A closed--shell electron reference plus a single positron is formally
+analogous to an \textit{unrestricted} HF problem with two spin blocks:
+the $\alpha$ electrons and the positron ($e^+$). The key
+difference is that the positron block contains \emph{exactly one}
+occupied orbital, so there is no exchange term between two positrons.
+Also there is an attractive Coulomb interaction between the positron and the
+electrons instead of the repulsive one between $\alpha$ and $\beta$ electrons.  
+We keep the convention of barred indices $\spb{p},\spb{q},\ldots$ for
+positron spin--orbitals and ordinary Latin indices $p,q,\ldots$ for the
+electrons.
+
+\subsection{Density--fitted working equations}
+The coupled Roothaan equations
+\begin{equation}
+f_{\mu}^{\nu(e)} C_{\nu}^{p} = S_{\mu}^{\nu} C_{\nu}^{p} \epsilon_{p},\qquad
+f_{\mu}^{\nu(p)} C_{\nu}^{\bar{p}} = S_{\mu}^{\nu} C_{\nu}^{\bar{p}} \epsilon_{\bar{p}},
+\label{eq:poshf-roothaan}
+\end{equation}
+are solved self--consistently.
+
+With density fitting [cf.~\sect{sec:df}] we reuse the three--index
+intermediates $v_{\mu}^{\nu L}$ and the metric factors $C_{P}^{L}$. The
+AO density matrices are
+\begin{equation}
+D_{\mu}^{\nu} = 2 C_{\mu}^{i} C_{\nu}^{i},\qquad
+P_{\mu}^{\nu} = C_{\mu}^{\bar{i}} C_{\nu}^{\bar{i}}.
+\end{equation}
+
+\paragraph{Electron block.}  Including the attractive Coulomb term with
+the positron the electronic Fock matrix becomes
+\begin{equation}
+\begin{aligned}
+f_{\mu}^{\nu(e)} &= h_{\mu}^{\nu}
++ 2 J_{\mu}^{\nu}[D] - K_{\mu}^{\nu}[D]
+ -     J_{\mu}^{\nu}[P] \\
+ J_{\mu}^{\nu}[D] &= \sum_{L} v_{\xi}^{\text{o}L} D_{\text{o}}^{\xi} v_{\mu}^{\nu L},
+ \quad J_{\mu}^{\nu}[P] = \sum_{L} v_{\xi}^{\text{o}L} P_{\text{o}}^{\xi} v_{\mu}^{\nu L},\\
+ \\
+K_{\mu}^{\nu}[D] &= v_{\mu}^{iL} v_{iL}^{\nu},\qquad 
+v_{\mu}^{iL} = v_{\mu}^{\rho L} C_{\rho}^{i}
+\label{eq:poshf-fock-e}
+\end{aligned}
+\end{equation}
+
+\paragraph{Positron block.}  Exchange vanishes for a single particle;
+the Fock matrix for the positron therefore contains only the one--body
+term and the \emph{attractive} Coulomb interaction with the electrons,
+\begin{equation}
+f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - 2 J_{\mu}^{\nu}[D],
+\label{eq:poshf-fock-p}
+\end{equation}
+where $h^{(p)}$ differs from the electronic one--electron matrix only by
+the sign of the nuclear attraction operator.
+
+
+\subsection{HF energy with a positron}
+The Hartree--Fock total energy is
+\begin{equation}
+E_{\text{HF}}^{e/e^+} = \tfrac12 D_{\mu}^{\nu} \bigl(h_{\nu}^{\mu} + f_{\nu}^{\mu(e)} + J_{\mu}^{\nu}[P]\bigr)
++        P_{\mu}^{\nu}  f_{\nu}^{\mu(p)}
++ E_0,
+\end{equation}
+which reduces to the ordinary closed--shell expression when
+$P\to0$.  In practice the Coulomb terms are accumulated on the fly
+from the three--index intermediates as described above.
+
+
 
 \section{(Bi-orthogonal) Hartree-Fock}
 The closed-shell Hartree-Fock on top of the FCIDUMP integrals (including the case of similarity-transformed 
