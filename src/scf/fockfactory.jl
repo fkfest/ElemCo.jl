@@ -16,7 +16,7 @@ using ..ElemCo.FciDumps
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
 
-export gen_fock, gen_ufock, gen_dffock
+export gen_fock, gen_ufock, gen_dffock, gen_pfock
 export gen_density_matrix, gen_frac_density_matrix
 
 """ 
@@ -26,7 +26,15 @@ export gen_density_matrix, gen_frac_density_matrix
 """
 function gen_fock(EC::ECInfo)
   @mtensor fock[p,q] := integ1(EC.fd,:α)[p,q] + 2.0*ints2(EC,":o:o",:α)[p,i,q,i] - ints2(EC,":oo:",:α)[p,i,i,q]
+  if EC.options.wf.npositron > 0
+    @mtensor fock[p,q] -= ints2(EC,":p:p",:p)[p,i,q,i] 
+  end
   return fock
+end
+
+function gen_pfock(EC::ECInfo)
+  @mtensor pfock[p,q] := integ1(EC.fd,:p)[p,q] - 2.0*ints2(EC,"o:o:",:p)[i,p,i,q]
+  return pfock
 end
 
 """ 
