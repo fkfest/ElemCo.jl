@@ -56,6 +56,8 @@ include("options.jl")
     - `v` for virtual
     - `O` for occupied-β
     - `V` for virtual-β
+    - `p` for positron
+    - `e` for virtual positron 
     - `m` for (full) MO space
     - `M` for (full) β-MO space
     - `A` for AO basis
@@ -107,7 +109,7 @@ end
 function setup_space_fd!(EC::ECInfo; verbose=true)
   @assert fd_exists(EC.fd) "EC.fd is not set up!"
   nelec = EC.options.wf.nelec
-  npositron = EC.options.wf.npositron
+  npos = EC.options.wf.npositron
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
@@ -121,15 +123,15 @@ function setup_space_fd!(EC::ECInfo; verbose=true)
   @assert !isnothing(ms2_from_fcidump)
   ms2_default = (nelec == nelec_from_fcidump) ? ms2_from_fcidump : mod(nelec,2)
   ms2 = (ms2 < 0) ? ms2_default : ms2
-  if npositron > 0
+  if npos > 0
     if verbose
-      println("Number of positrons: ", npositron)
+      println("Number of positrons: ", npos)
     end
     @assert ms2 == 0 "Cannot have positrons and spin > 0."
   end
   orbsym = headvars(EC.fd, "ORBSYM", Int)
   @assert !isnothing(orbsym)
-  setup_space!(EC, norb, nelec, ms2, orbsym; verbose=verbose)
+  setup_space!(EC, norb, nelec, npos, ms2, orbsym; verbose=verbose)
 end
 
 """
@@ -142,6 +144,7 @@ function setup_space_system!(EC::ECInfo; verbose=true)
   nelec = EC.options.wf.nelec
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
+  npos = EC.options.wf.npositron
 
   norb = guess_norb(EC) 
   nelec = (nelec < 0) ? guess_nelec(EC.system) : nelec
@@ -152,16 +155,16 @@ function setup_space_system!(EC::ECInfo; verbose=true)
     println("Number of orbitals: ", norb)
     println("Number of electrons: ", nelec)
   end
-  if EC.options.wf.npositron > 0
+  if npos > 0
     if verbose
-      println("Number of positrons: ", EC.options.wf.npositron)
+      println("Number of positrons: ", npos)
     end
     @assert ms2 == 0 "Cannot have positrons and spin > 0."
   end
   if verbose
     println("Spin: ", ms2)
   end
-  setup_space!(EC, norb, nelec, ms2, orbsym; verbose=verbose)
+  setup_space!(EC, norb, nelec, npos, ms2, orbsym; verbose=verbose)
 end
 
 """
@@ -169,9 +172,17 @@ end
 
   Setup EC.space from `norb`, `nelec`, `ms2`, `orbsym` or `occa`/`occb`.
 """
-function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym; verbose=true)
+function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true)
   occa = EC.options.wf.occa
   occb = EC.options.wf.occb
+  # positron spaces: occupied (‘p’) and virtual (‘e’)
+  if npos == 1
+    occp = 1:1
+    virp = 2:norb
+  else
+    occp = 0:0
+    virp = 0:0
+  end
   SP = EC.space
   if verbose
     println("Number of orbitals: ", norb)
@@ -181,6 +192,8 @@ function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym; verbose=true)
   SP['s'] = setdiff(SP['o'], SP['d'])
   SP['S'] = setdiff(SP['O'], SP['d'])
   SP[':'] = SP['m'] = SP['M'] = [1:norb;]
+  SP['p'] = occp
+  SP['e'] = virp
   return
 end
 

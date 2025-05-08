@@ -209,12 +209,12 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, cPO::Matrix,
   hAO_p = kinetic(bao) - nuclear(bao)
   cMO2 = cMO[:,full_spaces['o']]
   @mtensor hii = (cMO2[μ,i] * hAO[μ,ν]) * cMO2[ν,i]
-  cPO2 = cPO[:,1:1]
+  cPO2 = cPO[:,full_spaces['p']]
   @mtensor hii_p = (cPO2[μ,i] * hAO_p[μ,ν]) * cPO2[ν,i]
 
   spm = 1:norbs
   spo = EC.space['o']
-  sp_pos = 1:1
+  sp_pos = EC.space['p']
   @mtensor begin 
     fock[p,q] := 2.0*detri_int2(int2, norbs, spm, spo, spm, spo)[p,i,q,i]
     fockjp[p,q] := int2ep[spm,sp_pos,spm,sp_pos][p,I,q,I] 
@@ -247,7 +247,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, cPO::Matrix,
 
   eRef_fock = sum(diag(fock_jkfitMO)[full_spaces['o']])
   eRef_jp = sum(diag(jpMO)[full_spaces['o']])
-  eRef_jp_pos = sum(diag(fock_jkfitMO_pos)[1:1])
+  eRef_jp_pos = sum(diag(fock_jkfitMO_pos)[full_spaces['p']])
 
   eRef = eRef_hii + eRef_fock + eRef_jp + eRef_jp_pos
 

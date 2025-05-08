@@ -211,10 +211,16 @@ function orbital_energies(EC::ECInfo, spincase::Symbol=:α)
     eps = load1idx(EC, "e_m")
     ϵo = eps[EC.space['o']]
     ϵv = eps[EC.space['v']]
-  else
+  elseif spincase == :β
     eps = load1idx(EC, "e_M")
     ϵo = eps[EC.space['O']]
     ϵv = eps[EC.space['V']]
+  elseif spincase == :p
+    eps = load1idx(EC, "e_p")
+    ϵo = eps[EC.space['p']]
+    ϵv = eps[EC.space['e']]
+  else
+    error("orbital_energies: unknown spin case: $spincase")
   end
   return ϵo, ϵv
 end
