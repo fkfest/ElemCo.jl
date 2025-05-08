@@ -76,8 +76,8 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
     ϵo = load1idx(EC,"e_m")[SP['o']]
     EHF = sum(ϵo) + sum(diag(ints1(EC,"oo")))
     if EC.options.wf.npositron > 0
-      ϵp = load1idx(EC,"e_p")[1:1]
-      EHF += 0.5*(sum(ϵp) + sum(diag(ints1(EC,"1111",:p))))
+      ϵp = load1idx(EC,"e_p")[SP['p']]
+      EHF += 0.5*(sum(ϵp) + sum(diag(ints1(EC,"pp"))))
     end
     EHF = EHF + EC.fd.int0
   else
@@ -263,10 +263,16 @@ function update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=fal
   elseif spincase == :β
     ϵob, ϵvb = orbital_energies(EC, :β)
     return update_doubles(R2, ϵob, ϵvb, ϵob, ϵvb, shift, antisymmetrize)
-  else
+  elseif spincase == :αβ
     ϵo, ϵv = orbital_energies(EC)
     ϵob, ϵvb = orbital_energies(EC, :β)
     return update_doubles(R2, ϵo, ϵv, ϵob, ϵvb, shift, antisymmetrize)
+  elseif spincase == :αp
+    ϵo, ϵv = orbital_energies(EC)
+    ϵop, ϵvp = orbital_energies(EC, :p)
+    return update_doubles(R2, ϵo, ϵv, ϵop, ϵvp, shift, antisymmetrize)
+  else
+    error("update_doubles: unexpected spin case $spincase.")
   end
 end
 
