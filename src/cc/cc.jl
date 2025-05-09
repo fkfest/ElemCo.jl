@@ -1233,6 +1233,165 @@ function calc_R_from_U_F(e::Vector, X::Matrix, F::Matrix, q::Float64)
 end
 
 """
+    calc_qT_dc(AU1::Matrix, BU1::Matrix, Y1::Array, T2, T2t)
+
+  Calculate QV-DCD closed-shell transformed amplitudes qT.
+"""
+function calc_qT_dc(AU1::Matrix, BU1::Matrix, Y1::Array, T2, T2t)
+  @mtensor qTAB[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j]
+  @mtensor temp_perm[a,b,i,j] :=  qTAB[b,a,j,i]
+  qTAB .= 0.5 .* (qTAB .+ temp_perm)
+  @mtensor qTD[a,b,i,j]:= - Y1[c,k,a,i] * T2t[c,b,k,j] 
+  @mtensor temp_perm[a,b,i,j] =  qTD[b,a,j,i] 
+  qTD .= 0.5 .* (qTD .+ temp_perm)
+  @mtensor temp_perm[a,b,i,j] =  qTD[b,a,i,j]
+  qTD .= 2.0/3.0 .* qTD .+ 1.0/3.0 .* temp_perm
+  qT = qTAB .+ qTD
+  qTAB = nothing
+  qTD = nothing
+  temp_perm = nothing
+  return qT
+end
+
+"""
+    calc_qT_cc(AU1::Matrix, BU1::Matrix, CU1::Array, Y1::Array, W1::Array, T2, T2t)
+
+  Calculate QV-DCD closed-shell transformed amplitudes qT.
+"""
+function calc_qT_cc(AU1::Matrix, BU1::Matrix, CU1::Array, Y1::Array, W1::Array, T2, T2t)
+  @mtensor qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j] - 0.5 * CU1[i,j,k,l] * T2[a,b,k,l] -
+                        0.25 * (Y1[c,k,a,i] * T2t[c,b,k,j] + W1[c,k,a,i] * T2[b,c,k,j] + 2.0 * W1[c,k,a,j] * T2[c,b,i,k])
+  @mtensor temp_perm[a,b,i,j] :=  qT[b,a,j,i]
+  qT .= qT .+ temp_perm
+  temp_perm = nothing
+  return qT
+end
+
+
+function qv_orbital_optimization(EC::ECInfo, q1T, q2T)
+  SP = EC.space
+  norb = n_orbs(EC)
+  oovo = ints2(EC,"oovo")
+  ovvv = ints2(EC,"ovvv")
+  @mtensor q1Tt[a,b,i,j] :=  2.0 * q1T[a,b,i,j] - q1T[a,b,j,i]
+  @mtensor q2Tt[a,b,i,j] :=  2.0 * q2T[a,b,i,j] - q2T[a,b,j,i]
+  dfock = load2idx(EC,"df_mm") #this has alternative
+  @mtensor Tij[i,j] := q1Tt[a,b,i,k] * q1T[a,b,j,k]
+  @mtensor Tab[a,b] := q1Tt[a,c,i,j] * q1T[b,c,i,j]
+  R1 = dfock[SP['v'],SP['o']]
+  dfock = nothing
+  @mtensor grad[a,i] := R1[a,i] - Tij[i,j]*R1[a,j] - Tab[a,b]*R1[b,i]
+  @mtensor grad[a,i] -= Tij[k,l]*(2.0 *oovo[i,l,a,k] - oovo[l,i,a,k])
+  @mtensor grad[a,i] += Tab[d,c]*(2.0 *ovvv[i,d,a,c] - ovvv[i,d,c,a])
+  @mtensor grad[a,i] += q1T[c,d,i,k] * q1Tt[c,d,j,l] * oovo[j,l,a,k]
+  @mtensor grad[a,i] -= q1T[b,d,k,l] * q1Tt[a,c,k,l] * ovvv[i,c,b,d]
+  @mtensor grad[a,i] -= 0.5*(q1Tt[b,d,i,k] * q1Tt[c,d,j,k] + 3.0 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j]) * ovvv[j,b,a,c]
+  @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1Tt[a,c,l,j] * q1Tt[b,c,l,k]) * oovo[i,k,b,j]
+  @mtensor grad[a,i] += q1Tt[b,d,i,k] * q1Tt[c,d,j,k] * ovvv[j,b,c,a]
+  @mtensor grad[a,i] -= q1Tt[a,c,j,l] * q1Tt[b,c,k,l] * oovo[k,i,b,j]
+  @mtensor grad[a,i] += q2Tt[b,c,i,j] * ovvv[j,a,c,b] - q2Tt[a,b,j,k] * oovo[k,j,b,i]
+  oovo = nothing
+  ovvv = nothing
+  q1Tt = nothing
+  q2Tt = nothing
+  ϵo, ϵv = orbital_energies(EC)
+  Rpq = zeros(norb, norb)
+  for a in eachindex(ϵv)
+    for i in eachindex(ϵo)
+      Rpq[SP['v'][a],SP['o'][i]] = grad[a,i]/(ϵo[i] - ϵv[a])
+      Rpq[SP['o'][i],SP['v'][a]] = grad[a,i]/(ϵv[a] - ϵo[i])
+    end
+  end
+  Rpq = exp(Rpq)
+  transform_fcidump(EC.fd, Rpq, Rpq)
+  calc_fock_matrix(EC, true)
+  pseudo_dressed_ints(EC)
+end
+
+function calc_qG_dc(EC::ECInfo, qV, T2, T2t, qVD, Ae, AX, Be, BX, Ye, YX, AU1, BU1, Y1, q)
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  @mtensor qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
+  @mtensor qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
+  qAR = calc_R_from_U_F(Ae, AX, qAF, q)
+  qBR = calc_R_from_U_F(Be, BX, qBF, q)
+  @mtensor qDF[a,i,c,k] := qVD[a,b,i,j] * T2t[c,b,k,j]
+  qDF = reshape(qDF, nvirt*nocc, nvirt*nocc)
+  qDR = calc_R_from_U_F(Ye, YX, qDF, q)
+  qDF = nothing
+  qDR = reshape(qDR, nvirt, nocc, nvirt, nocc)
+  @mtensor begin 
+    qG[a,b,i,j] := (qAR[a,c] + qAR[c,a]) * T2t[c,b,i,j] 
+    qG[a,b,i,j] += qV[c,b,i,j] * AU1[c,a] 
+    qG[a,b,i,j] += (qBR[k,i] + qBR[i,k]) * T2t[a,b,k,j]
+    qG[a,b,i,j] += qV[a,b,k,j] * BU1[i,k]
+
+    qG[a,b,i,j] -= (qDR[a,i,c,k] + qDR[c,k,a,i]) * T2t[c,b,k,j] * 2.0
+    qG[a,b,i,j] += (qDR[b,i,c,k] + qDR[c,k,b,i]) * T2t[c,a,k,j]
+    qG[a,b,i,j] -= qVD[c,b,k,j] * Y1[a,i,c,k] * 2.0
+    qG[a,b,i,j] += qVD[c,a,k,j] * Y1[b,i,c,k] #qVD[c,b,k,i] * Y1[a,j,c,k] 
+  end
+  qDR = nothing
+  qG .= 0.5 .* (qG .+ permutedims(qG, (2,1,4,3)))
+  return qG
+end
+
+function calc_qG_cc(EC::ECInfo, qV, T2, T2t, Ae, AX, Be, BX, Ce, CX, Ye, YX, We, WX, AU1, BU1, CU1, Y1, W1, q)
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  @mtensor qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
+  @mtensor qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
+  qAR = calc_R_from_U_F(Ae, AX, qAF, q)
+  qBR = calc_R_from_U_F(Be, BX, qBF, q)
+  qAF = nothing
+  qBF = nothing
+  @mtensor qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
+  @mtensor q1DF[a,i,c,k] := qV[a,b,i,j] * 0.5 * T2t[c,b,k,j]
+  @mtensor q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j] + qV[a,b,j,i] * T2[c,b,j,k]
+
+  qCF = reshape(qCF, nocc^2, nocc^2)
+  q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
+  q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
+
+  qCR = calc_R_from_U_F(Ce, CX, qCF, q)
+  q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
+  q2DR = calc_R_from_U_F(We, WX, q2DF, q)
+
+  qCF =  nothing
+  q1DF = nothing
+  q2DF = nothing
+
+  qCR = reshape(qCR, nocc, nocc, nocc, nocc)
+  q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
+  q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
+  @mtensor begin 
+    qG[a,b,i,j] := 2.0 * (qAR[a,c] + qAR[c,a]) * T2t[c,b,i,j] 
+    qG[a,b,i,j] += 2.0 * qV[c,b,i,j] * AU1[c,a] 
+    qG[a,b,i,j] += 2.0 * (qBR[k,i] + qBR[i,k]) * T2t[a,b,k,j]
+    qG[a,b,i,j] += 2.0 * qV[a,b,k,j] * BU1[i,k]
+
+    qG[a,b,i,j] -= (qCR[k,l,i,j] + qCR[i,j,k,l]) * T2[a,b,k,l]
+    qG[a,b,i,j] -= qV[a,b,k,l] * CU1[k,l,i,j]
+    
+    qG[a,b,i,j] -= 2.0 * (q1DR[a,i,c,k] + q1DR[c,k,a,i]) * T2t[c,b,k,j]
+    qG[a,b,i,j] += (q1DR[b,i,c,k] + q1DR[c,k,b,i]) * T2t[c,a,k,j]
+    qG[a,b,i,j] -= (q2DR[b,i,c,k] + q2DR[c,k,b,i]) * T2[a,c,k,j]
+
+    qG[a,b,i,j] -= qV[c,b,k,j] * Y1[a,i,c,k]
+    qG[a,b,i,j] += 0.5 *  qV[c,a,k,j] * Y1[b,i,c,k] # qV[c,b,k,i] * Y1[a,j,c,k]
+    qG[a,b,i,j] -= 0.5 * qV[c,a,k,j] * W1[b,i,c,k]
+    qG[a,b,i,j] -= qV[c,b,i,k] * W1[a,j,c,k]
+  end
+  
+  qCR = nothing
+  q1DR = nothing
+  q2DR = nothing
+
+  qG .= 0.5 .* (qG .+ permutedims(qG, (2,1,4,3)))
+  return qG
+end
+
+"""
     calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
@@ -1250,11 +1409,6 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     W[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + T2[c,a,i,k] * T2[c,b,j,k]
   end
 
-  AU .= 0.5 .* (AU .+ AU')
-  BU .= 0.5 .* (BU .+ BU')
-  CU .= 0.5 .* (CU .+ permutedims(CU, (3,4,1,2)))
-  Y .= 0.5 .* (Y .+ permutedims(Y, (3,4,1,2)))
-  W .= 0.5 .* (W .+ permutedims(W, (3,4,1,2)))
  
   # a function that can calculate the eigenvectors & eigenvalues of a matrix
   # CU[i,j,k,l] -> CU[ij,kl], Y[a,i,b,j] -> Y[ai,bj], W[a,i,b,j] -> W[ai,bj]
@@ -1264,8 +1418,6 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   Ce, CX = eigen(Hermitian(reshape(CU, nocc^2, nocc^2)))
   Ye, YX = eigen(Hermitian(reshape(Y, nvirt*nocc, nvirt*nocc)))
   We, WX = eigen(Hermitian(reshape(W, nvirt*nocc, nvirt*nocc)))
-  AU = nothing
-  BU = nothing
   CU = nothing
   Y = nothing
   W = nothing
@@ -1273,138 +1425,70 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   G2 = zeros(eltype(T2),nvirt, nvirt, nocc, nocc)
   E_qvccd = 0.0
 
-  @mtensor T2_1[a,b,i,j] :=  2.0 * T2[a,b,i,j] - T2[a,b,j,i]
+  @mtensor T2t[a,b,i,j] :=  2.0 * T2[a,b,i,j] - T2[a,b,j,i]
 
-  for q in [1.0, 2.0]
-    AU1 = AX * Diagonal(Ae .^ (-q/2)) * AX' # AU1 = AU ^ (-q/2)
-    BU1 = BX * Diagonal(Be .^ (-q/2)) * BX' # BU1 = BU ^ (-q/2)
-    CU1 = reshape(CX * Diagonal(Ce .^ (-q/2)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-q/2)
-    Y1 = reshape(YX * Diagonal(Ye .^ (-q/2)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-q/2), nvirt, nocc, nvirt, nocc)
-    W1 = reshape(WX * Diagonal(We .^ (-q/2)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-q/2), nvirt, nocc, nvirt, nocc)
-    
-    # calculate qT
-    if dc 
-      @mtensor qTAB[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j]
-      @mtensor temp_perm[a,b,i,j] :=  qTAB[b,a,j,i]
-      qTAB .= 0.5 .* (qTAB .+ temp_perm)
-      @mtensor qTD[a,b,i,j]:= - Y1[c,k,a,i] * T2_1[c,b,k,j] 
-      @mtensor temp_perm[a,b,i,j] =  qTD[b,a,j,i] 
-      qTD .= 0.5 .* (qTD .+ temp_perm)
-      @mtensor temp_perm[a,b,i,j] =  qTD[b,a,i,j]
-      qTD .= 2.0/3.0 .* qTD .+ 1.0/3.0 .* temp_perm
-      qT = qTAB .+ qTD
-      qTAB = nothing
-      qTD = nothing
-    else
-      @mtensor qT[a,b,i,j] := AU1[a,c] * T2[c,b,i,j] + BU1[k,i] * T2[a,b,k,j] - 0.5 * CU1[i,j,k,l] * T2[a,b,k,l] -
-                            0.25 * (Y1[c,k,a,i] * T2_1[c,b,k,j] + W1[c,k,a,i] * T2[b,c,k,j] + 2.0 * W1[c,k,a,j] * T2[c,b,i,k])
-      @mtensor temp_perm[a,b,i,j] :=  qT[b,a,j,i]
-      qT .= qT .+ temp_perm
-    end
-
-    #calculate the energy
-    if q == 1.0
-      T1_0 = zeros(eltype(T1),0,0)
-      qVD = calc_cc_resid(EC, T1_0, qT; dc = true, linearized=true)[2]
-      qVD .-= ints2(EC, "vvoo")
-    elseif q == 2.0
-      qVD = ints2(EC, "vvoo")
-    end
-    @mtensor temp_perm[a,b,i,j] = qVD[b,a,i,j]
-    qV = 2.0 * qVD .- temp_perm
-    E_qvccd += sum(qV .* qT) * q
-
-    # calculate residual
-    @mtensor qAF[c,a] := qV[a,b,i,j] * T2[c,b,i,j]
-    @mtensor qBF[i,k] := qV[a,b,i,j] * T2[a,b,k,j]
-    qAR = calc_R_from_U_F(Ae, AX, qAF, q)
-    qBR = calc_R_from_U_F(Be, BX, qBF, q)
-    qAF = nothing
-    qBF = nothing
-    if dc 
-      @mtensor qDF[a,i,c,k] := qVD[a,b,i,j] * T2_1[c,b,k,j]
-      qDF = reshape(qDF, nvirt*nocc, nvirt*nocc)
-      qDR = calc_R_from_U_F(Ye, YX, qDF, q)
-      qDF = nothing
-      qDR = reshape(qDR, nvirt, nocc, nvirt, nocc)
-    else
-      @mtensor qCF[i,j,k,l] := qV[a,b,k,l] * T2[a,b,i,j]
-      @mtensor q1DF[a,i,c,k] := qV[a,b,i,j] * 0.5 * T2_1[c,b,k,j]
-      @mtensor q2DF[a,i,c,k] := 0.5*qV[a,b,i,j] * T2[b,c,k,j] + qV[a,b,j,i] * T2[c,b,j,k]
-
-      qCF = reshape(qCF, nocc^2, nocc^2)
-      q1DF = reshape(q1DF, nvirt*nocc, nvirt*nocc)
-      q2DF = reshape(q2DF, nvirt*nocc, nvirt*nocc)
-
-      qCR = calc_R_from_U_F(Ce, CX, qCF, q)
-      q1DR = calc_R_from_U_F(Ye, YX, q1DF, q)
-      q2DR = calc_R_from_U_F(We, WX, q2DF, q)
-
-      qCF =  nothing
-      q1DF = nothing
-      q2DF = nothing
-
-      qCR = reshape(qCR, nocc, nocc, nocc, nocc)
-      q1DR = reshape(q1DR, nvirt, nocc, nvirt, nocc)
-      q2DR = reshape(q2DR, nvirt, nocc, nvirt, nocc)
-    end
-
-    if dc
-      @mtensor begin 
-        qG[a,b,i,j] := (qAR[a,c] + qAR[c,a]) * T2_1[c,b,i,j] 
-        qG[a,b,i,j] += qV[c,b,i,j] * AU1[c,a] 
-        qG[a,b,i,j] += (qBR[k,i] + qBR[i,k]) * T2_1[a,b,k,j]
-        qG[a,b,i,j] += qV[a,b,k,j] * BU1[i,k]
-
-        qG[a,b,i,j] -= (qDR[a,i,c,k] + qDR[c,k,a,i]) * T2_1[c,b,k,j] * 2.0
-        qG[a,b,i,j] += (qDR[b,i,c,k] + qDR[c,k,b,i]) * T2_1[c,a,k,j]
-        qG[a,b,i,j] -= qVD[c,b,k,j] * Y1[a,i,c,k] * 2.0
-        qG[a,b,i,j] += qVD[c,a,k,j] * Y1[b,i,c,k] #qVD[c,b,k,i] * Y1[a,j,c,k] 
-      end
-      qAR = nothing
-      qBR = nothing
-      qDR = nothing
-    else      
-      @mtensor begin 
-        qG[a,b,i,j] := 2.0 * (qAR[a,c] + qAR[c,a]) * T2_1[c,b,i,j] 
-        qG[a,b,i,j] += 2.0 * qV[c,b,i,j] * AU1[c,a] 
-        qG[a,b,i,j] += 2.0 * (qBR[k,i] + qBR[i,k]) * T2_1[a,b,k,j]
-        qG[a,b,i,j] += 2.0 * qV[a,b,k,j] * BU1[i,k]
-
-        qG[a,b,i,j] -= (qCR[k,l,i,j] + qCR[i,j,k,l]) * T2[a,b,k,l]
-        qG[a,b,i,j] -= qV[a,b,k,l] * CU1[k,l,i,j]
-        
-        qG[a,b,i,j] -= 2.0 * (q1DR[a,i,c,k] + q1DR[c,k,a,i]) * T2_1[c,b,k,j]
-        qG[a,b,i,j] += (q1DR[b,i,c,k] + q1DR[c,k,b,i]) * T2_1[c,a,k,j]
-        qG[a,b,i,j] -= (q2DR[b,i,c,k] + q2DR[c,k,b,i]) * T2[a,c,k,j]
-
-        qG[a,b,i,j] -= qV[c,b,k,j] * Y1[a,i,c,k]
-        qG[a,b,i,j] += 0.5 *  qV[c,a,k,j] * Y1[b,i,c,k] # qV[c,b,k,i] * Y1[a,j,c,k]
-        qG[a,b,i,j] -= 0.5 * qV[c,a,k,j] * W1[b,i,c,k]
-        qG[a,b,i,j] -= qV[c,b,i,k] * W1[a,j,c,k]
-      end
-      qAR = nothing
-      qBR = nothing
-      qCR = nothing
-      q1DR = nothing
-      q2DR = nothing
-    end
-    AU1 = nothing
-    BU1 = nothing
-    CU1 = nothing
-    Y1 = nothing
-    W1 = nothing
-    @mtensor temp_perm[a,b,i,j] = qG[b,a,j,i]
-    qG .= 0.5 .* (qG .+ temp_perm)
-    G2 .+= qG
-    temp_perm = nothing
-    qG = nothing
-
+  AU1 = AX * Diagonal(Ae .^ (-0.5)) * AX' # AU1 = AU ^ (-1/2)
+  BU1 = BX * Diagonal(Be .^ (-0.5)) * BX' # BU1 = BU ^ (-1/2)
+  Y1 = reshape(YX * Diagonal(Ye .^ (-0.5)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-1/2), nvirt, nocc, nvirt, nocc)
+  AU2 = AX * Diagonal(Ae .^ (-1)) * AX' # AU1 = AU ^ (-1)
+  BU2 = BX * Diagonal(Be .^ (-1)) * BX' # BU1 = BU ^ (-1)
+  Y2 = reshape(YX * Diagonal(Ye .^ (-1)) * YX', nvirt, nocc, nvirt, nocc) # Y1 = reshape(Y ^ (-1)
+  if !dc
+    CU1 = reshape(CX * Diagonal(Ce .^ (-0.5)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-1/2)
+    W1 = reshape(WX * Diagonal(We .^ (-0.5)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-1/2), nvirt, nocc, nvirt, nocc)
+    CU2 = reshape(CX * Diagonal(Ce .^ (-1)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-1)
+    W2 = reshape(WX * Diagonal(We .^ (-1)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-1), nvirt, nocc, nvirt, nocc)
   end
+  if dc
+    q1T = calc_qT_dc(AU1, BU1, Y1, T2, T2t)
+    q2T = calc_qT_dc(AU2, BU2, Y2, T2, T2t)
+  else
+    q1T = calc_qT_cc(AU1, BU1, CU1, Y1, W1, T2, T2t)
+    q2T = calc_qT_cc(AU2, BU2, CU2, Y2, W2, T2, T2t)
+  end
+
+  #calculate the energy
+  T1_0 = zeros(eltype(T1),0,0)
+  q1VD = calc_cc_resid(EC, T1_0, q1T; dc = true, linearized=true)[2]
+  q2VD = ints2(EC, "vvoo")
+  q1VD .-= q2VD
+  @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
+  q1V = 2.0 * q1VD .- temp_perm
+  E_qvccd += sum(q1V .* q1T)
+  @mtensor temp_perm[a,b,i,j] = q2VD[b,a,i,j]
+  q2V = 2.0 * q2VD .- temp_perm
+  E_qvccd += sum(q2V .* q2T) * 2.0
+  q1V = nothing
+  q2V = nothing
+  q1VD = nothing
+  q2VD = nothing
+
+  # orbital optimization
+  qv_orbital_optimization(EC, q1T, q2T)
+
+  # load the integrals
+  T1_0 = zeros(eltype(T1),0,0)
+  q1VD = calc_cc_resid(EC, T1_0, q1T; dc = true, linearized=true)[2]
+  q2VD = ints2(EC, "vvoo")
+  q1VD .-= q2VD
+  @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
+  q1V = 2.0 * q1VD .- temp_perm
+  @mtensor temp_perm[a,b,i,j] = q2VD[b,a,i,j]
+  q2V = 2.0 * q2VD .- temp_perm
+  temp_perm = nothing
+
+  # calculate the residual
+  if dc
+    q1G = calc_qG_dc(EC, q1V, T2, T2t, q1VD, Ae, AX, Be, BX, Ye, YX, AU1, BU1, Y1, 1.0)
+    q2G = calc_qG_dc(EC, q2V, T2, T2t, q2VD, Ae, AX, Be, BX, Ye, YX, AU2, BU2, Y2, 2.0)
+  else
+    q1G = calc_qG_cc(EC, q1V, T2, T2t, Ae, AX, Be, BX, Ce, CX, Ye, YX, We, WX, AU1, BU1, CU1, Y1, W1, 1.0)
+    q2G = calc_qG_cc(EC, q2V, T2, T2t, Ae, AX, Be, BX, Ce, CX, Ye, YX, We, WX, AU2, BU2, CU2, Y2, W2, 2.0)
+  end
+
+  G2 .= q1G .+ q2G
   @mtensor temp_perm[a,b,i,j] := G2[b,a,i,j]
   G2 .= G2 .* 2.0/3.0 .+ temp_perm .* 1.0/3.0
-  temp_perm = nothing
-  T2_1 = nothing
   return (T1,G2), E_qvccd
 end
 
