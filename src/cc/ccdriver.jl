@@ -121,6 +121,16 @@ function dfccdriver(EC::ECInfo, method)
     error("$main_name DF method not implemented!")
   end
 
+  if has_prefix(ecmethod, "EOM")
+    if has_prefix(ecmethod, "SVD")
+      calc_svd_eom(EC, ecmethod)
+      t1 = print_time(EC, t1, "SVD", 1)
+    else
+      calc_df_eom(EC, ecmethod)
+      t1 = print_time(EC, t1, "DF-EOM", 1)      
+    end
+  end
+
   delete_temporary_files!(EC)
   restore_space!(EC, space_save)
   draw_endline()
