@@ -4024,4 +4024,148 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   end #buffer
 end
 
+"""
+    EOM_SVD_calculate_AU(EC)
+
+  Calculate singles and doubles AUs for SVD-EOM-DCSD.
+"""
+function EOM_SVD_calculate_AU(EC)
+  t1 = time_ns()
+  mem1 = free_memory()
+  U_voX = load3idx(EC, "C_voX")
+  #display(UvoX)
+  U_oXv[k,X,c] := U_voX[c,k,X]
+  bU_obXv[k,X,c] := U_voX[c,k,X]
+  bU_vobX[c,k,X] := U_voX[c,k,X]
+
+  #load decomposed amplitudes
+  T_XX = load2idx(EC, "T_XX")
+  U_bXbX = load2idx(EC, "U_{bX}{bX}")
+  #display(T_XX)
+  
+  #load df coeff
+  ovLfile, v_ovL = mmap3idx(EC, "d_ovL") #should be same as non-dressed ovL
+  voLfile, dv_voL = mmap3idx(EC, "d_voL")
+  ooLfile, dv_ooL = mmap3idx(EC, "d_ooL")
+  vvLfile, dv_vvL = mmap3idx(EC, "d_vvL")
+  
+
+  #load dressed fock matrices
+  SP = EC.space
+  dfock = load2idx(EC, "df_mm")
+  dfoo = dfock[SP['o'], SP['o']]
+  dfov = dfock[SP['o'], SP['v']] #only internally dressed
+  dfvo = dfock[SP['v'], SP['o']] 
+  dfvv = dfock[SP['v'], SP['v']]
+
+
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nX = size(T_XX, 1)
+  nL = size(ovL, 3)
+
+
+  @mtensor tT2[a,b,i,j] := 2 * T2[a,b,i,j] - T[b,a,i,j]          
+  @mtensor Y_voL[b,j,L] := v_ovL[l,d,L] * tT2[d,b,l,j]  
+  
+  @mtensor tU2[a,b,i,j] := 2 * U2[a,b,i,j] - U2[b,a,i,j] 
+  @mtensor tY_voL[b,j,L] := v_ovL[l,d,L] * tU2[d,b,l,j] 
+  
+  @mtensor dv_bXbXL[bX,bX',L] := v_bXbXL[bX,bX',L] 
+  @mtensor A[i,bX,k,bX'] := bU_obXc[i,bX,c] * bU_vobX[c,k,bX']
+  @mtensor dv_bXbXL[bX,bX',L] -= dv_ooL[k,i,L] * A[i,bX,k,bX']
+  
+  @mtensor A[k,bX,c,L] := dv_vvL[a,c,L] * bU_obXv[k,bX,a]
+  @mtensor v_bVbXL[bX,bX',L] := A[k,bX,c,L] * bU_vobX[c,k,bX']
+  
+  @mtensor A[i,bX,j,X'] := U_voX[a,j,X'] * bU_obXv[i,bX,a]
+  @mtensor bv_bXXL[bX,X',L] := bv_ooL[j,i,L] * A[i,bX,j,X']
+  
+  @mtensor A[m,i,X',L] := v_ovL[m,c,L] * U_voX[c,i,X']
+  @mtensor B[i,bX,m] := U1[a,m] * bU_obXv[i,bX,a]
+  @mtensor bv_bXXL[bX,X',L] += A[m,i,X',L] * B[i,bX,m]
+  
+  @mtensor A[j,bY,d,L] := dv_vvL[b,d,L] * bU_obXv[j,bY,b]
+  @mtensor dv_bXXL[bY,Y',L] := - A[j,bY,d,L] * U_voX[d,j,Y'] 
+  @mtensor A[j,bY,l,Y'] := U_voX[b,l,Y'] * bU_obXv[j,bY,b]
+  @mtensor dv_bXXL[bY,Y',L] += A[j,bY,l,Y'] * dv_ooL[l,j,L]
+  
+  @mtensor dx_vv[a,c] := df_vv[a,c] 
+  @mtensor dx_vv[a,c] -= 0.5 * Y_voL[a,k,L] * v_ovL[k,c,L]
+  
+  @mtensor dx_oo[k,i] := df_oo[k,i] 
+  @mtensor dx_oo[k,i] += 0.5 Y_voL[c,i,L] * v_ovL[k,c,L]
+  
+  @mtensor bv_L[L] := v_ovL[m,e,L] * U1[e,m]
+  @mtensor bv_voL[a,m,L] := dv_voL[a,e,L] * U1[e,m]
+  @mtensor bv_ooL[k,m,L] := v_ovL[k,e,L] * U1[e,m]
+
+  @mtensor bv_vv[a,d] := 2 * bv_L[L] * dv_vvL[a,d,L] 
+  @mtensor bv_vv[a,d] -= bv_voL[a,m,L] * v_ovL[m,d,L]
+
+  @mtensor bv_oo[k,i] := 2 * bv_L[L] * dv_ooL[k,i,L] 
+  @mtensor bv_oo[k,i] -= bv_ooL[k,m,L] * dv_ooL[m,i,L]
+
+  @mtensor bv_vo[a,i] := 2 * bv_L[L] * dv_voL[a,i,L] 
+  @mtensor bv_vo[a,i] -= bv_voL[a,m,L] * dv_ooL[m,i,L]
+
+  @mtensor bv_ov[k,b] := 2 * bv_L[L] * v_ovL[k,b,L] 
+  @mtensor bv_ov[k,b] -= bv_ooL[k,m,L] *  v_ovL[m,b,L]
+
+  @mtensor A[a,k,c,i] := dv_vvL[a,c,L] * dv_ooL[k,i,L]
+  @mtensor dv_vobX[a,i,bX] := A[a,k,c,i] * bU_oobX[c,k,bX]
+
+  @mtensor A[m,k,c,i] := v_ovL[m,c,L] * dv_ooL[k,i,L]
+  @mtensor B[m,i,X] := A[m,k,c,i] * U_voX[c,k,X]
+  @mtensor bv_voX[a,i,X] := B[m,i,X] * U1[a,m]
+  @mtensor A[a,k,c,i] := bv_ooL[k,i,L] * dv_vvL[a,c,L]
+  @mtensor bv_voX[a,i,X] -= A[a,k,c,i] * U_voX[c,k,X]
+
+
+
+  @mtensor AU1[a,i] := - dfoo[m,i] * U1[a,m]
+  @mtensor AU1[a,i] += dfvv[a,e] * U1[e,i]
+  @mtensor AU1[a,i] += bv_vo[a,i] 
+  @mtensor AU1[a,i] += bv_ov[j,b] * tT2[a,b,i,j]
+  @mtensor A[m,i]  := Y_voL[b,i,L] * v_ovL[m,b,L] 
+  @mtensor AU1[a,i] -= A[m,i] * U1[a,m]
+  @mtensor AU1[a,i] -= Y_voL[a,j,L] * bv_ooL[j,i,L]
+  @mtensor AU1[a,i] += dfov[m,e] * tU2[g,e,o,m] 
+  @mtensor AU1[a,i] += dv_vvL[g,f,L] * tY_voL[f,o,L] 
+  @mtensor AU1[a,i] += dv_ooL[n,o,L] * tY_voL[g,n,L] 
+  
+  @mtensor A[a,i,L] := dv_vvL[a,e,L] * U1[e,i]
+  @mtensor A[a,i,L] -= dv_ooL[m,i,L] * U1[a,m]
+  @mtensor A[a,i,L] += tY_voL[a,i,L]
+  @mtensor B[b,j,L] := dv_voL[b,j,L] + Y_voL[b,j,L]
+  @mtensor Q[a,b,i,j] := A[a,i,L] * B[b,j,L] 
+  @mtensor A[bX,Y',L] := bv_bXXL[bX,X',L] * T_XX[X',Y']
+  @mtensor B[bX,bY] := A[bX,Y',L] * dv_bXXL[bY,Y',L]
+  @mtensor A[bX,bY,L] := 0.5 * dv_bXbXL[bX,bX',L] * U_bXbX[bX',bY']
+  @mtensor B[bX,bY] += A[bX,bY,L] * dv_bXbXL[bY,bY',L]
+  @mtensor C[bX,b,j] := B[bX,bY] * bU_vobX[b,j,bY]
+  @mtensor Q[a,b,i,j] += C[bX,b,j] * bU_vobX[a,i,bX]
+  @mtensor A[a,d] := - dfov[m,d] * U1[a,m]  
+  @mtensor A[a,d] += bv_vv[a,d]
+  @mtensor A[a,d] -= 0.5 * tY_voL[a,k,L] * v_ovL[k,d,L]
+  @mtensor Q[a,b,i,j] += A[a,d] * T2[d,b,i,j]
+  @mtensor A[i,j] := - dfov[k,e] * U1[e,i]
+  @mtensor A[i,j] -= bv_oo[k,i]
+  @mtensor A[i,j] -= 0.5 * tY_voL[e,i,L] * v_ovL[k,e,L]
+  @mtensor Q[a,b,i,j] += A[i,j] * T2[a,b,k,j]
+  @mtensor Q[a,b,i,j] += dx_vv[a,e] * U2[e,b,i,j]
+  @mtensor Q[a,b,i,j] -= dx_oo[m,i]* U2[a,b,m,j]
+  @mtensor A[bX,b,j]  := bU_obXv[m,bX,e] * U2[e,b,m,j]
+  @mtensor Q[a,b,i,j] -= dv_voX[a,i,bX] * A[bX,b,j]
+  @mtensor A[X,b,j] := U_oXv[k,X,c] * T2[c,b,k,j]
+  @mtensor Q[a,b,i,j] += bv_voX[a,i,X] * A[X,b,j]
+
+  @mtensor AU2[a,b,i,j] := Q[a,b,i,j] + Q[b,a,j,i]
+
+  close(ovLfile)
+  close(ooLfile)
+  close(vvLfile)
+  return AU1, AU2
+end
+
 end #module
