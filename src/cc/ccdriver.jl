@@ -107,7 +107,23 @@ function dfccdriver(EC::ECInfo, method)
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
 
   main_name = method_name(ecmethod)
-  if has_prefix(ecmethod, "SVD")
+  
+  if has_prefix(ecmethod, "EOM")
+    #error("Test")
+    if has_prefix(ecmethod, "SVD") 
+      #error("Test2")
+      groundstate_method_name = "SVD-DCSD"
+      #println(string(groundstate_method_name) * " START ************************************************")
+      ECC = calc_svd_dc(EC, ecmethod)
+      energies = output_energy(EC, ECC, energies, groundstate_method_name)
+      println(string(groundstate_method_name) * " END **************************************************")
+      calc_svd_eom(EC, ecmethod)
+      t1 = print_time(EC, t1, "SVD", 1)
+    else
+      calc_df_eom(EC, ecmethod)
+      t1 = print_time(EC, t1, "DF-EOM", 1)      
+    end
+  elseif has_prefix(ecmethod, "SVD")
     @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
     if !closed_shell_method
       error("Only closed-shell SVD methods implemented!")
@@ -121,8 +137,11 @@ function dfccdriver(EC::ECInfo, method)
     error("$main_name DF method not implemented!")
   end
 
+  """
   if has_prefix(ecmethod, "EOM")
+    #error("Test")
     if has_prefix(ecmethod, "SVD")
+      #error("Test2")
       calc_svd_eom(EC, ecmethod)
       t1 = print_time(EC, t1, "SVD", 1)
     else
@@ -130,6 +149,7 @@ function dfccdriver(EC::ECInfo, method)
       t1 = print_time(EC, t1, "DF-EOM", 1)      
     end
   end
+  """
 
   delete_temporary_files!(EC)
   restore_space!(EC, space_save)
