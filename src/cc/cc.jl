@@ -4034,9 +4034,14 @@ function EOM_SVD_calculate_AU(EC)
   mem1 = free_memory()
   U_voX = load3idx(EC, "C_voX")
   #display(UvoX)
-  U_oXv[k,X,c] := U_voX[c,k,X]
-  bU_obXv[k,X,c] := U_voX[c,k,X]
-  bU_vobX[c,k,X] := U_voX[c,k,X]
+  
+  
+  #@buffer buf(lenbuf) begin
+  @mtensor U_oXv[k,X,c] := U_voX[c,k,X]
+  @mtensor bU_obXv[k,X,c] := U_voX[c,k,X]
+  @mtensor bU_vobX[c,k,X] := U_voX[c,k,X]
+  #end
+  
 
   #load decomposed amplitudes
   T_XX = load2idx(EC, "T_XX")
@@ -4064,7 +4069,8 @@ function EOM_SVD_calculate_AU(EC)
   nX = size(T_XX, 1)
   nL = size(ovL, 3)
 
-
+  
+  #@buffer buf(lenbuf) begin
   @mtensor tT2[a,b,i,j] := 2 * T2[a,b,i,j] - T[b,a,i,j]          
   @mtensor Y_voL[b,j,L] := v_ovL[l,d,L] * tT2[d,b,l,j]  
   
@@ -4094,7 +4100,7 @@ function EOM_SVD_calculate_AU(EC)
   @mtensor dx_vv[a,c] -= 0.5 * Y_voL[a,k,L] * v_ovL[k,c,L]
   
   @mtensor dx_oo[k,i] := df_oo[k,i] 
-  @mtensor dx_oo[k,i] += 0.5 Y_voL[c,i,L] * v_ovL[k,c,L]
+  @mtensor dx_oo[k,i] += 0.5 * Y_voL[c,i,L] * v_ovL[k,c,L]
   
   @mtensor bv_L[L] := v_ovL[m,e,L] * U1[e,m]
   @mtensor bv_voL[a,m,L] := dv_voL[a,e,L] * U1[e,m]
@@ -4161,6 +4167,8 @@ function EOM_SVD_calculate_AU(EC)
   @mtensor Q[a,b,i,j] += bv_voX[a,i,X] * A[X,b,j]
 
   @mtensor AU2[a,b,i,j] := Q[a,b,i,j] + Q[b,a,j,i]
+  #end
+  
 
   close(ovLfile)
   close(ooLfile)
