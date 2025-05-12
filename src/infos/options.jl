@@ -222,6 +222,28 @@ end
   ignore_error::Bool = false
 end
 
+"""
+  Options for excited states calculation.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct EomOptions
+  """`⟨1.e-6⟩` convergence threshold. """
+  thr::Float64 = 1.e-6
+  """`⟨1⟩` number of states to calculate. """
+  nstates::Int = 1
+  """`⟨50⟩` maximum number of iterations. """
+  maxit::Int = 50
+  """`⟨0.0⟩` level shift for the Davidson algorithm. """
+  shift::Float64 = 0.0
+  """`⟨"eigenvectors"⟩` main part of filename for start eigenvectors. 
+      For example, the singles eigenvectors for state 2 are read from `start*"_1^2"`. """
+  start::String = "eigenvectors"
+  """`⟨"eigenvectors"⟩` main part of filename to save eigenvectors.
+      For example, the singles eigenvectors for state 2 are saved to `save*"_1^2"`. """
+  save::String = "eigenvectors"
+end
+
 """ 
   Options for DMRG calculation.
 
@@ -291,6 +313,8 @@ end
 @kwdef mutable struct DavidsonOptions
   """`⟨10⟩` maximum number of Davidson vectors per state. """
   maxdav::Int = 10
+  """`⟨true⟩` use overlap in hermitian Davidson. """
+  use_overlap::Bool = true
 end
 
 
@@ -320,6 +344,8 @@ end
   int::IntOptions = IntOptions()
   """ Coupled-Cluster options ([`CcOptions`](@ref)). """
   cc::CcOptions = CcOptions()
+  """ EOM options ([`EomOptions`](@ref)). """
+  eom::EomOptions = EomOptions()
   """ DMRG options ([`DmrgOptions`](@ref)). """
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """

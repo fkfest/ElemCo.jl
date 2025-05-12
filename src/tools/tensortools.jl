@@ -284,29 +284,40 @@ function spincase_from_4spaces(spaces::String)
 end
 
 """ 
-    ints2(EC::ECInfo, spaces::String, spincase = nothing)
+    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
 
-  Return subset of 2e⁻ integrals according to spaces. 
-  
-  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
-  from upper/lower case of spaces specification.
+  Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
+
+  The `sp1`, `sp2`, `sp3`, `sp4` are arrays or ranges of indices.
+  The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given. 
   If the last two indices are stored as triangular - make them full.
+  The result is stored in `out`.
 """
-function ints2(EC::ECInfo, spaces::String, spincase = nothing)
-  if isnothing(spincase)
-    sc = spincase_from_4spaces(spaces)
-  else 
-    sc::Symbol = spincase
+function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+  if EC.fd.uhf && spincase == :αβ
+    @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
+    out .= @view integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
+    return out
   end
-  SP = EC.space
-  if EC.fd.uhf && sc == :αβ 
-    return integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
-  end
-  allint = integ2_ss(EC.fd, sc)
+  allint = integ2_ss(EC.fd, spincase)
   @assert ndims(allint) == 3
   norb = length(EC.space[':'])
   # last two indices as a triangular index, desymmetrize
-  return detri_int2(allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+  return detri_int2!(out, allint, norb, sp1, sp2, sp3, sp4)
+end
+
+""" 
+    ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+
+  Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
+
+  The `sp1`, `sp2`, `sp3`, `sp4` are arrays or ranges of indices.
+  The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given.
+  If the last two indices are stored as triangular - make them full.
+"""
+function ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+  return ints2!(out, EC, sp1, sp2, sp3, sp4, spincase)  
 end
 
 """ 
@@ -314,7 +325,7 @@ end
 
   Return subset of 2e⁻ integrals according to spaces. 
   
-  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
+  The `spincase`∈{`:α`,`:β`,`:αβ`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification.
   If the last two indices are stored as triangular - make them full.
   The result is stored in `out`.
@@ -326,16 +337,26 @@ function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spinc
     sc::Symbol = spincase
   end
   SP = EC.space
-  if EC.fd.uhf && sc == :αβ
-    @assert size(out) == (length(SP[spaces[1]]),length(SP[spaces[2]]),length(SP[spaces[3]]),length(SP[spaces[4]]))
-    out .= @view integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
-    return out
+  return ints2!(out, EC, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]], sc)
+end
+
+""" 
+    ints2(EC::ECInfo, spaces::String, spincase = nothing)
+
+  Return subset of 2e⁻ integrals according to spaces. 
+  
+  The `spincase`∈{`:α`,`:β`,`:αβ`} can explicitly be given, or will be deduced 
+  from upper/lower case of spaces specification.
+  If the last two indices are stored as triangular - make them full.
+"""
+function ints2(EC::ECInfo, spaces::String, spincase = nothing)
+  if isnothing(spincase)
+    sc = spincase_from_4spaces(spaces)
+  else 
+    sc::Symbol = spincase
   end
-  allint = integ2_ss(EC.fd, sc)
-  @assert ndims(allint) == 3
-  norb = length(EC.space[':'])
-  # last two indices as a triangular index, desymmetrize
-  return detri_int2!(out, allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+  SP = EC.space
+  return ints2(EC, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]], sc)
 end
 
 """ 

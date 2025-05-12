@@ -18,6 +18,7 @@ using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
+using ..ElemCo.EOM
 
 export ccdriver, dfccdriver
 
@@ -59,7 +60,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   elseif ecmethod.theory == "DMRG"
     energies = eval_dmrg_groundstate(EC, energies)
     t1 = print_time(EC, t1, "DMRG", 1)
-  else
+  elseif ecmethod.exclevel[2] != :none
     energies = eval_cc_groundstate(EC, ecmethod, energies)
     t1 = print_time(EC, t1, "ground state CC", 1)
   end
@@ -68,6 +69,12 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     calc_lm_cc(EC, ecmethod)
     t1 = print_time(EC, t1, "CC Lagrange multipliers", 1)
   end
+
+  if has_prefix(ecmethod, "EOM")
+    calc_eom(EC, ecmethod)
+    t1 = print_time(EC, t1, "EOM", 1)
+  end
+
   delete_temporary_files!(EC)
   draw_endline()
   # restore occs

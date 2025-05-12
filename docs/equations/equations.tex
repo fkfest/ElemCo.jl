@@ -598,12 +598,16 @@ The closed-shell CCSD and DCSD Lagrangian is given by
 \end{equation}
 The DCSD Lagrangian is obtained by removing terms in red.
 
+$\tilde T^{ij}_{ab}$ are the contravariant amplitudes,
+\begin{equation}
+\tilde T^{ij}_{ab} = 2T^{ij}_{ab} - T^{ij}_{ba}.
+\end{equation}
 Integrals with hats are dressed integrals, i.e. they are obtained by dressing the integrals with the singles amplitudes, 
 and the Fock matrix is internally dressed, too, e.g.,
 \begin{equation}
   \begin{aligned}
 &\hat v_{kl}^{id} = v_{kl}^{id} + v_{kl}^{cd} T^i_c\\
-&\hat v_{al}^{ij} = v_{al}^{ij} - v_{kl}^{ij} T^k_a\\
+&\hat v_{al}^{cd} = v_{al}^{cd} - v_{kl}^{cd} T^k_a\\
 &\hat f_k^c = h_k^c + 2\hat v_{kl}^{cl} - \hat v_{lk}^{cl} = f_k^c + \left(2v_{kl}^{cd} - v_{lk}^{cd}\right)T^l_d.
   \end{aligned}
 \end{equation}
@@ -682,7 +686,6 @@ with respect to the amplitudes and setting the result to zero, i.e.,
 \begin{equation}
 \begin{aligned}
 \frac{\partial \mathcal{L}}{\partial T^{mn}_{ef}}&= \frac{1}{2} \Sop{ef}{mn} \Big[
-  Λ_m^e \hat f_n^f
 \tilde v_{mn}^{ef}
 + Λ_{ij}^{ef} \left(\hat v_{mn}^{ij} \red{+ v_{mn}^{cd} T^{ij}_{cd}}\right) 
 \red{+ Λ_{mn}^{ab} v_{kl}^{ef} T^{kl}_{ab}} + Λ_{mn}^{ab} \hat v_{ab}^{ef} \\
@@ -701,7 +704,7 @@ with respect to the amplitudes and setting the result to zero, i.e.,
 - Λ_{in}^{eb} \Sop{eb}{in}\hat v_{mb}^{if}\\
 &\red{-Λ_{nj}^{fb} \Sop{fb}{nj} v_{ml}^{ce}\left(T^{lj}_{cb}-T^{lj}_{bc}\right)
 -Λ_{in}^{af} \Sop{af}{in}v_{km}^{ed}T^{ki}_{da}}\\
-&\red{+Λ_{in}^{ae} \Sop{ab}{ij}v_{km}^{fd}T^{ki}_{da}}\\
+&\red{+Λ_{in}^{ae} \Sop{ae}{in}v_{km}^{fd}T^{ki}_{da}}\\
 &+ {\mathcal{T}}(mn) \left\{
   Λ_m^e \hat f_n^f 
 + Λ_n^a \hat v_{am}^{fe} - Λ_i^f \hat v_{nm}^{ie} \right\}\Big],
@@ -710,7 +713,13 @@ with respect to the amplitudes and setting the result to zero, i.e.,
 with a ``contravariation'' operator,
 \begin{equation}
 \begin{aligned}
-&\mathcal{T}(mn) X_{mn}^{ef} = 2X_{mn}^{ef} - X_{nm}^{ef}.\\
+&\mathcal{T}(mn) X_{mn}^{ef} = 2X_{mn}^{ef} - X_{nm}^{ef},\\
+\end{aligned}
+\end{equation}
+and
+\begin{equation}
+\begin{aligned}
+  &\tilde v_{mn}^{ef} = 2 v_{mn}^{ef} - v_{nm}^{ef}.
 \end{aligned}
 \end{equation}
 

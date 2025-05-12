@@ -48,9 +48,6 @@ mutable struct ECMethod
     ipos = 1
     # check for prefix
     prefix, ipos = check_specs(Mname, ipos, Prefix4Methods)
-    if "EOM" ∈ prefix
-      error("EOM methods not implemented!")
-    end
     # if pure PT: all excitation levels are perturbative, otherwise only the highest
     pure_PT = false
     if substr(Mname, ipos, 2) == "CC"
