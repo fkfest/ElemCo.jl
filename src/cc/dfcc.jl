@@ -1320,7 +1320,7 @@ function calc_eom_svd_au(EC::ECInfo)
   @mtensor AU2[a,b,i,j] := Q[a,b,i,j] + Q[b,a,j,i]
   #end
   
-
+  close(voLfile)
   close(ovLfile)
   close(ooLfile)
   close(vvLfile)

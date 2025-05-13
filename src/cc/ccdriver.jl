@@ -120,6 +120,7 @@ function dfccdriver(EC::ECInfo, method)
       calc_svd_eom(EC, ecmethod)
       t1 = print_time(EC, t1, "SVD", 1)
     else
+      #error("Test3")
       calc_df_eom(EC, ecmethod)
       t1 = print_time(EC, t1, "DF-EOM", 1)      
     end
