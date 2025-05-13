@@ -12,6 +12,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
 using ..ElemCo.DavidsonSolver
+using ..ElemCo.CoupledCluster
 using ..ElemCo.CCTools
 using ..ElemCo.OrbTools
 using ..ElemCo.Outputs
@@ -25,14 +26,18 @@ function calc_eom(EC::ECInfo, method::ECMethod)
   print_info(method_name(method))
 
   highest_full_exc = max_full_exc(method)
-  if highest_full_exc > 1
-    error("only implemented upto singles")
+  if highest_full_exc > 2
+    error("only implemented upto doubles")
   end
   if is_unrestricted(method) || has_prefix(method, "R")
     error("open-shell not implemented")
   end
-
-  energies = eom_iterations(EC, method)
+  if highest_full_exc == 2
+    energies = eom_iterations(EC, ECMethod("EOM-CCS"))
+    energies = eom_iterations2(EC, method)
+  else
+    energies = eom_iterations(EC, method)
+  end
 
 end
 
@@ -88,6 +93,97 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
     end
     states = states2do
   end
+  # store the final eigenvectors
+  excitation_level = 1
+  mainfilename, descr = save_or_start_file(EC, "X", excitation_level)
+  if mainfilename != ""
+    for st in 1:nstates
+      filename = mainfilename*"_$excitation_level"*"^$st"
+      println("Saving $descr for state $st to $filename")
+      get_eigenvector!(dav, (U1,), st)
+      save!(EC, filename, U1, description=descr)
+    end
+  end
+  return energies
+end
+
+function eom_iterations2(EC::ECInfo, method::ECMethod)
+  t0 = time_ns()
+  dc = (method.theory[1:2] == "DC")
+  calc_intermediates4Jacobian(EC, method)
+  nstates = EC.options.eom.nstates
+  dav = Davidson(EC, nstates; hermitian=false)
+  # first guess for U1 from CIS
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  states = [1:nstates;]
+  energies = zeros(nstates)
+  U1 = zeros(nvirt, nocc)
+  U2 = zeros(nvirt, nvirt, nocc, nocc)
+  Vecs = (U1, U2)
+  # load the CIS eigenvectors
+  excitation_level = 1
+  mainfilename, descr = save_or_start_file(EC, "X", excitation_level, false)
+  if mainfilename != ""
+    for st in 1:nstates
+      filename = mainfilename*"_$excitation_level"*"^$st"
+      if file_exists(EC, filename)
+        println("Reading $descr from file $filename")
+        load!(EC, filename, U1)
+        add_trial_vector!(dav, Vecs, st)
+      else
+        error("File $filename not found, cannot read CIS eigenvector")
+      end
+    end
+  else
+    error("No file found for CIS eigenvectors")
+  end
+  println("Iter    Energy    Res       Time")
+  for it in 1:EC.options.eom.maxit
+    t1 = time_ns()
+    for st in states
+      get_current_trial_vector!(dav, Vecs, st)
+      V1, V2 = calc_ccsd_vector_times_Jacobian(EC, Vecs...; dc=dc, with_rhs=false)
+      add_product_vector!(dav, (V1,V2), st)
+    end
+    energies = perform!(dav)
+    states2do = Int[]
+    maxNormR = 0.0
+    for st in 1:nstates
+      get_residual!(dav, Vecs, st)
+      NormR1 = calc_singles_norm(Vecs[1])
+      NormR2 = calc_doubles_norm(Vecs[2])
+      NormR = NormR1 + NormR2
+      maxNormR = max(maxNormR, NormR)
+      converged = NormR < EC.options.eom.thr
+      output_state(st, NormR, energies[st]; converged=converged)
+      if !converged
+        new_trial_vector!(EC, Vecs, energies[st])
+        add_trial_vector!(dav, Vecs, st)
+        push!(states2do, st)
+      end
+    end
+    output_iteration(it, maxNormR, time_ns() - t0, energies...)
+    if isempty(states2do)
+      println("Converged")
+      break
+    end
+    states = states2do
+  end
+  # store the final eigenvectors
+  excitation_level = 1
+  mainfilename, descr = save_or_start_file(EC, "X", 1)
+  if mainfilename != ""
+    for st in 1:nstates
+      get_eigenvector!(dav, Vecs, st)
+      for excitation_level in 1:2
+        mainfilename, descr = save_or_start_file(EC, "X", excitation_level)
+        filename = mainfilename*"_$excitation_level"*"^$st"
+        println("Saving $descr for state $st to $filename")
+        save!(EC, filename, Vecs[excitation_level], description=descr)
+      end
+    end
+  end
   return energies
 end
 
@@ -120,6 +216,59 @@ function cis_homo_lumo_guess(EC, nstates)
   HH .-= permutedims(int2, (1,4,3,2))
   vals, vecs = eigen(Hermitian(reshape(HH, (nva*noa, nva*noa))))
   return vals[1:nstates], reshape(vecs[:,1:nstates], (nva, noa, nstates))
+end
+
+"""
+    new_trial_vector!(EC, vecs, omega)
+
+  Calculate new trial vector using residuals from `vecs`. 
+
+  Updates the vector in place.
+"""
+function new_trial_vector!(EC, vecs, omega)
+  ϵo, ϵv = orbital_energies(EC)
+  shift = EC.options.eom.shift
+  new_singles_trial!(vecs[1], ϵo, ϵv, omega, shift)
+  NormU = calc_singles_norm(vecs[1])
+  if length(vecs) > 1
+    new_doubles_trial!(vecs[2], ϵo, ϵv, omega, shift)
+    NormU += calc_doubles_norm(vecs[2])
+  end
+  for i in eachindex(vecs)
+    vecs[i] ./= sqrt(NormU)
+  end
+end
+
+"""
+    new_singles_trial!(Vec1, ϵo, ϵv, omega, shift)
+
+  Calculate new singles trial vector.
+
+  Updates the vector in place.
+"""
+function new_singles_trial!(Vec1, ϵo, ϵv, omega, shift)
+  omega -= shift
+  for I ∈ CartesianIndices(Vec1)
+    a,i = Tuple(I)
+    Vec1[I] /= -(ϵv[a] - ϵo[i] - omega)
+  end
+  return Vec1
+end
+
+"""
+    new_doubles_trial!(Vec2, ϵo, ϵv, omega, shift)
+
+  Calculate new doubles trial vector.
+
+  Updates the vector in place.
+"""
+function new_doubles_trial!(Vec2, ϵo, ϵv, omega, shift)
+  omega -= shift
+  for I ∈ CartesianIndices(Vec2)
+    a,b,i,j = Tuple(I)
+    Vec2[I] /= -(ϵv[a] + ϵv[b] - ϵo[i] - ϵo[j] - omega)
+  end
+  return Vec2
 end
 
 """

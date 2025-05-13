@@ -1,12 +1,15 @@
 # This file contains the functions for the Lagrange multiplier method for the
 # coupled cluster equations.
 """
-    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
+    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=true)
 
 Calculate the vector times the Jacobian for the closed-shell CCSD or DCSD
 equations.
+
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
+Return R1, R2
 """
-function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
+function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=true)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -23,13 +26,21 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false)
   fov = fock[SP['o'],SP['v']]
   dfov = dfock[SP['o'],SP['v']]
   if length(U1) > 0
-    @mtensor R1[e,m] := 2.0 * fov[m,e]
+    if with_rhs
+      @mtensor R1[e,m] := 2.0 * fov[m,e]
+    else
+      R1 = zero(U1)
+    end
   else
     R1 = U1
   end
 
   oovv = ints2(EC,"oovv")
-  @mtensor R2[e,f,m,n] := 2.0 * oovv[m,n,e,f] - oovv[n,m,e,f]
+  if with_rhs
+    @mtensor R2[e,f,m,n] := 2.0 * oovv[m,n,e,f] - oovv[n,m,e,f]
+  else
+    R2 = zero(U2)
+  end
   int2 = load4idx(EC, "d_oooo")
   if !dc
     @mtensor int2[m,n,i,j] += oovv[m,n,c,d] * T2[c,d,i,j]
@@ -1152,6 +1163,38 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
   end
 end
 
+"""
+    calc_intermediates4Jacobian(EC::ECInfo, method::ECMethod)
+
+  Calculate intermediates required in [`calc_ccsd_vector_times_Jacobian`](@ref)
+  for the closed-shell CCSD or DCSD equations.
+"""
+function calc_intermediates4Jacobian(EC::ECInfo, method::ECMethod)
+  dc = (method.theory[1:2] == "DC")
+  if is_unrestricted(method) || has_prefix(method, "R")
+    T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
+    T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
+    calc_dressed_ints(EC, T1a, T1b; calc_d_vovv=true)
+    T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
+    T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
+    T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    calc_vT2_intermediates(EC, T2a, T2b, T2ab; dc=dc)
+  else
+    T1 = read_starting_guess4amplitudes(EC, Val(1))
+    calc_dressed_ints(EC, T1; calc_d_vovv=true)
+    T2 = read_starting_guess4amplitudes(EC, Val(2))
+    calc_vT2_intermediates(EC, T2; dc=dc)
+  end
+end
+
+"""
+    lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
+
+  Perform the CCSD or UCCSD iterations using Lagrange multipliers.
+
+  `LMs1` are the Lagrange multipliers for the singles equations,
+  `LMs2` are the Lagrange multipliers for the doubles equations.
+"""
 function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC" || last(method.theory,2) == "DC")
   if is_unrestricted(method) || has_prefix(method, "R")

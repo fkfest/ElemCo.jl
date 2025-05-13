@@ -75,6 +75,7 @@ using ..ElemCo.CCTools
 export calc_MP2, calc_UMP2, calc_UMP2_energy 
 export calc_cc, calc_pertT
 export calc_lm_cc, calc_1RDM
+export calc_ccsd_vector_times_Jacobian, calc_intermediates4Jacobian
 
 include("cc_triples.jl")
 

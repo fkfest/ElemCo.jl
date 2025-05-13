@@ -728,6 +728,9 @@ function save_or_start_file(EC::ECInfo, type, excitation_level, save=true)
   elseif type == "LM"
     descr *= " Lagrange multipliers"
     mainfilename = save ? EC.options.cc.save_lm : EC.options.cc.start_lm
+  elseif type == "X"
+    descr *= " eigenvectors"
+    mainfilename = save ? EC.options.eom.save : EC.options.eom.start
   else
     error("unknown type $type")
   end
