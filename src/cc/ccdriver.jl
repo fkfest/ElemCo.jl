@@ -112,6 +112,8 @@ function dfccdriver(EC::ECInfo, method)
     #error("Test")
     if has_prefix(ecmethod, "SVD") 
       #error("Test2")
+      save_bool = EC.options.cc.use_full_t2
+      EC.options.cc.use_full_t2 = true
       groundstate_method_name = "SVD-DCSD"
       #println(string(groundstate_method_name) * " START ************************************************")
       ECC = calc_svd_dc(EC, ecmethod)
@@ -119,7 +121,8 @@ function dfccdriver(EC::ECInfo, method)
       println(string(groundstate_method_name) * " END **************************************************")
       calc_svd_eom(EC, ecmethod)
       t1 = print_time(EC, t1, "SVD", 1)
-    else
+      EC.options.cc.use_full_t2 = save_bool
+  else
       #error("Test3")
       calc_df_eom(EC, ecmethod)
       t1 = print_time(EC, t1, "DF-EOM", 1)      

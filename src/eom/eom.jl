@@ -16,11 +16,15 @@ using ..ElemCo.CoupledCluster
 using ..ElemCo.CCTools
 using ..ElemCo.OrbTools
 using ..ElemCo.Outputs
+using ..ElemCo.DecompTools
 
 export calc_eom
 export calc_df_eom
+export calc_svd_eom
 
 include("cis.jl")
+include("cis(d).jl")
+include("svd_dcsd.jl")
 
 function calc_eom(EC::ECInfo, method::ECMethod)
   t0 = time_ns()
@@ -351,6 +355,9 @@ function df_eom_iterations(EC::ECInfo, method::ECMethod)
         add_trial_vector!(dav, (U1,), st)
         push!(states2do, st)
       end
+      #println(string(st) * "U1")
+      #save!(EC, string(st) * "U1", U1)
+      #display(U1)
     end
     output_iteration(it, maxNormR, time_ns() - t0, energies...)
     if isempty(states2do)
@@ -359,6 +366,18 @@ function df_eom_iterations(EC::ECInfo, method::ECMethod)
     end
     states = states2do
   end
+  # store the final eigenvectors
+  excitation_level = 1
+  mainfilename, descr = save_or_start_file(EC, "X", excitation_level)
+  if mainfilename != ""
+    for st in 1:nstates
+      filename = mainfilename*"_$excitation_level"*"^$st"
+      println("Saving $descr for state $st to $filename")
+      get_eigenvector!(dav, (U1,), st)
+      save!(EC, filename, U1, description=descr)
+    end
+  end
+  #save!(EC, "U1", U1)
   return energies
 end
 
