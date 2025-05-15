@@ -6,11 +6,13 @@ module DavidsonSolver
 using LinearAlgebra
 using ..ElemCo.MIO
 using ..ElemCo.ECInfos
+using ..ElemCo.TensorTools
 
 export Davidson, perform!
 
 export add_trial_vector!, get_current_trial_vector!, add_product_vector!
 export get_residual!, get_eigenvector, get_eigenvector!
+export refresh!, do_refresh
 #export get_left_eigenvector
 
 """
@@ -172,19 +174,54 @@ function combine!(dav::Davidson, outvec, vecfiles, coeffs)
 end
 
 """
-    update_Heff!(dav::Davidson, prods)
+    custom_dot(customdots, tens, vecs, state=0)
+
+  Compute dot product of vectors
+  using custom dot-product functions `customdots::Tuple`.
+
+  `customdots` is a `Tuple` of custom dot-product functions for each tensor in the product
+  vector of the form `f(tvec, prod, state)` or `f(tvec, prod)` for `state=0`.
+  If `customdots` is empty, the standard dot product is used.
+  `vecs` are reshaped to the shape of tensors `tens`.
+"""
+function custom_dot(customdots, tens, vecs, state=0)
+  if length(customdots) == 0
+    return vecs ⋅ tens
+  end
+  @assert length(tens) == length(customdots)
+  @assert length(tens) == length(vecs)
+  dot::Float64 = 0.0
+  for i in eachindex(tens)
+    if state > 0
+      dot += dispatch(customdots[i], tens[i], vecs[i], state)
+    else
+      dot += dispatch(customdots[i], tens[i], vecs[i])
+    end
+  end
+  return dot
+end
+
+dispatch(f::Function, v::Vector, t, state) = f(reshape(v, size(t)), t, state)::Float64
+dispatch(f::Function, v::Vector, t) = f(reshape(v, size(t)), t)::Float64
+dispatch(f::Function, t, v, state) = f(t, reshape(v, size(t)), state)::Float64
+dispatch(f::Function, t, v) = f(t, reshape(v, size(t)))::Float64
+
+"""
+    update_Heff!(dav::Davidson, prods, state, customdots=())
 
   Update effective Hamiltonian matrix.
 
   `prods` are product vectors (for one state) 
   for the current iteration of Davidson algorithm
   (stored at dav.nDim+1 position).
+  `customdots` is a `Tuple` of custom dot-product functions for each tensor in the product
+  vector of the form `f(tvec, prod, state)` or `f(tvec, prod)` for `state=0`.
 """
-function update_Heff!(dav::Davidson, prods)
+function update_Heff!(dav::Davidson, prods, state, customdots=())
   ipos = dav.nDim + 1
   for i in 1:dav.nDimTrial
     vec = loadtvecs(dav, i)
-    res = vec ⋅ prods 
+    res = custom_dot(customdots, vec, prods, state)
     dav.hmat[i,ipos] = res
     if dav.hermitian
       dav.hmat[ipos,i] = res
@@ -193,7 +230,7 @@ function update_Heff!(dav::Davidson, prods)
 end
 
 """
-    update_Heff_dagger!(dav::Davidson, tvecs)
+    update_Heff_dagger!(dav::Davidson, tvecs, state, customdots=())
 
   Update effective Hamiltonian matrix 
   (transpose, for non-hermitian problems).
@@ -201,56 +238,62 @@ end
   `tvecs` are trial vectors (for one state)
   for the current iteration of Davidson algorithm
   (stored at dav.nDimTrial+1 position).
+  `customdots` is a `Tuple` of custom dot-product functions for each tensor in the product
+  and trial vector of the form `f(tvec, prod, state)` or `f(tvec, prod)` for `state=0`.
 """
-function update_Heff_dagger!(dav::Davidson, tvecs)
+function update_Heff_dagger!(dav::Davidson, tvecs, state, customdots=())
   ipos = dav.nDimTrial + 1
   for i in 1:dav.nDim
     prods = loadprods(dav, i)
-    res = tvecs ⋅ prods 
+    res = custom_dot(customdots, tvecs, prods, state)
     dav.hmat[ipos,i] = res
   end
 end
 
 """
-    update_Seff!(dav::Davidson, tvecs, state=1)
+    update_Seff!(dav::Davidson, tvecs, state, customdots=())
 
   Update effective overlap matrix.
 
   `tvecs` are trial vectors (for one state) 
   for the current iteration of Davidson algorithm (stored at dav.nDimTrial+1 position).
+  `customdots` is a `Tuple` of custom dot-product functions for each tensor in the
+  trial vector of the form `f(tvec, prod, state)` or `f(tvec, prod)` for `state=0`.
 """
-function update_Seff!(dav::Davidson, tvecs, state=1)
+function update_Seff!(dav::Davidson, tvecs, state, customdots=())
   ipos = dav.nDimTrial + 1
   for i in 1:dav.nDimTrial
     vec = loadtvecs(dav, i)
-    res = vec ⋅ tvecs
+    res = custom_dot(customdots, tvecs, vec, state)
     dav.smat[i,ipos] = res
     dav.smat[ipos,i] = res
   end
-  thisDot = tvecs ⋅ tvecs
+  thisDot = custom_dot(customdots, tvecs, tvecs, state)
   dav.smat[ipos,ipos] = thisDot 
   return thisDot
 end
 
 """
-    add_trial_vector!(dav::Davidson, tvecs, state=1)
+    add_trial_vector!(dav::Davidson, tvecs, state=1, customdots=())
 
   Add a trial vector for `state` to Davidson object and update effective overlap
   and Hamiltonian matrix.
 
   Note: the trial vector will be normalized and either orthogonalized to the existing trial vectors,
   or the effective overlap matrix will be updated (in non-hermitian case).
+  `customdots` is a `Tuple` of custom dot-product functions for each tensor in the trial vector
+  of the form `f(tvec, prod, state)` or `f(tvec, prod)` for `state=0`.
 """
-function add_trial_vector!(dav::Davidson, tvecs, state=1)
+function add_trial_vector!(dav::Davidson, tvecs, state=0, customdots=())
   @assert dav.nDimTrial < dav.maxdav*dav.nstates "Davidson: maximum number of trial vectors reached, but no restart done"
-  dav_normalize!(tvecs)
+  dav_normalize!(tvecs, state, customdots)
   if use_overlap(dav)
-    update_Seff!(dav, tvecs, state)
+    update_Seff!(dav, tvecs, state, customdots)
   else
-    orthogonalize!(dav, tvecs, state)
+    orthogonalize!(dav, tvecs, state, customdots)
   end
   if !dav.hermitian
-    update_Heff_dagger!(dav, tvecs)
+    update_Heff_dagger!(dav, tvecs, state, customdots)
   end
   dav.nDimTrial += 1
   savetvecs(dav, tvecs, state)
@@ -278,13 +321,16 @@ function get_current_trial_vector!(dav::Davidson, tvecs, state=-1)
 end
 
 """
-    add_product_vector!(dav::Davidson, prods, state=0)
+    add_product_vector!(dav::Davidson, prods, state=0, customdots=())
   
   Add a product vector for `state` to Davidson object and update effective Hamiltonian matrix.
+
+  `customdots()` is a `Tuple` of custom dot-product functions for each tensor in the product 
+  vector of the form `f(tvec, prod, state)` or `f(tvec, prod)` for `state=0`.
 """
-function add_product_vector!(dav::Davidson, prods, state=0)
+function add_product_vector!(dav::Davidson, prods, state=0, customdots=())
   @assert dav.nDim < dav.maxdav*dav.nstates "Davidson: maximum number of product vectors reached, but no restart done"
-  update_Heff!(dav, prods)
+  update_Heff!(dav, prods, state, customdots)
   dav.nDim += 1
   if state > 0
     @assert dav.states[dav.nDim] == state "Davidson: mismatch of product vector for state $state"
@@ -316,16 +362,39 @@ function perform!(dav::Davidson)
     # println("Norm of eigenvector $st: ", norm(eigvec))
     saveeigvecs(dav, eigvec, st)
   end
-  if dav.nDim + dav.nstates > dav.maxdav*dav.nstates
-    # restart
-    println("Davidson: maximum number of trial vectors reached, restarting")
-    dav.nDim = dav.nDimTrial = 0
-    for st in 1:dav.nstates
-      evec = get_eigenvector(dav, st)
-      add_trial_vector!(dav, evec, st)
-    end
-  end
   return vals[1:dav.nstates]
+end
+
+"""
+    do_refresh(dav::Davidson, nstates=dav.nstates)
+
+  Check if Davidson object needs to be refreshed.
+
+  The Davidson object needs to be refreshed if the total number of trial vectors
+  after the new iteration will exceed the maximum number of trial vectors
+  times the number of states.
+"""
+function do_refresh(dav::Davidson, nstates)
+  return dav.nDim + nstates > dav.maxdav*dav.nstates
+end
+
+"""
+    refresh!(dav::Davidson, evec, custom_dots=())
+
+  Refresh Davidson object by resetting the effective Hamiltonian and overlap matrices
+  and adding the eigenvectors as trial vectors.
+"""
+function refresh!(dav::Davidson, evec, custom_dots=())
+  println("Davidson: refresh")
+  dav.nDim = dav.nDimTrial = 0
+  dav.hmat .= 0.0
+  if use_overlap(dav)
+    dav.smat .= 0.0
+  end
+  for st in 1:dav.nstates
+    get_eigenvector!(dav, evec, st)
+    add_trial_vector!(dav, evec, st, custom_dots)
+  end
 end
 
 """
@@ -356,6 +425,14 @@ function get_eigenvector!(dav::Davidson, vecs, state)
   return vecs
 end
 
+"""
+    get_residual!(dav::Davidson, vecs, state)
+
+  Calculate residual for `state` and store it in `vecs`.
+
+  The residual is calculated as `res = H * eigvec - eigval * eigvec`.
+  The eigenvector is loaded from the corresponding file.
+"""
 function get_residual!(dav::Davidson, vecs, state)
   # calculate residual
   combine!(dav, vecs, dav.prodfiles, dav.eigvecs[:,state])
@@ -379,34 +456,36 @@ function diagonalize(dav::Davidson)
   else
     vals, vecs = eigen(Hermitian(dav.hmat[1:dav.nDim,1:dav.nDim]))
   end
+  # make sure the eigenvalues are real 
+  vecs, vals = rotate_eigenvectors_to_real(vecs, vals)
   dav.eigvals[1:dav.nstates] = vals[1:dav.nstates]
   dav.eigvecs[1:dav.nDim,1:dav.nstates] = vecs[:,1:dav.nstates]
   return vals, vecs
 end
 
 """
-    orthogonalize!(dav::Davidson, vecs, state=1)
+    orthogonalize!(dav::Davidson, vecs, state, customdots=())
 
   Orthogonalize vectors to trial vectors.
 """
-function orthogonalize!(dav::Davidson, vecs, state=1)
+function orthogonalize!(dav::Davidson, vecs, state, customdots=())
   for i in 1:dav.nDim
     vec = loadtvecs(dav, i)
-    overlap = vecs ⋅ vec
+    overlap = custom_dot(customdots, vecs, vec, state)
     for j in eachindex(vecs)
       vecs[j][:] .-= overlap * vec[j]
     end
   end
-  dav_normalize!(vecs)
+  dav_normalize!(vecs, state, customdots)
 end
 
 """
-    dav_normalize!(vecs)
+    dav_normalize!(vecs, state, customdots)
 
   Normalize vectors.
 """
-function dav_normalize!(vecs)
-  vnorm = norm(vecs)
+function dav_normalize!(vecs, state, customdots)
+  vnorm = sqrt(custom_dot(customdots, vecs, vecs, state))
   for i in eachindex(vecs)
     vecs[i] ./= vnorm
   end

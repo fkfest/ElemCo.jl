@@ -50,7 +50,7 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
   t0 = time_ns()
   nstates = EC.options.eom.nstates
   shift = EC.options.eom.shift
-  dav = Davidson(EC, nstates; hermitian=false)
+  dav = Davidson(EC, nstates; hermitian=true)
   # first guess for U1
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
@@ -58,6 +58,8 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
   energies = zeros(nstates)
   U1 = zeros(nvirt, nocc)
   V1 = zeros(nvirt, nocc)
+  Vecs = (U1,)
+  custom_dots = (calc_cs_singles_dot,)
   # HOMO-LUMO guess
   en_guess, vec_guess = cis_homo_lumo_guess(EC, nstates)
   nv_guess = size(vec_guess, 1)
@@ -65,7 +67,7 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
   for st in states
     U1 .= 0.0
     U1[1:nv_guess,end-no_guess+1:end] = vec_guess[:,:,st]
-    add_trial_vector!(dav, (U1,), st)
+    add_trial_vector!(dav, (U1,), st, custom_dots)
   end
   println("Iter    Energy    Res       Time")
   for it in 1:EC.options.eom.maxit
@@ -73,7 +75,7 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
     for st in states
       get_current_trial_vector!(dav, (U1,), st)
       V1 .= cis_HU1(EC, U1)
-      add_product_vector!(dav, (V1,), st)
+      add_product_vector!(dav, (V1,), st, custom_dots)
     end
     energies = perform!(dav)
     states2do = Int[]
@@ -87,7 +89,7 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
       output_state(st, NormR, energies[st]; converged=converged)
       if !converged
         U1 .= new_singles_trial(EC, V1, energies[st], shift)
-        add_trial_vector!(dav, (U1,), st)
+        add_trial_vector!(dav, (U1,), st, custom_dots)
         push!(states2do, st)
       end
     end
@@ -126,6 +128,8 @@ function eom_iterations2(EC::ECInfo, method::ECMethod)
   U1 = zeros(nvirt, nocc)
   U2 = zeros(nvirt, nvirt, nocc, nocc)
   Vecs = (U1, U2)
+  custom_dots = (calc_cs_singles_dot, calc_cs_doubles_dot)
+  # custom_dots = (calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot)
   # load the CIS eigenvectors
   excitation_level = 1
   mainfilename, descr = save_or_start_file(EC, "X", excitation_level, false)
@@ -135,7 +139,7 @@ function eom_iterations2(EC::ECInfo, method::ECMethod)
       if file_exists(EC, filename)
         println("Reading $descr from file $filename")
         load!(EC, filename, U1)
-        add_trial_vector!(dav, Vecs, st)
+        add_trial_vector!(dav, Vecs, st, custom_dots)
       else
         error("File $filename not found, cannot read CIS eigenvector")
       end
@@ -149,9 +153,15 @@ function eom_iterations2(EC::ECInfo, method::ECMethod)
     for st in states
       get_current_trial_vector!(dav, Vecs, st)
       V1, V2 = calc_ccsd_vector_times_Jacobian(EC, Vecs...; dc=dc, with_rhs=false)
-      add_product_vector!(dav, (V1,V2), st)
+      add_product_vector!(dav, (V1,V2), st, custom_dots)
     end
     energies = perform!(dav)
+    if do_refresh(dav, length(states))
+      refresh!(dav, Vecs, custom_dots)
+      output_iteration(it, -1.0, time_ns() - t0, energies...)
+      states = [1:nstates;]
+      continue
+    end
     states2do = Int[]
     maxNormR = 0.0
     for st in 1:nstates
@@ -164,7 +174,7 @@ function eom_iterations2(EC::ECInfo, method::ECMethod)
       output_state(st, NormR, energies[st]; converged=converged)
       if !converged
         new_trial_vector!(EC, Vecs, energies[st])
-        add_trial_vector!(dav, Vecs, st)
+        add_trial_vector!(dav, Vecs, st, custom_dots)
         push!(states2do, st)
       end
     end

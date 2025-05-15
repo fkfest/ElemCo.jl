@@ -25,6 +25,7 @@ export clean_cs_triples!
 export calc_cs_singles_dot, calc_u_singles_dot
 export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
 export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
+export calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot
 export triples_4ext!
 
 """ 
@@ -446,28 +447,39 @@ function calc_contra_singles_norm(T1a, T1b)
 end
 
 """
-    calc_cs_singles_dot(T1, T1_)
+    calc_cs_singles_dot(T1, T1_, state=0)
 
   Calculate dot product of closed-shell singles amplitudes.
 """
-function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
+function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
   @mtensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
   return DotT1::Float64
 end
-calc_cs_singles_dot(T1, T1_) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
+calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
 
 """
-    calc_u_singles_dot(T1, T1_)
+    calc_contra_cs_singles_dot(T1, T1_, state=0)
+
+  Calculate dot product of contravariant closed-shell singles amplitudes.
+"""
+function calc_contra_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
+  @mtensor DotT1 = 0.5*T1[a,i]*T1_[a,i]
+  return DotT1::Float64
+end
+calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot: T1 and T1_ must be matrices!")
+
+"""
+    calc_u_singles_dot(T1, T1_, state=0)
 
   Calculate dot of unrestricted singles amplitudes.
 """
-function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
+function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
   @mtensor begin
     DotT1 = T1[a,i]*T1_[a,i]
   end
   return DotT1::Float64
 end
-calc_u_singles_dot(T1, T1_) = error("calc_u_singles_dot: T1 and T1_ must be matrices!")
+calc_u_singles_dot(T1, T1_, state=0) = error("calc_u_singles_dot: T1 and T1_ must be matrices!")
 
 """
     calc_doubles_norm(T2)
@@ -508,37 +520,48 @@ end
 
   Calculate dot of closed-shell doubles amplitudes.
 """
-function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
   @mtensor DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
   return DotT2::Float64
 end
-calc_cs_doubles_dot(T2, T2_) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
+calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
+
+"""
+    calc_contra_cs_doubles_dot(T2, T2_)
+
+  Calculate dot of contravariant closed-shell doubles amplitudes.
+"""
+function calc_contra_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+  @mtensor DotT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2_[a,b,i,j]
+  return (DotT2/3.0)::Float64
+end
+calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
 
 """
     calc_samespin_doubles_dot(T2, T2_)
 
   Calculate dot of unrestricted same-spin doubles amplitudes.
 """
-function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
   @mtensor begin
     DotT2 = 0.25*(T2[a,b,i,j]*T2_[a,b,i,j])
   end
   return DotT2::Float64
 end
-calc_samespin_doubles_dot(T2, T2_) = error("calc_samespin_doubles_dot: T2 and T2_ must be 4D arrays!")
+calc_samespin_doubles_dot(T2, T2_, state=0) = error("calc_samespin_doubles_dot: T2 and T2_ must be 4D arrays!")
 
 """
     calc_ab_doubles_dot(T2, T2_)
 
   Calculate dot of unrestricted αβ doubles amplitudes.
 """
-function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
   @mtensor begin
     DotT2 = T2[a,b,i,j]*T2_[a,b,i,j]
   end
   return DotT2::Float64
 end
-calc_ab_doubles_dot(T2, T2_) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D arrays!")
+calc_ab_doubles_dot(T2, T2_, state=0) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D arrays!")
 
 """
     calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
