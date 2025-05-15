@@ -15,7 +15,8 @@ function calc_R2_df_cis_pert_d(EC::ECInfo, U1)
 
   @mtensor A[a,i,L] := dv_vvL[a,e,L] * U1[e,i]
   @mtensor A[a,i,L] -= dv_ooL[m,i,L] * U1[a,m]
-  @mtensor R2[a,b,i,j] := A[a,i,L] * dv_voL[b,j,L]
+  @mtensor B[a,b,i,j] := A[a,i,L] * dv_voL[b,j,L]
+  @mtensor R2[a,b,i,j] := B[a,b,i,j] + B[b,a,j,i]
   t1 = print_time(EC, t1, "df_cis_pert_d: residuals", 3)
 
   close(voLfile)
