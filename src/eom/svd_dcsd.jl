@@ -61,7 +61,8 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
         #  save!(EC, filename, U2, description=descr) 
         #end       
  
-        UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol)) 
+        UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(1.e-32)) 
+        #UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol)) 
         #display(UaiX) 
         save!(EC, "C_voX^$st", UaiX)        
 
@@ -286,7 +287,7 @@ function calc_eom_svd_au(EC::ECInfo,U1, U2, st)
   @mtensor AU1[a,i] -= Y_voL[a,j,L] * bv_ooL[j,i,L]
   @mtensor AU1[a,i] += dfov[m,e] * tU2[a,e,i,m] 
   @mtensor AU1[a,i] += dv_vvL[a,f,L] * tY_voL[f,i,L] 
-  @mtensor AU1[a,i] += dv_ooL[n,i,L] * tY_voL[a,n,L] 
+  @mtensor AU1[a,i] -= dv_ooL[n,i,L] * tY_voL[a,n,L] 
   
   @mtensor A[a,i,L] := dv_vvL[a,e,L] * U1[e,i]
   @mtensor A[a,i,L] -= dv_ooL[m,i,L] * U1[a,m]
