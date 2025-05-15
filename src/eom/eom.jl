@@ -78,6 +78,12 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
       add_product_vector!(dav, (V1,), st, custom_dots)
     end
     energies = perform!(dav)
+    if do_refresh(dav, length(states))
+      refresh!(dav, Vecs, custom_dots)
+      output_iteration(it, -1.0, time_ns() - t0, energies...)
+      states = [1:nstates;]
+      continue
+    end
     states2do = Int[]
     maxNormR = 0.0
     for st in 1:nstates
@@ -333,6 +339,8 @@ function df_eom_iterations(EC::ECInfo, method::ECMethod)
   energies = zeros(nstates)
   U1 = zeros(nvirt, nocc)
   V1 = zeros(nvirt, nocc)
+  Vecs = (U1,)
+  custom_dots = (calc_cs_singles_dot,)
   # HOMO-LUMO guess
   en_guess, vec_guess = df_cis_homo_lumo_guess(EC, nstates)
   nv_guess = size(vec_guess, 1)
@@ -340,17 +348,23 @@ function df_eom_iterations(EC::ECInfo, method::ECMethod)
   for st in states
     U1 .= 0.0
     U1[1:nv_guess,end-no_guess+1:end] = vec_guess[:,:,st]
-    add_trial_vector!(dav, (U1,), st)
+    add_trial_vector!(dav, Vecs, st, custom_dots)
   end
   println("Iter    Energy    Res       Time")
   for it in 1:EC.options.eom.maxit
     t1 = time_ns()
     for st in states
-      get_current_trial_vector!(dav, (U1,), st)
+      get_current_trial_vector!(dav, Vecs, st)
       V1 .= df_cis_HU1(EC, U1)
-      add_product_vector!(dav, (V1,), st)
+      add_product_vector!(dav, (V1,), st, custom_dots)
     end
     energies = perform!(dav)
+    if do_refresh(dav, length(states))
+      refresh!(dav, Vecs, custom_dots)
+      output_iteration(it, -1.0, time_ns() - t0, energies...)
+      states = [1:nstates;]
+      continue
+    end
     states2do = Int[]
     maxNormR = 0.0
     for st in 1:nstates
@@ -362,7 +376,7 @@ function df_eom_iterations(EC::ECInfo, method::ECMethod)
       output_state(st, NormR, energies[st]; converged=converged)
       if !converged
         U1 .= df_new_singles_trial(EC, V1, energies[st], shift)
-        add_trial_vector!(dav, (U1,), st)
+        add_trial_vector!(dav, Vecs, st, custom_dots)
         push!(states2do, st)
       end
       #println(string(st) * "U1")

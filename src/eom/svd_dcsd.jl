@@ -32,6 +32,7 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
   U1 = zeros(nvirt, nocc)
   U2 = zeros(nvirt, nvirt, nocc, nocc)
   Vecs = (U1, U2)
+  custom_dots = (calc_cs_singles_dot, calc_cs_doubles_dot)
 # load the CIS eigenvectors
   excitation_level = 1
   mainfilename, descr = save_or_start_file(EC, "X", excitation_level, false)
@@ -41,7 +42,7 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
       if file_exists(EC, filename)
         println("Reading $descr from file $filename")
         load!(EC, filename, U1)
-        add_trial_vector!(dav, Vecs, st)
+        add_trial_vector!(dav, Vecs, st, custom_dots)
         #display(U1)
         
         R2 = calc_R2_df_cis_pert_d(EC, U1)
@@ -80,9 +81,15 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
     for st in states
       get_current_trial_vector!(dav, Vecs, st)
       V1, V2 = calc_eom_svd_au(EC, Vecs..., st) 
-      add_product_vector!(dav, (V1,V2), st)
+      add_product_vector!(dav, (V1,V2), st, custom_dots)
     end
     energies = perform!(dav)
+    if do_refresh(dav, length(states))
+      refresh!(dav, Vecs, custom_dots)
+      output_iteration(it, -1.0, time_ns() - t0, energies...)
+      states = [1:nstates;]
+      continue
+    end
     states2do = Int[]
     maxNormR = 0.0
     for st in 1:nstates
@@ -95,7 +102,7 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
       output_state(st, NormR, energies[st]; converged=converged)
       if !converged
         new_trial_vector!(EC, Vecs, energies[st])
-        add_trial_vector!(dav, Vecs, st)
+        add_trial_vector!(dav, Vecs, st, custom_dots)
         push!(states2do, st)
       end
     end
@@ -183,8 +190,8 @@ function calc_eom_svd_au(EC::ECInfo,U1, U2, st)
   #@mtensor bU_vobX[c,k,X] := U_voX[c,k,X]
   #end
   
-  #load decomposed amplitudes
-  T_XX = load2idx(EC, "T_XX")
+  #decomposed amplitudes
+  @mtensor T_XX[X,Y] := T2[a,b,i,j] * U_voX[b,j,Y] * U_voX[a,i,X]
   #display(T_XX)
   
   #only for testing
