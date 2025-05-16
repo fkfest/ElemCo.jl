@@ -1285,11 +1285,11 @@ function qv_orbital_optimization(EC::ECInfo, q1T, q2T)
   @mtensor grad[a,i] += Tab[d,c]*(2.0 *ovvv[i,d,a,c] - ovvv[i,d,c,a])
   @mtensor grad[a,i] += q1T[c,d,i,k] * q1Tt[c,d,j,l] * oovo[j,l,a,k]
   @mtensor grad[a,i] -= q1T[b,d,k,l] * q1Tt[a,c,k,l] * ovvv[i,c,b,d]
-  @mtensor grad[a,i] -= 0.5*(q1Tt[b,d,i,k] * q1Tt[c,d,j,k] + 3.0 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j]) * ovvv[j,b,a,c]
-  @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1Tt[a,c,l,j] * q1Tt[b,c,l,k]) * oovo[i,k,b,j]
+  @mtensor grad[a,i] -= 0.5*(q1Tt[b,d,i,k] * q1Tt[c,d,j,k] + 3.0 * q1T[b,d,k,i] * q1T[c,d,k,j]) * ovvv[j,b,a,c]
+  @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1T[a,c,l,j] * q1T[b,c,l,k]) * oovo[i,k,b,j]
   @mtensor grad[a,i] += q1Tt[b,d,i,k] * q1Tt[c,d,j,k] * ovvv[j,b,c,a]
   @mtensor grad[a,i] -= q1Tt[a,c,j,l] * q1Tt[b,c,k,l] * oovo[k,i,b,j]
-  @mtensor grad[a,i] += q2Tt[b,c,i,j] * ovvv[j,a,c,b] - q2Tt[a,b,j,k] * oovo[k,j,b,i]
+  @mtensor grad[a,i] += q2Tt[b,c,i,j] * ovvv[j,b,c,a] - q2Tt[a,b,j,k] * oovo[k,i,b,j]
   oovo = nothing
   ovvv = nothing
   q1Tt = nothing
