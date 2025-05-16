@@ -142,18 +142,6 @@ function load_orbitals(EC::ECInfo, orbsfile::String="", porbsfile::String="")
   else
     error("no orbitals found")
   end
-  if EC.options.wf.npositron > 0
-    if !isempty(strip(porbsfile))
-      # orbsfile will be used
-    elseif !isempty(strip(EC.options.wf.orb_pos))
-      porbsfile = EC.options.wf.orb_pos
-    else
-      error("no positron orbitals found")
-    end
-    cMO = SpinMatrix(load_all(EC, orbsfile, Val(2))...)
-    cPO = SpinMatrix(load_all(EC, porbsfile, Val(2))...)
-    return cMO, cPO
-  end
   return SpinMatrix(load_all(EC, orbsfile, Val(2))...)
 end
 

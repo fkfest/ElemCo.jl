@@ -2,12 +2,13 @@ using ElemCo
 
 geometry="bohr
             Li 0.000000 0.000000 0.000000
-            H  0.000000 0.000000 3.0196"
+            H  0.000000 0.000000 3.0196
+            H2 0.000000 0.000000 6.0196"
 
 
-basis = Dict("ao"=>"sto-3g",
-     "jkfit"=>"sto-3g",
-     "mp2fit"=>"sto-3g","mpfit"=>"sto-3g")
+basis = Dict("ao"=>"aug-cc-pvdz",
+     "jkfit"=>"def2-universal-jkfit",
+     "mpfit"=>"aug-cc-pv5z-rifit")
 
 @ECinit
 @set wf charge=0

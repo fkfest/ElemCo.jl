@@ -263,22 +263,22 @@ function gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64}, bao,
   hsmall_pos = load2idx(EC, "h_positron_AA")
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
   occ2 = EC.space['o']
-  occp = 1:1
+  occp = EC.space['p']
   CMO2 = cMO[:,occ2]
   CPO2 = cPO[:,occp]
   nA = size(CMO2, 1)
   nocc = size(CMO2, 2)
   noccp = size(CPO2, 2) # = 1
   nL = size(PL, 2)
-  Pbatches = BasisBatcher(bao, bfit)
+  # FIXME: Why does one need 1000 here?
+  Pbatches = BasisBatcher(bao, bfit, 1000)
   maxP = max_batch_length(Pbatches)
   LoA = zeros(nL, nocc, nA)
   LpA = zeros(nL, noccp, nA)
   J = zeros(nA, nA)
   Jp = zeros(nA, nA)
   fock_pos = hsmall_pos
-  # FIXME: lenbuf is twice the RHF case without positron – just a guess
-  lenbuf = 2*(nocc*nA + max(nA*nA, nL))*maxP
+  lenbuf = ((nocc+noccp)*nA + max(nA*nA, nL))*maxP
   lencbuf = buffer_size_3idx(Pbatches)
   @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
   for Pblk in Pbatches

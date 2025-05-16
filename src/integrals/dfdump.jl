@@ -240,7 +240,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, cPO::Matrix,
   flushmmap(EC, int1p)
   fdump.int1 = int1
   fdump.int1p = int1p
-  int0 = Enuc + hii + hii_p - sum(diag(int1)[spo]) - sum(diag(int1p)[sp_pos])
+  int0 = Enuc + hii + .5*hii_p - sum(diag(int1)[spo]) - .5*sum(diag(int1p)[sp_pos])
   fdump.int0 = int0
 
   eRef_hii = Enuc+ hii
@@ -410,7 +410,8 @@ function dfdump(EC::ECInfo)
     error("Only density-fitted integrals implemented")
   end
   if EC.options.wf.npositron > 0
-    cMO, cPO = load_orbitals(EC)
+    cMO = load_orbitals(EC)
+    cPO = load_positron_orbitals(EC)
     norbs_pos = size(cPO,2)
   else
     cMO = load_orbitals(EC)
