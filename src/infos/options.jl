@@ -242,6 +242,8 @@ end
   """`⟨"eigenvectors"⟩` main part of filename to save eigenvectors.
       For example, the singles eigenvectors for state 2 are saved to `save*"_1^2"`. """
   save::String = "eigenvectors"
+  """`⟨1.e-5⟩` amplitude decomposition threshold. """
+  ampsvdtol::Float64 = 1.e-5
 end
 
 """ 

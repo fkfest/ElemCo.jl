@@ -13,11 +13,9 @@ This file contains all relevant functions of EOM-SVD-DCSD
 function calc_svd_eom(EC::ECInfo, method::ECMethod)
   t0 = time_ns()
   nstates = EC.options.eom.nstates
-  shift = 0
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   ϵo, ϵv = orbital_energies(EC) 
-  #shift = EC.options.eom.shift
   dav = Davidson(EC, nstates; hermitian=false)
   states = [1:nstates;]
   
@@ -26,9 +24,6 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
   display(energies)
   #calc_eom(EC,ECMethod("EOM-CCS"))  
 
-  println("Hello")
-
-    
   U1 = zeros(nvirt, nocc)
   U2 = zeros(nvirt, nvirt, nocc, nocc)
   Vecs = (U1, U2)
@@ -48,22 +43,10 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
         R2 = calc_R2_df_cis_pert_d(EC, U1)
         #display(R2)        
 
-        #U2 = zeros(nvirt,nvirt,nocc,nocc)
-        #display(U2)
         new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2       
         #display(U2)        
         
-        #excitation_level_2 = 2
-        #mainfilename, descr = save_or_start_file(EC, "X", excitation_level_2)
-        #if mainfilename != "" 
-        #  filename = mainfilename*"_$excitation_level_2"*"^$st"
-        #  println("Saving $descr for state $st to $filename")
-        #  
-        #  save!(EC, filename, U2, description=descr) 
-        #end       
- 
-        UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(1.e-32)) 
-        #UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol)) 
+        UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.eom.ampsvdtol)) 
         #display(UaiX) 
         save!(EC, "C_voX^$st", UaiX)        
 
@@ -129,39 +112,6 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
 #    end
 #  end
 
-
-#  U11 = zeros(nvirt, nocc)
-## load the CIS eigenvectors
-#  excitation_level = 1
-#  mainfilename, descr = save_or_start_file(EC, "X", excitation_level, false)
-#  if mainfilename != ""
-#    for st in 1:nstates
-#      filename = mainfilename*"_$excitation_level"*"^$st"
-#      if file_exists(EC, filename)
-#        println("Reading $descr from file $filename")
-#        load!(EC, filename, U11)
-#        display(U1)
-#      else
-#        error("File $filename not found, cannot read CIS eigenvector")
-#      end
-#    end
-#  else
-#    error("No file found for CIS eigenvectors")
-#  end
-
-
-
-  #Achtung, hier wird nur einer der U Vektoren von vielen gespeichert...
-  #U1_1 = load2idx(EC, "1U1")
-  #display(U1_1)
-  #U1_2 = load2idx(EC, "2U1")
-  #display(U1_2)
-
-  #R2 = calc_R2_df_cis_pert_d(EC, U1_1)
-  #display(R2)
-  #println("Hello3")
-
-  #calc_eom_svd_au(EC)
 end
 
 
@@ -171,7 +121,6 @@ end
   Calculate singles and doubles AUs for SVD-EOM-DCSD.
 """
 function calc_eom_svd_au(EC::ECInfo,U1, U2, st)
-  println("Hello2")
   t1 = time_ns()
   mem1 = free_memory()
   U_voX = load3idx(EC, "C_voX")
@@ -183,30 +132,15 @@ function calc_eom_svd_au(EC::ECInfo,U1, U2, st)
   T2 = load4idx(EC,"T_vvoo")
   @mtensor U_bXbX[bX,bY] := U2[a,b,i,j] * bU_obXv[i,bX,a] * bU_obXv[j,bY,b]   
  
-  #only for testing
-  #@buffer buf(lenbuf) begin
-  #@mtensor U_oXv[k,X,c] := U_voX[c,k,X]
-  #@mtensor bU_obXv[k,X,c] := U_voX[c,k,X]
-  #@mtensor bU_vobX[c,k,X] := U_voX[c,k,X]
-  #end
-  
   #decomposed amplitudes
   @mtensor T_XX[X,Y] := T2[a,b,i,j] * U_voX[b,j,Y] * U_voX[a,i,X]
   #display(T_XX)
   
-  #only for testing
-  #U_bXbX = load2idx(EC, "U_{bX}{bX}")
-  #@mtensor U_bXbX[X,Y] := T_XX[X,Y]  
-  #T2 = load4idx(EC,"T_vvoo")
-  #@mtensor T2[a,b,i,j] := T_XX[X,Y] * U_voX[a,i,X] * U_voX[b,j,Y] 
-  #@mtensor U2[a,b,i,j] := T_XX[X,Y] * U_voX[a,i,X] * U_voX[b,j,Y]   
-
   #load df coeff
   ovLfile, v_ovL = mmap3idx(EC, "d_ovL") #should be same as non-dressed ovL
   voLfile, dv_voL = mmap3idx(EC, "d_voL")
   ooLfile, dv_ooL = mmap3idx(EC, "d_ooL")
   vvLfile, dv_vvL = mmap3idx(EC, "d_vvL")
-  
 
   #load dressed fock matrices
   SP = EC.space
@@ -216,15 +150,11 @@ function calc_eom_svd_au(EC::ECInfo,U1, U2, st)
   dfvo = dfock[SP['v'], SP['o']] 
   dfvv = dfock[SP['v'], SP['v']]
 
-  #only for testing
-  #@mtensor U1[a,i] := dfvo[a,i] 
-
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   nX = size(T_XX, 1)
   nL = size(v_ovL, 3)
 
-  
   #@buffer buf(lenbuf) begin
   @mtensor tT2[a,b,i,j] := 2 * T2[a,b,i,j] - T2[b,a,i,j]          
   @mtensor Y_voL[b,j,L] := v_ovL[l,d,L] * tT2[d,b,l,j]  
