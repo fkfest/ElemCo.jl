@@ -108,52 +108,42 @@ function dfccdriver(EC::ECInfo, method)
 
   main_name = method_name(ecmethod)
   
-  if has_prefix(ecmethod, "EOM")
-    #error("Test")
-    if has_prefix(ecmethod, "SVD") 
-      #error("Test2")
-      save_bool = EC.options.cc.use_full_t2
-      EC.options.cc.use_full_t2 = true
-      groundstate_method_name = "SVD-DCSD"
-      #println(string(groundstate_method_name) * " START ************************************************")
-      ECC = calc_svd_dc(EC, ecmethod)
-      energies = output_energy(EC, ECC, energies, groundstate_method_name)
-      println(string(groundstate_method_name) * " END **************************************************")
-      calc_svd_eom(EC, ecmethod)
-      t1 = print_time(EC, t1, "SVD", 1)
-      EC.options.cc.use_full_t2 = save_bool
-  else
-      #error("Test3")
-      calc_df_eom(EC, ecmethod)
-      t1 = print_time(EC, t1, "DF-EOM", 1)      
-    end
-  elseif has_prefix(ecmethod, "SVD")
+  if has_prefix(ecmethod, "SVD") 
     @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
     if !closed_shell_method
       error("Only closed-shell SVD methods implemented!")
     end
+    if has_prefix(ecmethod, "EOM")
+      save_use_full_t2 = EC.options.cc.use_full_t2
+      EC.options.cc.use_full_t2 = true
+      save_project_vovo_t2 = EC.options.cc.project_vovo_t2
+      EC.options.cc.project_vovo_t2 = 1
+      if !save_use_full_t2 || save_project_vovo_t2 != 1
+        warn("SVD-EOM-DCSD requires `cc.use_full_t2=true` and `cc.project_vovo_t2=1`!")
+      end 
+    end
+    groundstate_method_name = "SVD-DCSD"
     ECC = calc_svd_dc(EC, ecmethod)
-    energies = output_energy(EC, ECC, energies, main_name)
+    energies = output_energy(EC, ECC, energies, groundstate_method_name)
   elseif root_name == "MP2"
     ECC = calc_dfmp2(EC)
     energies = output_energy(EC, ECC, energies, main_name)
+  elseif root_name == "CCS"
   else
     error("$main_name DF method not implemented!")
   end
 
-  """
   if has_prefix(ecmethod, "EOM")
-    #error("Test")
     if has_prefix(ecmethod, "SVD")
-      #error("Test2")
       calc_svd_eom(EC, ecmethod)
       t1 = print_time(EC, t1, "SVD", 1)
+      EC.options.cc.use_full_t2 = save_use_full_t2
+      EC.options.cc.project_vovo_t2 = save_project_vovo_t2
     else
       calc_df_eom(EC, ecmethod)
       t1 = print_time(EC, t1, "DF-EOM", 1)      
     end
   end
-  """
 
   delete_temporary_files!(EC)
   restore_space!(EC, space_save)
