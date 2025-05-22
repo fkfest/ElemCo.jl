@@ -1295,7 +1295,7 @@ function int1_npy_filename(fd::FDump, spincase::Symbol=:α)
   else
     if spincase == :α
       file = headvar(fd, "NPY1A", String)
-      if isnothing(file)[:,:,:,s][p,r,q]
+      if isnothing(file)
         file = "int1a.npy"
         # fd.head["NPY1A"] = [file]
       end
