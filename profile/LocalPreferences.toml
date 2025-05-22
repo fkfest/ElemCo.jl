@@ -1,2 +1,5 @@
 [ElemCo]
 precompile_workload = false
+
+[TensorOperations]
+precompile_workload = false

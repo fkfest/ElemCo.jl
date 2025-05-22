@@ -23,11 +23,11 @@ end
 Base.show(io::IO, ilib::ILibcint5) = print(io, "libcint v5")
 
 """
-    ILibcint5(atoms::Vector{BasisCenter}, cartesian::Bool)
+    ILibcint5(atoms::Vector{BasisCentre}, cartesian::Bool)
 
   Prepare the infos for Libcint5 integral library.
 """
-function ILibcint5(atoms::Vector{BasisCenter}, cartesian::Bool)
+function ILibcint5(atoms::Vector{BasisCentre}, cartesian::Bool)
   ATM_SLOTS = 6
   BAS_SLOTS = 8
 

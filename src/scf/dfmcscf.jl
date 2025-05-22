@@ -3,7 +3,7 @@ using LinearAlgebra, Printf
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.Integrals
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 using ..ElemCo.OrbTools
@@ -47,7 +47,7 @@ function dffockCAS(EC::ECInfo, μνL, μjL, μuL, cMO::Matrix, D1::Matrix)
   CMOa = cMO[:,occ1o] 
 
   # fockClosed
-  hsmall = TensorTools.load(EC,"h_AA")
+  hsmall = load2idx(EC,"h_AA")
   @mtensor L[L] := μjL[μ,j,L] * CMO2[μ,j]
   @mtensor fockClosed[μ,ν] := hsmall[μ,ν] - μjL[μ,j,L]*μjL[ν,j,L]
   @mtensor fockClosed[μ,ν] += 2.0*L[L]*μνL[μ,ν,L]
@@ -55,12 +55,12 @@ function dffockCAS(EC::ECInfo, μνL, μjL, μuL, cMO::Matrix, D1::Matrix)
   # fock
   fock =  deepcopy(fockClosed)
   @mtensor μuLD[μ,t,L] := μuL[μ,u,L] * D1[t,u]
-  @mtensor fock[μ,ν] -= 0.5 * (μuLD[μ,t,L] * μuL[ν,t,L])
+  @mtensor fock[μ,ν] -= 0.5 * μuLD[μ,t,L] * μuL[ν,t,L]
   @mtensor LD[L] := μuLD[μ,t,L] * CMOa[μ,t]
   @mtensor fock[μ,ν] += LD[L] * μνL[μ,ν,L]
 
-  @mtensor fock_MO[r,s] := (fock[μ,ν] * cMO[μ,r]) * cMO[ν,s]
-  @mtensor fockClosed_MO[r,s] := (fockClosed[μ,ν] * cMO[μ,r]) * cMO[ν,s]
+  @mtensor fock_MO[r,s] := fock[μ,ν] * cMO[μ,r] * cMO[ν,s]
+  @mtensor fockClosed_MO[r,s] := fockClosed[μ,ν] * cMO[μ,r] * cMO[ν,s]
   return fock_MO, fockClosed_MO
 end
 
@@ -181,18 +181,18 @@ function G_rtsu_calc(typer::Integer,types::Integer, num_MO, index_MO, DFint_MO, 
   swL = DFint_MO[types][2] #1,2,3 
   rvL = DFint_MO[typer][2] #1,2,3 
   @mtensor G_rtsu[r,t,s,u] += fockClosed_rs[r,s] * D1[t,u]
-  @mtensor G_rtsu[r,t,s,u] += rsL[r,s,L] * (vwL[v,w,L] * D2[t,u,v,w])
+  @mtensor G_rtsu[r,t,s,u] += rsL[r,s,L] * vwL[v,w,L] * D2[t,u,v,w]
   if types < 2
     if typer < 2
-      @mtensor G_rtsu[r,t,s,u] += (rvL[v,r,L] * swL[w,s,L]) * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += rvL[v,r,L] * swL[w,s,L] * D2[t,v,u,w] * 2.0
     else
-      @mtensor G_rtsu[r,t,s,u] += (rvL[r,v,L] * swL[w,s,L]) * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += rvL[r,v,L] * swL[w,s,L] * D2[t,v,u,w] * 2.0
     end
   else
     if typer < 2
-      @mtensor G_rtsu[r,t,s,u] += (rvL[v,r,L] * swL[s,w,L]) * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += rvL[v,r,L] * swL[s,w,L] * D2[t,v,u,w] * 2.0
     else
-      @mtensor G_rtsu[r,t,s,u] += (rvL[r,v,L] * swL[s,w,L]) * D2[t,v,u,w] * 2.0
+      @mtensor G_rtsu[r,t,s,u] += rvL[r,v,L] * swL[s,w,L] * D2[t,v,u,w] * 2.0
     end
   end
   fockClosed_rs = 0
@@ -465,7 +465,7 @@ Calculate the energy with the given density matrices and (updated) cMO,
 function calc_realE(EC::ECInfo, μuL, fockClosed_MO::Matrix, D1::Matrix, D2, cMO::Matrix)
   occ2 = intersect(EC.space['o'],EC.space['O'])
   occ1o = setdiff(EC.space['o'],occ2)
-  hsmall = TensorTools.load(EC,"h_AA")
+  hsmall = load2idx(EC,"h_AA")
   CMO2 = cMO[:,occ2] 
   CMOa = cMO[:,occ1o]
   @mtensor E = CMO2[μ,i] * hsmall[μ,ν] * CMO2[ν,i]
@@ -607,7 +607,7 @@ thres is the criterion of convergence,
 convTrack is to decide whether the tracking of eigenvectors is used
 """
 
-function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
+function davidson!(EC::ECInfo, eigenvec::Vector, N::Integer, n_max::Integer, thres::Number,  num_MO::Vector{Int64},
   h_block::NTuple{10, Matrix{Float64}}, g::Vector, λ::Number, initVecType::Symbol, 
   fock_MO::Matrix, cMO::Matrix, HessianType::Symbol, D1::Matrix, convTrack::Bool=false)
   V = zeros(N,n_max)
@@ -636,34 +636,29 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   initGuessIndex = findmax(abs.(H0_hb))[2]
   numInitialVectors = 0 
 
-  if initVecType == :RANDOM
-    v = rand(size(v,1))
-    v = v ./ norm(v)
+  if initVecType == :INHERIT
+    eigenvec .= eigenvec ./ norm(eigenvec)
     numInitialVectors = 1
-    V[:,1] = v
-  elseif initVecType == :INHERIT
-    v = v ./ norm(v)
-    numInitialVectors = 1
-    V[:,1] = v
+    V[:,1] = eigenvec
   elseif initVecType == :GRADIENT_SET
     V[1,1] = 1.0
     g_r = g + rand(size(g,1)) .* 0.02 .- 0.01
-    v = [[0.];g_r] ./ norm(g_r)
-    V[:,2] = v
+    eigenvec .= [[0.];g_r] ./ norm(g_r)
+    V[:,2] = eigenvec
     σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, λ, h_block, HessianType)
     numInitialVectors = 2
   elseif initVecType == :GRADIENT_SETPLUS
     V[1,1] = 1.0
     g_r = g 
-    v = [[0.];g_r] ./ norm(g_r)
-    V[:,2] = v
+    eigenvec .= [[0.];g_r] ./ norm(g_r)
+    V[:,2] = eigenvec
     σ[:,1] = H_multiply(EC, fock_MO, cMO, D1, V[:,1], num_MO, g, λ, h_block, HessianType)
     σ[:,2] = H_multiply(EC, fock_MO, cMO, D1, V[:,2], num_MO, g, λ, h_block, HessianType)
     V[initGuessIndex, 3] = 1.0
-    v = V[:,3]
-    v = v - V[initGuessIndex,2].* V[:,2]
-    v = v ./ norm(v)
-    V[:,3] = v
+    eigenvec = V[:,3]
+    eigenvec .= eigenvec - V[initGuessIndex,2].* V[:,2]
+    eigenvec .= eigenvec ./ norm(eigenvec)
+    V[:,3] = eigenvec
     newh_hb = V' * σ[:,2]
     h[:,2] = newh_hb
     h[2,:] = newh_hb
@@ -674,7 +669,7 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
   for i in numInitialVectors+1:n_max
     davCounti += 1
     # blockwise H * v
-    newσ_hb = H_multiply(EC, fock_MO, cMO, D1, v, num_MO, g, λ, h_block, HessianType)
+    newσ_hb = H_multiply(EC, fock_MO, cMO, D1, eigenvec, num_MO, g, λ, h_block, HessianType)
     σ[:,i-1] = newσ_hb
     newh_hb = V' * newσ_hb
     h[:,i-1] = newh_hb 
@@ -689,19 +684,19 @@ function davidson(EC::ECInfo, v::Vector, N::Integer, n_max::Integer, thres::Numb
       converged = true
       break
     end
-    v = -1.0 ./ (H0_hb .- ε[eigvec_index]) .* r
-    v[isnan.(v)] .= 0
-    v[isinf.(v)] .= 1e8
-    c = transpose(v) * V
-    v = v - V * transpose(c)
-    v = v./norm(v)
-    V[:,i] = v
+    eigenvec = -1.0 ./ (H0_hb .- ε[eigvec_index]) .* r
+    eigenvec[isnan.(eigenvec)] .= 0
+    eigenvec[isinf.(eigenvec)] .= 1e8
+    c = transpose(eigenvec) * V
+    eigenvec = eigenvec - V * transpose(c)
+    eigenvec = eigenvec./norm(eigenvec)
+    V[:,i] = eigenvec
   end
   if !converged
     println("davidson algorithm not converged!")
   end
-  v = V * ac
-  return ε[eigvec_index], v, converged, davCounti
+  eigenvec = V * ac
+  return ε[eigvec_index], eigenvec, converged, davCounti
 end
 
 """
@@ -736,7 +731,7 @@ function λTuning(EC::ECInfo, trust::Number, maxit4λ::Integer, λmax::Number, �
   # λ tuning loop (micro loop)
   for it=1:maxit4λ
     push!(λs, λ)
-    val, vec, converged, davCounti = davidson(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
+    val, vec, converged, davCounti = davidson!(EC, vec, N_rk+1, davItMax, davError, num_MO, h_block, g, λ, initVecType, fock_MO, cMO, HessianType, D1)
     davCount += davCounti
     # while !converged
     #   davItMax += 50
@@ -860,51 +855,43 @@ function print_initial(Enuc::Float64, HessianType::Symbol)
 end
 
 """
-    dfmcscf(EC::ECInfo; direct=false)
+    dfmcscf(EC::ECInfo)
 
 Main body of Density-Fitted Multi-Configurational Self-Consistent-Field method
 """
-function dfmcscf(EC::ECInfo; direct=false)
-  guess = EC.options.scf.guess
-  maxit = EC.options.scf.maxit
-  maxit4λ = EC.options.scf.maxit4lambda
+function dfmcscf(EC::ECInfo)
   HessianType = EC.options.scf.HessianType
-  initVecType = EC.options.scf.initVecType
-  # println("bisecdam = ", EC.options.scf.bisecdamp)
-  # println("maxit4λ = ", maxit4λ)
-  # println("gamaDavScale = ", EC.options.scf.gamaDavScale)
   print_info("DF-MCSCF")
   setup_space_system!(EC)
-  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
+  Enuc = generate_AO_DF_integrals(EC, "jkfit")
   print_initial(Enuc, HessianType)
 
   #load info
-  sao = TensorTools.load(EC,"S_AA")
+  sao = load2idx(EC,"S_AA")
   nAO = size(sao,2) # number of atomic orbitals
-  occ2 = intersect(EC.space['o'],EC.space['O']) 
-  occ1o = setdiff(EC.space['o'],occ2) 
-  occv = setdiff(1:nAO, EC.space['o'])
-  n_2 = size(occ2,1)
-  n_1o = size(occ1o, 1)
+  docc = EC.space['d'] # doubly occupied orbitals
+  act = EC.space['a'] # active orbitals
+  occv = setdiff(1:nAO, union(EC.space['d'], EC.space['a'])) # virtual orbitals
+  ndocc = size(docc,1)
+  nact = size(act, 1)
   n_v = size(occv,1)
-  num_MO = [n_2,n_1o,n_v]
-  N_rk = (n_1o+n_v) * (n_2+n_1o)
+  num_MO = [ndocc,nact,n_v]
+  N_rk = (nact+n_v) * (ndocc+nact)
 
   # initial guess for inherit initial guess
   vec = rand(N_rk+1)
   vec = vec ./ norm(vec)
   inherit_large = true
   reject = false
-  if size(occ1o,1) == 0
+  if size(act,1) == 0
     error("NO ACTIVE ORBITALS, PLEASE USE DFHF")
   end
 
   # cMO and density matrices initialization
-  cMO = guess_orb(EC,guess).α
+  cMO = guess_orb(EC, EC.options.scf.guess).α
   D1, D2 = denMatCreate(EC)
 
   # macro loop parameters initialisation
-  iteration_times = 0
   g = [1]
   E_former = 0.0
   trust = 0.632
@@ -919,16 +906,15 @@ function dfmcscf(EC::ECInfo; direct=false)
   prev_cMO = deepcopy(cMO)
   prev_A = zeros(N_rk,N_rk)
   prev_g = zeros(N_rk)
-  μνL = TensorTools.load(EC,"AAL")
+  μνL = load3idx(EC,"AAL")
   prev_fock_MO = zeros(nAO,nAO)
   prev_fockClosed_MO = zeros(nAO,nAO)
   Es = Array{Float64}(undef,0)
   davidsonSteps = Array{Int}(undef,0)
   gnorms = Array{Float64}(undef,0)
   tts = [0.0]
-  μjL = zeros(nAO,n_2,size(μνL,3))
-  μuL = zeros(nAO,n_1o,size(μνL,3))
-  convIter = maxit
+  μjL = zeros(nAO,ndocc,size(μνL,3))
+  μuL = zeros(nAO,nact,size(μνL,3))
   converged = false
   energyThreshold = 1e-8
   eThreg = 1e-6
@@ -943,10 +929,11 @@ function dfmcscf(EC::ECInfo; direct=false)
   convCount = 0
 
   # macro loop, g and h updated
-  while iteration_times < maxit && iteration_times < convIter
+  iteration = 0
+  while iteration < EC.options.scf.maxit && !converged
     # calc energy E with updated cMO
-    @mtensor μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
-    @mtensor μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
+    @mtensor μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,docc][ν,j]
+    @mtensor μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,act][ν,u]
     fock_MO, fockClosed_MO= dffockCAS(EC, μνL, μjL, μuL, cMO, D1)
     E_former = E
     E = calc_realE(EC, μuL, fockClosed_MO, D1, D2, cMO)
@@ -956,10 +943,10 @@ function dfmcscf(EC::ECInfo; direct=false)
     push!(davidsonSteps, davCount)
     push!(gnorms, norm(g))
     # check if reject the update and tune trust
-    if iteration_times > 0
+    if iteration > 0
       tt = (time_ns() - t0)/10^9
       push!(tts, tt)
-      @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i %3i \n" iteration_times E+Enuc E-E_former norm(g) tt trust sqrt(sum(x.^2)) λ davCount λSearchIt
+      @printf "%3i %12.8f %12.8f %12.8f %8.2f %12.6f %12.6f %12.6f %3i %3i \n" iteration E+Enuc E-E_former norm(g) tt trust sqrt(sum(x.^2)) λ davCount λSearchIt
       if preDE ≈ E-E_former && presumx2 ≈ sqrt(sum(x.^2)) && (λ ≈ λmax || λ ≈ 1) && preλ ≈ λ && 
         (sqrt(sum(x.^2)) < EC.options.scf.trustScale*trust || sqrt(sum(x.^2)) > trust) && (E-E_former) < energyThreshold * 100.0
         if convergeIssue
@@ -973,21 +960,21 @@ function dfmcscf(EC::ECInfo; direct=false)
       end
       preDE, presumx2, preλ = E-E_former , sqrt(sum(x.^2)), λ
       reject, trust = checkE_modifyTrust(EC, E, E_former, E_2o, trust, trustTune)
-      iteration_times += 1
+      iteration += 1
       if reject
-        iteration_times -= 1
+        iteration -= 1
         cMO = prev_cMO
-        @mtensor μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,occ2][ν,j]
-        @mtensor μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,occ1o][ν,u]
+        @mtensor μjL[μ,j,L] = μνL[μ,ν,L] * cMO[:,docc][ν,j]
+        @mtensor μuL[μ,u,L] = μνL[μ,ν,L] * cMO[:,act][ν,u]
         g = deepcopy(prev_g)
         A = deepcopy(prev_A)
         E = E_former
         fock_MO = deepcopy(prev_fock_MO)
         fockClosed_MO = deepcopy(prev_fockClosed_MO)
         inherit_large = false
-      elseif E_former - E < energyThreshold && E < E_former && norm(g) < eThreg && !converged
-        convIter = iteration_times+1
+      elseif E_former - E < energyThreshold && E < E_former && norm(g) < eThreg
         converged = true
+        println("Converged!")
       elseif E_former - E < energyThreshold && E < E_former
         convAccumu = true
         convCount += 1
@@ -996,7 +983,7 @@ function dfmcscf(EC::ECInfo; direct=false)
         convCount = 0
       end
     else
-      iteration_times += 1
+      iteration += 1
       println("Initial energy: ", E+Enuc)
       println("Initial norm of g: ", norm(g))
       println("Iter     Energy      DE           norm(g)       Time      trust        sumx2        α      microIter")
@@ -1013,11 +1000,11 @@ function dfmcscf(EC::ECInfo; direct=false)
     end
     # calculate h with updated cMO
     if HessianType == :SO
-      @mtensor abL[a,b,L] := (μνL[μ,ν,L] * cMO[:,occv][μ,a]) * cMO[:,occv][ν,b]
+      @mtensor abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
       h_block = calc_h_SO(EC, μjL, μuL, abL, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     elseif HessianType == :SO_SCI && EC.options.scf.SO_SCI_origin== true
-      @mtensor abL[a,b,L] := (μνL[μ,ν,L] * cMO[:,occv][μ,a]) * cMO[:,occv][ν,b]
+      @mtensor abL[a,b,L] := μνL[μ,ν,L] * cMO[:,occv][μ,a] * cMO[:,occv][ν,b]
       h_block = calc_h_SO_SCI_original(EC, μjL, μuL, abL, cMO, D1, D2, fock_MO, fockClosed_MO, A)
       abL = 0
     else
@@ -1030,7 +1017,7 @@ function dfmcscf(EC::ECInfo; direct=false)
       vec = vec./norm(vec)
       inherit_large == true
     end
-    λ, x, vec, davCount, λSearchIt, trustTune = λTuning(EC, trust, maxit4λ, λmax, λ, g, vec, num_MO, h_block, initVecType, fock_MO, cMO, HessianType, D1, reject)
+    λ, x, vec, davCount, λSearchIt, trustTune = λTuning(EC, trust, EC.options.scf.maxit4lambda, λmax, λ, g, vec, num_MO, h_block, EC.options.scf.initVecType, fock_MO, cMO, HessianType, D1, reject)
 
     # calc 2nd order perturbation energy
     h_2121, h_3121, h_3131, h_2221, h_2231, h_2222, h_3221, h_3231, h_3222, h_3232 = h_block
@@ -1054,10 +1041,8 @@ function dfmcscf(EC::ECInfo; direct=false)
     smo = cMO' * sao * cMO
     cMO = cMO * Hermitian(smo)^(-1/2)
   end
-  if iteration_times < maxit
-    println("Convergent!")
-  else
-    println("Not Convergent!")
+  if !converged
+    println("Not converged!")
   end
   delete_temporary_files!(EC)
   return E+Enuc

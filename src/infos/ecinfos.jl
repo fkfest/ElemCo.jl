@@ -1,12 +1,13 @@
 """ Various global infos """
 module ECInfos
-using Unitful, UnitfulAtomic
-using AtomsBase
+using HDF5
+using Dates
 using DocStringExtensions
+using ..ElemCo.VersionInfo
 using ..ElemCo.AbstractEC
 using ..ElemCo.Utils
 using ..ElemCo.FciDumps
-using ..ElemCo.MSystem
+using ..ElemCo.MSystems
 using ..ElemCo.BasisSets
 
 export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
@@ -17,8 +18,80 @@ export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
+export get_options
 
 include("options.jl")
+
+"""
+    get_options(opt::Options)
+
+Return a nested `NamedTuple` with the current options.
+"""
+function get_options(opt::Options)
+  return NamedTuple(key => get_options(getfield(opt, key)) for key ∈ propertynames(opt))
+end
+
+"""
+    get_options(opt)
+
+Return a `NamedTuple` with the current options for options `opt`.
+"""
+function get_options(opt)
+  return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
+end
+
+mutable struct ECDump
+  """ file name of the HDF5 dump. """
+  filename::String
+  """ an HDF5 file with calculation information (for restarts etc). 
+  The structure of the HDF5 file is as follows (with `track_order=true`):
+```
+/EC
+  /Molecule1
+    <name>
+    <geometry>
+    /BasisSet1
+      <basis set information>
+      /State1
+        <number of electrons>
+        <spin multiplicity>
+        <occupation (alpha/beta)>
+        <MO coefficients>
+        <list of frozen orbitals>
+        <CC amplitudes>
+        <other information>
+      /State2
+      ...
+    /BasisSet2
+    ...
+  /Molecule2
+    ...
+```
+  """
+  file::HDF5.Group
+  function ECDump(filename::AbstractString)
+    return new(filename, create_empty_dump(filename))
+  end
+end
+
+"""
+    create_empty_dump(filename::AbstractString)
+
+  Create an empty HDF5 dump file with the given `filename` and information about the package.
+
+  Returns an "EC" group in HDF5 file.
+"""
+function create_empty_dump(filename)
+  file = h5open(filename, "w")
+  g = create_group(file, "EC", track_order=true)
+  g["version"] = version()
+  g["git_hash"] = git_hash()
+  g["julia"] = "$VERSION"
+  g["hostname"] = gethostname()
+  g["scratch"] = tempdir()
+  g["date"] = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+  return file["EC"]
+end
 
 """
     ECInfo
@@ -32,12 +105,16 @@ include("options.jl")
   scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
   """`⟨".bin"⟩` extension of temporary files. """
   ext::String = ".bin"
+  """`⟨2⟩` verbosity level. """
+  verbosity::Int = 2
   """ options. """
   options::Options = Options()
   """ molecular system. """
-  system::FlexibleSystem = create_empty_system()
+  system::MSystem = MSystem()
   """ fcidump. """
   fd::TFDump = TFDump()
+  """ dump with calculation information (for restarts etc). """
+  dump::ECDump = ECDump(joinpath(scr,"ec.h5"))
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -79,17 +156,6 @@ include("options.jl")
   files::Dict{String,String} = Dict{String,String}()
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
   space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}()
-end
-
-"""
-    create_empty_system()
-
-  Create an empty molecular system of type `FlexibleSystem`.
-"""
-function create_empty_system() 
-  fs = isolated_system([:H => [0, 0, 0]u"bohr"])
-  deleteat!(fs.particles, 1)
-  return fs
 end
 
 """
@@ -194,7 +260,24 @@ function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true)
   SP[':'] = SP['m'] = SP['M'] = [1:norb;]
   SP['p'] = occp
   SP['e'] = virp
+  SP['a'], SP['d'] = active_space(EC)
   return
+end
+
+"""
+    remove_orbs_from_spaces!(EC::ECInfo, orbs; exclude=[':', 'm', 'M'])
+
+  Remove `orbs` from all subspaces in EC.space.
+
+  `exclude` is a list of subspaces to exclude (by default, exclude full MO spaces).
+"""
+function remove_orbs_from_spaces!(EC::ECInfo, orbs; exclude=[':', 'm', 'M'])
+  SP = EC.space
+  for sp in keys(SP)
+    if sp ∉ exclude
+      setdiff!(SP[sp], orbs)
+    end
+  end
 end
 
 """
@@ -217,6 +300,44 @@ function is_closed_shell(EC::ECInfo)
     restore_space!(EC, SP_save)
   end
   return cs
+end
+
+"""
+    active_space(EC::ECInfo)
+
+  Return active space and the new doubly-occupied (closed-shell) space.
+
+  EC.space has to be set up.
+  The active space is defined either
+  - from the option [`wf.active`](@ref ECInfos.WfOptions), if set up.
+    The format is either an occupation string, or `(#elec, #orb)`.
+  - from the singly-occupied orbitals in the reference occupation (from `EC.space`).
+"""
+function active_space(EC::ECInfo)
+  SP = EC.space
+  if EC.options.wf.active == "-"
+    @assert haskey(SP, 's') "EC.space is not set up!"
+    return union(SP['s'], SP['S']), SP['d']
+  end
+  #regular expression to check for the format " ( #elec , #orb ) "
+  if occursin(r"^\s*\(\s*\d+\s*,\s*\d+\s*\)\s*$", EC.options.wf.active)
+    nelec, norb = [ strip(a, [' ', '(', ')'] ) for a in split(EC.options.wf.active, ",")]
+    nelec = parse(Int, nelec)
+    norb = parse(Int, norb)
+    totnelec = length(SP['o']) + length(SP['O'])
+    totnorb = length(SP[':'])
+    @assert nelec <= totnelec && norb <= totnorb "Invalid active space"
+    nclosed = (totnelec - nelec) ÷ 2
+    @assert nclosed*2 == totnelec - nelec "Encountered single occupancy outside active space"
+    active = [nclosed+1:nclosed+norb;]
+  else
+    active = parse_orbstring(EC.options.wf.active)
+    norb = length(active)
+    nelec = length(intersect(active, SP['o'])) + length(intersect(active, SP['O']))
+  end
+  @assert length(union(active, SP['s'])) == norb "α singly occupied orbitals outside active space"
+  @assert length(union(active, SP['S'])) == norb "β singly occupied orbitals outside active space"
+  return active, setdiff(SP['d'], active)
 end
 
 """
@@ -280,7 +401,7 @@ end
   Freeze `freeze_nocc` occupied orbitals or orbitals on the `freeze_orbs` list. 
   If `freeze_nocc` is negative and `freeze_orbs` is empty: guess the number of core orbitals.
 
-  `core` as in [`MSystem.guess_ncore`](@ref).
+  `core` as in [`MSystems.guess_ncore`](@ref).
 """
 function freeze_core!(EC::ECInfo, core::Symbol, freeze_nocc::Int, freeze_orbs=[]; verbose=true)
   if freeze_nocc < 0 && isempty(freeze_orbs)
@@ -311,8 +432,7 @@ function freeze_nocc!(EC::ECInfo, freeze; verbose=true)
     println("Freezing ", nfreeze, " occupied orbitals")
     println()
   end
-  setdiff!(EC.space['o'], freeze)
-  setdiff!(EC.space['O'], freeze)
+  remove_orbs_from_spaces!(EC, freeze)
   return nfreeze
 end
 
@@ -340,8 +460,7 @@ function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[]; verbose=true)
     println("Freezing ", nfreeze, " virtual orbitals")
     println()
   end
-  setdiff!(EC.space['v'], freeze_orbs)
-  setdiff!(EC.space['V'], freeze_orbs)
+  remove_orbs_from_spaces!(EC, freeze_orbs)
   return nfreeze
 end
 
@@ -669,5 +788,6 @@ function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
 end
 
 
+include("ecdump.jl")
 
 end #module

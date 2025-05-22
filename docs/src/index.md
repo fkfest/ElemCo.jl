@@ -18,6 +18,13 @@ For a development version of `ElemCo.jl`, clone the [ElemCo.jl-devel](https://gi
 alias jlm='julia --project=<path_to_ElemCo.jl>'
 ```
 
+Start `jlm` in the terminal and run the following command to install the dependencies,
+
+```julia
+julia> using Pkg
+julia> Pkg.instantiate()
+```
+
 Now the command `jlm` can be used to start the calculations,
 
 ```bash
