@@ -91,6 +91,7 @@ export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @du
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
+export @molpro_input, @molpro_output, @check_molproinfo
 # from Utils
 export last_energy
 # from DescDict
@@ -801,6 +802,79 @@ macro export_molden(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
+  end
+end
+
+"""
+    @molpro_input(filename="elemcoil")
+
+  Initialize the Molpro interface with the given filename.
+
+  It relies on the Molpro XML file to set up the molecule and basis set.
+  If the `basis` variable exists, it will be updated with the AO basis set from the XML file.
+
+  See [`MolproInterface`](@ref) for more details on the Molpro interface.
+"""
+macro molpro_input(filename="elemcoil")
+  return quote
+    $(esc(:MI)) = MolproInterface.MolproInfo($(esc(filename)))
+    mol_node = MolproInterface.get_molecule($(esc(:MI)))
+    $(esc(:geometry)), ao_basis = MolproInterface.get_xml_geometry_basis(mol_node)
+    newbasis = [true]
+    try
+      if $(esc(:basis)) isa Dict{String,String}
+        $(esc(:basis))["ao"] = ao_basis
+        newbasis[1] = false
+      end
+    catch
+    end
+    if newbasis[1]
+      $(esc(:basis)) = ao_basis
+    end
+    $(esc(:@ECinit))
+    MolproInterface.set_options_from_xml!($(esc(:EC)), mol_node)
+    if haskey($(esc(:MI)), "ORBITALS")
+      orbs = MolproInterface.import_orbitals($(esc(:EC)), $(esc(:MI))["ORBITALS"])
+      if !isempty(orbs)
+        save!($(esc(:EC)), $(esc(:EC)).options.wf.orb, orbs)
+        println("Orbitals imported from Molpro: ", size(orbs, 2), " orbitals.")
+      end
+    end
+  end
+end
+
+"""
+    @check_molproinfo()
+
+  Check if [`MolproInterface.MolproInfo`](@ref) is initialized and return the files.
+  If not initialized, throw an error.
+"""
+macro check_molproinfo()
+  return quote
+    try
+      $(esc(:MI)).files
+    catch
+      error("MolproInfo is not initialized. Please run @molpro_input first.")
+    end
+  end
+end
+
+"""
+    @molpro_output(ecvariables, kwargs...)
+
+  Save key-value pairs from `ecvariables` to a `ECVARIABLES` file in the [`MolproInterface.MolproInfo`](@ref) object.
+  
+  The `ecvariables` is a dictionary with the variables to be included in the output.
+  The keyword arguments are passed to the [`MolproInterface.save_ecvariables_to_file`](@ref) function.
+  Possible keyword arguments include:
+  - `prefix::String`: prefix for each variable in the output file (default: "")
+  - `new::Bool`: if `true`, create a new file, otherwise append to the existing file (default: `true`)
+"""
+macro molpro_output(ecvariables, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@check_molproinfo))
+    MolproInterface.save_ecvariables_to_file($(esc(:MI)), $(esc(ecvariables)); $(ekwa...))
   end
 end
 
