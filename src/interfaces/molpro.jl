@@ -1,7 +1,108 @@
-"""
-MolproInterface
-
+@doc raw"""
 This module provides an interface to Molpro to read and write orbitals and other data.
+
+It includes functions to read Molpro matrop files to import overlap/density matrices and 
+orbital coefficients.
+
+A convenient way to use the interface is given below.
+
+## ElemCo.jl Molpro Interface: Seamless Julia-Molpro Integration
+
+The ElemCo.jl package provides a streamlined workflow for integrating Julia calculations with 
+Molpro quantum chemistry computations through a simple include mechanism and macro-based data exchange.
+
+### Setup
+
+Add the following line to your Molpro input file:
+```molpro
+include,elemcoil
+```
+
+This includes a separate configuration file `elemcoil` that handles all data exchange between
+Molpro and Julia.
+
+### Configuration File (`elemcoil`)
+
+The `elemcoil` file defines the interface between Molpro and Julia:
+
+```molpro
+$XML='data/mol.xml'
+$ORBITALS='data/orbs.dat'
+!$ECORBITALS='data/ecorbs.dat'
+$ECVARIABLES='data/ecvars.dat'
+
+system,'mkdir -p','data'
+
+put,xml,$XML
+
+{matrop
+load ORB ORB
+write,ORB,$ORBITALS,new,sci
+}
+
+system,'julia input.jl',' > elemcoil.log'
+
+!{matrop
+!read,ORB,file=$ECORBITALS
+!save,ORB,3200.2,ORBITALS
+!}
+
+readvar,$ECVARIABLES
+```
+
+**Key Components:**
+- **Variable definitions**: Define file paths for XML output, orbital data, and variable exchange
+- **Data export**: Automatically exports Molpro XML and orbital matrices to specified files
+- **Julia execution**: Calls the Julia script `input.jl` and logs output to `elemcoil.log`
+- **Data import**: Reads back modified variables and orbitals (commented sections for optional use)
+
+### Julia Script (`input.jl`)
+
+Use the convenient `@molpro_input` and `@molpro_output` macros for seamless data access:
+
+```julia
+using ElemCo
+
+# Read Molpro data using the @molpro_input macro
+@molpro_input
+
+# Perform Julia calculations
+result = @cc dcsd
+
+# Export results back to Molpro using @molpro_output macro, with a prefix for variable names
+@molpro_output result prefix="EC_" 
+```
+
+This script reads the Molpro data defined in `elemcoil`, performs calculations using Julia's
+ElemCo.jl package, and exports results back to Molpro with a specified prefix.
+
+The geometry and basis set information is automatically handled by the `@molpro_input` macro.
+Note that the XML file in Molpro stores only the AO basis set. 
+The fitting basis set is not stored in the XML file. If you need a specific fitting basis set,
+you can define it *before* the `@molpro_input` macro in the usual way, e.g.:
+```julia
+geometry = Dict("mpfit" => "avtz-mpfit", "jkfit" => "vqz-jkfit")
+@molpro_input
+```
+
+### Workflow Benefits
+
+1. **Automatic data handling**: No manual file path management - everything is configured in the `elemcoil` file
+2. **Clean separation**: Molpro handles quantum chemistry, Julia handles specialized calculations
+3. **Bidirectional communication**: Variables and data can flow both ways between Molpro and Julia
+4. **Logging**: All Julia output is captured in `elemcoil.log` for debugging
+5. **Flexible integration**: Commented sections allow for orbital modifications when needed
+
+### Use Cases
+
+- **Post-processing**: Analyze Molpro results with Julia's rich ecosystem
+- **Method development**: Implement new electronic structure methods in Julia
+- **Data analysis**: Use Julia's plotting and statistical capabilities on quantum chemistry data
+- **Orbital manipulation**: Modify or transform molecular orbitals using Julia algorithms
+- **Property calculations**: Compute additional molecular properties not available in Molpro
+
+This interface makes it easy to leverage Julia's computational capabilities within existing 
+Molpro workflows while maintaining clean, readable code.
 """
 module MolproInterface
 
@@ -11,6 +112,8 @@ using ..ElemCo.BasisSets
 
 export is_matrop_file
 export read_matrop_matrix, import_overlap, import_orbitals
+
+include("molproXml.jl")
 
 """
     MOLPRO2LIBCINT_PERMUTATION

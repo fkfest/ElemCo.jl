@@ -1,7 +1,7 @@
 # ElemCo.jl Documentation
 
 
-`ElemCo.jl` is a Julia package for computing electronic structure properties of molecules and materials. It provides a set of tools for performing quantum chemical calculations, including Hartree-Fock and post-HF methods.
+`ElemCo.jl` (*elemcoil*) is a Julia package for computing electronic structure properties of molecules and materials. It provides a set of tools for performing quantum chemical calculations, including Hartree-Fock and post-HF methods.
 
 ## Installation
 
