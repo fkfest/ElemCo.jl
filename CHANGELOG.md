@@ -6,6 +6,9 @@
 
 ### Changed
 
+* update libcint to version 6. 
+* reduce allocations in the integral calculation routines.
+
 ### Added
 
 ### Fixed
