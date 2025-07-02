@@ -632,6 +632,7 @@ end
   Delete all temporary files in ECInfo.  
 """
 function delete_temporary_files!(EC::ECInfo)
+  GC.gc(); GC.gc()
   delete_files!(EC, "tmp")
 end
 
