@@ -41,8 +41,8 @@ mutable struct Davidson
       maxdav = EC.options.davidson.maxdav
     end
     maxdav_tot = maxdav*nstates
-    tvecfiles = [ joinpath(EC.scr, "tvec"*string(i)*EC.ext) for i in 1:maxdav_tot ]
-    prodfiles = [ joinpath(EC.scr, "prod"*string(i)*EC.ext) for i in 1:maxdav_tot ]
+    tvecfiles = [ fullfilename(EC, "tvec"*string(i)) for i in 1:maxdav_tot ]
+    prodfiles = [ fullfilename(EC, "prod"*string(i)) for i in 1:maxdav_tot ]
     for i in 1:maxdav_tot
       add_file!(EC, "tvec"*string(i), "tmp", overwrite=true)
       add_file!(EC, "prod"*string(i), "tmp", overwrite=true)

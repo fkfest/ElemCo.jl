@@ -61,8 +61,8 @@ mutable struct Diis
     if maxdiis < 0
       maxdiis = cropdiis ? EC.options.diis.maxcrop : EC.options.diis.maxdiis
     end
-    ampfiles = [ joinpath(EC.scr, "amp"*string(i)*EC.ext) for i in 1:maxdiis ]
-    resfiles = [ joinpath(EC.scr, "res"*string(i)*EC.ext) for i in 1:maxdiis ]
+    ampfiles = [ fullfilename(EC, "amp"*string(i)) for i in 1:maxdiis ]
+    resfiles = [ fullfilename(EC, "res"*string(i)) for i in 1:maxdiis ]
     for i in 1:maxdiis
       add_file!(EC, "amp"*string(i), "tmp", overwrite=true)
       add_file!(EC, "res"*string(i), "tmp", overwrite=true)
