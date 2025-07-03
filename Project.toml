@@ -1,6 +1,6 @@
 name = "ElemCo"
 uuid = "094d408e-8508-40f4-9646-a254980d91ac"
-version = "0.14.1"
+version = "0.14.1+"
 authors = ["Daniel Kats <d.kats@fkf.mpg.de> and contributors"]
 
 [deps]

@@ -1,5 +1,15 @@
 # Release notes
 
+## Unreleased Version
+
+### Breaking
+
+### Changed
+
+### Added
+
+### Fixed
+
 ## Version [v0.14.1] - 2025.07.03
 
 ### Changed
