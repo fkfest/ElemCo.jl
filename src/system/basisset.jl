@@ -25,7 +25,7 @@ export basis_name, generate_basis, guess_norb
 export ao_list, print_ao
 export subshell_char, max_l
 
-export ILibcint5
+export ILibcint
 
 include("basiscentre.jl")  
 include("parse_basis.jl")
@@ -50,8 +50,8 @@ struct BasisSet
   shell_ranges::Vector{UnitRange{Int}}
   """ cartesian basis set """
   cartesian::Bool
-  """ infos for integral library (at the moment only libcint5 is possible)."""
-  lib::ILibcint5
+  """ infos for integral library (at the moment only libcint is possible)."""
+  lib::ILibcint
 end
 
 function BasisSet(centres::Vector{BasisCentre}, cartesian::Bool, lib::AbstractILib)
@@ -125,7 +125,7 @@ function combine(bs1::BasisSet, bs2::BasisSet)
   centre_ranges = vcat(bs1.centre_ranges, [r .+ length(bs1.centres) for r in bs2.centre_ranges])
   shell_ranges = vcat(bs1.shell_ranges, [r .+ length(bs1.shell_indices) for r in bs2.shell_ranges])
   cartesian = bs1.cartesian && bs2.cartesian
-  return BasisSet(centres, centre_ranges, shell_ranges, cartesian, ILibcint5(centres, cartesian))
+  return BasisSet(centres, centre_ranges, shell_ranges, cartesian, ILibcint(centres, cartesian))
 end
 
 function Base.show(io::IO, bs::BasisSet)
@@ -212,7 +212,7 @@ function generate_basis(ms::MSystem, type="ao"; cartesian::Bool=false, basisset:
     id = set_id!(basisfunctions, id)
     push!(array_of_centres, BasisCentre(atom, basisname, basisfunctions))
   end
-  return BasisSet(array_of_centres, cartesian, ILibcint5(array_of_centres, cartesian))
+  return BasisSet(array_of_centres, cartesian, ILibcint(array_of_centres, cartesian))
 end
 
 """

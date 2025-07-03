@@ -38,18 +38,18 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2IDX
       @doc $docstr
       function $jname_sfx(ash1::AngularShell, ash2::AngularShell, basis::BasisSet)
         buf = Matrix{Float64}(undef, n_ao(ash1,$cartesian),n_ao(ash2,$cartesian))
-        $libname(buf, [ash1.id,ash2.id], basis.lib)
+        $libname(buf, MVector(Cint(ash1.id-1),Cint(ash2.id-1)), basis.lib)
         return buf
       end
         
       @doc $docstr_ex
       function $jname_sfx_ex(out, ash1::AngularShell, ash2::AngularShell, basis::BasisSet)
-        $libname(out, [ash1.id,ash2.id], basis.lib)
+        $libname(out, MVector(Cint(ash1.id-1),Cint(ash2.id-1)), basis.lib)
       end
 
       @doc $docstr_sfx_ex
       function $jname_sfx_ex(out, i::Int, j::Int, basis::BasisSet)
-        $libname(out, [i,j], basis.lib)
+        $libname(out, MVector(Cint(i-1),Cint(j-1)), basis.lib)
       end
     end
   end
@@ -131,7 +131,7 @@ function calc_1e!(out, callback::Function, bs::BasisSet)
           # Call libcint
           callback(buf, i, j, bs)
           # save elements
-          vbuf = reshape_buf!(tbufs, leni, lenj)
+          vbuf = reshape_buf(buf, leni, lenj)
           out[ioff+1:ioff+leni, joff+1:joff+lenj] = vbuf
           out[joff+1:joff+lenj, ioff+1:ioff+leni] = vbuf'
         end
@@ -180,7 +180,7 @@ function calc_1e!(out, callback::Function, bs1::BasisSet, bs2::BasisSet)
           callback(buf, ib, jb, bs)
 
           # save elements
-          vbuf = reshape_buf!(tbufs, leni, lenj)
+          vbuf = reshape_buf(buf, leni, lenj)
           out[ioff+1:ioff+leni, joff+1:joff+lenj] = vbuf
         end
         reset!(tbufs)

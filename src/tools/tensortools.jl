@@ -106,7 +106,7 @@ end
   Add file to `EC.files` with `description`.
 """
 function save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
-  miosave(joinpath(EC.scr, fname*EC.ext), a...)
+  miosave(fullfilename(EC, fname), a...)
   add_file!(EC, fname, description; overwrite)
 end
 
@@ -116,7 +116,7 @@ end
   Load array from file `fname` in EC.scr directory.
 """
 function load(EC::ECInfo, fname::String)
-  return mioload(joinpath(EC.scr, fname*EC.ext))
+  return mioload(fullfilename(EC, fname))
 end
 
 """
@@ -128,7 +128,7 @@ end
   If `skip_error` is true, return empty `Array{T,N}` if the dimension/type is wrong.
 """
 function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)[1]
+  return mioload(fullfilename(EC, fname), Val(N), T; skip_error)[1]
 end
 
 """
@@ -141,7 +141,7 @@ end
   If `skip_error` is true, return empty `Array{T,N}[Array{T,N}()]` if the dimension/type is wrong.
 """
 function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)
+  return mioload(fullfilename(EC, fname), Val(N), T; skip_error)
 end
 
 for N in 1:6
@@ -166,7 +166,7 @@ end
   If `skip_error` is true, return false if the dimension/type is wrong.
 """
 function load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_error=false) where {T,N}
-  return mioload!(joinpath(EC.scr, fname*EC.ext), arrs...; skip_error)
+  return mioload!(fullfilename(EC, fname), arrs...; skip_error)
 end
 
 """
@@ -178,7 +178,7 @@ end
 """
 function newmmap(EC::ECInfo, fname::String, dims::NTuple{N,Int}, Type=Float64; description="tmp") where {N}
   add_file!(EC, fname, description; overwrite=true)
-  return mionewmmap(joinpath(EC.scr, fname*EC.ext), dims, Type)
+  return mionewmmap(fullfilename(EC, fname), dims, Type)
 end
 
 """
@@ -206,11 +206,11 @@ end
   Return a pointer to the file and the mmaped array.
 """
 function mmap(EC::ECInfo, fname::String)
-  return miommap(joinpath(EC.scr, fname*EC.ext))
+  return miommap(fullfilename(EC, fname))
 end
 
 function mmap(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
-  return miommap(joinpath(EC.scr, fname*EC.ext), Val(N), T)
+  return miommap(fullfilename(EC, fname), Val(N), T)
 end
 
 for N in 1:6

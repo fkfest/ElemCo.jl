@@ -1,13 +1,14 @@
-include("libcint5.jl")
+include("libcint.jl")
 
 """
   Electron-repulsion (and other) integrals 
 """
 module Integrals
 using Buffers
+using StaticArrays
 using ..ElemCo.Utils
 using ..ElemCo.BasisSets
-using ..ElemCo.Libcint5
+using ..ElemCo.Libcint
 
 export generate_basis # from BasisSets
 export overlap!, kinetic!, nuclear!
@@ -20,17 +21,17 @@ export BasisBatcher, BasisBatch, buffer_size_3idx, max_batch_length
 include("basisbatcher.jl")
 
 """
-    n_ao4sphshell(id::Integer, info::ILibcint5)
+    n_ao4sphshell(id::Integer, info::ILibcint)
 
   Return the number of AOs for a given spherical shell id.
 """
-n_ao4sphshell(id::Integer, info::ILibcint5) = CINTcgtos_spheric(id, info)
+n_ao4sphshell(id::Integer, info::ILibcint) = CINTcgtos_spheric(id, info)
 """
-    n_ao4cartshell(id::Integer, info::ILibcint5)
+    n_ao4cartshell(id::Integer, info::ILibcint)
 
   Return the number of AOs for a given cartesian shell id.
 """
-n_ao4cartshell(id::Integer, info::ILibcint5) = CINTcgtos_cart(id, info)
+n_ao4cartshell(id::Integer, info::ILibcint) = CINTcgtos_cart(id, info)
 
 include("integrals_2idx.jl")
 include("integrals_2e3idx.jl")
