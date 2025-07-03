@@ -1,15 +1,11 @@
 # Release notes
 
-## Unreleased Version
-
-### Breaking
+## Version [v0.14.1] - 2025.07.03
 
 ### Changed
 
 * update libcint to version 6. 
 * reduce allocations in the integral calculation routines.
-
-### Added
 
 ### Fixed
 
