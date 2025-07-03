@@ -1,5 +1,20 @@
 # Release notes
 
+## Version [v0.14.1] - 2025.07.03
+
+### Changed
+
+* update libcint to version 6. 
+* reduce allocations in the integral calculation routines.
+
+### Added
+
+* a simple XML based interface to Molpro.
+
+### Fixed
+
+* Fix Mac and Windows compatibility issues related to the case insensitivity of the file system. The capital letters in the file names on scratch are now converted to lower case plus a character `ß` (e.g., `oVoO` becomes `ovßoß`).
+
 ## Version [v0.14.0] - 2025.04.16
 
 ### Breaking

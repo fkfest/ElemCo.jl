@@ -38,18 +38,18 @@ for (jname_str, type, descr_str) in INTEGRAL_NAMES_2E3IDX
       @doc $docstr
       function $jname_sfx(ash1ao::AngularShell, ash2ao::AngularShell, ashfit::AngularShell, basis::BasisSet)
         buf = Array{Float64,3}(undef, n_ao(ash1ao,$cartesian),n_ao(ash2ao,$cartesian),n_ao(ashfit,$cartesian))
-        $libname(buf, [ash1ao.id,ash2ao.id,ashfit.id], basis.lib)
+        $libname(buf, MVector(Cint(ash1ao.id-1),Cint(ash2ao.id-1),Cint(ashfit.id-1)), basis.lib)
         return buf
       end
         
       @doc $docstr_ex
       function $jname_sfx_ex(out, ash1ao::AngularShell, ash2ao::AngularShell, ashfit::AngularShell, basis::BasisSet)
-        $libname(out, [ash1ao.id,ash2ao.id,ashfit.id], basis.lib)
+        $libname(out, MVector(Cint(ash1ao.id-1),Cint(ash2ao.id-1),Cint(ashfit.id-1)), basis.lib)
       end
 
       @doc $docstr_sfx_ex
       function $jname_sfx_ex(out, i::Int, j::Int, P::Int, basis::BasisSet)
-        $libname(out, [i,j,P], basis.lib)
+        $libname(out, MVector(Cint(i-1),Cint(j-1),Cint(P-1)), basis.lib)
       end
     end
   end
@@ -144,10 +144,10 @@ function calc_2e3idx!(out, callback::Function, ao_basis::BasisSet, fit_basis::Ba
             callback(buf, ib, jb, Pb, bs)
             
             # save elements
-            vbuf = reshape_buf!(tbufs, ni, nj, nP)
+            vbuf = reshape_buf(buf, ni, nj, nP)
             out[iblk, jblk, Pblk] = vbuf
             v_jiP = @view out[jblk, iblk, Pblk]
-            permutedims!(v_jiP, vbuf, (2,1,3))
+            allocfree_permutedims!(v_jiP, vbuf, (2,1,3))
           end
         end
         reset!(tbufs)
@@ -189,10 +189,10 @@ function calc_2e3idx!(out, buffer, callback::Function, batch::BasisBatch)
           callback(buf, ib, jb, Pb, bs)
           
           # save elements
-          vbuf = reshape_buf!(buffer, ni, nj, nP)
+          vbuf = reshape_buf(buf, ni, nj, nP)
           out[iblk, jblk, Pblk] = vbuf
           v_jiP = @view out[jblk, iblk, Pblk]
-          permutedims!(v_jiP, vbuf, (2,1,3))
+          allocfree_permutedims!(v_jiP, vbuf, (2,1,3))
         end
       end
       reset!(buffer)
