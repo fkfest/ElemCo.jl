@@ -61,6 +61,12 @@ Default scratch folder name is `elemcojlscr`.
 
 Variable names `fcidump`, `geometry` and `basis` are reserved for the file name of FCIDUMP, geometry specification and basis sets, respectively.
 
+### Input generation and orbital visualizer
+
+`ElemCo.jl` input files can be generated using [`jlmol`](https://github.com/fkfest/jlmol),
+which can also be used to visualize the molecular orbitals.
+The browser version of `jlmol` can be found at [app.jlmol.com](https://app.jlmol.com).
+
 ### Computing density-fitted Hartree-Fock and Coupled Cluster methods
 
 To compute density-fitted Hartree-Fock (DF-HF) using ElemCo.jl, you can use the [`@dfhf`](@ref) macro. In order to run post-HF calculations, the integrals have to be transformed to the MO basis (using the [`@dfints`](@ref) macro), and
