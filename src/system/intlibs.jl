@@ -8,11 +8,11 @@ Abstract type for infos for integral libraries.
 abstract type AbstractILib end
 
 """
-    ILibcint5
+    ILibcint
 
-  Infos for Libcint5 integral library.
+  Infos for Libcint integral library.
 """
-struct ILibcint5 <: AbstractILib
+struct ILibcint <: AbstractILib
   atm::Vector{Cint}
   natm::Cint
   bas::Vector{Cint}
@@ -20,14 +20,14 @@ struct ILibcint5 <: AbstractILib
   env::Vector{Cdouble}
 end
 
-Base.show(io::IO, ilib::ILibcint5) = print(io, "libcint v5")
+Base.show(io::IO, ilib::ILibcint) = print(io, "libcint")
 
 """
-    ILibcint5(atoms::Vector{BasisCentre}, cartesian::Bool)
+    ILibcint(atoms::Vector{BasisCentre}, cartesian::Bool)
 
-  Prepare the infos for Libcint5 integral library.
+  Prepare the infos for Libcint integral library.
 """
-function ILibcint5(atoms::Vector{BasisCentre}, cartesian::Bool)
+function ILibcint(atoms::Vector{BasisCentre}, cartesian::Bool)
   ATM_SLOTS = 6
   BAS_SLOTS = 8
 
@@ -86,5 +86,5 @@ function ILibcint5(atoms::Vector{BasisCentre}, cartesian::Bool)
     ib += 1
   end
 
-  return ILibcint5(lc_atm, Cint(natoms), lc_bas, Cint(ib), env)
+  return ILibcint(lc_atm, Cint(natoms), lc_bas, Cint(ib), env)
 end

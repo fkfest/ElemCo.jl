@@ -51,5 +51,5 @@ Order = [:type, :function]
 ## Integral libraries
 
 ```@docs
-ElemCo.Libcint5
+ElemCo.Libcint
 ```

@@ -15,7 +15,8 @@ export setup_space_fd!, setup_space_system!, setup_space!, reset_wf_info!
 export is_closed_shell
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
-export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
+export fullfilename, file_exists, add_file!, copy_file!
+export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 export get_options
@@ -105,6 +106,8 @@ end
   scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
   """`⟨".bin"⟩` extension of temporary files. """
   ext::String = ".bin"
+  """`⟨2⟩` verbosity level. """
+  verbosity::Int = 2
   """ options. """
   options::Options = Options()
   """ molecular system. """
@@ -240,7 +243,24 @@ function setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym; verbose=true)
   SP['s'] = setdiff(SP['o'], SP['d'])
   SP['S'] = setdiff(SP['O'], SP['d'])
   SP[':'] = SP['m'] = SP['M'] = [1:norb;]
+  SP['a'], SP['d'] = active_space(EC)
   return
+end
+
+"""
+    remove_orbs_from_spaces!(EC::ECInfo, orbs; exclude=[':', 'm', 'M'])
+
+  Remove `orbs` from all subspaces in EC.space.
+
+  `exclude` is a list of subspaces to exclude (by default, exclude full MO spaces).
+"""
+function remove_orbs_from_spaces!(EC::ECInfo, orbs; exclude=[':', 'm', 'M'])
+  SP = EC.space
+  for sp in keys(SP)
+    if sp ∉ exclude
+      setdiff!(SP[sp], orbs)
+    end
+  end
 end
 
 """
@@ -263,6 +283,44 @@ function is_closed_shell(EC::ECInfo)
     restore_space!(EC, SP_save)
   end
   return cs
+end
+
+"""
+    active_space(EC::ECInfo)
+
+  Return active space and the new doubly-occupied (closed-shell) space.
+
+  EC.space has to be set up.
+  The active space is defined either
+  - from the option [`wf.active`](@ref ECInfos.WfOptions), if set up.
+    The format is either an occupation string, or `(#elec, #orb)`.
+  - from the singly-occupied orbitals in the reference occupation (from `EC.space`).
+"""
+function active_space(EC::ECInfo)
+  SP = EC.space
+  if EC.options.wf.active == "-"
+    @assert haskey(SP, 's') "EC.space is not set up!"
+    return union(SP['s'], SP['S']), SP['d']
+  end
+  #regular expression to check for the format " ( #elec , #orb ) "
+  if occursin(r"^\s*\(\s*\d+\s*,\s*\d+\s*\)\s*$", EC.options.wf.active)
+    nelec, norb = [ strip(a, [' ', '(', ')'] ) for a in split(EC.options.wf.active, ",")]
+    nelec = parse(Int, nelec)
+    norb = parse(Int, norb)
+    totnelec = length(SP['o']) + length(SP['O'])
+    totnorb = length(SP[':'])
+    @assert nelec <= totnelec && norb <= totnorb "Invalid active space"
+    nclosed = (totnelec - nelec) ÷ 2
+    @assert nclosed*2 == totnelec - nelec "Encountered single occupancy outside active space"
+    active = [nclosed+1:nclosed+norb;]
+  else
+    active = parse_orbstring(EC.options.wf.active)
+    norb = length(active)
+    nelec = length(intersect(active, SP['o'])) + length(intersect(active, SP['O']))
+  end
+  @assert length(union(active, SP['s'])) == norb "α singly occupied orbitals outside active space"
+  @assert length(union(active, SP['S'])) == norb "β singly occupied orbitals outside active space"
+  return active, setdiff(SP['d'], active)
 end
 
 """
@@ -357,8 +415,7 @@ function freeze_nocc!(EC::ECInfo, freeze; verbose=true)
     println("Freezing ", nfreeze, " occupied orbitals")
     println()
   end
-  setdiff!(EC.space['o'], freeze)
-  setdiff!(EC.space['O'], freeze)
+  remove_orbs_from_spaces!(EC, freeze)
   return nfreeze
 end
 
@@ -386,8 +443,7 @@ function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[]; verbose=true)
     println("Freezing ", nfreeze, " virtual orbitals")
     println()
   end
-  setdiff!(EC.space['v'], freeze_orbs)
-  setdiff!(EC.space['V'], freeze_orbs)
+  remove_orbs_from_spaces!(EC, freeze_orbs)
   return nfreeze
 end
 
@@ -440,6 +496,37 @@ function set_options!(opt, allopts)
 end
 
 """
+    canonicalize_filename(name::String)
+
+  Canonicalize a filename by stripping whitespace and changing each capital letter to 
+  the corresponding lowercase letter plus 'ß'.
+"""
+function canonicalize_filename(name::String)
+  name = strip(name)
+  nameout = ""
+  for c in name
+    if isuppercase(c)
+      nameout *= lowercase(c) * 'ß'
+    else
+      nameout *= c
+    end
+  end
+  return nameout
+end
+
+"""
+  fullfilename(EC::ECInfo, name::String)
+
+  Return the full filename for file `name` in ECInfo.
+
+The file is assumed to be in the scratch directory `EC.scr` with extension `EC.ext`.
+The filename is canonicalized by `canonicalize_filename(name)` and the extension is added.
+"""
+function fullfilename(EC::ECInfo, name::String)
+  return joinpath(EC.scr, canonicalize_filename(name)*EC.ext)
+end
+
+"""
     file_exists(EC::ECInfo, name::String)
 
   Check if file `name` exists in ECInfo.
@@ -485,7 +572,7 @@ function copy_file!(EC::ECInfo, from::AbstractString, to::AbstractString; overwr
   end
   if !file_exists(EC, to) || overwrite
     EC.files[to] = EC.files[from]
-    cp(joinpath(EC.scr, from*EC.ext), joinpath(EC.scr, to*EC.ext), force=true)
+    cp(fullfilename(EC, from), fullfilename(EC, to), force=true)
   else
     error("File $to already exists in ECInfo. Use overwrite=true to overwrite.")
   end
@@ -500,7 +587,7 @@ function delete_file!(EC::ECInfo, name::AbstractString)
   if !file_exists(EC, name)
     error("File $name is not registered in ECInfo.")
   end
-  rm(joinpath(EC.scr, name*EC.ext), force=true)
+  rm(fullfilename(EC, name), force=true)
   delete!(EC.files, name)
 end
 
@@ -518,7 +605,7 @@ function delete_files!(EC::ECInfo, which::AbstractString)
   for (name,descr) in EC.files
     delete = all([w in split(descr) for w in split(which)])
     if delete
-      rm(joinpath(EC.scr, name*EC.ext), force=true)
+      rm(fullfilename(EC, name), force=true)
       delete!(EC.files, name)
     end
   end
@@ -545,6 +632,7 @@ end
   Delete all temporary files in ECInfo.  
 """
 function delete_temporary_files!(EC::ECInfo)
+  GC.gc(); GC.gc()
   delete_files!(EC, "tmp")
 end
 

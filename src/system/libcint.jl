@@ -1,12 +1,12 @@
 """
-    Libcint 5
+    Libcint
 
 Minimal wrap around the integral library libcint. This module exposes
 libcint functions to the Julia interface. 
 
 (adapted from GaussianBasis.jl) 
 """
-module Libcint5
+module Libcint
 
 using ..ElemCo.BasisSets
 
@@ -22,12 +22,12 @@ using libcint_jll
 
 const LIBCINT = libcint
 
-function CINTcgtos_spheric(id::Integer, lib::ILibcint5)
+function CINTcgtos_spheric(id::Integer, lib::ILibcint)
   id_c = Cint(id - 1)
   @ccall LIBCINT.CINTcgtos_spheric(id_c::Cint, lib.bas::Ptr{Cint})::Cint
 end
 
-function CINTcgtos_cart(id, lib::ILibcint5)
+function CINTcgtos_cart(id, lib::ILibcint)
   id_c = Cint(id - 1)
   @ccall LIBCINT.CINTcgtos_cart(id_c::Cint, lib.bas::Ptr{Cint})::Cint
 end
@@ -38,8 +38,7 @@ for suffix in ("sph", "cart")
     jname = Symbol("cint1e_$(type)_$(suffix)!")
     cname = Symbol("cint1e_$(type)_$(suffix)")
     @eval begin
-      function $jname(buf::Array{Cdouble}, shls::Array{<:Integer}, lib::ILibcint5)
-        cshls = Cint.(shls.-1)
+      function $jname(buf::Array{Cdouble}, cshls::AbstractArray{Cint}, lib::ILibcint)
         @ccall LIBCINT.$cname(
             buf  :: Ptr{Cdouble},
             cshls :: Ptr{Cint},
@@ -61,9 +60,8 @@ for prefix in ("2e", "2c2e", "3c2e")
       jname = Symbol("cint$(prefix)_$(type)$(suffix)!")
       cname = Symbol("cint$(prefix)_$(type)$(suffix)")
       @eval begin
-        function $jname(buf::Array{Cdouble}, shls::Array{<:Integer}, lib::ILibcint5)
+        function $jname(buf::AbstractArray{Cdouble}, cshls::AbstractArray{Cint}, lib::ILibcint)
           opt = Ptr{UInt8}(C_NULL)
-          cshls = Cint.(shls.-1)
           @ccall LIBCINT.$cname(
               buf  :: Ptr{Cdouble},
               cshls :: Ptr{Cint},

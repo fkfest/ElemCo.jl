@@ -6,7 +6,7 @@ using `ITensors.jl` package.
 """
 module DmrgExt
 using ElemCo
-using ITensors
+using ITensors, ITensorMPS
 using Printf
 using ElemCo.Utils
 using ElemCo.ECInfos
