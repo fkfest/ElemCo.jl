@@ -19,7 +19,13 @@ function parse_basis(basis_name::String, atom::ACentre; fallback=false)
         println(atomic_centre_label(atom),": Basis set $basis_name not found, using def2-universal-jkfit as a fallback.")
         basisfile = basis_file("def2-universal-jkfit")
       else
-        error("Basis set $basis_name not found!")
+        suggestions = suggest_basis_sets(basis_name)
+        if !isempty(suggestions)
+          suggestion_str = join(suggestions, ", ")
+          error("Basis set $basis_name not found! Did you mean: $suggestion_str?")
+        else
+          error("Basis set $basis_name not found!")
+        end
       end
     end
     basisblock = read_basis_block(basisfile, atom)
@@ -52,7 +58,13 @@ function basis_file(basis_name::AbstractString)
   end
   filename = "$mainname.$version.mpro"
   if !isfile(filename)
-    error("Basis set $basis_name version $version not found!")
+    suggestions = suggest_basis_sets(basis_name)
+    if !isempty(suggestions)
+      suggestion_str = join(suggestions, ", ")
+      error("Basis set $basis_name version $version not found! Did you mean: $suggestion_str?")
+    else
+      error("Basis set $basis_name version $version not found!")
+    end
   end
   return filename
 end
