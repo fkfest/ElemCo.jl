@@ -27,6 +27,7 @@ export TrexFile, write_trex, read_trex
 export write_trex_orbitals, read_trex_orbitals
 export write_trex_amplitudes, read_trex_amplitudes
 export write_trex_molecule, read_trex_molecule
+export open_trex, close_trex
 
 """
     TrexFile
@@ -83,7 +84,7 @@ function write_trex_metadata(file::HDF5.File)
     # Write format version and metadata
     attrs(trex_group)["format_version"] = "2.4.0"
     attrs(trex_group)["created_by"] = "ElemCo.jl"
-    attrs(trex_group)["created_date"] = string(now())
+    attrs(trex_group)["created_date"] = string(Dates.now())
     
     return trex_group
 end
@@ -157,7 +158,7 @@ function read_trex_molecule(trex::TrexFile)
         # Create basic basis (this would need to be enhanced for real use)
         basis = Dict{String,String}()
         
-        atom = ACentre(labels[i], pos[1], pos[2], pos[3], basis)
+        atom = ACentre(labels[i], pos[1], pos[2], pos[3], Int(charges[i]), charges[i], basis)
         push!(atoms, atom)
     end
     
@@ -285,12 +286,18 @@ function write_trex(filename::String, EC::ECInfo;
         # Write orbitals if available
         if include_orbitals
             try
-                orbs = load(EC, EC.options.wf.orb)
-                if !isnothing(orbs)
-                    write_trex_orbitals(trex, orbs)
+                # Check if orbitals file exists
+                orb_file = fullfilename(EC, EC.options.wf.orb)
+                if file_exists(EC, EC.options.wf.orb)
+                    orbs = load(EC, EC.options.wf.orb)
+                    if !isnothing(orbs)
+                        write_trex_orbitals(trex, orbs)
+                    end
+                else
+                    @warn "Orbital file $(EC.options.wf.orb) not found, skipping orbital export"
                 end
-            catch
-                @warn "Could not load orbitals for TREX export"
+            catch e
+                @warn "Could not load orbitals for TREX export: $e"
             end
         end
         
@@ -353,9 +360,20 @@ end
 
 # Utility function to get element symbol from atomic number
 function element_symbol(z::Int)
-    elements = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
-                "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar"]
-    return z <= length(elements) ? elements[z] : "X$z"
+    # Use the Elements module if available, otherwise fall back to simple list
+    try
+        for (symbol, (atomic_num, _, _, _, _, _)) in ELEMENTS
+            if atomic_num == z
+                return symbol
+            end
+        end
+    catch
+        # Fallback to simple list
+        elements = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
+                    "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar"]
+        return z <= length(elements) ? elements[z] : "X$z"
+    end
+    return "X$z"
 end
 
 end # module TrexInterface

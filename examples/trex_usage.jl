@@ -94,7 +94,7 @@ try
     println("Test orbital data written")
     
     # Close the file
-    close_trex(trex)
+    ElemCo.TrexInterface.close_trex(trex)
     
     # Read back the data
     trex_read = TrexFile("manual_trex.h5", "r")
@@ -104,7 +104,7 @@ try
     
     println("Read back: $(length(molecule_read)) atoms, $(size(orbitals_read)) orbital matrix")
     
-    close_trex(trex_read)
+    ElemCo.TrexInterface.close_trex(trex_read)
     
 catch e
     println("Low-level interface failed: $e")
