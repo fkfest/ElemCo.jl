@@ -27,7 +27,7 @@ TESTS = [
 ("DF", ["df_hf", "basis", "df_uhf", "df_mcscf", "levenshtein"]),
 ("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc"]),
-("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase"]),
+("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase", "trex_test"]),
 ("Unit-tests", ["unit_tests"])
 ]
 
