@@ -52,6 +52,7 @@ The following macros are available in `ElemCo.jl` (see [the documentation for mo
 - [`@cc`](@ref)` <method>` - Performs a coupled cluster calculation.
 - [`@dfcc`](@ref)` <method>` - Performs a coupled cluster calculation using density fitting.
 - [`@set`](@ref)` <option> <setting>` - Sets the options([`ElemCo.ECInfos.Options`](@ref)) for the calculation.
+- [`@write_trex`](@ref) and [`@read_trex`](@ref) - Export and import data using the [TREX format](@ref trex_format_support) for standardized quantum chemistry data exchange.
 
 etc.
 
