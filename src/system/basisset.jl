@@ -24,11 +24,13 @@ export coefficients_1mat, n_coefficients_1mat
 export basis_name, generate_basis, guess_norb
 export ao_list, print_ao
 export subshell_char, max_l
+export levenshtein_distance, get_available_basis_sets, suggest_basis_sets
 
 export ILibcint
 
 include("basiscentre.jl")  
 include("parse_basis.jl")
+include("levenshtein.jl")
 include("intlibs.jl")
 include("aos.jl")
 
