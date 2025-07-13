@@ -78,9 +78,11 @@ Export ElemCo data to TREX format.
 ```
 
 **Options:**
-- `include_orbitals::Bool=true`: Include molecular orbitals
+- `include_orbitals::Bool=true`: Include molecular orbitals and basis sets
 - `include_amplitudes::Bool=false`: Include CC amplitudes  
 - `include_molecule::Bool=true`: Include molecular geometry
+
+**Note:** When `include_orbitals=true`, basis set information is automatically included.
 
 **Examples:**
 ```julia
@@ -147,6 +149,10 @@ The TREX format organizes data in a standardized HDF5 hierarchy:
   │   ├── charge         # Nuclear charges
   │   ├── coord          # Atomic coordinates
   │   └── label          # Atom labels
+  ├── basis/             # Basis set information (automatically included with orbitals)
+  │   ├── num            # Number of basis sets
+  │   ├── nucleus_index  # Atom index for each basis set
+  │   └── type           # Basis set names (e.g., "cc-pVDZ")
   ├── mo/                # Molecular orbitals
   │   ├── num            # Number of MOs
   │   └── coefficient    # MO coefficients

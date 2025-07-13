@@ -27,6 +27,7 @@ export TrexFile, write_trex, read_trex
 export write_trex_orbitals, read_trex_orbitals
 export write_trex_amplitudes, read_trex_amplitudes
 export write_trex_molecule, read_trex_molecule
+export write_trex_basis, read_trex_basis
 export open_trex, close_trex
 
 """
@@ -166,15 +167,116 @@ function read_trex_molecule(trex::TrexFile)
 end
 
 """
-    write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
-                       orbital_type="molecular", spin="restricted")
+    write_trex_basis(trex::TrexFile, system::MSystem)
 
-Write molecular orbitals to TREX format.
+Write basis set information to TREX format.
 """
-function write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
-                            orbital_type="molecular", spin="restricted")
+function write_trex_basis(trex::TrexFile, system::MSystem)
     file = open_trex(trex)
     trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
+    
+    # Create basis group for basis set information
+    if haskey(trex_group, "basis")
+        delete_object(trex_group, "basis")
+    end
+    basis_group = create_group(trex_group, "basis")
+    
+    # Extract basis set information from atomic centres
+    nbasis = length(system)
+    basis_names = String[]
+    atom_indices = Int[]
+    
+    # Collect unique basis sets and their associations with atoms
+    for (i, atom) in enumerate(system)
+        # Get the primary basis set (usually "ao")
+        if haskey(atom.basis, "ao")
+            push!(basis_names, atom.basis["ao"])
+            push!(atom_indices, i)
+        elseif !isempty(atom.basis)
+            # Use the first available basis set if "ao" is not present
+            first_basis = first(values(atom.basis))
+            push!(basis_names, first_basis)
+            push!(atom_indices, i)
+        else
+            # No basis set specified for this atom
+            push!(basis_names, "")
+            push!(atom_indices, i)
+        end
+    end
+    
+    # Write basis set data
+    basis_group["num"] = Int64(nbasis)
+    basis_group["nucleus_index"] = atom_indices
+    basis_group["type"] = basis_names
+    
+    # Store additional basis set types if available
+    all_basis_types = Set{String}()
+    for atom in system
+        for basis_type in keys(atom.basis)
+            push!(all_basis_types, basis_type)
+        end
+    end
+    
+    if length(all_basis_types) > 1
+        # Store all basis types as attributes
+        attrs(basis_group)["available_types"] = collect(all_basis_types)
+    end
+    
+    # Add metadata
+    attrs(basis_group)["description"] = "Basis set information for molecular orbitals"
+    
+    return basis_group
+end
+
+"""
+    read_trex_basis(trex::TrexFile) -> Dict{String, Any}
+
+Read basis set information from TREX format.
+"""
+function read_trex_basis(trex::TrexFile)
+    file = open_trex(trex)
+    
+    if !haskey(file, "trex") || !haskey(file["trex"], "basis")
+        error("No basis set data found in TREX file")
+    end
+    
+    basis_group = file["trex"]["basis"]
+    
+    # Read basis set data
+    nbasis = read(basis_group["num"])
+    atom_indices = read(basis_group["nucleus_index"])
+    basis_types = read(basis_group["type"])
+    
+    basis_info = Dict{String, Any}(
+        "num" => nbasis,
+        "nucleus_index" => atom_indices,
+        "type" => basis_types
+    )
+    
+    # Read additional attributes if available
+    if haskey(attrs(basis_group), "available_types")
+        basis_info["available_types"] = read(attrs(basis_group)["available_types"])
+    end
+    
+    return basis_info
+end
+
+"""
+    write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
+                       orbital_type="molecular", spin="restricted", system=nothing)
+
+Write molecular orbitals to TREX format. If system is provided, 
+basis set information will also be written.
+"""
+function write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
+                            orbital_type="molecular", spin="restricted", system=nothing)
+    file = open_trex(trex)
+    trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
+    
+    # Write basis set information if system is provided and not already written
+    if !isnothing(system) && !haskey(trex_group, "basis")
+        write_trex_basis(trex, system)
+    end
     
     # Create MO group
     if haskey(trex_group, "mo")
@@ -263,10 +365,11 @@ end
 """
     write_trex(filename::String, EC::ECInfo; kwargs...)
 
-Write ElemCo data to TREX format file.
+Write ElemCo data to TREX format file. When orbitals are included,
+basis set information is automatically written as well.
 
 # Keyword arguments
-- `include_orbitals::Bool=true`: Include molecular orbitals
+- `include_orbitals::Bool=true`: Include molecular orbitals and basis sets
 - `include_amplitudes::Bool=false`: Include CC amplitudes  
 - `include_molecule::Bool=true`: Include molecular geometry
 """
@@ -291,7 +394,8 @@ function write_trex(filename::String, EC::ECInfo;
                 if file_exists(EC, EC.options.wf.orb)
                     orbs = load(EC, EC.options.wf.orb)
                     if !isnothing(orbs)
-                        write_trex_orbitals(trex, orbs)
+                        # Pass system information to include basis set data
+                        write_trex_orbitals(trex, orbs, system=EC.system)
                     end
                 else
                     @warn "Orbital file $(EC.options.wf.orb) not found, skipping orbital export"
@@ -341,6 +445,10 @@ function read_trex(filename::String)
         # Read available sections
         if haskey(trex_group, "nucleus")
             data["molecule"] = read_trex_molecule(trex)
+        end
+        
+        if haskey(trex_group, "basis")
+            data["basis"] = read_trex_basis(trex)
         end
         
         if haskey(trex_group, "mo")
