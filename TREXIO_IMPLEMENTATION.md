@@ -1,32 +1,32 @@
-# TREX Format Implementation Summary
+# TREXIO Format Implementation Summary
 
 ## Overview
-Successfully implemented TREX (Table of Results Exchange) compatible storage for ElemCo.jl, enabling standardized data exchange in quantum chemistry calculations.
+Successfully implemented TREXIO (Table of Results Exchange) compatible storage for ElemCo.jl, enabling standardized data exchange in quantum chemistry calculations.
 
 ## Implementation Details
 
 ### Files Added
-1. **`src/interfaces/trex.jl`** - Core TREX interface implementation
-2. **`test/trex_test.jl`** - Comprehensive test suite 
-3. **`examples/trex_usage.jl`** - Working usage examples
-4. **`docs/trex_format.md`** - Complete documentation
+1. **`src/interfaces/trexio.jl`** - Core TREXIO interface implementation
+2. **`test/trexio_test.jl`** - Comprehensive test suite 
+3. **`examples/trexio_usage.jl`** - Working usage examples
+4. **`docs/trexio_format.md`** - Complete documentation
 
 ### Files Modified
-1. **`src/ElemCo.jl`** - Added TREX interface inclusion and macros
-2. **`src/interfaces/interfaces.jl`** - Integrated TREX exports
-3. **`test/runtests.jl`** - Added TREX tests to test suite
+1. **`src/ElemCo.jl`** - Added TREXIO interface inclusion and macros
+2. **`src/interfaces/interfaces.jl`** - Integrated TREXIO exports
+3. **`test/runtests.jl`** - Added TREXIO tests to test suite
 
 ## Key Features
 
 ### High-Level Interface
-- `@write_trex filename [options...]` - Export ElemCo data to TREX format
-- `@read_trex filename` - Import data from TREX files
+- `@write_trexio filename [options...]` - Export ElemCo data to TREXIO format
+- `@read_trexio filename` - Import data from TREXIO files
 - Seamless integration with existing ElemCo workflow
 
 ### Low-Level Interface
 - `TrexFile` structure for file management
 - Individual functions for molecules, orbitals, and amplitudes
-- Full control over TREX file structure
+- Full control over TREXIO file structure
 
 ### Data Support
 - **Molecular geometries**: Atomic positions, charges, labels
@@ -35,32 +35,32 @@ Successfully implemented TREX (Table of Results Exchange) compatible storage for
 - **Extensible format**: Easy to add new data types
 
 ### Standards Compliance
-- Follows TREX format specification v2.4.0
+- Follows TREXIO format specification v2.4.0
 - HDF5-based for cross-platform compatibility
-- Compatible with other TREX-supporting quantum chemistry codes
+- Compatible with other TREXIO-supporting quantum chemistry codes
 
 ## Usage Examples
 
 ### Basic Export
 ```julia
 @dfhf
-@write_trex "results.h5"
+@write_trexio "results.h5"
 ```
 
 ### Data Import
 ```julia
-data = @read_trex "shared_results.h5"
+data = @read_trexio "shared_results.h5"
 molecule = data["molecule"]
 orbitals = data["orbitals"]
 ```
 
 ### Advanced Usage
 ```julia
-using ElemCo.TrexInterface
-trex = TrexFile("custom.h5", "w")
-write_trex_molecule(trex, system)
-write_trex_orbitals(trex, orbitals)
-close_trex(trex)
+using ElemCo.TrexioInterface
+trexio = TrexioFile("custom.h5", "w")
+write_trexio_molecule(trex, system)
+write_trexio_orbitals(trex, orbitals)
+close_trexio(trexio)
 ```
 
 ## Testing

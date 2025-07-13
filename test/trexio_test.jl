@@ -1,18 +1,18 @@
 """
-Test for TREX interface functionality
+Test for TREXIO interface functionality
 """
 
 using Test
 
 # Only test if HDF5 is available
-@testset "TREX Interface Tests" begin
+@testset "TREXIO Interface Tests" begin
     try
         using HDF5
         using ElemCo
         
-        # Test basic TREX file operations
-        @testset "TREX File Operations" begin
-            test_filename = "test_trex.h5"
+        # Test basic TREXIO file operations
+        @testset "TREXIO File Operations" begin
+            test_filename = "test_trexio.h5"
             
             # Clean up any existing test file
             if isfile(test_filename)
@@ -24,12 +24,12 @@ using Test
                 test_orbitals = rand(Float64, 5, 3)  # 5 basis functions, 3 MOs
                 
                 # Test high-level write function
-                trex_data = Dict{String, Any}("orbitals" => test_orbitals)
+                trexio_data = Dict{String, Any}("orbitals" => test_orbitals)
                 
                 # Use HDF5 directly for basic test
                 h5open(test_filename, "w") do file
-                    trex_group = create_group(file, "trex")
-                    mo_group = create_group(trex_group, "mo")
+                    trexio_group = create_group(file, "trexio")
+                    mo_group = create_group(trexio_group, "mo")
                     mo_group["num"] = size(test_orbitals, 2)
                     mo_group["coefficient"] = test_orbitals
                 end
@@ -38,15 +38,15 @@ using Test
                 
                 # Test reading
                 h5open(test_filename, "r") do file
-                    if haskey(file, "trex") && haskey(file["trex"], "mo")
-                        orbitals_read = read(file["trex"]["mo"]["coefficient"])
+                    if haskey(file, "trexio") && haskey(file["trexio"], "mo")
+                        orbitals_read = read(file["trexio"]["mo"]["coefficient"])
                         @test size(orbitals_read) == size(test_orbitals)
                         @test isapprox(orbitals_read, test_orbitals)
                     end
                 end
                 
             catch e
-                @warn "TREX basic test failed: $e"
+                @warn "TREXIO basic test failed: $e"
             finally
                 # Clean up
                 if isfile(test_filename)
@@ -55,7 +55,7 @@ using Test
             end
         end
         
-        @testset "TREX Basis Set Data" begin
+        @testset "TREXIO Basis Set Data" begin
             test_filename = "test_basis.h5"
             
             if isfile(test_filename)
@@ -74,27 +74,27 @@ using Test
                                               Dict("ao" => "cc-pVDZ", "jkfit" => "cc-pVDZ-jkfit"), false)
                 system = ElemCo.MSystems.MSystem([atom1, atom2])
                 
-                # Test basis set I/O using TrexInterface
-                if isdefined(ElemCo, :TrexInterface)
-                    trex = ElemCo.TrexInterface.TrexFile(test_filename, "w")
-                    ElemCo.TrexInterface.write_trex_basis(trex, system)
-                    ElemCo.TrexInterface.close_trex(trex)
+                # Test basis set I/O using TrexioInterface
+                if isdefined(ElemCo, :TrexioInterface)
+                    trex = ElemCo.TrexioInterface.TrexioFile(test_filename, "w")
+                    ElemCo.TrexioInterface.write_trexio_basis(trex, system)
+                    ElemCo.TrexioInterface.close_trexio(trex)
                     
                     @test isfile(test_filename)
                     
                     # Read basis set data back
-                    trex_read = ElemCo.TrexInterface.TrexFile(test_filename, "r")
-                    basis_data = ElemCo.TrexInterface.read_trex_basis(trex_read)
-                    ElemCo.TrexInterface.close_trex(trex_read)
+                    trex_read = ElemCo.TrexioInterface.TrexioFile(test_filename, "r")
+                    basis_data = ElemCo.TrexioInterface.read_trexio_basis(trex_read)
+                    ElemCo.TrexioInterface.close_trexio(trex_read)
                     
                     # Check that basis data is available - handle both formats
                     @test haskey(basis_data, "format")  # Should indicate format type
                     
                     if basis_data["format"] == "trexio"
-                        # TREXIO format
+                        # TREXIOIO format
                         @test haskey(basis_data, "shell_num")
                         @test haskey(basis_data, "shell_nucleus_index")
-                        println("Basis data read in TREXIO format")
+                        println("Basis data read in TREXIOIO format")
                     elseif basis_data["format"] == "legacy"
                         # Legacy format
                         @test haskey(basis_data, "type")
@@ -108,7 +108,7 @@ using Test
                 end
                 
             catch e
-                @warn "TREX basis set test failed: $e"
+                @warn "TREXIO basis set test failed: $e"
             finally
                 # Clean up
                 if isfile(test_filename)
@@ -117,7 +117,7 @@ using Test
             end
         end
         
-        @testset "TREX Orbitals with Basis Sets" begin
+        @testset "TREXIO Orbitals with Basis Sets" begin
             test_filename = "test_orbitals_basis.h5"
             
             if isfile(test_filename)
@@ -138,30 +138,30 @@ using Test
                 
                 test_orbitals = rand(Float64, 2, 2)  # 2 basis functions, 2 MOs
                 
-                if isdefined(ElemCo, :TrexInterface)
-                    trex = ElemCo.TrexInterface.TrexFile(test_filename, "w")
-                    ElemCo.TrexInterface.write_trex_orbitals(trex, test_orbitals, system=system)
-                    ElemCo.TrexInterface.close_trex(trex)
+                if isdefined(ElemCo, :TrexioInterface)
+                    trex = ElemCo.TrexioInterface.TrexioFile(test_filename, "w")
+                    ElemCo.TrexioInterface.write_trexio_orbitals(trex, test_orbitals, system=system)
+                    ElemCo.TrexioInterface.close_trexio(trex)
                     
                     @test isfile(test_filename)
                     
                     # Check that both orbitals and basis sets were written
                     h5open(test_filename, "r") do file
-                        @test haskey(file, "trex")
-                        @test haskey(file["trex"], "mo")
-                        @test haskey(file["trex"], "basis")  # Basis should be included automatically
+                        @test haskey(file, "trexio")
+                        @test haskey(file["trexio"], "mo")
+                        @test haskey(file["trexio"], "basis")  # Basis should be included automatically
                         
                         # Check orbital data
-                        orbitals_read = read(file["trex"]["mo"]["coefficient"])
+                        orbitals_read = read(file["trexio"]["mo"]["coefficient"])
                         @test isapprox(orbitals_read, test_orbitals)
                         
-                        # Check basis data - handle both TREXIO and legacy formats
-                        basis_group = file["trex"]["basis"]
+                        # Check basis data - handle both TREXIOIO and legacy formats
+                        basis_group = file["trexio"]["basis"]
                         if haskey(basis_group, "shell_num")
-                            # TREXIO format
+                            # TREXIOIO format
                             @test haskey(basis_group, "shell_nucleus_index")
                             @test haskey(basis_group, "shell_ang_mom")
-                            println("Basis data stored in TREXIO format")
+                            println("Basis data stored in TREXIOIO format")
                         elseif haskey(basis_group, "type")
                             # Legacy format
                             basis_types = read(basis_group["type"])
@@ -175,7 +175,7 @@ using Test
                 end
                 
             catch e
-                @warn "TREX orbitals with basis test failed: $e"
+                @warn "TREXIO orbitals with basis test failed: $e"
             finally
                 # Clean up
                 if isfile(test_filename)
@@ -184,7 +184,7 @@ using Test
             end
         end
         
-        @testset "TREX Read Function with Basis" begin
+        @testset "TREXIO Read Function with Basis" begin
             test_filename = "test_read_complete.h5"
             
             if isfile(test_filename)
@@ -202,15 +202,15 @@ using Test
                 system = ElemCo.MSystems.MSystem([atom1])
                 test_orbitals = rand(Float64, 5, 5)  # 5 basis functions, 5 MOs
                 
-                if isdefined(ElemCo, :TrexInterface)
+                if isdefined(ElemCo, :TrexioInterface)
                     # Write complete data
-                    trex = ElemCo.TrexInterface.TrexFile(test_filename, "w")
-                    ElemCo.TrexInterface.write_trex_molecule(trex, system)
-                    ElemCo.TrexInterface.write_trex_orbitals(trex, test_orbitals, system=system)
-                    ElemCo.TrexInterface.close_trex(trex)
+                    trex = ElemCo.TrexioInterface.TrexioFile(test_filename, "w")
+                    ElemCo.TrexioInterface.write_trexio_molecule(trex, system)
+                    ElemCo.TrexioInterface.write_trexio_orbitals(trex, test_orbitals, system=system)
+                    ElemCo.TrexioInterface.close_trexio(trex)
                     
                     # Use the high-level read function
-                    data = ElemCo.TrexInterface.read_trex(test_filename)
+                    data = ElemCo.TrexioInterface.read_trexio(test_filename)
                     
                     @test haskey(data, "molecule")
                     @test haskey(data, "orbitals")
@@ -219,9 +219,9 @@ using Test
                     # Check basis data format and content
                     basis_data = data["basis"]
                     if basis_data["format"] == "trexio"
-                        # TREXIO format may have basis set type as attribute
+                        # TREXIOIO format may have basis set type as attribute
                         @test haskey(basis_data, "shell_num")
-                        println("Complete data read with TREXIO basis format")
+                        println("Complete data read with TREXIOIO basis format")
                     elseif basis_data["format"] == "legacy"
                         # Legacy format has type array
                         @test basis_data["type"][1] == "6-31G"
@@ -230,7 +230,7 @@ using Test
                 end
                 
             catch e
-                @warn "TREX complete read test failed: $e"
+                @warn "TREXIO complete read test failed: $e"
             finally
                 # Clean up
                 if isfile(test_filename)
@@ -239,7 +239,7 @@ using Test
             end
         end
 
-        @testset "TREX Amplitude Data" begin
+        @testset "TREXIO Amplitude Data" begin
             test_filename = "test_amplitudes.h5"
             
             if isfile(test_filename)
@@ -255,8 +255,8 @@ using Test
                 
                 # Write amplitude data
                 h5open(test_filename, "w") do file
-                    trex_group = create_group(file, "trex")
-                    amp_group = create_group(trex_group, "amplitudes")
+                    trexio_group = create_group(file, "trexio")
+                    amp_group = create_group(trexio_group, "amplitudes")
                     for (key, value) in test_amplitudes
                         amp_group[key] = value
                     end
@@ -266,8 +266,8 @@ using Test
                 
                 # Read amplitude data
                 h5open(test_filename, "r") do file
-                    if haskey(file, "trex") && haskey(file["trex"], "amplitudes")
-                        amp_group = file["trex"]["amplitudes"]
+                    if haskey(file, "trexio") && haskey(file["trexio"], "amplitudes")
+                        amp_group = file["trexio"]["amplitudes"]
                         for key in ["t1", "t2"]
                             if haskey(amp_group, key)
                                 amp_read = read(amp_group[key])
@@ -278,7 +278,7 @@ using Test
                 end
                 
             catch e
-                @warn "TREX amplitude test failed: $e"
+                @warn "TREXIO amplitude test failed: $e"
             finally
                 # Clean up
                 if isfile(test_filename)
@@ -288,6 +288,6 @@ using Test
         end
         
     catch e
-        @warn "TREX tests skipped due to missing dependencies: $e"
+        @warn "TREXIO tests skipped due to missing dependencies: $e"
     end
 end

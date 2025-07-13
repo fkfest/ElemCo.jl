@@ -1,10 +1,10 @@
-# TREX Format Support in ElemCo.jl
+# TREXIO Format Support in ElemCo.jl
 
-ElemCo.jl includes support for the TREX (Table of Results Exchange) format, a standardized HDF5-based format for quantum chemistry data exchange. This enables efficient storage and retrieval of orbitals, amplitudes, and other data structures, facilitating interoperability with other quantum chemistry software.
+ElemCo.jl includes support for the TREXIO (Table of Results Exchange) format, a standardized HDF5-based format for quantum chemistry data exchange. This enables efficient storage and retrieval of orbitals, amplitudes, and other data structures, facilitating interoperability with other quantum chemistry software.
 
 ## Overview
 
-The TREX format provides:
+The TREXIO format provides:
 - Standardized structure for quantum chemistry data
 - HDF5-based efficient storage and retrieval
 - Cross-platform compatibility
@@ -12,7 +12,7 @@ The TREX format provides:
 
 ## Key Features
 
-- **Standardized Format**: Follows the TREX specification for maximum compatibility
+- **Standardized Format**: Follows the TREXIO specification for maximum compatibility
 - **Efficient Storage**: Built on HDF5 for high-performance I/O
 - **Comprehensive Data Support**: Handles molecules, orbitals, CC amplitudes, and more
 - **Easy Integration**: Simple macros for common use cases
@@ -36,19 +36,19 @@ basis = "cc-pVDZ"
 @ECinit
 @dfhf
 
-# Export to TREX format
-@write_trex "water_results.h5"
+# Export to TREXIO format
+@write_trexioio "water_results.h5"
 
-# Read TREX data
-data = @read_trex "water_results.h5"
+# Read TREXIO data
+data = @read_trexioio "water_results.h5"
 println("Available data: ", keys(data))
 ```
 
-### Reading TREX Data
+### Reading TREXIO Data
 
 ```julia
-# Read a TREX file
-data = @read_trex "calculation_results.h5"
+# Read a TREXIO file
+data = @read_trexioio "calculation_results.h5"
 
 # Access different data sections
 if haskey(data, "molecule")
@@ -69,12 +69,12 @@ end
 
 ## Macro Reference
 
-### `@write_trex`
+### `@write_trexioio`
 
-Export ElemCo data to TREX format.
+Export ElemCo data to TREXIO format.
 
 ```julia
-@write_trex filename [options...]
+@write_trexioio filename [options...]
 ```
 
 **Options:**
@@ -87,60 +87,60 @@ Export ElemCo data to TREX format.
 **Examples:**
 ```julia
 # Export everything (default)
-@write_trex "results.h5"
+@write_trexioio "results.h5"
 
 # Export only geometry
-@write_trex "geometry.h5" include_orbitals=false
+@write_trexioio "geometry.h5" include_orbitals=false
 
 # Export with amplitudes (when available)
-@write_trex "full_results.h5" include_amplitudes=true
+@write_trexioio "full_results.h5" include_amplitudes=true
 ```
 
-### `@read_trex`
+### `@read_trexioio`
 
-Read data from TREX format file.
+Read data from TREXIO format file.
 
 ```julia
-data = @read_trex filename
+data = @read_trexioio filename
 ```
 
 Returns a dictionary with available data sections.
 
 ## Low-Level Interface
 
-For more control, use the low-level `TrexInterface` module:
+For more control, use the low-level `TrexioInterface` module:
 
 ```julia
-using ElemCo.TrexInterface
+using ElemCo.TrexioInterface
 
-# Create a TREX file
-trex = TrexFile("custom.h5", "w")
+# Create a TREXIO file
+trex = TrexioFile("custom.h5", "w")
 
 # Write molecular data
-write_trex_molecule(trex, EC.system)
+write_trexio_molecule(trex, EC.system)
 
 # Write orbital data
 orbitals = load(EC, EC.options.wf.orb)
-write_trex_orbitals(trex, orbitals)
+write_trexio_orbitals(trex, orbitals)
 
 # Write amplitude data
 amplitudes = Dict("t1" => t1_amplitudes, "t2" => t2_amplitudes)
-write_trex_amplitudes(trex, amplitudes)
+write_trexio_amplitudes(trex, amplitudes)
 
 # Close file
-close_trex(trex)
+close_trexio(trex)
 
 # Read data back
-trex_read = TrexFile("custom.h5", "r")
-molecule = read_trex_molecule(trex_read)
-orbitals = read_trex_orbitals(trex_read)
-amplitudes = read_trex_amplitudes(trex_read)
-close_trex(trex_read)
+trex_read = TrexioFile("custom.h5", "r")
+molecule = read_trexio_molecule(trex_read)
+orbitals = read_trexio_orbitals(trex_read)
+amplitudes = read_trexio_amplitudes(trex_read)
+close_trexio(trex_read)
 ```
 
-## TREX File Structure
+## TREXIO File Structure
 
-The TREX format organizes data in a standardized HDF5 hierarchy:
+The TREXIO format organizes data in a standardized HDF5 hierarchy:
 
 ```
 /trex/
@@ -150,14 +150,14 @@ The TREX format organizes data in a standardized HDF5 hierarchy:
   │   ├── coord          # Atomic coordinates
   │   └── label          # Atom labels
   ├── basis/             # Basis set information (automatically included with orbitals)
-  │   ├── shell_num      # Number of shells (TREXIO format)
-  │   ├── prim_num       # Number of primitives (TREXIO format)
-  │   ├── shell_nucleus_index # Nucleus index for each shell (TREXIO format)
-  │   ├── shell_ang_mom  # Angular momentum for each shell (TREXIO format)
-  │   ├── shell_factor   # Normalization factors (TREXIO format)
-  │   ├── shell_range    # Range of primitives for each shell (TREXIO format)
-  │   ├── exponent       # Primitive exponents (TREXIO format)
-  │   ├── coefficient    # Contraction coefficients (TREXIO format)
+  │   ├── shell_num      # Number of shells (TREXIOIO format)
+  │   ├── prim_num       # Number of primitives (TREXIOIO format)
+  │   ├── shell_nucleus_index # Nucleus index for each shell (TREXIOIO format)
+  │   ├── shell_ang_mom  # Angular momentum for each shell (TREXIOIO format)
+  │   ├── shell_factor   # Normalization factors (TREXIOIO format)
+  │   ├── shell_range    # Range of primitives for each shell (TREXIOIO format)
+  │   ├── exponent       # Primitive exponents (TREXIOIO format)
+  │   ├── coefficient    # Contraction coefficients (TREXIOIO format)
   │   └── type           # Basis set name (stored as attribute)
   │   # Legacy format (for backward compatibility):
   │   ├── num            # Number of basis sets (legacy)
@@ -180,17 +180,17 @@ The TREX format organizes data in a standardized HDF5 hierarchy:
 # Standard workflow
 @dfhf
 @cc ccsd
-@write_trex "final_results.h5" include_amplitudes=true
+@write_trexioio "final_results.h5" include_amplitudes=true
 ```
 
 ### Data Sharing and Collaboration
 
 ```julia
 # Export for sharing
-@write_trex "shared_data.h5"
+@write_trexioio "shared_data.h5"
 
 # Import shared data (in another session/code)
-shared = @read_trex "shared_data.h5"
+shared = @read_trexioio "shared_data.h5"
 # Use shared["molecule"], shared["orbitals"] as starting point
 ```
 
@@ -198,7 +198,7 @@ shared = @read_trex "shared_data.h5"
 
 ```julia
 # Read previous results
-previous = @read_trex "checkpoint.h5"
+previous = @read_trexioio "checkpoint.h5"
 
 # Use previous orbitals as initial guess
 if haskey(previous, "orbitals")
@@ -209,32 +209,32 @@ end
 
 ## Error Handling
 
-The TREX interface includes comprehensive error handling:
+The TREXIO interface includes comprehensive error handling:
 
 ```julia
 try
-    data = @read_trex "nonexistent.h5"
+    data = @read_trexioio "nonexistent.h5"
 catch e
-    println("Error reading TREX file: ", e)
+    println("Error reading TREXIO file: ", e)
 end
 
 # Check file existence
 if isfile("results.h5")
-    data = @read_trex "results.h5"
+    data = @read_trexioio "results.h5"
 else
-    println("TREX file not found")
+    println("TREXIO file not found")
 end
 ```
 
-## TREXIO Standard Compliance
+## TREXIOIO Standard Compliance
 
-ElemCo.jl's TREX implementation follows the TREXIO standard for basis set storage:
+ElemCo.jl's TREXIO implementation follows the TREXIOIO standard for basis set storage:
 
-- **TREXIO Format**: When detailed basis set information is available, data is stored using TREXIO-compliant field names (`shell_num`, `prim_num`, `shell_nucleus_index`, `shell_ang_mom`, `shell_factor`, `shell_range`, `exponent`, `coefficient`)
+- **TREXIOIO Format**: When detailed basis set information is available, data is stored using TREXIOIO-compliant field names (`shell_num`, `prim_num`, `shell_nucleus_index`, `shell_ang_mom`, `shell_factor`, `shell_range`, `exponent`, `coefficient`)
 - **Legacy Support**: Maintains backward compatibility with simplified basis set storage (`num`, `nucleus_index`, `type`)
 - **Automatic Detection**: The reader automatically detects and handles both formats
 
-The implementation automatically uses the TREXIO-compliant format when basis set details are available from ElemCo calculations, ensuring maximum interoperability with other quantum chemistry codes.
+The implementation automatically uses the TREXIOIO-compliant format when basis set details are available from ElemCo calculations, ensuring maximum interoperability with other quantum chemistry codes.
 
 ## Performance Considerations
 
@@ -245,8 +245,8 @@ The implementation automatically uses the TREXIO-compliant format when basis set
 
 ## Compatibility
 
-This implementation follows the TREX format specification version 2.4.0 and is compatible with:
-- Other TREX-supporting quantum chemistry codes
+This implementation follows the TREXIO format specification version 2.4.0 and is compatible with:
+- Other TREXIO-supporting quantum chemistry codes
 - Standard HDF5 tools and libraries
 - Cross-platform data exchange (Linux, Windows, macOS)
 
@@ -258,25 +258,25 @@ This implementation follows the TREX format specification version 2.4.0 and is c
 ```julia
 # Always check file existence
 if !isfile("results.h5")
-    error("TREX file not found")
+    error("TREXIO file not found")
 end
 ```
 
 **Missing data sections:**
 ```julia
-data = @read_trex "file.h5"
+data = @read_trexioio "file.h5"
 if !haskey(data, "orbitals")
-    @warn "No orbital data found in TREX file"
+    @warn "No orbital data found in TREXIO file"
 end
 ```
 
 **Version compatibility:**
-Check TREX format version in file attributes if compatibility issues arise.
+Check TREXIO format version in file attributes if compatibility issues arise.
 
 ## References
 
-- [TREX Format Specification](https://trex-coe.github.io/trexio/lib.html)
-- [TREX Paper](https://arxiv.org/abs/2302.14793)
+- [TREXIO Format Specification](https://trex-coe.github.io/trexio/lib.html)
+- [TREXIO Paper](https://arxiv.org/abs/2302.14793)
 - [HDF5 Documentation](https://www.hdfgroup.org/solutions/hdf5/)
 
 ## Examples
@@ -285,16 +285,16 @@ See `examples/trex_usage.jl` for comprehensive usage examples.
 
 ## API Reference
 
-### TrexInterface Module
+### TrexioInterface Module
 
 ```@docs
-ElemCo.TrexInterface
+ElemCo.TrexioInterface
 ```
 
 ### Exported Functions
 
 ```@autodocs
-Modules = [ElemCo.TrexInterface]
+Modules = [ElemCo.TrexioInterface]
 Private = false
 Order = [:function, :type, :macro, :constant]
 ```
@@ -302,7 +302,7 @@ Order = [:function, :type, :macro, :constant]
 ### Internal Functions
 
 ```@autodocs
-Modules = [ElemCo.TrexInterface]
+Modules = [ElemCo.TrexioInterface]
 Public = false
 Order = [:function, :type, :macro, :constant]
 ```

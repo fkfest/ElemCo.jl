@@ -1,18 +1,18 @@
 """
-TREX Interface Module
+TREXIOIO Interface Module
 
-This module provides functions to import and export data in TREX format,
+This module provides functions to import and export data in TREXIOIO format,
 which is a standardized format for quantum chemistry data exchange.
 
-TREX (Table of Results Exchange) format specification:
+TREXIOIO (Table of Results Exchange Input/Output) format specification:
 - Based on HDF5 for efficient storage
 - Standardized structure for quantum chemistry data
 - Supports orbitals, amplitudes, integrals, and other QC data
 
-See: https://trex-coe.github.io/trexio/lib.html
+See: https://trexio-coe.github.io/trexio/lib.html
      https://arxiv.org/abs/2302.14793
 """
-module TrexInterface
+module TrexioInterface
 
 using HDF5
 using Dates
@@ -23,64 +23,64 @@ using ..ElemCo.QMTensors
 using ..ElemCo.Elements
 using LinearAlgebra
 
-export TrexFile, write_trex, read_trex
-export write_trex_orbitals, read_trex_orbitals
-export write_trex_amplitudes, read_trex_amplitudes
-export write_trex_molecule, read_trex_molecule
-export write_trex_basis, read_trex_basis
-export open_trex, close_trex
+export TrexioFile, write_trexio, read_trexio
+export write_trexio_orbitals, read_trexio_orbitals
+export write_trexio_amplitudes, read_trexio_amplitudes
+export write_trexio_molecule, read_trexio_molecule
+export write_trexio_basis, read_trexio_basis
+export open_trexio, close_trexio
 
 """
-    TrexFile
+    TrexioFile
 
-Structure representing a TREX format file.
+Structure representing a TREXIOIO format file.
 Contains the HDF5 file handle and metadata.
 """
-mutable struct TrexFile
+mutable struct TrexioFile
     filename::String
     file::Union{HDF5.File, Nothing}
     mode::String  # "r", "w", "r+"
     
-    function TrexFile(filename::String, mode::String="r")
+    function TrexioFile(filename::String, mode::String="r")
         new(filename, nothing, mode)
     end
 end
 
 """
-    open_trex(trex::TrexFile)
+    open_trexio(trexio::TrexioFile)
 
-Open a TREX file for reading or writing.
+Open a TREXIO file for reading or writing.
 """
-function open_trex(trex::TrexFile)
-    if trex.file === nothing
-        trex.file = h5open(trex.filename, trex.mode)
-        # Ensure the main TREX group exists
-        if trex.mode in ["w", "r+"] && !haskey(trex.file, "trex")
-            create_group(trex.file, "trex")
+function open_trexio(trexio::TrexioFile)
+    if trexio.file === nothing
+        trexio.file = h5open(trexio.filename, trexio.mode)
+        # Ensure the main TREXIO group exists
+        if trexio.mode in ["w", "r+"] && !haskey(trexio.file, "trexio")
+            create_group(trexio.file, "trexio")
         end
     end
-    return trex.file
+    return trexio.file
 end
 
 """
-    close_trex(trex::TrexFile)
+    close_trexio(trexio::TrexioFile)
 
-Close a TREX file.
+Close a TREXIO file.
 """
-function close_trex(trex::TrexFile)
-    if trex.file !== nothing
-        close(trex.file)
-        trex.file = nothing
+function close_trexio(trexio::TrexioFile)
+    if trexio.file !== nothing
+        close(trexio.file)
+        trexio.file = nothing
     end
 end
 
 """
-    write_trex_metadata(file::HDF5.File)
+    write_trexio_metadata(file::HDF5.File)
 
-Write TREX format metadata to the file.
+Write TREXIO format metadata to the file.
 """
-function write_trex_metadata(file::HDF5.File)
-    trex_group = file["trex"]
+function write_trexio_metadata(file::HDF5.File)
+    trex_group = file["trexio"]
     
     # Write format version and metadata
     attrs(trex_group)["format_version"] = "2.4.0"
@@ -91,13 +91,13 @@ function write_trex_metadata(file::HDF5.File)
 end
 
 """
-    write_trex_molecule(trex::TrexFile, system::MSystem)
+    write_trexio_molecule(trexio::TrexioFile, system::MSystem)
 
-Write molecular geometry and basis set information to TREX format.
+Write molecular geometry and basis set information to TREXIO format.
 """
-function write_trex_molecule(trex::TrexFile, system::MSystem)
-    file = open_trex(trex)
-    trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
+function write_trexio_molecule(trexio::TrexioFile, system::MSystem)
+    file = open_trexio(trexio)
+    trex_group = haskey(file, "trexio") ? file["trexio"] : write_trexio_metadata(file)
     
     # Create nucleus group for atomic information
     if haskey(trex_group, "nucleus")
@@ -130,18 +130,18 @@ function write_trex_molecule(trex::TrexFile, system::MSystem)
 end
 
 """
-    read_trex_molecule(trex::TrexFile) -> MSystem
+    read_trexio_molecule(trexio::TrexioFile) -> MSystem
 
-Read molecular geometry from TREX format and return MSystem.
+Read molecular geometry from TREXIO format and return MSystem.
 """
-function read_trex_molecule(trex::TrexFile)
-    file = open_trex(trex)
+function read_trexio_molecule(trexio::TrexioFile)
+    file = open_trexio(trexio)
     
-    if !haskey(file, "trex") || !haskey(file["trex"], "nucleus")
-        error("No molecular data found in TREX file")
+    if !haskey(file, "trexio") || !haskey(file["trexio"], "nucleus")
+        error("No molecular data found in TREXIO file")
     end
     
-    nucleus_group = file["trex"]["nucleus"]
+    nucleus_group = file["trexio"]["nucleus"]
     
     # Read atomic data
     natoms = read(nucleus_group["num"])
@@ -167,15 +167,15 @@ function read_trex_molecule(trex::TrexFile)
 end
 
 """
-    write_trex_basis(trex::TrexFile, system::MSystem; basisset=nothing)
+    write_trexio_basis(trexio::TrexioFile, system::MSystem; basisset=nothing)
 
-Write basis set information to TREX format following TREXIO standard.
+Write basis set information to TREXIO format following TREXIOIO standard.
 If basisset is provided, detailed shell information is stored.
 Otherwise, only basic basis set names are stored.
 """
-function write_trex_basis(trex::TrexFile, system::MSystem; basisset=nothing)
-    file = open_trex(trex)
-    trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
+function write_trexio_basis(trexio::TrexioFile, system::MSystem; basisset=nothing)
+    file = open_trexio(trexio)
+    trex_group = haskey(file, "trexio") ? file["trexio"] : write_trexio_metadata(file)
     
     # Create basis group for basis set information
     if haskey(trex_group, "basis")
@@ -184,7 +184,7 @@ function write_trex_basis(trex::TrexFile, system::MSystem; basisset=nothing)
     basis_group = create_group(trex_group, "basis")
     
     if !isnothing(basisset)
-        # Write detailed TREXIO-compliant basis set information
+        # Write detailed TREXIOIO-compliant basis set information
         _write_detailed_basis_trexio(basis_group, basisset)
     else
         # Fallback: write basic basis set names (original implementation)
@@ -192,16 +192,16 @@ function write_trex_basis(trex::TrexFile, system::MSystem; basisset=nothing)
     end
     
     # Add metadata
-    attrs(basis_group)["description"] = "Basis set information following TREXIO standard"
+    attrs(basis_group)["description"] = "Basis set information following TREXIOIO standard"
     
     return basis_group
 end
 
 """
-Write detailed basis set information following TREXIO standard
+Write detailed basis set information following TREXIOIO standard
 """
 function _write_detailed_basis_trexio(basis_group, basisset)
-    # Collect shell information following TREXIO standard
+    # Collect shell information following TREXIOIO standard
     shell_num = length(basisset)
     shell_nucleus_index = Int[]
     shell_ang_mom = Int[]
@@ -243,7 +243,7 @@ function _write_detailed_basis_trexio(basis_group, basisset)
         shell_index += 1
     end
     
-    # Write TREXIO standard datasets
+    # Write TREXIOIO standard datasets
     basis_group["shell_num"] = Int64(shell_num)
     basis_group["prim_num"] = Int64(prim_num_total)
     basis_group["shell_nucleus_index"] = shell_nucleus_index
@@ -286,7 +286,7 @@ function _write_basic_basis_names(basis_group, system)
         end
     end
     
-    # Write basic basis set data (non-TREXIO standard, for compatibility)
+    # Write basic basis set data (non-TREXIOIO standard, for compatibility)
     basis_group["num"] = Int64(nbasis)
     basis_group["nucleus_index"] = atom_indices
     basis_group["type"] = basis_names
@@ -306,39 +306,39 @@ function _write_basic_basis_names(basis_group, system)
 end
 
 """
-    read_trex_basis(trex::TrexFile) -> Dict{String, Any}
+    read_trexio_basis(trexio::TrexioFile) -> Dict{String, Any}
 
-Read basis set information from TREX format.
-Handles both TREXIO-compliant format and legacy format.
+Read basis set information from TREXIO format.
+Handles both TREXIOIO-compliant format and legacy format.
 """
-function read_trex_basis(trex::TrexFile)
-    file = open_trex(trex)
+function read_trexio_basis(trexio::TrexioFile)
+    file = open_trexio(trexio)
     
-    if !haskey(file, "trex") || !haskey(file["trex"], "basis")
-        error("No basis set data found in TREX file")
+    if !haskey(file, "trexio") || !haskey(file["trexio"], "basis")
+        error("No basis set data found in TREXIO file")
     end
     
-    basis_group = file["trex"]["basis"]
+    basis_group = file["trexio"]["basis"]
     
-    # Check if this is TREXIO-compliant format (has shell_num) or legacy format (has num)
+    # Check if this is TREXIOIO-compliant format (has shell_num) or legacy format (has num)
     if haskey(basis_group, "shell_num")
-        # TREXIO-compliant format
+        # TREXIOIO-compliant format
         return _read_detailed_basis_trexio(basis_group)
     elseif haskey(basis_group, "num")
         # Legacy format (backward compatibility)
         return _read_basic_basis_legacy(basis_group)
     else
-        error("Unknown basis set format in TREX file")
+        error("Unknown basis set format in TREXIO file")
     end
 end
 
 """
-Read TREXIO-compliant detailed basis set information
+Read TREXIOIO-compliant detailed basis set information
 """
 function _read_detailed_basis_trexio(basis_group)
     basis_info = Dict{String, Any}()
     
-    # Read TREXIO standard datasets
+    # Read TREXIOIO standard datasets
     basis_info["shell_num"] = read(basis_group["shell_num"])
     basis_info["prim_num"] = read(basis_group["prim_num"])
     basis_info["shell_nucleus_index"] = read(basis_group["shell_nucleus_index"])
@@ -353,7 +353,7 @@ function _read_detailed_basis_trexio(basis_group)
         basis_info["type"] = read(attrs(basis_group)["type"])
     end
     
-    # Mark as TREXIO format
+    # Mark as TREXIOIO format
     basis_info["format"] = "trexio"
     
     return basis_info
@@ -384,21 +384,21 @@ function _read_basic_basis_legacy(basis_group)
 end
 
 """
-    write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
+    write_trexio_orbitals(trexio::TrexioFile, orbitals::AbstractMatrix; 
                        orbital_type="molecular", spin="restricted", system=nothing, basisset=nothing)
 
-Write molecular orbitals to TREX format. If system is provided, 
+Write molecular orbitals to TREXIO format. If system is provided, 
 basis set information will also be written. If basisset is provided,
-detailed TREXIO-compliant basis information will be stored.
+detailed TREXIOIO-compliant basis information will be stored.
 """
-function write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
+function write_trexio_orbitals(trexio::TrexioFile, orbitals::AbstractMatrix; 
                             orbital_type="molecular", spin="restricted", system=nothing, basisset=nothing)
-    file = open_trex(trex)
-    trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
+    file = open_trexio(trexio)
+    trex_group = haskey(file, "trexio") ? file["trexio"] : write_trexio_metadata(file)
     
     # Write basis set information if system is provided and not already written
     if !isnothing(system) && !haskey(trex_group, "basis")
-        write_trex_basis(trex, system; basisset=basisset)
+        write_trexio_basis(trexio, system; basisset=basisset)
     end
     
     # Create MO group
@@ -421,29 +421,29 @@ function write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix;
 end
 
 """
-    read_trex_orbitals(trex::TrexFile) -> AbstractMatrix
+    read_trexio_orbitals(trexio::TrexioFile) -> AbstractMatrix
 
-Read molecular orbitals from TREX format.
+Read molecular orbitals from TREXIO format.
 """
-function read_trex_orbitals(trex::TrexFile)
-    file = open_trex(trex)
+function read_trexio_orbitals(trexio::TrexioFile)
+    file = open_trexio(trexio)
     
-    if !haskey(file, "trex") || !haskey(file["trex"], "mo")
-        error("No orbital data found in TREX file")
+    if !haskey(file, "trexio") || !haskey(file["trexio"], "mo")
+        error("No orbital data found in TREXIO file")
     end
     
-    mo_group = file["trex"]["mo"]
+    mo_group = file["trexio"]["mo"]
     return read(mo_group["coefficient"])
 end
 
 """
-    write_trex_amplitudes(trex::TrexFile, amplitudes::Dict{String, Any})
+    write_trexio_amplitudes(trexio::TrexioFile, amplitudes::Dict{String, Any})
 
-Write CC amplitudes to TREX format.
+Write CC amplitudes to TREXIO format.
 """
-function write_trex_amplitudes(trex::TrexFile, amplitudes::Dict{String, Any})
-    file = open_trex(trex)
-    trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
+function write_trexio_amplitudes(trexio::TrexioFile, amplitudes::Dict{String, Any})
+    file = open_trexio(trexio)
+    trex_group = haskey(file, "trexio") ? file["trexio"] : write_trexio_metadata(file)
     
     # Create amplitudes group
     if haskey(trex_group, "amplitudes")
@@ -464,18 +464,18 @@ function write_trex_amplitudes(trex::TrexFile, amplitudes::Dict{String, Any})
 end
 
 """
-    read_trex_amplitudes(trex::TrexFile) -> Dict{String, Any}
+    read_trexio_amplitudes(trexio::TrexioFile) -> Dict{String, Any}
 
-Read CC amplitudes from TREX format.
+Read CC amplitudes from TREXIO format.
 """
-function read_trex_amplitudes(trex::TrexFile)
-    file = open_trex(trex)
+function read_trexio_amplitudes(trexio::TrexioFile)
+    file = open_trexio(trexio)
     
-    if !haskey(file, "trex") || !haskey(file["trex"], "amplitudes")
-        error("No amplitude data found in TREX file")
+    if !haskey(file, "trexio") || !haskey(file["trexio"], "amplitudes")
+        error("No amplitude data found in TREXIO file")
     end
     
-    amp_group = file["trex"]["amplitudes"]
+    amp_group = file["trexio"]["amplitudes"]
     amplitudes = Dict{String, Any}()
     
     for key in keys(amp_group)
@@ -486,9 +486,9 @@ function read_trex_amplitudes(trex::TrexFile)
 end
 
 """
-    write_trex(filename::String, EC::ECInfo; kwargs...)
+    write_trexio(filename::String, EC::ECInfo; kwargs...)
 
-Write ElemCo data to TREX format file. When orbitals are included,
+Write ElemCo data to TREXIO format file. When orbitals are included,
 basis set information is automatically written as well.
 
 # Keyword arguments
@@ -496,17 +496,17 @@ basis set information is automatically written as well.
 - `include_amplitudes::Bool=false`: Include CC amplitudes  
 - `include_molecule::Bool=true`: Include molecular geometry
 """
-function write_trex(filename::String, EC::ECInfo; 
+function write_trexio(filename::String, EC::ECInfo; 
                    include_orbitals::Bool=true,
                    include_amplitudes::Bool=false,
                    include_molecule::Bool=true)
     
-    trex = TrexFile(filename, "w")
+    trexio = TrexioFile(filename, "w")
     
     try
         # Write molecular information
         if include_molecule && !isnothing(EC.system)
-            write_trex_molecule(trex, EC.system)
+            write_trexio_molecule(trexio, EC.system)
         end
         
         # Write orbitals if available
@@ -517,23 +517,23 @@ function write_trex(filename::String, EC::ECInfo;
                 if file_exists(EC, EC.options.wf.orb)
                     orbs = load(EC, EC.options.wf.orb)
                     if !isnothing(orbs)
-                        # Try to get basis set information for TREXIO-compliant storage
+                        # Try to get basis set information for TREXIOIO-compliant storage
                         local basisset = nothing
                         try
                             # Try to import BasisSets module and generate basis set
                             basisset = ElemCo.BasisSets.generate_basis(EC, "ao")
                         catch e
-                            @debug "Could not generate basis set for TREX export: $e"
+                            @debug "Could not generate basis set for TREXIO export: $e"
                         end
                         
                         # Pass system and basis set information to include detailed basis set data
-                        write_trex_orbitals(trex, orbs, system=EC.system, basisset=basisset)
+                        write_trexio_orbitals(trexio, orbs, system=EC.system, basisset=basisset)
                     end
                 else
                     @warn "Orbital file $(EC.options.wf.orb) not found, skipping orbital export"
                 end
             catch e
-                @warn "Could not load orbitals for TREX export: $e"
+                @warn "Could not load orbitals for TREXIO export: $e"
             end
         end
         
@@ -544,55 +544,55 @@ function write_trex(filename::String, EC::ECInfo;
         end
         
     finally
-        close_trex(trex)
+        close_trexio(trexio)
     end
     
     return filename
 end
 
 """
-    read_trex(filename::String) -> Dict{String, Any}
+    read_trexio(filename::String) -> Dict{String, Any}
 
-Read data from TREX format file.
+Read data from TREXIO format file.
 
 Returns a dictionary with available data sections.
 """
-function read_trex(filename::String)
+function read_trexio(filename::String)
     if !isfile(filename)
-        error("TREX file not found: $filename")
+        error("TREXIO file not found: $filename")
     end
     
-    trex = TrexFile(filename, "r")
+    trexio = TrexioFile(filename, "r")
     data = Dict{String, Any}()
     
     try
-        file = open_trex(trex)
+        file = open_trexio(trexio)
         
-        if !haskey(file, "trex")
-            error("Invalid TREX file format")
+        if !haskey(file, "trexio")
+            error("Invalid TREXIO file format")
         end
         
-        trex_group = file["trex"]
+        trex_group = file["trexio"]
         
         # Read available sections
         if haskey(trex_group, "nucleus")
-            data["molecule"] = read_trex_molecule(trex)
+            data["molecule"] = read_trexio_molecule(trexio)
         end
         
         if haskey(trex_group, "basis")
-            data["basis"] = read_trex_basis(trex)
+            data["basis"] = read_trexio_basis(trexio)
         end
         
         if haskey(trex_group, "mo")
-            data["orbitals"] = read_trex_orbitals(trex)
+            data["orbitals"] = read_trexio_orbitals(trexio)
         end
         
         if haskey(trex_group, "amplitudes")
-            data["amplitudes"] = read_trex_amplitudes(trex)
+            data["amplitudes"] = read_trexio_amplitudes(trexio)
         end
         
     finally
-        close_trex(trex)
+        close_trexio(trexio)
     end
     
     return data
@@ -616,4 +616,4 @@ function element_symbol(z::Int)
     return "X$z"
 end
 
-end # module TrexInterface
+end # module TrexioInterface

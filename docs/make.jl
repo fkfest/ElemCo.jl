@@ -26,7 +26,7 @@ makedocs(
     "Manual" => [
       "Running calculations" => "elemco.md",
       "Options" => "options.md",
-      "TREX Format Support" => "trex_format.md"
+      "TREXIO Format Support" => "trexio_format.md"
       ],
     "Internals" => [
       "basisset.md",

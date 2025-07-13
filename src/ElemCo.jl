@@ -47,7 +47,7 @@ include("scf/dfmcscf.jl")
 
 include("interfaces/molpro.jl")
 include("interfaces/molden.jl")
-include("interfaces/trex.jl")
+include("interfaces/trexio.jl")
 include("interfaces/interfaces.jl")
 
 try
@@ -92,7 +92,7 @@ export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @du
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @import_matrix, @export_molden
-export @write_trex, @read_trex
+export @write_trexio, @read_trexio
 export @molpro_input, @molpro_output, @check_molproinfo
 # from Utils
 export last_energy
@@ -881,9 +881,9 @@ macro molpro_output(ecvariables, kwargs...)
 end
 
 """
-    @write_trex(filename, kwargs...)
+    @write_trexio(filename, kwargs...)
 
-Export current ElemCo data to TREX format file.
+Export current ElemCo data to TREXIO format file.
 
 # Keyword arguments
 - `include_orbitals::Bool=true`: Include molecular orbitals
@@ -893,38 +893,38 @@ Export current ElemCo data to TREX format file.
 # Examples
 ```julia
 @dfhf
-@write_trex "molecule.h5"
-@write_trex "results.h5" include_amplitudes=true
+@write_trexio "molecule.h5"
+@write_trexio "results.h5" include_amplitudes=true
 ```
 """
-macro write_trex(filename, kwargs...)
+macro write_trexio(filename, kwargs...)
   strfilename = clean_exprstring(filename)
   ekwa = [esc(a) for a in kwargs]
   return quote
     $(esc(:@tryECinit))
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
-    write_trex(strfilename, $(esc(:EC)); $(ekwa...))
+    write_trexio(strfilename, $(esc(:EC)); $(ekwa...))
   end
 end
 
 """
-    @read_trex(filename)
+    @read_trexio(filename)
 
-Read data from TREX format file.
+Read data from TREXIO format file.
 
 Returns a dictionary with available data sections (molecule, orbitals, amplitudes).
 
 # Examples
 ```julia
-data = @read_trex "molecule.h5"
+data = @read_trexio "molecule.h5"
 println(keys(data))  # Show available data sections
 ```
 """
-macro read_trex(filename)
+macro read_trexio(filename)
   strfilename = clean_exprstring(filename)
   return quote
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
-    read_trex(strfilename)
+    read_trexio(strfilename)
   end
 end
 
