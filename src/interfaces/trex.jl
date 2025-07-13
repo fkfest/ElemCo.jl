@@ -167,11 +167,13 @@ function read_trex_molecule(trex::TrexFile)
 end
 
 """
-    write_trex_basis(trex::TrexFile, system::MSystem)
+    write_trex_basis(trex::TrexFile, system::MSystem; basisset=nothing)
 
-Write basis set information to TREX format.
+Write basis set information to TREX format following TREXIO standard.
+If basisset is provided, detailed shell information is stored.
+Otherwise, only basic basis set names are stored.
 """
-function write_trex_basis(trex::TrexFile, system::MSystem)
+function write_trex_basis(trex::TrexFile, system::MSystem; basisset=nothing)
     file = open_trex(trex)
     trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
     
@@ -181,6 +183,86 @@ function write_trex_basis(trex::TrexFile, system::MSystem)
     end
     basis_group = create_group(trex_group, "basis")
     
+    if !isnothing(basisset)
+        # Write detailed TREXIO-compliant basis set information
+        _write_detailed_basis_trexio(basis_group, basisset)
+    else
+        # Fallback: write basic basis set names (original implementation)
+        _write_basic_basis_names(basis_group, system)
+    end
+    
+    # Add metadata
+    attrs(basis_group)["description"] = "Basis set information following TREXIO standard"
+    
+    return basis_group
+end
+
+"""
+Write detailed basis set information following TREXIO standard
+"""
+function _write_detailed_basis_trexio(basis_group, basisset)
+    # Collect shell information following TREXIO standard
+    shell_num = length(basisset)
+    shell_nucleus_index = Int[]
+    shell_ang_mom = Int[]
+    shell_factor = Float64[]
+    shell_range = Int[]
+    
+    prim_num_total = 0
+    shell_index = 1
+    
+    # Count total primitives first
+    for shell in basisset
+        prim_num_total += length(shell.exponents)
+    end
+    
+    # Collect exponents and coefficients
+    exponent = Float64[]
+    coefficient = Float64[]
+    
+    for shell in basisset
+        # Get center index from shell_indices
+        center_idx = basisset.shell_indices[shell_index][1]
+        push!(shell_nucleus_index, center_idx)
+        push!(shell_ang_mom, shell.l)
+        push!(shell_factor, 1.0)  # Normalization factor
+        push!(shell_range, length(shell.exponents))
+        
+        # Add exponents
+        for exp in shell.exponents
+            push!(exponent, exp)
+        end
+        
+        # Add coefficients for each contraction
+        for contraction in shell.subshells
+            for coef in contraction.coefs
+                push!(coefficient, coef)
+            end
+        end
+        
+        shell_index += 1
+    end
+    
+    # Write TREXIO standard datasets
+    basis_group["shell_num"] = Int64(shell_num)
+    basis_group["prim_num"] = Int64(prim_num_total)
+    basis_group["shell_nucleus_index"] = shell_nucleus_index
+    basis_group["shell_ang_mom"] = shell_ang_mom
+    basis_group["shell_factor"] = shell_factor
+    basis_group["shell_range"] = shell_range
+    basis_group["exponent"] = exponent
+    basis_group["coefficient"] = coefficient
+    
+    # Store basis set type as attribute
+    if !isempty(basisset.centres)
+        attrs(basis_group)["type"] = basisset.centres[1].basis
+    end
+end
+
+"""
+Write basic basis set names (fallback for when detailed basis set is not available)
+"""
+function _write_basic_basis_names(basis_group, system)
     # Extract basis set information from atomic centres
     nbasis = length(system)
     basis_names = String[]
@@ -204,7 +286,7 @@ function write_trex_basis(trex::TrexFile, system::MSystem)
         end
     end
     
-    # Write basis set data
+    # Write basic basis set data (non-TREXIO standard, for compatibility)
     basis_group["num"] = Int64(nbasis)
     basis_group["nucleus_index"] = atom_indices
     basis_group["type"] = basis_names
@@ -221,17 +303,13 @@ function write_trex_basis(trex::TrexFile, system::MSystem)
         # Store all basis types as attributes
         attrs(basis_group)["available_types"] = collect(all_basis_types)
     end
-    
-    # Add metadata
-    attrs(basis_group)["description"] = "Basis set information for molecular orbitals"
-    
-    return basis_group
 end
 
 """
     read_trex_basis(trex::TrexFile) -> Dict{String, Any}
 
 Read basis set information from TREX format.
+Handles both TREXIO-compliant format and legacy format.
 """
 function read_trex_basis(trex::TrexFile)
     file = open_trex(trex)
@@ -242,7 +320,50 @@ function read_trex_basis(trex::TrexFile)
     
     basis_group = file["trex"]["basis"]
     
-    # Read basis set data
+    # Check if this is TREXIO-compliant format (has shell_num) or legacy format (has num)
+    if haskey(basis_group, "shell_num")
+        # TREXIO-compliant format
+        return _read_detailed_basis_trexio(basis_group)
+    elseif haskey(basis_group, "num")
+        # Legacy format (backward compatibility)
+        return _read_basic_basis_legacy(basis_group)
+    else
+        error("Unknown basis set format in TREX file")
+    end
+end
+
+"""
+Read TREXIO-compliant detailed basis set information
+"""
+function _read_detailed_basis_trexio(basis_group)
+    basis_info = Dict{String, Any}()
+    
+    # Read TREXIO standard datasets
+    basis_info["shell_num"] = read(basis_group["shell_num"])
+    basis_info["prim_num"] = read(basis_group["prim_num"])
+    basis_info["shell_nucleus_index"] = read(basis_group["shell_nucleus_index"])
+    basis_info["shell_ang_mom"] = read(basis_group["shell_ang_mom"])
+    basis_info["shell_factor"] = read(basis_group["shell_factor"])
+    basis_info["shell_range"] = read(basis_group["shell_range"])
+    basis_info["exponent"] = read(basis_group["exponent"])
+    basis_info["coefficient"] = read(basis_group["coefficient"])
+    
+    # Read basis set type from attributes
+    if haskey(attrs(basis_group), "type")
+        basis_info["type"] = read(attrs(basis_group)["type"])
+    end
+    
+    # Mark as TREXIO format
+    basis_info["format"] = "trexio"
+    
+    return basis_info
+end
+
+"""
+Read legacy basis set format (for backward compatibility)
+"""
+function _read_basic_basis_legacy(basis_group)
+    # Read legacy format data
     nbasis = read(basis_group["num"])
     atom_indices = read(basis_group["nucleus_index"])
     basis_types = read(basis_group["type"])
@@ -250,7 +371,8 @@ function read_trex_basis(trex::TrexFile)
     basis_info = Dict{String, Any}(
         "num" => nbasis,
         "nucleus_index" => atom_indices,
-        "type" => basis_types
+        "type" => basis_types,
+        "format" => "legacy"
     )
     
     # Read additional attributes if available
@@ -263,19 +385,20 @@ end
 
 """
     write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
-                       orbital_type="molecular", spin="restricted", system=nothing)
+                       orbital_type="molecular", spin="restricted", system=nothing, basisset=nothing)
 
 Write molecular orbitals to TREX format. If system is provided, 
-basis set information will also be written.
+basis set information will also be written. If basisset is provided,
+detailed TREXIO-compliant basis information will be stored.
 """
 function write_trex_orbitals(trex::TrexFile, orbitals::AbstractMatrix; 
-                            orbital_type="molecular", spin="restricted", system=nothing)
+                            orbital_type="molecular", spin="restricted", system=nothing, basisset=nothing)
     file = open_trex(trex)
     trex_group = haskey(file, "trex") ? file["trex"] : write_trex_metadata(file)
     
     # Write basis set information if system is provided and not already written
     if !isnothing(system) && !haskey(trex_group, "basis")
-        write_trex_basis(trex, system)
+        write_trex_basis(trex, system; basisset=basisset)
     end
     
     # Create MO group
@@ -394,8 +517,17 @@ function write_trex(filename::String, EC::ECInfo;
                 if file_exists(EC, EC.options.wf.orb)
                     orbs = load(EC, EC.options.wf.orb)
                     if !isnothing(orbs)
-                        # Pass system information to include basis set data
-                        write_trex_orbitals(trex, orbs, system=EC.system)
+                        # Try to get basis set information for TREXIO-compliant storage
+                        local basisset = nothing
+                        try
+                            # Try to import BasisSets module and generate basis set
+                            basisset = ElemCo.BasisSets.generate_basis(EC, "ao")
+                        catch e
+                            @debug "Could not generate basis set for TREX export: $e"
+                        end
+                        
+                        # Pass system and basis set information to include detailed basis set data
+                        write_trex_orbitals(trex, orbs, system=EC.system, basisset=basisset)
                     end
                 else
                     @warn "Orbital file $(EC.options.wf.orb) not found, skipping orbital export"

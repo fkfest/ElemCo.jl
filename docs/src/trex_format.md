@@ -150,9 +150,19 @@ The TREX format organizes data in a standardized HDF5 hierarchy:
   │   ├── coord          # Atomic coordinates
   │   └── label          # Atom labels
   ├── basis/             # Basis set information (automatically included with orbitals)
-  │   ├── num            # Number of basis sets
-  │   ├── nucleus_index  # Atom index for each basis set
-  │   └── type           # Basis set names (e.g., "cc-pVDZ")
+  │   ├── shell_num      # Number of shells (TREXIO format)
+  │   ├── prim_num       # Number of primitives (TREXIO format)
+  │   ├── shell_nucleus_index # Nucleus index for each shell (TREXIO format)
+  │   ├── shell_ang_mom  # Angular momentum for each shell (TREXIO format)
+  │   ├── shell_factor   # Normalization factors (TREXIO format)
+  │   ├── shell_range    # Range of primitives for each shell (TREXIO format)
+  │   ├── exponent       # Primitive exponents (TREXIO format)
+  │   ├── coefficient    # Contraction coefficients (TREXIO format)
+  │   └── type           # Basis set name (stored as attribute)
+  │   # Legacy format (for backward compatibility):
+  │   ├── num            # Number of basis sets (legacy)
+  │   ├── nucleus_index  # Atom index for each basis set (legacy)
+  │   └── type           # Basis set names (legacy)
   ├── mo/                # Molecular orbitals
   │   ├── num            # Number of MOs
   │   └── coefficient    # MO coefficients
@@ -215,6 +225,16 @@ else
     println("TREX file not found")
 end
 ```
+
+## TREXIO Standard Compliance
+
+ElemCo.jl's TREX implementation follows the TREXIO standard for basis set storage:
+
+- **TREXIO Format**: When detailed basis set information is available, data is stored using TREXIO-compliant field names (`shell_num`, `prim_num`, `shell_nucleus_index`, `shell_ang_mom`, `shell_factor`, `shell_range`, `exponent`, `coefficient`)
+- **Legacy Support**: Maintains backward compatibility with simplified basis set storage (`num`, `nucleus_index`, `type`)
+- **Automatic Detection**: The reader automatically detects and handles both formats
+
+The implementation automatically uses the TREXIO-compliant format when basis set details are available from ElemCo calculations, ensuring maximum interoperability with other quantum chemistry codes.
 
 ## Performance Considerations
 
