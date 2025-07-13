@@ -25,7 +25,8 @@ makedocs(
     "Home" => "index.md",
     "Manual" => [
       "Running calculations" => "elemco.md",
-      "Options" => "options.md" 
+      "Options" => "options.md",
+      "TREXIO Format Support" => "trexio_format.md"
       ],
     "Internals" => [
       "basisset.md",
@@ -54,6 +55,7 @@ makedocs(
       "mnpy.md",
       "msystems.md",
       "orbtools.md",
+      "outputs.md",
       "qmtensors.md",
       "tensortools.md",
       "descdict.md",
