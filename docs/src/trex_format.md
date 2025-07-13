@@ -282,3 +282,33 @@ Check TREX format version in file attributes if compatibility issues arise.
 ## Examples
 
 See `examples/trex_usage.jl` for comprehensive usage examples.
+
+## API Reference
+
+### TrexInterface Module
+
+```@docs
+ElemCo.TrexInterface
+```
+
+### Types
+
+```@docs
+ElemCo.TrexInterface.TrexFile
+```
+
+### Exported Functions
+
+```@autodocs
+Modules = [ElemCo.TrexInterface]
+Private = false
+Order = [:function, :type, :macro, :constant]
+```
+
+### Internal Functions
+
+```@autodocs
+Modules = [ElemCo.TrexInterface]
+Public = false
+Order = [:function, :type, :macro, :constant]
+```
