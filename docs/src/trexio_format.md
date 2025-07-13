@@ -1,6 +1,6 @@
 # TREXIO Format Support in ElemCo.jl
 
-ElemCo.jl includes support for the TREXIO (Table of Results Exchange) format, a standardized HDF5-based format for quantum chemistry data exchange. This enables efficient storage and retrieval of orbitals, amplitudes, and other data structures, facilitating interoperability with other quantum chemistry software.
+ElemCo.jl includes support for the TREXIO format, a standardized HDF5-based format for quantum chemistry data exchange. This enables efficient storage and retrieval of orbitals, amplitudes, and other data structures, facilitating interoperability with other quantum chemistry software.
 
 ## Overview
 
@@ -37,10 +37,10 @@ basis = "cc-pVDZ"
 @dfhf
 
 # Export to TREXIO format
-@write_trexioio "water_results.h5"
+@write_trexio "water_results.h5"
 
 # Read TREXIO data
-data = @read_trexioio "water_results.h5"
+data = @read_trexio "water_results.h5"
 println("Available data: ", keys(data))
 ```
 
@@ -48,7 +48,7 @@ println("Available data: ", keys(data))
 
 ```julia
 # Read a TREXIO file
-data = @read_trexioio "calculation_results.h5"
+data = @read_trexio "calculation_results.h5"
 
 # Access different data sections
 if haskey(data, "molecule")
@@ -69,12 +69,12 @@ end
 
 ## Macro Reference
 
-### `@write_trexioio`
+### `@write_trexio`
 
 Export ElemCo data to TREXIO format.
 
 ```julia
-@write_trexioio filename [options...]
+@write_trexio filename [options...]
 ```
 
 **Options:**
@@ -87,21 +87,21 @@ Export ElemCo data to TREXIO format.
 **Examples:**
 ```julia
 # Export everything (default)
-@write_trexioio "results.h5"
+@write_trexio "results.h5"
 
 # Export only geometry
-@write_trexioio "geometry.h5" include_orbitals=false
+@write_trexio "geometry.h5" include_orbitals=false
 
 # Export with amplitudes (when available)
-@write_trexioio "full_results.h5" include_amplitudes=true
+@write_trexio "full_results.h5" include_amplitudes=true
 ```
 
-### `@read_trexioio`
+### `@read_trexio`
 
 Read data from TREXIO format file.
 
 ```julia
-data = @read_trexioio filename
+data = @read_trexio filename
 ```
 
 Returns a dictionary with available data sections.
@@ -150,14 +150,14 @@ The TREXIO format organizes data in a standardized HDF5 hierarchy:
   │   ├── coord          # Atomic coordinates
   │   └── label          # Atom labels
   ├── basis/             # Basis set information (automatically included with orbitals)
-  │   ├── shell_num      # Number of shells (TREXIOIO format)
-  │   ├── prim_num       # Number of primitives (TREXIOIO format)
-  │   ├── shell_nucleus_index # Nucleus index for each shell (TREXIOIO format)
-  │   ├── shell_ang_mom  # Angular momentum for each shell (TREXIOIO format)
-  │   ├── shell_factor   # Normalization factors (TREXIOIO format)
-  │   ├── shell_range    # Range of primitives for each shell (TREXIOIO format)
-  │   ├── exponent       # Primitive exponents (TREXIOIO format)
-  │   ├── coefficient    # Contraction coefficients (TREXIOIO format)
+  │   ├── shell_num      # Number of shells (TREXIO format)
+  │   ├── prim_num       # Number of primitives (TREXIO format)
+  │   ├── shell_nucleus_index # Nucleus index for each shell (TREXIO format)
+  │   ├── shell_ang_mom  # Angular momentum for each shell (TREXIO format)
+  │   ├── shell_factor   # Normalization factors (TREXIO format)
+  │   ├── shell_range    # Range of primitives for each shell (TREXIO format)
+  │   ├── exponent       # Primitive exponents (TREXIO format)
+  │   ├── coefficient    # Contraction coefficients (TREXIO format)
   │   └── type           # Basis set name (stored as attribute)
   │   # Legacy format (for backward compatibility):
   │   ├── num            # Number of basis sets (legacy)
@@ -180,17 +180,17 @@ The TREXIO format organizes data in a standardized HDF5 hierarchy:
 # Standard workflow
 @dfhf
 @cc ccsd
-@write_trexioio "final_results.h5" include_amplitudes=true
+@write_trexio "final_results.h5" include_amplitudes=true
 ```
 
 ### Data Sharing and Collaboration
 
 ```julia
 # Export for sharing
-@write_trexioio "shared_data.h5"
+@write_trexio "shared_data.h5"
 
 # Import shared data (in another session/code)
-shared = @read_trexioio "shared_data.h5"
+shared = @read_trexio "shared_data.h5"
 # Use shared["molecule"], shared["orbitals"] as starting point
 ```
 
@@ -198,7 +198,7 @@ shared = @read_trexioio "shared_data.h5"
 
 ```julia
 # Read previous results
-previous = @read_trexioio "checkpoint.h5"
+previous = @read_trexio "checkpoint.h5"
 
 # Use previous orbitals as initial guess
 if haskey(previous, "orbitals")
@@ -213,28 +213,28 @@ The TREXIO interface includes comprehensive error handling:
 
 ```julia
 try
-    data = @read_trexioio "nonexistent.h5"
+    data = @read_trexio"nonexistent.h5"
 catch e
     println("Error reading TREXIO file: ", e)
 end
 
 # Check file existence
 if isfile("results.h5")
-    data = @read_trexioio "results.h5"
+    data = @read_trexio "results.h5"
 else
     println("TREXIO file not found")
 end
 ```
 
-## TREXIOIO Standard Compliance
+## TREXIO Standard Compliance
 
-ElemCo.jl's TREXIO implementation follows the TREXIOIO standard for basis set storage:
+ElemCo.jl's TREXIO implementation follows the TREXIO standard for basis set storage:
 
-- **TREXIOIO Format**: When detailed basis set information is available, data is stored using TREXIOIO-compliant field names (`shell_num`, `prim_num`, `shell_nucleus_index`, `shell_ang_mom`, `shell_factor`, `shell_range`, `exponent`, `coefficient`)
+- **TREXIO Format**: When detailed basis set information is available, data is stored using TREXIO-compliant field names (`shell_num`, `prim_num`, `shell_nucleus_index`, `shell_ang_mom`, `shell_factor`, `shell_range`, `exponent`, `coefficient`)
 - **Legacy Support**: Maintains backward compatibility with simplified basis set storage (`num`, `nucleus_index`, `type`)
 - **Automatic Detection**: The reader automatically detects and handles both formats
 
-The implementation automatically uses the TREXIOIO-compliant format when basis set details are available from ElemCo calculations, ensuring maximum interoperability with other quantum chemistry codes.
+The implementation automatically uses the TREXIO-compliant format when basis set details are available from ElemCo calculations, ensuring maximum interoperability with other quantum chemistry codes.
 
 ## Performance Considerations
 
@@ -264,7 +264,7 @@ end
 
 **Missing data sections:**
 ```julia
-data = @read_trexioio "file.h5"
+data = @read_trexio "file.h5"
 if !haskey(data, "orbitals")
     @warn "No orbital data found in TREXIO file"
 end

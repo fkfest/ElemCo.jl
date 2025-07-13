@@ -25,8 +25,7 @@ makedocs(
     "Home" => "index.md",
     "Manual" => [
       "Running calculations" => "elemco.md",
-      "Options" => "options.md",
-      "TREXIO Format Support" => "trexio_format.md"
+      "Options" => "options.md"
       ],
     "Internals" => [
       "basisset.md",
@@ -63,7 +62,8 @@ makedocs(
       "versioninfo.md",
       "interfaces.md",
       "molpro.md",
-      "molden.md"
+      "molden.md",
+      "trexio_format.md"
     ],
     "release-notes.md", 
   ],

@@ -1,10 +1,10 @@
 """
-TREXIOIO Interface Module
+TREXIO Interface Module
 
-This module provides functions to import and export data in TREXIOIO format,
+This module provides functions to import and export data in TREXIO format,
 which is a standardized format for quantum chemistry data exchange.
 
-TREXIOIO (Table of Results Exchange Input/Output) format specification:
+TREXIO format specification:
 - Based on HDF5 for efficient storage
 - Standardized structure for quantum chemistry data
 - Supports orbitals, amplitudes, integrals, and other QC data
@@ -34,7 +34,7 @@ export open_trexio, close_trexio
 """
     TrexioFile
 
-Structure representing a TREXIOIO format file.
+Structure representing a TREXIO format file.
 Contains the HDF5 file handle and metadata.
 """
 mutable struct TrexioFile
@@ -170,7 +170,7 @@ end
 """
     write_trexio_basis(trexio::TrexioFile, system::MSystem; basisset=nothing)
 
-Write basis set information to TREXIO format following TREXIOIO standard.
+Write basis set information to TREXIO format following TREXIO standard.
 If basisset is provided, detailed shell information is stored.
 Otherwise, only basic basis set names are stored.
 """
@@ -185,7 +185,7 @@ function write_trexio_basis(trexio::TrexioFile, system::MSystem; basisset=nothin
     basis_group = create_group(trex_group, "basis")
     
     if !isnothing(basisset)
-        # Write detailed TREXIOIO-compliant basis set information
+        # Write detailed TREXIO-compliant basis set information
         _write_detailed_basis_trexio(basis_group, basisset)
     else
         # Fallback: write basic basis set names (original implementation)
@@ -193,16 +193,16 @@ function write_trexio_basis(trexio::TrexioFile, system::MSystem; basisset=nothin
     end
     
     # Add metadata
-    attrs(basis_group)["description"] = "Basis set information following TREXIOIO standard"
+    attrs(basis_group)["description"] = "Basis set information following TREXIO standard"
     
     return basis_group
 end
 
 """
-Write detailed basis set information following TREXIOIO standard
+Write detailed basis set information following TREXIO standard
 """
 function _write_detailed_basis_trexio(basis_group, basisset)
-    # Collect shell information following TREXIOIO standard
+    # Collect shell information following TREXIO standard
     shell_num = length(basisset)
     shell_nucleus_index = Int[]
     shell_ang_mom = Int[]
@@ -244,7 +244,7 @@ function _write_detailed_basis_trexio(basis_group, basisset)
         shell_index += 1
     end
     
-    # Write TREXIOIO standard datasets
+    # Write TREXIO standard datasets
     basis_group["shell_num"] = Int64(shell_num)
     basis_group["prim_num"] = Int64(prim_num_total)
     basis_group["shell_nucleus_index"] = shell_nucleus_index
@@ -287,7 +287,7 @@ function _write_basic_basis_names(basis_group, system)
         end
     end
     
-    # Write basic basis set data (non-TREXIOIO standard, for compatibility)
+    # Write basic basis set data (non-TREXIO standard, for compatibility)
     basis_group["num"] = Int64(nbasis)
     basis_group["nucleus_index"] = atom_indices
     basis_group["type"] = basis_names
@@ -310,7 +310,7 @@ end
     read_trexio_basis(trexio::TrexioFile) -> Dict{String, Any}
 
 Read basis set information from TREXIO format.
-Handles both TREXIOIO-compliant format and legacy format.
+Handles both TREXIO-compliant format and legacy format.
 """
 function read_trexio_basis(trexio::TrexioFile)
     file = open_trexio(trexio)
@@ -321,9 +321,9 @@ function read_trexio_basis(trexio::TrexioFile)
     
     basis_group = file["trexio"]["basis"]
     
-    # Check if this is TREXIOIO-compliant format (has shell_num) or legacy format (has num)
+    # Check if this is TREXIO-compliant format (has shell_num) or legacy format (has num)
     if haskey(basis_group, "shell_num")
-        # TREXIOIO-compliant format
+        # TREXIO-compliant format
         return _read_detailed_basis_trexio(basis_group)
     elseif haskey(basis_group, "num")
         # Legacy format (backward compatibility)
@@ -334,12 +334,12 @@ function read_trexio_basis(trexio::TrexioFile)
 end
 
 """
-Read TREXIOIO-compliant detailed basis set information
+Read TREXIO-compliant detailed basis set information
 """
 function _read_detailed_basis_trexio(basis_group)
     basis_info = Dict{String, Any}()
     
-    # Read TREXIOIO standard datasets
+    # Read TREXIO standard datasets
     basis_info["shell_num"] = read(basis_group["shell_num"])
     basis_info["prim_num"] = read(basis_group["prim_num"])
     basis_info["shell_nucleus_index"] = read(basis_group["shell_nucleus_index"])
@@ -354,7 +354,7 @@ function _read_detailed_basis_trexio(basis_group)
         basis_info["type"] = read(attrs(basis_group)["type"])
     end
     
-    # Mark as TREXIOIO format
+    # Mark as TREXIO format
     basis_info["format"] = "trexio"
     
     return basis_info
@@ -390,7 +390,7 @@ end
 
 Write molecular orbitals to TREXIO format. If system is provided, 
 basis set information will also be written. If basisset is provided,
-detailed TREXIOIO-compliant basis information will be stored.
+detailed TREXIO-compliant basis information will be stored.
 """
 function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix; 
                             orbital_type="molecular", system=nothing, basisset=nothing)
@@ -531,7 +531,7 @@ function write_trexio(filename::String, EC::ECInfo;
                 if file_exists(EC, EC.options.wf.orb)
                     orbs = load_orbitals(EC, EC.options.wf.orb)
                     if !isnothing(orbs)
-                        # Try to get basis set information for TREXIOIO-compliant storage
+                        # Try to get basis set information for TREXIO-compliant storage
                         local basisset = nothing
                         try
                             # Try to import BasisSets module and generate basis set

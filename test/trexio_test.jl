@@ -91,10 +91,10 @@ using Test
                     @test haskey(basis_data, "format")  # Should indicate format type
                     
                     if basis_data["format"] == "trexio"
-                        # TREXIOIO format
+                        # TREXIO format
                         @test haskey(basis_data, "shell_num")
                         @test haskey(basis_data, "shell_nucleus_index")
-                        println("Basis data read in TREXIOIO format")
+                        println("Basis data read in TREXIO format")
                     elseif basis_data["format"] == "legacy"
                         # Legacy format
                         @test haskey(basis_data, "type")
@@ -155,13 +155,13 @@ using Test
                         orbitals_read = read(file["trexio"]["mo"]["coefficient"])
                         @test isapprox(orbitals_read, test_orbitals)
                         
-                        # Check basis data - handle both TREXIOIO and legacy formats
+                        # Check basis data - handle both TREXIO and legacy formats
                         basis_group = file["trexio"]["basis"]
                         if haskey(basis_group, "shell_num")
-                            # TREXIOIO format
+                            # TREXIO format
                             @test haskey(basis_group, "shell_nucleus_index")
                             @test haskey(basis_group, "shell_ang_mom")
-                            println("Basis data stored in TREXIOIO format")
+                            println("Basis data stored in TREXIO format")
                         elseif haskey(basis_group, "type")
                             # Legacy format
                             basis_types = read(basis_group["type"])
@@ -219,9 +219,9 @@ using Test
                     # Check basis data format and content
                     basis_data = data["basis"]
                     if basis_data["format"] == "trexio"
-                        # TREXIOIO format may have basis set type as attribute
+                        # TREXIO format may have basis set type as attribute
                         @test haskey(basis_data, "shell_num")
-                        println("Complete data read with TREXIOIO basis format")
+                        println("Complete data read with TREXIO basis format")
                     elseif basis_data["format"] == "legacy"
                         # Legacy format has type array
                         @test basis_data["type"][1] == "6-31G"

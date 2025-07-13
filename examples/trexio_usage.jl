@@ -25,7 +25,7 @@ basis = "sto-3g"
 @ECinit
 
 # Export just the molecular structure to TREXIO format
-@write_trexioio "water_geometry.h5" include_orbitals=false include_amplitudes=false
+@write_trexio "water_geometry.h5" include_orbitals=false include_amplitudes=false
 
 println("Water geometry exported to water_geometry.h5")
 
@@ -38,7 +38,7 @@ try
     @dfhf
     
     # Export geometry and orbitals to TREXIO format
-    @write_trexioio "water_hf.h5" include_orbitals=true include_amplitudes=false
+    @write_trexio "water_hf.h5" include_orbitals=true include_amplitudes=false
     
     println("Water HF calculation exported to water_hf.h5")
 catch e
@@ -51,7 +51,7 @@ println("\n=== Example 3: Reading TREXIO data ===")
 
 try
     # Read the TREXIO file
-    data = @read_trexioio "water_geometry.h5"
+    data = @read_trexio "water_geometry.h5"
     
     println("Available data sections: ", keys(data))
     
@@ -120,12 +120,12 @@ Typical TREXIO workflow for data exchange:
 1. Export calculation results:
    @dfhf
    @cc ccsd
-   @write_trexioio "results.h5" include_amplitudes=true
+   @write_trexio "results.h5" include_amplitudes=true
 
 2. Share the TREXIO file with collaborators
 
 3. Import data in another calculation:
-   data = @read_trexioio "results.h5"
+   data = @read_trexio "results.h5"
    # Use data["molecule"], data["orbitals"], data["amplitudes"] as needed
 
 4. The TREXIO format ensures compatibility across different
