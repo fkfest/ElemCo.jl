@@ -291,12 +291,6 @@ See `examples/trex_usage.jl` for comprehensive usage examples.
 ElemCo.TrexInterface
 ```
 
-### Types
-
-```@docs
-ElemCo.TrexInterface.TrexFile
-```
-
 ### Exported Functions
 
 ```@autodocs
