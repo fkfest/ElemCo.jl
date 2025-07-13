@@ -21,6 +21,7 @@ using ..ElemCo.MSystems
 using ..ElemCo.Utils
 using ..ElemCo.QMTensors
 using ..ElemCo.Elements
+using ..ElemCo.OrbTools
 using LinearAlgebra
 
 export TrexioFile, write_trexio, read_trexio
@@ -384,15 +385,15 @@ function _read_basic_basis_legacy(basis_group)
 end
 
 """
-    write_trexio_orbitals(trexio::TrexioFile, orbitals::AbstractMatrix; 
-                       orbital_type="molecular", spin="restricted", system=nothing, basisset=nothing)
+    write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix; 
+                          orbital_type="molecular", system=nothing, basisset=nothing)
 
 Write molecular orbitals to TREXIO format. If system is provided, 
 basis set information will also be written. If basisset is provided,
 detailed TREXIOIO-compliant basis information will be stored.
 """
-function write_trexio_orbitals(trexio::TrexioFile, orbitals::AbstractMatrix; 
-                            orbital_type="molecular", spin="restricted", system=nothing, basisset=nothing)
+function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix; 
+                            orbital_type="molecular", system=nothing, basisset=nothing)
     file = open_trexio(trexio)
     trex_group = haskey(file, "trexio") ? file["trexio"] : write_trexio_metadata(file)
     
@@ -408,13 +409,17 @@ function write_trexio_orbitals(trexio::TrexioFile, orbitals::AbstractMatrix;
     mo_group = create_group(trex_group, "mo")
     
     # Write orbital information
-    nmo, nbasis = size(orbitals)
+    nbasis, nmo = size(orbitals)
+    if is_restricted(orbitals)
+        mo_group["coefficient"] = orbitals[1]
+    else
+        mo_group["coefficient"] = hcat(orbitals...)
+        attrs(mo_group)["spin"] = vcat(fill(0, nmo), fill(1, nmo))
+        nmo *= 2  # For unrestricted, double the number of orbitals
+    end
     mo_group["num"] = Int64(nmo)
-    mo_group["coefficient"] = orbitals
-    
     # Add metadata
     attrs(mo_group)["type"] = orbital_type
-    attrs(mo_group)["spin"] = spin
     attrs(mo_group)["basis_size"] = Int64(nbasis)
     
     return mo_group
@@ -433,7 +438,16 @@ function read_trexio_orbitals(trexio::TrexioFile)
     end
     
     mo_group = file["trexio"]["mo"]
-    return read(mo_group["coefficient"])
+    if haskey(mo_group, "spin")
+        # Unrestricted orbitals
+        spins = read(mo_group["spin"])
+        if length(spins) == 2 * size(mo_group["coefficient"], 2)
+            return SpinMatrix(read(mo_group["coefficient"][:, 1:end÷2]), read(mo_group["coefficient"][:, end÷2+1:end]))
+        else
+            error("Spin data does not match orbital coefficients")
+        end
+    end
+    return SpinMatrix(read(mo_group["coefficient"]))
 end
 
 """
@@ -515,7 +529,7 @@ function write_trexio(filename::String, EC::ECInfo;
                 # Check if orbitals file exists
                 orb_file = fullfilename(EC, EC.options.wf.orb)
                 if file_exists(EC, EC.options.wf.orb)
-                    orbs = load(EC, EC.options.wf.orb)
+                    orbs = load_orbitals(EC, EC.options.wf.orb)
                     if !isnothing(orbs)
                         # Try to get basis set information for TREXIOIO-compliant storage
                         local basisset = nothing
