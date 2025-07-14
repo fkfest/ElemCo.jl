@@ -285,13 +285,27 @@ See `examples/trex_usage.jl` for comprehensive usage examples.
 
 ## API Reference
 
+### Standalone TREXIO Module
+
+```@docs
+ElemCo.TREXIO
+```
+
+#### TREXIO Core Types and Functions
+
+```@autodocs
+Modules = [ElemCo.TREXIO]
+Private = false
+Order = [:type, :function, :macro, :constant]
+```
+
 ### TrexioInterface Module
 
 ```@docs
 ElemCo.TrexioInterface
 ```
 
-### Exported Functions
+#### ElemCo Integration Functions
 
 ```@autodocs
 Modules = [ElemCo.TrexioInterface]

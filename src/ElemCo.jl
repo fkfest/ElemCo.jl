@@ -6,6 +6,7 @@
 module ElemCo
 
 include("version.jl")
+include("../lib/TREXIO/src/TREXIO.jl")  # Include standalone TREXIO module
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
 include("tools/outputs.jl")
@@ -84,6 +85,7 @@ using .DFMCSCF
 using .DfDump
 using .DMRG
 using .Interfaces
+using .TREXIO  # Use the standalone TREXIO module
 
 
 export @mainname, @print_input
