@@ -21,6 +21,7 @@ using ..ElemCo.MSystems
 using ..ElemCo.Utils
 using ..ElemCo.QMTensors
 using ..ElemCo.Elements
+using ..ElemCo.BasisSets
 using ..ElemCo.OrbTools
 using LinearAlgebra
 
@@ -351,7 +352,7 @@ function _read_detailed_basis_trexio(basis_group)
     
     # Read basis set type from attributes
     if haskey(attrs(basis_group), "type")
-        basis_info["type"] = read(attrs(basis_group)["type"])
+        basis_info["type"] = attrs(basis_group)["type"]
     end
     
     # Mark as TREXIO format
@@ -378,7 +379,7 @@ function _read_basic_basis_legacy(basis_group)
     
     # Read additional attributes if available
     if haskey(attrs(basis_group), "available_types")
-        basis_info["available_types"] = read(attrs(basis_group)["available_types"])
+        basis_info["available_types"] = attrs(basis_group)["available_types"]
     end
     
     return basis_info
@@ -534,8 +535,8 @@ function write_trexio(filename::String, EC::ECInfo;
                         # Try to get basis set information for TREXIO-compliant storage
                         local basisset = nothing
                         try
-                            # Try to import BasisSets module and generate basis set
-                            basisset = ElemCo.BasisSets.generate_basis(EC, "ao")
+                            # Try to generate basis set
+                            basisset = generate_basis(EC, "ao")
                         catch e
                             @debug "Could not generate basis set for TREXIO export: $e"
                         end
