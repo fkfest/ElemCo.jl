@@ -32,14 +32,16 @@ export triples_4ext!
 
   Calculate fock matrix from FCIDump
 """
-function calc_fock_matrix(EC::ECInfo, closed_shell)
+function calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
   t1 = time_ns()
   if closed_shell
     fock = gen_fock(EC)
     save!(EC, "f_mm", fock)
     save!(EC, "f_MM", fock)
     eps = diag(fock)
-    println("Occupied orbital energies: ", eps[EC.space['o']])
+    if print_out
+      println("Occupied orbital energies: ", eps[EC.space['o']])
+    end
     save!(EC, "e_m", eps)
     save!(EC, "e_M", eps)
   else
@@ -54,7 +56,9 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
     save!(EC,"f_MM", fock)
     save!(EC,"e_M", eps)
   end
-  t1 = print_time(EC,t1,"fock matrix",1)
+  if print_out
+    t1 = print_time(EC,t1,"fock matrix",1)
+  end
 end
 
 """ 

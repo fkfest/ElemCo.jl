@@ -359,6 +359,10 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   EHF = energies["HF"]
   main_name = method_name(ecmethod)
   ECC = calc_cc(EC, ECMethod(main_name))
+  if has_prefix(ecmethod, "OQV")
+    closed_shell = is_closed_shell(EC)
+    energies = eval_hf_energy(EC, energies, closed_shell)
+  end
   if has_prefix(ecmethod, "2D")
     energies = output_2d_energy(EC, ECC, energies, main_name)
   else

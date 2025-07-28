@@ -1275,7 +1275,7 @@ function qv_orbital_optimization(EC::ECInfo, q1T, q2T)
   ovvv = ints2(EC,"ovvv")
   @mtensor q1Tt[a,b,i,j] :=  2.0 * q1T[a,b,i,j] - q1T[a,b,j,i]
   @mtensor q2Tt[a,b,i,j] :=  2.0 * q2T[a,b,i,j] - q2T[a,b,j,i]
-  dfock = load2idx(EC,"df_mm") #this has alternative
+  dfock = load2idx(EC,"f_mm") #this has alternative
   @mtensor Tij[i,j] := q1Tt[a,b,i,k] * q1T[a,b,j,k]
   @mtensor Tab[a,b] := q1Tt[a,c,i,j] * q1T[b,c,i,j]
   R1 = dfock[SP['v'],SP['o']]
@@ -1296,16 +1296,7 @@ function qv_orbital_optimization(EC::ECInfo, q1T, q2T)
   q2Tt = nothing
   ϵo, ϵv = orbital_energies(EC)
   Rpq = zeros(norb, norb)
-  for a in eachindex(ϵv)
-    for i in eachindex(ϵo)
-      Rpq[SP['v'][a],SP['o'][i]] = grad[a,i]/(ϵo[i] - ϵv[a])
-      Rpq[SP['o'][i],SP['v'][a]] = grad[a,i]/(ϵv[a] - ϵo[i])
-    end
-  end
-  Rpq = exp(Rpq)
-  transform_fcidump(EC.fd, Rpq, Rpq)
-  calc_fock_matrix(EC, true)
-  pseudo_dressed_ints(EC)
+  return grad
 end
 
 function calc_qG_dc(EC::ECInfo, qV, T2, T2t, qVD, Ae, AX, Be, BX, Ye, YX, AU1, BU1, Y1, q)
@@ -1396,11 +1387,32 @@ end
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
-function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
+function calc_qvcc_resid(EC::ECInfo, fd_original::FDump, it::Int, T1, T2; dc=false, orbopt=false)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   I_ab = Matrix{eltype(T2)}(I,nvirt,nvirt)
   I_ij = Matrix{eltype(T2)}(I,nocc,nocc)
+  norb = n_orbs(EC)
+  SP = EC.space
+
+  # orbital optimization -- integral tranformation
+  if orbopt
+    Rpq = zeros(norb, norb)
+    for a in 1:nvirt
+      for i in 1:nocc
+        Rpq[SP['v'][a],SP['o'][i]] = T1[a,i]
+        Rpq[SP['o'][i],SP['v'][a]] = -T1[a,i]
+      end
+    end
+    Rpq = exp(Rpq)
+    EC.fd.int2 = transform_int2(fd_original.int2, Rpq, Rpq, Rpq, Rpq)
+    EC.fd.int1 = transform_int1(fd_original.int1, Rpq, Rpq)
+    # EC.fd.int2, EC.fd.int1 = transform_fcidump(fd_original, Rpq, Rpq; qv=true)
+
+    calc_fock_matrix(EC, true, false)
+    # pseudo_dressed_ints(EC) # to be changed
+  end
+
   @mtensor begin
     AU[b,a] := I_ab[b,a] + 2.0 * T2[a,c,i,j] * T2[b,c,i,j] - T2[a,c,i,j] * T2[c,b,i,j]
     BU[i,j] := I_ij[i,j] +  2.0 * T2[a,b,i,k] * T2[a,b,j,k] - T2[a,b,i,k] * T2[a,b,k,j]
@@ -1447,35 +1459,26 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
     q2T = calc_qT_cc(AU2, BU2, CU2, Y2, W2, T2, T2t)
   end
 
+  # orbital optimization -- gradients calculation
+  if orbopt
+    G1 = qv_orbital_optimization(EC, q1T, q2T)
+  else
+    G1 = T1
+  end
+
+  #load the integrals
+  T1_0 = zeros(eltype(T1),0,0)
+  q1VD = calc_cc_resid(EC, T1_0, q1T; dc = true, linearized=true)[2]
+  q2VD = ints2(EC, "vvoo")
+  q1VD .-= q2VD
+  @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
+  q1V = 2.0 * q1VD .- temp_perm
+  @mtensor temp_perm[a,b,i,j] = q2VD[b,a,i,j]
+  q2V = 2.0 * q2VD .- temp_perm
+
   #calculate the energy
-  T1_0 = zeros(eltype(T1),0,0)
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc = true, linearized=true)[2]
-  q2VD = ints2(EC, "vvoo")
-  q1VD .-= q2VD
-  @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
-  q1V = 2.0 * q1VD .- temp_perm
   E_qvccd += sum(q1V .* q1T)
-  @mtensor temp_perm[a,b,i,j] = q2VD[b,a,i,j]
-  q2V = 2.0 * q2VD .- temp_perm
   E_qvccd += sum(q2V .* q2T) * 2.0
-  q1V = nothing
-  q2V = nothing
-  q1VD = nothing
-  q2VD = nothing
-
-  # orbital optimization
-  qv_orbital_optimization(EC, q1T, q2T)
-
-  # load the integrals
-  T1_0 = zeros(eltype(T1),0,0)
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc = true, linearized=true)[2]
-  q2VD = ints2(EC, "vvoo")
-  q1VD .-= q2VD
-  @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
-  q1V = 2.0 * q1VD .- temp_perm
-  @mtensor temp_perm[a,b,i,j] = q2VD[b,a,i,j]
-  q2V = 2.0 * q2VD .- temp_perm
-  temp_perm = nothing
 
   # calculate the residual
   if dc
@@ -1487,9 +1490,10 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false)
   end
 
   G2 .= q1G .+ q2G
-  @mtensor temp_perm[a,b,i,j] := G2[b,a,i,j]
+  @mtensor temp_perm[a,b,i,j] = G2[b,a,i,j]
   G2 .= G2 .* 2.0/3.0 .+ temp_perm .* 1.0/3.0
-  return (T1,G2), E_qvccd
+  temp_perm = nothing
+  return (G1,G2), E_qvccd
 end
 
 """
@@ -2679,10 +2683,15 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
   qv = has_prefix(method, "QV")
+  orbopt = has_prefix(method, "OQV")
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
     @assert (length(Amps1) == 1) && (length(Amps2) == 1) && (length(Amps3) == 1 || length(Amps3) == 0)
+  end
+  if orbopt
+    qv = true
+    Amps1 = (zeros(eltype(Amps2[1]), n_virt_orbs(EC), n_occ_orbs(EC)),)
   end
   Amps = (Amps1..., Amps2..., Amps3...) 
   T2αβ = last(Amps2)
@@ -2700,10 +2709,11 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
   t0 = print_time(EC, t0, "initialization", 1)
   println("Iter     SqNorm      Energy      DE          Res         Time")
+  fd_original = deepcopy(EC.fd) # to be changed
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if length(Amps3) == 0 && !do_sing && qv
-      Res, E = calc_qvcc_resid(EC, it, Amps...; dc)
+      Res, E = calc_qvcc_resid(EC, fd_original, it, Amps...; dc, orbopt)
       Eh = OutDict("E"=>E)
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
@@ -2742,7 +2752,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
         clean_cs_triples!(Amps3...)
       end
     end
-    if do_sing
+    if do_sing || orbopt
       NormT1 = calc_singles_norm(Amps1...)
       NormR1 = calc_singles_norm(Res1...)
       update_singles!(EC, Amps1..., Res1...)
