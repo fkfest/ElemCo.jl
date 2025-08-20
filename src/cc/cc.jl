@@ -1083,7 +1083,7 @@ end
 
   If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation).
 """
-function calc_D2(EC::ECInfo, T1, T2, scalepp=false; qv=false, R=zeros(Float64,0,0))
+function calc_D2(EC::ECInfo, T1, T2, scalepp=false; R=zeros(Float64,0,0))
   SP = EC.space
   norb = n_orbs(EC)
   nocc = n_occ_orbs(EC)
@@ -1104,7 +1104,7 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false; qv=false, R=zeros(Float64,0,
       D2[SP['v'],SP['o'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
     end
   end
-  if qv && length(R) > 0
+  if length(R) > 0
     @mtensor D2[p',q',i,j] = D2[p,q,i,j] * R[p',p] * R[q',q]
   end
   if scalepp
@@ -1521,13 +1521,12 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   I_ij = Matrix{eltype(T2)}(I,nocc,nocc)
   norb = n_orbs(EC)
   SP = EC.space
-  transIntEveryIter = EC.options.cc.transIntEveryIter
   Rpq = zeros(0,0)
 
   # orbital optimization -- integral tranformation
   if orbopt
     Rpq = rotation_matrix(EC, T1)
-    if transIntEveryIter
+    if EC.options.cc.transIntEveryIter
       int2_o = load(EC,"int2_o")
       EC.fd.int2 = transform_int2(int2_o, Rpq, Rpq, Rpq, Rpq)
       int2_o = nothing
@@ -1600,7 +1599,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   T1_0 = zeros(eltype(T1),0,0)
   # q2VD = ints2(EC, "vvoo")
   q2VD = load4idx(EC,"d_vvoo")
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, qv=true, R = Rpq, linearized=true)[2]
+  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, R = Rpq, linearized=true)[2]
   # display(q1VD[:,:,1,1])
 
   q1VD .-= q2VD
@@ -1636,7 +1635,7 @@ end
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, qv=false, R=zeros(Float64,0,0))
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, R=zeros(Float64,0,0))
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1646,7 +1645,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
-    if EC.options.cc.transIntEveryIter
+    if length(R) == 0 || EC.options.cc.transIntEveryIter
       pseudo_dressed_ints(EC)
     end
   end
@@ -1683,7 +1682,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     R2 = eltype(T2).(load4idx(EC,"d_vvoo"))
   end
   t1 = print_time(EC,t1,"<ab|ij>",2)
-  if EC.options.cc.transIntEveryIter
+  if length(R) == 0 || EC.options.cc.transIntEveryIter
     klcd = ints2(EC,"oovv")
   else
     klcd = load4idx(EC,"d_oovv")
@@ -1701,15 +1700,11 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     int2 = integ2_ss(EC.fd)
     # last two indices of integrals are stored as upper triangular 
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
-    if EC.options.cc.transIntEveryIter
-      D2 = calc_D2(EC, T1, T2, true; qv=false, R)[tripp,:,:]
-    else
-      D2 = calc_D2(EC, T1, T2, true; qv, R)[tripp,:,:]
-    end
+    D2 = calc_D2(EC, T1, T2, true; R)[tripp,:,:]
     # <pq|rs> D^ij_rs
     @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
-    if qv && !EC.options.cc.transIntEveryIter
-      @mtensor  rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * R[p', p] * R[r', r] # R --- rotate
+    if length(R) > 0 && !EC.options.cc.transIntEveryIter
+      @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * R[p', p] * R[r', r] # R --- rotate
     end
     D2 = nothing
     # symmetrize R
