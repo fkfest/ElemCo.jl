@@ -56,6 +56,7 @@ catch
   #println("MKL package not found, using OpenBLAS.")
 end
 using LinearAlgebra
+using TimerOutputs
 #BLAS.set_num_threads(1)
 using Buffers
 using ..ElemCo.Outputs
@@ -1082,7 +1083,7 @@ end
 
   If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation).
 """
-function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
+function calc_D2(EC::ECInfo, T1, T2, scalepp=false; qv=false, R=zeros(Float64,0,0))
   SP = EC.space
   norb = n_orbs(EC)
   nocc = n_occ_orbs(EC)
@@ -1102,6 +1103,9 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false)
       D2[SP['o'],SP['v'],:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
       D2[SP['v'],SP['o'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
     end
+  end
+  if qv && length(R) > 0
+    @mtensor D2[p',q',i,j] = D2[p,q,i,j] * R[p',p] * R[q',q]
   end
   if scalepp
     diagindx = [CartesianIndex(i,i) for i in 1:norb]
@@ -1267,12 +1271,17 @@ function calc_qT_cc(AU1::Matrix, BU1::Matrix, CU1::Array, Y1::Array, W1::Array, 
   return qT
 end
 
+"""
+    qv_orbital_optimization(EC::ECInfo, q1T, q2T, R)
 
-function qv_orbital_optimization(EC::ECInfo, q1T, q2T)
+  Calculate the gradient for orbital optimization in OQV-CCD/DCD.
+  `q1T` and `q2T` are the transformed amplitudes.
+  `R` is the rotation matrix.
+  Return the gradient as a matrix.
+"""
+function qv_orbital_optimization(EC::ECInfo, q1T, q2T, R)
   SP = EC.space
   norb = n_orbs(EC)
-  oovo = ints2(EC,"oovo")
-  ovvv = ints2(EC,"ovvv")
   @mtensor q1Tt[a,b,i,j] :=  2.0 * q1T[a,b,i,j] - q1T[a,b,j,i]
   @mtensor q2Tt[a,b,i,j] :=  2.0 * q2T[a,b,i,j] - q2T[a,b,j,i]
   dfock = load2idx(EC,"f_mm") #this has alternative
@@ -1280,25 +1289,39 @@ function qv_orbital_optimization(EC::ECInfo, q1T, q2T)
   @mtensor Tab[a,b] := q1Tt[a,c,i,j] * q1T[b,c,i,j]
   R1 = dfock[SP['v'],SP['o']]
   dfock = nothing
+
   @mtensor grad[a,i] := R1[a,i] - Tij[i,j]*R1[a,j] - Tab[a,b]*R1[b,i]
+
+  mmmo = load(EC,"d_mmmo")
+  Rpa = R[:,SP['v']]
+  @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * mmmo[p',q',r',i] - mmmo[p',r',q',i]) *  Rpa[q',a]
+  @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * mmmo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
+  @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
+  @mtensor grad[a,i] += (q1Tt[b,d,i,k] * q1Tt[c,d,j,k]+  q2Tt[b,c,i,j]) * Rpa[p',b] * Rpa[q',c] * mmmo[p',q',r',j] * Rpa[r',a]
+  mmmo = nothing
+
+  oovo = load4idx(EC,"d_oovo")
+  @mtensor grad[a,i] -=  q2Tt[a,b,j,k] * oovo[k,i,b,j]
   @mtensor grad[a,i] -= Tij[k,l]*(2.0 *oovo[i,l,a,k] - oovo[l,i,a,k])
-  @mtensor grad[a,i] += Tab[d,c]*(2.0 *ovvv[i,d,a,c] - ovvv[i,d,c,a])
   @mtensor grad[a,i] += q1T[c,d,i,k] * q1Tt[c,d,j,l] * oovo[j,l,a,k]
-  @mtensor grad[a,i] -= q1T[b,d,k,l] * q1Tt[a,c,k,l] * ovvv[i,c,b,d]
-  @mtensor grad[a,i] -= 0.5*(q1Tt[b,d,i,k] * q1Tt[c,d,j,k] + 3.0 * q1T[b,d,k,i] * q1T[c,d,k,j]) * ovvv[j,b,a,c]
   @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1T[a,c,l,j] * q1T[b,c,l,k]) * oovo[i,k,b,j]
-  @mtensor grad[a,i] += q1Tt[b,d,i,k] * q1Tt[c,d,j,k] * ovvv[j,b,c,a]
   @mtensor grad[a,i] -= q1Tt[a,c,j,l] * q1Tt[b,c,k,l] * oovo[k,i,b,j]
-  @mtensor grad[a,i] += q2Tt[b,c,i,j] * ovvv[j,b,c,a] - q2Tt[a,b,j,k] * oovo[k,i,b,j]
-  oovo = nothing
-  ovvv = nothing
-  q1Tt = nothing
-  q2Tt = nothing
-  ϵo, ϵv = orbital_energies(EC)
-  Rpq = zeros(norb, norb)
+
+  # @mtensor grad[a,i] -= 0.5*(q1Tt[b,d,i,k] * q1Tt[c,d,j,k] + 3.0 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j]) * ovvv[j,b,a,c]
+  # @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1Tt[a,c,l,j] * q1Tt[b,c,l,k]) * oovo[i,k,b,j]
   return grad
 end
 
+"""
+    calc_qG_dc(EC::ECInfo, qV, T2, T2t, qVD, Ae, AX, Be, BX, Ye, YX, AU1, BU1, Y1, q)
+
+  Calculate QV-DCD closed-shell residuals qG.
+  `qV` and `qVD` are the specially defined integrals in QV-DCD.
+  `T2` and `T2t` are the transformed doubles amplitudes.
+  `Ae`, `AX`, `Be`, `BX`, `Ye`, `YX` are the eigenvalues and eigenvectors of the corresponding U in QV-DCD.
+  `AU1`, `BU1`, `Y1` are the AU^(-q/2), BU^(-q/2) and Y^(-q/2)matrices.
+  Return qG as a matrix.
+"""
 function calc_qG_dc(EC::ECInfo, qV, T2, T2t, qVD, Ae, AX, Be, BX, Ye, YX, AU1, BU1, Y1, q)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
@@ -1327,6 +1350,16 @@ function calc_qG_dc(EC::ECInfo, qV, T2, T2t, qVD, Ae, AX, Be, BX, Ye, YX, AU1, B
   return qG
 end
 
+"""
+    calc_qG_cc(EC::ECInfo, qV, T2, T2t, Ae, AX, Be, BX, Ce, CX, Ye, YX, We, WX, AU1, BU1, CU1, Y1, W1, q)
+
+  Calculate QV-DCD closed-shell residuals qG for CC.
+  `qV` is the specially defined integrals in QV-CCD.
+  `T2` and `T2t` are the transformed doubles amplitudes.
+  `Ae`, `AX`, `Be`, `BX`, `Ce`, `CX`, `Ye`, `YX`, `We`, `WX` are the eigenvalues and eigenvectors of the corresponding U in QV-CCD.
+  `AU1`, `BU1`, `CU1`, `Y1`, `W1` are the AU^(-q/2), BU^(-q/2), CU^(-q/2), Y^(-q/2) and W^(-q/2) matrices.
+  Return qG as a matrix.
+"""
 function calc_qG_cc(EC::ECInfo, qV, T2, T2t, Ae, AX, Be, BX, Ce, CX, Ye, YX, We, WX, AU1, BU1, CU1, Y1, W1, q)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
@@ -1383,34 +1416,134 @@ function calc_qG_cc(EC::ECInfo, qV, T2, T2t, Ae, AX, Be, BX, Ce, CX, Ye, YX, We,
 end
 
 """
-    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false)
+    rotate_ints_o(EC::ECInfo, R::Matrix)
+
+  Calculate into (integral -- 1 occupied) mmmo integral from the original molecular orbitals.
+  Return as a tensor `into[p',q',r',i]` where `p'`, `q'`, `r'` are original molecular orbitals and `i` is the occupied orbital.
+"""
+function rotate_ints_o(EC::ECInfo, R::Matrix)
+  SP = EC.space
+  @mtensor into[p',q',r',i] := ints2(EC,"::::",:α)[p',q',r',s'] * R[:,SP['o']][s',i]
+  return into
+end
+
+"""
+    rotate_calc_fock(EC::ECInfo, into, R::Matrix)
+
+  Calculate the Fock matrix in the rotated orbital basis with the original 
+  `into` is the mmmo integral.
+  `R` is the rotation matrix.
+  Return the Fock matrix.
+"""
+function rotate_calc_fock(EC::ECInfo, into, R::Matrix)
+  SP = EC.space
+  @mtensor fock[p,q] := integ1(EC.fd,:α)[p',q'] * R[p',p] * R[q',q] 
+  @mtensor fock[p,q] += 2.0* into[p', q',r',i] * R[:,SP['o']][q',i] * R[p',p]  * R[r',q]
+  @mtensor fock[p,q] -= into[p',q',r',i] * R[:,SP['o']][r',i] * R[p',p] * R[q',q] 
+  return fock
+end
+
+"""
+    rotate_ints(EC::ECInfo, R::Matrix)
+
+  Update the fock matrix with rotated integrals.
+  Rotate the orginal integrals ith the rotation matrix `R`. This function calculates various integrals and saves them in the ECInfo object (disk).
+"""
+function rotate_ints(EC::ECInfo, R::Matrix)
+  SP = EC.space
+
+  into = rotate_ints_o(EC, R)
+
+  fock = rotate_calc_fock(EC, into, R)
+  save!(EC, "f_mm", fock)
+  save!(EC, "df_mm", fock)
+  save!(EC, "f_MM", fock)
+  eps = diag(fock)
+  save!(EC, "e_m", eps)
+  save!(EC, "e_M", eps)
+  Rpi = R[:,SP['o']]
+  Rpa = R[:,SP['v']]
+
+  @mtensor intoovo[i,j,a,k] := into[p',q',r',k] * Rpi[p',i] *Rpi[q',j]  * Rpa[r',a] 
+  save!(EC,"d_oovo", intoovo)
+  intoovo = nothing
+
+  save!(EC, "d_mmmo", into)
+
+  @mtensor intvvoo[a,b,i,j] := into[p',q',r',j] * Rpi[r',i] * Rpa[p',a] * Rpa[q',b]  
+  save!(EC,"d_vvoo", intvvoo)
+  save!(EC,"d_voov", permutedims(intvvoo, (1,4,3,2)))
+  save!(EC,"d_oovv", permutedims(intvvoo, (3,4,1,2)))
+  intvvoo = nothing
+
+  @mtensor intoooo[i,j,k,l] := into[p',q',r',l] * Rpi[p',i] *Rpi[q',j]  * Rpi[r',k]
+  save!(EC,"d_oooo", intoooo)
+  intoooo = nothing
+
+  @mtensor intvovo[a,i,b,j] := into[p',q',r',j] * Rpi[q',i] * Rpa[p',a]  * Rpa[r',b]
+  save!(EC,"d_vovo", intvovo)
+  intvovo = nothing
+
+  into = nothing
+end
+
+"""
+    rotation_matrix(EC::ECInfo, T1)
+  
+  Make the integrals rotation matrix with T1.
+"""
+function rotation_matrix(EC::ECInfo, T1)
+  norb = n_orbs(EC)
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  SP = EC.space
+  Rpq = zeros(norb, norb)
+  for a in 1:nvirt
+    for i in 1:nocc
+      Rpq[SP['v'][a],SP['o'][i]] = T1[a,i]
+      Rpq[SP['o'][i],SP['v'][a]] = -T1[a,i]
+    end
+  end
+  Rpq = exp(Rpq)
+  return Rpq
+end
+
+
+"""
+    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false, orbopt=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
-function calc_qvcc_resid(EC::ECInfo, fd_original::FDump, it::Int, T1, T2; dc=false, orbopt=false)
+function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   I_ab = Matrix{eltype(T2)}(I,nvirt,nvirt)
   I_ij = Matrix{eltype(T2)}(I,nocc,nocc)
   norb = n_orbs(EC)
   SP = EC.space
+  transIntEveryIter = EC.options.cc.transIntEveryIter
+  Rpq = zeros(0,0)
 
   # orbital optimization -- integral tranformation
   if orbopt
-    Rpq = zeros(norb, norb)
-    for a in 1:nvirt
-      for i in 1:nocc
-        Rpq[SP['v'][a],SP['o'][i]] = T1[a,i]
-        Rpq[SP['o'][i],SP['v'][a]] = -T1[a,i]
-      end
+    Rpq = rotation_matrix(EC, T1)
+    if transIntEveryIter
+      int2_o = load(EC,"int2_o")
+      EC.fd.int2 = transform_int2(int2_o, Rpq, Rpq, Rpq, Rpq)
+      int2_o = nothing
+      int1_o = load(EC,"int1_o")
+      EC.fd.int1 = transform_int1(int1_o, Rpq, Rpq)
+      int1_o = nothing
+      calc_fock_matrix(EC, true, false)
+      EC.options.cc.calc_d_vvoo = true
+      EC.options.cc.calc_d_vvvo = true
+      pseudo_dressed_ints(EC) # to be changed
+    else
+      rotate_ints(EC, Rpq)
     end
-    Rpq = exp(Rpq)
-    EC.fd.int2 = transform_int2(fd_original.int2, Rpq, Rpq, Rpq, Rpq)
-    EC.fd.int1 = transform_int1(fd_original.int1, Rpq, Rpq)
-    # EC.fd.int2, EC.fd.int1 = transform_fcidump(fd_original, Rpq, Rpq; qv=true)
-
-    calc_fock_matrix(EC, true, false)
-    # pseudo_dressed_ints(EC) # to be changed
+  else
+    EC.options.cc.calc_d_vvoo = true
+    pseudo_dressed_ints(EC)
   end
 
   @mtensor begin
@@ -1421,7 +1554,6 @@ function calc_qvcc_resid(EC::ECInfo, fd_original::FDump, it::Int, T1, T2; dc=fal
     W[a,i,b,j] := I_ab[a,b] * I_ij[i,j] + T2[c,a,i,k] * T2[c,b,j,k]
   end
 
- 
   # a function that can calculate the eigenvectors & eigenvalues of a matrix
   # CU[i,j,k,l] -> CU[ij,kl], Y[a,i,b,j] -> Y[ai,bj], W[a,i,b,j] -> W[ai,bj]
   # corresponding to \pre{_C}U^{ij}_{kl}, Y^{aj}_{bi}, W^{aj}_{bi}
@@ -1433,9 +1565,6 @@ function calc_qvcc_resid(EC::ECInfo, fd_original::FDump, it::Int, T1, T2; dc=fal
   CU = nothing
   Y = nothing
   W = nothing
-
-  G2 = zeros(eltype(T2),nvirt, nvirt, nocc, nocc)
-  E_qvccd = 0.0
 
   @mtensor T2t[a,b,i,j] :=  2.0 * T2[a,b,i,j] - T2[a,b,j,i]
 
@@ -1451,6 +1580,7 @@ function calc_qvcc_resid(EC::ECInfo, fd_original::FDump, it::Int, T1, T2; dc=fal
     CU2 = reshape(CX * Diagonal(Ce .^ (-1)) * CX', nocc, nocc, nocc, nocc) # CU1 = CU ^ (-1)
     W2 = reshape(WX * Diagonal(We .^ (-1)) * WX', nvirt, nocc, nvirt, nocc) # W1 = reshape(W ^ (-1), nvirt, nocc, nvirt, nocc)
   end
+  # calculate the transformed amplitudes
   if dc
     q1T = calc_qT_dc(AU1, BU1, Y1, T2, T2t)
     q2T = calc_qT_dc(AU2, BU2, Y2, T2, T2t)
@@ -1461,26 +1591,31 @@ function calc_qvcc_resid(EC::ECInfo, fd_original::FDump, it::Int, T1, T2; dc=fal
 
   # orbital optimization -- gradients calculation
   if orbopt
-    G1 = qv_orbital_optimization(EC, q1T, q2T)
+    G1 = qv_orbital_optimization(EC, q1T, q2T, Rpq)
   else
     G1 = T1
   end
 
   #load the integrals
   T1_0 = zeros(eltype(T1),0,0)
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc = true, linearized=true)[2]
-  q2VD = ints2(EC, "vvoo")
+  # q2VD = ints2(EC, "vvoo")
+  q2VD = load4idx(EC,"d_vvoo")
+  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, qv=true, R = Rpq, linearized=true)[2]
+  # display(q1VD[:,:,1,1])
+
   q1VD .-= q2VD
   @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
   q1V = 2.0 * q1VD .- temp_perm
   @mtensor temp_perm[a,b,i,j] = q2VD[b,a,i,j]
   q2V = 2.0 * q2VD .- temp_perm
 
+  E_qvccd = 0.0
   #calculate the energy
   E_qvccd += sum(q1V .* q1T)
   E_qvccd += sum(q2V .* q2T) * 2.0
 
   # calculate the residual
+  G2 = zeros(eltype(T2),nvirt, nvirt, nocc, nocc)
   if dc
     q1G = calc_qG_dc(EC, q1V, T2, T2t, q1VD, Ae, AX, Be, BX, Ye, YX, AU1, BU1, Y1, 1.0)
     q2G = calc_qG_dc(EC, q2V, T2, T2t, q2VD, Ae, AX, Be, BX, Ye, YX, AU2, BU2, Y2, 2.0)
@@ -1497,11 +1632,11 @@ function calc_qvcc_resid(EC::ECInfo, fd_original::FDump, it::Int, T1, T2; dc=fal
 end
 
 """
-    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false)
+    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, qv=false, R=zeros(Float64,0,0))
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false)
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, qv=false, R=zeros(Float64,0,0))
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1511,7 +1646,9 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
-    pseudo_dressed_ints(EC)
+    if EC.options.cc.transIntEveryIter
+      pseudo_dressed_ints(EC)
+    end
   end
   @mtensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   dfock = load2idx(EC,"df_mm")
@@ -1524,8 +1661,6 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
       if !EC.options.cc.calc_d_vovv
         error("for not use_kext calc_d_vovv has to be True")
       end
-      int2 = load4idx(EC,"d_vovv")
-      @mtensor R1[a,i] += int2[a,k,b,c] * T2t[c,b,k,i]
     end
     int2 = load4idx(EC,"d_oovo")
     fov = dfock[SP['o'],SP['v']]
@@ -1548,7 +1683,11 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     R2 = eltype(T2).(load4idx(EC,"d_vvoo"))
   end
   t1 = print_time(EC,t1,"<ab|ij>",2)
-  klcd = ints2(EC,"oovv")
+  if EC.options.cc.transIntEveryIter
+    klcd = ints2(EC,"oovv")
+  else
+    klcd = load4idx(EC,"d_oovv")
+  end
   t1 = print_time(EC,t1,"<kl|cd>",2)
   int2 = load4idx(EC,"d_oooo")
   if !dc && !linearized
@@ -1562,9 +1701,16 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     int2 = integ2_ss(EC.fd)
     # last two indices of integrals are stored as upper triangular 
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
-    D2 = calc_D2(EC, T1, T2, true)[tripp,:,:]
+    if EC.options.cc.transIntEveryIter
+      D2 = calc_D2(EC, T1, T2, true; qv=false, R)[tripp,:,:]
+    else
+      D2 = calc_D2(EC, T1, T2, true; qv, R)[tripp,:,:]
+    end
     # <pq|rs> D^ij_rs
     @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
+    if qv && !EC.options.cc.transIntEveryIter
+      @mtensor  rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * R[p', p] * R[r', r] # R --- rotate
+    end
     D2 = nothing
     # symmetrize R
     @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
@@ -2709,11 +2855,14 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
   t0 = print_time(EC, t0, "initialization", 1)
   println("Iter     SqNorm      Energy      DE          Res         Time")
-  fd_original = deepcopy(EC.fd) # to be changed
+  if EC.options.cc.transIntEveryIter
+    save!(EC, "int1_o", EC.fd.int1)
+    save!(EC, "int2_o", EC.fd.int2)
+  end
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if length(Amps3) == 0 && !do_sing && qv
-      Res, E = calc_qvcc_resid(EC, fd_original, it, Amps...; dc, orbopt)
+      Res, E = calc_qvcc_resid(EC, it, Amps...; dc, orbopt)
       Eh = OutDict("E"=>E)
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
@@ -2793,6 +2942,10 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       converged = true
       break
     end
+  end
+  if orbopt
+    Rpq = rotation_matrix(EC, Amps1[1])
+    transform_fcidump(EC.fd, Rpq, Rpq)
   end
   if !converged
     println("WARNING: CC iterations did not converge!")

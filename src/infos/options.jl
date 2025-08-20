@@ -220,6 +220,8 @@ end
   dcsd_ofac::Float64 = 0.15
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
+  """`⟨false⟩` transform integrals in EC.fd every iteration in OQV-CCD/DCD.  """
+  transIntEveryIter::Bool = false
 end
 
 """ 
