@@ -338,6 +338,9 @@ function guess_basis_name(atom::ACentre, type)
     error("AO basis set for atom $(atomic_centre_label(atom)) not defined!")
   end
   aobasis = basis_name(atom, "ao")
+  if startswith(aobasis, "{")
+    error("The basis block in $aobasis is given explicitly, cannot guess the corresponding $type basis")
+  end
   return aobasis * "-" * type
 end
 
