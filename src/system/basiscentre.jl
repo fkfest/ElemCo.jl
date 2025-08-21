@@ -120,7 +120,7 @@ function Base.show(io::IO, bc::BasisContraction)
 end
 
 function Base.show(io::IO, ashell::AngularShell)
-  print(io, subshell_char(ashell.l), ", ", ashell.element)
+  print(io, subshell_char(ashell.l), ", ", uppercase(ashell.element))
   for exp in ashell.exponents
     print(io, ", ", exp)
   end
