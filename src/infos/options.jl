@@ -254,6 +254,12 @@ end
   cartesian::Bool = false
   """`⟨1000⟩` target batch length for the integral transformation. """
   target_batch_length::Int = 1000
+  """`⟨false⟩` use fallback basis sets (in case of missing basis sets). """
+  use_fallback_basis::Bool = false
+  """`⟨true⟩` sanity check of the fit basis (i.e., that it's not an AO basis)"""
+  check_fit_basis::Bool = true
+  """`⟨true⟩` split independent angular shells (important for efficiency). """
+  split_ashells::Bool = true
 end
 
 """ 

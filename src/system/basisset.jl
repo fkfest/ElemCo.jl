@@ -24,11 +24,13 @@ export coefficients_1mat, n_coefficients_1mat
 export basis_name, generate_basis, guess_norb
 export ao_list, print_ao
 export subshell_char, max_l
+export levenshtein_distance, get_available_basis_sets, suggest_basis_sets
 
-export ILibcint5
+export ILibcint
 
 include("basiscentre.jl")  
 include("parse_basis.jl")
+include("levenshtein.jl")
 include("intlibs.jl")
 include("aos.jl")
 
@@ -50,8 +52,8 @@ struct BasisSet
   shell_ranges::Vector{UnitRange{Int}}
   """ cartesian basis set """
   cartesian::Bool
-  """ infos for integral library (at the moment only libcint5 is possible)."""
-  lib::ILibcint5
+  """ infos for integral library (at the moment only libcint is possible)."""
+  lib::ILibcint
 end
 
 function BasisSet(centres::Vector{BasisCentre}, cartesian::Bool, lib::AbstractILib)
@@ -125,7 +127,7 @@ function combine(bs1::BasisSet, bs2::BasisSet)
   centre_ranges = vcat(bs1.centre_ranges, [r .+ length(bs1.centres) for r in bs2.centre_ranges])
   shell_ranges = vcat(bs1.shell_ranges, [r .+ length(bs1.shell_indices) for r in bs2.shell_ranges])
   cartesian = bs1.cartesian && bs2.cartesian
-  return BasisSet(centres, centre_ranges, shell_ranges, cartesian, ILibcint5(centres, cartesian))
+  return BasisSet(centres, centre_ranges, shell_ranges, cartesian, ILibcint(centres, cartesian))
 end
 
 function Base.show(io::IO, bs::BasisSet)
@@ -184,19 +186,35 @@ end
   If `basisset` is provided, it is used as the basis set.
 """
 function generate_basis(EC::AbstractECInfo, type="ao"; basisset::AbstractString="")
-  return generate_basis(EC.system, type; cartesian=EC.options.int.cartesian, basisset=basisset)
+  return generate_basis(EC.system, type; cartesian=EC.options.int.cartesian, basisset=basisset,
+                        use_fallback=EC.options.int.use_fallback_basis,
+                        check_fit_basis=EC.options.int.check_fit_basis,
+                        split_ashells=EC.options.int.split_ashells)
 end
 
 """
-    generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::AbstractString="")
+    generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::AbstractString="", use_fallback=false, check_fit_basis=true)
 
   Generate basis sets for integral calculations.
 
   The basis set is stored in [`BasisSet`](@ref) object.
   `type` can be `"ao"`, `"mpfit"` or `"jkfit"`.
   If `basisset` is provided, it is used as the basis set.
+  If `split_ashells` is true, independent angular shells are split (important for efficiency).
 """
-function generate_basis(ms::MSystem, type="ao"; cartesian::Bool=false, basisset::AbstractString="")
+function generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::AbstractString="",
+                        use_fallback=false, check_fit_basis=true, split_ashells=true)
+  fallback = ""
+  if use_fallback
+    # set fallback basis sets
+    if type == "ao"
+      fallback = "def2-tzvppd"
+    elseif type == "mpfit"
+      fallback = "def2-tzvppd-mpfit"
+    elseif type == "jkfit"
+      fallback = "def2-universal-jkfit"
+    end
+  end
   array_of_centres = BasisCentre[]
   id = 1
   for atom in ms
@@ -208,11 +226,12 @@ function generate_basis(ms::MSystem, type="ao"; cartesian::Bool=false, basisset:
         basisname = guess_basis_name(atom, type)
       end
     end
-    basisfunctions = parse_basis(basisname, atom; fallback=(type=="jkfit"))
+    check_fit_basis_name(basisname, type, check_fit_basis)
+    basisfunctions = parse_basis(basisname, atom; fallback, split_ashells)
     id = set_id!(basisfunctions, id)
     push!(array_of_centres, BasisCentre(atom, basisname, basisfunctions))
   end
-  return BasisSet(array_of_centres, cartesian, ILibcint5(array_of_centres, cartesian))
+  return BasisSet(array_of_centres, cartesian, ILibcint(array_of_centres, cartesian))
 end
 
 """
@@ -320,6 +339,25 @@ function guess_basis_name(atom::ACentre, type)
   end
   aobasis = basis_name(atom, "ao")
   return aobasis * "-" * type
+end
+
+"""
+    check_fit_basis_name(basis_name, type, err)
+
+  Check if the basis name is a valid fit basis (to catch a common mistake of using AO basis 
+  as a fitting basis).
+"""
+function check_fit_basis_name(basis_name, type, err)
+  if startswith(basis_name, "{")
+    # the basis block is given explicitly, cannot check 
+    return
+  end
+  if endswith(type, "fit") && !endswith(basis_name, "fit")
+    warn("Basis set $basis_name is not a valid fitting basis! 
+           Use a fitting basis set (e.g., `avtz-jkfit` for JK fit or `avtz-mpfit` for MP fit) 
+           instead of AO basis set!
+           This error can be ignored by setting option `int.check_fit_basis=false`)", err)
+  end
 end
 
 """

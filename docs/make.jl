@@ -13,6 +13,15 @@ Changelog.generate(
     repo = "fkfest/ElemCo.jl",
 )
 
+mathengine = MathJax3(Dict(
+    :loader => Dict("load" => ["[tex]/physics"]),
+    :tex => Dict(
+        "inlineMath" => [["\$","\$"], ["\\(","\\)"]],
+        "tags" => "ams",
+        "packages" => ["base", "ams", "autoload", "physics"],
+    ),
+))
+
 makedocs(
   modules = [ElemCo],
   format = Documenter.HTML(
@@ -25,7 +34,7 @@ makedocs(
     "Home" => "index.md",
     "Manual" => [
       "Running calculations" => "elemco.md",
-      "Options" => "options.md" 
+      "Options" => "options.md"
       ],
     "Internals" => [
       "basisset.md",
@@ -54,6 +63,7 @@ makedocs(
       "mnpy.md",
       "msystems.md",
       "orbtools.md",
+      "outputs.md",
       "qmtensors.md",
       "tensortools.md",
       "descdict.md",
@@ -61,7 +71,8 @@ makedocs(
       "versioninfo.md",
       "interfaces.md",
       "molpro.md",
-      "molden.md"
+      "molden.md",
+      "trexio_format.md"
     ],
     "release-notes.md", 
   ],

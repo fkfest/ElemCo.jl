@@ -4,11 +4,37 @@
 
 ### Breaking
 
+* The fallback basis sets are not used by default anymore. Set `@set int use_fallback_basis=true`
+  to enable them.
+
 ### Changed
+
+* The fallback basis sets are now defined for `ao` (`def2-tzvppd`), `jkfit` (`def2-universal-jkfit`), and `mpfit` (`def2-tzvppd-mpfit`) basis sets.
+* Functions for H and He are copied from [aug]-cc-pVXZ basis sets to [aug]-p[w]CVXZ basis sets. Functions for Li and Be are copied from [aug]-cc-pCVXZ basis sets to [aug]-pwCVXZ basis sets.
 
 ### Added
 
+* automatic augmentation of basis sets by additional diffuse or steep functions.
+
 ### Fixed
+
+* A simple sanity check of the fitting basis sets is performed (by checking whether it's 
+  an AO basis set). The error message can be turned to a warning by setting `@set int check_fit_basis=false`.
+
+## Version [v0.14.1] - 2025.07.03
+
+### Changed
+
+* update libcint to version 6. 
+* reduce allocations in the integral calculation routines.
+
+### Added
+
+* a simple XML based interface to Molpro.
+
+### Fixed
+
+* Fix Mac and Windows compatibility issues related to the case insensitivity of the file system. The capital letters in the file names on scratch are now converted to lower case plus a character `ß` (e.g., `oVoO` becomes `ovßoß`).
 
 ## Version [v0.14.0] - 2025.04.16
 

@@ -1,6 +1,7 @@
 """ various utilities """
 module Utils
 using MKL
+using XML
 using Printf
 using ..ElemCo.AbstractEC
 using ..ElemCo.DescDict
@@ -13,10 +14,15 @@ export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_
 export subspace_in_space, argmaxN
 export @istoplevel
 export substr
+export allocfree_permutedims!
+export reshape_buf
 export amdmkl
+export xpath
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
 export OutDict, last_energy
+
+include("xmltools.jl")
 
 """
     mainname(file::String)
@@ -317,6 +323,53 @@ function argmaxN(vals, N; by::Function=identity)
   return perm
 end
 
+"""
+    reshape_buf(buf::AbstractVector, dims...)
+
+  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`.
+  The buffer is expected to be large enough to fit the reshaped data.
+
+  # Example
+```julia
+julia> buf = zeros(1000)
+julia> reshaped_buf = reshape_buf(buf, 10, 10)
+"""
+Base.@propagate_inbounds function reshape_buf(buf::AbstractVector, dims...)
+  len = prod(dims)
+  @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
+  return reshape(@view(buf[1:len]), dims...)
+end
+
+
+"""
+    allocfree_permutedims!(dest::AbstractArray{T1,N}, src::AbstractArray{T2,N}, perm::NTuple{N,Int}) where {T1,T2,N}
+
+  Copy data from `src` to `dest` with the dimensions permuted according to `perm`.
+  The `dest` array is expected to be preallocated and have the same size as `src` after permutation.
+  This function has the same functionality as `permutedims!`, but has much lower allocation overhead
+  for views of arrays (there is still one allocation left somewhere...).
+  
+  # Example
+```julia
+julia> src = rand(3, 4)
+julia> dest = zeros(10, 10)
+julia> allocfree_permutedims!(@view(dest[1:4,2:4]), src, (2, 1))
+"""
+function allocfree_permutedims!(dest::AbstractArray{T1,2}, src::AbstractArray{T2,2}, perm::NTuple{2,Int}) where {T1,T2}
+  @inbounds for I in CartesianIndices(src)
+    dest[I[perm[1]],I[perm[2]]] = src[I]
+  end
+end
+function allocfree_permutedims!(dest::AbstractArray{T1,3}, src::AbstractArray{T2,3}, perm::NTuple{3,Int}) where {T1,T2}
+  @inbounds for I in CartesianIndices(src)
+    dest[I[perm[1]],I[perm[2]],I[perm[3]]] = src[I]
+  end
+end
+function allocfree_permutedims!(dest::AbstractArray{T1,4}, src::AbstractArray{T2,4}, perm::NTuple{4,Int}) where {T1,T2}
+  @inbounds for I in CartesianIndices(src)
+    dest[I[perm[1]],I[perm[2]],I[perm[3]],I[perm[4]]] = src[I]
+  end
+end
 """
     @istoplevel
 
