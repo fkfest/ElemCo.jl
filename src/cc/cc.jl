@@ -56,7 +56,6 @@ catch
   #println("MKL package not found, using OpenBLAS.")
 end
 using LinearAlgebra
-using TimerOutputs
 #BLAS.set_num_threads(1)
 using Buffers
 using ..ElemCo.Outputs
@@ -1083,7 +1082,7 @@ end
 
   If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation).
 """
-function calc_D2(EC::ECInfo, T1, T2, scalepp=false; R=zeros(Float64,0,0))
+function calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
   SP = EC.space
   norb = n_orbs(EC)
   nocc = n_occ_orbs(EC)
@@ -1104,8 +1103,8 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false; R=zeros(Float64,0,0))
       D2[SP['v'],SP['o'],:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k]
     end
   end
-  if length(R) > 0
-    @mtensor D2[p',q',i,j] = D2[p,q,i,j] * R[p',p] * R[q',q]
+  if length(Rot) > 0
+    @mtensor D2[p',q',i,j] = D2[p,q,i,j] * Rot[p',p] * Rot[q',q]
   end
   if scalepp
     diagindx = [CartesianIndex(i,i) for i in 1:norb]
@@ -1296,19 +1295,20 @@ function qv_orbital_optimization(EC::ECInfo, q1T, q2T, R)
   Rpa = R[:,SP['v']]
   @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * mmmo[p',q',r',i] - mmmo[p',r',q',i]) *  Rpa[q',a]
   @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * mmmo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
-  @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
+  # @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
+  @mtensor grad[a,i] -= (1.5 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
   @mtensor grad[a,i] += (q1Tt[b,d,i,k] * q1Tt[c,d,j,k]+  q2Tt[b,c,i,j]) * Rpa[p',b] * Rpa[q',c] * mmmo[p',q',r',j] * Rpa[r',a]
   mmmo = nothing
 
   oovo = load4idx(EC,"d_oovo")
   @mtensor grad[a,i] -=  q2Tt[a,b,j,k] * oovo[k,i,b,j]
-  @mtensor grad[a,i] -= Tij[k,l]*(2.0 *oovo[i,l,a,k] - oovo[l,i,a,k])
+  @mtensor grad[a,i] -= Tij[k,l]* 2.0 *oovo[i,l,a,k] - Tij[k,l]* oovo[l,i,a,k]
   @mtensor grad[a,i] += q1T[c,d,i,k] * q1Tt[c,d,j,l] * oovo[j,l,a,k]
-  @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1T[a,c,l,j] * q1T[b,c,l,k]) * oovo[i,k,b,j]
-  @mtensor grad[a,i] -= q1Tt[a,c,j,l] * q1Tt[b,c,k,l] * oovo[k,i,b,j]
+  # @mtensor grad[a,i] += 0.5 * oovo[i,k,b,j] * q1Tt[b,c,k,l] * q1Tt[a,c,j,l] + 1.5 * oovo[i,k,b,j] * q1T[b,c,l,k] * q1T[a,c,l,j] 
+  @mtensor grad[a,i] -=  q1Tt[b,c,k,l] * oovo[k,i,b,j] * q1Tt[a,c,j,l] 
 
   # @mtensor grad[a,i] -= 0.5*(q1Tt[b,d,i,k] * q1Tt[c,d,j,k] + 3.0 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j]) * ovvv[j,b,a,c]
-  # @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1Tt[a,c,l,j] * q1Tt[b,c,l,k]) * oovo[i,k,b,j]
+  @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1Tt[a,c,l,j] * q1Tt[b,c,l,k]) * oovo[i,k,b,j]
   return grad
 end
 
@@ -1599,8 +1599,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   T1_0 = zeros(eltype(T1),0,0)
   # q2VD = ints2(EC, "vvoo")
   q2VD = load4idx(EC,"d_vvoo")
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, R = Rpq, linearized=true)[2]
-  # display(q1VD[:,:,1,1])
+  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, Rot=Rpq, linearized=true)[2]
 
   q1VD .-= q2VD
   @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
@@ -1635,7 +1634,7 @@ end
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, R=zeros(Float64,0,0))
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, Rot=zeros(Float64,0,0))
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1645,7 +1644,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
-    if length(R) == 0 || EC.options.cc.transIntEveryIter
+    if length(Rot) == 0 || EC.options.cc.transIntEveryIter
       pseudo_dressed_ints(EC)
     end
   end
@@ -1682,7 +1681,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     R2 = eltype(T2).(load4idx(EC,"d_vvoo"))
   end
   t1 = print_time(EC,t1,"<ab|ij>",2)
-  if length(R) == 0 || EC.options.cc.transIntEveryIter
+  if length(Rot) == 0 || EC.options.cc.transIntEveryIter
     klcd = ints2(EC,"oovv")
   else
     klcd = load4idx(EC,"d_oovv")
@@ -1700,14 +1699,14 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     int2 = integ2_ss(EC.fd)
     # last two indices of integrals are stored as upper triangular 
     tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
-    D2 = calc_D2(EC, T1, T2, true; R)[tripp,:,:]
+    D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
     # <pq|rs> D^ij_rs
     @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
-    if length(R) > 0 && !EC.options.cc.transIntEveryIter
-      @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * R[p', p] * R[r', r] # R --- rotate
+    if length(Rot) > 0 && !EC.options.cc.transIntEveryIter
+      @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
     end
     D2 = nothing
-    # symmetrize R
+    # symmetrize Rot
     @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
     rK2pq = nothing
     R2 += K2pq[SP['v'],SP['v'],:,:]
