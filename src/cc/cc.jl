@@ -1271,14 +1271,14 @@ function calc_qT_cc(AU1::Matrix, BU1::Matrix, CU1::Array, Y1::Array, W1::Array, 
 end
 
 """
-    qv_orbital_optimization(EC::ECInfo, q1T, q2T, R)
+    calc_oqv_gradient(EC::ECInfo, q1T, q2T, R)
 
   Calculate the gradient for orbital optimization in OQV-CCD/DCD.
   `q1T` and `q2T` are the transformed amplitudes.
   `R` is the rotation matrix.
   Return the gradient as a matrix.
 """
-function qv_orbital_optimization(EC::ECInfo, q1T, q2T, R)
+function calc_oqv_gradient(EC::ECInfo, q1T, q2T, R)
   SP = EC.space
   norb = n_orbs(EC)
   @mtensor q1Tt[a,b,i,j] :=  2.0 * q1T[a,b,i,j] - q1T[a,b,j,i]
@@ -1295,8 +1295,8 @@ function qv_orbital_optimization(EC::ECInfo, q1T, q2T, R)
   Rpa = R[:,SP['v']]
   @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * mmmo[p',q',r',i] - mmmo[p',r',q',i]) *  Rpa[q',a]
   @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * mmmo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
-  # @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
-  @mtensor grad[a,i] -= (1.5 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
+  @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
+  # @mtensor grad[a,i] -= (1.5 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
   @mtensor grad[a,i] += (q1Tt[b,d,i,k] * q1Tt[c,d,j,k]+  q2Tt[b,c,i,j]) * Rpa[p',b] * Rpa[q',c] * mmmo[p',q',r',j] * Rpa[r',a]
   mmmo = nothing
 
@@ -1304,11 +1304,10 @@ function qv_orbital_optimization(EC::ECInfo, q1T, q2T, R)
   @mtensor grad[a,i] -=  q2Tt[a,b,j,k] * oovo[k,i,b,j]
   @mtensor grad[a,i] -= Tij[k,l]* 2.0 *oovo[i,l,a,k] - Tij[k,l]* oovo[l,i,a,k]
   @mtensor grad[a,i] += q1T[c,d,i,k] * q1Tt[c,d,j,l] * oovo[j,l,a,k]
-  # @mtensor grad[a,i] += 0.5 * oovo[i,k,b,j] * q1Tt[b,c,k,l] * q1Tt[a,c,j,l] + 1.5 * oovo[i,k,b,j] * q1T[b,c,l,k] * q1T[a,c,l,j] 
+  @mtensor grad[a,i] += 0.5 * oovo[i,k,b,j] * q1Tt[b,c,k,l] * q1Tt[a,c,j,l] + 1.5 * oovo[i,k,b,j] * q1T[b,c,l,k] * q1T[a,c,l,j] 
+  # @mtensor grad[a,i] += 0.5 * oovo[i,k,b,j] * q1Tt[b,c,k,l] * q1Tt[a,c,j,l] + 1.5 * oovo[i,k,b,j] * q1Tt[b,c,l,k] * q1Tt[a,c,l,j] 
   @mtensor grad[a,i] -=  q1Tt[b,c,k,l] * oovo[k,i,b,j] * q1Tt[a,c,j,l] 
 
-  # @mtensor grad[a,i] -= 0.5*(q1Tt[b,d,i,k] * q1Tt[c,d,j,k] + 3.0 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j]) * ovvv[j,b,a,c]
-  @mtensor grad[a,i] += 0.5*(q1Tt[a,c,j,l] * q1Tt[b,c,k,l] + 3.0 * q1Tt[a,c,l,j] * q1Tt[b,c,l,k]) * oovo[i,k,b,j]
   return grad
 end
 
@@ -1526,20 +1525,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   # orbital optimization -- integral tranformation
   if orbopt
     Rpq = rotation_matrix(EC, T1)
-    if EC.options.cc.transIntEveryIter
-      int2_o = load(EC,"int2_o")
-      EC.fd.int2 = transform_int2(int2_o, Rpq, Rpq, Rpq, Rpq)
-      int2_o = nothing
-      int1_o = load(EC,"int1_o")
-      EC.fd.int1 = transform_int1(int1_o, Rpq, Rpq)
-      int1_o = nothing
-      calc_fock_matrix(EC, true, false)
-      EC.options.cc.calc_d_vvoo = true
-      EC.options.cc.calc_d_vvvo = true
-      pseudo_dressed_ints(EC) # to be changed
-    else
-      rotate_ints(EC, Rpq)
-    end
+    rotate_ints(EC, Rpq)
   else
     EC.options.cc.calc_d_vvoo = true
     pseudo_dressed_ints(EC)
@@ -1590,7 +1576,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
 
   # orbital optimization -- gradients calculation
   if orbopt
-    G1 = qv_orbital_optimization(EC, q1T, q2T, Rpq)
+    G1 = calc_oqv_gradient(EC, q1T, q2T, Rpq)
   else
     G1 = T1
   end
@@ -1644,7 +1630,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
-    if length(Rot) == 0 || EC.options.cc.transIntEveryIter
+    if length(Rot) == 0
       pseudo_dressed_ints(EC)
     end
   end
@@ -1681,7 +1667,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     R2 = eltype(T2).(load4idx(EC,"d_vvoo"))
   end
   t1 = print_time(EC,t1,"<ab|ij>",2)
-  if length(Rot) == 0 || EC.options.cc.transIntEveryIter
+  if length(Rot) == 0
     klcd = ints2(EC,"oovv")
   else
     klcd = load4idx(EC,"d_oovv")
@@ -1702,7 +1688,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
     # <pq|rs> D^ij_rs
     @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
-    if length(Rot) > 0 && !EC.options.cc.transIntEveryIter
+    if length(Rot) > 0 
       @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
     end
     D2 = nothing
@@ -2849,10 +2835,6 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
   t0 = print_time(EC, t0, "initialization", 1)
   println("Iter     SqNorm      Energy      DE          Res         Time")
-  if EC.options.cc.transIntEveryIter
-    save!(EC, "int1_o", EC.fd.int1)
-    save!(EC, "int2_o", EC.fd.int2)
-  end
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if length(Amps3) == 0 && !do_sing && qv

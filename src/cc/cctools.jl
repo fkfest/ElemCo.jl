@@ -28,7 +28,7 @@ export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_do
 export triples_4ext!
 
 """ 
-    calc_fock_matrix(EC::ECInfo, closed_shell)
+    calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
 
   Calculate fock matrix from FCIDump
 """
