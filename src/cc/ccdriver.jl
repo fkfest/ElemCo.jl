@@ -180,16 +180,25 @@ end
   Evaluate the Hartree-Fock energy for the integrals in `EC.fd`.
   Return the updated `energies::OutDict` with the Hartree-Fock energy (field `HF`).
 """
-function eval_hf_energy(EC::ECInfo, energies::OutDict, closed_shell)
+function eval_hf_energy(EC::ECInfo, energies::OutDict, closed_shell; rotated=false)
   t1 = time_ns()
-  calc_fock_matrix(EC, closed_shell)
-  EHF = calc_HF_energy(EC, closed_shell)
+  if !rotated
+    calc_fock_matrix(EC, closed_shell)
+    EHF = calc_HF_energy(EC, closed_shell)
+  else
+    EHF = calc_rotated_HF_energy(EC, closed_shell)
+  end
   hfname = closed_shell ? "HF" : "UHF"
   output_E_method(EHF, hfname, "energy:")
   t1 = print_time(EC, t1, "$hfname energy", 1)
   println()
   flush_output()
-  return merge(energies, "HF"=>(EHF, "$hfname energy"))
+  if !rotated
+    energies = merge(energies, "HF"=>(EHF, "$hfname energy"))
+  else
+    energies = merge(energies, "HF(rotated)"=>(EHF, "$hfname energy"))
+  end
+  return energies
 end
 
 """
@@ -226,6 +235,9 @@ end
 function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=true)
   enecor = En["E"]
   enetot = En["E"]+energies["HF"]
+  if haskey(energies, "HF(rotated)")
+    enetot = En["E"]+energies["HF(rotated)"]
+  end
   energies_out = copy(energies)
   if print
     output_E_method(enecor, mname, "correlation energy:")
@@ -359,9 +371,14 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   EHF = energies["HF"]
   main_name = method_name(ecmethod)
   ECC = calc_cc(EC, ECMethod(main_name))
-  if has_prefix(ecmethod, "OQV")
+  if has_prefix(ecmethod, "O") && has_prefix(ecmethod, "QV")
     closed_shell = is_closed_shell(EC)
-    energies = eval_hf_energy(EC, energies, closed_shell)
+    if EC.options.cc.keepOQVorbitals
+      push!(energies, "HF(original)"=>(energies["HF"], "HF energy"))
+      energies = eval_hf_energy(EC, energies, closed_shell)
+    else
+      energies = eval_hf_energy(EC, energies, closed_shell; rotated=true)
+    end
   end
   if has_prefix(ecmethod, "2D")
     energies = output_2d_energy(EC, ECC, energies, main_name)

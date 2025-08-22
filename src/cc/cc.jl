@@ -1104,8 +1104,10 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
     end
   end
   if length(Rot) > 0
-    @mtensor D2[p',q',i,j] = D2[p,q,i,j] * Rot[p',p] * Rot[q',q]
+    @mtensor D2_r[p',q',i,j] := D2[p,q,i,j] * Rot[p',p] * Rot[q',q]
   end
+  D2 = deepcopy(D2_r)
+  D2_r = nothing
   if scalepp
     diagindx = [CartesianIndex(i,i) for i in 1:norb]
     D2[diagindx,:,:] *= 0.5
@@ -1291,7 +1293,7 @@ function calc_oqv_gradient(EC::ECInfo, q1T, q2T, R)
 
   @mtensor grad[a,i] := R1[a,i] - Tij[i,j]*R1[a,j] - Tab[a,b]*R1[b,i]
 
-  mmmo = load(EC,"d_mmmo")
+  mmmo = load4idx(EC,"d_mmmo")
   Rpa = R[:,SP['v']]
   @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * mmmo[p',q',r',i] - mmmo[p',r',q',i]) *  Rpa[q',a]
   @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * mmmo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
@@ -1427,14 +1429,14 @@ function rotate_ints_o(EC::ECInfo, R::Matrix)
 end
 
 """
-    rotate_calc_fock(EC::ECInfo, into, R::Matrix)
+    calc_rotated_fock(EC::ECInfo, into, R::Matrix)
 
   Calculate the Fock matrix in the rotated orbital basis with the original 
   `into` is the mmmo integral.
   `R` is the rotation matrix.
   Return the Fock matrix.
 """
-function rotate_calc_fock(EC::ECInfo, into, R::Matrix)
+function calc_rotated_fock(EC::ECInfo, into, R::Matrix)
   SP = EC.space
   @mtensor fock[p,q] := integ1(EC.fd,:α)[p',q'] * R[p',p] * R[q',q] 
   @mtensor fock[p,q] += 2.0* into[p', q',r',i] * R[:,SP['o']][q',i] * R[p',p]  * R[r',q]
@@ -1453,7 +1455,7 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 
   into = rotate_ints_o(EC, R)
 
-  fock = rotate_calc_fock(EC, into, R)
+  fock = calc_rotated_fock(EC, into, R)
   save!(EC, "f_mm", fock)
   save!(EC, "df_mm", fock)
   save!(EC, "f_MM", fock)
@@ -1692,7 +1694,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
       @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
     end
     D2 = nothing
-    # symmetrize Rot
+    # symmetrize K2
     @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
     rK2pq = nothing
     R2 += K2pq[SP['v'],SP['v'],:,:]
@@ -2809,14 +2811,14 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
   qv = has_prefix(method, "QV")
-  orbopt = has_prefix(method, "OQV")
+  orbopt = has_prefix(method, "O")
+  println("has prefix o",has_prefix(method, "QV") )
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
     @assert (length(Amps1) == 1) && (length(Amps2) == 1) && (length(Amps3) == 1 || length(Amps3) == 0)
   end
-  if orbopt
-    qv = true
+  if orbopt && qv
     Amps1 = (zeros(eltype(Amps2[1]), n_virt_orbs(EC), n_occ_orbs(EC)),)
   end
   Amps = (Amps1..., Amps2..., Amps3...) 
@@ -2837,7 +2839,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
-    if length(Amps3) == 0 && !do_sing && qv
+    if qv
       Res, E = calc_qvcc_resid(EC, it, Amps...; dc, orbopt)
       Eh = OutDict("E"=>E)
     else
@@ -2919,9 +2921,15 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       break
     end
   end
-  if orbopt
+  if orbopt && qv
     Rpq = rotation_matrix(EC, Amps1[1])
-    transform_fcidump(EC.fd, Rpq, Rpq)
+    if EC.options.cc.keepOQVorbitals
+      transform_fcidump(EC.fd, Rpq, Rpq)
+    else
+      rotate_ints(EC, Rpq)
+      @mtensor int1_r[p,q] := EC.fd.int1[p',q'] * Rpq[p',p] * Rpq[q',q]
+      save!(EC, "int1_r", int1_r)
+    end
   end
   if !converged
     println("WARNING: CC iterations did not converge!")

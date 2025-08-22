@@ -12,7 +12,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.FockFactory
 using ..ElemCo.OrbTools
 
-export calc_fock_matrix, calc_HF_energy
+export calc_fock_matrix, calc_HF_energy, calc_rotated_HF_energy
 export calc_singles_energy_using_dfock
 export update_singles, update_doubles, update_singles!, update_doubles!, update_triples!, update_deco_doubles, update_deco_triples
 export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
@@ -75,6 +75,23 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
     ϵo = load1idx(EC,"e_m")[SP['o']]
     ϵob = load1idx(EC,"e_M")[SP['O']]
     EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(ints1(EC, "oo"))) + sum(diag(ints1(EC, "OO")))) + EC.fd.int0
+  end
+  return EHF
+end
+
+"""
+    calc_rotated_HF_energy(EC::ECInfo)
+
+  Calculate the Hartree-Fock energy in the rotated orbital basis.
+"""
+function calc_rotated_HF_energy(EC::ECInfo, closed_shell)
+  SP = EC.space
+  if closed_shell
+    ϵo = load1idx(EC,"e_m")[SP['o']]
+    int1_r = load2idx(EC,"int1_r")[SP['o'],SP['o']]
+    EHF = sum(ϵo) + sum(diag(int1_r)) + EC.fd.int0
+  else
+    # TODO
   end
   return EHF
 end

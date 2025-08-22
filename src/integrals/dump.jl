@@ -16,7 +16,6 @@ export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
 export is_similarity_transformed
-export transform_int2, transform_int1
 
 # optional variables which won't be written if =0
 const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
@@ -992,8 +991,8 @@ function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
     fd.head["IUHF"] = [1]
     fd.uhf = true
   else
-      fd.int2 = transform_int2(fd.int2, Tl, Tl, Tr, Tr)
-      fd.int1 = transform_int1(fd.int1, Tl, Tr)
+    fd.int2 = transform_int2(fd.int2, Tl, Tl, Tr, Tr)
+    fd.int1 = transform_int1(fd.int1, Tl, Tr)
   end
 end
 
