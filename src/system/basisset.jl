@@ -21,7 +21,7 @@ export shell_range, centre_range, is_cartesian, combine
 export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao
 export normalize_contraction
 export coefficients_1mat, n_coefficients_1mat
-export basis_name, generate_basis, guess_norb
+export basis_name, generate_basis, guess_norb, output_basis, get_available_elements4basis
 export ao_list, print_ao
 export subshell_char, max_l
 export levenshtein_distance, get_available_basis_sets, suggest_basis_sets
@@ -136,6 +136,39 @@ function Base.show(io::IO, bs::BasisSet)
   end
 end
 
+
+"""
+    output_basis([io::IO,] basisname, list_of_elements=String[])
+
+  Output the basis set for the specified elements. If the list is empty, 
+  generate the basis for all elements available in the basis set.
+"""
+function output_basis(io::IO, basisname, list_of_elements=String[])
+  if isempty(list_of_elements)
+    list_of_elements = get_available_elements4basis(basisname)
+  end
+  for atom in list_of_elements
+    # Generate a system with one atom
+    ac = ACentre(atom, 0.0, 0.0, 0.0, Dict("ao" => basisname))
+    system = MSystem([ac])
+    # Generate the basis for the atom
+    basis = generate_basis(system; basisset=basisname, split_ashells=false)
+    bc = basis.centres[1]
+    nume4l = number_of_primitives_for_l(bc)
+    numc4l = number_of_contractions_for_l(bc)
+    println(io, "!")
+    # name of the element, 20 characters long
+    name = lowercase(element_fullname(ac))
+    name *=" "^(20-length(name))
+    println(io, "! ", name, " (", gen_ls_string(nume4l), ") -> [", gen_ls_string(numc4l), "]")
+    for shell in bc.shells
+      println(io, shell)
+    end
+  end
+end
+
+output_basis(basisname, list_of_atoms=String[]) = output_basis(stdout, basisname, list_of_atoms)
+
 """
     shell_range(bs::BasisSet, i::Int=1)
 
@@ -193,7 +226,8 @@ function generate_basis(EC::AbstractECInfo, type="ao"; basisset::AbstractString=
 end
 
 """
-    generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::AbstractString="", use_fallback=false, check_fit_basis=true)
+    generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::AbstractString="", 
+                   use_fallback=false, check_fit_basis=true, split_ashells=true)
 
   Generate basis sets for integral calculations.
 
@@ -212,7 +246,7 @@ function generate_basis(ms::MSystem, type="ao"; cartesian=false, basisset::Abstr
     elseif type == "mpfit"
       fallback = "def2-tzvppd-mpfit"
     elseif type == "jkfit"
-      fallback = "def2-universal-jkfit"
+      fallback = "aug-def2-universal-jkfit"
     end
   end
   array_of_centres = BasisCentre[]

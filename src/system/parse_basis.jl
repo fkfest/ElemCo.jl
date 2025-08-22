@@ -448,3 +448,25 @@ function split_angular_shell(ashell::AngularShell)
   end
   return ashells
 end
+
+"""
+    get_available_elements4basis(basisname)
+
+  Return a list of available elements for the specified basis set.
+"""
+function get_available_elements4basis(basisname)
+  basisname, add_diffuse, add_steep = parse_diffuse_steep(basisname)
+  basisfile = basis_file(basisname)
+  @assert basisfile != "" "Basis set $basisname not found!"
+  elements = String[]
+  # search for ` s, $elem , 13...`
+  reg_exp = Regex("^\\s*s\\s*,\\s*([^,]+)\\s*,")
+  open(basisfile) do io
+    for line in eachline(io)
+      if occursin(reg_exp, line)
+        push!(elements, strip(match(reg_exp, line).captures[1]))
+      end
+    end
+  end
+  return elements
+end
