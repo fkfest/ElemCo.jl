@@ -1107,7 +1107,6 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
     @mtensor D2p[p',q,i,j] := D2[p,q,i,j] * Rot[p',p]
     @mtensor D2[p',q',i,j] = D2p[p',q,i,j] * Rot[q',q]
     D2p = nothing
-    D2_r = nothing
   end
   if scalepp
     diagindx = [CartesianIndex(i,i) for i in 1:norb]
