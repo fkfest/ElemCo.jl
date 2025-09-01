@@ -1105,9 +1105,9 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
   end
   if length(Rot) > 0
     @mtensor D2_r[p',q',i,j] := D2[p,q,i,j] * Rot[p',p] * Rot[q',q]
+    D2 = deepcopy(D2_r)
+    D2_r = nothing
   end
-  D2 = deepcopy(D2_r)
-  D2_r = nothing
   if scalepp
     diagindx = [CartesianIndex(i,i) for i in 1:norb]
     D2[diagindx,:,:] *= 0.5
@@ -1282,7 +1282,6 @@ end
 """
 function calc_oqv_gradient(EC::ECInfo, q1T, q2T, R)
   SP = EC.space
-  norb = n_orbs(EC)
   @mtensor q1Tt[a,b,i,j] :=  2.0 * q1T[a,b,i,j] - q1T[a,b,j,i]
   @mtensor q2Tt[a,b,i,j] :=  2.0 * q2T[a,b,i,j] - q2T[a,b,j,i]
   dfock = load2idx(EC,"f_mm") #this has alternative
@@ -1424,8 +1423,27 @@ end
 """
 function rotate_ints_o(EC::ECInfo, R::Matrix)
   SP = EC.space
-  @mtensor into[p',q',r',i] := ints2(EC,"::::",:α)[p',q',r',s'] * R[:,SP['o']][s',i]
-  return into
+  norb = n_orbs(EC)
+  nocc = n_occ_orbs(EC)
+  int2 = EC.fd.int2
+  int_o = zeros(norb,norb,norb,nocc)
+  for s = 1:norb
+    rs = strict_uppertriangular_range(s)
+    rrange = 1:s-1
+    ss = uppertriangular_index(s, s)
+    v!int_o = @mview int_o[:,:,rrange,:]
+    v!int2_rs = @mview int2[:,:,rs]
+    v!int_os = @mview int_o[:,:,s,:]
+    v!int2_ss = @mview int2[:,:,ss]
+    Rso = R[s,SP['o']]
+    Rro = R[rrange,SP['o']]
+    if length(rs) > 0
+      @mtensor v!int_o[p',q',r',i] += v!int2_rs[p',q',r'] * Rso[i]
+      @mtensor v!int_os[p',q',i] += v!int2_rs[q',p',r'] * Rro[r',i]
+    end
+    @mtensor v!int_os[p',q',i] += v!int2_ss[p',q'] * Rso[i]
+  end
+  return int_o
 end
 
 """
@@ -1471,6 +1489,7 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 
   save!(EC, "d_mmmo", into)
 
+  @assert headvar(EC.fd, "ST", Int) == 0
   @mtensor intvvoo[a,b,i,j] := into[p',q',r',j] * Rpi[r',i] * Rpa[p',a] * Rpa[q',b]  
   save!(EC,"d_vvoo", intvvoo)
   save!(EC,"d_voov", permutedims(intvvoo, (1,4,3,2)))
@@ -1647,6 +1666,8 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
       if !EC.options.cc.calc_d_vovv
         error("for not use_kext calc_d_vovv has to be True")
       end
+      int2 = load4idx(EC,"d_vovv")
+      @mtensor R1[a,i] += int2[a,k,b,c] * T2t[c,b,k,i]
     end
     int2 = load4idx(EC,"d_oovo")
     fov = dfock[SP['o'],SP['v']]
