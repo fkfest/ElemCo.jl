@@ -220,6 +220,8 @@ end
   dcsd_ofac::Float64 = 0.15
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
+  """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
+  keepOQVorbitals::Bool = false
 end
 
 """ 
