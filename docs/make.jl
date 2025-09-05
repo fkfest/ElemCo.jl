@@ -28,6 +28,10 @@ makedocs(
     # Use clean URLs, unless built as a "local" build
     prettyurls = !("local" in ARGS),
     assets = ["assets/favicon.ico"],
+     # Do no check for large pages.
+    size_threshold_ignore = [
+      "trexio_format.md",
+    ],
   ),
   sitename="ElemCo.jl documentation",
   pages = [
