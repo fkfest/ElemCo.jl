@@ -965,7 +965,7 @@ end
   For UHF fcidump, Tl and Tr are arrays of matrices for α and β spin.
   If Tl and Tr are arrays of arrays, then the function transforms rhf fcidump to uhf fcidump.
 """
-function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray) 
+function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
   println("Transform integrals...")
   if length(Tl) == 2 && typeof(Tl[1]) <: AbstractArray
     genuhfdump = true
@@ -1024,8 +1024,10 @@ function transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::Abstract
       rs1 = uppertriangular_range(s1)
       rrange = 1:s1
       Tr2ss1 = Tr2[s,s1]
-      @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,rrange][p,q,r] * Tr2ss1
-      @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,s1][q,p] * Tr2[s,rrange][r]
+      for ir in rrange
+        @views int2t[:, :, rs1[ir]] .+= Tr2ss1 .* int_3i[:, :, ir]
+        @views int2t[:, :, rs1[ir]] .+= Tr2[s, ir] .* transpose(int_3i[:, :, s1])
+      end
     end
   end
   return int2t

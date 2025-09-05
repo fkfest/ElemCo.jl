@@ -120,7 +120,7 @@ function Base.show(io::IO, bc::BasisContraction)
 end
 
 function Base.show(io::IO, ashell::AngularShell)
-  print(io, subshell_char(ashell.l), ", ", ashell.element)
+  print(io, subshell_char(ashell.l), ", ", uppercase(ashell.element))
   for exp in ashell.exponents
     print(io, ", ", exp)
   end
@@ -142,6 +142,42 @@ function Base.show(io::IO, bc::BasisCentre)
     println(io, shell)
   end
 end
+
+"""
+    number_of_primitives_for_l(bc::BasisCentre)
+
+  Return an array with the number of primitives for each angular momentum.
+"""
+function number_of_primitives_for_l(bc::BasisCentre)
+  nums = zeros(Int, maximum(l -> l.l, bc.shells) + 1)
+  for ashell in bc.shells
+    nums[ashell.l + 1] += length(ashell.exponents)
+  end
+  return nums
+end
+
+function number_of_contractions_for_l(bc::BasisCentre)
+  nums = zeros(Int, maximum(l -> l.l, bc.shells) + 1)
+  for ashell in bc.shells
+    nums[ashell.l + 1] += length(ashell.subshells)
+  end
+  return nums
+end
+
+"""
+    gen_ls_string(num4l::Vector{Int})
+
+  Generate a string representation of the number of functions for each angular momentum.
+"""
+function gen_ls_string(num4l::Vector{Int})
+  return join([string(n) * subshell_char(l-1) for (l, n) in enumerate(num4l)], ",")
+end
+
+"""
+    angularshells(cen::BasisCentre)
+
+  Return the array of angular shells in the basis centre.
+"""
 
 angularshells(cen::BasisCentre) = cen.shells
 

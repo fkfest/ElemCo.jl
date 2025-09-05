@@ -53,6 +53,25 @@ basis = Dict("ao"=>"cc-pVTZ; o=avdz;
 
 In this case, the basis set for the AO integrals is `cc-pVTZ` for all elements, except for oxygen, which uses `avdz`, and hydrogen, which uses a custom basis set. The Fock density fitting basis set is `vtz-jkfit`, and the fitting basis set for the correlated calculations is `avtz-mpfit`.
 
+Even-tempered diffuse (or steep) functions can automatically be added to the basis set by specifying the desired number of functions in the basis set definition:
+
+```julia
+basis = "vdz+steep+2diffuse"
+```
+
+Here, the basis set `vdz` is augmented with one steep function and two diffuse functions (for each angular momentum).
+The exponents are calculated as follows:
+
+- For the diffuse functions, the exponent is set to $\frac{e_1^2}{e_2}$, where $e_1$
+  is the most diffuse exponent and $e_2$ is the second-most-diffuse exponent in the angular shell.\
+  If there is only one exponent in the list, the new exponent is set to $\frac{e_1}{2.5}$.
+- For the steep functions, the exponent is set to $\frac{e_1^2}{e_2}$, where $e_1$
+  is the steepest exponent and $e_2$ is the second-steepest exponent in the angular shell.\
+  If there is only one exponent in the list, the new exponent is set to $e_1 \times 2.5$.
+
+This works also for explicitly defined basis sets. In this case `+diffuse` or `+steep` can 
+be added after the curly brackets.
+
 ```@docs
 BasisSets
 ```
