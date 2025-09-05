@@ -16,28 +16,93 @@ See: https://trexio-coe.github.io/trexio/lib.html
 """
 module TrexioInterface
 
-using ..ElemCo.ECInfos
 using ..ElemCo.MSystems
 using ..ElemCo.Utils
 using ..ElemCo.QMTensors
-using ..ElemCo.Elements
 using ..ElemCo.BasisSets
-using ..ElemCo.OrbTools
 using ..ElemCo.TREXIO  # Use the standalone TREXIO module
 using LinearAlgebra
 
 # Re-export the core TREXIO types and functions for backward compatibility
-export TrexioFile, write_trexio, read_trexio
-export write_trexio_orbitals, read_trexio_orbitals
-export write_trexio_amplitudes, read_trexio_amplitudes
+export TrexioFile
+export open_trexio, close_trexio
 export write_trexio_molecule, read_trexio_molecule
 export write_trexio_basis, read_trexio_basis
-export open_trexio, close_trexio
+export write_trexio_orbitals, read_trexio_orbitals
+export read_trexio_orbital_classes, read_trexio_orbital_energies, read_trexio_orbital_occupations
+export write_trexio_amplitudes
+export read_trexio_singles, read_trexio_doubles
+export read_trexio_unrestricted_singles, read_trexio_unrestricted_doubles
 
 # Re-export the standalone TREXIO types for compatibility
 const TrexioFile = TREXIO.TrexioFile
-const open_trexio = TREXIO.open_trexio
-const close_trexio = TREXIO.close_trexio
+
+"""
+    TREXIO2LIBCINT_PERMUTATION
+
+  Permutation of the atomic orbitals from the TREXIO to the libcint order.
+"""
+const TREXIO2LIBCINT_PERMUTATION = [        # TREXIO order:
+  [1],                                      # s
+  [2,3,1],                                  # p 0, +1, -1 (z,x,y)
+  [5,3,1,2,4],                              # d 0, +1, -1 , +2, -2 (z^2, xz, yz, x^2-y^2, xy)
+  [7,5,3,1,2,4,6],                          # f 0, +1, -1, +2, -2, +3, -3
+  [9,7,5,3,1,2,4,6,8],                      # g 0, +1, -1, +2, -2, +3, -3, +4, -4
+  [11,9,7,5,3,1,2,4,6,8,10],                # h 0, +1, -1, +2, -2, +3, -3, +4, -4, +5, -5
+  [13,11,9,7,5,3,1,2,4,6,8,10,12]           # i 0, +1, -1, +2, -2, +3, -3, +4, -4, +5, -5, +6, -6
+      ]
+
+"""
+    TREXIO2LIBCINT_PERMUTATION_CART
+
+  Permutation of the atomic orbitals from the TREXIO to the libcint order for cartesian basis sets.
+"""
+const TREXIO2LIBCINT_PERMUTATION_CART = [   # TREXIO order (lexicographical, same as libcint)
+  [1],                                      # s
+  [1:3;],                                   # p x,y,z
+  [1:6;],                                   # d xx,xy,xz,yy,yz,zz
+  [1:10;],                                  # f xxx,xxy,xxz,xyy,xyz,xzz,yyy,yyz,yzz,zzz
+  [1:15;],                                  # g
+  [1:21;],                                  # h
+  [1:28;]                                   # i
+      ]
+
+"""
+    order4l(basis::BasisSet) -> Vector{Int}
+
+  Return order for each l from TREXIO order to libcint order.
+"""
+order4l(basis) = is_cartesian(basis) ? TREXIO2LIBCINT_PERMUTATION_CART : TREXIO2LIBCINT_PERMUTATION
+"""
+    open_trexio(filename::String, mode::String="r") -> TrexioFile
+
+Open a TREXIO file. Returns an opened TrexioFile object.
+Compatible wrapper around the standard TREXIO API.
+
+# Arguments
+- `filename::String`: Path to the TREXIO file
+- `mode::String`: Access mode ("r" for read, "w" for write, "u" for read-write)
+"""
+function open_trexio(filename::String, mode::String="r")
+  trexio = TREXIO.trexio_open(filename, mode)
+  if isnothing(trexio)
+    error("Failed to open TREXIO file: $filename")
+  end
+  return trexio
+end
+
+"""
+    close_trexio(trexio::TrexioFile)
+
+Close a TREXIO file and release resources.
+Compatible wrapper around the standard TREXIO API.
+"""
+function close_trexio(trexio::TrexioFile)
+  status = TREXIO.trexio_close(trexio)
+  if status != TREXIO.TREXIO_SUCCESS
+    @warn "Warning: Failed to properly close TREXIO file"
+  end
+end
 
 """
     write_trexio_molecule(trexio::TrexioFile, system::MSystem)
@@ -45,20 +110,27 @@ const close_trexio = TREXIO.close_trexio
 Write molecular geometry and basis set information to TREXIO format using ElemCo data structures.
 """
 function write_trexio_molecule(trexio::TrexioFile, system::MSystem)
-    # Convert ElemCo MSystem to TREXIO format
-    natoms = length(system)
-    nuclear_charges = Float64[]
-    coordinates = zeros(Float64, 3, natoms)
-    labels = String[]
-    
-    for (i, atom) in enumerate(system)
-        push!(nuclear_charges, Float64(atom.atomic_number))
-        coordinates[:, i] = Vector(atom.position)
-        push!(labels, atom.label)
-    end
-    
-    # Use the standalone TREXIO module to write the data
-    return TREXIO.write_nucleus(trexio, nuclear_charges, coordinates, labels)
+  # Convert ElemCo MSystem to TREXIO format
+  natoms = length(system)
+  nuclear_charges = Float64[]
+  coordinates = zeros(Float64, 3, natoms)
+  labels = String[]
+  
+  for (i, atom) in enumerate(system)
+    push!(nuclear_charges, Float64(atom.atomic_number))
+    coordinates[:, i] = Vector(atom.position)
+    push!(labels, atom.label)
+  end
+  
+  # Use the standalone TREXIO module to write the data
+  trexio_write_nucleus_num(trexio, natoms)
+  trexio_write_nucleus_charge(trexio, nuclear_charges)
+  trexio_write_nucleus_coord(trexio, coordinates)
+  trexio_write_nucleus_label(trexio, labels)
+  trexio_write_nucleus_point_group(trexio, "C1") # we don't have point group info
+  trexio_write_nucleus_repulsion(trexio, nuclear_repulsion(system)) # no repulsion energy
+
+  # write_trexio_basis(trexio, generate_basis(system, "ao"))
 end
 
 """
@@ -67,349 +139,517 @@ end
 Read molecular geometry from TREXIO format and return ElemCo MSystem.
 """
 function read_trexio_molecule(trexio::TrexioFile)
-    # Read data using standalone TREXIO module
-    nuclear_charges, coordinates, labels = TREXIO.read_nucleus(trexio)
+  # Read data using standalone TREXIO module
+  natoms, status = trexio_read_nucleus_num(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+      error("No nucleus data found in TREXIO file")
+  end
+  nuclear_charges, status = trexio_read_nucleus_charge(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read nuclear charges from TREXIO file"
+  coordinates, status = trexio_read_nucleus_coord(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read nuclear coordinates from TREXIO file"
+  labels, status = trexio_read_nucleus_label(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read nuclear labels from TREXIO file"
+  sym, status = trexio_read_nucleus_point_group(trexio)
+  if status == TREXIO.TREXIO_SUCCESS && sym != "C1"
+    error("Point group symmetry not supported: $sym")
+  end
+  
+  # Convert to ElemCo MSystem
+  atoms = ACentre[]
+  for (i, charge) in enumerate(nuclear_charges)
+    # Convert charge to element symbol
+    pos = coordinates[:, i]
     
-    # Convert to ElemCo MSystem
-    atoms = ACentre[]
-    for i in 1:length(nuclear_charges)
-        # Convert charge to element symbol
-        element = element_symbol(Int(nuclear_charges[i]))
-        pos = coordinates[:, i]
-        
-        # Create basic basis (this would need to be enhanced for real use)
-        basis = Dict{String,String}()
-        
-        atom = ACentre(labels[i], pos[1], pos[2], pos[3], Int(nuclear_charges[i]), nuclear_charges[i], basis)
-        push!(atoms, atom)
-    end
-    
-    return MSystem(atoms)
+    # Create basic basis (this would need to be enhanced for real use)
+    basis = Dict{String,String}()
+
+    atom = ACentre(labels[i], pos[1], pos[2], pos[3], charge, basis)
+    push!(atoms, atom)
+  end
+  
+  return MSystem(atoms)
 end
 
 """
-    write_trexio_basis(trexio::TrexioFile, system::MSystem; basisset=nothing)
+    write_trexio_basis(trexio::TrexioFile, basis::BasisSet)
 
 Write basis set information to TREXIO format following TREXIO standard.
-This is a simplified version that stores basic basis set names. 
-For full TREXIO-compliant basis sets, the detailed basisset information would be needed.
 """
-function write_trexio_basis(trexio::TrexioFile, system::MSystem; basisset=nothing)
-    # For now, we'll implement a simplified version that stores basis set names
-    # This maintains backward compatibility while the full TREXIO basis implementation is developed
-    
-    # Open file and ensure it has metadata
-    file = open_trexio(trexio)
-    if !haskey(file, "trexio")
-        TREXIO.write_metadata(trexio, created_by="ElemCo.jl")
+function write_trexio_basis(trexio::TrexioFile, basis::BasisSet)
+  nsh = n_subshells(basis)
+
+  trexio_write_basis_type(trexio, "Gaussian")
+  nucleus_index = Int[]
+  shell_ang_mom = Int[]
+  ish = 0
+  shell_index = Int[]
+  exponent = Float64[]
+  coefficient = Float64[]
+  prim_factor = Float64[]
+  basisname = ""
+  for (i, centre) in enumerate(basis.centres)
+    append!(nucleus_index, fill(i-1, n_subshells(centre)))
+    if basisname == ""
+      basisname = centre.name
+    elseif basisname != centre.name
+      basisname = "Mixed"
     end
-    
-    # For simplicity, store basis information as attributes for now
-    # This is not fully TREXIO compliant but maintains functionality
-    trex_group = file["trexio"]
-    
-    # Create a simple basis group with basic information
-    if haskey(trex_group, "basis")
-        delete_object(trex_group, "basis")
-    end
-    basis_group = create_group(trex_group, "basis")
-    
-    # Store basic basis set names from atoms
-    basis_names = String[]
-    for atom in system
-        if haskey(atom.basis, "ao")
-            push!(basis_names, atom.basis["ao"])
-        else
-            push!(basis_names, "unknown")
+    for ash in angularshells(centre)
+      append!(shell_ang_mom, fill(ash.l, n_subshells(ash)))
+      for bc in ash.subshells
+        normalized_contraction = normalize_contraction(bc, ash, basis.cartesian)
+        ic = 1
+        for prim in bc.exprange
+          push!(shell_index, ish)
+          push!(exponent, ash.exponents[prim])
+          push!(coefficient, bc.coefs[ic])
+          push!(prim_factor, normalized_contraction[ic]/bc.coefs[ic])
+          ic += 1
         end
+        ish += 1
+      end
     end
-    
-    # Store as legacy format for compatibility
-    basis_group["num"] = Int64(length(system))
-    basis_group["nucleus_index"] = collect(1:length(system))
-    basis_group["type"] = basis_names
-    attrs(basis_group)["format"] = "legacy"
-    
-    return basis_group
+  end
+  status = trexio_write_basis_prim_num(trexio, length(exponent))
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write prim_num to TREXIO with status $status"
+  status = trexio_write_basis_shell_num(trexio, nsh)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_num to TREXIO with status $status"
+  status = trexio_write_basis_nucleus_index(trexio, nucleus_index)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write nucleus_index to TREXIO with status $status"
+  status = trexio_write_basis_shell_ang_mom(trexio, shell_ang_mom)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_ang_mom to TREXIO with status $status"
+  status = trexio_write_basis_shell_factor(trexio, fill(1.0, nsh))  # no normalization
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_factor to TREXIO with status $status"
+  status = trexio_write_basis_shell_index(trexio, shell_index)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_index to TREXIO with status $status"
+  status = trexio_write_basis_exponent(trexio, exponent)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write exponent to TREXIO with status $status"
+  status = trexio_write_basis_coefficient(trexio, coefficient)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write coefficient to TREXIO with status $status"
+  status = trexio_write_basis_prim_factor(trexio, prim_factor)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write prim_factor to TREXIO with status $status"
+  status = trexio_write_basis_name(trexio, basisname)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write basisname to TREXIO with status $status"
+  
+  # write AO information
+  aolist = ao_list(basis)
+  status = trexio_write_ao_cartesian(trexio, basis.cartesian ? 1 : 0)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_cartesian to TREXIO with status $status"
+  status = trexio_write_ao_num(trexio, length(aolist))
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_num to TREXIO with status $status"
+  shell = Int[]
+  ishell = -1
+  iash = issh = 0
+  for ao in aolist
+    if ao.iangularshell != iash || ao.isubshell != issh
+      ishell += 1
+      iash = ao.iangularshell
+      issh = ao.isubshell
+    end
+    push!(shell, ishell)
+  end
+  status = trexio_write_ao_shell(trexio, shell)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_shell to TREXIO with status $status"
+  status = trexio_write_ao_normalization(trexio, fill(1.0, length(aolist)))
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_normalization to TREXIO with status $status"
 end
 
 """
-    read_trexio_basis(trexio::TrexioFile) -> Dict{String, Any}
+    read_trexio_basis(trexio::TrexioFile) -> BasisSet
 
-Read basis set information from TREXIO format.
-Handles both TREXIO-compliant format and legacy format.
+Read basis set information from TREXIO file.
 """
 function read_trexio_basis(trexio::TrexioFile)
-    # Try to read using the standalone TREXIO module first
-    try
-        basis_data = TREXIO.read_basis(trexio)
-        basis_data["format"] = "trexio"
-        return basis_data
-    catch
-        # Fall back to legacy format reading
-        file = open_trexio(trexio)
-        
-        if !haskey(file, "trexio") || !haskey(file["trexio"], "basis")
-            error("No basis set data found in TREXIO file")
+  system = read_trexio_molecule(trexio)
+
+  type, status = trexio_read_basis_type(trexio)
+  if type != "Gaussian"
+    error("Unsupported basis set type: $type")
+  end
+
+  prim_num, status = trexio_read_basis_prim_num(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read prim_num from TREXIO with status $status"
+  shell_num, status = trexio_read_basis_shell_num(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_num from TREXIO with status $status"
+  nucleus_index, status = trexio_read_basis_nucleus_index(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read nucleus_index from TREXIO with status $status"
+  shell_ang_mom, status = trexio_read_basis_shell_ang_mom(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_ang_mom from TREXIO with status $status"
+  shell_factor, status = trexio_read_basis_shell_factor(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_factor from TREXIO with status $status"
+  shell_index, status = trexio_read_basis_shell_index(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_index from TREXIO with status $status"
+  exponent, status = trexio_read_basis_exponent(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read exponent from TREXIO with status $status"
+  coefficient, status = trexio_read_basis_coefficient(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read coefficient from TREXIO with status $status"
+  prim_factor, status = trexio_read_basis_prim_factor(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read prim_factor from TREXIO with status $status"
+  basisname, status = trexio_read_basis_name(trexio)
+  if status != TREXIO.TREXIO_SUCCESS
+    basisname = "Unknown"
+  end
+
+  @assert length(nucleus_index) == length(shell_ang_mom) == length(shell_factor) == shell_num "Mismatch in shell_num lengths"
+  @assert length(shell_index) == length(exponent) == length(coefficient) == length(prim_factor) == prim_num "Mismatch in prim_num lengths"
+
+  array_of_centres = BasisCentre[]
+  id = 1
+  iat = 0
+  sh_start = 1
+  pr_start = 1
+  for atom in system
+    element = element_label(atom)
+    basisfunctions = AngularShell[]
+    for ish in sh_start:shell_num
+      if nucleus_index[ish] != iat
+        sh_start = ish
+        break  # Move to the next atom
+      end
+      l = shell_ang_mom[ish]
+      # get range of primitives for this shell
+      pr_end = pr_start - 1
+      for ipr in pr_start:prim_num
+        if shell_index[ipr] == ish - 1
+          pr_end = ipr
+        else
+          break
         end
-        
-        basis_group = file["trexio"]["basis"]
-        
-        # Read legacy format
-        basis_data = Dict{String, Any}()
-        basis_data["num"] = read(basis_group["num"])
-        basis_data["nucleus_index"] = read(basis_group["nucleus_index"])
-        basis_data["type"] = read(basis_group["type"])
-        basis_data["format"] = "legacy"
-        
-        return basis_data
+      end
+      if length(basisfunctions) == 0 || basisfunctions[end].l != l ||
+          length(basisfunctions[end].exponents) != pr_end - pr_start + 1 ||
+          !isapprox(basisfunctions[end].exponents, exponent[pr_start:pr_end])
+        # new angular shell with new exponents
+        push!(basisfunctions, generate_angularshell(element, l, exponent[pr_start:pr_end]))
+      end
+      add_subshell!(basisfunctions[end], 1:(pr_end-pr_start+1), coefficient[pr_start:pr_end])
+      pr_start = pr_end + 1
     end
+    push!(array_of_centres, BasisCentre(atom, basisname, basisfunctions))
+    iat += 1
+  end
+  return BasisSet(array_of_centres)
 end
 
 """
-    write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix; 
-                          orbital_type="molecular", system=nothing, basisset=nothing)
+    write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::BasisSet;
+                          type="HF", class=(String[], String[]),
+                          energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]))
 
-Write molecular orbitals to TREXIO format using ElemCo data structures.
-If system is provided, basis set information will also be written.
+  Write molecular orbitals to TREXIO file. 
+
+`class`, `energies`, and `occupations` are optional and can be provided as tuples for alpha and beta spins.
+`class` entries can be "Core", "Inactive", "Active", "Virtual", "Deleted"
 """
-function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix; 
-                            orbital_type="molecular", system=nothing, basisset=nothing)
-    
-    # Write basis set information if system is provided
-    if !isnothing(system)
-        write_trexio_basis(trexio, system; basisset=basisset)
+function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::BasisSet;
+                               type="HF", class=(String[], String[]),
+                               energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]))
+  write_trexio_basis(trexio, basis)
+  # Convert ElemCo orbital format to standard matrix format
+  nbasis, nmo = size(orbitals)
+  nao = n_ao(basis)
+  @assert nao == nbasis "Basis size mismatch: basis has $nao, orbitals have $nbasis"
+  order = ao_order2internal(basis, order4l(basis), true)
+  status = trexio_write_mo_type(trexio, type)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_type to TREXIO with status $status"
+  if is_restricted(orbitals)
+    status = trexio_write_mo_num(trexio, nmo)
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_num to TREXIO with status $status"
+    status = trexio_write_mo_coefficient(trexio, orbitals[1][order, :])
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_coefficient to TREXIO with status $status"
+    if length(class[1]) > 0
+      status = trexio_write_mo_class(trexio, class[1])
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_class to TREXIO with status $status"
     end
-    
-    # Convert ElemCo orbital format to standard matrix format
-    nbasis, nmo = size(orbitals)
-    if is_restricted(orbitals)
-        coefficients = orbitals[1]
-        spin = nothing
-    else
-        coefficients = hcat(orbitals...)
-        spin = vcat(fill(0, nmo), fill(1, nmo))  # α=0, β=1
-        nmo *= 2  # For unrestricted, double the number of orbitals
+    if length(energies[1]) > 0
+      status = trexio_write_mo_energy(trexio, energies[1])
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_energy to TREXIO with status $status"
     end
-    
-    # Use the standalone TREXIO module to write MO data
-    return TREXIO.write_mo(trexio, coefficients, orbital_type=orbital_type, spin=spin)
+    if length(occupations[1]) > 0
+      status = trexio_write_mo_occupation(trexio, occupations[1])
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_occupation to TREXIO with status $status"
+    end
+  else
+    status = trexio_write_mo_num(trexio, 2*nmo) # For unrestricted, double the number of orbitals
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_num to TREXIO with status $status"
+    status = trexio_write_mo_coefficient(trexio, hcat(orbitals...)[order, :])
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_coefficient to TREXIO with status $status"
+    status = trexio_write_mo_spin(trexio, vcat(fill(0, nmo), fill(1, nmo)))  # α=0, β=1
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_spin to TREXIO with status $status"
+    if length(class[1]) > 0
+      status = trexio_write_mo_class(trexio, vcat(class...))
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_class to TREXIO with status $status"
+    end
+    if length(energies[1]) > 0
+      status = trexio_write_mo_energy(trexio, vcat(energies...))
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_energy to TREXIO with status $status"
+    end
+    if length(occupations[1]) > 0
+      status = trexio_write_mo_occupation(trexio, vcat(occupations...))
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_occupation to TREXIO with status $status"
+    end
+  end
+  return  
 end
 
 """
-    read_trexio_orbitals(trexio::TrexioFile) -> SpinMatrix
+    read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true) -> SpinMatrix
 
-Read molecular orbitals from TREXIO format and return ElemCo SpinMatrix.
+Read molecular orbitals from TREXIO file and return `SpinMatrix`.
 """
-function read_trexio_orbitals(trexio::TrexioFile)
-    # Read MO data using standalone TREXIO module
-    mo_data = TREXIO.read_mo(trexio)
-    
-    coefficients = mo_data["coefficient"]
-    
-    # Check if spin information is available (unrestricted case)
-    if haskey(mo_data, "spin")
-        spins = mo_data["spin"]
-        nmo_total = size(coefficients, 2)
-        nmo_half = nmo_total ÷ 2
-        
-        # Split into α and β orbitals
-        α_orbs = coefficients[:, 1:nmo_half]
-        β_orbs = coefficients[:, nmo_half+1:end]
-        
-        return SpinMatrix(α_orbs, β_orbs)
-    else
-        # Restricted case
-        return SpinMatrix(coefficients)
-    end
+function read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true)
+  # Read basis first
+  if isnothing(basis)
+    basis = read_trexio_basis(trexio)
+  end
+  order = ao_order2internal(basis, order4l(basis))
+  nao = length(order)
+  # Read MO data using standalone TREXIO module
+  type, status = TREXIO.trexio_read_mo_type(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_type from TREXIO with status $status"
+  if verbose
+    println("Read $type molecular orbitals from TREXIO file")
+  end
+  nmo, status = TREXIO.trexio_read_mo_num(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
+  coefficients, status = TREXIO.trexio_read_mo_coefficient(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_coefficient from TREXIO with status $status"
+  @assert size(coefficients, 1) == nao "Basis size mismatch: basis has $nao, orbitals have $(size(coefficients, 1))"
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
+  if length(beta_iorbs) == 0
+    orbs = SpinMatrix(coefficients[order,:])
+  else
+    orbs = SpinMatrix(coefficients[order,alpha_iorbs],coefficients[order,beta_iorbs])
+  end
+  return orbs
 end
 
 """
-    write_trexio_amplitudes(trexio::TrexioFile, amplitudes::Dict{String, Any})
+    alphabeta_orbital_indices(trexio::TrexioFile, nmo)
+
+  Return the indices of alpha and beta orbitals.
+
+  For restricted orbitals the list of beta orbitals is empty.
+"""
+function alphabeta_orbital_indices(trexio::TrexioFile, nmo)
+  spins, status = TREXIO.trexio_read_mo_spin(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT || length(spins) != nmo
+    return ([1:nmo;], Int[])
+  else
+    alpha_indices = findall(spins .== 0)
+    beta_indices = findall(spins .== 1)
+    if length(alpha_indices) == 0 || length(beta_indices) == 0
+      # assume restricted case
+      return ([1:nmo;], Int[])
+    elseif length(alpha_indices) != length(beta_indices) || length(alpha_indices) + length(beta_indices) != nmo
+      error("Inconsistent spin information in TREXIO file")
+    end
+    return (alpha_indices, beta_indices)
+  end
+end
+
+"""
+    read_trexio_orbital_classes(trexio::TrexioFile) -> (classa::Vector{String}, classb::Vector{String})
+
+Read molecular orbital classes from TREXIO file and return as two vectors (alpha, beta).
+
+For restricted orbitals the list of beta orbitals is empty.
+If no orbital classes are found, empty vectors are returned.
+"""
+function read_trexio_orbital_classes(trexio::TrexioFile)
+  # Read MO data using standalone TREXIO module
+  nmo, status = TREXIO.trexio_read_mo_num(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
+  classes, status = TREXIO.trexio_read_mo_class(trexio)
+  if status != TREXIO.TREXIO_SUCCESS 
+    println("Failed to read mo_class from TREXIO with status $status")
+    return (String[], String[])
+  end
+  @assert length(classes) == nmo "Inconsistent number of orbital classes: expected $nmo, got $(length(classes))"
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
+  if length(beta_iorbs) == 0
+    return (classes, String[])
+  else
+    return (classes[alpha_iorbs], classes[beta_iorbs])
+  end
+end
+
+"""
+    read_trexio_orbital_energies(trexio::TrexioFile) -> (epsa, epsb)
+
+Read molecular orbital energies from TREXIO file and return as two vectors (alpha, beta).
+
+For restricted orbitals the list of beta orbitals is empty.
+If no orbital energies are found, empty vectors are returned.
+"""
+function read_trexio_orbital_energies(trexio::TrexioFile)
+  # Read MO data using standalone TREXIO module
+  nmo, status = TREXIO.trexio_read_mo_num(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
+  energies, status = TREXIO.trexio_read_mo_energy(trexio)
+  if status != TREXIO.TREXIO_SUCCESS 
+    println("Failed to read mo_energy from TREXIO with status $status")
+    return (Float64[], Float64[])
+  end
+  @assert length(energies) == nmo "Inconsistent number of orbital energies: expected $nmo, got $(length(energies))"
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
+  if length(beta_iorbs) == 0
+    return (energies, Float64[])
+  else
+    return (energies[alpha_iorbs], energies[beta_iorbs])
+  end
+end
+
+"""
+    read_trexio_orbital_occupations(trexio::TrexioFile) -> (occa, occb)
+
+Read molecular orbital occupations from TREXIO file and return as two vectors (alpha, beta).
+
+For restricted orbitals the list of beta orbitals is empty.
+If no orbital occupations are found, empty vectors are returned.
+"""
+function read_trexio_orbital_occupations(trexio::TrexioFile)
+  # Read MO data using standalone TREXIO module
+  nmo, status = TREXIO.trexio_read_mo_num(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
+  occupations, status = TREXIO.trexio_read_mo_occupation(trexio)
+  if status != TREXIO.TREXIO_SUCCESS 
+    println("Failed to read mo_occupation from TREXIO with status $status")
+    return (Float64[], Float64[])
+  end
+  @assert length(occupations) == nmo "Inconsistent number of orbital occupations: expected $nmo, got $(length(occupations))"
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
+  if length(beta_iorbs) == 0
+    return (occupations, Float64[])
+  else
+    return (occupations[alpha_iorbs], occupations[beta_iorbs])
+  end
+end
+
+"""
+    write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2}, T2::AbstractArray{Float64,4})
 
 Write CC amplitudes to TREXIO format using the standalone TREXIO module.
 This is a custom extension for storing amplitude data.
 """
-function write_trexio_amplitudes(trexio::TrexioFile, amplitudes::Dict{String, Any})
-    # Ensure metadata exists
-    file = open_trexio(trexio)
-    if !haskey(file, "trexio")
-        TREXIO.write_metadata(trexio, created_by="ElemCo.jl")
-    end
-    
-    trex_group = file["trexio"]
-    
-    # Create amplitudes group
-    if haskey(trex_group, "amplitudes")
-        delete_object(trex_group, "amplitudes")
-    end
-    amp_group = create_group(trex_group, "amplitudes")
-    
-    # Write each amplitude tensor
-    for (key, value) in amplitudes
-        if isa(value, AbstractArray)
-            amp_group[key] = value
-            attrs(amp_group[key])["tensor_rank"] = length(size(value))
-            attrs(amp_group[key])["dimensions"] = collect(size(value))
-        end
-    end
-    
-    return amp_group
+function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2}, T2::AbstractArray{Float64,4})
+  if length(T1) > 0
+    status = TREXIO.trexio_write_amplitude_single_dense(trexio, T1)
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T1 amplitudes to TREXIO with status $status"
+  end
+  if length(T2) > 0
+    a,b,i,j = size(T2)
+    @assert a == b && i == j "T2 amplitudes must be in vvoo order with equal dimensions"
+    status = TREXIO.trexio_write_amplitude_double_dense(trexio, T2[:,:,uppertriangular_cut(i)])
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2 amplitudes to TREXIO with status $status"
+  end
+end
+
+function write_trexio_amplitudes(trexio::TrexioFile, T1a::AbstractArray{Float64,2}, T1b::AbstractArray{Float64,2},
+                                 T2a::AbstractArray{Float64,4}, T2b::AbstractArray{Float64,4}, T2ab::AbstractArray{Float64,4})
+  if length(T1a) > 0
+    status = TREXIO.trexio_write_amplitude_single_up_dense(trexio, T1a)
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T1a amplitudes to TREXIO with status $status"
+  end
+  if length(T1b) > 0
+    status = TREXIO.trexio_write_amplitude_single_dn_dense(trexio, T1b)
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T1b amplitudes to TREXIO with status $status"
+  end
+  if length(T2a) > 0
+    a,b,i,j = size(T2a)
+    @assert a == b && i == j "T2a amplitudes must be in vvoo order with equal dimensions"
+    status = TREXIO.trexio_write_amplitude_double_upup_dense(trexio, T2a[strict_uppertriangular_cut(a),strict_uppertriangular_cut(i)])
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2a amplitudes to TREXIO with status $status"
+  end
+  if length(T2b) > 0
+    a,b,i,j = size(T2b)
+    @assert a == b && i == j "T2b amplitudes must be in VVOO order with equal dimensions"
+    status = TREXIO.trexio_write_amplitude_double_dndn_dense(trexio, T2b[strict_uppertriangular_cut(a),strict_uppertriangular_cut(i)])
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2b amplitudes to TREXIO with status $status"
+  end
+  if length(T2ab) > 0
+    status = TREXIO.trexio_write_amplitude_double_updn_dense(trexio, T2ab)
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2ab amplitudes to TREXIO with status $status"
+  end
 end
 
 """
-    read_trexio_amplitudes(trexio::TrexioFile) -> Dict{String, Any}
+    read_trexio_singles(trexio::TrexioFile) -> T1
 
-Read CC amplitudes from TREXIO format.
+Read T1 amplitudes from TREXIO file.
 """
-function read_trexio_amplitudes(trexio::TrexioFile)
-    file = open_trexio(trexio)
-    
-    if !haskey(file, "trexio") || !haskey(file["trexio"], "amplitudes")
-        error("No amplitude data found in TREXIO file")
-    end
-    
-    amp_group = file["trexio"]["amplitudes"]
-    amplitudes = Dict{String, Any}()
-    
-    for key in keys(amp_group)
-        amplitudes[key] = read(amp_group[key])
-    end
-    
-    return amplitudes
+function read_trexio_singles(trexio::TrexioFile)
+  T1, status = TREXIO.trexio_read_amplitude_single_dense(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    return zeros(0, 0)  # No T1 amplitudes found
+  end
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T1 amplitudes from TREXIO with status $status"
+  return T1
 end
 
 """
-    write_trexio(filename::String, EC::ECInfo; kwargs...)
+    read_trexio_doubles(trexio::TrexioFile) -> T2
 
-Write ElemCo data to TREXIO format file using the standalone TREXIO module.
-When orbitals are included, basis set information is automatically written as well.
-
-# Keyword arguments
-- `include_orbitals::Bool=true`: Include molecular orbitals and basis sets
-- `include_amplitudes::Bool=false`: Include CC amplitudes  
-- `include_molecule::Bool=true`: Include molecular geometry
+Read T2 amplitudes from TREXIO file.
 """
-function write_trexio(filename::String, EC::ECInfo; 
-                   include_orbitals::Bool=true,
-                   include_amplitudes::Bool=false,
-                   include_molecule::Bool=true)
-    
-    trexio = TrexioFile(filename, "w")
-    
-    try
-        # Write metadata
-        TREXIO.write_metadata(trexio, created_by="ElemCo.jl")
-        
-        # Write molecular information
-        if include_molecule && !isnothing(EC.system)
-            write_trexio_molecule(trexio, EC.system)
-        end
-        
-        # Write orbitals if available
-        if include_orbitals
-            try
-                # Check if orbitals file exists
-                if file_exists(EC, EC.options.wf.orb)
-                    orbs = load_orbitals(EC, EC.options.wf.orb)
-                    if !isnothing(orbs)
-                        # Try to get basis set information for TREXIO-compliant storage
-                        local basisset = nothing
-                        try
-                            # Try to generate basis set
-                            basisset = generate_basis(EC, "ao")
-                        catch e
-                            @debug "Could not generate basis set for TREXIO export: $e"
-                        end
-                        
-                        # Pass system and basis set information to include detailed basis set data
-                        write_trexio_orbitals(trexio, orbs, system=EC.system, basisset=basisset)
-                    end
-                else
-                    @warn "Orbital file $(EC.options.wf.orb) not found, skipping orbital export"
-                end
-            catch e
-                @warn "Could not load orbitals for TREXIO export: $e"
-            end
-        end
-        
-        # Write amplitudes if requested and available
-        if include_amplitudes
-            # This would need to be implemented based on how amplitudes are stored in ElemCo
-            @warn "Amplitude export not yet implemented"
-        end
-        
-    finally
-        close_trexio(trexio)
-    end
-    
-    return filename
+function read_trexio_doubles(trexio::TrexioFile)
+  T2, status = TREXIO.trexio_read_amplitude_double_dense(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    return zeros(0, 0, 0, 0)  # No T2 amplitudes found
+  end
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2 amplitudes from TREXIO with status $status"
+  return detri_doubles(T2)
 end
 
 """
-    read_trexio(filename::String) -> Dict{String, Any}
+    read_trexio_unrestricted_singles(trexio::TrexioFile) -> (T1a, T1b)
 
-Read data from TREXIO format file using the standalone TREXIO module.
-
-Returns a dictionary with available data sections.
+Read T1a and T1b amplitudes from TREXIO file.
 """
-function read_trexio(filename::String)
-    if !isfile(filename)
-        error("TREXIO file not found: $filename")
-    end
-    
-    trexio = TrexioFile(filename, "r")
-    data = Dict{String, Any}()
-    
-    try
-        file = open_trexio(trexio)
-        
-        if !haskey(file, "trexio")
-            error("Invalid TREXIO file format")
-        end
-        
-        trex_group = file["trexio"]
-        
-        # Read available sections
-        if haskey(trex_group, "nucleus")
-            data["molecule"] = read_trexio_molecule(trexio)
-        end
-        
-        if haskey(trex_group, "basis")
-            data["basis"] = read_trexio_basis(trexio)
-        end
-        
-        if haskey(trex_group, "mo")
-            data["orbitals"] = read_trexio_orbitals(trexio)
-        end
-        
-        if haskey(trex_group, "amplitudes")
-            data["amplitudes"] = read_trexio_amplitudes(trexio)
-        end
-        
-    finally
-        close_trexio(trexio)
-    end
-    
-    return data
+function read_trexio_unrestricted_singles(trexio::TrexioFile)
+  T1a, status = TREXIO.trexio_read_amplitude_single_up_dense(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    T1a = zeros(0, 0)
+  else
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T1a amplitudes from TREXIO with status $status"
+  end
+  T1b, status = TREXIO.trexio_read_amplitude_single_dn_dense(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    T1b = zeros(0, 0)
+  else
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T1b amplitudes from TREXIO with status $status"
+  end
+  return (T1a, T1b)
 end
 
-# Utility function to get element symbol from atomic number
-function element_symbol(z::Int)
-    # Use the Elements module if available, otherwise fall back to simple list
-    try
-        for (symbol, (atomic_num, _, _, _, _, _)) in ELEMENTS
-            if atomic_num == z
-                return symbol
-            end
-        end
-    catch
-        # Fallback to simple list
-        elements = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
-                    "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar"]
-        return z <= length(elements) ? elements[z] : "X$z"
-    end
-    return "X$z"
+"""
+    read_trexio_unrestricted_doubles(trexio::TrexioFile) -> (T2a, T2b, T2ab)
+
+Read T2a, T2b and T2ab amplitudes from TREXIO file.
+"""
+function read_trexio_unrestricted_doubles(trexio::TrexioFile)
+  T2a, status = TREXIO.trexio_read_amplitude_double_upup_dense(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    T2a_full = zeros(0, 0, 0, 0)
+  else
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2a amplitudes from TREXIO with status $status"
+    T2a_full = detri_samespin_doubles(T2a)
+  end
+  T2b, status = TREXIO.trexio_read_amplitude_double_dndn_dense(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    T2b_full = zeros(0, 0, 0, 0)
+  else
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2b amplitudes from TREXIO with status $status"
+    T2b_full = detri_samespin_doubles(T2b)
+  end
+  T2ab, status = TREXIO.trexio_read_amplitude_double_updn_dense(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    T2ab = zeros(0, 0, 0, 0)
+  else
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2ab amplitudes from TREXIO with status $status"
+  end
+  return (T2a_full, T2b_full, T2ab)
 end
 
 end # module TrexioInterface

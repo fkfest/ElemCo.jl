@@ -1707,7 +1707,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   if EC.options.cc.use_kext
     int2 = integ2_ss(EC.fd)
     # last two indices of integrals are stored as upper triangular 
-    tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+    tripp = uppertriangular_cut(norb)
     D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
     # <pq|rs> D^ij_rs
     @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
@@ -1910,7 +1910,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   #ladder terms
   if EC.options.cc.use_kext
     # last two indices of integrals (apart from αβ) are stored as upper triangular 
-    tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+    tripp = uppertriangular_cut(norb)
     if EC.fd.uhf
       # αα
       int2a = integ2_ss(EC.fd, :α)
@@ -3394,7 +3394,7 @@ function calc_triples_decomposition(EC::ECInfo)
 
   Triples_Amplitudes = zeros(nvirt, nocc, nvirt, nocc, nvirt, nocc)
   t3file, T3 = mmap4idx(EC, "T_vvvooo")
-  trippp = [CartesianIndex(i,j,k) for k in 1:nocc for j in 1:k for i in 1:j]
+  trippp = uppertriangular_cut3(nocc)
   for ijk in axes(T3,4)
     i,j,k = Tuple(trippp[ijk])                                            #trippp is giving the indices according to the joint index ijk as a tuple
     Triples_Amplitudes[:,i,:,j,:,k] = T3[:,:,:,ijk]

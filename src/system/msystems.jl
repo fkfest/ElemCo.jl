@@ -44,6 +44,15 @@ function ACentre(label::AbstractString, x, y, z, atomic_number::Int, charge, bas
   ACentre(label, SVector(x,y,z), atomic_number, charge, basis, false)
 end
 
+function ACentre(label::AbstractString, x, y, z, charge, basis::Dict{String,String}) 
+  ACentre(label, SVector(x,y,z), charge, basis)
+end
+
+function ACentre(label::AbstractString, position::SVector{3, Float64}, charge, basis::Dict{String,String}) 
+  atomic_number = nuclear_charge_of_centre(element_LABEL(label))
+  ACentre(label, position, atomic_number, charge, basis, false)
+end
+
 function ACentre(label::AbstractString, x, y, z, basis::Dict{String,String}) 
   ACentre(label, SVector(x,y,z), basis)
 end
