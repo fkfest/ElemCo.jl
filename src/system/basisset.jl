@@ -18,11 +18,12 @@ using ..ElemCo.AbstractEC
 export BasisCentre, BasisSet
 export BasisContraction, AngularShell
 export shell_range, centre_range, is_cartesian, combine
+export generate_angularshell, add_subshell!, angularshells
 export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao
 export normalize_contraction
 export coefficients_1mat, n_coefficients_1mat
 export basis_name, generate_basis, guess_norb
-export ao_list, print_ao
+export ao_list, print_ao, ao_order2internal
 export subshell_char, max_l
 export levenshtein_distance, get_available_basis_sets, suggest_basis_sets
 
@@ -56,15 +57,21 @@ struct BasisSet
   lib::ILibcint
 end
 
-function BasisSet(centres::Vector{BasisCentre}, cartesian::Bool, lib::AbstractILib)
+function BasisSet(centres::Vector{BasisCentre}, cartesian::Bool=false, lib::AbstractILib=ILibcint(centres, cartesian))
   shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centres) for j in 1:n_angularshells(c)]
   centre_ranges = [1:length(centres)]
   shell_ranges = [1:length(shell_indices)]
+  if id_not_set(centres)
+    set_id!(centres, 1)
+  end
   return BasisSet(centres, shell_indices, centre_ranges, shell_ranges, cartesian, lib)
 end
 
-function BasisSet(centres::Vector{BasisCentre}, centre_ranges, shell_ranges, cartesian::Bool, lib::AbstractILib)
+function BasisSet(centres::Vector{BasisCentre}, centre_ranges, shell_ranges, cartesian::Bool=false, lib::AbstractILib=ILibcint(centres, cartesian))
   shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centres) for j in 1:n_angularshells(c)]
+  if id_not_set(centres)
+    set_id!(centres, 1)
+  end
   return BasisSet(centres, shell_indices, centre_ranges, shell_ranges, cartesian, lib)
 end
 
@@ -308,6 +315,25 @@ function print_ao(ao::AbstractAtomicOrbital, basis::BasisSet)
     end
   end
   print(basis.centres[ao.icentre].name, "[", icen, "]", ao)
+end
+
+"""
+    ao_order2internal(basis::BasisSet, order4l, back=false)
+
+  Return the order of the atomic orbitals from an external to the internal order
+  such that `μ(external)[order] == μ(internal)`.
+
+  `order4l` is a vector of orders for each angular momentum (from external to internal order).
+"""
+function ao_order2internal(basis::BasisSet, order4l, back=false)
+  action = back ? invperm : identity
+  order = Int[]
+  for ash in basis
+    for ish = 1:n_subshells(ash)
+      append!(order, action(order4l[ash.l+1]) .+ length(order))
+    end
+  end
+  return order
 end
 
 """

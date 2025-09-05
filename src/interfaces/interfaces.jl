@@ -25,10 +25,8 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.MolproInterface: MolproInterface, is_matrop_file
 using ..ElemCo.MoldenInterface: MoldenInterface, is_molden_file
-using ..ElemCo.TrexioInterface: TrexioInterface, write_trexio, read_trexio
 
 export import_matrix, export_molden_orbitals
-export write_trexio, read_trexio
 
 """
     import_matrix(EC::ECInfo, filename::String)

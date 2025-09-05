@@ -394,6 +394,21 @@ function set_id!(centres::AbstractArray{BasisCentre}, start_id)
 end
 
 """
+    id_not_set(centres::AbstractArray{BasisCentre})
+
+  Check if the id is not set for angular shells in the array of centres.
+  Return true if the id is not set.
+"""
+function id_not_set(centres::AbstractArray{BasisCentre})
+  for centre in centres
+    for ashell in centre.shells
+      return ashell.id == 0
+    end
+  end
+  return false
+end
+
+"""
     subshell_char(l)
 
   Return the character for the subshell with angular momentum `l`.

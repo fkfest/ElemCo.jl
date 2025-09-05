@@ -195,14 +195,7 @@ end
 """
 function ao_permutation(EC::ECInfo, back=false)
   basisset = generate_basis(EC, "ao")
-  permutation = is_cartesian(basisset) ? MOLDEN2LIBCINT_PERMUTATION_CART : MOLDEN2LIBCINT_PERMUTATION
-  action = back ? invperm : identity
-  order = Int[]
-  for ash in basisset
-    for ish = 1:n_subshells(ash)
-      append!(order, action(permutation[ash.l+1]) .+ length(order))
-    end
-  end
-  return order
+  order4l = is_cartesian(basisset) ? MOLDEN2LIBCINT_PERMUTATION_CART : MOLDEN2LIBCINT_PERMUTATION
+  return ao_order2internal(basisset, order4l, back)
 end
 end # module
