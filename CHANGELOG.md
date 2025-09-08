@@ -17,6 +17,7 @@
 * automatic augmentation of basis sets by additional diffuse or steep functions.
 * functions to get all elements available in a given basis set (`get_available_elements4basis`) and to output the basis set for a given list of elements in the molpro format (`output_basis`).
 * augmented basis sets for jkfit vXz-jkfit and def2-universal-jkfit basis sets.
+* DF-HF and DF-UF orbitals are stored in trexio dump file.
 
 ### Fixed
 

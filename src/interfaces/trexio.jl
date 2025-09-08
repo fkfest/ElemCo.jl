@@ -26,7 +26,7 @@ using LinearAlgebra
 # Re-export the core TREXIO types and functions for backward compatibility
 export TrexioFile
 export open_trexio, close_trexio
-export write_trexio_molecule, read_trexio_molecule
+export write_trexio_system, read_trexio_system
 export write_trexio_basis, read_trexio_basis
 export write_trexio_orbitals, read_trexio_orbitals
 export read_trexio_orbital_classes, read_trexio_orbital_energies, read_trexio_orbital_occupations
@@ -91,6 +91,15 @@ function open_trexio(filename::String, mode::String="r")
   return trexio
 end
 
+function open_trexio(f::Function, filename::String, mode::String="r")
+  trexio = open_trexio(filename, mode)
+  try
+    f(trexio)
+  finally
+    close_trexio(trexio)
+  end
+end
+
 """
     close_trexio(trexio::TrexioFile)
 
@@ -105,11 +114,11 @@ function close_trexio(trexio::TrexioFile)
 end
 
 """
-    write_trexio_molecule(trexio::TrexioFile, system::MSystem)
+    write_trexio_system(trexio::TrexioFile, system::MSystem)
 
 Write molecular geometry and basis set information to TREXIO format using ElemCo data structures.
 """
-function write_trexio_molecule(trexio::TrexioFile, system::MSystem)
+function write_trexio_system(trexio::TrexioFile, system::MSystem)
   # Convert ElemCo MSystem to TREXIO format
   natoms = length(system)
   nuclear_charges = Float64[]
@@ -134,11 +143,11 @@ function write_trexio_molecule(trexio::TrexioFile, system::MSystem)
 end
 
 """
-    read_trexio_molecule(trexio::TrexioFile) -> MSystem
+    read_trexio_system(trexio::TrexioFile) -> MSystem
 
 Read molecular geometry from TREXIO format and return ElemCo MSystem.
 """
-function read_trexio_molecule(trexio::TrexioFile)
+function read_trexio_system(trexio::TrexioFile)
   # Read data using standalone TREXIO module
   natoms, status = trexio_read_nucleus_num(trexio)
   if status == TREXIO.TREXIO_HAS_NOT
@@ -261,7 +270,7 @@ end
 Read basis set information from TREXIO file.
 """
 function read_trexio_basis(trexio::TrexioFile)
-  system = read_trexio_molecule(trexio)
+  system = read_trexio_system(trexio)
 
   type, status = trexio_read_basis_type(trexio)
   if type != "Gaussian"
@@ -334,16 +343,16 @@ end
 
 """
     write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::BasisSet;
-                          type="HF", class=(String[], String[]),
+                          type="HF", classes=(String[], String[]),
                           energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]))
 
   Write molecular orbitals to TREXIO file. 
 
-`class`, `energies`, and `occupations` are optional and can be provided as tuples for alpha and beta spins.
-`class` entries can be "Core", "Inactive", "Active", "Virtual", "Deleted"
+`classes`, `energies`, and `occupations` are optional and can be provided as tuples for alpha and beta spins.
+`classes` entries can be "Core", "Inactive", "Active", "Virtual", "Deleted"
 """
 function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::BasisSet;
-                               type="HF", class=(String[], String[]),
+                               type="HF", classes=(String[], String[]),
                                energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]))
   write_trexio_basis(trexio, basis)
   # Convert ElemCo orbital format to standard matrix format
@@ -358,8 +367,8 @@ function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::
     @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_num to TREXIO with status $status"
     status = trexio_write_mo_coefficient(trexio, orbitals[1][order, :])
     @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_coefficient to TREXIO with status $status"
-    if length(class[1]) > 0
-      status = trexio_write_mo_class(trexio, class[1])
+    if length(classes[1]) > 0
+      status = trexio_write_mo_class(trexio, classes[1])
       @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_class to TREXIO with status $status"
     end
     if length(energies[1]) > 0
@@ -377,8 +386,8 @@ function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::
     @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_coefficient to TREXIO with status $status"
     status = trexio_write_mo_spin(trexio, vcat(fill(0, nmo), fill(1, nmo)))  # α=0, β=1
     @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_spin to TREXIO with status $status"
-    if length(class[1]) > 0
-      status = trexio_write_mo_class(trexio, vcat(class...))
+    if length(classes[1]) > 0
+      status = trexio_write_mo_class(trexio, vcat(classes...))
       @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_class to TREXIO with status $status"
     end
     if length(energies[1]) > 0

@@ -21,10 +21,11 @@ include("system/msystems.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
+include("infos/ecinfos.jl")
+
 include("interfaces/trexio.jl")
 include("system/wavefunctions.jl")
 
-include("infos/ecinfos.jl")
 include("infos/ecmethods.jl")
 include("tools/tensortools.jl")
 include("solvers/diis.jl")
