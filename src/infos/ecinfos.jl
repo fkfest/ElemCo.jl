@@ -1,6 +1,5 @@
 """ Various global infos """
 module ECInfos
-using HDF5
 using Dates
 using DocStringExtensions
 using ..ElemCo.VersionInfo
@@ -41,59 +40,6 @@ function get_options(opt)
   return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
 end
 
-mutable struct ECDump
-  """ file name of the HDF5 dump. """
-  filename::String
-  """ an HDF5 file with calculation information (for restarts etc). 
-  The structure of the HDF5 file is as follows (with `track_order=true`):
-```
-/EC
-  /Molecule1
-    <name>
-    <geometry>
-    /BasisSet1
-      <basis set information>
-      /State1
-        <number of electrons>
-        <spin multiplicity>
-        <occupation (alpha/beta)>
-        <MO coefficients>
-        <list of frozen orbitals>
-        <CC amplitudes>
-        <other information>
-      /State2
-      ...
-    /BasisSet2
-    ...
-  /Molecule2
-    ...
-```
-  """
-  file::HDF5.Group
-  function ECDump(filename::AbstractString)
-    return new(filename, create_empty_dump(filename))
-  end
-end
-
-"""
-    create_empty_dump(filename::AbstractString)
-
-  Create an empty HDF5 dump file with the given `filename` and information about the package.
-
-  Returns an "EC" group in HDF5 file.
-"""
-function create_empty_dump(filename)
-  file = h5open(filename, "w")
-  g = create_group(file, "EC", track_order=true)
-  g["version"] = version()
-  g["git_hash"] = git_hash()
-  g["julia"] = "$VERSION"
-  g["hostname"] = gethostname()
-  g["scratch"] = tempdir()
-  g["date"] = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
-  return file["EC"]
-end
-
 """
     ECInfo
 
@@ -114,8 +60,6 @@ end
   system::MSystem = MSystem()
   """ fcidump. """
   fd::TFDump = TFDump()
-  """ dump with calculation information (for restarts etc). """
-  dump::ECDump = ECDump(joinpath(scr,"ec.h5"))
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -801,8 +745,5 @@ function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
   end
   return occa, virta, occb, virtb
 end
-
-
-include("ecdump.jl")
 
 end #module

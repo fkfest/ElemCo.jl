@@ -13,6 +13,8 @@
   nelec::Int = -1
   """`⟨0⟩` charge of the system (relative to nelec/FCIDump/neutral system!). """
   charge::Int = 0
+  """`⟨"wf.h5"⟩` filename for wavefunction dump (stored in TREXIO format). """
+  dump::String = "wf.h5"
   """`⟨"C_Am"⟩` filename of MO coefficients. 
   Used by all programs to read and write orbitals from/to file. """
   orb::String = "C_Am"
