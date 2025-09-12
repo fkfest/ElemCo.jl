@@ -465,7 +465,7 @@ end
 """
 function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   t1 = time_ns()
-  cMO = load_orbitals(EC, EC.options.wf.orb)
+  cMO = load_orbitals(EC)
   unrestricted = !is_restricted(cMO)
   ERef = generate_DF_integrals(EC, cMO; save3idx)
   t1 = print_time(EC, t1, "generate DF integrals", 2)

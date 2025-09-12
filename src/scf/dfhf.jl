@@ -88,9 +88,8 @@ function dfhf(EC::ECInfo)
   println("DF-HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
-  dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ)
-  save!(EC, "e_m", ϵ, description="DFHF orbital energies")
-  save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
+  occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
+  dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
   return OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
 end
 
@@ -171,10 +170,12 @@ function dfhf_positron(EC::ECInfo)
   println("DF-HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
-  save!(EC, "e_m", ϵ, description="DFHF orbital energies")
-  save!(EC, EC.options.wf.eps_pos, ε_pos, description="DFHF positron orbital energies")
-  save!(EC, EC.options.wf.orb, cMO, description="DFHF orbitals")
-  save!(EC, EC.options.wf.orb_pos, cPO, description="DFHF positron orbitals")
+  open_dump(EC, "w") do io
+    occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
+    dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, MO="mo")
+    occupations = [1.0; zeros(length(SP['m'])-1)]
+    dump_orbitals(io, EC, SpinMatrix(cPO); type="DF-HF positron", energies=ε_pos, occupations=occupations, MO="po")
+  end
   return OutDict("HF"=>(EHF, "closed-shell DF-HF+ energy"), "E"=>(EHF, "closed-shell DF-HF+ energy"))
 end
 
@@ -256,10 +257,9 @@ function dfuhf(EC::ECInfo)
   println("DF-UHF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
-  dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ)
-  save!(EC, "e_m", ϵ[1], description="DFUHF spin-up orbital energies")
-  save!(EC, "e_M", ϵ[2], description="DFUHF spin-down orbital energies")
-  save!(EC, EC.options.wf.orb, cMO..., description="DFUHF orbitals")
+  occupationsa = [ones(length(SP['o'])); zeros(length(SP['v']))]
+  occupationsb = [ones(length(SP['O'])); zeros(length(SP['V']))]
+  dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
   return OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
 end
 

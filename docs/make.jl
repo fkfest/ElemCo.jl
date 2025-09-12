@@ -73,6 +73,7 @@ makedocs(
       "descdict.md",
       "utils.md",
       "versioninfo.md",
+      "wavefunctions.md",
       "interfaces.md",
       "molpro.md",
       "molden.md",

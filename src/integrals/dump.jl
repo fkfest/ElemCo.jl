@@ -959,15 +959,14 @@ function write_integrals1(int1, fdf, tol, simtra)
 end
 
 """ 
-    transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
+    transform_fcidump(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
 
   Transform integrals to new basis using Tl and Tr transformation matrices. 
-  For UHF fcidump, Tl and Tr are arrays of matrices for α and β spin.
-  If Tl and Tr are arrays of arrays, then the function transforms rhf fcidump to uhf fcidump.
+  If Tl and Tr are unrestricted, then the function transforms rhf fcidump to uhf fcidump.
 """
-function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
+function transform_fcidump(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
   println("Transform integrals...")
-  if length(Tl) == 2 && typeof(Tl[1]) <: AbstractArray
+  if !is_restricted(Tl) || !is_restricted(Tr)
     genuhfdump = true
   else
     genuhfdump = false
@@ -991,8 +990,8 @@ function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
     fd.head["IUHF"] = [1]
     fd.uhf = true
   else
-    fd.int2 = transform_int2(fd.int2, Tl, Tl, Tr, Tr)
-    fd.int1 = transform_int1(fd.int1, Tl, Tr)
+    fd.int2 = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1])
+    fd.int1 = transform_int1(fd.int1, Tl[1], Tr[1])
   end
 end
 

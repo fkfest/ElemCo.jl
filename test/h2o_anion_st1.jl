@@ -11,7 +11,7 @@ fcidump = joinpath(@__DIR__,"files","H2O_ST1.FCIDUMP")
 
 @opt wf charge=-1
 @bohf
-@transform_ints biorthogonal
+@transform_ints
 energies = @cc ccsd
 @test abs(energies["HF"]-EHF_test) < epsilon
 @test abs(energies["MP2"]-EMP2_test) < epsilon

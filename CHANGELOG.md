@@ -6,17 +6,19 @@
 
 * The fallback basis sets are not used by default anymore. Set `@set int use_fallback_basis=true`
   to enable them.
+* `wf.orb` and `wf.left` options are deprecated. The orbitals are now always written to and read from the trexio dump file `wf.dump`. Use `@loadwf` to load the orbitals from the dump file.
+* The `@transform_ints` macro now automatically uses biorthogonal transformations for BO orbitals.
 
 ### Changed
 
 * The fallback basis sets are now defined for `ao` (`def2-tzvppd`), `jkfit` (`aug-def2-universal-jkfit`), and `mpfit` (`def2-tzvppd-mpfit`) basis sets.
-* Functions for H and He are copied from [aug]-cc-pVXZ basis sets to [aug]-p[w]CVXZ basis sets. Functions for Li and Be are copied from [aug]-cc-pCVXZ basis sets to [aug]-pwCVXZ basis sets.
+* Functions for `H` and `He` are copied from [aug]-cc-pVXZ basis sets to [aug]-p[w]CVXZ basis sets. Functions for Li and Be are copied from [aug]-cc-pCVXZ basis sets to [aug]-pwCVXZ basis sets.
 
 ### Added
 
-* automatic augmentation of basis sets by additional diffuse or steep functions.
-* functions to get all elements available in a given basis set (`get_available_elements4basis`) and to output the basis set for a given list of elements in the molpro format (`output_basis`).
-* augmented basis sets for jkfit vXz-jkfit and def2-universal-jkfit basis sets.
+* Automatic augmentation of basis sets by additional diffuse or steep functions.
+* Functions to get all elements available in a given basis set (`get_available_elements4basis`) and to output the basis set for a given list of elements in the molpro format (`output_basis`).
+* Augmented basis sets for jkfit vXz-jkfit and def2-universal-jkfit basis sets.
 * DF-HF and DF-UF orbitals are stored in trexio dump file.
 
 ### Fixed

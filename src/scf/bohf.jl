@@ -13,27 +13,10 @@ using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
 using ..ElemCo.FockFactory
 using ..ElemCo.DIIS
+using ..ElemCo.Wavefunctions
 
 export bohf, bouhf
 export guess_boorb
-
-"""
-    left_from_right(cMOr::SpinMatrix)
-
-  Calculate left BO-MO coefficients from right BO-MO coefficients.
-"""
-function left_from_right(cMOr::SpinMatrix{T}) where {T}
-  if is_restricted(cMOr)
-    cMOl = SpinMatrix((inv(cMOr[1]))')
-    restrict!(cMOl)
-  else
-    cMOl = SpinMatrix{T}()
-    for ispin = 1:2
-      cMOl[ispin] = (inv(cMOr[ispin]))'
-    end
-  end
-  return cMOl
-end
 
 """
     guess_boorb(EC::ECInfo, guess::Symbol, uhf=false)
@@ -59,11 +42,11 @@ function guess_boorb(EC::ECInfo, guess::Symbol, uhf=false)
   elseif guess == :GWH || guess == :gwh
     cMOr = guess_bo_gwh(EC, uhf)
   elseif guess == :ORB || guess == :orb
-    cMOr = load_orbitals(EC, EC.options.wf.orb)
+    cMOr = load_rotations(EC)
   else
     error("Unknown guess for MO coefficients: ", guess)
   end
-  cMOl = left_from_right(cMOr)
+  cMOl = left_from_right_rotations(cMOr)
   cMOl, cMOr = heatup(EC, cMOl, cMOr, EC.options.scf.temperature_guess) 
   return cMOl, cMOr
 end
@@ -149,7 +132,7 @@ function closed_shell_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, tem
   fock = gen_fock(EC, den4temp)
   ϵ, cMOr_new = eigen(fock)
   cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
-  cMOl = left_from_right(cMOr)
+  cMOl = left_from_right_rotations(cMOr)
   return cMOl, cMOr
 end
 
@@ -175,7 +158,7 @@ function unrestricted_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, tem
   for (ispin, sp) = enumerate(['o', 'O'])
     ϵ, cMOr_new = eigen(fock[ispin])
     cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
-    cMOl_out[ispin] = left_from_right(cMOr_out[ispin])
+    cMOl_out[ispin] = left_from_right_rotations(cMOr_out[ispin])
   end
   return cMOl_out, cMOr_out
 end
@@ -280,8 +263,7 @@ function bohf(EC::ECInfo)
   println("BO-HF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  save!(EC, EC.options.wf.orb, cMOr[1], description="BOHF right orbitals")
-  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl[1], description="BOHF left orbitals")
+  dump_rotations(EC, cMOr; type="BO-HF", energies=ϵ, biorthogonal=true)
   return EHF
 end
 
@@ -371,12 +353,8 @@ function bouhf(EC::ECInfo)
   println("BO-UHF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  save!(EC, EC.options.wf.orb, cMOr..., description="BOHF right orbitals")
-  save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl..., description="BOHF left orbitals")
+  dump_rotations(EC, cMOr; type="BO-UHF", energies=ϵ, biorthogonal=true)
   return EHF
 end
-
-
-
 
 end # module BOHF

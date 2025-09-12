@@ -29,6 +29,7 @@ export open_trexio, close_trexio
 export write_trexio_system, read_trexio_system
 export write_trexio_basis, read_trexio_basis
 export write_trexio_orbitals, read_trexio_orbitals
+export write_trexio_rotations, read_trexio_rotations
 export read_trexio_orbital_classes, read_trexio_orbital_energies, read_trexio_orbital_occupations
 export write_trexio_amplitudes
 export read_trexio_singles, read_trexio_doubles
@@ -350,99 +351,185 @@ end
 
 `classes`, `energies`, and `occupations` are optional and can be provided as tuples for alpha and beta spins.
 `classes` entries can be "Core", "Inactive", "Active", "Virtual", "Deleted"
+
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
 function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::BasisSet;
                                type="HF", classes=(String[], String[]),
-                               energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]))
+                               energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]),
+                               MO="mo")
   write_trexio_basis(trexio, basis)
-  # Convert ElemCo orbital format to standard matrix format
   nbasis, nmo = size(orbitals)
   nao = n_ao(basis)
   @assert nao == nbasis "Basis size mismatch: basis has $nao, orbitals have $nbasis"
   order = ao_order2internal(basis, order4l(basis), true)
-  status = trexio_write_mo_type(trexio, type)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_type to TREXIO with status $status"
-  if is_restricted(orbitals)
-    status = trexio_write_mo_num(trexio, nmo)
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_num to TREXIO with status $status"
-    status = trexio_write_mo_coefficient(trexio, orbitals[1][order, :])
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_coefficient to TREXIO with status $status"
-    if length(classes[1]) > 0
-      status = trexio_write_mo_class(trexio, classes[1])
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_class to TREXIO with status $status"
-    end
-    if length(energies[1]) > 0
-      status = trexio_write_mo_energy(trexio, energies[1])
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_energy to TREXIO with status $status"
-    end
-    if length(occupations[1]) > 0
-      status = trexio_write_mo_occupation(trexio, occupations[1])
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_occupation to TREXIO with status $status"
-    end
-  else
-    status = trexio_write_mo_num(trexio, 2*nmo) # For unrestricted, double the number of orbitals
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_num to TREXIO with status $status"
-    status = trexio_write_mo_coefficient(trexio, hcat(orbitals...)[order, :])
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_coefficient to TREXIO with status $status"
-    status = trexio_write_mo_spin(trexio, vcat(fill(0, nmo), fill(1, nmo)))  # α=0, β=1
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_spin to TREXIO with status $status"
-    if length(classes[1]) > 0
-      status = trexio_write_mo_class(trexio, vcat(classes...))
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_class to TREXIO with status $status"
-    end
-    if length(energies[1]) > 0
-      status = trexio_write_mo_energy(trexio, vcat(energies...))
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_energy to TREXIO with status $status"
-    end
-    if length(occupations[1]) > 0
-      status = trexio_write_mo_occupation(trexio, vcat(occupations...))
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write mo_occupation to TREXIO with status $status"
-    end
-  end
-  return  
+  _write_trexio_orbital_transformation_data(trexio, orbitals, order, type, classes, energies, occupations, MO)
 end
 
 """
-    read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true) -> SpinMatrix
+    read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true, MO="mo") -> (SpinMatrix, String)
 
-Read molecular orbitals from TREXIO file and return `SpinMatrix`.
+  Read molecular orbitals from TREXIO file and return `SpinMatrix` and `type::String`.
+
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
-function read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true)
+function read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true, MO="mo")
   # Read basis first
   if isnothing(basis)
     basis = read_trexio_basis(trexio)
   end
   order = ao_order2internal(basis, order4l(basis))
-  nao = length(order)
-  # Read MO data using standalone TREXIO module
-  type, status = TREXIO.trexio_read_mo_type(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_type from TREXIO with status $status"
-  if verbose
-    println("Read $type molecular orbitals from TREXIO file")
-  end
-  nmo, status = TREXIO.trexio_read_mo_num(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
-  coefficients, status = TREXIO.trexio_read_mo_coefficient(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_coefficient from TREXIO with status $status"
-  @assert size(coefficients, 1) == nao "Basis size mismatch: basis has $nao, orbitals have $(size(coefficients, 1))"
-  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
-  if length(beta_iorbs) == 0
-    orbs = SpinMatrix(coefficients[order,:])
-  else
-    orbs = SpinMatrix(coefficients[order,alpha_iorbs],coefficients[order,beta_iorbs])
-  end
-  return orbs
+  return _read_trexio_orbital_transformations(trexio, order, verbose, MO)
 end
 
 """
-    alphabeta_orbital_indices(trexio::TrexioFile, nmo)
+    write_trexio_rotations(trexio::TrexioFile, rotations::SpinMatrix;
+                          type="Rotation", classes=(String[], String[]),
+                          energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]), MO="mo")
+
+  Write rotations of molecular orbitals to TREXIO file. 
+
+The rotations are written in place of orbitals, i.e., it is not possible to write rotations 
+to a TREXIO file, which contains orbitals.
+`classes`, `energies`, and `occupations` are optional and can be provided as tuples for alpha and beta spins.
+`classes` entries can be "Core", "Inactive", "Active", "Virtual", "Deleted"
+
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+"""
+function write_trexio_rotations(trexio::TrexioFile, rotations::SpinMatrix;
+                               type="HF", classes=(String[], String[]),
+                               energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]), MO="mo")
+  nbasis, nmo = size(rotations)
+  status = trexio_write_ao_num(trexio, nbasis)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_num to TREXIO with status $status"
+  _write_trexio_orbital_transformation_data(trexio, rotations, collect(1:nbasis), type, classes, energies, occupations, MO)
+end
+
+"""
+    read_trexio_rotations(trexio::TrexioFile; verbose=true, MO="mo") -> (SpinMatrix, String)
+
+  Read molecular orbital rotations from TREXIO file and return `SpinMatrix` and `type::String`.
+
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+"""
+function read_trexio_rotations(trexio::TrexioFile; verbose=true, MO="mo")
+  nao, status = trexio_read_ao_num(trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read ao_num from TREXIO with status $status"
+  return _read_trexio_orbital_transformations(trexio, collect(1:nao), verbose, MO)
+end
+
+for action in ("write", "read")
+  for field in ("num", "type", "spin", "coefficient", "class", "energy", "occupation")
+    fname = Symbol("trexio_" * action * "_MO_" * field)
+    fmoname = Symbol("trexio_" * action * "_mo_" * field)
+    fponame = Symbol("trexio_" * action * "_po_" * field)
+    @eval begin
+      function ($fname)(MO::AbstractString, trexio::TrexioFile, args...)
+        if MO == "po"
+          return $fponame(trexio, args...)
+        else
+          return $fmoname(trexio, args...)
+        end
+      end
+    end
+  end
+end
+
+"""
+    _write_trexio_orbital_transformation_data(trexio::TrexioFile, coefficients::SpinMatrix, 
+                                             order, type, classes, energies, occupations, MO="mo")
+
+  Internal function to write orbital transformation data to TREXIO file.
+  
+  `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+""" 
+function _write_trexio_orbital_transformation_data(trexio::TrexioFile, coefficients::SpinMatrix, 
+                                                   order, type, classes, energies, occupations, MO="mo")
+  nbasis, nmo = size(coefficients)
+  @assert length(order) == nbasis "Basis size mismatch: basis has $nbasis, order has $(length(order))"
+  status = trexio_write_MO_type(MO, trexio, type)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_type to TREXIO with status $status"
+  if is_restricted(coefficients)
+    status = trexio_write_MO_num(MO, trexio, nmo)
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_num to TREXIO with status $status"
+    status = trexio_write_MO_coefficient(MO, trexio, coefficients[1][order, :])
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_coefficient to TREXIO with status $status"
+    if length(classes[1]) > 0
+      status = trexio_write_MO_class(MO, trexio, classes[1])
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_class to TREXIO with status $status"
+    end
+    if length(energies[1]) > 0
+      status = trexio_write_MO_energy(MO, trexio, energies[1])
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_energy to TREXIO with status $status"
+    end
+    if length(occupations[1]) > 0
+      status = trexio_write_MO_occupation(MO, trexio, occupations[1])
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_occupation to TREXIO with status $status"
+    end
+  else
+    status = trexio_write_MO_num(MO, trexio, 2*nmo) # For unrestricted, double the number of coefficients
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_num to TREXIO with status $status"
+    status = trexio_write_MO_coefficient(MO, trexio, hcat(coefficients...)[order, :])
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_coefficient to TREXIO with status $status"
+    status = trexio_write_MO_spin(MO, trexio, vcat(fill(0, nmo), fill(1, nmo)))  # α=0, β=1
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_spin to TREXIO with status $status"
+    if length(classes[1]) > 0
+      status = trexio_write_MO_class(MO, trexio, vcat(classes...))
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_class to TREXIO with status $status"
+    end
+    if length(energies[1]) > 0
+      status = trexio_write_MO_energy(MO, trexio, vcat(energies...))
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_energy to TREXIO with status $status"
+    end
+    if length(occupations[1]) > 0
+      status = trexio_write_MO_occupation(MO, trexio, vcat(occupations...))
+      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_occupation to TREXIO with status $status"
+    end
+  end
+  return
+end
+
+"""
+    _read_trexio_orbital_transformations(trexio::TrexioFile, order, verbose, MO="mo") -> (SpinMatrix, String)
+
+  Internal function to read orbital transformation coefficients from TREXIO file
+  
+  `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+"""
+function _read_trexio_orbital_transformations(trexio::TrexioFile, order, verbose, MO="mo")
+  nao = length(order)
+  # Read MO data using standalone TREXIO module
+  type, status = trexio_read_MO_type(MO, trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_type from TREXIO with status $status"
+  if verbose
+    println("Read $type molecular orbitals from TREXIO file")
+  end
+  nmo, status = trexio_read_MO_num(MO, trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  coefficients, status = trexio_read_MO_coefficient(MO, trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_coefficient from TREXIO with status $status"
+  @assert size(coefficients, 1) == nao "Basis size mismatch: basis has $nao, orbitals have $(size(coefficients, 1))"
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
+  if length(beta_iorbs) == 0
+    coeffs = SpinMatrix(coefficients[order,:])
+  else
+    coeffs = SpinMatrix(coefficients[order,alpha_iorbs],coefficients[order,beta_iorbs])
+  end
+  return coeffs, type
+end
+
+
+"""
+    alphabeta_orbital_indices(trexio::TrexioFile, nmo, MO="mo") -> (alpha_indices::Vector{Int}, beta_indices::Vector{Int})
 
   Return the indices of alpha and beta orbitals.
 
   For restricted orbitals the list of beta orbitals is empty.
+  
+  `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
-function alphabeta_orbital_indices(trexio::TrexioFile, nmo)
-  spins, status = TREXIO.trexio_read_mo_spin(trexio)
+function alphabeta_orbital_indices(trexio::TrexioFile, nmo, MO="mo")
+  spins, status = trexio_read_MO_spin(MO, trexio)
   if status == TREXIO.TREXIO_HAS_NOT || length(spins) != nmo
     return ([1:nmo;], Int[])
   else
@@ -459,24 +546,26 @@ function alphabeta_orbital_indices(trexio::TrexioFile, nmo)
 end
 
 """
-    read_trexio_orbital_classes(trexio::TrexioFile) -> (classa::Vector{String}, classb::Vector{String})
+    read_trexio_orbital_classes(trexio::TrexioFile, MO="mo") -> (classa::Vector{String}, classb::Vector{String})
 
 Read molecular orbital classes from TREXIO file and return as two vectors (alpha, beta).
 
 For restricted orbitals the list of beta orbitals is empty.
 If no orbital classes are found, empty vectors are returned.
+  
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
-function read_trexio_orbital_classes(trexio::TrexioFile)
+function read_trexio_orbital_classes(trexio::TrexioFile, MO="mo")
   # Read MO data using standalone TREXIO module
-  nmo, status = TREXIO.trexio_read_mo_num(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
-  classes, status = TREXIO.trexio_read_mo_class(trexio)
-  if status != TREXIO.TREXIO_SUCCESS 
-    println("Failed to read mo_class from TREXIO with status $status")
+  nmo, status = trexio_read_MO_num(MO, trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  classes, status = trexio_read_MO_class(MO, trexio)
+  if status != TREXIO.TREXIO_SUCCESS
+    println("Failed to read $(MO)_class from TREXIO with status $status")
     return (String[], String[])
   end
   @assert length(classes) == nmo "Inconsistent number of orbital classes: expected $nmo, got $(length(classes))"
-  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
   if length(beta_iorbs) == 0
     return (classes, String[])
   else
@@ -485,24 +574,26 @@ function read_trexio_orbital_classes(trexio::TrexioFile)
 end
 
 """
-    read_trexio_orbital_energies(trexio::TrexioFile) -> (epsa, epsb)
+    read_trexio_orbital_energies(trexio::TrexioFile, MO="mo") -> (epsa, epsb)
 
 Read molecular orbital energies from TREXIO file and return as two vectors (alpha, beta).
 
 For restricted orbitals the list of beta orbitals is empty.
 If no orbital energies are found, empty vectors are returned.
+  
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
-function read_trexio_orbital_energies(trexio::TrexioFile)
+function read_trexio_orbital_energies(trexio::TrexioFile, MO="mo")
   # Read MO data using standalone TREXIO module
-  nmo, status = TREXIO.trexio_read_mo_num(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
-  energies, status = TREXIO.trexio_read_mo_energy(trexio)
-  if status != TREXIO.TREXIO_SUCCESS 
-    println("Failed to read mo_energy from TREXIO with status $status")
+  nmo, status = trexio_read_MO_num(MO, trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  energies, status = trexio_read_MO_energy(MO, trexio)
+  if status != TREXIO.TREXIO_SUCCESS
+    println("Failed to read $(MO)_energy from TREXIO with status $status")
     return (Float64[], Float64[])
   end
   @assert length(energies) == nmo "Inconsistent number of orbital energies: expected $nmo, got $(length(energies))"
-  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
   if length(beta_iorbs) == 0
     return (energies, Float64[])
   else
@@ -511,24 +602,26 @@ function read_trexio_orbital_energies(trexio::TrexioFile)
 end
 
 """
-    read_trexio_orbital_occupations(trexio::TrexioFile) -> (occa, occb)
+    read_trexio_orbital_occupations(trexio::TrexioFile, MO="mo") -> (occa, occb)
 
 Read molecular orbital occupations from TREXIO file and return as two vectors (alpha, beta).
 
 For restricted orbitals the list of beta orbitals is empty.
 If no orbital occupations are found, empty vectors are returned.
+  
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
-function read_trexio_orbital_occupations(trexio::TrexioFile)
+function read_trexio_orbital_occupations(trexio::TrexioFile, MO="mo")
   # Read MO data using standalone TREXIO module
-  nmo, status = TREXIO.trexio_read_mo_num(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read mo_num from TREXIO with status $status"
-  occupations, status = TREXIO.trexio_read_mo_occupation(trexio)
-  if status != TREXIO.TREXIO_SUCCESS 
-    println("Failed to read mo_occupation from TREXIO with status $status")
+  nmo, status = trexio_read_MO_num(MO, trexio)
+  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  occupations, status = trexio_read_MO_occupation(MO, trexio)
+  if status != TREXIO.TREXIO_SUCCESS
+    println("Failed to read $(MO)_occupation from TREXIO with status $status")
     return (Float64[], Float64[])
   end
   @assert length(occupations) == nmo "Inconsistent number of orbital occupations: expected $nmo, got $(length(occupations))"
-  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo)
+  alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
   if length(beta_iorbs) == 0
     return (occupations, Float64[])
   else

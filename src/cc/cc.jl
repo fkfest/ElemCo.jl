@@ -2945,7 +2945,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   if orbopt && qv
     Rpq = rotation_matrix(EC, Amps1[1])
     if EC.options.cc.keepOQVorbitals
-      transform_fcidump(EC.fd, Rpq, Rpq)
+      transform_fcidump(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
     else
       rotate_ints(EC, Rpq)
       @mtensor int1_r[p,q] := EC.fd.int1[p',q'] * Rpq[p',p] * Rpq[q',q]

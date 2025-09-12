@@ -393,6 +393,20 @@ const TREXIO_MO_FIELDS = [
     TrexioField("mo", "k_point", Int, ["mo.num"], "for periodic calculations, the k point to which each MO belongs"),
 ]
 
+## 4.2a Positron orbitals (po group) - non-standard, violator
+const TREXIO_PO_FIELDS = [
+    TrexioField("po", "type", String, SCALAR, "free text to identify the set of POs (HF, Natural, Local, CASSCF, etc)", violator=true),
+    TrexioField("po", "num", Int, SCALAR, "number of POs", violator=true),
+    TrexioField("po", "coefficient", Float64, ["ao.num", "po.num"], "PO coefficients", violator=true),
+    TrexioField("po", "coefficient_im", Float64, ["ao.num", "po.num"], "PO coefficients (imaginary part)", violator=true),
+    TrexioField("po", "class", String, ["po.num"], "choose among: Core, Inactive, Active, Virtual, Deleted", violator=true),
+    TrexioField("po", "symmetry", String, ["po.num"], "symmetry in the point group", violator=true),
+    TrexioField("po", "occupation", Float64, ["po.num"], "occupation number", violator=true),
+    TrexioField("po", "energy", Float64, ["po.num"], "for canonical POs, corresponding eigenvalue", violator=true),
+    TrexioField("po", "spin", Int, ["po.num"], "for UHF wave functions, 0 is ↑ and 1 is ↓", violator=true),
+    TrexioField("po", "k_point", Int, ["po.num"], "for periodic calculations, the k point to which each PO belongs", violator=true),
+]
+
 ## 4.2.1 One-electron integrals (mo_1e_int group)
 const TREXIO_MO_1E_INT_FIELDS = [
     TrexioField("mo_1e_int", "overlap", Float64, ["mo.num", "mo.num"], "overlap integrals ⟨p|q⟩"),
@@ -511,7 +525,9 @@ const ALL_TREXIO_FIELDS = vcat(
     TREXIO_AO_FIELDS, TREXIO_AO_1E_INT_FIELDS, TREXIO_AO_2E_INT_FIELDS,
     TREXIO_MO_FIELDS, TREXIO_MO_1E_INT_FIELDS, TREXIO_MO_2E_INT_FIELDS,
     TREXIO_DETERMINANT_FIELDS, TREXIO_CSF_FIELDS, TREXIO_AMPLITUDE_FIELDS,
-    TREXIO_RDM_FIELDS, TREXIO_JASTROW_FIELDS, TREXIO_QMC_FIELDS
+    TREXIO_RDM_FIELDS, TREXIO_JASTROW_FIELDS, TREXIO_QMC_FIELDS,
+    # non-standard fields
+    TREXIO_PO_FIELDS,
 )
 
 # Generate exports dynamically for all TREXIO fields
