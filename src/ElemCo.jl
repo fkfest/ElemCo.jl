@@ -250,13 +250,15 @@ julia> wf = @loadwf ["orbital_energies", "orbital_occupations"]
 """
 macro loadwf(what...)
   strwhat = String[clean_exprstring(w) for w in what]
-  return quote
-    if length($(esc(strwhat))) == 1
+  if length(strwhat) == 1
+    return quote
       strwhat = @var2string($(esc(what[1])), $(esc(strwhat)), AbstractArray)
-    else
-      strwhat = $(esc(strwhat))
+      load_wavefunction($(esc(:EC)), strwhat)
     end
-    load_wavefunction($(esc(:EC)), strwhat)
+  else
+    return quote
+      load_wavefunction($(esc(:EC)), $(esc(strwhat)))
+    end
   end
 end
 
