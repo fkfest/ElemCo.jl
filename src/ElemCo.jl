@@ -252,11 +252,13 @@ macro loadwf(what...)
   strwhat = String[clean_exprstring(w) for w in what]
   if length(strwhat) == 1
     return quote
+      $(esc(:@tryECinit))
       strwhat = @var2string($(esc(what[1])), $(esc(strwhat)), AbstractArray)
       load_wavefunction($(esc(:EC)), strwhat)
     end
   else
     return quote
+      $(esc(:@tryECinit))
       load_wavefunction($(esc(:EC)), $(esc(strwhat)))
     end
   end
@@ -295,19 +297,6 @@ macro ECinit()
   end
 end
 
-# """ 
-#     @checkEC()
-
-#   Check current molecular system and/or fcidump in `EC::ECInfo` vs the defined variables.
-#   If variables `geometry::String` and `basis::Dict{String,Any}`
-#   and/or `fcidump::String` have changed, update `EC`.
-# """
-# macro checkEC()
-#   return quote
-#     $(esc(:@setupEC))
-#   end
-# end
-
 """ 
     @setupEC()
 
@@ -316,17 +305,29 @@ end
 macro setupEC()
   return quote
     try
-      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
-      println("Geometry: ",$(esc(:geometry)))
-      println("Basis: ",$(esc(:basis)))
-      $(esc(:EC)).system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
+      @assert(typeof($(esc(:fcidump))) <: AbstractString, "fcidump must be a String")
+      if fd_origin($(esc(:EC)).fd) != $(esc(:fcidump))
+        println("FCIDump: ",$(esc(:fcidump)))
+        $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+      end
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
     try
-      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
-      println("FCIDump: ",$(esc(:fcidump)))
-      $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
+      @assert(typeof($(esc(:geometry))) <: AbstractString, "geometry must be a String")
+      @assert(typeof($(esc(:basis))) <: Union{AbstractDict, AbstractString}, "basis must be a Dict or a String")
+      system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
+      if system != $(esc(:EC)).system
+        println("Geometry: ",$(esc(:geometry)))
+        println("Basis: ",$(esc(:basis)))
+        $(esc(:EC)).system = system
+        if fd_exists($(esc(:EC)).fd)
+          println("Geometry or basis changed, the integrals will be regenerated.")
+          $(esc(:EC)).fd = TFDump()  # reset fcidump
+        end
+      end
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
@@ -348,6 +349,8 @@ macro tryECinit()
     end
     if runECinit[1]
       $(esc(:@ECinit))
+    else
+      $(esc(:@setupEC))
     end
   end
 end
@@ -414,6 +417,7 @@ var"@opt" = var"@set"
 macro reset(opt)
   stropt="$opt"
   return quote
+    $(esc(:@tryECinit))
     if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
       $(esc(:EC)).options.$opt = typeof($(esc(:EC)).options.$opt)()
     else
@@ -694,7 +698,7 @@ macro transform_ints()
       error("No FCIDump found.")
     end
     CMOl, CMOr = load_left_right_rotations($(esc(:EC)))
-    transform_fcidump($(esc(:EC)).fd, CMOl, CMOr)
+    transform_fcidump!($(esc(:EC)).fd, CMOl, CMOr)
   end
 end
 
@@ -832,6 +836,7 @@ end
 macro export_molden(filename)
   strfilename = clean_exprstring(filename)
   return quote
+    $(esc(:@tryECinit))
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
   end
@@ -863,7 +868,7 @@ macro molpro_input(filename="elemcoil")
     if newbasis[1]
       $(esc(:basis)) = ao_basis
     end
-    $(esc(:@ECinit))
+    $(esc(:@ECinit)) # TODO replace with @tryECinit once the mo classes are properly handled
     MolproInterface.set_options_from_xml!($(esc(:EC)), mol_node)
     if haskey($(esc(:MI)), "ORBITALS")
       orbs = MolproInterface.import_orbitals($(esc(:EC)), $(esc(:MI))["ORBITALS"])

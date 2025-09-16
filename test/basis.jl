@@ -31,7 +31,6 @@ energies = @cc dcsd
 @test abs(energies["DCSD"]-EDCSD_test) < epsilon
 
 basis = "vdz+diffuse"
-@ECinit
 @dfhf
 energies = @dfmp2
 @test abs(energies["MP2"]-EDFMP2_test) < epsilon

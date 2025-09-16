@@ -2833,7 +2833,6 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   restrict = has_prefix(method, "R")
   qv = has_prefix(method, "QV")
   orbopt = has_prefix(method, "O")
-  println("has prefix o",has_prefix(method, "QV") )
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
@@ -2945,7 +2944,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   if orbopt && qv
     Rpq = rotation_matrix(EC, Amps1[1])
     if EC.options.cc.keepOQVorbitals
-      transform_fcidump(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
+      transform_fcidump!(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
     else
       rotate_ints(EC, Rpq)
       @mtensor int1_r[p,q] := EC.fd.int1[p',q'] * Rpq[p',p] * Rpq[q',q]

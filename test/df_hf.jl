@@ -39,16 +39,16 @@ println(orbital_printout)
 energies = @dfmp2
 @test abs(energies["MP2"]-EMP2_test) < epsilon
 
-fcidump = "DF_HF_TEST.FCIDUMP"
-@set int fcidump=fcidump
+fdump = "DF_HF_TEST.FCIDUMP"
+@set int fcidump=fdump
 @dfints
 
-energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
+energies = ElemCo.ccdriver(EC, "dcsd"; fcidump=fdump)
 @test abs(energies["HF"]-EHF_test) < epsilon
 @test abs(energies["MP2"]-EMP2_test) < epsilon
 @test abs(energies["DCSD"]-EDCSD_test) < epsilon
 
-rm(fcidump)
+rm(fdump)
 
 energies = @dfcc svd-dcsd
 @test abs(energies["SVD-DCSD"]-ESVDDCSD_test) < epsilon

@@ -13,6 +13,7 @@
 
 * The fallback basis sets are now defined for `ao` (`def2-tzvppd`), `jkfit` (`aug-def2-universal-jkfit`), and `mpfit` (`def2-tzvppd-mpfit`) basis sets.
 * Functions for `H` and `He` are copied from [aug]-cc-pVXZ basis sets to [aug]-p[w]CVXZ basis sets. Functions for Li and Be are copied from [aug]-cc-pCVXZ basis sets to [aug]-pwCVXZ basis sets.
+* Function `transform_fcidump` has been renamed to `transform_fcidump!`.
 
 ### Added
 
@@ -20,6 +21,7 @@
 * Functions to get all elements available in a given basis set (`get_available_elements4basis`) and to output the basis set for a given list of elements in the molpro format (`output_basis`).
 * Augmented basis sets for jkfit vXz-jkfit and def2-universal-jkfit basis sets.
 * DF-HF and DF-UF orbitals are stored in trexio dump file.
+* A check for changes of the molecular geometry/basis/fcidump is performed in every macro-command call. If a change is detected, the integrals are set to be recalculated or reloaded from the fcidump file. With this, the user doesn't need to worry about calling `@ECinit` after changing the geometry/basis/fcidump.
 
 ### Fixed
 

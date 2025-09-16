@@ -11,7 +11,7 @@ using ..ElemCo.MNPY
 using ..ElemCo.QMTensors
 
 export FDump, TFDump, QFDump 
-export fd_exists, read_fcidump, write_fcidump, transform_fcidump
+export fd_exists, fd_origin, fd_ismodified, read_fcidump, write_fcidump, transform_fcidump!
 export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
@@ -123,6 +123,10 @@ end
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
   head::FDumpHeader = FDumpHeader()
+  """ path of the original fcidump file, empty if created from scratch. """
+  origin::String = ""
+  """`⟨false⟩` has the integrals been modified after reading? """
+  modified::Bool = false
   """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
   uhf::Bool = false
 end
@@ -149,7 +153,7 @@ FDump(int2::Array{Float64,N}, int1::Matrix{Float64}, int0::Float64, head::FDumpH
 
   Spin-polarized fcidump
 """
-FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2aa, int2bb, int2ab, int1a, int1b, int0, head)
+FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2aa, int2bb, int2ab, int1a, int1b, int0, head, uhf=true)
 
 """
     FDump{N}(norb, nelec; ms2=0, isym=1, orbsym=[], uhf=false, simtra=false)
@@ -202,6 +206,24 @@ end
 """
 function fd_exists(fd::FDump)
   return !isempty(fd.head)
+end
+
+"""
+    fd_ismodified(fd::FDump)
+
+  Return true if the object has been modified after reading
+"""
+function fd_ismodified(fd::FDump)
+  return fd.modified
+end
+
+"""
+    fd_origin(fd::FDump)
+
+  Return the path of the original fcidump file, empty if created from scratch.
+"""
+function fd_origin(fd::FDump)
+  return fd.origin
 end
 
 """
@@ -327,6 +349,7 @@ function read_fcidump(fcidump::String, ::Val{N}) where N
   fdf = open(fcidump)
   fd = FDump{N}()
   fd.head = read_header(fdf)
+  fd.origin = fcidump
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
   simtra = (headvar(fd, "ST", Int) > 0)
   if simtra
@@ -831,14 +854,14 @@ end
 """
 function write_integrals2(int2::Array{Float64,3}, fdf, tol, simtra)
   write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
-  inds = (p,q,r,s) -> CartesianIndex(p,q,uppertriangular_index(r,s))
-  indslow = (p,q,r,s) -> CartesianIndex(q,p,uppertriangular_index(s,r))
+  inds(p,q,r,s) = CartesianIndex(p,q,uppertriangular_index(r,s))
+  indslow(p,q,r,s) = CartesianIndex(q,p,uppertriangular_index(s,r))
   write_integrals2_(int2, inds, indslow, fdf, tol)
 end
 
 function write_integrals2(int2::Array{Float64,4}, fdf, tol, simtra)
   write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
-  inds = (p,q,r,s) -> CartesianIndex(p,q,r,s)
+  inds(p,q,r,s) = CartesianIndex(p,q,r,s)
   write_integrals2_(int2, inds, inds, fdf, tol)
 end
 
@@ -959,12 +982,12 @@ function write_integrals1(int1, fdf, tol, simtra)
 end
 
 """ 
-    transform_fcidump(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
+    transform_fcidump!(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
 
   Transform integrals to new basis using Tl and Tr transformation matrices. 
   If Tl and Tr are unrestricted, then the function transforms rhf fcidump to uhf fcidump.
 """
-function transform_fcidump(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
+function transform_fcidump!(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
   println("Transform integrals...")
   if !is_restricted(Tl) || !is_restricted(Tr)
     genuhfdump = true
@@ -993,6 +1016,7 @@ function transform_fcidump(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
     fd.int2 = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1])
     fd.int1 = transform_int1(fd.int1, Tl[1], Tr[1])
   end
+  fd.modified = true
 end
 
 """
