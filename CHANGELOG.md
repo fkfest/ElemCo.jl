@@ -8,6 +8,8 @@
   to enable them.
 * `wf.orb` and `wf.left` options are deprecated. The orbitals are now always written to and read from the trexio dump file `wf.dump`. Use `@loadwf` to load the orbitals from the dump file.
 * The `@transform_ints` macro now automatically uses biorthogonal transformations for BO orbitals.
+* The `@mtensor`, `@mview` macros are moved from `TensorTools` to a new `MTensorOperations` module (still reexported by `TensorTools`).
+* The function `get_spaceblocks` has been moved from `TensorTools` to `Utils` module.
 
 ### Changed
 
@@ -27,6 +29,7 @@
 
 * A simple sanity check of the fitting basis sets is performed (by checking whether it's 
   an AO basis set). The error message can be turned to a warning by setting `@set int check_fit_basis=false`.
+* Integral transformation now should use much less memory and be faster.
 
 ## Version [v0.14.1] - 2025.07.03
 

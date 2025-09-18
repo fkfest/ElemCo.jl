@@ -9,6 +9,8 @@ using ..ElemCo.TensorTools
 using ..ElemCo.OrbTools
 using ..ElemCo.DFTools
 using ..ElemCo.DFHF
+using ..ElemCo.QMTensors
+using ..ElemCo.Wavefunctions
 
 export dfmcscf
 
@@ -1045,6 +1047,11 @@ function dfmcscf(EC::ECInfo)
     println("Not converged!")
   end
   delete_temporary_files!(EC)
+  occupations = zeros(size(cMO,2))
+  occupations[EC.space['d']] .= 2.0
+  occupations[EC.space['a']] .= 1.0 # TODO: use the real occupation numbers from 1RDM
+  ϵ = diag(prev_fock_MO+prev_fockClosed_MO)
+  dump_orbitals(EC, SpinMatrix(cMO); type="DF-MCSCF", energies=ϵ, occupations=occupations)
   return E+Enuc
 end
 end #module

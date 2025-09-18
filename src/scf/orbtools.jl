@@ -114,10 +114,11 @@ end
   See [`ScfOptions.guess`](@ref ECInfos.ScfOptions) for possible values.
 
 """
-
 function guess_pos_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
     return guess_pos_hcore(EC)
+  elseif guess == :ORB || guess == :orb
+    return load_positron_orbitals(EC)
   else
     error("unknown guess type")
     return SpinMatrix()

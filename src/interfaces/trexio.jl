@@ -418,7 +418,8 @@ function read_trexio_rotations(trexio::TrexioFile; verbose=true, MO="mo")
   return _read_trexio_orbital_transformations(trexio, collect(1:nao), verbose, MO)
 end
 
-for action in ("write", "read")
+# Generate wrapper functions for mo and po variants of TREXIO orbital functions
+for action in ("has", "write", "read")
   for field in ("num", "type", "spin", "coefficient", "class", "energy", "occupation")
     fname = Symbol("trexio_" * action * "_MO_" * field)
     fmoname = Symbol("trexio_" * action * "_mo_" * field)

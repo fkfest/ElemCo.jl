@@ -5,9 +5,11 @@ Individual arrays of integrals can also be in *.npy format
 module FciDumps
 
 using DocStringExtensions
-using TensorOperations
 using Printf
+using Buffers
+using ..ElemCo.Utils
 using ..ElemCo.MNPY
+using ..ElemCo.MTensorOperations
 using ..ElemCo.QMTensors
 
 export FDump, TFDump, QFDump 
@@ -1034,25 +1036,44 @@ function transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::Abstract
   norb = size(int2,1)
   int2t = zeros(norb,norb,norb*(norb+1)÷2)
   int_3i = zeros(norb,norb,norb)
+  @buffer buf(2*norb*norb*norb) begin
   for s = 1:norb
     rs = strict_uppertriangular_range(s)
     rrange = 1:s-1
-    if length(rs) > 0
-      @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
+    lenrs = length(rs)
+    if lenrs > 0
+      v!int2 = @mview int2[:,:,rs]
+      v!Tr = @mview Tr[rrange,:]
+      intb1 = alloc!(buf, norb, norb, lenrs)
+      intb2 = alloc!(buf, norb, norb, lenrs)
+      @mtensor intb1[p,q',r'] = v!int2[p',q',r'] * Tl[p',p]
+      @mtensor intb2[p,q,r'] = intb1[p,q',r'] * Tl2[q',q]
+      @mtensor int_3i[p,q,r] = intb2[p,q,r'] * v!Tr[r',r]
+      reset!(buf)
     end
     # contribution from the diagonal <p'q'|s's'> 
     ss = uppertriangular_index(s, s)
-    @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
+    v!int2 = @mview int2[:,:,ss]
+    intb1 = alloc!(buf, norb, norb)
+    intb2 = alloc!(buf, norb, norb)
+    @mtensor intb1[p,q'] = 0.5 * v!int2[p',q'] * Tl[p',p]
+    @mtensor intb2[p,q] = intb1[p,q'] * Tl2[q',q]
+    @mtensor int_3i[p,q,r] += intb2[p,q] * Tr[s,:][r]
+    reset!(buf)
+    Tr2s = Tr2[s,:]
     for s1 = 1:norb
       rs1 = uppertriangular_range(s1)
       rrange = 1:s1
-      Tr2ss1 = Tr2[s,s1]
-      for ir in rrange
-        @views int2t[:, :, rs1[ir]] .+= Tr2ss1 .* int_3i[:, :, ir]
-        @views int2t[:, :, rs1[ir]] .+= Tr2[s, ir] .* transpose(int_3i[:, :, s1])
-      end
+      Tr2ss1 = Tr2s[s1]
+      v!Tr2s = @mview Tr2s[rrange]
+      v!int2t = @mview int2t[:,:,rs1]
+      v!int_3i_r = @mview int_3i[:,:,rrange]
+      v!int_3i_s1 = @mview int_3i[:,:,s1]
+      @mtensor v!int2t[p,q,r] += v!int_3i_r[p,q,r] * Tr2ss1
+      @mtensor v!int2t[p,q,r] += v!int_3i_s1[q,p] * v!Tr2s[r]
     end
   end
+  end #buffer
   return int2t
 end
 function transform_int2(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
@@ -1075,26 +1096,72 @@ function transform_int2_Q(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::Abstra
   int2t = zeros(norb,norb,norb,norb)
   int_3i = zeros(norb,norb,norb)
   int_3i2 = zeros(norb,norb,norb)
+  @buffer buf(2*norb*norb*norb) begin
   for s = 1:norb
     rs = strict_uppertriangular_range(s)
     rrange = 1:s-1
-    if length(rs) > 0
-      @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
-      @tensoropt int_3i2[p,q,r] = int2[:,:,rs][p',q',r'] * Tl2[p',p] * Tl[q',q] * Tr2[rrange,:][r',r]
+    lenrs = length(rs)
+    if lenrs > 0
+      v!int2 = @mview int2[:,:,rs]
+      v!Tr = @mview Tr[rrange,:]
+      v!Tr2 = @mview Tr2[rrange,:]
+      intb1 = alloc!(buf, norb, norb, lenrs)
+      intb2 = alloc!(buf, norb, norb, lenrs)
+      @mtensor intb1[p,q',r'] = v!int2[p',q',r'] * Tl[p',p]
+      @mtensor intb2[p,q,r'] = intb1[p,q',r'] * Tl2[q',q]
+      @mtensor int_3i[p,q,r] = intb2[p,q,r'] * v!Tr[r',r]
+      @mtensor intb1[p,q',r'] = v!int2[p',q',r'] * Tl2[p',p]
+      @mtensor intb2[p,q,r'] = intb1[p,q',r'] * Tl[q',q]
+      @mtensor int_3i2[p,q,r] = intb2[p,q,r'] * v!Tr2[r',r]
+      reset!(buf)
     end
+    Tr_s = Tr[s,:]
+    Tr2_s = Tr2[s,:]
     # contribution from the diagonal <p'q'|s's'> 
     ss = uppertriangular_index(s, s)
-    @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
-    @tensoropt int_3i2[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl2[p',p] * Tl[q',q] * Tr2[s,:][r]
+    v!int2 = @mview int2[:,:,ss]
+    intb1 = alloc!(buf, norb, norb)
+    intb2 = alloc!(buf, norb, norb)
+    @mtensor intb1[p,q'] = 0.5 * v!int2[p',q'] * Tl[p',p]
+    @mtensor intb2[p,q] = intb1[p,q'] * Tl2[q',q]
+    @mtensor int_3i[p,q,r] += intb2[p,q] * Tr_s[r]
+    @mtensor intb1[p,q'] = 0.5 * v!int2[p',q'] * Tl2[p',p]
+    @mtensor intb2[p,q] = intb1[p,q'] * Tl[q',q]
+    @mtensor int_3i2[p,q,r] += intb2[p,q] * Tr2_s[r]
+    reset!(buf)
 
-    @tensoropt int2t[p,q,r,s'] += int_3i[p,q,r] * Tr2[s,:][s']
-    @tensoropt int2t[p,q,r,s'] += int_3i2[q,p,s'] * Tr[s,:][r]
+    @mtensor int2t[p,q,r,s'] += int_3i[p,q,r] * Tr2_s[s']
+    @mtensor int2t[p,q,r,s'] += int_3i2[q,p,s'] * Tr_s[r]
   end
+  end #buffer
   return int2t
 end
 function transform_int2_Q(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
                         Tr::AbstractArray, Tr2::AbstractArray)
-  @tensoropt int2t[p,q,r,s] := int2[p',q',r',s']*Tl[p',p]*Tl2[q',q]*Tr[r',r]*Tr2[s',s]
+  norb = size(int2,1)
+  sBlks = get_spaceblocks(1:norb)
+  maxs = maximum(length, sBlks)
+  int2t = Array{Float64,4}(undef, norb, norb, norb, norb)
+  @buffer buf(2*norb*norb*norb*maxs) begin
+  first = true
+  for s = sBlks
+    lens = length(s)
+    intb1 = alloc!(buf, norb, norb, norb, lens)
+    v!int2 = @mview int2[:,:,:,s]
+    v!Tr2 = @mview Tr2[s,:]
+    @mtensor intb1[p,q',r',s'] = v!int2[p',q',r',s'] * Tl[p',p]
+    intb2 = alloc!(buf, norb, norb, norb, lens)
+    @mtensor intb2[p,q,r',s'] = intb1[p,q',r',s'] * Tl2[q',q]
+    @mtensor intb1[p,q,r,s'] = intb2[p,q,r',s'] * Tr[r',r]
+    if first
+      @mtensor int2t[p,q,r,s] = intb1[p,q,r,s'] * v!Tr2[s',s]
+      first = false
+    else
+      @mtensor int2t[p,q,r,s] += intb1[p,q,r,s'] * v!Tr2[s',s]
+    end
+    reset!(buf)
+  end
+  end #buffer
   return int2t
 end
 
@@ -1104,7 +1171,7 @@ end
   Transform 1-e integrals to new basis using `Tl` and `Tr` transformation matrices.
 """
 function transform_int1(int1::AbstractArray, Tl::AbstractArray,  Tr::AbstractArray)
-  @tensoropt int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
+  @mtensor int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
   return int1t
 end
 
@@ -1138,9 +1205,9 @@ function reorder_orbs_int2(int2::AbstractArray, orbs)
         ro = orbs[r]
         so = orbs[s]
         if ro <= so
-          int2t[:,:,uppertriangular_index(r,s)] = int2[orbs,orbs,uppertriangular_index(ro, so)]
+          @views int2t[:,:,uppertriangular_index(r,s)] = int2[orbs,orbs,uppertriangular_index(ro, so)]
         else
-          int2t[:,:,uppertriangular_index(r,s)] = permutedims(int2[orbs,orbs,uppertriangular_index(so, ro)], [2,1])
+          @views permutedims!(int2t[:,:,uppertriangular_index(r,s)], int2[orbs,orbs,uppertriangular_index(so, ro)], (2,1))
         end
       end
     end

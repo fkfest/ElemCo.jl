@@ -69,6 +69,7 @@ makedocs(
       "orbtools.md",
       "outputs.md",
       "qmtensors.md",
+      "mtensoroperations.md",
       "tensortools.md",
       "descdict.md",
       "utils.md",
