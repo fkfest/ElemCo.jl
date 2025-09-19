@@ -152,7 +152,7 @@ function read_trexio_system(trexio::TrexioFile)
   # Read data using standalone TREXIO module
   natoms, status = trexio_read_nucleus_num(trexio)
   if status == TREXIO.TREXIO_HAS_NOT
-      error("No nucleus data found in TREXIO file")
+    return MSystem()  # empty system
   end
   nuclear_charges, status = trexio_read_nucleus_charge(trexio)
   @assert status == TREXIO.TREXIO_SUCCESS "Failed to read nuclear charges from TREXIO file"
@@ -272,6 +272,9 @@ Read basis set information from TREXIO file.
 """
 function read_trexio_basis(trexio::TrexioFile)
   system = read_trexio_system(trexio)
+  if isempty(system)
+    return BasisSet()  # empty basis set
+  end
 
   type, status = trexio_read_basis_type(trexio)
   if type != "Gaussian"

@@ -12,7 +12,7 @@ using ..ElemCo.Elements
 using ..ElemCo.Constants
 export ACentre, MSystem
 export issame
-export parse_geometry, system_exists, genxyz, nuclear_repulsion, bond_length, electron_distribution
+export parse_geometry, genxyz, nuclear_repulsion, bond_length, electron_distribution
 export atomic_position
 export guess_nelec, guess_norb, guess_ncore
 export atomic_centre_label, element_fullname, element_label, element_LABEL, is_dummy, set_dummy!, unset_dummy!
@@ -441,13 +441,8 @@ function parse_xyz_geometry(xyz_lines::AbstractArray, basis::Dict)
   return array_of_atoms, badline
 end
 
-""" 
-    system_exists(ms::MSystem)
-
-  Check whether the system is not empty.
-"""
-function system_exists(ms::MSystem)
-  return length(ms) > 0
+function Base.isempty(ms::MSystem)
+  return isempty(ms.centres)
 end
 
 """

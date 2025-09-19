@@ -13,7 +13,7 @@ export open_dump, close_dump
 export dump_orbitals, fetch_orbitals
 export dump_rotations, fetch_rotations, is_rotation, is_biorthogonal
 export fetch_orbital_energies, fetch_orbital_occupations
-export load_wavefunction
+export load_wavefunction, save_wavefunction, copy_wavefunction
 
 """
     dumpfile(EC::ECInfo, intent)
@@ -115,14 +115,21 @@ end
 
   Prepare orbital info vectors for dumping.
 """
-function prepare_orb_vectors(input, restricted)
-  if isnothing(input)
-    return (Float64[], Float64[])
-  elseif restricted
-    @assert isa(input, Vector{Float64}) "For restricted orbitals, provide input as a single vector."
+function prepare_orb_vectors(input, restricted) end
+function prepare_orb_vectors(input::Nothing, restricted)
+  return (Float64[], Float64[])
+end
+function prepare_orb_vectors(input::Vector{Float64}, restricted)
+  if restricted
     return (input, Float64[])
   else
-    @assert length(input) == 2 "For unrestricted orbitals, provide input as a tuple of two vectors."
+    error("For unrestricted orbitals, provide input as a tuple of two vectors.")
+  end
+end
+function prepare_orb_vectors(input::Tuple{Vector{Float64},Vector{Float64}}, restricted)
+  if restricted
+    return (input[1], Float64[])
+  else
     return (input[1], input[2])
   end
 end
@@ -153,6 +160,8 @@ end
 
   Returns a `SpinMatrix` of the orbitals, `type::String` and the basis.
 
+If the basis information is not stored in the dump file (i.e., we have a rotation instead of orbitals), 
+`basis` is returned as empty `BasisSet`.
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
 function fetch_orbitals end
@@ -164,7 +173,11 @@ end
 function fetch_orbitals(io::TrexioFile, EC::ECInfo, MO="mo")
   println("Fetching orbitals ...")
   basis = read_trexio_basis(io)
-  return read_trexio_orbitals(io, basis; MO=MO)..., basis
+  if isnothing(basis)
+    return read_trexio_rotations(io; MO=MO)..., basis
+  else
+    return read_trexio_orbitals(io, basis; MO=MO)..., basis
+  end
 end
 
 """
@@ -229,10 +242,12 @@ function dump_rotations(io::TrexioFile, EC::ECInfo, cRot::SpinMatrix;
   oenergies = prepare_orb_vectors(energies, is_restricted(cRot))
   ooccupations = prepare_orb_vectors(occupations, is_restricted(cRot))
   classes = prepare_orb_classes(EC, is_restricted(cRot))
-  if biorthogonal
+  if biorthogonal && !is_biorthogonal(type)
     type *= " biorthogonal"
   end
-  type *= " Rotation"
+  if !is_rotation(type)
+    type *= " Rotation"
+  end
   write_trexio_rotations(io, cRot; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
   return
 end
@@ -286,6 +301,59 @@ function load_wavefunction(EC::ECInfo, what::Vector{String})
   return wf
 end
 
+"""
+    save_wavefunction(EC::ECInfo, wf::AbstractDict)
+
+  Save parts of the wavefunction to file [`WfOptions.dump_new`](@ref ECInfos.WfOptions) or [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  `wf` can contain any of the following keys:
+  - `basis`: basis set information
+  - `orbitals`: molecular orbitals
+  - `orbital_type`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
+  - `orbital_energies`: molecular orbital energies
+  - `orbital_occupations`: molecular orbital occupations
+  - `amplitudes`: coupled cluster amplitudes
+"""
+function save_wavefunction(EC::ECInfo, wf::AbstractDict)
+  open_dump(EC, "w") do io
+    if haskey(wf, "orbitals") 
+      if haskey(wf, "basis") && !isempty(wf["basis"])
+        dump_orbitals(io, EC, wf["orbitals"]; 
+                      basis=wf["basis"], type=get(wf, "orbital_type", "USER"), 
+                      energies=get(wf, "orbital_energies", nothing), 
+                      occupations=get(wf, "orbital_occupations", nothing))
+      else
+        dump_rotations(io, EC, wf["orbitals"]; 
+                       type=get(wf, "orbital_type", "USER"), 
+                       energies=get(wf, "orbital_energies", nothing), 
+                       occupations=get(wf, "orbital_occupations", nothing),
+                       biorthogonal=is_biorthogonal(get(wf, "orbital_type", "")))
+      end
+    elseif haskey(wf, "rotations") 
+      dump_rotations(io, EC, wf["rotations"]; 
+                     type=get(wf, "orbital_type", "USER"), 
+                     energies=get(wf, "orbital_energies", nothing), 
+                     occupations=get(wf, "orbital_occupations", nothing),
+                     biorthogonal=is_biorthogonal(get(wf, "orbital_type", "")))
+    end
+    # if haskey(wf, "amplitudes")
+    #   dump_amplitudes(io, EC, wf["amplitudes"]; type="CCSD")
+    # end
+  end
+  return
+end
+
+"""
+    copy_wavefunction(EC::ECInfo, tofile::AbstractString="")
+
+  Copy the wavefunction dump file to `tofile`. If `tofile` is not given, copy to the current dump file for writing.
+
+  Note: This does not check the contents of the files.
+"""
+function copy_wavefunction(EC::ECInfo, tofile::AbstractString="")
+  cp(dumpfile(EC, "r")[2], tofile == "" ? dumpfile(EC, "w")[2] : tofile; force=true)
+  return
+end
 
 """
     is_rotation(type)

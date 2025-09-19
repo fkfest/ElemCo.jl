@@ -116,7 +116,7 @@ end
   Setup EC.space from fcidump EC.fd.
 """
 function setup_space_fd!(EC::ECInfo; verbose=true)
-  @assert fd_exists(EC.fd) "EC.fd is not set up!"
+  @assert !isempty(EC.fd) "EC.fd is not set up!"
   nelec = EC.options.wf.nelec
   npositron = EC.options.wf.npositron
   charge = EC.options.wf.charge
@@ -144,7 +144,7 @@ end
   Setup EC.space from molecular system EC.system.
 """
 function setup_space_system!(EC::ECInfo; verbose=true)
-  @assert system_exists(EC.system) "EC.system is not set up!"
+  @assert !isempty(EC.system) "EC.system is not set up!"
   nelec = EC.options.wf.nelec
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2

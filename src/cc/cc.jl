@@ -2992,7 +2992,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
       println("SVD-DC-CCSDT with SVD-(T)")
     end
   end
-  if EC.options.cc.usedf && system_exists(EC.system)
+  if EC.options.cc.usedf && !isempty(EC.system)
     println("Using density fitting")
     calc_df_integrals(EC)
   else

@@ -13,7 +13,7 @@ using ..ElemCo.MTensorOperations
 using ..ElemCo.QMTensors
 
 export FDump, TFDump, QFDump 
-export fd_exists, fd_origin, fd_ismodified, read_fcidump, write_fcidump, transform_fcidump!
+export fd_origin, fd_ismodified, read_fcidump, write_fcidump, transform_fcidump!
 export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
@@ -201,13 +201,8 @@ function modify_header!(fd::FDump, norb::Int, nelec::Int; ms2::Int=-1, isym::Int
   end
 end
 
-"""
-    fd_exists(fd::FDump)
-
-  Return true if the object is a non-empty FDump
-"""
-function fd_exists(fd::FDump)
-  return !isempty(fd.head)
+function Base.isempty(fd::FDump)
+  return isempty(fd.head)
 end
 
 """

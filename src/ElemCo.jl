@@ -93,7 +93,7 @@ using .TrexioInterface
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
-export @loadwf
+export @loadwf, @savewf, @copywf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
@@ -265,6 +265,53 @@ macro loadwf(what...)
   end
 end
 
+"""
+    @savewf(wf::AbstractDict)
+
+  Save wavefunction data to the trexio dump file.
+
+  The argument `wf` is a dictionary with the data to be saved.
+  Possible keys are:
+  - `basis`: basis set information
+  - `orbitals`: molecular orbitals
+  - `orbital_type`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
+  - `orbital_energies`: molecular orbital energies
+  - `orbital_occupations`: molecular orbital occupations
+  - `amplitudes`: coupled cluster amplitudes
+
+  # Examples
+```julia
+julia> wf = @loadwf orbital_energies orbital_occupations
+julia> orbs = wf["orbitals"]
+[...]
+julia> wf1 = Dict("basis"=>wf["basis"], "orbitals"=>orbs, "orbital_type"=>"modified RHF") 
+julia> @savewf wf1
+```
+"""
+macro savewf(wf)
+  return quote
+    $(esc(:@tryECinit))
+    save_wavefunction($(esc(:EC)), $(esc(wf)))
+  end
+end
+
+"""
+    @copywf(to_file::AbstractString="")
+
+  Copy wavefunction data from the current trexio dump file to another dump file.
+
+  If `to_file` is not provided, the wavefunction is copied to [`EC.options.wf.dump_new`](@ref ECInfos.WfOptions) file.
+  Note: This does not check the contents of the files.
+"""
+macro copywf(to_file="")
+  strto = clean_exprstring(to_file)
+  return quote
+    $(esc(:@tryECinit))
+    strto = @var2string($(esc(to_file)), $(esc(strto)))
+    copy_wavefunction($(esc(:EC)), strto)
+  end
+end
+
 """ 
     @ECinit()
 
@@ -320,7 +367,7 @@ macro setupEC()
       @assert(typeof($(esc(:geometry))) <: AbstractString, "geometry must be a String")
       @assert(typeof($(esc(:basis))) <: Union{AbstractDict, AbstractString}, "basis must be a Dict or a String")
       system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
-      if !isapprox(system, $(esc(:EC)).system) && fd_exists($(esc(:EC)).fd)
+      if !isapprox(system, $(esc(:EC)).system) && !isempty($(esc(:EC)).fd)
         println("Geometry or basis changed, the integrals will be regenerated.")
         $(esc(:EC)).fd = TFDump()  # reset fcidump
       end
@@ -586,7 +633,7 @@ macro cc(method, kwargs...)
   else
     return quote
       $(esc(:@tryECinit))
-      if !fd_exists($(esc(:EC)).fd)
+      if isempty($(esc(:EC)).fd)
         $(esc(:@dfints))
       end
       strmethod = @var2string($(esc(method)), $(esc(strmethod)))
@@ -656,7 +703,7 @@ fcidump = "FCIDUMP"
 macro bohf()
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     if is_closed_shell($(esc(:EC)))
@@ -675,7 +722,7 @@ end
 macro bouhf()
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     bouhf($(esc(:EC)))
@@ -695,7 +742,7 @@ end
 macro transform_ints()
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     CMOl, CMOr = load_left_right_rotations($(esc(:EC)))
@@ -713,7 +760,7 @@ If `tol` is negative, all integrals are written, otherwise only integrals with a
 macro write_ints(file="FCIDUMP", tol=-1.0)
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     write_fcidump($(esc(:EC)).fd, $file, $tol)

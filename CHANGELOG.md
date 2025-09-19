@@ -25,6 +25,7 @@
 * DF-HF and DF-UF orbitals are stored in trexio dump file.
 * A check for changes of the molecular geometry/basis/fcidump is performed in every macro-command call. If a change is detected, the integrals are set to be recalculated or reloaded from the fcidump file. With this, the user doesn't need to worry about calling `@ECinit` after changing the geometry/basis/fcidump.
 * A test for dummy atoms is added. At the moment, if dummy atoms are detected, the integrals are recalculated. In the future, once we have AO-FDump support, the integrals can be reused.
+* Macros `@loadwf` and `@savewf` to load and save orbitals (etc) from/to trexio dump files. `@copywf` to copy trexio dump files (e.g., to make a local backup).
 
 ### Fixed
 
