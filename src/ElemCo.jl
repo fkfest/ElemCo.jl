@@ -320,14 +320,14 @@ macro setupEC()
       @assert(typeof($(esc(:geometry))) <: AbstractString, "geometry must be a String")
       @assert(typeof($(esc(:basis))) <: Union{AbstractDict, AbstractString}, "basis must be a Dict or a String")
       system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
-      if system != $(esc(:EC)).system
+      if !isapprox(system, $(esc(:EC)).system) && fd_exists($(esc(:EC)).fd)
+        println("Geometry or basis changed, the integrals will be regenerated.")
+        $(esc(:EC)).fd = TFDump()  # reset fcidump
+      end
+      if !issame(system, $(esc(:EC)).system)
         println("Geometry: ",$(esc(:geometry)))
         println("Basis: ",$(esc(:basis)))
         $(esc(:EC)).system = system
-        if fd_exists($(esc(:EC)).fd)
-          println("Geometry or basis changed, the integrals will be regenerated.")
-          $(esc(:EC)).fd = TFDump()  # reset fcidump
-        end
       end
     catch err
       isa(err, UndefVarError) || rethrow(err)

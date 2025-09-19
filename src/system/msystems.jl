@@ -11,6 +11,7 @@ using DocStringExtensions
 using ..ElemCo.Elements
 using ..ElemCo.Constants
 export ACentre, MSystem
+export issame
 export parse_geometry, system_exists, genxyz, nuclear_repulsion, bond_length, electron_distribution
 export atomic_position
 export guess_nelec, guess_norb, guess_ncore
@@ -82,6 +83,15 @@ function Base.isapprox(at1::ACentre, at2::ACentre; kwargs...)
         at1.basis == at2.basis && at1.dummy == at2.dummy
 end
 
+"""
+    issame(at1::ACentre, at2::ACentre; atol=1e-10, rtol=atol>0 ? 0 : 1e-8)
+
+  Check whether two atomic centres are the same, except for the charge and dummy flag.
+"""
+function issame(at1::ACentre, at2::ACentre; atol=1e-10, rtol=atol>0 ? 0 : 1e-8)
+  return at1.label == at2.label && isapprox(at1.position, at2.position; atol, rtol) && 
+        at1.atomic_number == at2.atomic_number && at1.basis == at2.basis 
+end
 
 """
     MSystem
@@ -119,6 +129,24 @@ function Base.isapprox(ms1::MSystem, ms2::MSystem; atol=1e-10, rtol=atol>0 ? 0 :
   end
   for (at1,at2) in zip(ms1,ms2)
     if !isapprox(at1, at2; atol, rtol)
+      return false
+    end
+  end
+  return true
+end
+
+"""
+    issame(ms1::MSystem, ms2::MSystem; atol=1e-10, rtol=atol>0 ? 0 : 1e-8)
+
+  Check whether two molecular systems are the same, 
+  except for the charges and dummy flags of the centres.
+"""
+function issame(ms1::MSystem, ms2::MSystem; atol=1e-10, rtol=atol>0 ? 0 : 1e-8)
+  if length(ms1) != length(ms2)
+    return false
+  end
+  for (at1,at2) in zip(ms1,ms2)
+    if !issame(at1, at2; atol, rtol)
       return false
     end
   end
