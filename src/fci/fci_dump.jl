@@ -6,6 +6,7 @@ FCI_DUMP molecular data structure.
     FCIDump
 
 Container for molecular data for FCI calculations.
+TODO: Use QFDump instead!
 """
 mutable struct FCIDump
   n_elec::Int
