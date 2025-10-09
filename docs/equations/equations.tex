@@ -3,6 +3,7 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{amsfonts}
+\usepackage{eufrak}
 \usepackage{xcolor}
 \newcommand{\red}[1]{{\color{red} #1}}
 \newcommand{\blue}[1]{{\color{blue} #1}}
@@ -61,11 +62,12 @@
 \newcommand{\sect}[1]{Sec.~\ref{#1}}
 \newcommand{\spa}[1]{{#1}}
 \newcommand{\spb}[1]{\bar{#1}}
+\newcommand{\st}[1]{\mathfrak{#1}}
 \newcommand{\dg}{\dagger}
 \newcommand{\lk}{\left}
 \newcommand{\rk}{\right}
 \newcommand{\ieq}{\stackrel{!}{=}}
-\newcommand{\ElemCojl}{\textsf{ElemCo.jl} }
+\newcommand{\elemcoil}{\textsf{ElemCo.jl}}
 \newcommand{\quantwo}{\textsf{Quantwo} }
 \newcommand{\cmd}[1]{\texttt{#1}}
 % for presubscripts and presuperscripts (e.g., \pre{^x}U_a)
@@ -76,13 +78,13 @@
 \mathcode`<="4268 \mathcode`>="5269
 
 \begin{document}
-\title{Equations and derivations for \ElemCojl}
+\title{Equations and derivations for \elemcoil}
 \author{Thomas Schraivogel, Fangcheng Wu and Daniel Kats}
 \maketitle
 \tableofcontents
 \chapter{Introduction}
 \section{General}
-In this document we collect the equations and derivations for methods implemented in the \ElemCojl package.
+In this document we collect the equations and derivations for methods implemented in the \elemcoil package.
 The final goal is to have a document which can be used as a reference for the equations and derivations.
 The final equations should also be contained in the code as docstrings or copied to the corresponding Markdown files.
 
@@ -137,7 +139,7 @@ Antisymmetrization operators:
 \chapter{Integrals}
 \section{Density fitting and Cholesky decomposition}
 \label{sec:df}
-The electron-repulsion integrals in \ElemCojl are obtained either from an external program 
+The electron-repulsion integrals in \elemcoil are obtained either from an external program 
 through an FCIDUMP \cite{knowlesDeterminant1989} interface, 
 or are calculated using the density-fitting approximation using an
 interface to the \texttt{libcint}\cite{libcint} library.
@@ -170,7 +172,7 @@ with $\delta^{K}_{L}$ being the Kronecker delta.
 If $L^{P}_{L}$ is low-rank, the equation is solved using the QR decomposition,
 otherwise it can be solved by simple back-substitution.
 
-The transformed density-fitted integrals which are used throughout \ElemCojl 
+The transformed density-fitted integrals which are used throughout \elemcoil
 are then calculated by multiplying the density-fitted 3-index 
 integrals with the non-symmetric square root of the inverse,
 \begin{equation}
@@ -182,7 +184,7 @@ and the density-fitted 4-index integrals can be calculated by
 \end{equation}
 
 If all integrals are calculated using the density-fitting approximation using \textit{mp2fit}
-fitting basis in \ElemCojl,
+fitting basis in \elemcoil,
 the correction terms are added using the \textit{jkfit} fitting basis
 to the one-body and zero-body terms of the Hamiltonian in order to ensure that the 
 reference energy and the Fock matrix from DF-HF is not changed by the density-fitting approximation,
@@ -208,7 +210,7 @@ and $L$ corresponds to the \textit{mpfit} density-fitting basis functions.
 \section{Frozen-core approximation}
 \label{sec:frozen-core}
 The frozen-core approximation is used to reduce the number of orbitals in the correlated 
-calculation. The frozen-core approximation is implemented in \ElemCojl by
+calculation. The frozen-core approximation is implemented in \elemcoil by
 setting the corresponding integrals to zero and adding their contribution to the
 one-particle and zero-particle part of the Hamiltonian,
 \begin{equation}
@@ -612,7 +614,7 @@ Note that only the \textbf{lower virtual} and \textbf{upper occupied} indices ar
 The amplitude equations can be obtained by taking the derivative of the Lagrangian with respect to the Lagrange multipliers $\Lambda$ 
 and setting the result to zero.
 
-The most efficient version of CCSD/DCSD in \ElemCojl combines the dressed factorization from above with 
+The most efficient version of CCSD/DCSD in \elemcoil combines the dressed factorization from above with 
 the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} and is given by
 \begin{equation}
 \begin{aligned}
@@ -1736,6 +1738,353 @@ IAS contribution to the energy,
 \end{equation}
 
 
+\chapter{Full Configuration Interaction and Selected CI Methods}
+\label{ch:fci}
+
+\section{Introduction}
+
+Full Configuration Interaction (FCI) provides the exact solution to the time-independent 
+Schr\"odinger equation within a given orbital basis set. While FCI is the ultimate benchmark 
+for quantum chemistry calculations, its exponential scaling with system size
+limits its applicability to small systems.
+This chapter describes the implementation of FCI and selected CI methods in \elemcoil,
+including Heat-bath CI (HCI), multi-state calculations, P-space enhanced Davidson solver,
+and reduced density matrix calculations.
+
+\section{Full Configuration Interaction}
+\label{sec:fci}
+
+\subsection{Determinantal Representation}
+
+A Slater determinant $|\Phi_I\rangle$ is specified by occupation numbers for each spin-orbital.
+In the Knowles-Handy algorithm\cite{knowles84_fci}, determinants are represented separately 
+for $\alpha$ and $\beta$ spins:
+\beq
+|\Phi^I\rangle = |\alpha^I\rangle \otimes |\beta^I\rangle
+\eeq
+where $|\alpha^I\rangle$ and $|\beta^I\rangle$ are strings of occupied spin-orbitals.
+
+The FCI wave function is expanded as:
+\beq
+|\Psi\rangle = c_I |\Phi^I\rangle
+\eeq
+where $c_I$ are the CI coefficients to be determined.
+
+\subsection{Slater-Condon Rules}
+
+Matrix elements $\langle \Phi_I | \op{H} | \Phi^J \rangle$ can be evaluated using 
+Slater-Condon rules:
+
+\textbf{Identical determinants} ($|\Phi^I\rangle = |\Phi^J\rangle$):
+\beq
+\langle \Phi_I | \op{H} | \Phi^I \rangle = \sum_{i \in I} h_i^i 
+    + \frac{1}{2} \sum_{i,j \in I} \left[ v_{ij}^{ij} - v_{ij}^{ji} \right]
+\eeq
+
+\textbf{Single excitation} ($|\Phi^J\rangle = \op{a}^\dagger_a \op{a}_i |\Phi^I\rangle$):
+\beq
+\langle \Phi_I | \op{H} | \Phi^J \rangle = \sgn_{ia} \left[ h_{ia} 
+    + \sum_{j \in I} \left[ v_{ij}^{aj} - v_{ij}^{ja} \right] \right]
+\eeq
+where $\sgn_{ia}$ is the fermionic phase factor from orbital reordering.
+
+\textbf{Double excitation} ($|\Phi^J\rangle = \op{a}^\dagger_a \op{a}^\dagger_b \op{a}_j \op{a}_i |\Phi^I\rangle$):
+\beq
+\langle \Phi_I | \op{H} | \Phi^J \rangle = \sgn_{iajb} \left[ v_{ij}^{ab} - v_{ij}^{ba} \right]
+\eeq
+
+\textbf{Higher excitations}: Matrix elements vanish for determinants differing by more than 
+two orbitals.
+
+\subsection{String-Based Algorithm}
+
+The Knowles-Handy algorithm\cite{knowles84_fci} evaluates the matrix-vector product 
+$\vect{v}_{\text{out}} = \op{H} \vect{c}_{\text{in}}$ efficiently using string-based 
+techniques and resolution of identity:
+
+\beq
+v_I = H_{I}^{J} c_J = \langle \alpha_I \beta_I | \op{H} | \alpha^J \beta^J \rangle c_J
+\eeq
+
+For the two-electron part of the Hamiltonian, we have:
+\beq
+\langle I| \half v_{pq}^{rs} \left(\op E^{p}_{r} \op E^{q}_{s} - \op E^{p}_{s}\delta^{q}_{r} \right)| J \rangle c_J,
+= \half v_{pq}^{rs} \langle I | \op E^{p}_{r} |K><K| \op E^{q}_{s} | J \rangle c_J - \cdots,
+\eeq
+
+The Hamiltonian is decomposed into one-electron and two-electron parts:
+\beq
+\op{H} = \op{H}_1^{(\alpha)} + \op{H}_1^{(\beta)} 
+       + \op{H}_2^{(\alpha\alpha)} + \op{H}_2^{(\beta\beta)} + \op{H}_2^{(\alpha\beta)}
+\eeq
+
+For each component, string substitutions are performed:
+\begin{itemize}
+\item \textbf{One-electron terms}: Substitution in one string, sum over other string
+\item \textbf{Same-spin two-electron}: Substitution in one string, sum over other string
+\item \textbf{Opposite-spin two-electron}: Substitution in both strings simultaneously
+\end{itemize}
+
+
+
+\section{Davidson Iterative Diagonalization}
+\label{sec:davidson}
+
+\subsection{Davidson Algorithm}
+
+The Davidson method finds the lowest eigenvalues of large matrices 
+without explicit matrix construction. Given initial guess vectors $\{\vect{u}^1, \ldots, \vect{u}^k\}$,
+the algorithm iteratively builds a subspace and solves:
+
+\beq
+\mat{H}_{\text{sub}} \vect{c} = E \vect{c},
+\eeq
+where $[\mat{H}_{\text{sub}}]_{i}^{j} = \langle \vect{u}_i | \op{H} | \vect{u}^j \rangle$.
+
+\subsection{Subspace Expansion}
+
+The residual vector for eigenstate $\st{n}$ is:
+\beq
+\vect{r}^{\st{n}} = \mat{H} \vect{x}^{\st{n}} - E^{\st{n}} \vect{x}^{\st{n}},
+\eeq
+where $\vect{x}^{\st{n}} = c_{i}^{\st{n}} \vect{u}^i$ is the approximate eigenvector.
+
+A correction vector $\vect{u}^{\st{n}} \rightarrow \vect{u}^{k+1}$ is computed and added to the subspace. In \elemcoil, 
+we use either the diagonal preconditioner,
+\beq
+u^\st{n}_{I} = \frac{r^\st{n}_{I}}{E^\st{n} - H_{I}^{I}},
+\label{eq:diag_precond}
+\eeq
+or the P-Space enhanced preconditioner (see \sect{sec:jacobi_davidson} and \sect{sec:pspace}).
+\subsection{Jacobi-Davidson Preconditioner}
+\label{sec:jacobi_davidson}
+
+For improved convergence, especially for excited states, we implement the Jacobi-Davidson 
+correction. The correction vector $\vect{u}^{\st{n}}$ solves:
+
+\beq
+(\mat{I} - \vect{x}^{\st{n}} \vect{x}_\st{n}^\dagger)(\mat{H} - E^\st{n})
+(\mat{I} - \vect{x}^\st{n} \vect{x}_\st{n}^\dagger) \vect{u}^\st{n} 
+= -\vect{r}^{\st{n}\perp},
+\eeq
+where $\vect{x}^{\st{n}}$ is the normalized Ritz vector and $\vect{r}^{\st{n}\perp}$ is the residual 
+orthogonalized to $\vect{x}^{\st{n}}$.
+
+In our implementation, we use a P-Q space decomposition where P is a selected subspace 
+of important determinants and Q is its complement. For the Q space we use the simple diagonal preconditioner, \eq{eq:diag_precond}, 
+while for the P space we solve the Jacobi-Davidson equation exactly, including the coupling to Q space.
+The correction equation becomes:
+
+\beq
+\left[(\mat{I}_{\{P\}} - \vect{x}^\st{n}_{\{P\}} \vect{x}_{\st{n}\{P\}}^\dagger)(\mat{H}_{\{P\}} - E^\st{n})
+(\mat{I}_{\{P\}} - \vect{x}^\st{n}_{\{P\}} \vect{x}_{\st{n}\{P\}}^\dagger) 
++ \alpha \vect{x}^\st{n}_{\{P\}} \vect{x}_{\st{n}\{P\}}^\dagger\right] \vect{u}^\st{n}_{\{P\}} = -\vect{r}_{\{P\}}^{\st{n}\perp} + \vect{s}_{\{P\}},
+\eeq
+with coupling terms:
+\begin{align}
+\alpha &= \vect{x}_{\st{n}\{Q\}}^\dagger (\mat{H}_{\{Q\}} - E^\st{n}) \vect{x}^{\st{n}}_{\{Q\}} \\
+\vect{s}^\st{n}_{\{P\}} &= (\mat{I}_{\{P\}} - \vect{x}^\st{n}_{\{P\}} \vect{x}_{\st{n}\{P\}}^\dagger)
+\left(\mat{H}_{\{P\}} - E^\st{n}\right)\vect{x}^\st{n}_{\{P\}}
+  \left(\vect{x}_{\st{n}\{Q\}}^\dagger \vect{u}_{\{Q\}}\right) + \beta \vect{x}^\st{n}_{\{P\}} \\
+\beta &= \vect{x}_{\st{n}\{Q\}}^\dagger(\mat{H}_{\{Q\}} - E^\st{n})
+(\mat{I}_{\{Q\}} - \vect{x}^\st{n}_{\{Q\}} \vect{x}_{\st{n}\{Q\}}^\dagger)\vect{u}^\st{n}_{\{Q\}}.
+\end{align}
+Since $\mat{H}_{Q}$ is diagonal, $\alpha$ and $\beta$ are computed efficiently using only 
+diagonal elements.
+
+The equation is solved using a direct linear solver (LU or QR decomposition) since the P space is small.
+
+\subsection{Multi-State Davidson}
+
+For computing multiple states simultaneously, the algorithm is extended to maintain 
+orthogonality between states. The subspace is expanded for all states:
+
+\beq
+\mat{H}_{\text{sub}} \mat{C} = \mat{C} \mat{E},
+\eeq
+where $\mat{E} = \text{diag}(E^\st{1}, E^\st{2}, \ldots, E^\st{n})$ and columns of $\mat{C}$ contain 
+eigenvector coefficients.
+
+\textbf{Dual convergence criteria}: Both energy convergence ($|\Delta E^\st{n}| \lt \epsilon_E$) 
+and residual convergence ($\|\vect{r}^\st{n}\| \lt \epsilon_R$) must be satisfied for all states 
+to ensure correct excited state energies.
+
+
+\subsection{P-Space Selection}
+\label{sec:pspace}
+
+The P-space is a subset of important determinants used to generate high-quality initial 
+guess vectors and preconditioners. Determinants are selected by:
+
+\textbf{Excitation level}: Include all determinants up to $n$-fold excitations from the 
+Hartree-Fock reference.
+
+\textbf{Energy criterion}: Select determinants with diagonal elements satisfying:
+\beq
+H_{I}^{I} - E_{\text{HF}} \lt \Delta E_{\text{threshold}}
+\eeq
+
+\textbf{Hybrid selection}: Combine excitation level and energy criteria.
+
+\textbf{HCI-based selection}: Use Heat-bath CI (see \sect{sec:hci}) to select the 
+most important determinants.
+
+\section{Heat-bath Configuration Interaction (HCI)/CIPSI}
+\label{sec:hci}
+
+\subsection{Algorithm Overview}
+
+Heat-bath CI (HCI)\cite{holmes16_hci} is a selected CI method that efficiently selects 
+important determinants using selection inspired by heat-bath sampling.
+An extension towards CIPSI\cite{huron73_cipsi} is also implemented.
+
+The algorithm consists of three phases plus an extension towards CIPSI:
+
+\textbf{Phase I} (Setup): Pre-compute sorted lists of double excitation matrix elements:
+\beq
+\text{For each } (p,q): \quad \{(r,s,|H_{rs \leftarrow pq}|)\} 
+    \text{ sorted by } |H_{rs \leftarrow pq}| \text{ (decreasing)}
+\eeq
+
+\textbf{Phase II}: Variational calculation in the current selected space:
+\beq
+\mat{H}_{\text{sel}} \vect{c} = E_{\text{var}} \vect{c}
+\eeq
+
+\textbf{Phase III} (Selection): Generate candidate determinants connected to the variational 
+space by $|H_{J}^I c_I| \gt \epsilon_1$:
+
+
+For each determinant $|\Phi_I\rangle$ in the variational space:
+\begin{itemize}
+\item Generate single excitations with $|f_{i}^{a} c_I| \gt \epsilon_1$
+\item Use pre-sorted lists to generate only double excitations with $|v_{ij}^{ab} c_I| \gt \epsilon_{\text{adaptive}}$
+\item Adaptive threshold: $\epsilon_{\text{adaptive}} = \epsilon_1 / |c_I|$
+\end{itemize}
+
+\textbf{Phase IV} (extension of HCI towards CIPSI): Select determinants with highest selection probabilities:
+\beq
+P_J = \sum_{I \in \text{var}} \frac{|H^I_{J} c_I|^2}{(E_{\text{var}} - H^J_{J})^2}
+\eeq
+
+\subsection{Efficient Excitation Generation}
+
+The key to HCI performance is the setup phase, which pre-computes and sorts excitation lists.
+For restricted Hartree-Fock (RHF), store:
+\beq
+\text{double\_excitations}[(p,q)] = \{(r,s,|H_{rs \leftarrow pq}|)\}_{\text{sorted}},
+\eeq
+where $H_{rs \leftarrow pq} = v_{pq}^{rs} - v_{pq}^{sr}$ is the antisymmetrized matrix element.
+
+For unrestricted Hartree-Fock (UHF), store separately:
+\begin{itemize}
+\item $\alpha$-$\alpha$ excitations: $v_{pq}^{rs} - v_{pq}^{sr}$
+\item $\beta$-$\beta$ excitations: $v_{pq}^{rs} - v_{pq}^{sr}$
+\item $\alpha$-$\beta$ mixed excitations: $v_{pq}^{rs}$
+\end{itemize}
+
+\subsection{Multi-State HCI/CIPSI}
+
+For multi-state calculations, use \textbf{state-maximum selection}:
+\beq
+P_J = \max_{\st{n}=\st{1},\ldots,\st{N}_{\text{states}}} \left[ \sum_{I \in \text{var}} 
+    \frac{|H^I_{J} c^\st{n}_{I}|^2}{(E^\st{n}_{\text{var}} - H^J_{J})^2} \right]
+\eeq
+
+This ensures determinants important for \emph{any} state are included, preventing bias 
+toward the ground state.
+
+
+The initial guess is generated by diagonalizing a small-space Hamiltonian:
+
+\beq
+N_{\text{small}} = \max\left(100, \frac{N_{\text{target}}}{10}, 5 N_{\text{states}}\right)
+\eeq
+
+Select determinants using hybrid method (energy + excitation level), diagonalize to get 
+initial eigenvectors for all states. This prevents missing excited states due to poor 
+initialization.
+
+
+\subsection{Second-Order Energy Correction}
+\label{sec:pt2}
+
+The PT2 correction recovers dynamical correlation from determinants outside the variational 
+space\cite{holmes16_hci}:
+
+\beq
+\Delta E_{\text{PT2}} = \sum_{K \notin \text{var}} 
+    \frac{\left(\sum_{I \in \text{var}} H^I_{K} c_I\right)^2}{E_{\text{var}} - H^K_{K}},
+\eeq
+where $K$ runs over all determinants connected to the variational space but not included in it.
+
+To compute PT2 efficiently, adaptive thresholding is employed. For each variational determinant $|\Phi^I\rangle$,
+\beq
+\epsilon_{\text{adaptive}} = \frac{\epsilon_2}{|c_I|},
+\eeq
+and only excitations are generated with $|H_{IK}| \gt \epsilon_{\text{adaptive}}$ using pre-sorted lists from setup. Accumulate contributions:
+
+\section{Reduced Density Matrices}
+\label{sec:rdm}
+
+\subsection{One-Particle Density Matrix}
+
+The one-particle reduced spin-resolved density matrix (1-RDM) is:
+\beq
+\gamma^p_{q} = \langle \Psi | \op{a}^\dagger_p \op{a}_q | \Psi \rangle
+            = c^{I*} c_J \langle \Phi_I | \op{a}^\dagger_p \op{a}_q | \Phi^J \rangle
+\eeq
+
+For separate spin components ($\spa{p},\spa{q}$ and $\spb{p},\spb{q}$ correspond 
+to $\alpha$ and $\beta$ orbitals, respectively):
+\beq
+\gamma^{\spa{p}}_{\spa{q}} &= c^{I*} c_J \langle \alpha_I \beta_I | 
+    \op{a}^\dagger_{\spa{p}} \op{a}_{\spa{q}} | \alpha^J \beta^J \rangle \\
+\gamma^{\spb{p}}_{\spb{q}} &= c^{I*} c_J \langle \alpha_I \beta_I | 
+    \op{a}^\dagger_{\spb{p}} \op{a}_{\spb{q}} | \alpha^J \beta^J \rangle
+\eeq
+
+\textbf{Properties}:
+\begin{itemize}
+\item Trace: $\trace(\gamma^{(\alpha)}) = N_{\alpha}$, $\trace(\gamma^{(\beta)}) = N_{\beta}$
+\item Hermitian: $\gamma_{pq} = \gamma_{qp}^*$
+\item Eigenvalues: Natural orbital occupations $0 \leq n_i \leq 2$
+\end{itemize}
+
+\subsection{Transition Density Matrix}
+
+For different states $|\Psi_\st{m}\rangle$ and $|\Psi_\st{n}\rangle$:
+\beq
+\pre{_\st{m}^\st{n}}\gamma^p_{q} = \langle \Psi_\st{m} | \op{a}^\dagger_p \op{a}_q | \Psi^\st{n} \rangle
+\eeq
+
+Used for computing transition properties (e.g., oscillator strengths, transition dipole moments).
+
+\subsection{Two-Particle Density Matrix}
+
+The two-particle reduced (spin-resolved) density matrix (2-RDM) is:
+\beq
+\Gamma^{pq}_{rs} = \langle \Psi | \op{a}^\dagger_p \op{a}^\dagger_q \op{a}_s \op{a}_r | \Psi \rangle
+\eeq
+
+\textbf{Energy verification}:
+\beq
+E = h_p^q \gamma^p_q + \frac{1}{2} v_{pq}^{rs} \Gamma^{pq}_{rs} + E_{\text{nuc}}
+\eeq
+
+\subsection{Natural Orbitals}
+
+Diagonalize the 1-RDM:
+\beq
+\gamma \vect{\phi}_i = n_i \vect{\phi}_i
+\eeq
+Natural orbital occupations $n_i$ indicate importance of orbitals. Used for:
+\begin{itemize}
+\item Active space selection 
+\item Identifying multireference character
+\end{itemize}
+
+
 \chapter{Automatically generated UCCSDT and UDC-CCSDT}
 Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} were generated with version 1.0.1 of the \quantwo program\cite{quantwo}.
 The \quantwo inputs are listed below.
@@ -1785,7 +2134,7 @@ output,level=1,maxlenline=70
 \end{lstlisting}
 \end{itemize}
 \noindent The program generates \textsf{TensorOperations} code.
-The generated code  used by \ElemCojl is located in the \texttt{src/algo} directory. 
+The generated code  used by \elemcoil is located in the \texttt{src/algo} directory. 
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
 \bibliographystyle{naturemag}

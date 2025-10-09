@@ -111,6 +111,17 @@ function save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp"
 end
 
 """
+    save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
+
+  Save tuple of arrays `a` to file `fname` in EC.scr directory.
+  Add file to `EC.files` with `description`.
+"""
+function save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
+  miosave(fullfilename(EC, fname), a...)
+  add_file!(EC, fname, description; overwrite)
+end
+
+"""
     load(EC::ECInfo, fname::String)
 
   Load array from file `fname` in EC.scr directory.

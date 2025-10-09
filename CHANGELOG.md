@@ -11,6 +11,7 @@
 
 * The fallback basis sets are now defined for `ao` (`def2-tzvppd`), `jkfit` (`aug-def2-universal-jkfit`), and `mpfit` (`def2-tzvppd-mpfit`) basis sets.
 * Functions for H and He are copied from [aug]-cc-pVXZ basis sets to [aug]-p[w]CVXZ basis sets. Functions for Li and Be are copied from [aug]-cc-pCVXZ basis sets to [aug]-pwCVXZ basis sets.
+* `CCDriver` module is renamed to `Drivers`. 
 
 ### Added
 

@@ -44,7 +44,7 @@ makedocs(
       "basisset.md",
       "bohf.md",
       "cc.md",
-      "ccdriver.md",
+      "drivers.md",
       "cctools.md",
       "constants.md",
       "decomptools.md",

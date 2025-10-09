@@ -1,9 +1,9 @@
 """
-    CCDriver
+    Drivers
 
-Module for coupled-cluster drivers.
+Module for methods drivers (ccdriver, dfccdriver, etc).
 """
-module CCDriver
+module Drivers
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
@@ -18,8 +18,9 @@ using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
+using ..ElemCo.FCI
 
-export ccdriver, dfccdriver
+export ccdriver, dfccdriver, fcidriver
 
 """ 
     ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
@@ -117,6 +118,27 @@ function dfccdriver(EC::ECInfo, method)
   delete_temporary_files!(EC)
   restore_space!(EC, space_save)
   draw_endline()
+  return energies
+end
+
+function fcidriver(EC::ECInfo; occa="-", occb="-")
+  t1 = time_ns()
+  save_occs = check_occs(EC, occa, occb)
+  setup_space_fd!(EC)
+  closed_shell = is_closed_shell(EC)
+
+  energies = OutDict()
+  energies = eval_hf_energy(EC, energies, closed_shell)
+  # t1 = print_time(EC, t1, "HF energy", 1)
+
+  E_FCI = eval_fci(EC, energies["HF"])
+  energies = output_energy(EC, E_FCI, energies, "FCI")
+  t1 = print_time(EC, t1, "FCI", 1)
+
+  delete_temporary_files!(EC)
+  draw_endline()
+  # restore occs
+  EC.options.wf.occa, EC.options.wf.occb = save_occs
   return energies
 end
 
@@ -473,6 +495,39 @@ function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   output_E_method(ERef, "Reference energy:")
   println()
   return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
+end
+
+function eval_fci(EC::ECInfo, ref_energy)
+  t1 = time_ns()
+  # Create basic FCI setup TODO: use QFDump
+  fci_dump = FCIDump()
+  norb = length(EC.space[':'])
+  nalpha = length(EC.space['o'])
+  nbeta = length(EC.space['O'])
+  fci_dump.n_orb = norb
+  fci_dump.n_elec = nalpha + nbeta
+  fci_dump.n_spin = nalpha - nbeta
+  fci_dump.n_alpha = nalpha
+  fci_dump.n_beta = nbeta
+  fci_dump.e_nuc = EC.fd.int0
+  if is_similarity_transformed(EC.fd)
+    error("FCI not implemented for similarity transformed Hamiltonians!")
+  end
+  if EC.fd.uhf
+    fci_dump.is_uhf = true
+    fci_dump.h1a = EC.fd.int1a
+    fci_dump.h1b = EC.fd.int1b
+    fci_dump.h2aa = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
+    fci_dump.h2bb = permutedims(ints2(EC, "MMMM"), (1,3,2,4))
+    fci_dump.h2ab = permutedims(ints2(EC, "mMmM"), (1,3,2,4))
+  else
+    fci_dump.h1 = EC.fd.int1
+    fci_dump.h2 = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
+  end
+  fci_ctx = FCIContext(fci_dump)
+  E_FCI = run_fci!(fci_ctx)
+  t1 = print_time(EC, t1, "FCI", 1)
+  return OutDict("E" => E_FCI - ref_energy)
 end
 
 """

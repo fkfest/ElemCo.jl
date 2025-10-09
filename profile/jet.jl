@@ -17,7 +17,7 @@ basis="vdz"
 @report_opt target_modules=(@__MODULE__,
                             ElemCo,
                             ElemCo.BOHF,
-                            ElemCo.CCDriver,
+                            ElemCo.Drivers,
                             ElemCo.CCTools,
                             ElemCo.Constants,
                             ElemCo.CoupledCluster,
@@ -52,10 +52,10 @@ basis="vdz"
                             ElemCo.MSystem
                             #) ElemCo.DfDump.dfdump(EC)
                             #) ElemCo.DFHF.dfhf(EC)
-                            #) ElemCo.CCDriver.dfccdriver(EC,"MP2")
-                            #) ElemCo.CCDriver.ccdriver(EC,"λCCSD")
-                            ) ElemCo.CCDriver.ccdriver(EC,"SVD-DC-CCSDT")
-                            #) ElemCo.CCDriver.dfccdriver(EC,"SVD-DCSD")
-                            
+                            #) ElemCo.Drivers.dfccdriver(EC,"MP2")
+                            #) ElemCo.Drivers.ccdriver(EC,"λCCSD")
+                            ) ElemCo.Drivers.ccdriver(EC,"SVD-DC-CCSDT")
+                            #) ElemCo.Drivers.dfccdriver(EC,"SVD-DCSD")
+
 end
 @time main()
