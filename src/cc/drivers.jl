@@ -121,7 +121,7 @@ function dfccdriver(EC::ECInfo, method)
   return energies
 end
 
-function fcidriver(EC::ECInfo; occa="-", occb="-")
+function fcidriver(EC::ECInfo; occa="-", occb="-", hci=false)
   t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
   setup_space_fd!(EC)
@@ -131,9 +131,10 @@ function fcidriver(EC::ECInfo; occa="-", occb="-")
   energies = eval_hf_energy(EC, energies, closed_shell)
   # t1 = print_time(EC, t1, "HF energy", 1)
 
-  E_FCI = eval_fci(EC, energies["HF"])
-  energies = output_energy(EC, E_FCI, energies, "FCI")
-  t1 = print_time(EC, t1, "FCI", 1)
+  E_FCI = eval_fci(EC, energies["HF"]; hci=hci)
+  method = hci ? "HCI" : "FCI"
+  energies = output_energy(EC, E_FCI, energies, method)
+  t1 = print_time(EC, t1, method, 1)
 
   delete_temporary_files!(EC)
   draw_endline()
@@ -497,7 +498,7 @@ function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
 end
 
-function eval_fci(EC::ECInfo, ref_energy)
+function eval_fci(EC::ECInfo, ref_energy; hci=false)
   t1 = time_ns()
   # Create basic FCI setup TODO: use QFDump
   fci_dump = FCIDump()
@@ -525,9 +526,17 @@ function eval_fci(EC::ECInfo, ref_energy)
     fci_dump.h2 = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
   end
   fci_ctx = FCIContext(fci_dump)
-  E_FCI = run_fci!(fci_ctx)
-  t1 = print_time(EC, t1, "FCI", 1)
-  return OutDict("E" => E_FCI - ref_energy)
+  if hci
+    hb_options = HeatBathCIOptions(compute_pt2=true)
+    energies, coefs, dets, pt2 = run_heatbath_ci!(fci_ctx, hb_options)
+    t1 = print_time(EC, t1, "HCI", 1)
+    return OutDict("E-correction" => pt2.energy_correction,
+                   "E" => energies[1] - ref_energy)
+  else
+    E_FCI = run_fci!(fci_ctx)
+    t1 = print_time(EC, t1, "FCI", 1)
+    return OutDict("E" => E_FCI - ref_energy)
+  end
 end
 
 """

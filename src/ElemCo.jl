@@ -95,7 +95,7 @@ export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
-export @fci
+export @fci, @hci
 export @import_matrix, @export_molden
 export @molpro_input, @molpro_output, @check_molproinfo
 # from Utils
@@ -629,6 +629,40 @@ macro fci(kwargs...)
       $(esc(:@dfints))
     end
     fcidriver($(esc(:EC)); $(ekwa...))
+  end
+end
+
+""" 
+    @hci(kwargs...)
+
+  Run Heat-bath CI calculation.
+
+  # Keyword arguments
+  - `occa::String`: occupied α orbitals (default: "-").
+  - `occb::String`: occupied β orbitals (default: "-").
+
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+
+  # Examples
+```julia
+geometry="bohr
+O      0.000000000    0.000000000   -0.130186067
+H1     0.000000000    1.489124508    1.033245507
+H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
+@dfhf
+@hci
+```
+"""
+macro hci(kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECinit))
+    if !fd_exists($(esc(:EC)).fd)
+      $(esc(:@dfints))
+    end
+    fcidriver($(esc(:EC)); $(ekwa...), hci=true)
   end
 end
 

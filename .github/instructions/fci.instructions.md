@@ -5,6 +5,61 @@ applyTo: 'src/fci/*.jl'
 
 Julia implementation of Full Configuration Interaction (FCI) with Selected CI and Heat-Bath CI extensions.
 
+## Running FCI/HCI Calculations
+
+### Using ElemCo Macros
+
+**Full Configuration Interaction (FCI):**
+```julia
+using ElemCo
+@print_input
+
+geometry = "
+    O      0.000000000    0.000000000   -0.130186067
+    H1     0.000000000    1.489124508    1.033245507
+    H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"6-31g", "jkfit"=>"vtz-jkfit", "mpfit"=>"vtz-mpfit")
+
+@dfhf
+@fci
+```
+
+**Heat-Bath Configuration Interaction (HBCI/Selected CI):**
+```julia
+using ElemCo
+@print_input
+
+geometry = "
+    O      0.000000000    0.000000000   -0.130186067
+    H1     0.000000000    1.489124508    1.033245507
+    H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"6-31g", "jkfit"=>"vtz-jkfit", "mpfit"=>"vtz-mpfit")
+
+@dfhf
+@hci
+```
+
+**Using FCIDUMP file:**
+```julia
+using ElemCo
+@print_input
+
+fcidump = "path/to/file.FCIDUMP"
+@fci
+# or
+@hci
+```
+
+**Setting FCI/HCI options: (to be implemented!)**
+```julia
+@set fci n_roots=3        # Number of states to compute
+@set fci max_iter=100     # Maximum Davidson iterations
+@set fci threshold=1.e-6  # Energy convergence threshold
+@set fci hbci_eps=1.e-4   # HBCI selection threshold
+@dfhf
+@hci
+```
+
 ## Core Architecture
 
 ### Key Modules
@@ -217,6 +272,227 @@ h1a = ctx.fcidump.h1a[i, a]
 h2aa = ctx.fcidump.h2aa[i, j, a, b]
 h2ab = ctx.fcidump.h2ab[i, j, a, b]
 ```
+
+## Planned Improvements
+
+### 1. Optimize Fock Element Calculation with Precomputed h1e2 (High Priority)
+**Location**: `fci_selected_ci.jl:1095` (single excitations in Heat-Bath CI)
+
+Currently, single excitations use only 1-electron integrals for threshold filtering:
+```julia
+h_val = is_uhf ? abs(ctx.fcidump.h1a[i+1, a+1]) : abs(ctx.fcidump.h1[i+1, a+1])
+```
+
+**Goal**: Use proper Fock matrix elements for more accurate threshold filtering using direct computation with precomputed h1e2 terms.
+
+#### Implementation: Precompute h1e2 and Direct Computation
+
+Pre-compute the two-electron contribution to Fock elements once during setup:
+```julia
+# Add to HBCISetupData or FCIContext
+struct HBCISetupData
+  double_excitations::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}
+  h_doub_max::Float64
+  
+  # Precomputed h1e2 terms for efficient Fock calculation
+  h1e2::Array{Float64, 3}      # RHF: h1e2[i, p, q] = v_{pi}^{qi} - v_{pi}^{iq}
+  h1e2_aa::Array{Float64, 3}   # UHF: alpha-alpha
+  h1e2_bb::Array{Float64, 3}   # UHF: beta-beta
+  h1e2_ab::Array{Float64, 3}   # UHF: alpha-beta (no exchange)
+  
+  is_uhf::Bool
+end
+
+function setup_hbci!(ctx::FCIContext)::HBCISetupData
+  # ... existing double excitation setup ...
+  
+  # Precompute h1e2 terms
+  n_orb = ctx.n_orb
+  if ctx.fcidump.is_uhf
+    h1e2_aa = zeros(n_orb, n_orb, n_orb)
+    h1e2_bb = zeros(n_orb, n_orb, n_orb)
+    h1e2_ab = zeros(n_orb, n_orb, n_orb)
+    
+    for i in 1:n_orb, p in 1:n_orb, q in 1:n_orb
+      h1e2_aa[i, p, q] = ctx.fcidump.h2aa[p, i, q, i] - ctx.fcidump.h2aa[p, i, i, q]
+      h1e2_bb[i, p, q] = ctx.fcidump.h2bb[p, i, q, i] - ctx.fcidump.h2bb[p, i, i, q]
+      h1e2_ab[i, p, q] = ctx.fcidump.h2ab[p, i, q, i]  # No exchange for mixed spin
+    end
+    
+    return HBCISetupData(..., h1e2_aa, h1e2_bb, h1e2_ab, true)
+  else
+    h1e2 = zeros(n_orb, n_orb, n_orb)
+    for i in 1:n_orb, p in 1:n_orb, q in 1:n_orb
+      h1e2[i, p, q] = ctx.fcidump.h2[p, i, q, i] - ctx.fcidump.h2[p, i, i, q]
+    end
+    return HBCISetupData(..., h1e2, ..., false)
+  end
+end
+```
+
+**Direct Fock Element Computation** (no caching needed):
+```julia
+"""
+    compute_fock_ai_direct(ctx, setup_data, occ_alpha, occ_beta, a, i, is_alpha)
+
+Compute Fock matrix element f_ai directly using precomputed h1e2 terms.
+
+f_ai = h1_ai + Σ_j (v_aijj - v_ajji)
+
+# Arguments
+- `ctx`: FCIContext with integrals
+- `setup_data`: HBCISetupData with precomputed h1e2 arrays
+- `occ_alpha`, `occ_beta`: Occupied orbital lists (0-based)
+- `a, i`: Virtual and occupied orbital indices (0-based)
+- `is_alpha`: true for alpha spin, false for beta
+"""
+function compute_fock_ai_direct(ctx::FCIContext, 
+                                setup_data::HBCISetupData,
+                                occ_alpha::Vector{Int}, 
+                                occ_beta::Vector{Int},
+                                a::Int, i::Int, 
+                                is_alpha::Bool)::Float64
+    # Convert to 1-based indexing
+    a1, i1 = a + 1, i + 1
+    
+    if setup_data.is_uhf
+        h1 = is_alpha ? ctx.fcidump.h1a : ctx.fcidump.h1b
+        h1e2_same = is_alpha ? setup_data.h1e2_aa : setup_data.h1e2_bb
+        occ_same = is_alpha ? occ_alpha : occ_beta
+        occ_opp = is_alpha ? occ_beta : occ_alpha
+        
+        # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
+        fock_val = h1[i1, a1]
+        @inbounds @simd for j in occ_same
+            fock_val += h1e2_same[j+1, a1, i1]
+        end
+        @inbounds @simd for j in occ_opp
+            fock_val += setup_data.h1e2_ab[j+1, a1, i1]
+        end
+    else
+        # RHF: sum over all occupied orbitals
+        fock_val = ctx.fcidump.h1[i1, a1]
+        @inbounds @simd for j in occ_alpha
+            fock_val += setup_data.h1e2[j+1, a1, i1]
+        end
+    end
+    
+    return fock_val
+end
+```
+
+**Integration into Heat-Bath Single Excitation Selection:**
+```julia
+# In generate_excitations_with_threshold! (around line 1095)
+
+# Alpha single excitations with proper Fock elements
+for i in alpha_occ
+    for a in alpha_virt
+        h_val = abs(compute_fock_ai_direct(ctx, setup_data, 
+                                          alpha_occ, beta_occ,
+                                          i, a, true))
+        
+        if h_val >= epsilon
+            new_det = single_excitation_alpha(det, i, a)
+            push!(excitations, new_det)
+        end
+    end
+end
+
+# Beta single excitations
+for i in beta_occ
+    for a in beta_virt
+        h_val = abs(compute_fock_ai_direct(ctx, setup_data,
+                                          alpha_occ, beta_occ,
+                                          i, a, false))
+        
+        if h_val >= epsilon
+            new_det = single_excitation_beta(det, i, a)
+            push!(excitations, new_det)
+        end
+    end
+end
+```
+
+**Performance Characteristics**:
+- **Memory overhead**: `8 × n_orb³` bytes per h1e2 array (e.g., 2 MB for 64 orbitals)
+- **Computation**: Direct sum over occupied orbitals O(n_elec) per (i,a) pair
+- **Simple and robust**: No caching complexity, no search overhead
+- **SIMD-friendly**: Inner loops vectorize well
+
+**Key Advantages**:
+- Clean, straightforward implementation
+- No caching infrastructure needed
+- Memory overhead is modest and predictable
+- Easy to debug and maintain
+- More accurate threshold filtering than using only h1
+
+### 2. Implement Slater-Condon Rule Screening (Medium Priority)
+**Locations**: `fci_selected_ci.jl:1289, 1383`
+
+In Heat-Bath CI probability calculation, currently all determinants are considered:
+```julia
+for (i, det_I) in enumerate(variational_dets)
+  # TODO: skip determinants according to Slater-Condon rules
+  c_I = variational_coeffs[i]
+  H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
+  sum_term += c_I * H_IJ
+end
+```
+
+**TODO**: Skip determinants that have zero matrix elements by Slater-Condon rules:
+- If det_I and det_J differ by more than 2 orbitals, H_IJ = 0
+- Pre-compute excitation degree or use bit operations to quickly determine
+- Expected benefit: Reduce O(N_var) loop cost in probability computation
+
+**Implementation approach**:
+```julia
+# Quick check: excitation degree > 2 → skip
+if count_excitation_degree(det_I, det_J) > 2
+  continue
+end
+H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
+```
+
+### 3. Store and Use PT2 Contributions (Low Priority)
+**Location**: `fci_selected_ci.jl:1299`
+
+Currently, perturbative energy contributions are computed but not used:
+```julia
+contrib_J = prob_J * ΔE_J  # Perturbative energy contribution
+#TODO: use contrib_J to calculate the PT2 correction later
+```
+
+**TODO**: Accumulate and report PT2 corrections:
+- Sum contributions from all external determinants
+- Report variational + PT2 energy
+- Useful for convergence assessment and comparison with CIPSI
+
+**Implementation approach**:
+```julia
+# In run_heatbath_ci!:
+E_PT2 = 0.0
+for candidate in candidates
+  if !selected
+    E_PT2 += candidate.contrib
+  end
+end
+return E_variational, E_PT2
+```
+
+### 4. Migrate to QFDump (Low Priority)
+**Location**: `fci_dump.jl:9`
+
+Current `FCIDump` struct is FCI-specific:
+```julia
+mutable struct FCIDump
+  # TODO: Use QFDump instead!
+```
+
+**TODO**: Migrate to unified `QFDump` from ElemCo main codebase:
+- Use standardized integral storage format
+- Better integration with rest of ElemCo.jl
+- Consistent FCIDUMP reading across modules
 
 ## Key References
 
