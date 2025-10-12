@@ -403,7 +403,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
     error("Diagonal Hamiltonian not initialized. Call init_hamiltonian_terms! first.")
   end
 
-  # Setup P-space for enhanced initial guess (Phase 5a-5b)
+  # Setup P-space for enhanced initial guess
   # Pass n_states so HBCI can compute the same number of roots
   setup_pspace!(context, n_states)
 
@@ -434,7 +434,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
   k = k_initial
   guess_vectors = [V[i] for i in 1:k]
 
-  # Try P-space enhanced initial guess (Phase 5c)
+  # Try P-space enhanced initial guess
   pspace_success = generate_pspace_initial_guess!(context, guess_vectors, min(k, n_states))
 
   # Always supplement with diagonal-based guesses, especially for excited states

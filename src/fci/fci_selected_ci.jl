@@ -601,11 +601,11 @@ struct HeatBathCIOptions
   tol::Float64                      # convergence threshold for Davidson (default: 1e-8)
   max_iterations::Int               # Maximum HBCI iterations (default: 10)
   verbose::Bool                     # Print iteration details
-  use_setup_phase::Bool             # Perform Phase IIa setup (all singles+doubles from HF)
+  use_setup_phase::Bool             # Perform setup (all singles+doubles from HF)
   compute_pt2::Bool                 # Compute PT2 perturbative correction
   epsilon_pt2::Float64              # Threshold for PT2 contributions (default: 1e-6)
   n_roots::Int                      # Number of states to compute (default: 1 = ground state only)
-  use_small_space_guess::Bool       # Use small-space Hamiltonian for initial guess (Phase 15)
+  use_small_space_guess::Bool       # Use small-space Hamiltonian for initial guess
   small_space_size::Int             # Size of small space (0 = auto: max(100, target÷10, 5*n_roots))
   small_space_method::Symbol        # Selection method: :hybrid (energy + excitation)
   
@@ -987,7 +987,7 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   beta_virt = virtual_orbitals(det.beta, n_orb)
   
   # ===========================================
-  # 1. Generate double excitations using Phase IIa pre-computed lists
+  # 1. Generate double excitations using pre-computed lists
   # ===========================================
   
   # Check if we should skip all double excitations
@@ -1390,7 +1390,7 @@ the maximum probability across states (state-max selection strategy).
 - `variational_coeffs`: Matrix (n_dets × n_states) of coefficients for all states
 - `ctx`: FCI context
 - `E_states`: Vector of energies for all states
-- `setup_data`: Optional Phase IIa setup data
+- `setup_data`: Optional setup data
 - `epsilon`: Threshold for excitation generation
 
 # Returns
@@ -1556,7 +1556,7 @@ Setup: Pre-compute and store sorted double excitation matrix elements.
 For each pair of orbitals {p,q}, computes H(rs ← pq) for all distinct {r,s} pairs
 that don't include {p,q}, and stores them sorted by |H| in decreasing order.
 
-This enables efficient generation of only important excitations during Phase IIb,
+This enables efficient generation of only important excitations,
 avoiding computation of matrix elements that would be below threshold.
 
 Algorithm from Holmes et al. (2016), IIa:
@@ -1788,7 +1788,7 @@ function compute_pt2_correction!(
     # Generate connected determinants with |H_ki| > epsilon_adaptive
     empty!(connected)
     if setup_data !== nothing
-      # Use efficient Phase IIa setup if available
+      # Use efficient setup if available
       generate_excitations_with_threshold!(connected, det_i, ctx, setup_data, epsilon_adaptive)
     else
       # Fallback: generate all connected determinants (slower)
@@ -1895,7 +1895,7 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
     println("="^70)
   end
   
-  # Phase I: Initialization
+  # Initialization
   hf_det = hartree_fock_determinant(ctx)
   
   # Setup (if enabled)
@@ -1917,14 +1917,14 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
     end
   end
   
-  # Phase 15: Enhanced initial guess using small-space Hamiltonian (if enabled)
+  # Enhanced initial guess using small-space Hamiltonian (if enabled)
   variational_dets = Determinant[]
   E_init_vec = Float64[]
   
   if options.use_small_space_guess && options.n_roots > 1
     # Use small-space Hamiltonian diagonalization for better initial guess
     if options.verbose
-      println("\nPhase I: Initialization (Small-Space Method)")
+      println("\nInitialization (Small-Space Method)")
       println("  Using small-space Hamiltonian for multi-state initial guess")
     end
     
@@ -1955,7 +1955,7 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
   else
     # Traditional initialization: Start with HF determinant only
     if options.verbose
-      println("\nPhase I: Initialization (HF Reference)")
+      println("\nInitialization (HF Reference)")
       println("  Starting from HF reference determinant")
     end
     
@@ -1979,7 +1979,7 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
   end
   
   if options.verbose
-    println("\nPhase IIb: Iterative perturbative selection")
+    println("\nIterative perturbative selection")
   end
   
   E_prev_vec = copy(E_init_vec)

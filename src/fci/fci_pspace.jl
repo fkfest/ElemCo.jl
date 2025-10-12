@@ -274,7 +274,7 @@ function diagonalize_pspace_hamiltonian!(context::FCIContext)
 end
 
 # ===========================================
-# Phase 15: Small-Space Initial Guess
+# Small-Space Initial Guess
 # ===========================================
 
 """
@@ -440,7 +440,7 @@ function initialize_multistate_from_small_space(
 )::SmallSpaceResult
   
   if context.options.print_level >= 1
-    println("\nPhase 15: Small-Space Initial Guess Generation")
+    println("\nSmall-Space Initial Guess Generation")
   end
   
   # 1. Determine small-space size (adaptive)
@@ -533,7 +533,7 @@ function setup_pspace!(context::FCIContext, n_states::Int=1)
     return
   end
 
-  # Phase 5b: Build and diagonalize P-space Hamiltonian
+  # Build and diagonalize P-space Hamiltonian
   build_pspace_hamiltonian!(context)
   diagonalize_pspace_hamiltonian!(context)
 
