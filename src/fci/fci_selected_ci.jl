@@ -598,35 +598,35 @@ struct HeatBathCIOptions
   target_selection::Int              # Target number of determinants to select
   epsilon_h::Float64                # HCI selection threshold (default: 1e-4)
   epsilon_p::Float64                # CIPSI selection threshold (default: 1e-4)
-  epsilon_pt2::Float64              # PT2 variational threshold (default: 1e-8)
+  tol::Float64                      # convergence threshold for Davidson (default: 1e-8)
   max_iterations::Int               # Maximum HBCI iterations (default: 10)
   verbose::Bool                     # Print iteration details
   use_setup_phase::Bool             # Perform Phase IIa setup (all singles+doubles from HF)
   compute_pt2::Bool                 # Compute PT2 perturbative correction
-  pt2_epsilon::Float64              # Threshold for PT2 contributions (default: 1e-6)
+  epsilon_pt2::Float64              # Threshold for PT2 contributions (default: 1e-6)
   n_roots::Int                      # Number of states to compute (default: 1 = ground state only)
   use_small_space_guess::Bool       # Use small-space Hamiltonian for initial guess (Phase 15)
   small_space_size::Int             # Size of small space (0 = auto: max(100, target÷10, 5*n_roots))
   small_space_method::Symbol        # Selection method: :hybrid (energy + excitation)
   
   function HeatBathCIOptions(;
-    target_selection::Int = 1000,
-    epsilon_h::Float64 = 1e-4,
-    epsilon_p::Float64 = 1e-4,
-    epsilon_pt2::Float64 = 1e-8,
-    max_iterations::Int = 10,
+    target_selection::Int = 10000,
+    epsilon_h::Float64 = 1e-3,
+    epsilon_p::Float64 = 1e-7,
+    tol::Float64 = 1e-6,
+    max_iterations::Int = 50,
     verbose::Bool = true,
     use_setup_phase::Bool = true,
-    compute_pt2::Bool = false,
-    pt2_epsilon::Float64 = 1e-6,
+    compute_pt2::Bool = true,
+    epsilon_pt2::Float64 = 1e-6,
     n_roots::Int = 1,
     use_small_space_guess::Bool = true,
     small_space_size::Int = 0,
     small_space_method::Symbol = :hybrid
   )
-    new(target_selection, epsilon_h, epsilon_p, epsilon_pt2, max_iterations, 
+    new(target_selection, epsilon_h, epsilon_p, tol, max_iterations, 
         verbose, use_setup_phase,
-        compute_pt2, pt2_epsilon, n_roots,
+        compute_pt2, epsilon_pt2, n_roots,
         use_small_space_guess, small_space_size, small_space_method)
   end
 end
@@ -662,31 +662,51 @@ struct HBCISetupData
   # For UHF: all three dictionaries are used (aa, bb, ab)
   double_excitations::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-alpha
   double_excitations_bb::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}  # UHF beta-beta
-  double_excitations_ab::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}  # UHF alpha-beta mixed
+  double_excitations_ab::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-beta mixed
   h_doub_max::Float64              # Maximum |H(rs ← pq)| over all excitations
+  
+  # Precomputed h1e2 terms for efficient Fock element calculation
+  # h1e2[i, p, q] = v_{pi}^{qi} - v_{pi}^{iq}
+  h1e2::Array{Float64, 3}          # RHF: spatial orbitals
+  h1e2_aa::Array{Float64, 3}       # UHF: alpha-alpha
+  h1e2_bb::Array{Float64, 3}       # UHF: beta-beta
+  h1e2_ab::Array{Float64, 3}       # UHF and RHF: alpha-beta (no exchange)
+  h1e2_ba::Array{Float64, 3}       # UHF: beta-alpha (no exchange)
+
   is_uhf::Bool                     # Whether this is UHF data
   
   function HBCISetupData()
     new(Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(), 
         Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
         Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
-        0.0, false)
+        0.0, 
+        zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0),
+        false)
   end
   
   # RHF constructor
-  function HBCISetupData(double_exc::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}, h_max::Float64)
+  function HBCISetupData(double_exc::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}, 
+                        double_exc_ab::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
+                        h_max::Float64, 
+                        h1e2::Array{Float64, 3}, h1e2_ab::Array{Float64, 3})
     new(double_exc, 
         Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
-        Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
-        h_max, false)
+        double_exc_ab,
+        h_max, 
+        h1e2, zeros(0,0,0), zeros(0,0,0), h1e2_ab, zeros(0,0,0),
+        false)
   end
   
   # UHF constructor
   function HBCISetupData(double_exc_aa::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
                         double_exc_bb::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
                         double_exc_ab::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
-                        h_max::Float64)
-    new(double_exc_aa, double_exc_bb, double_exc_ab, h_max, true)
+                        h_max::Float64,
+                        h1e2_aa::Array{Float64, 3}, h1e2_bb::Array{Float64, 3},
+                        h1e2_ab::Array{Float64, 3}, h1e2_ba::Array{Float64, 3})
+    new(double_exc_aa, double_exc_bb, double_exc_ab, h_max, 
+        zeros(0,0,0), h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba,
+        true)
   end
 end
 
@@ -976,7 +996,7 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
       # RHF: Use single dictionary for all double excitations
       # Alpha-alpha double excitations
       for (idx_i, i) in enumerate(alpha_occ)
-        for j in alpha_occ[(idx_i+1):end]
+        for j in @view(alpha_occ[(idx_i+1):end])
           # Look up pre-sorted list for (i,j) pair
           pq_key = i < j ? (i, j) : (j, i)
           if haskey(setup_data.double_excitations, pq_key)
@@ -998,7 +1018,7 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
       
       # Beta-beta double excitations (RHF uses same integrals)
       for (idx_i, i) in enumerate(beta_occ)
-        for j in beta_occ[(idx_i+1):end]
+        for j in @view(beta_occ[(idx_i+1):end])
           pq_key = i < j ? (i, j) : (j, i)
           if haskey(setup_data.double_excitations, pq_key)
             for (r, s, h_val) in setup_data.double_excitations[pq_key]
@@ -1013,16 +1033,19 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
           end
         end
       end
-      
-      # Mixed double excitations (alpha-beta)
+
+      # Mixed double excitations (alpha-beta) (use h2ab pre-computed lists, i.e., no exchange)
       for i_alpha in alpha_occ
         for i_beta in beta_occ
-          for a_alpha in alpha_virt
-            for a_beta in beta_virt
-              # Compute matrix element on-the-fly (convert to 1-based for array indexing)
-              h_val = abs(ctx.fcidump.h2[i_alpha+1, a_alpha+1, i_beta+1, a_beta+1])
-              if h_val >= epsilon
-                new_det = double_excitation_mixed(det, i_alpha, i_beta, a_alpha, a_beta)
+          pq_key = (i_alpha, i_beta)
+          if haskey(setup_data.double_excitations_ab, pq_key)
+            for (r, s, h_val) in setup_data.double_excitations_ab[pq_key]
+              if h_val < epsilon
+                break
+              end
+              # r is alpha virtual, s is beta virtual
+              if !(r in alpha_occ) && !(s in beta_occ)
+                new_det = double_excitation_mixed(det, i_alpha, i_beta, r, s)
                 push!(excitations, new_det)
               end
             end
@@ -1090,16 +1113,43 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   end
   
   # ===========================================
-  # 2. Generate single excitations with on-the-fly filtering
+  # 2. Generate single excitations with on-the-fly filtering using Fock elements
   # ===========================================
-  # TODO: use the proper H(a ← i) and H(b ← i) including 2-electron terms. For this precompute the v_{pi}^{qi} - v_{pi}^{iq} terms for basket of i's, and combine/correct them for the given det.
   is_uhf = ctx.fcidump.is_uhf
+
+  @inline function sum_h1e2(h1e2, occ, a1, i1)
+    total = 0.0
+    @inbounds @simd for j in occ
+      total += h1e2[j+1, a1, i1]
+    end
+    return total
+  end
+  # Helper function to compute Fock matrix element f_ai
+  # f_ai = h1_ai + Σ_j (v_aijj - v_ajji)
+  function compute_fock_element(setup_data::HBCISetupData, 
+                                occ_same::Vector{Int}, occ_opp::Vector{Int},
+                                a::Int, i::Int, is_alpha::Bool)::Float64
+    # Convert to 1-based indexing
+    a1, i1 = a + 1, i + 1
+    if is_uhf
+      h1 = is_alpha ? ctx.fcidump.h1a : ctx.fcidump.h1b
+      h1e2_same = is_alpha ? setup_data.h1e2_aa : setup_data.h1e2_bb
+      h1e2_opp = is_alpha ? setup_data.h1e2_ab : setup_data.h1e2_ba
+    else
+      h1 = ctx.fcidump.h1
+      h1e2_same = setup_data.h1e2
+      h1e2_opp = setup_data.h1e2_ab
+    end
+    # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
+    return h1[a1, i1] + sum_h1e2(h1e2_same, occ_same, a1, i1)
+                      + sum_h1e2(h1e2_opp, occ_opp, a1, i1)
+  end
   
   # Alpha single excitations
   for i in alpha_occ
     for a in alpha_virt
-      # Compute matrix element H(a ← i) (convert to 1-based for array indexing)
-      h_val = is_uhf ? abs(ctx.fcidump.h1a[i+1, a+1]) : abs(ctx.fcidump.h1[i+1, a+1])
+      # Compute Fock matrix element f_ai
+      h_val = abs(compute_fock_element(setup_data, alpha_occ, beta_occ, a, i, true))
       if h_val >= epsilon
         new_det = single_excitation_alpha(det, i, a)
         push!(excitations, new_det)
@@ -1110,8 +1160,8 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   # Beta single excitations
   for i in beta_occ
     for a in beta_virt
-      # Convert to 1-based for array indexing
-      h_val = is_uhf ? abs(ctx.fcidump.h1b[i+1, a+1]) : abs(ctx.fcidump.h1[i+1, a+1])
+      # Compute Fock matrix element f_ai
+      h_val = abs(compute_fock_element(setup_data, beta_occ, alpha_occ, i, a, false))
       if h_val >= epsilon
         new_det = single_excitation_beta(det, i, a)
         push!(excitations, new_det)
@@ -1236,7 +1286,7 @@ end
                                     ctx::FCIContext,
                                     E_current::Float64,
                                     setup_data::Union{HBCISetupData,Nothing}=nothing,
-                                    epsilon::Float64=1e-10) -> Float64
+                                    epsilon::Float64) -> Float64
 
 Compute Heat-Bath selection probabilities for all candidates.
 
@@ -1260,8 +1310,13 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
   
   if setup_data !== nothing
     # Setup enabled: Use efficient threshold-based excitation generation
-    for det in variational_dets
-      generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, epsilon)
+    for (i, det) in enumerate(variational_dets)
+      c_I = variational_coeffs[i]
+      if abs(c_I) < 1e-10
+        continue  # Skip negligible coefficients
+      end
+      eps = epsilon / abs(c_I)
+      generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
       union!(connected, temp_buffer)
     end
   else
@@ -1271,11 +1326,11 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
       union!(connected, temp_buffer)
     end
   end
-  
   # Remove determinants already in variational space
   variational_set = Set(variational_dets)
   setdiff!(connected, variational_set)
   
+  println("Generated $(length(connected)) connected determinants from variational space of size $(length(variational_dets))") 
   total_prob = 0.0
   
   for det_J in connected
@@ -1286,7 +1341,18 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
     # Compute perturbative contribution: sum over I in variational space
     sum_term = 0.0
     for (i, det_I) in enumerate(variational_dets)
-      # TODO: skip determinants according to Slater-Condon rules
+      # Slater-Condon screening: skip if determinants differ by > 2 orbitals
+      # Count differing orbitals in alpha and beta spins
+      alpha_diff = det_I.alpha ⊻ det_J.alpha
+      beta_diff = det_I.beta ⊻ det_J.beta
+      n_alpha_diff = count_ones(alpha_diff)
+      n_beta_diff = count_ones(beta_diff)
+      
+      # Matrix element is zero if total differences > 4
+      # (4 because each single excitation changes 2 bits: remove one, add one)
+      if n_alpha_diff + n_beta_diff > 4
+        continue  # Skip: matrix element is exactly zero
+      end
       c_I = variational_coeffs[i]
       H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
       sum_term += c_I * H_IJ
@@ -1345,11 +1411,24 @@ function compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandida
   # Get all connected determinants from variational space
   connected = Set{Determinant}()
   temp_buffer = Determinant[]
-  
+ 
+  # Helper to get maximum absolute coefficient for a determinant allocfree
+  function absmax(a, i)
+    am = 0.0
+    for j in axes(a,2)
+      am = max(am, abs(a[i,j]))
+    end
+    return am
+  end
   if setup_data !== nothing
     # Setup enabled: Use efficient threshold-based excitation generation
-    for det in variational_dets
-      generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, epsilon)
+    for (i, det) in enumerate(variational_dets)
+      abs_c_I = absmax(variational_coeffs, i)
+      if abs_c_I < 1e-10
+        continue  # Skip negligible coefficients
+      end
+      eps = epsilon / abs_c_I
+      generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
       union!(connected, temp_buffer)
     end
   else
@@ -1374,20 +1453,32 @@ function compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandida
     max_prob = 0.0
     max_contrib = 0.0
     
+    sum_terms = zeros(Float64, n_states)
+    # Compute perturbative contribution for each state: sum over I in variational space
+    for (i, det_I) in enumerate(variational_dets)
+      # Slater-Condon screening: skip if determinants differ by > 2 orbitals
+      # Count differing orbitals in alpha and beta spins
+      alpha_diff = det_I.alpha ⊻ det_J.alpha
+      beta_diff = det_I.beta ⊻ det_J.beta
+      n_alpha_diff = count_ones(alpha_diff)
+      n_beta_diff = count_ones(beta_diff)
+    
+      # Matrix element is zero if total differences > 4
+      # (4 because each single excitation changes 2 bits: remove one, add one)
+      if n_alpha_diff + n_beta_diff > 4
+        continue  # Skip: matrix element is exactly zero
+      end
+      H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
+      for state in 1:n_states
+        c_I = variational_coeffs[i, state]
+        sum_terms[state] += c_I * H_IJ
+      end
+    end
+      
     for state in 1:n_states
       ΔE_J = E_states[state] - H_JJ
-      
-      # Compute perturbative contribution for this state: sum over I in variational space
-      sum_term = 0.0
-      for (i, det_I) in enumerate(variational_dets)
-        # TODO: skip determinants according to Slater-Condon rules
-        c_I = variational_coeffs[i, state]
-        H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
-        sum_term += c_I * H_IJ
-      end
-      
       # Selection probability for this state: |Σ c_I H_IJ|² / ΔE²
-      prob_state = abs2(sum_term) / (ΔE_J^2 + 1e-10)
+      prob_state = abs2(sum_terms[state]) / (ΔE_J^2 + 1e-10)
       contrib_state = prob_state * ΔE_J  # Perturbative energy contribution
       
       # Keep maximum across states (state-max selection)
@@ -1445,12 +1536,12 @@ function select_deterministic!(selected::Vector{Determinant},
     if candidate.probability > options.epsilon_p
       push!(selected, candidate.determinant)
       n_selected += 1
-    else
-      # If below threshold and we haven't reached target, still add some
-      if n_selected < min(100, options.target_selection ÷ 10)
-        push!(selected, candidate.determinant)
-        n_selected += 1
-      end
+    # else
+    #   # If below threshold and we haven't reached target, still add some
+    #   if n_selected < min(100, options.target_selection ÷ 10)
+    #     push!(selected, candidate.determinant)
+    #     n_selected += 1
+    #   end
     end
   end
   
@@ -1490,16 +1581,7 @@ function setup_hbci!(ctx::FCIContext)::HBCISetupData
   end
 end
 
-"""
-    setup_hbci_rhf!(ctx::FCIContext) -> HBCISetupData
-
-Phase IIa setup for RHF systems using spatial orbital integrals.
-"""
-function setup_hbci_rhf!(ctx::FCIContext)::HBCISetupData
-  n_orb = ctx.fcidump.n_orb
-  
-  # Dictionary to store sorted lists for each (p,q) pair
-  # Note: Using 0-based indices to match occupied_orbitals/virtual_orbitals convention
+function gen_triplets_list(n_orb::Int, h2::Array{Float64,4})
   double_exc_lists = Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}()
   h_doub_max = 0.0
   
@@ -1524,7 +1606,7 @@ function setup_hbci_rhf!(ctx::FCIContext)::HBCISetupData
           # Matrix element for double excitation p,q → r,s is (pr|qs) - (ps|qr)
           # Note: h2[i,a,j,b] represents integral (ia|jb)
           # Convert to 1-based for array indexing
-          h_val = abs(ctx.fcidump.h2[p+1, r+1, q+1, s+1] - ctx.fcidump.h2[p+1, s+1, q+1, r+1])
+          h_val = abs(h2[p+1, r+1, q+1, s+1] - h2[p+1, s+1, q+1, r+1])
           
           if h_val > 1e-14  # Skip negligible matrix elements
             push!(triplets, (r, s, h_val))
@@ -1540,79 +1622,14 @@ function setup_hbci_rhf!(ctx::FCIContext)::HBCISetupData
       double_exc_lists[(p, q)] = triplets
     end
   end
-  
-  return HBCISetupData(double_exc_lists, h_doub_max)
+  return double_exc_lists, h_doub_max
 end
 
-"""
-    setup_hbci_uhf!(ctx::FCIContext) -> HBCISetupData
-
-Phase IIa setup for UHF systems using spin-separated integrals.
-Handles three types of double excitations:
-- Alpha-alpha (using h2aa)
-- Beta-beta (using h2bb)  
-- Mixed alpha-beta (using h2ab)
-"""
-function setup_hbci_uhf!(ctx::FCIContext)::HBCISetupData
-  n_orb = ctx.fcidump.n_orb
+function gen_triplets_list_ab(n_orb::Int, h2ab::Array{Float64,4})
+  double_exc_ab_lists = Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}()
   h_doub_max = 0.0
   
-  # Three dictionaries for the three types of double excitations
-  double_exc_aa = Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}()
-  double_exc_bb = Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}()
-  double_exc_ab = Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}()
-  
-  # 1. Alpha-alpha double excitations (using h2aa)
-  for p in 0:(n_orb-1)
-    for q in (p+1):(n_orb-1)
-      triplets = Tuple{Int,Int,Float64}[]
-      
-      for r in 0:(n_orb-1)
-        if r == p || r == q; continue; end
-        for s in (r+1):(n_orb-1)
-          if s == p || s == q; continue; end
-          
-          # Antisymmetrized alpha-alpha integral <pq||rs>_αα
-          h_val = abs(ctx.fcidump.h2aa[p+1, r+1, q+1, s+1] - ctx.fcidump.h2aa[p+1, s+1, q+1, r+1])
-          
-          if h_val > 1e-14
-            push!(triplets, (r, s, h_val))
-            h_doub_max = max(h_doub_max, h_val)
-          end
-        end
-      end
-      
-      sort!(triplets, by=x->x[3], rev=true)
-      double_exc_aa[(p, q)] = triplets
-    end
-  end
-  
-  # 2. Beta-beta double excitations (using h2bb)
-  for p in 0:(n_orb-1)
-    for q in (p+1):(n_orb-1)
-      triplets = Tuple{Int,Int,Float64}[]
-      
-      for r in 0:(n_orb-1)
-        if r == p || r == q; continue; end
-        for s in (r+1):(n_orb-1)
-          if s == p || s == q; continue; end
-          
-          # Antisymmetrized beta-beta integral <pq||rs>_ββ
-          h_val = abs(ctx.fcidump.h2bb[p+1, r+1, q+1, s+1] - ctx.fcidump.h2bb[p+1, s+1, q+1, r+1])
-          
-          if h_val > 1e-14
-            push!(triplets, (r, s, h_val))
-            h_doub_max = max(h_doub_max, h_val)
-          end
-        end
-      end
-      
-      sort!(triplets, by=x->x[3], rev=true)
-      double_exc_bb[(p, q)] = triplets
-    end
-  end
-  
-  # 3. Mixed alpha-beta double excitations (using h2ab)
+  # Loop over all pairs of orbitals {p, q} (0-based)
   # For mixed excitations, we don't need antisymmetrization (different spins)
   for p in 0:(n_orb-1)
     for q in 0:(n_orb-1)  # Note: can have p >= q for mixed
@@ -1626,7 +1643,7 @@ function setup_hbci_uhf!(ctx::FCIContext)::HBCISetupData
           if s == q; continue; end  # Beta s cannot equal beta q
           
           # Mixed integral (pr|qs)_αβ (no antisymmetrization for different spins)
-          h_val = abs(ctx.fcidump.h2ab[p+1, r+1, q+1, s+1])
+          h_val = abs(h2ab[p+1, r+1, q+1, s+1])
           
           if h_val > 1e-14
             push!(triplets, (r, s, h_val))
@@ -1635,12 +1652,75 @@ function setup_hbci_uhf!(ctx::FCIContext)::HBCISetupData
         end
       end
       
+      # Sort triplets by |H| in decreasing order
       sort!(triplets, by=x->x[3], rev=true)
-      double_exc_ab[(p, q)] = triplets
+      double_exc_ab_lists[(p, q)] = triplets
     end
   end
+  return double_exc_ab_lists, h_doub_max
+end
+"""
+    setup_hbci_rhf!(ctx::FCIContext) -> HBCISetupData
+
+Setup for RHF systems using spatial orbital integrals.
+"""
+function setup_hbci_rhf!(ctx::FCIContext)::HBCISetupData
+  n_orb = ctx.fcidump.n_orb
   
-  return HBCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max)
+  # Dictionary to store sorted lists for each (p,q) pair
+  # Note: Using 0-based indices to match occupied_orbitals/virtual_orbitals convention
+  double_exc_lists, h_doub_max = gen_triplets_list(n_orb, ctx.fcidump.h2)
+  double_exc_ab_lists, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.h2)
+  h_doub_max = max(h_doub_max, h_doub_max_ab)
+  
+  # Precompute h1e2 terms for efficient Fock element calculation
+  # h1e2[i, p, q] = v_{pi}^{qi} - v_{pi}^{iq} = (pq|ii) - (pi|iq)
+  h1e2 = zeros(Float64, n_orb, n_orb, n_orb)
+  h1e2_ab = zeros(Float64, n_orb, n_orb, n_orb)
+  for i in 1:n_orb, p in 1:n_orb, q in 1:n_orb
+    h1e2[i, p, q] = ctx.fcidump.h2[p, q, i, i] - ctx.fcidump.h2[p, i, i, q]
+    h1e2_ab[i, p, q] = ctx.fcidump.h2[p, q, i, i]  # (without exchange for opposite spins)
+  end
+  return HBCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max, h1e2, h1e2_ab)
+end
+
+"""
+    setup_hbci_uhf!(ctx::FCIContext) -> HBCISetupData
+
+Setup for UHF systems using spin-separated integrals.
+Handles three types of double excitations:
+- Alpha-alpha (using h2aa)
+- Beta-beta (using h2bb)  
+- Mixed alpha-beta (using h2ab)
+"""
+function setup_hbci_uhf!(ctx::FCIContext)::HBCISetupData
+  n_orb = ctx.fcidump.n_orb
+  
+  # Three dictionaries for the three types of double excitations
+  double_exc_aa, h_doub_max_aa = gen_triplets_list(n_orb, ctx.fcidump.h2aa)
+  double_exc_bb, h_doub_max_bb = gen_triplets_list(n_orb, ctx.fcidump.h2bb)
+  double_exc_ab, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.h2ab)
+  h_doub_max = max(h_doub_max_aa, h_doub_max_bb, h_doub_max_ab)
+
+  # Precompute h1e2 terms for efficient Fock element calculation (UHF)
+  # For alpha: h1e2_aa[i, p, q] = v_{pi}^{qi}_αα - v_{pi}^{iq}_αα 
+  # For beta:  h1e2_bb[i, p, q] = v_{pi}^{qi}_ββ - v_{pi}^{iq}_ββ 
+  # For mixed: h1e2_ab[i, p, q] = v_{pi}^{qi}_αβ (no exchange for different spins)
+  # For mixed: h1e2_ba[i, p, q] = v_{ip}^{iq}_αβ (no exchange for different spins)
+  h1e2_aa = zeros(Float64, n_orb, n_orb, n_orb)
+  h1e2_bb = zeros(Float64, n_orb, n_orb, n_orb)
+  h1e2_ab = zeros(Float64, n_orb, n_orb, n_orb)
+  h1e2_ba = zeros(Float64, n_orb, n_orb, n_orb)
+  
+  for i in 1:n_orb, p in 1:n_orb, q in 1:n_orb
+    h1e2_aa[i, p, q] = ctx.fcidump.h2aa[p, q, i, i] - ctx.fcidump.h2aa[p, i, i, q]
+    h1e2_bb[i, p, q] = ctx.fcidump.h2bb[p, q, i, i] - ctx.fcidump.h2bb[p, i, i, q]
+    h1e2_ab[i, p, q] = ctx.fcidump.h2ab[p, q, i, i]  # No exchange for mixed spin
+    h1e2_ba[i, p, q] = ctx.fcidump.h2ab[i, i, p, q]  # No exchange for mixed spin
+  end
+  
+  return HBCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max,
+                      h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba)
 end
 
 """
@@ -1811,7 +1891,7 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
     println("Target selection: $(options.target_selection)")
     println("Selection threshold (εₕ): $(options.epsilon_h)")
     println("Selection threshold (εₚ): $(options.epsilon_p)")
-    println("Variational threshold (εₚₜ₂): $(options.epsilon_pt2)")
+    println("PT2 threshold (εₚₜ₂): $(options.epsilon_pt2)")
     println("Number of states (n_roots): $(options.n_roots)")
     if options.n_roots > 1
       println("Multi-state selection: State-maximum probability")
@@ -1947,9 +2027,9 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
       end
     end
     
-    if ΔE_max < options.epsilon_pt2 && length(variational_dets) >= options.target_selection
+    if ΔE_max < options.tol && length(variational_dets) >= options.target_selection
       if options.verbose
-        println("  ✓ Converged! max(ΔE) = $ΔE_max < $(options.epsilon_pt2)")
+        println("  ✓ Converged! max(ΔE) = $ΔE_max < $(options.tol)")
       end
       converged = true
       break
@@ -2044,7 +2124,7 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
   pt2_result = PT2Result()
   if options.compute_pt2
     pt2_options = PT2Options(
-      epsilon_pt2 = options.pt2_epsilon,
+      epsilon_pt2 = options.epsilon_pt2,
       compute_pt2 = true,
       verbose = options.verbose
     )
