@@ -611,8 +611,8 @@ struct HeatBathCIOptions
   
   function HeatBathCIOptions(;
     target_selection::Int = 10000,
-    epsilon_h::Float64 = 1e-3,
-    epsilon_p::Float64 = 1e-7,
+    epsilon_h::Float64 = 2e-4,
+    epsilon_p::Float64 = epsilon_h,
     tol::Float64 = 1e-6,
     max_iterations::Int = 50,
     verbose::Bool = true,
@@ -1528,20 +1528,16 @@ function select_deterministic!(selected::Vector{Determinant},
   sort!(candidates, by=c->c.probability, rev=true)
   
   # Select determinants above threshold or until target reached
+  # use square of epsilon_p to match probability definition (T_2^2)
+  epsilon = options.epsilon_p^2
   n_selected = 0
   for candidate in candidates
     if n_selected >= options.target_selection
       break
     end
-    if candidate.probability > options.epsilon_p
+    if candidate.probability > epsilon
       push!(selected, candidate.determinant)
       n_selected += 1
-    # else
-    #   # If below threshold and we haven't reached target, still add some
-    #   if n_selected < min(100, options.target_selection ÷ 10)
-    #     push!(selected, candidate.determinant)
-    #     n_selected += 1
-    #   end
     end
   end
   
@@ -1987,6 +1983,7 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
   end
   
   E_prev_vec = copy(E_init_vec)
+  previous_eigenvectors = nothing  # Track previous eigenvectors for warm start
   converged = false
   
   for iter in 1:options.max_iterations
@@ -1998,7 +1995,9 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
     # 1. Diagonalize Hamiltonian in current space (all requested states)
     selected_ctx = SelectedCIContext(ctx, variational_dets)
     
-    E_electronic_vec, coeffs_matrix = diagonalize_selected_space(selected_ctx, n_roots=options.n_roots)
+    E_electronic_vec, coeffs_matrix = diagonalize_selected_space(selected_ctx, 
+                                                                 n_roots=options.n_roots,
+                                                                 previous_vectors=previous_eigenvectors)
     E_current_vec = E_electronic_vec .+ ctx.fcidump.e_nuc  # Add nuclear repulsion
     
     if options.verbose
@@ -2081,6 +2080,8 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
     unique!(variational_dets)
     
     E_prev_vec = copy(E_current_vec)
+    # Save eigenvectors for next iteration as warm start
+    previous_eigenvectors = coeffs_matrix
   end
   
   if !converged
@@ -2093,7 +2094,9 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
   end
   
   selected_ctx = SelectedCIContext(ctx, variational_dets)
-  E_electronic_vec, coeffs_final_matrix = diagonalize_selected_space(selected_ctx, n_roots=options.n_roots)
+  E_electronic_vec, coeffs_final_matrix = diagonalize_selected_space(selected_ctx, 
+                                                                     n_roots=options.n_roots,
+                                                                     previous_vectors=previous_eigenvectors)
   
   # Add nuclear repulsion energy for total energy
   E_final_vec = E_electronic_vec .+ ctx.fcidump.e_nuc
@@ -2152,7 +2155,9 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
 end
 
 """
-    diagonalize_selected_space(selected_ctx::SelectedCIContext; n_roots::Int=1) 
+    diagonalize_selected_space(selected_ctx::SelectedCIContext; 
+                               n_roots::Int=1,
+                               previous_vectors::Union{Nothing,Matrix{Float64}}=nothing) 
       -> (Vector{Float64}, Matrix{Float64})
 
 Diagonalize the Hamiltonian in the selected CI space.
@@ -2164,12 +2169,18 @@ For large spaces (≥ 1000 determinants), uses Davidson iterative diagonalizatio
 # Arguments
 - `selected_ctx`: Selected CI context with determinants
 - `n_roots`: Number of lowest eigenstates to compute (default: 1)
+- `previous_vectors`: Optional previous eigenvectors to use as initial guess for Davidson.
+                     Should be a matrix of size (n_prev, n_roots) where n_prev is the
+                     number of determinants in the previous iteration. Will be projected
+                     onto the current determinant space.
 
 # Returns
 - `eigenvalues`: Vector of length n_roots with lowest eigenvalues
 - `eigenvectors`: Matrix of size (n_selected, n_roots) with eigenvectors
 """
-function diagonalize_selected_space(selected_ctx::SelectedCIContext; n_roots::Int=1)
+function diagonalize_selected_space(selected_ctx::SelectedCIContext; 
+                                   n_roots::Int=1,
+                                   previous_vectors::Union{Nothing,Matrix{Float64}}=nothing)
   n_selected = selected_ctx.selected_dets.n_selected
   n_roots = min(n_roots, n_selected)  # Can't compute more roots than determinants
   
@@ -2191,28 +2202,57 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext; n_roots::In
     nval = min(n_roots+5, n_selected)
     eigenvalues, eigenvectors = eigen(Hermitian(H_matrix), 1:nval)
     return real.(eigenvalues[1:n_roots]), real.(eigenvectors[:, 1:n_roots])
-  else
-    # For large spaces, use Davidson iterative diagonalization
-    # This is much faster: O(N²) per iteration vs O(N³) for direct
+  end
+
+  # For large spaces, use Davidson iterative diagonalization
+  # This is much faster: O(N²) per iteration vs O(N³) for direct
+  
+  # Create initial guess(es)
+  if previous_vectors !== nothing && size(previous_vectors, 1) <= n_selected
+    # Use previous eigenvectors as initial guesses
+    # The previous vectors correspond to a subset of current determinants
+    # (the current space is a superset of the previous space)
+    n_prev = size(previous_vectors, 1)
+    n_prev_roots = size(previous_vectors, 2)
     
-    # Create initial guess: use determinant with lowest diagonal element
-    diagonal = [compute_diagonal_element(det, selected_ctx.base_context) 
-                for det in selected_ctx.selected_dets.determinants]
-    min_idx = argmin(diagonal)
+    # Project previous eigenvectors onto current space
+    # Assume first n_prev determinants are the same (newly added dets are at the end)
+    # Pass all available previous eigenvectors for their respective roots
+    n_use_prev = min(n_roots, n_prev_roots)
+    initial_guesses = zeros(Scalar, n_selected, n_use_prev)
     
-    initial_guess = zeros(Scalar, n_selected)
-    initial_guess[min_idx] = 1.0
+    for i in 1:n_use_prev
+      # Copy previous eigenvector (zero-padded for new determinants)
+      initial_guesses[1:n_prev, i] .= previous_vectors[:, i]
+    end
     
-    # Call Davidson solver
+    # Call Davidson with all previous eigenvectors
     eigenvalues, eigenvectors = davidson_selected_ci!(
       selected_ctx, 
-      initial_guess,
+      initial_guesses,
       n_roots = n_roots,
       max_iterations = 50,
       convergence_threshold = 1e-8,
       verbose = false
     )
-    
     return real.(eigenvalues), real.(eigenvectors)
   end
+  # No previous vectors: use determinant with lowest diagonal element
+  diagonal = [compute_diagonal_element(det, selected_ctx.base_context) 
+              for det in selected_ctx.selected_dets.determinants]
+  min_idx = argmin(diagonal)
+  initial_guess = zeros(Scalar, n_selected)
+  initial_guess[min_idx] = 1.0
+  
+  # Call Davidson solver with single initial guess
+  eigenvalues, eigenvectors = davidson_selected_ci!(
+    selected_ctx, 
+    initial_guess,
+    n_roots = n_roots,
+    max_iterations = 50,
+    convergence_threshold = 1e-8,
+    verbose = false
+  )
+  return real.(eigenvalues), real.(eigenvectors)
+  
 end

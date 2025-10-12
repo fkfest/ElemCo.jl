@@ -773,7 +773,7 @@ memory usage rather than O(N_full).
 """
 function davidson_selected_ci!(
   selected_ctx::SelectedCIContext,
-  initial_guess::Vector{Scalar};
+  initial_guess::Union{Vector{Scalar}, Matrix{Scalar}};
   n_roots::Int = 1,
   max_iterations::Int = 50,
   convergence_threshold::Float64 = 1e-8,
@@ -782,10 +782,19 @@ function davidson_selected_ci!(
 )
   n_selected = selected_ctx.selected_dets.n_selected
   
+  # Handle both single vector and matrix of initial guesses
+  if initial_guess isa Vector
+    initial_guesses = reshape(initial_guess, n_selected, 1)
+    n_guess = 1
+  else
+    initial_guesses = initial_guess
+    n_guess = size(initial_guesses, 2)
+  end
+  
   # Validate input
   @assert n_roots >= 1 "n_roots must be at least 1"
   @assert n_roots <= n_selected "n_roots cannot exceed n_selected"
-  @assert length(initial_guess) == n_selected "initial_guess must have length n_selected"
+  @assert size(initial_guesses, 1) == n_selected "initial_guess must have $n_selected rows"
   @assert max_subspace >= 2 * n_roots "max_subspace must be at least 2*n_roots"
   
   # Scale subspace size with number of roots
@@ -796,6 +805,7 @@ function davidson_selected_ci!(
     println("\nStarting Davidson Selected CI diagonalization")
     println("Selected space: $n_selected determinants")
     println("Computing $n_roots eigenstate$(n_roots > 1 ? "s" : "")")
+    println("Initial guesses provided: $n_guess")
     println("Subspace settings: max=$max_subspace, keep=$n_keep")
   end
   
@@ -811,17 +821,39 @@ function davidson_selected_ci!(
   HV = [zeros(Scalar, n_selected) for _ in 1:max_subspace]
   
   # Initialize with guess vector(s)
-  k = min(n_roots + 1, max_subspace)
+  k = min(max(n_roots + 1, n_guess), max_subspace)
   
-  # First vector from initial guess
-  V[1] .= initial_guess
-  V[1] ./= norm(V[1])
+  # First vectors from provided initial guesses
+  n_use_guess = min(n_guess, k)
+  for i in 1:n_use_guess
+    V[i] .= initial_guesses[:, i]
+    # Normalize
+    norm_val = norm(V[i])
+    if norm_val > 1e-10
+      V[i] ./= norm_val
+    else
+      # If guess is zero, use diagonal-based guess
+      min_idx = argmin(diagonal)
+      V[i] .= 0.0
+      V[i][min_idx] = 1.0
+    end
+    
+    # Orthogonalize against previous vectors
+    for j in 1:(i-1)
+      overlap = dot(V[i], V[j])
+      V[i] .-= overlap .* V[j]
+    end
+    norm_val = norm(V[i])
+    if norm_val > 1e-10
+      V[i] ./= norm_val
+    end
+  end
   
-  # Additional vectors: perturb initial guess or use random
-  for i in 2:k
-    if i <= n_roots + 1
-      # Perturb around best guess with different random seeds
-      V[i] .= initial_guess .+ 0.01 * randn(n_selected)
+  # Additional vectors if needed: perturb or use random
+  for i in (n_use_guess+1):k
+    if i <= n_roots + 1 && n_use_guess > 0
+      # Perturb around first guess with different random seeds
+      V[i] .= initial_guesses[:, 1] .+ 0.01 * randn(n_selected)
     else
       # Random orthogonal vectors
       V[i] .= randn(n_selected)
