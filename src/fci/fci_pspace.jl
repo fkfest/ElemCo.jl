@@ -158,6 +158,10 @@ function select_pspace_determinants!(context::FCIContext)
   # Create candidate list with energy and excitation level
   candidates = Tuple{Address, Scalar, Int}[]  # (address, energy, excitation_level)
 
+  # Calculate HF energy once (used for thresholding and sorting)
+  hf_addr = address_from_determinant(context, hf_ref)
+  hf_energy::Scalar = context.diag_h.data[hf_addr]
+
   for addr in Address(1):n_total
     det = determinant_from_address(context, addr)
 
@@ -173,9 +177,6 @@ function select_pspace_determinants!(context::FCIContext)
     diagonal_energy = context.diag_h.data[addr]  # addr is now 1-based
 
     # Apply energy threshold (relative to HF diagonal energy)
-    hf_addr = address_from_determinant(context, hf_ref)
-    hf_energy = context.diag_h.data[hf_addr]  # hf_addr is now 1-based
-
     if diagonal_energy - hf_energy > pspace_opts.energy_threshold
       continue
     end
@@ -192,7 +193,6 @@ function select_pspace_determinants!(context::FCIContext)
     sort!(candidates, by = x -> (x[3], x[2]))
   elseif pspace_opts.selection_method == :hybrid
     # Balanced approach: weight both energy and excitation level
-    hf_energy = context.diag_h.data[address_from_determinant(context, hf_ref)]  # address is now 1-based
     sort!(candidates, by = x -> (x[3] * 0.1 + (x[2] - hf_energy)))
   else
     error("Unknown P-space selection method: $(pspace_opts.selection_method)")
@@ -309,7 +309,7 @@ function select_small_space_determinants(context::FCIContext, target_size::Int, 
   candidates = Tuple{Determinant, Scalar, Int}[]  # (determinant, energy, excitation_level)
   
   hf_addr = address_from_determinant(context, hf_ref)
-  hf_energy = context.diag_h.data[hf_addr]
+  hf_energy::Scalar = context.diag_h.data[hf_addr]
   
   # Use larger energy threshold for small-space (more permissive)
   energy_threshold = 1.0  # Hartree (much larger than typical P-space)

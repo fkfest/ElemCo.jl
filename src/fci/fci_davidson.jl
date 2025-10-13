@@ -370,7 +370,7 @@ Always returns arrays of energies and states for type stability.
 # Returns
 - `Tuple{Vector{Scalar}, Vector{FCIVector}}`: Arrays of energies and corresponding eigenvectors
 """
-function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = nothing)
+function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = nothing)::Tuple{Vector{Scalar}, Vector{FCIVector}}
   # Use n_roots from options if n_states not provided
   n_states = isnothing(n_states) ? context.options.n_roots : n_states
 
@@ -733,7 +733,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
 end
 
 """
-    davidson_selected_ci!(selected_ctx, initial_guess; kwargs...)
+    davidson_selected_ci!(selected_ctx, initial_guesses; kwargs...)
 
 Davidson diagonalization in selected CI space.
 
@@ -744,7 +744,7 @@ determinants rather than the full CI space.
 
 # Arguments
 - `selected_ctx::SelectedCIContext`: Selected CI context containing determinants
-- `initial_guess::Vector{Scalar}`: Initial guess vector in selected CI basis
+- `initial_guesses::Matrix{Scalar}`: Initial guess vector in selected CI basis (n_selected × n_guess)
 
 # Keyword Arguments
 - `n_roots::Int=1`: Number of lowest eigenvalues to compute
@@ -773,29 +773,22 @@ memory usage rather than O(N_full).
 """
 function davidson_selected_ci!(
   selected_ctx::SelectedCIContext,
-  initial_guess::Union{Vector{Scalar}, Matrix{Scalar}};
+  initial_guesses::Matrix{Scalar};
   n_roots::Int = 1,
   max_iterations::Int = 50,
   convergence_threshold::Float64 = 1e-8,
   max_subspace::Int = 30,
   verbose::Bool = false
 )
-  n_selected = selected_ctx.selected_dets.n_selected
+  n_selected::Int = selected_ctx.selected_dets.n_selected
   
-  # Handle both single vector and matrix of initial guesses
-  if initial_guess isa Vector
-    initial_guesses = reshape(initial_guess, n_selected, 1)
-    n_guess = 1
-  else
-    initial_guesses = initial_guess
-    n_guess = size(initial_guesses, 2)
-  end
+  n_guess::Int = size(initial_guesses, 2)
   
   # Validate input
-  @assert n_roots >= 1 "n_roots must be at least 1"
-  @assert n_roots <= n_selected "n_roots cannot exceed n_selected"
-  @assert size(initial_guesses, 1) == n_selected "initial_guess must have $n_selected rows"
-  @assert max_subspace >= 2 * n_roots "max_subspace must be at least 2*n_roots"
+  n_roots >= 1 || error("n_roots must be at least 1")
+  n_roots <= n_selected || error("n_roots cannot exceed n_selected")
+  size(initial_guesses, 1) == n_selected || error("initial_guess must have ", n_selected, " rows")
+  max_subspace >= 2 * n_roots || error("max_subspace must be at least 2*n_roots")
   
   # Scale subspace size with number of roots
   max_subspace = max(max_subspace, 3 * n_roots)

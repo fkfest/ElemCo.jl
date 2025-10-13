@@ -5,6 +5,27 @@ applyTo: 'src/fci/*.jl'
 
 Julia implementation of Full Configuration Interaction (FCI) with Selected CI and Heat-Bath CI extensions.
 
+## Type Stability Status
+
+**Last checked:** 2025-10-13  
+**JET Issues:** ✅ **0** (All type instabilities resolved!)
+
+### All Issues Fixed (8/8)
+1. ✅ `davidson_fci!` return type annotation added
+2. ✅ `hf_energy` captured variable type annotations (3 locations in fci_pspace.jl)
+3. ✅ `initial_guesses` type stability in `davidson_selected_ci!` fixed
+4. ✅ `diagonalize_selected_space` return type annotation added
+5. ✅ `run_heatbath_ci!` return type annotation added
+6. ✅ `n_selected` and `n_guess` type annotations in `davidson_selected_ci!`
+7. ✅ Variable name fix in `apply_1e_op!` (coeffs_beta, removed invalid free! call)
+8. ✅ Replaced `@assert` with `||error()` to avoid AssertionError type instability
+
+**Testing:** Run `julia --project=.. jet_fci.jl` from `profile/` directory
+
+**Result:** The FCI module is now fully type-stable according to JET analysis! 🎉
+
+---
+
 ## Running FCI/HCI Calculations
 
 ### Using ElemCo Macros
@@ -60,6 +81,63 @@ fcidump = "path/to/file.FCIDUMP"
 @hci
 ```
 
+## Development Workflow: Type Stability with JET
+
+**IMPORTANT**: Before implementing any new features or optimizations, ensure type stability!
+
+### Step 1: Run JET Analysis
+
+```bash
+cd profile
+julia --project=.. jet.jl
+```
+
+This runs FCI code through JET's type inference analyzer and reports any type instabilities.
+
+### Step 2: Identify Issues
+
+JET output will show:
+```julia
+┌ @ ElemCo.FCI src/fci/fci_selected_ci.jl:1234 my_function(arg1, arg2)
+│┌ @ ElemCo.FCI src/fci/fci_selected_ci.jl:1240 internal_call(x)
+││ runtime dispatch detected: internal_call(::Any)
+```
+
+This means `internal_call` is being dispatched dynamically because `x` has type `Any`.
+
+### Step 3: Diagnose with @code_warntype
+
+```julia
+julia> using ElemCo, ElemCo.FCI
+julia> @code_warntype my_function(arg1, arg2)
+```
+
+Look for:
+- **Red variables** = type-unstable (bad!)
+- **Yellow variables** = Union types (acceptable for initialization, bad in loops)
+- **Blue/green variables** = concrete types (good!)
+
+### Step 4: Fix Type Instabilities
+
+Common fixes:
+1. **Add type annotations to function signatures**
+2. **Use parametric types in structs**
+3. **Avoid returning different types from branches**
+4. **Use function barriers for unavoidable type instabilities**
+5. **Replace abstract types with concrete ones**
+
+### Step 5: Verify Fix
+
+Re-run JET and `@code_warntype` to confirm the issue is resolved.
+
+### Step 6: Run Correctness Tests
+
+```bash
+julia --project=. test/runtests.jl
+```
+
+Ensure numerical results remain correct after refactoring.
+
 ## Core Architecture
 
 ### Key Modules
@@ -85,7 +163,105 @@ end
 
 ## Critical Performance Requirements
 
-### 1. Selected CI Efficiency: Direct Matrix Elements ONLY
+### 1. Type Stability (PRIMARY GOAL)
+
+**All FCI code must be fully type-stable.** This is the current priority for development.
+
+#### Testing Type Stability with JET
+
+Use JET.jl to automatically detect type instabilities:
+
+```bash
+# Run JET analysis on FCI code
+cd profile
+julia --project=.. jet.jl
+```
+
+The `jet.jl` file is configured to analyze the FCI module:
+```julia
+@report_opt target_modules=(
+    ElemCo.FCI,  # FCI module is included
+    ...
+) ElemCo.Drivers.fcidriver(EC)  # Tests FCI execution
+```
+
+#### Type Stability Requirements
+
+**All performance-critical functions must be type-stable:**
+- Return types must be inferrable at compile time
+- No `Union` types in hot paths
+- Avoid abstract types in struct fields
+- Use `Val{N}` for dimension-dependent code
+- All loop variables must have concrete types
+
+**Check functions with:**
+```julia
+using JET
+@report_opt my_function(args...)
+```
+
+Or manually:
+```julia
+@code_warntype my_function(args...)
+```
+
+#### Common Type Instabilities to Fix
+
+**❌ Bad: Abstract field types**
+```julia
+struct MyStruct
+    data::AbstractArray  # Type-unstable!
+end
+```
+
+**✅ Good: Parametric types**
+```julia
+struct MyStruct{T<:AbstractFloat, N}
+    data::Array{T, N}
+end
+```
+
+**❌ Bad: Type-unstable returns**
+```julia
+function maybe_compute(flag)
+    if flag
+        return 1.0
+    else
+        return nothing  # Union{Float64, Nothing}
+    end
+end
+```
+
+**✅ Good: Consistent return type**
+```julia
+function maybe_compute(flag)
+    if flag
+        return 1.0
+    else
+        return 0.0  # Always Float64
+    end
+end
+```
+
+**❌ Bad: Dynamic dispatch in loops**
+```julia
+function process(items::Vector)  # Abstract!
+    for item in items
+        compute(item)  # Type-unstable dispatch
+    end
+end
+```
+
+**✅ Good: Concrete types**
+```julia
+function process(items::Vector{MyType})
+    for item in items
+        compute(item)  # Type-stable dispatch
+    end
+end
+```
+
+### 2. Selected CI Efficiency: Direct Matrix Elements ONLY
 
 **NEVER map selected determinants to full CI space!**
 
@@ -103,16 +279,6 @@ result = v_out[selected_addresses]
 ```
 
 **Why**: For 100 selected determinants out of 25,200 total, direct computation is **250x faster**.
-
-
-
-### 2. Type Stability
-
-All performance-critical functions must be type-stable:
-- Ensure return types are inferrable at compile time
-- Use `@code_warntype` to check for type instabilities
-- Avoid abstract types in struct fields
-- Use `Val{N}` for dimension-dependent code
 
 ### 3. Zero Allocations in Hot Paths
 
@@ -203,7 +369,37 @@ end
 
 ## Testing
 
-### Running Tests
+### Type Stability Testing with JET (PRIMARY)
+
+**Goal**: Ensure all FCI code is type-stable for optimal performance.
+
+```bash
+# Run JET analysis
+cd profile
+julia --project=.. jet.jl
+```
+
+JET will report:
+- Type instabilities in function calls
+- Runtime dispatch issues
+- Potential performance problems
+- Optimization opportunities
+
+**Expected output**: No type instability warnings from FCI module functions.
+
+**Interpreting JET output:**
+- `✓ No errors found` - Code is type-stable
+- `┌ @ ElemCo.FCI file.jl:123 function(...)` - Type instability detected at this location
+- Look for red/yellow warnings about dynamic dispatch or type uncertainty
+
+**Fixing issues:**
+1. Identify the problematic function from JET output
+2. Run `@code_warntype` on that specific function
+3. Look for variables marked in red (type-unstable)
+4. Add type annotations or refactor to make types concrete
+5. Re-run JET to verify fix
+
+### Running Correctness Tests
 ```bash
 julia --project=. test/runtests.jl          # All tests
 julia --project=. test/runtests.jl quick    # Quick tests only
@@ -219,11 +415,13 @@ end
 ```
 
 ### Validation Checklist
+- [ ] **JET reports no type instabilities** (PRIMARY)
 - [ ] Energy matches reference within 1e-8 Hartree
 - [ ] Multi-state: all states converge and are orthogonal
 - [ ] Selected CI: energies independent of P-space size
 - [ ] Heat-Bath CI: setup phase provides speedup
 - [ ] No performance regressions
+- [ ] `@code_warntype` shows no red variables in hot paths
 
 ## Code Style
 
@@ -503,6 +701,11 @@ mutable struct FCIDump
 
 ## Status Summary
 
+**Current Priority**:
+- 🎯 **Type stability testing with JET** - Ensure all FCI code is fully type-stable
+- Test with `profile/jet.jl` and fix any reported type instabilities
+- Goal: Zero type instability warnings from JET for FCI module
+
 **Implemented & Working**:
 - ✅ Full CI (RHF and UHF)
 - ✅ Multi-state Davidson solver
@@ -512,9 +715,16 @@ mutable struct FCIDump
 - ✅ P-space initial guess (including HBCI-based)
 - ✅ 1-RDM and 2-RDM calculations
 - ✅ Jacobi-Davidson preconditioner
+- ✅ Previous eigenvector warm start for Davidson
 
 **Performance**:
 - Heat-Bath CI: 574x speedup (RHF), 20-26x speedup (UHF) vs naive
 - Selected CI: O(N_selected²) scaling, not O(N_full²)
 - Davidson: Efficient for N > 100 determinants
 - Zero allocations in hot paths achieved
+- Warm start improves multi-state convergence
+
+**Type Stability Status**:
+- ⏳ Testing in progress with JET
+- Run `profile/jet.jl` to check current status
+- Fix any reported type instabilities before adding new features

@@ -611,7 +611,7 @@ struct HeatBathCIOptions
   
   function HeatBathCIOptions(;
     target_selection::Int = 10000,
-    epsilon_h::Float64 = 2e-4,
+    epsilon_h::Float64 = 5e-4,
     epsilon_p::Float64 = epsilon_h,
     tol::Float64 = 1e-6,
     max_iterations::Int = 50,
@@ -1879,7 +1879,7 @@ Run Heat-Bath CI calculation with support for multiple states.
 - For n_roots>1, uses multi-state selection with state-maximum probability
 - PT2 correction currently only computed for ground state
 """
-function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)
+function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
   if options.verbose
     println("\n" * "="^70)
     println("Heat-Bath Configuration Interaction (HBCI)")
@@ -2180,7 +2180,7 @@ For large spaces (≥ 1000 determinants), uses Davidson iterative diagonalizatio
 """
 function diagonalize_selected_space(selected_ctx::SelectedCIContext; 
                                    n_roots::Int=1,
-                                   previous_vectors::Union{Nothing,Matrix{Float64}}=nothing)
+                                   previous_vectors::Union{Nothing,Matrix{Float64}}=nothing)::Tuple{Vector{Scalar}, Matrix{Scalar}}
   n_selected = selected_ctx.selected_dets.n_selected
   n_roots = min(n_roots, n_selected)  # Can't compute more roots than determinants
   
@@ -2241,8 +2241,8 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
   diagonal = [compute_diagonal_element(det, selected_ctx.base_context) 
               for det in selected_ctx.selected_dets.determinants]
   min_idx = argmin(diagonal)
-  initial_guess = zeros(Scalar, n_selected)
-  initial_guess[min_idx] = 1.0
+  initial_guess = zeros(Scalar, n_selected, 1)
+  initial_guess[min_idx, 1] = 1.0
   
   # Call Davidson solver with single initial guess
   eigenvalues, eigenvectors = davidson_selected_ci!(

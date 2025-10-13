@@ -447,7 +447,7 @@ function apply_1e_op!(result::AbstractVector{Scalar}, coeffs::AbstractVector{Sca
       # Gather input coefficients with signs
       for i_kk in 1:(n_orb_val * n_blk_k)
         adr_idx = addr_k1_block[i_kk]
-        input_k[i_kk] = signs_block[i_kk] * coeff_beta[st1 * adr_idx + 1]
+        input_k[i_kk] = signs_block[i_kk] * coeffs_beta[st1 * adr_idx + 1]
       end
 
       # Matrix multiplication: output_k = op_matrix_1e * input_k
@@ -463,9 +463,6 @@ function apply_1e_op!(result::AbstractVector{Scalar}, coeffs::AbstractVector{Sca
       end
     end
   end
-
-  # Free temporary memory
-  free!(mem, addr1)
 end
 
 """
