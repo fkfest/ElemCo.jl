@@ -74,7 +74,7 @@ end
   Guess BO-MO coefficients (right) from core Hamiltonian.
 """
 function guess_bo_hcore(EC::ECInfo, uhf)
-  CMOr_final = SpinMatrix()
+  cMOr_final = SpinMatrix{Float64}()
   if uhf
     spins = [:α, :β]
     if !EC.fd.uhf
@@ -91,9 +91,9 @@ function guess_bo_hcore(EC::ECInfo, uhf)
     isp += 1
   end
   if !uhf
-    restrict!(CMOr_final)
+    restrict!(cMOr_final)
   end
-  return CMOr_final
+  return cMOr_final
 end
 
 """
@@ -282,7 +282,7 @@ function bohf(EC::ECInfo)
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMOr[1], description="BOHF right orbitals")
   save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl[1], description="BOHF left orbitals")
-  return EHF
+  return OutDict("HF"=>(EHF, "closed-shell BO-HF energy"), "E"=>(EHF, "closed-shell BO-HF energy"))
 end
 
 """ 
@@ -373,10 +373,7 @@ function bouhf(EC::ECInfo)
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMOr..., description="BOHF right orbitals")
   save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl..., description="BOHF left orbitals")
-  return EHF
+  return OutDict("UHF"=>(EHF, "BO-UHF energy"), "HF"=>(EHF, "BO-UHF energy"), "E"=>(EHF, "BO-UHF energy"))
 end
-
-
-
 
 end # module BOHF
