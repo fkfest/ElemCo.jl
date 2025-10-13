@@ -27,7 +27,7 @@ CMOr = @loadfile EC.options.wf.orb
 CMOl = @loadfile EC.options.wf.orb*EC.options.wf.left
 ElemCo.transform_fcidump(EC.fd, CMOl, CMOr)
 energies = @cc dcsd
-@test abs(EBOHF-EBOHF_test) < epsilon
+@test abs(EBOHF["E"]-EBOHF_test) < epsilon
 @test abs(last_energy(energies)-EBODCSD_test) < epsilon
 
 @freeze_orbs [1]
