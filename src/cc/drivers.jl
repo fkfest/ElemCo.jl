@@ -525,14 +525,21 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
     fci_dump.h1 = EC.fd.int1
     fci_dump.h2 = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
   end
-  fci_ctx = FCIContext(fci_dump)
+  
+  # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
   if hci
+    println("Setting up HCI (lightweight context)..."); flush(stdout)
     hb_options = HeatBathCIOptions(compute_pt2=true)
-    energies, coefs, dets, pt2 = run_heatbath_ci!(fci_ctx, hb_options)
+    hci_ctx = HCIContext(fci_dump, hb_options)
+    println("HCI context setup complete."); flush(stdout)
+    energies, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
     t1 = print_time(EC, t1, "HCI", 1)
     return OutDict("E-correction" => pt2.energy_correction,
                    "E" => energies[1] - ref_energy)
   else
+    println("Setting up FCI..."); flush(stdout)
+    fci_ctx = FCIContext(fci_dump, EC.options.fci)
+    println("FCI context setup complete."); flush(stdout)
     E_FCI = run_fci!(fci_ctx)
     t1 = print_time(EC, t1, "FCI", 1)
     return OutDict("E" => E_FCI - ref_energy)

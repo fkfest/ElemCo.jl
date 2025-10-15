@@ -72,12 +72,21 @@ end
 Context for Selected CI calculations using direct H*c operations.
 """
 mutable struct SelectedCIContext
-  base_context::FCIContext             # Full FCI context for integrals and addressing
-  selected_dets::SelectedCIDeterminants # Selected determinants and addresses
+  base_context::Union{FCIContext, HCIContext}  # Context for integrals and (optionally) addressing
+  selected_dets::SelectedCIDeterminants        # Selected determinants and addresses
 
+  # Constructor for FCIContext (uses full addressing)
   function SelectedCIContext(base_context::FCIContext, determinants::Vector{Determinant})
-    # Convert determinants to addresses
+    # Convert determinants to addresses using full addressing
     addresses = [address_from_determinant(base_context, det) for det in determinants]
+    selected_dets = SelectedCIDeterminants(determinants, addresses)
+    new(base_context, selected_dets)
+  end
+
+  # Constructor for HCIContext (on-demand addressing)
+  function SelectedCIContext(base_context::HCIContext, determinants::Vector{Determinant})
+    # For HCI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
+    addresses = UInt64.(1:length(determinants))
     selected_dets = SelectedCIDeterminants(determinants, addresses)
     new(base_context, selected_dets)
   end
@@ -266,22 +275,24 @@ end
 
 """
     compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
-                                 context::FCIContext) -> Scalar
+                                 context) -> Scalar
 
 Compute ⟨det_i|Ĥ|det_j⟩ directly using orbital excitation analysis.
+Works with both FCIContext and HCIContext.
 """
-function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, context::FCIContext)::Scalar
+function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext})::Scalar
   excitation = analyze_determinant_excitation(det_i, det_j)
   return evaluate_matrix_element(det_i, det_j, context, excitation)
 end
 
 """
     evaluate_matrix_element(det_i::Determinant, det_j::Determinant, 
-                           context::FCIContext, excitation::ExcitationInfo) -> Scalar
+                           context, excitation::ExcitationInfo) -> Scalar
 
 Evaluate matrix element based on excitation type.
+Works with both FCIContext and HCIContext.
 """
-function evaluate_matrix_element(det_i::Determinant, det_j::Determinant, context::FCIContext,
+function evaluate_matrix_element(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext},
                                  excitation::ExcitationInfo)::Scalar
   if excitation.excitation_type == :same
     return diagonal_matrix_element(det_i, context)
@@ -295,9 +306,10 @@ function evaluate_matrix_element(det_i::Determinant, det_j::Determinant, context
 end
 
 """
-    diagonal_matrix_element(det::Determinant, context::FCIContext) -> Scalar
+    diagonal_matrix_element(det::Determinant, context) -> Scalar
 
 Compute diagonal matrix element ⟨det|Ĥ|det⟩.
+For FCIContext uses precomputed diagonal, for HCIContext computes on-the-fly.
 """
 function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
   # Get the address and use existing diagonal computation
@@ -305,26 +317,33 @@ function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
   return context.diag_h.data[addr]
 end
 
+function diagonal_matrix_element(det::Determinant, context::HCIContext)::Scalar
+  # For HCI, compute diagonal element on-the-fly
+  return compute_diagonal_element(det, context)
+end
+
 """
     single_excitation_matrix_element(det_i::Determinant, det_j::Determinant, 
-                                    context::FCIContext, excitation::ExcitationInfo) -> Scalar
+                                    context, excitation::ExcitationInfo) -> Scalar
 
 Compute matrix element for single excitation.
+Works with both FCIContext and HCIContext.
 """
 function single_excitation_matrix_element(det_i::Determinant, det_j::Determinant,
-                                          context::FCIContext, excitation::ExcitationInfo)::Scalar
+                                          context::Union{FCIContext, HCIContext}, excitation::ExcitationInfo)::Scalar
   orb_i = excitation.orb_indices[1] + 1  # Convert to 1-based indexing
   orb_a = excitation.orb_indices[2] + 1
   phase = excitation.phase
 
-  # Select correct integrals based on RHF vs UHF
-  is_uhf = context.fcidump.is_uhf
+  # Get fcidump and is_uhf from context
+  fcidump = context.fcidump
+  is_uhf = fcidump.is_uhf
 
   # One-electron contribution: h_ia
   if excitation.excitation_type == :single_alpha
-    h_element = is_uhf ? context.fcidump.h1a[orb_i, orb_a] : context.fcidump.h1[orb_i, orb_a]
+    h_element = is_uhf ? fcidump.h1a[orb_i, orb_a] : fcidump.h1[orb_i, orb_a]
   else  # single_beta
-    h_element = is_uhf ? context.fcidump.h1b[orb_i, orb_a] : context.fcidump.h1[orb_i, orb_a]
+    h_element = is_uhf ? fcidump.h1b[orb_i, orb_a] : fcidump.h1[orb_i, orb_a]
   end
 
   # Two-electron contributions: sum over occupied orbitals in det_i
@@ -332,8 +351,8 @@ function single_excitation_matrix_element(det_i::Determinant, det_j::Determinant
 
   if excitation.excitation_type == :single_alpha
     # Get correct alpha-alpha integrals
-    h2aa = is_uhf ? context.fcidump.h2aa : context.fcidump.h2
-    h2ab = is_uhf ? context.fcidump.h2ab : context.fcidump.h2
+    h2aa = is_uhf ? fcidump.h2aa : fcidump.h2
+    h2ab = is_uhf ? fcidump.h2ab : fcidump.h2
     
     # Sum over all occupied alpha orbitals in det_i (excluding orbital i)
     pattern_alpha = det_i.alpha
@@ -363,8 +382,8 @@ function single_excitation_matrix_element(det_i::Determinant, det_j::Determinant
 
   else  # single_beta
     # Get correct beta-beta and alpha-beta integrals
-    h2bb = is_uhf ? context.fcidump.h2bb : context.fcidump.h2
-    h2ab = is_uhf ? context.fcidump.h2ab : context.fcidump.h2
+    h2bb = is_uhf ? fcidump.h2bb : fcidump.h2
+    h2ab = is_uhf ? fcidump.h2ab : fcidump.h2
     
     # Sum over all occupied alpha orbitals in det_i
     pattern_alpha = det_i.alpha
@@ -399,13 +418,14 @@ end
 
 """
     double_excitation_matrix_element(det_i::Determinant, det_j::Determinant, 
-                                    context::FCIContext, excitation::ExcitationInfo) -> Scalar
+                                    context, excitation::ExcitationInfo) -> Scalar
 
 Compute matrix element for double excitation.
 Handles both same-spin and alpha-beta mixed double excitations correctly.
+Works with both FCIContext and HCIContext.
 """
 function double_excitation_matrix_element(det_i::Determinant, det_j::Determinant,
-                                          context::FCIContext, excitation::ExcitationInfo)::Scalar
+                                          context::Union{FCIContext, HCIContext}, excitation::ExcitationInfo)::Scalar
   # Determine if this is same-spin or alpha-beta mixed
   alpha_diff = det_i.alpha ⊻ det_j.alpha
   beta_diff = det_i.beta ⊻ det_j.beta
@@ -413,7 +433,8 @@ function double_excitation_matrix_element(det_i::Determinant, det_j::Determinant
   n_beta_diff = count_ones(beta_diff)
 
   phase = excitation.phase
-  is_uhf = context.fcidump.is_uhf
+  fcidump = context.fcidump
+  is_uhf = fcidump.is_uhf
 
   if n_alpha_diff == 4 && n_beta_diff == 0
     # Double alpha excitation: both electrons in alpha spin
@@ -424,7 +445,7 @@ function double_excitation_matrix_element(det_i::Determinant, det_j::Determinant
     orb_b = excitation.orb_indices[4] + 1
 
     # Get correct alpha-alpha integrals
-    h2aa = is_uhf ? context.fcidump.h2aa : context.fcidump.h2
+    h2aa = is_uhf ? fcidump.h2aa : fcidump.h2
     
     # Matrix element: phase * [(ia|jb) - (ib|ja)]
     h_element = h2aa[orb_i, orb_a, orb_j, orb_b] - h2aa[orb_i, orb_b, orb_j, orb_a]
@@ -439,7 +460,7 @@ function double_excitation_matrix_element(det_i::Determinant, det_j::Determinant
     orb_b = excitation.orb_indices[4] + 1
 
     # Get correct beta-beta integrals
-    h2bb = is_uhf ? context.fcidump.h2bb : context.fcidump.h2
+    h2bb = is_uhf ? fcidump.h2bb : fcidump.h2
     
     # Matrix element: phase * [(ia|jb) - (ib|ja)]
     h_element = h2bb[orb_i, orb_a, orb_j, orb_b] - h2bb[orb_i, orb_b, orb_j, orb_a]
@@ -454,7 +475,7 @@ function double_excitation_matrix_element(det_i::Determinant, det_j::Determinant
     orb_a_beta = excitation.orb_indices[4] + 1
 
     # Get correct alpha-beta integrals
-    h2ab = is_uhf ? context.fcidump.h2ab : context.fcidump.h2
+    h2ab = is_uhf ? fcidump.h2ab : fcidump.h2
     
     # Matrix element: phase * (i_α a_α | i_β a_β) - NO exchange term!
     h_element = h2ab[orb_i_alpha, orb_a_alpha, orb_i_beta, orb_a_beta]
@@ -587,51 +608,6 @@ end
 # ===========================================
 
 """
-    HeatBathCIOptions
-
-Configuration for Heat-Bath CI selection algorithm.
-
-Based on Holmes et al. (2016): "Heat-Bath Configuration Interaction: An Efficient 
-Selected Configuration Interaction Algorithm Inspired by Heat-Bath Sampling"
-"""
-struct HeatBathCIOptions
-  target_selection::Int              # Target number of determinants to select
-  epsilon_h::Float64                # HCI selection threshold (default: 1e-4)
-  epsilon_p::Float64                # CIPSI selection threshold (default: 1e-4)
-  tol::Float64                      # convergence threshold for Davidson (default: 1e-8)
-  max_iterations::Int               # Maximum HBCI iterations (default: 10)
-  verbose::Bool                     # Print iteration details
-  use_setup_phase::Bool             # Perform setup (all singles+doubles from HF)
-  compute_pt2::Bool                 # Compute PT2 perturbative correction
-  epsilon_pt2::Float64              # Threshold for PT2 contributions (default: 1e-6)
-  n_roots::Int                      # Number of states to compute (default: 1 = ground state only)
-  use_small_space_guess::Bool       # Use small-space Hamiltonian for initial guess
-  small_space_size::Int             # Size of small space (0 = auto: max(100, target÷10, 5*n_roots))
-  small_space_method::Symbol        # Selection method: :hybrid (energy + excitation)
-  
-  function HeatBathCIOptions(;
-    target_selection::Int = 10000,
-    epsilon_h::Float64 = 5e-4,
-    epsilon_p::Float64 = epsilon_h,
-    tol::Float64 = 1e-6,
-    max_iterations::Int = 50,
-    verbose::Bool = true,
-    use_setup_phase::Bool = true,
-    compute_pt2::Bool = true,
-    epsilon_pt2::Float64 = 1e-6,
-    n_roots::Int = 1,
-    use_small_space_guess::Bool = true,
-    small_space_size::Int = 0,
-    small_space_method::Symbol = :hybrid
-  )
-    new(target_selection, epsilon_h, epsilon_p, tol, max_iterations, 
-        verbose, use_setup_phase,
-        compute_pt2, epsilon_pt2, n_roots,
-        use_small_space_guess, small_space_size, small_space_method)
-  end
-end
-
-"""
     HBCandidate
 
 Heat-Bath selection candidate with probability and energy contribution.
@@ -673,15 +649,12 @@ struct HBCISetupData
   h1e2_ab::Array{Float64, 3}       # UHF and RHF: alpha-beta (no exchange)
   h1e2_ba::Array{Float64, 3}       # UHF: beta-alpha (no exchange)
 
-  is_uhf::Bool                     # Whether this is UHF data
-  
   function HBCISetupData()
     new(Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(), 
         Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
         Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
         0.0, 
-        zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0),
-        false)
+        zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0))
   end
   
   # RHF constructor
@@ -693,8 +666,7 @@ struct HBCISetupData
         Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
         double_exc_ab,
         h_max, 
-        h1e2, zeros(0,0,0), zeros(0,0,0), h1e2_ab, zeros(0,0,0),
-        false)
+        h1e2, zeros(0,0,0), zeros(0,0,0), h1e2_ab, zeros(0,0,0))
   end
   
   # UHF constructor
@@ -705,8 +677,7 @@ struct HBCISetupData
                         h1e2_aa::Array{Float64, 3}, h1e2_bb::Array{Float64, 3},
                         h1e2_ab::Array{Float64, 3}, h1e2_ba::Array{Float64, 3})
     new(double_exc_aa, double_exc_bb, double_exc_ab, h_max, 
-        zeros(0,0,0), h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba,
-        true)
+        zeros(0,0,0), h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba)
   end
 end
 
@@ -782,6 +753,15 @@ function hartree_fock_determinant(ctx::FCIContext)::Determinant
   end
   
   return Determinant(alpha_pattern, beta_pattern)
+end
+
+"""
+    hartree_fock_determinant(ctx::HCIContext) -> Determinant
+
+Create Hartree-Fock determinant for HCI context (directly returns stored reference_det).
+"""
+function hartree_fock_determinant(ctx::HCIContext)::Determinant
+  return ctx.reference_det
 end
 
 """
@@ -971,14 +951,16 @@ This is the efficient excitation generation from Holmes et al. (2016):
 
 Time complexity: O(N_εcon × M^2) where N_εcon is number of excitations above threshold,
 much faster than O(M^4) for generating all possible excitations.
+Works with both FCIContext and HCIContext.
 """
 function generate_excitations_with_threshold!(excitations::Vector{Determinant},
                                              det::Determinant,
-                                             ctx::FCIContext,
+                                             ctx::Union{FCIContext, HCIContext},
                                              setup_data::HBCISetupData,
                                              epsilon::Float64)::Int
   empty!(excitations)
   n_orb = ctx.fcidump.n_orb
+  is_uhf = ctx.fcidump.is_uhf
   
   # Get occupied and virtual orbitals
   alpha_occ = occupied_orbitals(det.alpha, n_orb)
@@ -992,7 +974,7 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   
   # Check if we should skip all double excitations
   if epsilon <= setup_data.h_doub_max
-    if !setup_data.is_uhf
+    if !is_uhf
       # RHF: Use single dictionary for all double excitations
       # Alpha-alpha double excitations
       for (idx_i, i) in enumerate(alpha_occ)
@@ -1115,8 +1097,6 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   # ===========================================
   # 2. Generate single excitations with on-the-fly filtering using Fock elements
   # ===========================================
-  is_uhf = ctx.fcidump.is_uhf
-
   @inline function sum_h1e2(h1e2, occ, a1, i1)
     total = 0.0
     @inbounds @simd for j in occ
@@ -1177,102 +1157,112 @@ end
 # ===========================================
 
 """
-    compute_diagonal_element(det::Determinant, ctx::FCIContext) -> Scalar
+    compute_diagonal_element(det::Determinant, ctx) -> Scalar
 
 Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant.
+Works with both FCIContext and HCIContext.
 """
-function compute_diagonal_element(det::Determinant, ctx::FCIContext)::Scalar
-  # For diagonal elements, we need:
-  # 1. One-electron contributions: Σᵢ hᵢᵢ
-  # 2. Two-electron contributions: Σᵢⱼ (ii|jj) - (ij|ij) for same spin, (ii|jj) for opposite spin
+function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
+  fcidump = ctx.fcidump
+  n_orb = fcidump.n_orb
+  n_elec = fcidump.n_elec
+  f_scale = 1.0 / n_elec
   
-  n_orb = ctx.fcidump.n_orb
-  fc = ctx.fcidump
+  # DiagonalHEvalData uses double loop over ALL orbitals with occupation factors
   
-  # Get occupied orbitals (0-based indexing from bit patterns)
-  alpha_occ = occupied_orbitals(det.alpha, n_orb)
-  beta_occ = occupied_orbitals(det.beta, n_orb)
+  f_elem = 0.0
   
-  # One-electron contribution
-  H_diag = 0.0
-  if fc.is_uhf
-    # UHF: use spin-separated integrals
-    for i in alpha_occ
-      H_diag += fc.h1a[i+1, i+1]  # Convert to 1-based indexing for array access
-    end
-    for i in beta_occ
-      H_diag += fc.h1b[i+1, i+1]
+  # NOTE: When absorb_1e=true, hbar arrays are empty, so NO 1e contribution
+  
+  if fcidump.is_uhf
+    # UHF case: replicate DiagonalHEvalData formula line-by-line
+    for i in 0:(n_orb - 1)
+      # Get occupation numbers for orbital i
+      ni_a = Int((det.alpha >> i) & 1)
+      ni_b = Int((det.beta >> i) & 1)
+      
+      if ni_a + ni_b == 0
+        continue  # Skip if orbital i is completely unoccupied
+      end
+      
+      for j in 0:(n_orb - 1)
+        # Get occupation numbers for orbital j
+        nj_a = Int((det.alpha >> j) & 1)
+        nj_b = Int((det.beta >> j) & 1)
+        
+        # Compute absorbed jaa, jbb, jab (Coulomb-like terms)
+        # jaa[i,j] = h2aa_absorbed[i,i,j,j]
+        jaa_absorbed = fcidump.h2aa[i+1, i+1, j+1, j+1]
+        jaa_absorbed += f_scale * (ctx.mod_core_h_a[j+1, j+1] + ctx.mod_core_h_a[i+1, i+1])
+        
+        jbb_absorbed = fcidump.h2bb[i+1, i+1, j+1, j+1]
+        jbb_absorbed += f_scale * (ctx.mod_core_h_b[j+1, j+1] + ctx.mod_core_h_b[i+1, i+1])
+        
+        jab_absorbed = fcidump.h2ab[i+1, i+1, j+1, j+1]
+        # For jab: alpha part contributes core_h_a, beta part contributes core_h_b
+        jab_absorbed += f_scale * (ctx.mod_core_h_b[j+1, j+1] + ctx.mod_core_h_a[i+1, i+1])
+        
+        # Compute absorbed kaa, kbb (Exchange-like terms)
+        # kaa[i,j] = h2aa_absorbed[i,j,i,j]
+        kaa_absorbed = fcidump.h2aa[i+1, j+1, i+1, j+1]
+        # kaa only gets absorbed contribution when i==j
+        if i == j
+          kaa_absorbed += 2.0 * f_scale * ctx.mod_core_h_a[i+1, i+1]
+        end
+        
+        kbb_absorbed = fcidump.h2bb[i+1, j+1, i+1, j+1]
+        if i == j
+          kbb_absorbed += 2.0 * f_scale * ctx.mod_core_h_b[i+1, i+1]
+        end
+        
+        f_elem += ni_a * nj_b * jab_absorbed
+        f_elem += (ni_a * nj_a) * 0.5 * jaa_absorbed
+        f_elem += (ni_b * nj_b) * 0.5 * jbb_absorbed
+        
+        f_elem += 0.5 * kaa_absorbed * (ni_a * (1 - nj_a))
+        f_elem += 0.5 * kbb_absorbed * (ni_b * (1 - nj_b))
+      end
     end
   else
-    # RHF: use spatial integrals
-    for i in alpha_occ
-      H_diag += fc.h1[i+1, i+1]
-    end
-    for i in beta_occ
-      H_diag += fc.h1[i+1, i+1]
+    # RHF case: same structure but h2aa = h2bb = h2ab = h2 (spatial)
+    for i in 0:(n_orb - 1)
+      ni_a = Int((det.alpha >> i) & 1)
+      ni_b = Int((det.beta >> i) & 1)
+      
+      if ni_a + ni_b == 0
+        continue
+      end
+      
+      for j in 0:(n_orb - 1)
+        nj_a = Int((det.alpha >> j) & 1)
+        nj_b = Int((det.beta >> j) & 1)
+        
+        # Compute absorbed integrals
+        jaa_absorbed = fcidump.h2[i+1, i+1, j+1, j+1]
+        jaa_absorbed += f_scale * (ctx.mod_core_h_a[j+1, j+1] + ctx.mod_core_h_a[i+1, i+1])
+        
+        # For RHF, jbb = jaa and jab = jaa (same spatial integrals)
+        jbb_absorbed = jaa_absorbed
+        jab_absorbed = jaa_absorbed
+        
+        kaa_absorbed = fcidump.h2[i+1, j+1, i+1, j+1]
+        if i == j
+          kaa_absorbed += 2.0 * f_scale * ctx.mod_core_h_a[i+1, i+1]
+        end
+        kbb_absorbed = kaa_absorbed
+        
+        # Apply formula
+        f_elem += ni_a * nj_b * jab_absorbed
+        f_elem += (ni_a * nj_a) * 0.5 * jaa_absorbed
+        f_elem += (ni_b * nj_b) * 0.5 * jbb_absorbed
+        
+        f_elem += 0.5 * kaa_absorbed * (ni_a * (1 - nj_a))
+        f_elem += 0.5 * kbb_absorbed * (ni_b * (1 - nj_b))
+      end
     end
   end
   
-  # Two-electron contribution
-  if fc.is_uhf
-    # UHF: use spin-separated integrals
-    # Alpha-alpha
-    for i in alpha_occ
-      for j in alpha_occ
-        H_diag += 0.5 * fc.h2aa[i+1, i+1, j+1, j+1]  # Coulomb
-        if i != j
-          H_diag -= 0.5 * fc.h2aa[i+1, j+1, j+1, i+1]  # Exchange
-        end
-      end
-    end
-    
-    # Beta-beta
-    for i in beta_occ
-      for j in beta_occ
-        H_diag += 0.5 * fc.h2bb[i+1, i+1, j+1, j+1]  # Coulomb
-        if i != j
-          H_diag -= 0.5 * fc.h2bb[i+1, j+1, j+1, i+1]  # Exchange
-        end
-      end
-    end
-    
-    # Alpha-beta (no exchange)
-    for i in alpha_occ
-      for j in beta_occ
-        H_diag += fc.h2ab[i+1, i+1, j+1, j+1]  # Coulomb only
-      end
-    end
-  else
-    # RHF: use spatial integrals
-    # Alpha-alpha
-    for i in alpha_occ
-      for j in alpha_occ
-        H_diag += 0.5 * fc.h2[i+1, i+1, j+1, j+1]  # Coulomb
-        if i != j
-          H_diag -= 0.5 * fc.h2[i+1, j+1, j+1, i+1]  # Exchange
-        end
-      end
-    end
-    
-    # Beta-beta
-    for i in beta_occ
-      for j in beta_occ
-        H_diag += 0.5 * fc.h2[i+1, i+1, j+1, j+1]  # Coulomb
-        if i != j
-          H_diag -= 0.5 * fc.h2[i+1, j+1, j+1, i+1]  # Exchange
-        end
-      end
-    end
-    
-    # Alpha-beta (no exchange)
-    for i in alpha_occ
-      for j in beta_occ
-        H_diag += fc.h2[i+1, i+1, j+1, j+1]  # Coulomb only
-      end
-    end
-  end
-  
-  return Scalar(H_diag)
+  return Scalar(f_elem)
 end
 
 # ===========================================
@@ -1292,13 +1282,14 @@ Compute Heat-Bath selection probabilities for all candidates.
 
 If setup_data is provided, uses efficient excitation generation
 with threshold-based filtering. Otherwise, generates all connected determinants.
+Works with both FCIContext and HCIContext.
 
 Returns total selection probability sum.
 """
 function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
                                         variational_dets::Vector{Determinant},
                                         variational_coeffs::Vector{Float64},
-                                        ctx::FCIContext,
+                                        ctx::Union{FCIContext, HCIContext},
                                         E_current::Float64,
                                         setup_data::Union{HBCISetupData,Nothing}=nothing,
                                         epsilon::Float64=1e-10)::Float64
@@ -1564,7 +1555,7 @@ Algorithm from Holmes et al. (2016), IIa:
 - Space complexity: O(M^4)
 where M is the number of orbitals.
 """
-function setup_hbci!(ctx::FCIContext)::HBCISetupData
+function setup_hbci!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
   n_orb = ctx.fcidump.n_orb
   is_uhf = ctx.fcidump.is_uhf
   
@@ -1656,11 +1647,11 @@ function gen_triplets_list_ab(n_orb::Int, h2ab::Array{Float64,4})
   return double_exc_ab_lists, h_doub_max
 end
 """
-    setup_hbci_rhf!(ctx::FCIContext) -> HBCISetupData
+    setup_hbci_rhf!(ctx::Union{FCIContext, HCIContext}) -> HBCISetupData
 
 Setup for RHF systems using spatial orbital integrals.
 """
-function setup_hbci_rhf!(ctx::FCIContext)::HBCISetupData
+function setup_hbci_rhf!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
   n_orb = ctx.fcidump.n_orb
   
   # Dictionary to store sorted lists for each (p,q) pair
@@ -1681,7 +1672,7 @@ function setup_hbci_rhf!(ctx::FCIContext)::HBCISetupData
 end
 
 """
-    setup_hbci_uhf!(ctx::FCIContext) -> HBCISetupData
+    setup_hbci_uhf!(ctx::Union{FCIContext, HCIContext}) -> HBCISetupData
 
 Setup for UHF systems using spin-separated integrals.
 Handles three types of double excitations:
@@ -1689,7 +1680,7 @@ Handles three types of double excitations:
 - Beta-beta (using h2bb)  
 - Mixed alpha-beta (using h2ab)
 """
-function setup_hbci_uhf!(ctx::FCIContext)::HBCISetupData
+function setup_hbci_uhf!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
   n_orb = ctx.fcidump.n_orb
   
   # Three dictionaries for the three types of double excitations
@@ -1737,7 +1728,7 @@ on important contributions.
 Returns PT2Result with energy correction and diagnostics.
 """
 function compute_pt2_correction!(
-  ctx::FCIContext,
+  ctx::Union{FCIContext, HCIContext},
   variational_dets::Vector{Determinant},
   coefficients::Vector{Float64},
   E_variational::Float64,
@@ -1859,7 +1850,7 @@ function compute_pt2_correction!(
 end
 
 """
-    run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions) 
+    run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HeatBathCIOptions) 
       -> (Vector{Float64}, Matrix{Float64}, Vector{Determinant}, PT2Result)
 
 Run Heat-Bath CI calculation with support for multiple states.
@@ -1879,7 +1870,7 @@ Run Heat-Bath CI calculation with support for multiple states.
 - For n_roots>1, uses multi-state selection with state-maximum probability
 - PT2 correction currently only computed for ground state
 """
-function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
+function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HeatBathCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
   if options.verbose
     println("\n" * "="^70)
     println("Heat-Bath Configuration Interaction (HBCI)")
@@ -1893,6 +1884,7 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)::Tuple{Ve
       println("Multi-state selection: State-maximum probability")
     end
     println("="^70)
+    flush(stdout)
   end
   
   # Initialization
@@ -2152,6 +2144,23 @@ function run_heatbath_ci!(ctx::FCIContext, options::HeatBathCIOptions)::Tuple{Ve
   
   # Return format: energies (vector), coefficients (matrix), determinants, pt2_result
   return E_final_vec, coeffs_final_matrix, variational_dets, pt2_result
+end
+
+"""
+    run_heatbath_ci!(ctx::HCIContext) -> (energies, coeffs, determinants, pt2_result)
+
+Convenience method for HCIContext that uses bundled options.
+
+This lightweight interface avoids FCIContext initialization overhead:
+- No full-space address tables computed upfront
+- No full-space diagonal H computed upfront  
+- Initialization time proportional to N_orbitals, not N_determinants
+
+# Returns
+Same as run_heatbath_ci!(ctx, options): (energies, coeffs, determinants, pt2_result)
+"""
+function run_heatbath_ci!(ctx::HCIContext)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
+  return run_heatbath_ci!(ctx, ctx.options)
 end
 
 """

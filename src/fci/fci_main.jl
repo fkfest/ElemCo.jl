@@ -375,7 +375,7 @@ function make_diagonal_h!(context::FCIContext, diag_h::FCIVector,
   n_str_a = Int(diag_h.n_str_a)
   n_str_b = Int(diag_h.n_str_b)
 
-  Threads.@threads for idx_b in 1:n_str_b
+  for idx_b in 1:n_str_b
     str_b = make_pattern(diag_h.adr_b, Address(idx_b))
     for idx_a in 1:n_str_a
       str_a = make_pattern(diag_h.adr_a, Address(idx_a))

@@ -137,7 +137,7 @@ Select P-space determinants based on the configured selection method.
 Populates context.pspace_data with selected determinants and their indices.
 """
 function select_pspace_determinants!(context::FCIContext)
-  pspace_opts = context.options.pspace_options
+  opts = context.options
   pspace = context.pspace_data
 
   # Build HF reference determinant
@@ -149,10 +149,10 @@ function select_pspace_determinants!(context::FCIContext)
 
   if context.options.print_level >= 2
     println("Selecting P-space determinants:")
-    println("  Method: $(pspace_opts.selection_method)")
-    println("  Max size: $(pspace_opts.max_size)")
-    println("  Max excitation: $(pspace_opts.max_excitation)")
-    println("  Energy threshold: $(pspace_opts.energy_threshold)")
+    println("  Method: $(opts.pspace_selection_method)")
+    println("  Max size: $(opts.max_pspace_size)")
+    println("  Max excitation: $(opts.max_pspace_excitation)")
+    println("  Energy threshold: $(opts.pspace_energy_threshold)")
   end
 
   # Create candidate list with energy and excitation level
@@ -169,7 +169,7 @@ function select_pspace_determinants!(context::FCIContext)
     excitation_level = count_excitation_level(hf_ref, det)
 
     # Filter by maximum excitation level
-    if excitation_level > pspace_opts.max_excitation
+    if excitation_level > opts.max_pspace_excitation
       continue
     end
 
@@ -177,7 +177,7 @@ function select_pspace_determinants!(context::FCIContext)
     diagonal_energy = context.diag_h.data[addr]  # addr is now 1-based
 
     # Apply energy threshold (relative to HF diagonal energy)
-    if diagonal_energy - hf_energy > pspace_opts.energy_threshold
+    if diagonal_energy - hf_energy > opts.pspace_energy_threshold
       continue
     end
 
@@ -185,21 +185,21 @@ function select_pspace_determinants!(context::FCIContext)
   end
 
   # Sort candidates based on selection method
-  if pspace_opts.selection_method == :energy
+  if opts.pspace_selection_method == :energy
     # Sort by diagonal energy (lowest first)
     sort!(candidates, by = x -> x[2])
-  elseif pspace_opts.selection_method == :excitation
+  elseif opts.pspace_selection_method == :excitation
     # Sort by excitation level, then by energy
     sort!(candidates, by = x -> (x[3], x[2]))
-  elseif pspace_opts.selection_method == :hybrid
+  elseif opts.pspace_selection_method == :hybrid
     # Balanced approach: weight both energy and excitation level
     sort!(candidates, by = x -> (x[3] * 0.1 + (x[2] - hf_energy)))
   else
-    error("Unknown P-space selection method: $(pspace_opts.selection_method)")
+    error("Unknown P-space selection method: $(opts.pspace_selection_method)")
   end
 
-  # Select top candidates up to max_size
-  n_selected = min(length(candidates), pspace_opts.max_size)
+  # Select top candidates up to max_pspace_size
+  n_selected = min(length(candidates), opts.max_pspace_size)
 
   # Resize arrays
   resize!(pspace.determinants, n_selected)
@@ -312,8 +312,8 @@ function select_small_space_determinants(context::FCIContext, target_size::Int, 
   hf_energy::Scalar = context.diag_h.data[hf_addr]
   
   # Use larger energy threshold for small-space (more permissive)
-  energy_threshold = 1.0  # Hartree (much larger than typical P-space)
-  max_excitation = 2      # Singles and doubles only (for efficiency)
+  pspace_energy_threshold = 1.0  # Hartree (much larger than typical P-space)
+  max_pspace_excitation = 4      # Singles and doubles only (for efficiency)
   
   for addr in Address(1):n_total
     det = determinant_from_address(context, addr)
@@ -322,7 +322,7 @@ function select_small_space_determinants(context::FCIContext, target_size::Int, 
     excitation_level = count_excitation_level(hf_ref, det)
     
     # Filter by maximum excitation level
-    if excitation_level > max_excitation
+    if excitation_level > max_pspace_excitation
       continue
     end
     
@@ -330,7 +330,7 @@ function select_small_space_determinants(context::FCIContext, target_size::Int, 
     diagonal_energy = context.diag_h.data[addr]
     
     # Apply energy threshold (relative to HF diagonal energy)
-    if diagonal_energy - hf_energy > energy_threshold
+    if diagonal_energy - hf_energy > pspace_energy_threshold
       continue
     end
     
@@ -506,7 +506,7 @@ Supports two modes:
 function setup_pspace!(context::FCIContext, n_states::Int=1)
   if context.options.print_level >= 1
     println("Setting up P-space for enhanced initial guess")
-    if n_states > 1 && context.options.pspace_options.use_hbci
+    if n_states > 1 && context.options.pspace_selection_method == :hci
       println("  Multi-state P-space: computing $n_states roots in HBCI")
     end
   end
@@ -517,9 +517,9 @@ function setup_pspace!(context::FCIContext, n_states::Int=1)
   end
 
   # Check if HBCI-based P-space selection is enabled
-  if context.options.pspace_options.use_hbci
+  if context.options.pspace_selection_method == :hci
     # Use Heat-Bath CI for P-space selection
-    # Pass n_states so HBCI computes the same number of roots
+    # Pass n_states so HCI computes the same number of roots
     setup_pspace_hbci!(context, n_states)
   else
     # Traditional P-space selection (single-state only for now)
@@ -558,12 +558,12 @@ subsequent full FCI Davidson iterations.
 - `n_states`: Number of states to compute (HBCI will compute the same number of roots)
 """
 function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
-  pspace_opts = context.options.pspace_options
+  opts = context.options
   
   if context.options.print_level >= 1
     println("  Using Heat-Bath CI for P-space selection")
-    println("  Target size: $(pspace_opts.max_size)")
-    println("  HBCI ε₁: $(pspace_opts.hbci_epsilon)")
+    println("  Target size: $(opts.max_pspace_size)")
+    println("  HBCI ε₁: $(opts.pspace_hci_epsilon)")
     if n_states > 1
       println("  HBCI n_roots: $n_states (matching FCI)")
     end
@@ -572,12 +572,11 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
   # Configure HBCI options for P-space generation
   # CRITICAL: Use same n_roots as the final FCI calculation for multi-state
   hbci_options = HeatBathCIOptions(
-    target_selection = pspace_opts.max_size,
-    epsilon_1 = pspace_opts.hbci_epsilon,
-    epsilon_2 = 1e-8,  # Convergence threshold for HBCI iterations
+    target_selection = opts.max_pspace_size,
+    epsilon_h = opts.pspace_hci_epsilon,
+    tol = 1e-6,  # Convergence threshold for HBCI iterations
     max_iterations = 10,
-    use_stochastic = false,
-    use_setup_phase = pspace_opts.hbci_use_setup_phase,
+    use_setup_phase = opts.pspace_hci_use_setup_phase,
     compute_pt2 = false,  # Don't need PT2 for P-space
     verbose = false,  # Keep HBCI output minimal
     n_roots = n_states  # Match the number of states in the final FCI calculation
@@ -602,10 +601,10 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
   # Convert HBCI determinants to P-space indices
   n_selected = length(dets_hbci)
   
-  # Limit to requested max_size if HBCI selected more
-  if n_selected > pspace_opts.max_size
-    @warn "HBCI selected $n_selected determinants, exceeding requested max_size $(pspace_opts.max_size). Truncating."
-    n_selected = pspace_opts.max_size
+  # Limit to requested max_pspace_size if HBCI selected more
+  if n_selected > opts.max_pspace_size
+    @warn "HBCI selected $n_selected determinants, exceeding requested max_pspace_size $(opts.max_pspace_size). Truncating."
+    n_selected = opts.max_pspace_size
   end
   
   # Resize P-space storage arrays

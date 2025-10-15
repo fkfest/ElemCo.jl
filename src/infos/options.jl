@@ -224,6 +224,46 @@ end
   keepOQVorbitals::Bool = false
 end
 
+"""
+  Option for FCI calculations.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct FCIOptions
+  """ Maximum number of iterations """
+  max_iter::Int = 50
+  """ Convergence tolerance for energy """
+  conv_tol::Float64 = 1e-8
+  """ Convergence tolerance for residual norm """
+  res_tol::Float64 = 1e-6
+  """ Number of roots to compute """
+  n_roots::Int = 1
+  """ Number of guess vectors to use """
+  n_guess::Int = 2
+  """ Maximum subspace size for Davidson diagonalization """
+  subspace_size::Int = 8
+  """ Level of printed output (0=none, 1=some, 2=detailed) """
+  print_level::Int = 1
+  """ Compute 1-RDMs after convergence """
+  compute_rdms::Bool = true
+  """ Compute 2-RDM after convergence """
+  compute_2rdm::Bool = false
+  """ Use projected Jacobi-Davidson correction (prevents linear dependency) """
+  jacobi_davidson::Bool = true
+  """ Maximum P-space size (typically 100-1000) """
+  max_pspace_size::Int = 1000
+  """ Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
+  max_pspace_excitation::Int = 4
+  """ Energy cutoff for determinant inclusion """
+  pspace_energy_threshold::Float64 = 5.0
+  """ Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
+  pspace_selection_method::Symbol = :hybrid
+  """ HCI selection threshold (epsilon_1) for P-space generation """
+  pspace_hci_epsilon::Float64 = 1e-4
+  """ Enable setup for HCI P-space generation """
+  pspace_hci_use_setup_phase::Bool = true
+end
+
 """ 
   Options for DMRG calculation.
 
@@ -328,6 +368,8 @@ end
   int::IntOptions = IntOptions()
   """ Coupled-Cluster options ([`CcOptions`](@ref)). """
   cc::CcOptions = CcOptions()
+  """ FCI options ([`FCIOptions`](@ref)). """
+  fci::FCIOptions = FCIOptions()
   """ DMRG options ([`DmrgOptions`](@ref)). """
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """

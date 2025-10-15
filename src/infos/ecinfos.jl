@@ -20,6 +20,7 @@ export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 export get_options
+export FCIOptions
 
 include("options.jl")
 

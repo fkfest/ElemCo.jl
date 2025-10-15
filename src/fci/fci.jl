@@ -10,8 +10,11 @@ using LinearAlgebra
 using Printf
 using StridedViews
 
+using ..ElemCo.ECInfos
+
 # Export main types and functions
 export FCIContext, FCIVector, FCIOptions, FCIDump
+export HCIContext  # Lightweight context for Heat-Bath CI
 export run_fci!, make_diagonal_h!, contract_hamiltonian!
 export read_fcidump
 export OrbStringAdrTable, SubstResult
@@ -49,6 +52,7 @@ include("fci_dump.jl")
 include("fci_vec.jl")
 include("fci_ops.jl")
 include("fci_main.jl")
+include("fci_hci_context.jl")  # After options (needs HeatBathCIOptions, Determinant), before selected_ci
 include("fci_selected_ci.jl")
 include("fci_pspace.jl")
 include("fci_davidson.jl")
