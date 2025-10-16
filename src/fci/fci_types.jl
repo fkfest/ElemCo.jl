@@ -100,6 +100,18 @@ struct Determinant
   Determinant(alpha::OrbPattern, beta::OrbPattern) = new(alpha, beta)
 end
 
+Determinant() = Determinant(OrbPattern(0), OrbPattern(0))
+function Determinant(occa::Union{AbstractArray, UnitRange}, occb::Union{AbstractArray, UnitRange})
+  alpha = OrbPattern(0)
+  beta = OrbPattern(0)
+  for i in occa
+    alpha |= OrbPattern(1) << (i - 1)
+  end
+  for i in occb
+    beta |= OrbPattern(1) << (i - 1)
+  end
+  return Determinant(alpha, beta)
+end
 """
     PSpaceData
 

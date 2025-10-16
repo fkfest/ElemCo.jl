@@ -9,8 +9,10 @@ module FCI
 using LinearAlgebra
 using Printf
 using StridedViews
+using TensorOperations
 
 using ..ElemCo.ECInfos
+using ..ElemCo.FciDumps
 
 # Export main types and functions
 export FCIContext, FCIVector, FCIOptions, FCIDump
@@ -47,11 +49,10 @@ export compute_heatbath_probabilities!, compute_heatbath_probabilities_multistat
 export PT2Options, PT2Result, compute_pt2_correction!
 
 include("fci_types.jl")
-include("fci_dump.jl")
 include("fci_vec.jl")
+include("fci_hci_context.jl")
 include("fci_ops.jl")
 include("fci_main.jl")
-include("fci_hci_context.jl")
 include("fci_selected_ci.jl")
 include("fci_pspace.jl")
 include("fci_davidson.jl")

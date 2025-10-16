@@ -410,7 +410,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
   # Print unified header
   mode_name = n_states == 1 ? "Single-State" : "Multi-State"
   println("Starting $mode_name Davidson FCI diagonalization")
-  println("System: $(context.fcidump.n_orb) orbitals, $(context.fcidump.n_elec) electrons")
+  println("System: $(context.n_orb) orbitals, $(context.n_elec) electrons")
   println("Determinant space: $(n_total) determinants")
   println("Computing $n_states electronic state$(n_states > 1 ? "s" : "")")
   println(
@@ -418,12 +418,14 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
   )
 
   # Davidson subspace vectors
+  n_spin = context.n_elec[1] - context.n_elec[2]
+  n_elec = context.n_elec[1] + context.n_elec[2]
   V = [
-    FCIVector(context.fcidump.n_elec, context.fcidump.n_orb, context.fcidump.n_spin) for
+    FCIVector(n_elec, context.n_orb, n_spin) for
     _ in 1:subspace_size
   ]
   HV = [
-    FCIVector(context.fcidump.n_elec, context.fcidump.n_orb, context.fcidump.n_spin) for
+    FCIVector(n_elec, context.n_orb, n_spin) for
     _ in 1:subspace_size
   ]
 
@@ -459,7 +461,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
       end
       normalize!(V[i])
       
-      println("Supplemental guess $i: H_diag = $(diag_sorted[i][1] + context.fcidump.e_nuc) Hartree")
+      println("Supplemental guess $i: H_diag = $(diag_sorted[i][1] + context.fcidump.int0) Hartree")
     end
   elseif !pspace_success
     # Fall back entirely to diagonal-based initial guess
@@ -471,9 +473,9 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
       normalize!(V[i])
 
       if n_states == 1
-        println("Initial guess energy: $(diag_sorted[i][1] + context.fcidump.e_nuc) Hartree")
+        println("Initial guess energy: $(diag_sorted[i][1] + context.fcidump.int0) Hartree")
       else
-        println("Initial guess $i: H_diag = $(diag_sorted[i][1] + context.fcidump.e_nuc) Hartree")
+        println("Initial guess $i: H_diag = $(diag_sorted[i][1] + context.fcidump.int0) Hartree")
       end
     end
   end
@@ -539,7 +541,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
         converged_states[istate] = energy_converged && residual_converged
         
         status = converged_states[istate] ? "✓" : " "
-        print("E = $(energies[istate] + context.fcidump.e_nuc) Hartree, ΔE = $energy_change")
+        print("E = $(energies[istate] + context.fcidump.int0) Hartree, ΔE = $energy_change")
         if !energy_converged
           print(" (E)")  # Energy not converged
         end
@@ -559,7 +561,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
           print("  State $istate: ")
         end
         res_norm = residual_norms[istate]
-        print("E = $(energies[istate] + context.fcidump.e_nuc) Hartree")
+        print("E = $(energies[istate] + context.fcidump.int0) Hartree")
         print(" (R=$(Printf.@sprintf("%.2e", res_norm)))")
       end
       all_converged = false
@@ -595,18 +597,20 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
       # Store current eigenvector coefficients and Ritz vectors for each state BEFORE expansion
       # This prevents bounds errors when k changes during the loop
       state_data = Tuple{Int, FCIVector, FCIVector, Float64, Float64}[]  # (istate, coeff, resid, energy, res_norm)
-      
+     
+      n_spin = context.n_elec[1] - context.n_elec[2]
+      n_elec = context.n_elec[1] + context.n_elec[2]
       for istate in 1:n_states
         if !converged_states[istate]
           # Form current eigenvector for this state using the CURRENT subspace size k_start
-          coeff_state = FCIVector(context.fcidump.n_elec, context.fcidump.n_orb, context.fcidump.n_spin)
+          coeff_state = FCIVector(n_elec, context.n_orb, n_spin)
           clear!(coeff_state)
           for j in 1:k_start
             add!(coeff_state, V[j], eigenvecs[j, istate])
           end
 
           # Form residual: r = H|ψ⟩ - E|ψ⟩
-          resid_state = FCIVector(context.fcidump.n_elec, context.fcidump.n_orb, context.fcidump.n_spin)
+          resid_state = FCIVector(n_elec, context.n_orb, n_spin)
           clear!(resid_state)
           for j in 1:k_start
             add!(resid_state, HV[j], eigenvecs[j, istate])
@@ -706,12 +710,14 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
   eigenvals, eigenvecs = eigen(Hermitian(T))
 
   # Extract final states (unified approach)
-  final_energies = eigenvals[1:n_states] .+ context.fcidump.e_nuc
+  final_energies = eigenvals[1:n_states] .+ context.fcidump.int0
   final_states = Vector{FCIVector}(undef, n_states)
 
+  n_spin = context.n_elec[1] - context.n_elec[2]
+  n_elec = context.n_elec[1] + context.n_elec[2]
   for istate in 1:n_states
     final_states[istate] =
-      FCIVector(context.fcidump.n_elec, context.fcidump.n_orb, context.fcidump.n_spin)
+      FCIVector(n_elec, context.n_orb, n_spin)
     clear!(final_states[istate])
 
     for j in 1:k
@@ -920,12 +926,12 @@ function davidson_selected_ci!(
     
     if verbose
       if n_roots == 1
-        E_total = real(eigenvalues[1]) + selected_ctx.base_context.fcidump.e_nuc
+        E_total = real(eigenvalues[1]) + selected_ctx.base_context.fcidump.int0
         println("Iteration $iter: E = $(E_total) Hartree, |r| = $(max_residual)")
       else
         println("Iteration $iter:")
         for iroot in 1:n_roots
-          E_total = real(eigenvalues[iroot]) + selected_ctx.base_context.fcidump.e_nuc
+          E_total = real(eigenvalues[iroot]) + selected_ctx.base_context.fcidump.int0
           res_norm = norm(residuals[iroot])
           println("  State $iroot: E = $(E_total) Hartree, |r| = $(res_norm)")
         end

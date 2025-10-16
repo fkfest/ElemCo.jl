@@ -61,25 +61,13 @@ Construct the Hartree-Fock reference determinant from the FCIDUMP data.
 This is used as the starting point for P-space determinant selection.
 """
 function build_hf_reference_determinant(context::FCIContext)::Determinant
-  n_elec = context.fcidump.n_elec
-  n_orb = context.fcidump.n_orb
-  n_spin = context.fcidump.n_spin
-
   # Number of alpha and beta electrons
-  n_elec_a = (n_elec + n_spin) ÷ 2
-  n_elec_b = (n_elec - n_spin) ÷ 2
+  n_elec_a = context.n_elec[1]
+  n_elec_b = context.n_elec[2]
 
   # Build HF determinant: occupy lowest n_elec_a/n_elec_b orbitals
-  alpha_pattern = OrbPattern(0)
-  beta_pattern = OrbPattern(0)
-
-  for i in 0:(n_elec_a - 1)
-    alpha_pattern |= (OrbPattern(1) << i)
-  end
-
-  for i in 0:(n_elec_b - 1)
-    beta_pattern |= (OrbPattern(1) << i)
-  end
+  alpha_pattern = (OrbPattern(1) << n_elec_a) - OrbPattern(1)
+  beta_pattern = (OrbPattern(1) << n_elec_b) - OrbPattern(1)
 
   return Determinant(alpha_pattern, beta_pattern)
 end
@@ -475,7 +463,7 @@ function initialize_multistate_from_small_space(
   if context.options.print_level >= 1
     println("  Small-space energies (electronic):")
     for (i, E) in enumerate(eigenvalues_selected)
-      E_total = E + context.fcidump.e_nuc
+      E_total = E + context.fcidump.int0
       println("    State $i: $E_total Hartree (electronic: $E)")
     end
   end
@@ -629,7 +617,7 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
   # Store HBCI eigenvector coefficients for ground state as first eigenvector (good initial guess)
   # coeffs_hbci_matrix is (n_dets × n_roots), extract ground state coefficients
   if size(coeffs_hbci_matrix, 1) == n_selected
-    context.pspace_data.eigenvalues[1] = E_hbci_vec[1] - context.fcidump.e_nuc  # Electronic energy
+    context.pspace_data.eigenvalues[1] = E_hbci_vec[1] - context.fcidump.int0  # Electronic energy
     context.pspace_data.eigenvectors[:, 1] = coeffs_hbci_matrix[:, 1]  # Ground state coefficients
   end
   

@@ -500,36 +500,32 @@ end
 
 function eval_fci(EC::ECInfo, ref_energy; hci=false)
   t1 = time_ns()
-  # Create basic FCI setup TODO: use QFDump
-  fci_dump = FCIDump()
+  # Create basic FCI setup
   norb = length(EC.space[':'])
   nalpha = length(EC.space['o'])
   nbeta = length(EC.space['O'])
-  fci_dump.n_orb = norb
-  fci_dump.n_elec = nalpha + nbeta
-  fci_dump.n_spin = nalpha - nbeta
-  fci_dump.n_alpha = nalpha
-  fci_dump.n_beta = nbeta
-  fci_dump.e_nuc = EC.fd.int0
+  ms2 = nalpha - nbeta
+  nelec = nalpha + nbeta
+  fdump = QFDump(norb, nelec, ms2=ms2, uhf=EC.fd.uhf)
+  fdump.int0 = EC.fd.int0
   if is_similarity_transformed(EC.fd)
     error("FCI not implemented for similarity transformed Hamiltonians!")
   end
   if EC.fd.uhf
-    fci_dump.is_uhf = true
-    fci_dump.h1a = EC.fd.int1a
-    fci_dump.h1b = EC.fd.int1b
-    fci_dump.h2aa = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
-    fci_dump.h2bb = permutedims(ints2(EC, "MMMM"), (1,3,2,4))
-    fci_dump.h2ab = permutedims(ints2(EC, "mMmM"), (1,3,2,4))
+    fdump.int1a = EC.fd.int1a
+    fdump.int1b = EC.fd.int1b
+    fdump.int2aa = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
+    fdump.int2bb = permutedims(ints2(EC, "MMMM"), (1,3,2,4))
+    fdump.int2ab = permutedims(ints2(EC, "mMmM"), (1,3,2,4))
   else
-    fci_dump.h1 = EC.fd.int1
-    fci_dump.h2 = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
+    fdump.int1 = EC.fd.int1
+    fdump.int2 = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
   end
   
   # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
   if hci
     println("Setting up HCI (lightweight context)..."); flush(stdout)
-    hci_ctx = HCIContext(fci_dump, EC.options.hci)
+    hci_ctx = HCIContext(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
     println("HCI context setup complete."); flush(stdout)
     energies, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
     t1 = print_time(EC, t1, "HCI", 1)
@@ -537,7 +533,7 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
                    "E" => energies[1] - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)
-    fci_ctx = FCIContext(fci_dump, EC.options.fci)
+    fci_ctx = FCIContext(fdump, EC.options.fci)
     println("FCI context setup complete."); flush(stdout)
     E_FCI = run_fci!(fci_ctx)
     t1 = print_time(EC, t1, "FCI", 1)

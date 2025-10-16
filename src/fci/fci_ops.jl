@@ -325,13 +325,6 @@ function convert_op2_to_pair_matrix_opposite_spin(op::AbstractArray{Scalar}, n_o
 end
 
 """
-    HamiltonianTerm
-
-Abstract base type for Hamiltonian terms.
-"""
-abstract type HamiltonianTerm end
-
-"""
     contract!(term::HamiltonianTerm, r::FCIVector, c::FCIVector, prefactor::Scalar)
 
 Apply Hamiltonian term: |r⟩ += prefactor * H |c⟩
