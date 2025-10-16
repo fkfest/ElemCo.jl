@@ -533,7 +533,7 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
                    "E" => energies[1] - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)
-    fci_ctx = FCIContext(fdump, EC.options.fci)
+    fci_ctx = FCIContext(fdump, EC.options.fci; occa=EC.space['o'], occb=EC.space['O'])
     println("FCI context setup complete."); flush(stdout)
     E_FCI = run_fci!(fci_ctx)
     t1 = print_time(EC, t1, "FCI", 1)

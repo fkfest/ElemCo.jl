@@ -22,6 +22,7 @@ mutable struct FCIContext
   diag_h::FCIVector
   absorb_1e::Bool
   hamiltonian_terms::Vector{HamiltonianTerm}
+  reference_det::Determinant
   mod_core_h_a::Matrix{Scalar}
   mod_core_h_b::Matrix{Scalar}
   basis_a::Matrix{Scalar}
@@ -34,7 +35,7 @@ mutable struct FCIContext
   method_name::String
   pspace_data::PSpaceData             # P-space calculation data
 
-  function FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions())
+  function FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing)
     n_elec = headvar(fcidump, "NELEC", Int) 
     n_orb = headvar(fcidump, "NORB", Int)
     ms2 = headvar(fcidump, "MS2", Int)
@@ -63,6 +64,19 @@ mutable struct FCIContext
       mod_core_h_b = copy(fcidump.int1)
     end
 
+    if occa !== nothing && occb !== nothing
+      # User provided occupation patterns for reference determinant
+      if length(occa) != n_alpha || length(occb) != n_beta
+        error("Provided occupation patterns do not match n_alpha/n_beta")
+      end
+      reference_det = Determinant(occa, occb)
+    else
+      # HF determinant: occupy first n_alpha/n_beta orbitals
+      alpha_pattern = (OrbPattern(1) << n_alpha) - OrbPattern(1)
+      beta_pattern = (OrbPattern(1) << n_beta) - OrbPattern(1)
+      reference_det = Determinant(alpha_pattern, beta_pattern)
+    end
+
     context = new(
       fcidump,
       options,
@@ -75,6 +89,7 @@ mutable struct FCIContext
       diag_h,
       true,
       HamiltonianTerm[],  # Set absorb_1e = true by default
+      reference_det,
       mod_core_h_a,
       mod_core_h_b,
       Matrix{Scalar}(I, n_orb, n_orb),

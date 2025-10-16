@@ -29,7 +29,7 @@ export make_1rdms!, add_1rdm_for_spin!, make_2rdm!
 export OrbPattern, Address, Scalar
 # P-space functionality
 export PSpaceOptions, PSpaceData, Determinant, setup_pspace!
-export build_hf_reference_determinant, address_from_determinant, determinant_from_address
+export get_reference_determinant, address_from_determinant, determinant_from_address
 export n_data
 # Small-space initial guess
 export SmallSpaceResult, initialize_multistate_from_small_space
@@ -42,7 +42,7 @@ export project_selected_to_full!, extract_full_to_selected!
 export diagonalize_selected_space
 # Heat-Bath CI functionality
 export HCIOptions, HBCandidate, HBCISetupData
-export run_heatbath_ci!, hartree_fock_determinant, setup_hbci!
+export run_heatbath_ci!, get_reference_determinant, setup_hbci!
 export generate_connected_determinants!, generate_excitations_with_threshold!
 export compute_heatbath_probabilities!, compute_heatbath_probabilities_multistate!, select_determinants_heatbath!
 # PT2 correction functionality

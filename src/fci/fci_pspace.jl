@@ -55,21 +55,13 @@ function build_pspace_hamiltonian_selected!(context::FCIContext)
 end
 
 """
-    build_hf_reference_determinant(context::FCIContext) -> Determinant
+    get_reference_determinant(context::Union{FCIContext, HCIContext}) -> Determinant
 
-Construct the Hartree-Fock reference determinant from the FCIDUMP data.
+Return the reference determinant.
 This is used as the starting point for P-space determinant selection.
 """
-function build_hf_reference_determinant(context::FCIContext)::Determinant
-  # Number of alpha and beta electrons
-  n_elec_a = context.n_elec[1]
-  n_elec_b = context.n_elec[2]
-
-  # Build HF determinant: occupy lowest n_elec_a/n_elec_b orbitals
-  alpha_pattern = (OrbPattern(1) << n_elec_a) - OrbPattern(1)
-  beta_pattern = (OrbPattern(1) << n_elec_b) - OrbPattern(1)
-
-  return Determinant(alpha_pattern, beta_pattern)
+function get_reference_determinant(context::Union{FCIContext, HCIContext})::Determinant
+  return context.reference_det
 end
 
 """
@@ -129,7 +121,7 @@ function select_pspace_determinants!(context::FCIContext)
   pspace = context.pspace_data
 
   # Build HF reference determinant
-  hf_ref = build_hf_reference_determinant(context)
+  hf_ref = get_reference_determinant(context)
   pspace.reference_det = hf_ref
 
   # Get diagonal Hamiltonian elements for energy-based selection
@@ -281,7 +273,7 @@ Uses the same hybrid selection method as traditional P-space.
 """
 function select_small_space_determinants(context::FCIContext, target_size::Int, n_roots::Int=1)::Vector{Determinant}
   # Build HF reference determinant
-  hf_ref = build_hf_reference_determinant(context)
+  hf_ref = get_reference_determinant(context)
   
   # Get diagonal Hamiltonian elements for energy-based selection
   n_total = n_data(context.coeff)

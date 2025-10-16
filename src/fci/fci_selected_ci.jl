@@ -707,32 +707,6 @@ end
 # ===========================================
 
 """
-    hartree_fock_determinant(ctx::FCIContext) -> Determinant
-
-Create Hartree-Fock determinant (lowest n_elec orbitals occupied).
-"""
-function hartree_fock_determinant(ctx::FCIContext)::Determinant
-  n_alpha = ctx.n_elec[1]
-  n_beta = ctx.n_elec[2]
-
-  # Occupy lowest n_alpha alpha orbitals (0-based bit positions)
-  alpha_pattern = (OrbPattern(1) << n_alpha) - OrbPattern(1)
-  # Occupy lowest n_beta beta orbitals (0-based bit positions)
-  beta_pattern = (OrbPattern(1) << n_beta) - OrbPattern(1)
-  
-  return Determinant(alpha_pattern, beta_pattern)
-end
-
-"""
-    hartree_fock_determinant(ctx::HCIContext) -> Determinant
-
-Create Hartree-Fock determinant for HCI context (directly returns stored reference_det).
-"""
-function hartree_fock_determinant(ctx::HCIContext)::Determinant
-  return ctx.reference_det
-end
-
-"""
     occupied_orbitals(pattern::OrbPattern, n_orb::Int) -> Vector{Int}
 
 Get list of occupied orbital indices (0-based to match bit positions).
@@ -1855,7 +1829,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   end
   
   # Initialization
-  hf_det = hartree_fock_determinant(ctx)
+  hf_det = get_reference_determinant(ctx)
   
   # Setup (if enabled)
   # Pre-compute and store sorted double excitation matrix elements
