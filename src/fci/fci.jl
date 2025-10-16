@@ -39,7 +39,7 @@ export setup_selected_ci_from_determinants!, setup_selected_ci_from_addresses!
 export project_selected_to_full!, extract_full_to_selected!
 export diagonalize_selected_space
 # Heat-Bath CI functionality
-export HeatBathCIOptions, HBCandidate, HBCISetupData
+export HCIOptions, HBCandidate, HBCISetupData
 export run_heatbath_ci!, hartree_fock_determinant, setup_hbci!
 export generate_connected_determinants!, generate_excitations_with_threshold!
 export compute_heatbath_probabilities!, compute_heatbath_probabilities_multistate!, select_determinants_heatbath!
@@ -47,12 +47,11 @@ export compute_heatbath_probabilities!, compute_heatbath_probabilities_multistat
 export PT2Options, PT2Result, compute_pt2_correction!
 
 include("fci_types.jl")
-include("fci_options.jl")
 include("fci_dump.jl")
 include("fci_vec.jl")
 include("fci_ops.jl")
 include("fci_main.jl")
-include("fci_hci_context.jl")  # After options (needs HeatBathCIOptions, Determinant), before selected_ci
+include("fci_hci_context.jl")
 include("fci_selected_ci.jl")
 include("fci_pspace.jl")
 include("fci_davidson.jl")

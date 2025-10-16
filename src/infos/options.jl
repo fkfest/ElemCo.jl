@@ -230,38 +230,72 @@ end
   $(TYPEDFIELDS)
 """
 @kwdef mutable struct FCIOptions
-  """ Maximum number of iterations """
+  """`⟨50⟩` Maximum number of iterations """
   max_iter::Int = 50
-  """ Convergence tolerance for energy """
+  """`⟨1e-8⟩` Convergence tolerance for energy """
   conv_tol::Float64 = 1e-8
-  """ Convergence tolerance for residual norm """
+  """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
-  """ Number of roots to compute """
+  """`⟨1⟩` Number of roots to compute """
   n_roots::Int = 1
-  """ Number of guess vectors to use """
+  """`⟨2⟩` Number of guess vectors to use """
   n_guess::Int = 2
-  """ Maximum subspace size for Davidson diagonalization """
-  subspace_size::Int = 8
-  """ Level of printed output (0=none, 1=some, 2=detailed) """
+  """`⟨10⟩` Maximum subspace size for Davidson diagonalization """
+  subspace_size::Int = 10
+  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
   print_level::Int = 1
-  """ Compute 1-RDMs after convergence """
+  """`⟨true⟩` Compute 1-RDMs after convergence """
   compute_rdms::Bool = true
-  """ Compute 2-RDM after convergence """
+  """`⟨false⟩` Compute 2-RDM after convergence """
   compute_2rdm::Bool = false
-  """ Use projected Jacobi-Davidson correction (prevents linear dependency) """
+  """`⟨true⟩` Use projected Jacobi-Davidson correction (prevents linear dependency) """
   jacobi_davidson::Bool = true
-  """ Maximum P-space size (typically 100-1000) """
+  """`⟨1000⟩` Maximum P-space size (typically 100-1000) """
   max_pspace_size::Int = 1000
-  """ Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
+  """`⟨4⟩` Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
   max_pspace_excitation::Int = 4
-  """ Energy cutoff for determinant inclusion """
+  """`⟨5.0⟩` Energy cutoff for determinant inclusion """
   pspace_energy_threshold::Float64 = 5.0
-  """ Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
+  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
   pspace_selection_method::Symbol = :hybrid
-  """ HCI selection threshold (epsilon_1) for P-space generation """
-  pspace_hci_epsilon::Float64 = 1e-4
-  """ Enable setup for HCI P-space generation """
+  """`⟨1e-3⟩` HCI selection threshold (epsilon_h) for P-space generation """
+  pspace_hci_epsilon::Float64 = 1e-3
+  """`⟨true⟩` Enable setup for HCI P-space generation """
   pspace_hci_use_setup_phase::Bool = true
+end
+
+"""
+  Option for HCI calculations.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct HCIOptions
+  """`⟨10000⟩` Target number of determinants to select """
+  target_selection::Int = 10000
+  """`⟨3e-4⟩` HCI selection threshold """
+  epsilon_h::Float64 = 3e-4
+  """`⟨epsilon_h⟩` CIPSI selection threshold """
+  epsilon_p::Float64 = epsilon_h
+  """`⟨1e-6⟩` Energy convergence threshold """
+  tol::Float64 = 1e-6
+  """`⟨50⟩` Maximum HBCI iterations """
+  max_iterations::Int = 50
+  """`⟨true⟩` Print iteration details """
+  verbose::Bool = true
+  """`⟨true⟩` Perform setup """
+  use_setup_phase::Bool = true
+  """`⟨true⟩` Compute PT2 perturbative correction """
+  compute_pt2::Bool = true
+  """`⟨1e-6⟩` Threshold for PT2 contributions """
+  epsilon_pt2::Float64 = 1e-6
+  """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
+  n_roots::Int = 1
+  """`⟨true⟩` Use small-space Hamiltonian for initial guess """
+  use_small_space_guess::Bool = true
+  """`⟨0⟩` Size of small space (0 = auto: max(100, target÷10, 5*n_roots)) """
+  small_space_size::Int = 0
+  """`⟨:hybrid⟩` Selection method: :hybrid (energy + excitation) """
+  small_space_method::Symbol = :hybrid
 end
 
 """ 
@@ -370,6 +404,8 @@ end
   cc::CcOptions = CcOptions()
   """ FCI options ([`FCIOptions`](@ref)). """
   fci::FCIOptions = FCIOptions()
+  """ HCI options ([`HCIOptions`](@ref)). """
+  hci::HCIOptions = HCIOptions()
   """ DMRG options ([`DmrgOptions`](@ref)). """
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """

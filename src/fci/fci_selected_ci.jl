@@ -682,27 +682,6 @@ struct HBCISetupData
 end
 
 """
-    PT2Options
-
-Options for second-order perturbative correction (PT2) computation.
-
-Following Holmes et al. (2016), Section III.B.
-"""
-struct PT2Options
-  epsilon_pt2::Float64               # Threshold for PT2 contributions
-  compute_pt2::Bool               # Whether to compute PT2 correction
-  verbose::Bool                   # Print PT2 details
-  
-  function PT2Options(;
-    epsilon_pt2::Float64 = 1e-6,
-    compute_pt2::Bool = false,
-    verbose::Bool = true
-  )
-    new(epsilon_pt2, compute_pt2, verbose)
-  end
-end
-
-"""
     PT2Result
 
 Results from PT2 perturbative correction computation.
@@ -1493,14 +1472,14 @@ end
 """
     select_determinants_heatbath!(selected::Vector{Determinant},
                                  candidates::Vector{HBCandidate},
-                                 options::HeatBathCIOptions) -> Int
+                                 options::HCIOptions) -> Int
 
 Select determinants from candidates using Heat-Bath sampling.
 Returns number of determinants selected.
 """
 function select_determinants_heatbath!(selected::Vector{Determinant},
                                       candidates::Vector{HBCandidate},
-                                      options::HeatBathCIOptions)::Int
+                                      options::HCIOptions)::Int
   empty!(selected)
   return select_deterministic!(selected, candidates, options)
 end
@@ -1508,13 +1487,13 @@ end
 """
     select_deterministic!(selected::Vector{Determinant},
                          candidates::Vector{HBCandidate},
-                         options::HeatBathCIOptions) -> Int
+                         options::HCIOptions) -> Int
 
 Deterministic selection: select top-N by probability.
 """
 function select_deterministic!(selected::Vector{Determinant},
                               candidates::Vector{HBCandidate},
-                              options::HeatBathCIOptions)::Int
+                              options::HCIOptions)::Int
   # Sort by probability (descending)
   sort!(candidates, by=c->c.probability, rev=true)
   
@@ -1733,7 +1712,7 @@ function compute_pt2_correction!(
   coefficients::Vector{Float64},
   E_variational::Float64,
   setup_data::Union{HBCISetupData, Nothing},
-  options::PT2Options
+  options::HCIOptions
 )::PT2Result
   
   if !options.compute_pt2
@@ -1850,7 +1829,7 @@ function compute_pt2_correction!(
 end
 
 """
-    run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HeatBathCIOptions) 
+    run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions) 
       -> (Vector{Float64}, Matrix{Float64}, Vector{Determinant}, PT2Result)
 
 Run Heat-Bath CI calculation with support for multiple states.
@@ -1870,7 +1849,7 @@ Run Heat-Bath CI calculation with support for multiple states.
 - For n_roots>1, uses multi-state selection with state-maximum probability
 - PT2 correction currently only computed for ground state
 """
-function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HeatBathCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
+function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
   if options.verbose
     println("\n" * "="^70)
     println("Heat-Bath Configuration Interaction (HBCI)")
@@ -2118,16 +2097,9 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HeatBathC
   # Compute PT2 correction if requested (only for ground state currently)
   pt2_result = PT2Result()
   if options.compute_pt2
-    pt2_options = PT2Options(
-      epsilon_pt2 = options.epsilon_pt2,
-      compute_pt2 = true,
-      verbose = options.verbose
-    )
-    
     # Note: PT2 correction currently only computed for ground state (state 1)
-    pt2_result = compute_pt2_correction!(
-      ctx, variational_dets, coeffs_final_matrix[:,1], E_electronic_vec[1], setup_data, pt2_options
-    )
+    pt2_result = compute_pt2_correction!(ctx, variational_dets, coeffs_final_matrix[:,1], 
+                                         E_electronic_vec[1], setup_data, options)
     
     E_total_with_pt2 = E_final_vec[1] + pt2_result.energy_correction
     

@@ -571,7 +571,7 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
   
   # Configure HBCI options for P-space generation
   # CRITICAL: Use same n_roots as the final FCI calculation for multi-state
-  hbci_options = HeatBathCIOptions(
+  hbci_options = HCIOptions(
     target_selection = opts.max_pspace_size,
     epsilon_h = opts.pspace_hci_epsilon,
     tol = 1e-6,  # Convergence threshold for HBCI iterations

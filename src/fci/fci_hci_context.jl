@@ -7,7 +7,7 @@ Lightweight context for Heat-Bath Configuration Interaction (HCI) calculations.
 Unlike FCIContext, HCIContext does NOT pre-compute full-space address tables
 or diagonal Hamiltonian elements. Instead, it only stores the minimal data needed:
 - Integral data (FCIDump)
-- Calculation options (HeatBathCIOptions)
+- Calculation options (HCIOptions)
 - System size parameters
 - Modified core Hamiltonian (for correct diagonal element calculation)
 
@@ -24,7 +24,7 @@ For a system with 23 orbitals:
 
 # Fields
 - `fcidump::FCIDump` - Integral data (h1, h2 tensors)
-- `options::HeatBathCIOptions` - HCI-specific calculation options
+- `options::HCIOptions` - HCI-specific calculation options
 - `n_orb::Int` - Number of spatial orbitals
 - `n_elec::Tuple{Int,Int}` - (n_alpha, n_beta) electron counts
 - `reference_det::Determinant` - HF reference determinant
@@ -34,14 +34,14 @@ For a system with 23 orbitals:
 """
 struct HCIContext
   fcidump::FCIDump
-  options::HeatBathCIOptions
+  options::HCIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
   reference_det::Determinant
   mod_core_h_a::Matrix{Scalar}
   mod_core_h_b::Matrix{Scalar}
 
-  function HCIContext(fcidump::FCIDump, options::HeatBathCIOptions = HeatBathCIOptions())
+  function HCIContext(fcidump::FCIDump, options::HCIOptions = HCIOptions())
     n_orb = fcidump.n_orb
     n_elec = fcidump.n_elec
     n_spin = fcidump.n_spin

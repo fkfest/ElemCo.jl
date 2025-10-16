@@ -529,8 +529,7 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
   # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
   if hci
     println("Setting up HCI (lightweight context)..."); flush(stdout)
-    hb_options = HeatBathCIOptions(compute_pt2=true)
-    hci_ctx = HCIContext(fci_dump, hb_options)
+    hci_ctx = HCIContext(fci_dump, EC.options.hci)
     println("HCI context setup complete."); flush(stdout)
     energies, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
     t1 = print_time(EC, t1, "HCI", 1)
