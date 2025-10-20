@@ -258,20 +258,20 @@ end
 # ===========================================
 
 """
-    select_small_space_determinants(context::FCIContext, target_size::Int, n_roots::Int=1) -> Vector{Determinant}
+    select_small_space_determinants(context::FCIContext, target_size::Int, nstates::Int=1) -> Vector{Determinant}
 
 Select determinants for small-space Hamiltonian diagonalization.
 Uses the same hybrid selection method as traditional P-space.
 
 # Arguments
 - `context`: FCI context
-- `target_size`: Target number of determinants (adaptive: max(100, target_selection÷10, 5*n_roots))
-- `n_roots`: Number of states to compute (used for sizing)
+- `target_size`: Target number of determinants (adaptive: max(100, target_selection÷10, 5*nstates))
+- `nstates`: Number of states to compute (used for sizing)
 
 # Returns
 - Vector of selected determinants
 """
-function select_small_space_determinants(context::FCIContext, target_size::Int, n_roots::Int=1)::Vector{Determinant}
+function select_small_space_determinants(context::FCIContext, target_size::Int, nstates::Int=1)::Vector{Determinant}
   # Build HF reference determinant
   hf_ref = get_reference_determinant(context)
   
@@ -293,7 +293,7 @@ function select_small_space_determinants(context::FCIContext, target_size::Int, 
   
   # Use larger energy threshold for small-space (more permissive)
   pspace_energy_threshold = 1.0  # Hartree (much larger than typical P-space)
-  max_pspace_excitation = 4      # Singles and doubles only (for efficiency)
+  max_pspace_excitation = 4      # Upto quadruple excitations (for efficiency)
   
   for addr in Address(1):n_total
     det = determinant_from_address(context, addr)
@@ -339,19 +339,149 @@ function select_small_space_determinants(context::FCIContext, target_size::Int, 
 end
 
 """
-    build_small_space_hamiltonian(context::FCIContext, determinants::Vector{Determinant}) -> Matrix{Scalar}
+    select_small_space_determinants(context::HCIContext, target_size::Int, nstates::Int=1) -> Vector{Determinant}
+
+Select determinants for small-space Hamiltonian diagonalization.
+For HCIContext, generates determinants by excitation level from reference,
+then calculates diagonal energies only for the generated determinants.
+
+# Arguments
+- `context`: HCI context
+- `target_size`: Target number of determinants (adaptive: max(100, target_selection÷10, 5*nstates))
+- `nstates`: Number of states to compute (used for sizing)
+
+# Returns
+- Vector of selected determinants
+"""
+function select_small_space_determinants(context::HCIContext, target_size::Int, nstates::Int=1)::Vector{Determinant}
+  # Build HF reference determinant
+  hf_ref = get_reference_determinant(context)
+  
+  if context.options.print_level >= 2
+    println("  Small-space selection (excitation-based for HCI):")
+    println("    Target size: $target_size determinants")
+  end
+  
+  # Generate determinants by excitation level (up to quadruples)
+  max_pspace_excitation = 4
+  
+  # Extract occupied and virtual orbitals from reference
+  n_alpha, n_beta = context.n_elec
+  n_orb = context.n_orb
+  
+  alpha_occ = [i for i in 0:(n_orb-1) if (hf_ref.alpha >> i) & 1 == 1]
+  alpha_virt = [a for a in 0:(n_orb-1) if (hf_ref.alpha >> a) & 1 == 0]
+  beta_occ = [i for i in 0:(n_orb-1) if (hf_ref.beta >> i) & 1 == 1]
+  beta_virt = [a for a in 0:(n_orb-1) if (hf_ref.beta >> a) & 1 == 0]
+  
+  # Generate determinants by excitation level
+  candidates_by_level = Vector{Determinant}[]
+  
+  # Level 0: HF reference
+  push!(candidates_by_level, [hf_ref])
+  
+  if context.options.print_level >= 2
+    println("    Level 0 (reference): 1 determinant")
+  end
+  
+  # Level 1: Singles
+  if max_pspace_excitation >= 1
+    singles = Determinant[]
+    for i in alpha_occ, a in alpha_virt
+      push!(singles, single_excitation_alpha(hf_ref, i, a))
+    end
+    for i in beta_occ, a in beta_virt
+      push!(singles, single_excitation_beta(hf_ref, i, a))
+    end
+    push!(candidates_by_level, singles)
+    if context.options.print_level >= 2
+      println("    Level 1 (singles): $(length(singles)) determinants")
+    end
+  end
+  
+  # Level 2: Doubles
+  if max_pspace_excitation >= 2
+    doubles = Determinant[]
+    # Alpha-alpha doubles
+    for i in 1:length(alpha_occ), j in 1:(i-1)
+      for a in 1:length(alpha_virt), b in 1:(a-1)
+        det = double_excitation_alpha(hf_ref, alpha_occ[i], alpha_occ[j], alpha_virt[a], alpha_virt[b])
+        push!(doubles, det)
+      end
+    end
+    # Beta-beta doubles
+    for i in 1:length(beta_occ), j in 1:(i-1)
+      for a in 1:length(beta_virt), b in 1:(a-1)
+        det = double_excitation_beta(hf_ref, beta_occ[i], beta_occ[j], beta_virt[a], beta_virt[b])
+        push!(doubles, det)
+      end
+    end
+    # Alpha-beta mixed doubles
+    for i in alpha_occ, a in alpha_virt
+      for j in beta_occ, b in beta_virt
+        det = double_excitation_mixed(hf_ref, i, j, a, b)
+        push!(doubles, det)
+      end
+    end
+    push!(candidates_by_level, doubles)
+    if context.options.print_level >= 2
+      println("    Level 2 (doubles): $(length(doubles)) determinants")
+    end
+  end
+  
+  # Level 3 and 4: Can be added if needed, but typically doubles are sufficient
+  # For now, we'll stop at doubles for efficiency
+  
+  # Flatten and calculate diagonal energies
+  candidates = Tuple{Determinant, Scalar, Int}[]  # (determinant, energy, excitation_level)
+  
+  for (level, dets) in enumerate(candidates_by_level)
+    for det in dets
+      # Calculate diagonal energy on-the-fly using compute_diagonal_element
+      diagonal_energy = compute_diagonal_element(det, context)
+      push!(candidates, (det, diagonal_energy, level-1))
+    end
+  end
+  
+  # Calculate HF energy for sorting
+  hf_energy = compute_diagonal_element(hf_ref, context)
+  
+  # Sort using hybrid method: weight both energy and excitation level
+  sort!(candidates, by = x -> (x[3] * 0.1 + (x[2] - hf_energy)))
+  
+  # Select top candidates up to target_size
+  n_selected = min(length(candidates), target_size)
+  
+  if context.options.print_level >= 2
+    println("    Total candidates: $(length(candidates))")
+    println("    Selected: $n_selected determinants")
+    if n_selected > 0
+      min_energy = candidates[1][2]
+      max_energy = candidates[n_selected][2]
+      println("    Energy range: $(min_energy - hf_energy) to $(max_energy - hf_energy) Ha above HF")
+    end
+  end
+  
+  # Extract determinants
+  selected_dets = [candidates[i][1] for i in 1:n_selected]
+  
+  return selected_dets
+end
+
+"""
+    build_small_space_hamiltonian(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant}) -> Matrix{Scalar}
 
 Build Hamiltonian matrix for small space of determinants.
 Uses Selected CI framework for efficient matrix element computation.
 
 # Arguments
-- `context`: FCI context
+- `context`: FCI or HCIcontext
 - `determinants`: Vector of determinants spanning the small space
 
 # Returns
 - Hamiltonian matrix H[i,j] = ⟨det_i|H|det_j⟩
 """
-function build_small_space_hamiltonian(context::FCIContext, determinants::Vector{Determinant})::Matrix{Scalar}
+function build_small_space_hamiltonian(context::Union{FCIContext,HCIContext}, determinants::Vector{Determinant})::Matrix{Scalar}
   n_small = length(determinants)
   
   if context.options.print_level >= 2
@@ -387,70 +517,67 @@ Result from small-space Hamiltonian diagonalization.
 """
 struct SmallSpaceResult
   determinants::Vector{Determinant}    # Determinants in small space
-  eigenvalues::Vector{Float64}         # Eigenvalues (n_roots lowest)
-  eigenvectors::Matrix{Float64}        # Eigenvectors in small-space basis (n_small × n_roots)
+  eigenvalues::Vector{Float64}         # Eigenvalues (nstates lowest)
+  eigenvectors::Matrix{Float64}        # Eigenvectors in small-space basis (n_small × nstates)
   n_small::Int                         # Size of small space
-  n_roots::Int                         # Number of states computed
+  nstates::Int                         # Number of states computed
 end
 
 """
-    initialize_multistate_from_small_space(context::FCIContext, target_selection::Int, n_roots::Int) -> SmallSpaceResult
+    initialize_multistate_from_small_space(context::Union{FCIContext, HCIContext}, target_selection::Int, nstates::Int) -> SmallSpaceResult
 
-Initialize multi-state HBCI using small-space Hamiltonian diagonalization.
+Initialize multi-state HCI using small-space Hamiltonian diagonalization.
 This provides better initial guesses for all states, preventing missed excited states.
 
 # Algorithm
-1. Select small space: max(100, target_selection÷10, 5*n_roots) determinants
+1. Select small space: max(100, target_selection÷10, 5*nstates) determinants
 2. Build Hamiltonian in small space
-3. Diagonalize to get n_roots lowest eigenstates
-4. Return determinants and eigenvectors as initial guess for HBCI
+3. Diagonalize to get nstates lowest eigenstates
+4. Return determinants and eigenvectors as initial guess for HCI
 
 # Arguments
-- `context`: FCI context
-- `target_selection`: Target HBCI variational space size (for adaptive sizing)
-- `n_roots`: Number of states to compute
+- `context`: FCI or HCI context
+- `target_selection`: Target HCI variational space size (for adaptive sizing)
+- `nstates`: Number of states to compute
 
 # Returns
 - `SmallSpaceResult` containing determinants, eigenvalues, and eigenvectors
 """
-function initialize_multistate_from_small_space(
-  context::FCIContext,
-  target_selection::Int,
-  n_roots::Int
-)::SmallSpaceResult
+function initialize_multistate_from_small_space(context::Union{FCIContext, HCIContext},
+                                target_selection::Int, nstates::Int)::SmallSpaceResult
   
   if context.options.print_level >= 1
     println("\nSmall-Space Initial Guess Generation")
   end
   
   # 1. Determine small-space size (adaptive)
-  small_space_size = max(100, target_selection ÷ 10, 5 * n_roots)
+  small_space_size = max(100, target_selection ÷ 10, 5 * nstates)
   
   if context.options.print_level >= 1
-    println("  Adaptive sizing: max(100, $target_selection÷10, 5×$n_roots) = $small_space_size")
+    println("  Adaptive sizing: max(100, $target_selection÷10, 5×$nstates) = $small_space_size")
   end
   
   # 2. Select determinants using hybrid method (same as traditional P-space)
-  small_space_dets = select_small_space_determinants(context, small_space_size, n_roots)
+  small_space_dets = select_small_space_determinants(context, small_space_size, nstates)
   n_small = length(small_space_dets)
   
-  if n_small < n_roots
-    error("Small-space size ($n_small) < n_roots ($n_roots). Cannot compute $n_roots states.")
+  if n_small < nstates
+    error("Small-space size ($n_small) < nstates ($nstates). Cannot compute $nstates states.")
   end
   
   # 3. Build Hamiltonian in small space
   H_small = build_small_space_hamiltonian(context, small_space_dets)
   
-  # 4. Diagonalize for n_roots lowest eigenstates
+  # 4. Diagonalize for nstates lowest eigenstates
   if context.options.print_level >= 2
-    println("  Diagonalizing small-space Hamiltonian for $n_roots states")
+    println("  Diagonalizing small-space Hamiltonian for $nstates states")
   end
   
   eigenvals, eigenvecs = eigen(Hermitian(H_small))
-  
-  # Extract n_roots lowest states
-  eigenvalues_selected = eigenvals[1:n_roots]
-  eigenvectors_selected = eigenvecs[:, 1:n_roots]
+
+  # Extract nstates lowest states
+  eigenvalues_selected = eigenvals[1:nstates]
+  eigenvectors_selected = eigenvecs[:, 1:nstates]
   
   if context.options.print_level >= 1
     println("  Small-space energies (electronic):")
@@ -465,7 +592,7 @@ function initialize_multistate_from_small_space(
     eigenvalues_selected,
     eigenvectors_selected,
     n_small,
-    n_roots
+    nstates
   )
 end
 
@@ -545,21 +672,21 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
     println("  Target size: $(opts.max_pspace_size)")
     println("  HBCI ε₁: $(opts.pspace_hci_epsilon)")
     if n_states > 1
-      println("  HBCI n_roots: $n_states (matching FCI)")
+      println("  HBCI nstates: $n_states (matching FCI)")
     end
   end
   
   # Configure HBCI options for P-space generation
-  # CRITICAL: Use same n_roots as the final FCI calculation for multi-state
+  # CRITICAL: Use same nstates as the final FCI calculation for multi-state
   hbci_options = HCIOptions(
     target_selection = opts.max_pspace_size,
-    epsilon_h = opts.pspace_hci_epsilon,
+    epsilon = opts.pspace_hci_epsilon,
     tol = 1e-6,  # Convergence threshold for HBCI iterations
     max_iterations = 10,
     use_setup_phase = opts.pspace_hci_use_setup_phase,
     compute_pt2 = false,  # Don't need PT2 for P-space
     verbose = false,  # Keep HBCI output minimal
-    n_roots = n_states  # Match the number of states in the final FCI calculation
+    nstates = n_states  # Match the number of states in the final FCI calculation
   )
   
   # Run HBCI to get selected determinants
@@ -607,7 +734,7 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
   context.pspace_data.eigenvectors = zeros(Scalar, n_selected, n_selected)
   
   # Store HBCI eigenvector coefficients for ground state as first eigenvector (good initial guess)
-  # coeffs_hbci_matrix is (n_dets × n_roots), extract ground state coefficients
+  # coeffs_hbci_matrix is (n_dets × nstates), extract ground state coefficients
   if size(coeffs_hbci_matrix, 1) == n_selected
     context.pspace_data.eigenvalues[1] = E_hbci_vec[1] - context.fcidump.int0  # Electronic energy
     context.pspace_data.eigenvectors[:, 1] = coeffs_hbci_matrix[:, 1]  # Ground state coefficients

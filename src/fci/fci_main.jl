@@ -13,6 +13,7 @@ mutable struct DiagonalHEvalData
   hbar_a::Vector{Scalar}   # ⟨i|ModCoreH|i⟩ for alpha
   hbar_b::Vector{Scalar}   # ⟨i|ModCoreH|i⟩ for beta
   n_orb::FCIUInt
+  ibuf::Buffer{Int}        # Buffer for indices
 
   function DiagonalHEvalData()
     new(
@@ -25,6 +26,7 @@ mutable struct DiagonalHEvalData
       Scalar[],
       Scalar[],
       0,
+      Buffer{Int}(0)
     )
   end
 end
@@ -38,6 +40,7 @@ Initialize diagonal evaluation data for alpha/beta spins.
 function init_ab!(eval_data::DiagonalHEvalData, int2e_aa, int2e_bb, int2e_ab,
                   core_h_a, core_h_b, n_orb::Integer, n_pairs::Integer, c1_integrals::Bool)
   eval_data.n_orb = FCIUInt(n_orb)
+  eval_data.ibuf = Buffer{Int}(2 * n_orb)
 
   # Resize matrices to match n_orb
   eval_data.jaa = zeros(Scalar, n_orb, n_orb)
@@ -124,7 +127,8 @@ Evaluate diagonal Hamiltonian element ⟨Ψ|H|Ψ⟩ for determinant |str_a, str_
 function (eval_data::DiagonalHEvalData)(str_a::OrbPattern, str_b::OrbPattern)::Scalar
   f_elem = 0.0
   n_orb_val = Int(eval_data.n_orb)
-
+  ibuf = eval_data.ibuf
+  
   # One-electron contributions
   if !isempty(eval_data.hbar_a)
     for i in 0:(n_orb_val - 1)
@@ -373,11 +377,11 @@ function contract_hamiltonian!(context::FCIContext, r::FCIVector, c::FCIVector, 
 end
 
 """
-    run_fci!(context::FCIContext) -> Scalar
+    run_fci!(context::FCIContext) -> Vector{Scalar}
 
 Run full FCI calculation.
 """
-function run_fci!(context::FCIContext)::Scalar
+function run_fci!(context::FCIContext)
   println("="^80)
   println("FCI CALCULATION")
   println("="^80)
@@ -450,7 +454,7 @@ function run_fci!(context::FCIContext)::Scalar
   
   println("="^80)
 
-  return energy
+  return energies
 end
 
 """

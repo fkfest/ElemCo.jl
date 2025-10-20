@@ -10,6 +10,7 @@ using LinearAlgebra
 using Printf
 using StridedViews
 using TensorOperations
+using Buffers
 
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
@@ -40,6 +41,8 @@ export contract_hamiltonian_selected!, compute_matrix_element_direct, compute_di
 export setup_selected_ci_from_determinants!, setup_selected_ci_from_addresses!
 export project_selected_to_full!, extract_full_to_selected!
 export diagonalize_selected_space
+export single_excitation_alpha, single_excitation_beta
+export double_excitation_alpha, double_excitation_beta, double_excitation_mixed
 # Heat-Bath CI functionality
 export HCIOptions, HBCandidate, HBCISetupData
 export run_heatbath_ci!, get_reference_determinant, setup_hbci!

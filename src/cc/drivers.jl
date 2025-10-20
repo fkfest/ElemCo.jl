@@ -308,6 +308,13 @@ function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=
       push!(energies_out, "SCS-"*mname=>(enescs, "SCS-$mname energy"))
     end
   end
+
+  for (type, en, desc) in En
+    if startswith(type, "ω")
+      push!(energies_out, mname*type => (en, "$mname excitation energy $type"),
+                          type => (en, "$mname excitation energy $type"))
+    end
+  end
   push!(energies_out, mname*"c"=>(enecor, "$mname correlation energy"),
                       mname=>(enetot, "$mname total energy"),
                       "Ec"=>(enecor, "$mname correlation energy"),
@@ -527,17 +534,27 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
     println("Setting up HCI (lightweight context)..."); flush(stdout)
     hci_ctx = HCIContext(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
     println("HCI context setup complete."); flush(stdout)
-    energies, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+    E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
     t1 = print_time(EC, t1, "HCI", 1)
-    return OutDict("E-correction" => pt2.energy_correction,
-                   "E" => energies[1] - ref_energy)
+    Egs = E_HCI[1]
+    energies = OutDict()
+    for i = 1:length(E_HCI)-1
+      energies["ω$i"] = E_HCI[i+1] - Egs
+    end
+    return merge(energies, "E-correction" => pt2.energy_correction,
+                   "E" => Egs - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)
     fci_ctx = FCIContext(fdump, EC.options.fci; occa=EC.space['o'], occb=EC.space['O'])
     println("FCI context setup complete."); flush(stdout)
     E_FCI = run_fci!(fci_ctx)
     t1 = print_time(EC, t1, "FCI", 1)
-    return OutDict("E" => E_FCI - ref_energy)
+    Egs = E_FCI[1]
+    energies = OutDict()
+    for i = 1:length(E_FCI)-1
+      energies["ω$i"] = E_FCI[i+1] - Egs
+    end
+    return merge(energies, "E" => Egs - ref_energy)
   end
 end
 

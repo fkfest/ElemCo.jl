@@ -23,6 +23,8 @@ end
 TESTS = [
 ("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_triplet", "2d_cc"]),
 ("CC", ["h2-"]),
+("FCI", ["fci_rhf", "fci_uhf"]),
+("HCI", ["hci_rhf", "hci_uhf"]),
 ("QV-CC", ["h2o_qv-ccd"]),
 ("DF", ["df_hf", "basis", "df_uhf", "df_mcscf", "levenshtein"]),
 ("POS", ["pos_df_hf"]),

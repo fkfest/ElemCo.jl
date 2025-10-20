@@ -554,11 +554,11 @@ end
 # ===========================================
 
 """
-    setup_selected_ci_from_determinants!(context::FCIContext, determinants::Vector{Determinant}) -> SelectedCIContext
+    setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant}) -> SelectedCIContext
 
 Create SelectedCIContext from list of determinants.
 """
-function setup_selected_ci_from_determinants!(context::FCIContext, determinants::Vector{Determinant})
+function setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant})
   return SelectedCIContext(context, determinants)
 end
 
@@ -1306,7 +1306,7 @@ end
     compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandidate},
                                               variational_dets::Vector{Determinant},
                                               variational_coeffs::Matrix{Float64},
-                                              ctx::FCIContext,
+                                              ctx::Union{FCIContext, HCIContext},
                                               E_states::Vector{Float64},
                                               setup_data::Union{HBCISetupData,Nothing}=nothing,
                                               epsilon::Float64=1e-10)::Float64
@@ -1320,7 +1320,7 @@ the maximum probability across states (state-max selection strategy).
 - `candidates`: Output vector to store candidates
 - `variational_dets`: Current variational space determinants
 - `variational_coeffs`: Matrix (n_dets × n_states) of coefficients for all states
-- `ctx`: FCI context
+- `ctx`: FCI or HCI context
 - `E_states`: Vector of energies for all states
 - `setup_data`: Optional setup data
 - `epsilon`: Threshold for excitation generation
@@ -1331,7 +1331,7 @@ the maximum probability across states (state-max selection strategy).
 function compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandidate},
                                                    variational_dets::Vector{Determinant},
                                                    variational_coeffs::Matrix{Float64},
-                                                   ctx::FCIContext,
+                                                   ctx::Union{FCIContext, HCIContext},
                                                    E_states::Vector{Float64},
                                                    setup_data::Union{HBCISetupData,Nothing}=nothing,
                                                    epsilon::Float64=1e-10)::Float64
@@ -1461,7 +1461,8 @@ function select_deterministic!(selected::Vector{Determinant},
   
   # Select determinants above threshold or until target reached
   # use square of epsilon_p to match probability definition (T_2^2)
-  epsilon = options.epsilon_p^2
+  eps_p = options.epsilon_p > -0.1 ? options.epsilon_p : options.epsilon
+  epsilon = eps_p^2
   n_selected = 0
   for candidate in candidates
     if n_selected >= options.target_selection
@@ -1798,17 +1799,17 @@ Run Heat-Bath CI calculation with support for multiple states.
 
 # Arguments
 - `ctx`: FCI context
-- `options`: Heat-Bath CI options (including n_roots for multi-state)
+- `options`: Heat-Bath CI options (including nstates for multi-state)
 
 # Returns
-- `energies`: Vector of length n_roots with total energies (electronic + nuclear)
-- `coefficients`: Matrix (n_dets × n_roots) with CI coefficients for all states
+- `energies`: Vector of length nstates with total energies (electronic + nuclear)
+- `coefficients`: Matrix (n_dets × nstates) with CI coefficients for all states
 - `variational_dets`: Vector of determinants in final variational space
 - `pt2_result`: PT2 correction result (currently only for ground state)
 
 # Notes
-- For n_roots=1 (default), uses single-state selection strategy
-- For n_roots>1, uses multi-state selection with state-maximum probability
+- For nstates=1 (default), uses single-state selection strategy
+- For nstates>1, uses multi-state selection with state-maximum probability
 - PT2 correction currently only computed for ground state
 """
 function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
@@ -1817,11 +1818,16 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     println("Heat-Bath Configuration Interaction (HBCI)")
     println("="^70)
     println("Target selection: $(options.target_selection)")
-    println("Selection threshold (εₕ): $(options.epsilon_h)")
-    println("Selection threshold (εₚ): $(options.epsilon_p)")
+    println("Selection threshold (ε): $(options.epsilon)")
+    if options.epsilon_h > -0.1
+      println("Selection threshold (εₕ): $(options.epsilon_h)")
+    end
+    if options.epsilon_p > -0.1
+      println("Selection threshold (εₚ): $(options.epsilon_p)")
+    end
     println("PT2 threshold (εₚₜ₂): $(options.epsilon_pt2)")
-    println("Number of states (n_roots): $(options.n_roots)")
-    if options.n_roots > 1
+    println("Number of states (nstates): $(options.nstates)")
+    if options.nstates > 1
       println("Multi-state selection: State-maximum probability")
     end
     println("="^70)
@@ -1853,8 +1859,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   # Enhanced initial guess using small-space Hamiltonian (if enabled)
   variational_dets = Determinant[]
   E_init_vec = Float64[]
-  
-  if options.use_small_space_guess && options.n_roots > 1
+
+  if options.use_small_space_guess && options.nstates > 1
     # Use small-space Hamiltonian diagonalization for better initial guess
     if options.verbose
       println("\nInitialization (Small-Space Method)")
@@ -1864,11 +1870,11 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     # Determine small-space size (adaptive or user-specified)
     small_space_size = options.small_space_size > 0 ? 
                        options.small_space_size : 
-                       max(100, options.target_selection ÷ 10, 5 * options.n_roots)
+                       max(100, options.target_selection ÷ 10, 5 * options.nstates)
     
     # Generate initial guess from small-space diagonalization
     small_space_result = initialize_multistate_from_small_space(
-      ctx, options.target_selection, options.n_roots
+      ctx, options.target_selection, options.nstates
     )
     
     # Start with all small-space determinants
@@ -1880,7 +1886,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     if options.verbose
       println("\n  Small-space initial guess:")
       println("    Space size: $(small_space_result.n_small) determinants")
-      println("    Initial energies ($(options.n_roots) states):")
+      println("    Initial energies ($(options.nstates) states):")
       for (i, E) in enumerate(E_init_vec)
         println("      State $i: $E Hartree")
       end
@@ -1896,14 +1902,14 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     
     # Get initial HF energy (all states)
     selected_ctx_hf = SelectedCIContext(ctx, variational_dets)
-    E_electronic_hf_vec, _ = diagonalize_selected_space(selected_ctx_hf, n_roots=options.n_roots)
+    E_electronic_hf_vec, _ = diagonalize_selected_space(selected_ctx_hf, nstates=options.nstates)
     E_init_vec = E_electronic_hf_vec .+ ctx.fcidump.int0
     
     if options.verbose
-      if options.n_roots == 1
+      if options.nstates == 1
         println("  HF reference energy: $(E_init_vec[1]) Hartree")
       else
-        println("  HF reference energies ($(options.n_roots) states):")
+        println("  HF reference energies ($(options.nstates) states):")
         for (i, E) in enumerate(E_init_vec)
           println("    State $i: $E Hartree")
         end
@@ -1927,17 +1933,16 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     
     # 1. Diagonalize Hamiltonian in current space (all requested states)
     selected_ctx = SelectedCIContext(ctx, variational_dets)
-    
-    E_electronic_vec, coeffs_matrix = diagonalize_selected_space(selected_ctx, 
-                                                                 n_roots=options.n_roots,
+    E_electronic_vec, coeffs_matrix = diagonalize_selected_space(selected_ctx,
+                                                                 nstates=options.nstates,
                                                                  previous_vectors=previous_eigenvectors)
     E_current_vec = E_electronic_vec .+ ctx.fcidump.int0  # Add nuclear repulsion
     
     if options.verbose
-      if options.n_roots == 1
+      if options.nstates == 1
         println("  Energy: $(E_current_vec[1]) Hartree")
       else
-        println("  Energies ($(options.n_roots) states):")
+        println("  Energies ($(options.nstates) states):")
         for (i, E) in enumerate(E_current_vec)
           println("    State $i: $E Hartree")
         end
@@ -1949,7 +1954,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     ΔE_max = maximum(ΔE_vec)
     
     if options.verbose
-      if options.n_roots == 1
+      if options.nstates == 1
         println("  ΔE: $(ΔE_vec[1])")
       else
         println("  ΔE (max): $ΔE_max")
@@ -1968,15 +1973,16 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     end
     
     # 3. Generate candidates and compute probabilities
+    eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon
     candidates = HBCandidate[]
-    if options.n_roots == 1
+    if options.nstates == 1
       # Single-state: use original single-state function
       total_prob = compute_heatbath_probabilities!(candidates, variational_dets, coeffs_matrix[:,1], ctx, 
-                                                  E_electronic_vec[1], setup_data, options.epsilon_h)
+                                                  E_electronic_vec[1], setup_data, eps_h)
     else
       # Multi-state: use new multi-state function
       total_prob = compute_heatbath_probabilities_multistate!(candidates, variational_dets, coeffs_matrix, ctx, 
-                                                              E_electronic_vec, setup_data, options.epsilon_h)
+                                                              E_electronic_vec, setup_data, eps_h)
     end
     
     if options.verbose
@@ -2027,8 +2033,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   end
   
   selected_ctx = SelectedCIContext(ctx, variational_dets)
-  E_electronic_vec, coeffs_final_matrix = diagonalize_selected_space(selected_ctx, 
-                                                                     n_roots=options.n_roots,
+  E_electronic_vec, coeffs_final_matrix = diagonalize_selected_space(selected_ctx,
+                                                                     nstates=options.nstates,
                                                                      previous_vectors=previous_eigenvectors)
   
   # Add nuclear repulsion energy for total energy
@@ -2037,12 +2043,12 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   if options.verbose
     println("="^70)
     println("HBCI Complete!")
-    if options.n_roots == 1
+    if options.nstates == 1
       println("Electronic energy: $(E_electronic_vec[1]) Hartree")
       println("Nuclear repulsion: $(ctx.fcidump.int0) Hartree")
       println("Total energy: $(E_final_vec[1]) Hartree")
     else
-      println("Electronic energies ($(options.n_roots) states):")
+      println("Electronic energies ($(options.nstates) states):")
       for (i, E) in enumerate(E_electronic_vec)
         println("  State $i: $E Hartree")
       end
@@ -2070,7 +2076,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
       println("  Variational:     $(E_final_vec[1]) Ha")
       println("  PT2 correction:  $(pt2_result.energy_correction) Ha")
       println("  Total (VAR+PT2): $E_total_with_pt2 Ha")
-      if options.n_roots > 1
+      if options.nstates > 1
         println("  Note: PT2 currently only computed for ground state")
       end
     end
@@ -2099,33 +2105,33 @@ end
 
 """
     diagonalize_selected_space(selected_ctx::SelectedCIContext; 
-                               n_roots::Int=1,
+                               nstates::Int=1,
                                previous_vectors::Union{Nothing,Matrix{Float64}}=nothing) 
       -> (Vector{Float64}, Matrix{Float64})
 
 Diagonalize the Hamiltonian in the selected CI space.
-Returns eigenvalues and eigenvectors for n_roots lowest states.
+Returns eigenvalues and eigenvectors for nstates lowest states.
 
 For small spaces (< 1000 determinants), uses direct diagonalization via eigen().
 For large spaces (≥ 1000 determinants), uses Davidson iterative diagonalization.
 
 # Arguments
 - `selected_ctx`: Selected CI context with determinants
-- `n_roots`: Number of lowest eigenstates to compute (default: 1)
+- `nstates`: Number of lowest eigenstates to compute (default: 1)
 - `previous_vectors`: Optional previous eigenvectors to use as initial guess for Davidson.
-                     Should be a matrix of size (n_prev, n_roots) where n_prev is the
+                     Should be a matrix of size (n_prev, nstates) where n_prev is the
                      number of determinants in the previous iteration. Will be projected
                      onto the current determinant space.
 
 # Returns
-- `eigenvalues`: Vector of length n_roots with lowest eigenvalues
-- `eigenvectors`: Matrix of size (n_selected, n_roots) with eigenvectors
+- `eigenvalues`: Vector of length nstates with lowest eigenvalues
+- `eigenvectors`: Matrix of size (n_selected, nstates) with eigenvectors
 """
 function diagonalize_selected_space(selected_ctx::SelectedCIContext; 
-                                   n_roots::Int=1,
+                                   nstates::Int=1,
                                    previous_vectors::Union{Nothing,Matrix{Float64}}=nothing)::Tuple{Vector{Scalar}, Matrix{Scalar}}
   n_selected = selected_ctx.selected_dets.n_selected
-  n_roots = min(n_roots, n_selected)  # Can't compute more roots than determinants
+  nstates = min(nstates, n_selected)  # Can't compute more roots than determinants
   
   # For small spaces, use direct diagonalization (faster startup)
   if n_selected < 1000
@@ -2142,9 +2148,9 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
       end
     end
     
-    nval = min(n_roots+5, n_selected)
+    nval = min(nstates+5, n_selected)
     eigenvalues, eigenvectors = eigen(Hermitian(H_matrix), 1:nval)
-    return real.(eigenvalues[1:n_roots]), real.(eigenvectors[:, 1:n_roots])
+    return real.(eigenvalues[1:nstates]), real.(eigenvectors[:, 1:nstates])
   end
 
   # For large spaces, use Davidson iterative diagonalization
@@ -2161,7 +2167,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     # Project previous eigenvectors onto current space
     # Assume first n_prev determinants are the same (newly added dets are at the end)
     # Pass all available previous eigenvectors for their respective roots
-    n_use_prev = min(n_roots, n_prev_roots)
+    n_use_prev = min(nstates, n_prev_roots)
     initial_guesses = zeros(Scalar, n_selected, n_use_prev)
     
     for i in 1:n_use_prev
@@ -2173,7 +2179,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     eigenvalues, eigenvectors = davidson_selected_ci!(
       selected_ctx, 
       initial_guesses,
-      n_roots = n_roots,
+      nstates = nstates,
       max_iterations = 50,
       convergence_threshold = 1e-8,
       verbose = false
@@ -2191,7 +2197,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
   eigenvalues, eigenvectors = davidson_selected_ci!(
     selected_ctx, 
     initial_guess,
-    n_roots = n_roots,
+    nstates = nstates,
     max_iterations = 50,
     convergence_threshold = 1e-8,
     verbose = false

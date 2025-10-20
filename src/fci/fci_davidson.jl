@@ -365,14 +365,14 @@ Always returns arrays of energies and states for type stability.
 
 # Arguments
 - `context`: FCI context containing system information
-- `n_states`: Number of electronic states to compute (default: uses context.options.n_roots)
+- `n_states`: Number of electronic states to compute (default: uses context.options.nstates)
 
 # Returns
 - `Tuple{Vector{Scalar}, Vector{FCIVector}}`: Arrays of energies and corresponding eigenvectors
 """
 function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = nothing)::Tuple{Vector{Scalar}, Vector{FCIVector}}
-  # Use n_roots from options if n_states not provided
-  n_states = isnothing(n_states) ? context.options.n_roots : n_states
+  # Use nstates from options if n_states not provided
+  n_states = isnothing(n_states) ? context.options.nstates : n_states
 
   # Scale max_iter for multi-state calculations (excited states need more iterations)
   max_iter = context.options.max_iter
@@ -753,7 +753,7 @@ determinants rather than the full CI space.
 - `initial_guesses::Matrix{Scalar}`: Initial guess vector in selected CI basis (n_selected × n_guess)
 
 # Keyword Arguments
-- `n_roots::Int=1`: Number of lowest eigenvalues to compute
+- `nstates::Int=1`: Number of lowest eigenvalues to compute
 - `max_iterations::Int=50`: Maximum number of Davidson iterations
 - `convergence_threshold::Float64=1e-8`: Energy convergence threshold
 - `max_subspace::Int=30`: Maximum subspace size before refresh
@@ -761,8 +761,8 @@ determinants rather than the full CI space.
 
 # Returns
 - `Tuple{Vector{Float64}, Matrix{Float64}}`: Eigenvalues and eigenvectors
-  - eigenvalues: Vector of lowest n_roots eigenvalues
-  - eigenvectors: Matrix of eigenvectors (n_selected × n_roots)
+  - eigenvalues: Vector of lowest `nstates` eigenvalues
+  - eigenvectors: Matrix of eigenvectors (n_selected × nstates)
 
 # Algorithm
 Uses the Davidson iterative diagonalization method:
@@ -780,7 +780,7 @@ memory usage rather than O(N_full).
 function davidson_selected_ci!(
   selected_ctx::SelectedCIContext,
   initial_guesses::Matrix{Scalar};
-  n_roots::Int = 1,
+  nstates::Int = 1,
   max_iterations::Int = 50,
   convergence_threshold::Float64 = 1e-8,
   max_subspace::Int = 30,
@@ -791,19 +791,19 @@ function davidson_selected_ci!(
   n_guess::Int = size(initial_guesses, 2)
   
   # Validate input
-  n_roots >= 1 || error("n_roots must be at least 1")
-  n_roots <= n_selected || error("n_roots cannot exceed n_selected")
+  nstates >= 1 || error("nstates must be at least 1")
+  nstates <= n_selected || error("nstates cannot exceed n_selected")
   size(initial_guesses, 1) == n_selected || error("initial_guess must have ", n_selected, " rows")
-  max_subspace >= 2 * n_roots || error("max_subspace must be at least 2*n_roots")
-  
+  max_subspace >= 2 * nstates || error("max_subspace must be at least 2*nstates")
+
   # Scale subspace size with number of roots
-  max_subspace = max(max_subspace, 3 * n_roots)
-  n_keep = max(n_roots + 2, max_subspace ÷ 3)
+  max_subspace = max(max_subspace, 3 * nstates)
+  n_keep = max(nstates + 2, max_subspace ÷ 3)
   
   if verbose
     println("\nStarting Davidson Selected CI diagonalization")
     println("Selected space: $n_selected determinants")
-    println("Computing $n_roots eigenstate$(n_roots > 1 ? "s" : "")")
+    println("Computing $nstates eigenstate$(nstates > 1 ? "s" : "")")
     println("Initial guesses provided: $n_guess")
     println("Subspace settings: max=$max_subspace, keep=$n_keep")
   end
@@ -820,7 +820,7 @@ function davidson_selected_ci!(
   HV = [zeros(Scalar, n_selected) for _ in 1:max_subspace]
   
   # Initialize with guess vector(s)
-  k = min(max(n_roots + 1, n_guess), max_subspace)
+  k = min(max(nstates + 1, n_guess), max_subspace)
   
   # First vectors from provided initial guesses
   n_use_guess = min(n_guess, k)
@@ -850,7 +850,7 @@ function davidson_selected_ci!(
   
   # Additional vectors if needed: perturb or use random
   for i in (n_use_guess+1):k
-    if i <= n_roots + 1 && n_use_guess > 0
+    if i <= nstates + 1 && n_use_guess > 0
       # Perturb around first guess with different random seeds
       V[i] .= initial_guesses[:, 1] .+ 0.01 * randn(n_selected)
     else
@@ -875,8 +875,8 @@ function davidson_selected_ci!(
   converged = false
   iteration = 0
   max_residual = Inf  # Initialize outside loop for warning message
-  eigenvalues = zeros(Float64, n_roots)
-  eigenvectors = zeros(Scalar, n_selected, n_roots)
+  eigenvalues = zeros(Float64, nstates)
+  eigenvectors = zeros(Scalar, n_selected, nstates)
   
   for iter in 1:max_iterations
     iteration = iter
@@ -899,14 +899,14 @@ function davidson_selected_ci!(
     # For orthonormal basis, S ≈ I, so we can use standard eigen
     sub_vals, sub_vecs = eigen(Hermitian(H_sub))
     
-    # Extract lowest n_roots
-    eigenvalues .= real.(sub_vals[1:n_roots])
+    # Extract lowest nstates eigenvalues
+    eigenvalues .= real.(sub_vals[1:nstates])
     
     # Compute Ritz vectors and residuals
     max_residual = 0.0
-    residuals = [zeros(Scalar, n_selected) for _ in 1:n_roots]
+    residuals = [zeros(Scalar, n_selected) for _ in 1:nstates]
     
-    for iroot in 1:n_roots
+    for iroot in 1:nstates
       # Ritz vector: linear combination of subspace vectors
       eigenvectors[:, iroot] .= 0.0
       for i in 1:k
@@ -925,12 +925,12 @@ function davidson_selected_ci!(
     end
     
     if verbose
-      if n_roots == 1
+      if nstates == 1
         E_total = real(eigenvalues[1]) + selected_ctx.base_context.fcidump.int0
         println("Iteration $iter: E = $(E_total) Hartree, |r| = $(max_residual)")
       else
         println("Iteration $iter:")
-        for iroot in 1:n_roots
+        for iroot in 1:nstates
           E_total = real(eigenvalues[iroot]) + selected_ctx.base_context.fcidump.int0
           res_norm = norm(residuals[iroot])
           println("  State $iroot: E = $(E_total) Hartree, |r| = $(res_norm)")
@@ -949,7 +949,7 @@ function davidson_selected_ci!(
     
     # Generate correction vectors using preconditioner
     n_new = 0
-    for iroot in 1:n_roots
+    for iroot in 1:nstates
       if k + n_new >= max_subspace
         break  # Subspace is full
       end

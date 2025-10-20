@@ -236,8 +236,8 @@ end
   conv_tol::Float64 = 1e-8
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
-  """`⟨1⟩` Number of roots to compute """
-  n_roots::Int = 1
+  """`⟨1⟩` Number of states to compute """
+  nstates::Int = 1
   """`⟨2⟩` Number of guess vectors to use """
   n_guess::Int = 2
   """`⟨10⟩` Maximum subspace size for Davidson diagonalization """
@@ -252,12 +252,12 @@ end
   jacobi_davidson::Bool = true
   """`⟨1000⟩` Maximum P-space size (typically 100-1000) """
   max_pspace_size::Int = 1000
+  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
+  pspace_selection_method::Symbol = :hybrid
   """`⟨4⟩` Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
   max_pspace_excitation::Int = 4
   """`⟨5.0⟩` Energy cutoff for determinant inclusion """
   pspace_energy_threshold::Float64 = 5.0
-  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
-  pspace_selection_method::Symbol = :hybrid
   """`⟨1e-3⟩` HCI selection threshold (epsilon_h) for P-space generation """
   pspace_hci_epsilon::Float64 = 1e-3
   """`⟨true⟩` Enable setup for HCI P-space generation """
@@ -272,10 +272,12 @@ end
 @kwdef mutable struct HCIOptions
   """`⟨10000⟩` Target number of determinants to select """
   target_selection::Int = 10000
-  """`⟨3e-4⟩` HCI selection threshold """
-  epsilon_h::Float64 = 3e-4
-  """`⟨epsilon_h⟩` CIPSI selection threshold """
-  epsilon_p::Float64 = epsilon_h
+  """`⟨3e-4⟩` Selection threshold """
+  epsilon::Float64 = 3e-4
+  """`⟨epsilon⟩` HCI selection threshold """
+  epsilon_h::Float64 = -1.0
+  """`⟨epsilon⟩` CIPSI selection threshold """
+  epsilon_p::Float64 = -1.0
   """`⟨1e-6⟩` Energy convergence threshold """
   tol::Float64 = 1e-6
   """`⟨50⟩` Maximum HBCI iterations """
@@ -289,13 +291,15 @@ end
   """`⟨1e-6⟩` Threshold for PT2 contributions """
   epsilon_pt2::Float64 = 1e-6
   """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
-  n_roots::Int = 1
+  nstates::Int = 1
   """`⟨true⟩` Use small-space Hamiltonian for initial guess """
   use_small_space_guess::Bool = true
   """`⟨0⟩` Size of small space (0 = auto: max(100, target÷10, 5*n_roots)) """
   small_space_size::Int = 0
   """`⟨:hybrid⟩` Selection method: :hybrid (energy + excitation) """
   small_space_method::Symbol = :hybrid
+  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
+  print_level::Int = 1
 end
 
 """ 

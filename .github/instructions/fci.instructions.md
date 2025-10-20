@@ -25,7 +25,28 @@ Julia implementation of Full Configuration Interaction (FCI) with Selected CI an
 **Files:**
 - `src/fci/fci_hci_context.jl` - HCIContext struct definition
 - `src/fci/fci_selected_ci.jl` - compute_diagonal_element implementation
+- `src/infos/options.jl` - FCI options (moved from fci_options.jl)
 
+
+## Configuration
+
+**FCI Options:**
+FCI options are stored in the main `Options` structure (`src/infos/options.jl`) and can be set using the `@set` macro:
+
+```julia
+@set fci nstates=3           # Number of states to compute
+@set fci max_iter=100        # Maximum Davidson iterations  
+@set fci threshold=1.e-6     # Energy convergence threshold
+@set hci epsilon_h=1.e-4     # Heat-Bath CI selection threshold
+@set fci use_hci=true        # Use lightweight HCIContext
+```
+
+**Integral Storage:**
+FCI now uses the unified `QFDump` structure instead of the old FCI-specific `FCIDump` type:
+- Integrals still accessed via `ctx.fcidump` (field name unchanged)
+- `ctx.fcidump` is now of type `QFDump` (not the old `FCIDump`)
+- Better integration with rest of ElemCo.jl
+- Consistent with other quantum chemistry modules
 
 ## Usage Examples
 
@@ -39,10 +60,12 @@ basis = "6-31g"
 @fci
 ```
 
-**Heat-Bath CI:**
+**Heat-Bath CI with options:**
 ```julia
 using ElemCo
 @print_input
+@set fci hbci_eps=1.e-4
+@set fci nstates=2
 fcidump = "path/to/file.FCIDUMP"
 @hci
 ```
@@ -76,12 +99,16 @@ cd profile && julia --project=.. jet.jl     # Type stability check
 ```
 
 
+## Recent Updates
+
+**October 2025:**
+- ✅ FCI options moved to main `Options` structure in `src/infos/options.jl`
+- ✅ Migrated to unified `QFDump` type - `ctx.fcidump` now uses `QFDump` instead of old `FCIDump` type
+- ✅ Options configurable via standard `@set fci <option>=<value>` macro
+
 ## Future Improvements
 
-1. **Fock Elements in HBCI Selection** - Use proper Fock matrix elements (h1 + 2e contributions) instead of just h1 for single excitation thresholding
-2. **Slater-Condon Screening** - Skip zero matrix elements by checking excitation degree before computation
-3. **PT2 Energy Reporting** - Accumulate and report perturbative corrections from external determinants
-4. **QFDump Migration** - Use unified QFDump format for better integration with ElemCo.jl
+1. **PT2 Energy Reporting** - Accumulate and report perturbative corrections from external determinants
 
 ## References
 
