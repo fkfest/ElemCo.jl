@@ -21,8 +21,11 @@ export xpath
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
 export OutDict, last_energy
+# from bufvec
+export BufVec, capacity, is_full
 
 include("xmltools.jl")
+include("bufvec.jl")
 
 """
     mainname(file::String)

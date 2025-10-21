@@ -103,7 +103,6 @@ export last_energy
 # from DescDict
 export ODDict
 
-
 """
     __init__()
 

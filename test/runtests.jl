@@ -30,7 +30,7 @@ TESTS = [
 ("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc"]),
 ("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase"]),
-("Unit-tests", ["unit_tests"])
+("Unit-tests", ["unit_tests", "bufvec"]),
 ]
 
 # long tests

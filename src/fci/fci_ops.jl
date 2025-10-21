@@ -174,7 +174,7 @@ Forms: `data_k[k,l,iBlk1,iBlk2] += <K_1|c†_k c_l|J_1> * coeffs[J_1,K_2] * sign
 # Arguments
 - `data_k`: Output array [n_orb, n_orb, n_blk1, n_blk2] 
 - `info_1`: Array of StrInfo for spin 1 substitutions
-- `coeffs`: CI coefficients as AbstractMatrix [n_str_1, n_blk_2] (can be StridedView)
+- `coeffs`: CI coefficients as AbstractMatrix `[n_str_1, n_blk_2]` (can be StridedView)
 - `c_sum`: Accumulator for sum of contributions (for screening)
 - `prefactor`: Multiplicative prefactor (typically ±1)
 """
@@ -301,7 +301,7 @@ end
     convert_op2_to_pair_matrix_opposite_spin(op::AbstractArray{Scalar}, n_orb::Int)
 
 Convert 4D integral tensor to pair matrix format for opposite-spin interactions.
-Stores pure Coulomb integrals: (ij|kl) without exchange correction.
+Stores pure Coulomb integrals: `(ij|kl)` without exchange correction.
 """
 function convert_op2_to_pair_matrix_opposite_spin(op::AbstractArray{Scalar}, n_orb::Int)
   n_pairs = n_orb * (n_orb + 1) ÷ 2
@@ -354,7 +354,7 @@ end
 """
     HamiltonianTerm2e <: HamiltonianTerm
 
-Two-electron Hamiltonian term: [1/2] (ij|kl) E^i_j E^k_l
+Two-electron Hamiltonian term: ``\\[1/2\\] (ij|kl) E^i_j E^k_l``
 
 WARNING: Uses (ij|kl) integrals, NOT ⟨ij|kl⟩ and includes factor 1/2.
 """
