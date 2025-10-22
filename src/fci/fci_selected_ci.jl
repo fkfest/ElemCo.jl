@@ -162,25 +162,61 @@ Find the two orbitals involved in a single excitation i -> a.
 """
 function find_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPattern)::Tuple{Int, Int}
   diff = pattern_i ⊻ pattern_j
-
-  orb_i = -1  # Orbital being destroyed
+  # println("Diff: ", bitstring(diff))
+  occ = pattern_i & diff
+  # println("Occupied: ", bitstring(occ)) 
+  virt = pattern_j & diff
+  # println("Virtual: ", bitstring(virt))
+ 
   orb_a = -1  # Orbital being created
-
-  bit_pos = 0
-  while diff != 0
-    if (diff & 1) != 0
-      if (pattern_i & (OrbPattern(1) << bit_pos)) != 0
-        orb_i = bit_pos  # This orbital is in pattern_i but not pattern_j
-      else
-        orb_a = bit_pos  # This orbital is in pattern_j but not pattern_i
-      end
+  orb_i = -1  # Orbital being destroyed
+  for i in 1:2
+    index = trailing_zeros(diff)
+    if (pattern_i & (OrbPattern(1) << index)) != 0
+      orb_i = index  # Orbital being destroyed
+    else
+      orb_a = index  # Orbital being created
     end
-    diff >>= 1
-    bit_pos += 1
+    diff ⊻= (OrbPattern(1) << index)
   end
 
   return (orb_i, orb_a)
 end
+
+mutable struct IndexPair
+  i::Int
+  j::Int
+  n::Int
+  function IndexPair()
+    new(0, 0, 0)
+  end
+  function IndexPair(i)
+    new(i, 0, 1)
+  end
+  function IndexPair(i, j)
+    new(i, j, 2)
+  end
+end
+
+function Base.push!(pair::IndexPair, val::Int)
+  if pair.n == 0
+    pair.i = val
+  elseif pair.n == 1
+    pair.j = val
+  else
+    throw(ArgumentError("IndexPair can only hold two indices"))
+  end
+  pair.n += 1
+  return pair
+end
+
+function sorted(pair::IndexPair)
+  if pair.i > pair.j
+    return (pair.j, pair.i)
+  end
+  return (pair.i, pair.j)
+end
+
 
 """
     find_double_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPattern) -> (Int, Int, Int, Int)
@@ -193,8 +229,8 @@ function find_double_excitation_orbitals(
 )::NTuple{4, Int}
   diff = pattern_i ⊻ pattern_j
 
-  destroyed = Int[]  # Orbitals in pattern_i but not pattern_j
-  created = Int[]    # Orbitals in pattern_j but not pattern_i
+  destroyed = IndexPair()  # Orbitals in pattern_i but not pattern_j
+  created = IndexPair()   # Orbitals in pattern_j but not pattern_i
 
   bit_pos = 0
   while diff != 0
@@ -209,12 +245,9 @@ function find_double_excitation_orbitals(
     bit_pos += 1
   end
 
-  @assert length(destroyed) == 2 && length(created) == 2 "Invalid double excitation"
-
   # Order: (i, j, a, b) where i < j and a < b
-  orb_i, orb_j =
-    destroyed[1] < destroyed[2] ? (destroyed[1], destroyed[2]) : (destroyed[2], destroyed[1])
-  orb_a, orb_b = created[1] < created[2] ? (created[1], created[2]) : (created[2], created[1])
+  orb_i, orb_j = sorted(destroyed)
+  orb_a, orb_b = sorted(created)
 
   return (orb_i, orb_j, orb_a, orb_b)
 end
@@ -282,6 +315,7 @@ Works with both FCIContext and HCIContext.
 """
 function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext})::Scalar
   excitation = analyze_determinant_excitation(det_i, det_j)
+  # println("Excitation type: ", excitation.excitation_type, ", orbitals: ", excitation.orb_indices, ", phase: ", excitation.phase)
   return evaluate_matrix_element(det_i, det_j, context, excitation)
 end
 
@@ -508,7 +542,6 @@ function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Sc
   @assert length(input) == n_selected "Input vector size mismatch"
 
   fill!(result, 0.0)
-
   for i in 1:n_selected
     det_i = selected_ctx.selected_dets.determinants[i]
 
@@ -636,9 +669,9 @@ Following Holmes et al. (2016), Algorithm Step IIa.
 struct HBCISetupData
   # For RHF: only double_excitations is used
   # For UHF: all three dictionaries are used (aa, bb, ab)
-  double_excitations::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-alpha
-  double_excitations_bb::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}  # UHF beta-beta
-  double_excitations_ab::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-beta mixed
+  double_excitations::Vector{Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-alpha
+  double_excitations_bb::Vector{Vector{Tuple{Int,Int,Float64}}}  # UHF beta-beta
+  double_excitations_ab::Vector{Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-beta mixed
   h_doub_max::Float64              # Maximum |H(rs ← pq)| over all excitations
   
   # Precomputed h1e2 terms for efficient Fock element calculation
@@ -650,29 +683,29 @@ struct HBCISetupData
   h1e2_ba::Array{Float64, 3}       # UHF: beta-alpha (no exchange)
 
   function HBCISetupData()
-    new(Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(), 
-        Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
-        Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
+    new(Vector{Vector{Tuple{Int,Int,Float64}}}(), 
+        Vector{Vector{Tuple{Int,Int,Float64}}}(),
+        Vector{Vector{Tuple{Int,Int,Float64}}}(),
         0.0, 
         zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0))
   end
   
   # RHF constructor
-  function HBCISetupData(double_exc::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}, 
-                        double_exc_ab::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
+  function HBCISetupData(double_exc::Vector{Vector{Tuple{Int,Int,Float64}}}, 
+                        double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
                         h_max::Float64, 
                         h1e2::Array{Float64, 3}, h1e2_ab::Array{Float64, 3})
     new(double_exc, 
-        Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}(),
+        Vector{Vector{Tuple{Int,Int,Float64}}}(),
         double_exc_ab,
         h_max, 
         h1e2, zeros(0,0,0), zeros(0,0,0), h1e2_ab, zeros(0,0,0))
   end
   
   # UHF constructor
-  function HBCISetupData(double_exc_aa::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
-                        double_exc_bb::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
-                        double_exc_ab::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}},
+  function HBCISetupData(double_exc_aa::Vector{Vector{Tuple{Int,Int,Float64}}},
+                        double_exc_bb::Vector{Vector{Tuple{Int,Int,Float64}}},
+                        double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
                         h_max::Float64,
                         h1e2_aa::Array{Float64, 3}, h1e2_bb::Array{Float64, 3},
                         h1e2_ab::Array{Float64, 3}, h1e2_ba::Array{Float64, 3})
@@ -707,95 +740,65 @@ end
 # ===========================================
 
 """
-    occupied_orbitals(pattern::OrbPattern, n_orb::Int) -> Vector{Int}
-
-Get list of occupied orbital indices (0-based to match bit positions).
-"""
-function occupied_orbitals(pattern::OrbPattern, n_orb::Int)::Vector{Int}
-  occ = Int[]
-  for i in 0:(n_orb-1)
-    if (pattern & (OrbPattern(1) << i)) != 0
-      push!(occ, i)
-    end
-  end
-  return occ
-end
-
-"""
-    virtual_orbitals(pattern::OrbPattern, n_orb::Int) -> Vector{Int}
-
-Get list of virtual (unoccupied) orbital indices (0-based).
-"""
-function virtual_orbitals(pattern::OrbPattern, n_orb::Int)::Vector{Int}
-  virt = Int[]
-  for i in 0:(n_orb-1)
-    if (pattern & (OrbPattern(1) << i)) == 0
-      push!(virt, i)
-    end
-  end
-  return virt
-end
-
-"""
     single_excitation_alpha(det::Determinant, i::Int, a::Int) -> Determinant
 
-Create determinant with alpha electron moved from orbital i to orbital a (0-based indices).
+Create determinant with alpha electron moved from orbital i to orbital a.
 """
 function single_excitation_alpha(det::Determinant, i::Int, a::Int)::Determinant
-  # Remove electron from orbital i, add to orbital a (0-based indexing)
-  new_alpha = det.alpha & ~(OrbPattern(1) << i)  # Remove i
-  new_alpha |= (OrbPattern(1) << a)              # Add a
+  # Remove electron from orbital i, add to orbital a
+  new_alpha = det.alpha & ~(OrbPattern(1) << (i-1))  # Remove i
+  new_alpha |= (OrbPattern(1) << (a-1))              # Add a
   return Determinant(new_alpha, det.beta)
 end
 
 """
     single_excitation_beta(det::Determinant, i::Int, a::Int) -> Determinant
 
-Create determinant with beta electron moved from orbital i to orbital a (0-based indices).
+Create determinant with beta electron moved from orbital i to orbital a.
 """
 function single_excitation_beta(det::Determinant, i::Int, a::Int)::Determinant
-  new_beta = det.beta & ~(OrbPattern(1) << i)
-  new_beta |= (OrbPattern(1) << a)
+  new_beta = det.beta & ~(OrbPattern(1) << (i-1))
+  new_beta |= (OrbPattern(1) << (a-1))
   return Determinant(det.alpha, new_beta)
 end
 
 """
     double_excitation_alpha(det::Determinant, i::Int, j::Int, a::Int, b::Int) -> Determinant
 
-Create determinant with alpha electrons moved from orbitals i,j to orbitals a,b (0-based).
+Create determinant with alpha electrons moved from orbitals i,j to orbitals a,b.
 """
 function double_excitation_alpha(det::Determinant, i::Int, j::Int, a::Int, b::Int)::Determinant
-  new_alpha = det.alpha & ~(OrbPattern(1) << i)  # Remove i
-  new_alpha &= ~(OrbPattern(1) << j)             # Remove j
-  new_alpha |= (OrbPattern(1) << a)              # Add a
-  new_alpha |= (OrbPattern(1) << b)              # Add b
+  new_alpha = det.alpha & ~(OrbPattern(1) << (i-1))  # Remove i
+  new_alpha &= ~(OrbPattern(1) << (j-1))              # Remove j
+  new_alpha |= (OrbPattern(1) << (a-1))               # Add a
+  new_alpha |= (OrbPattern(1) << (b-1))               # Add b
   return Determinant(new_alpha, det.beta)
 end
 
 """
     double_excitation_beta(det::Determinant, i::Int, j::Int, a::Int, b::Int) -> Determinant
 
-Create determinant with beta electrons moved from orbitals i,j to orbitals a,b (0-based).
+Create determinant with beta electrons moved from orbitals i,j to orbitals a,b.
 """
 function double_excitation_beta(det::Determinant, i::Int, j::Int, a::Int, b::Int)::Determinant
-  new_beta = det.beta & ~(OrbPattern(1) << i)
-  new_beta &= ~(OrbPattern(1) << j)
-  new_beta |= (OrbPattern(1) << a)
-  new_beta |= (OrbPattern(1) << b)
+  new_beta = det.beta & ~(OrbPattern(1) << (i-1))
+  new_beta &= ~(OrbPattern(1) << (j-1))
+  new_beta |= (OrbPattern(1) << (a-1))
+  new_beta |= (OrbPattern(1) << (b-1))
   return Determinant(det.alpha, new_beta)
 end
 
 """
     double_excitation_mixed(det::Determinant, i_alpha::Int, i_beta::Int, a_alpha::Int, a_beta::Int) -> Determinant
 
-Create determinant with one alpha excitation i_alpha->a_alpha and one beta excitation i_beta->a_beta (0-based).
+Create determinant with one alpha excitation i_alpha->a_alpha and one beta excitation i_beta->a_beta.
 """
 function double_excitation_mixed(det::Determinant, i_alpha::Int, i_beta::Int, 
                                  a_alpha::Int, a_beta::Int)::Determinant
-  new_alpha = det.alpha & ~(OrbPattern(1) << i_alpha)
-  new_alpha |= (OrbPattern(1) << a_alpha)
-  new_beta = det.beta & ~(OrbPattern(1) << i_beta)
-  new_beta |= (OrbPattern(1) << a_beta)
+  new_alpha = det.alpha & ~(OrbPattern(1) << (i_alpha-1))
+  new_alpha |= (OrbPattern(1) << (a_alpha-1))
+  new_beta = det.beta & ~(OrbPattern(1) << (i_beta-1))
+  new_beta |= (OrbPattern(1) << (a_beta-1))
   return Determinant(new_alpha, new_beta)
 end
 
@@ -818,13 +821,15 @@ function generate_connected_determinants!(connected::Vector{Determinant},
   n_orb = ctx.n_orb
   
   # Get occupied and virtual orbitals for alpha and beta
-  alpha_occ = occupied_orbitals(det.alpha, n_orb)
-  alpha_virt = virtual_orbitals(det.alpha, n_orb)
-  beta_occ = occupied_orbitals(det.beta, n_orb)
-  beta_virt = virtual_orbitals(det.beta, n_orb)
+  alpha_occ = BufVec(@view(ctx.ibuf[1:n_orb]))
+  alpha_virt = BufVec(@view(ctx.ibuf[n_orb+1:n_orbs*2]))
+  occupied_and_virtual_orbitals!(alpha_occ, alpha_virt, det.alpha, n_orb)
+  beta_occ = BufVec(@view(ctx.ibuf[n_orb*2+1:n_orb*3]))
+  beta_virt = BufVec(@view(ctx.ibuf[n_orb*3+1:end]))
+  occupied_and_virtual_orbitals!(beta_occ, beta_virt, det.beta, n_orb)
   
   # Alpha single excitations: i -> a
-  for i in alpha_occ
+  @inbounds for i in alpha_occ
     for a in alpha_virt
       new_det = single_excitation_alpha(det, i, a)
       push!(connected, new_det)
@@ -832,7 +837,7 @@ function generate_connected_determinants!(connected::Vector{Determinant},
   end
   
   # Beta single excitations: i -> a
-  for i in beta_occ
+  @inbounds for i in beta_occ
     for a in beta_virt
       new_det = single_excitation_beta(det, i, a)
       push!(connected, new_det)
@@ -840,10 +845,10 @@ function generate_connected_determinants!(connected::Vector{Determinant},
   end
   
   # Alpha double excitations: ij -> ab
-  for (idx_i, i) in enumerate(alpha_occ)
-    for j in alpha_occ[(idx_i+1):end]  # j > i to avoid duplicates
+  @inbounds for (idx_i, i) in enumerate(alpha_occ)
+    for j in @view(alpha_occ[(idx_i+1):end])  # j > i to avoid duplicates
       for (idx_a, a) in enumerate(alpha_virt)
-        for b in alpha_virt[(idx_a+1):end]  # b > a to avoid duplicates
+        for b in @view(alpha_virt[(idx_a+1):end])  # b > a to avoid duplicates
           new_det = double_excitation_alpha(det, i, j, a, b)
           push!(connected, new_det)
         end
@@ -853,9 +858,9 @@ function generate_connected_determinants!(connected::Vector{Determinant},
   
   # Beta double excitations: ij -> ab
   for (idx_i, i) in enumerate(beta_occ)
-    for j in beta_occ[(idx_i+1):end]
+    for j in @view(beta_occ[(idx_i+1):end])
       for (idx_a, a) in enumerate(beta_virt)
-        for b in beta_virt[(idx_a+1):end]
+        for b in @view(beta_virt[(idx_a+1):end])
           new_det = double_excitation_beta(det, i, j, a, b)
           push!(connected, new_det)
         end
@@ -869,6 +874,8 @@ function generate_connected_determinants!(connected::Vector{Determinant},
       for i_beta in beta_occ
         for a_beta in beta_virt
           new_det = double_excitation_mixed(det, i_alpha, i_beta, a_alpha, a_beta)
+          @assert_devel count_ones(new_det.alpha) == count_ones(det.alpha) "Alpha electron count mismatch"
+          @assert_devel count_ones(new_det.beta) == count_ones(det.beta) "Beta electron count mismatch"
           push!(connected, new_det)
         end
       end
@@ -876,6 +883,96 @@ function generate_connected_determinants!(connected::Vector{Determinant},
   end
   
   return length(connected)
+end
+
+"""
+    add_excitations!(excitations::Vector{Determinant}, det::Determinant,
+                    double_excitation::Function,
+                    occ, pchb_excitations, epsilon::Float64)
+
+Generate same-spin double excitations from occupied orbitals using pre-computed
+Heat-Bath lists, adding only those with |H| > epsilon.
+"""
+function add_excitations!(excitations::Vector{Determinant}, det::Determinant,
+                          double_excitation::Function,
+                          occ, pchb_excitations, epsilon::Float64)
+  for (idx_i, i) in enumerate(occ)
+    for j in @view(occ[(idx_i+1):end])
+      # Look up pre-sorted list for (i,j) pair
+      pq_key = trip_index(i, j)
+      for (r, s, h_val) in pchb_excitations[pq_key]
+        # Stop when matrix element falls below threshold
+        if h_val < epsilon
+          break
+        end
+        
+        # Check if r and s are virtual (not occupied)
+        if !(r in occ) && !(s in occ)
+          new_det = double_excitation(det, i, j, r, s)
+          @assert_devel count_ones(new_det.alpha) == count_ones(det.alpha) "Alpha electron count mismatch $i $j -> $r $s from $(bitstring(det.alpha))"
+          @assert_devel count_ones(new_det.beta) == count_ones(det.beta) "Beta electron count mismatch $i $j -> $r $s from $(bitstring(det.beta))"
+          push!(excitations, new_det)
+        end
+      end
+    end
+  end
+  return
+end
+
+"""
+    add_excitations!(excitations::Vector{Determinant}, det::Determinant,
+                    alpha_occ, beta_occ, n_orb, pchb_excitations, epsilon::Float64)
+
+Generate mixed-spin double excitations from occupied alpha and beta orbitals
+using pre-computed Heat-Bath lists, adding only those with |H| > epsilon.
+"""
+function add_excitations!(excitations::Vector{Determinant}, det::Determinant,
+                          alpha_occ, beta_occ, n_orb, pchb_excitations,
+                          epsilon::Float64)
+  for i_alpha in alpha_occ
+    for i_beta in beta_occ
+      pq_key = trip_index(i_alpha, i_beta, n_orb)
+      for (r, s, h_val) in pchb_excitations[pq_key]
+        if h_val < epsilon
+          break
+        end
+        # r is alpha virtual, s is beta virtual
+        if !(r in alpha_occ) && !(s in beta_occ)
+          new_det = double_excitation_mixed(det, i_alpha, i_beta, r, s)
+          push!(excitations, new_det)
+        end
+      end
+    end
+  end
+  return
+end
+
+"""
+    sum_h1e2(h1e2, occ, a, i) -> Float64
+
+Compute Σ_j h1e2[j, a, i] over occupied orbitals j.
+"""
+@inline function sum_h1e2(h1e2, occ, a, i)
+  total = 0.0
+  @inbounds @simd for j in occ
+    total += h1e2[j, a, i]
+  end
+  return total
+end
+
+"""
+    compute_fock_element(int1, h1e2_same, h1e2_opp, occ_same, occ_opp,
+                        a::Int, i::Int) -> Float64
+
+Compute Fock matrix element f_ai
+f_ai = h_ai + Σ_j (v_aijj - v_ajji)_SS + Σ_j (v_aijj)_OS
+where SS = same spin, OS = opposite spin. 
+"""
+function compute_fock_element(int1, h1e2_same, h1e2_opp, occ_same, occ_opp,
+                              a::Int, i::Int)::Float64
+  # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
+  return int1[a, i] + sum_h1e2(h1e2_same, occ_same, a, i)
+                    + sum_h1e2(h1e2_opp, occ_opp, a, i)
 end
 
 """
@@ -905,10 +1002,12 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   is_uhf = ctx.fcidump.uhf
   
   # Get occupied and virtual orbitals
-  alpha_occ = occupied_orbitals(det.alpha, n_orb)
-  alpha_virt = virtual_orbitals(det.alpha, n_orb)
-  beta_occ = occupied_orbitals(det.beta, n_orb)
-  beta_virt = virtual_orbitals(det.beta, n_orb)
+  alpha_occ = BufVec(reshape_buf(ctx.ibuf, n_orb))
+  alpha_virt = BufVec(reshape_buf(ctx.ibuf, n_orb; offset=n_orb))
+  occupied_and_virtual_orbitals!(alpha_occ, alpha_virt, det.alpha, n_orb)
+  beta_occ = BufVec(reshape_buf(ctx.ibuf, n_orb; offset=n_orb*2))
+  beta_virt = BufVec(reshape_buf(ctx.ibuf, n_orb; offset=n_orb*3))
+  occupied_and_virtual_orbitals!(beta_occ, beta_virt, det.beta, n_orb)
   
   # ===========================================
   # 1. Generate double excitations using pre-computed lists
@@ -916,162 +1015,32 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   
   # Check if we should skip all double excitations
   if epsilon <= setup_data.h_doub_max
-    if !is_uhf
-      # RHF: Use single dictionary for all double excitations
-      # Alpha-alpha double excitations
-      for (idx_i, i) in enumerate(alpha_occ)
-        for j in @view(alpha_occ[(idx_i+1):end])
-          # Look up pre-sorted list for (i,j) pair
-          pq_key = i < j ? (i, j) : (j, i)
-          if haskey(setup_data.double_excitations, pq_key)
-            for (r, s, h_val) in setup_data.double_excitations[pq_key]
-              # Stop when matrix element falls below threshold
-              if h_val < epsilon
-                break
-              end
-              
-              # Check if r and s are virtual (not occupied)
-              if !(r in alpha_occ) && !(s in alpha_occ)
-                new_det = double_excitation_alpha(det, i, j, r, s)
-                push!(excitations, new_det)
-              end
-            end
-          end
-        end
-      end
-      
-      # Beta-beta double excitations (RHF uses same integrals)
-      for (idx_i, i) in enumerate(beta_occ)
-        for j in @view(beta_occ[(idx_i+1):end])
-          pq_key = i < j ? (i, j) : (j, i)
-          if haskey(setup_data.double_excitations, pq_key)
-            for (r, s, h_val) in setup_data.double_excitations[pq_key]
-              if h_val < epsilon
-                break
-              end
-              if !(r in beta_occ) && !(s in beta_occ)
-                new_det = double_excitation_beta(det, i, j, r, s)
-                push!(excitations, new_det)
-              end
-            end
-          end
-        end
-      end
-
-      # Mixed double excitations (alpha-beta) (use int2ab pre-computed lists, i.e., no exchange)
-      for i_alpha in alpha_occ
-        for i_beta in beta_occ
-          pq_key = (i_alpha, i_beta)
-          if haskey(setup_data.double_excitations_ab, pq_key)
-            for (r, s, h_val) in setup_data.double_excitations_ab[pq_key]
-              if h_val < epsilon
-                break
-              end
-              # r is alpha virtual, s is beta virtual
-              if !(r in alpha_occ) && !(s in beta_occ)
-                new_det = double_excitation_mixed(det, i_alpha, i_beta, r, s)
-                push!(excitations, new_det)
-              end
-            end
-          end
-        end
-      end
-      
-    else
-      # UHF: Use spin-separated dictionaries
-      # Alpha-alpha double excitations (use int2aa pre-computed lists)
-      for (idx_i, i) in enumerate(alpha_occ)
-        for j in alpha_occ[(idx_i+1):end]
-          pq_key = i < j ? (i, j) : (j, i)
-          if haskey(setup_data.double_excitations, pq_key)
-            for (r, s, h_val) in setup_data.double_excitations[pq_key]
-              if h_val < epsilon
-                break
-              end
-              if !(r in alpha_occ) && !(s in alpha_occ)
-                new_det = double_excitation_alpha(det, i, j, r, s)
-                push!(excitations, new_det)
-              end
-            end
-          end
-        end
-      end
-
-      # Beta-beta double excitations (use int2bb pre-computed lists)
-      for (idx_i, i) in enumerate(beta_occ)
-        for j in beta_occ[(idx_i+1):end]
-          pq_key = i < j ? (i, j) : (j, i)
-          if haskey(setup_data.double_excitations_bb, pq_key)
-            for (r, s, h_val) in setup_data.double_excitations_bb[pq_key]
-              if h_val < epsilon
-                break
-              end
-              if !(r in beta_occ) && !(s in beta_occ)
-                new_det = double_excitation_beta(det, i, j, r, s)
-                push!(excitations, new_det)
-              end
-            end
-          end
-        end
-      end
-
-      # Mixed alpha-beta double excitations (use int2ab pre-computed lists)
-      for i_alpha in alpha_occ
-        for i_beta in beta_occ
-          pq_key = (i_alpha, i_beta)
-          if haskey(setup_data.double_excitations_ab, pq_key)
-            for (r, s, h_val) in setup_data.double_excitations_ab[pq_key]
-              if h_val < epsilon
-                break
-              end
-              # r is alpha virtual, s is beta virtual
-              if !(r in alpha_occ) && !(s in beta_occ)
-                new_det = double_excitation_mixed(det, i_alpha, i_beta, r, s)
-                push!(excitations, new_det)
-              end
-            end
-          end
-        end
-      end
-    end
+    double_excitations_bb = is_uhf ? setup_data.double_excitations_bb : setup_data.double_excitations
+    # Alpha-alpha double excitations
+    add_excitations!(excitations, det, double_excitation_alpha, alpha_occ, setup_data.double_excitations, epsilon)
+    # Beta-beta double excitations
+    add_excitations!(excitations, det, double_excitation_beta, beta_occ, double_excitations_bb, epsilon)
+    # Mixed double excitations (alpha-beta) (use int2ab pre-computed lists, i.e., no exchange)
+    add_excitations!(excitations, det, alpha_occ, beta_occ, n_orb, setup_data.double_excitations_ab, epsilon)
   end
-  
   # ===========================================
   # 2. Generate single excitations with on-the-fly filtering using Fock elements
   # ===========================================
-  @inline function sum_h1e2(h1e2, occ, a1, i1)
-    total = 0.0
-    @inbounds @simd for j in occ
-      total += h1e2[j+1, a1, i1]
-    end
-    return total
-  end
-  # Helper function to compute Fock matrix element f_ai
-  # f_ai = h_ai + Σ_j (v_aijj - v_ajji)
-  function compute_fock_element(setup_data::HBCISetupData, 
-                                occ_same::Vector{Int}, occ_opp::Vector{Int},
-                                a::Int, i::Int, is_alpha::Bool)::Float64
-    # Convert to 1-based indexing
-    a1, i1 = a + 1, i + 1
-    if is_uhf
-      int1 = is_alpha ? ctx.fcidump.int1a : ctx.fcidump.int1b
-      h1e2_same = is_alpha ? setup_data.h1e2_aa : setup_data.h1e2_bb
-      h1e2_opp = is_alpha ? setup_data.h1e2_ab : setup_data.h1e2_ba
-    else
-      int1 = ctx.fcidump.int1
-      h1e2_same = setup_data.h1e2
-      h1e2_opp = setup_data.h1e2_ab
-    end
-    # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
-    return int1[a1, i1] + sum_h1e2(h1e2_same, occ_same, a1, i1)
-                      + sum_h1e2(h1e2_opp, occ_opp, a1, i1)
-  end
   
+  if is_uhf
+    int1 = ctx.fcidump.int1a
+    h1e2_same = setup_data.h1e2_aa
+    h1e2_opp = setup_data.h1e2_ab
+  else
+    int1 = ctx.fcidump.int1
+    h1e2_same = setup_data.h1e2
+    h1e2_opp = setup_data.h1e2_ab
+  end
   # Alpha single excitations
   for i in alpha_occ
     for a in alpha_virt
       # Compute Fock matrix element f_ai
-      h_val = abs(compute_fock_element(setup_data, alpha_occ, beta_occ, a, i, true))
+      h_val = abs(compute_fock_element(int1, h1e2_same, h1e2_opp, alpha_occ, beta_occ, a, i))
       if h_val >= epsilon
         new_det = single_excitation_alpha(det, i, a)
         push!(excitations, new_det)
@@ -1079,11 +1048,16 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
     end
   end
   
+  if is_uhf
+    int1 = ctx.fcidump.int1b
+    h1e2_same = setup_data.h1e2_bb
+    h1e2_opp = setup_data.h1e2_ba
+  end
   # Beta single excitations
   for i in beta_occ
     for a in beta_virt
       # Compute Fock matrix element f_ai
-      h_val = abs(compute_fock_element(setup_data, beta_occ, alpha_occ, i, a, false))
+      h_val = abs(compute_fock_element(int1, h1e2_same, h1e2_opp, beta_occ, alpha_occ, a, i))
       if h_val >= epsilon
         new_det = single_excitation_beta(det, i, a)
         push!(excitations, new_det)
@@ -1298,7 +1272,6 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
     push!(candidates, HBCandidate(det_J, prob_J, contrib_J))
     total_prob += prob_J
   end
-  
   return total_prob
 end
 
@@ -1510,23 +1483,43 @@ function setup_hbci!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
   end
 end
 
+"""
+    trip_index(p, q) -> Int
+
+Compute unique index for orbital pair (p, q) with p < q.
+"""
+function trip_index(p, q)
+  @assert_devel p < q "trip_index requires p < q"
+  return p + (q - 1) * (q - 2) ÷ 2
+end
+
+"""
+    trip_index(p, q, n) -> Int
+
+Compute unique index for orbital pair (p, q),
+with n orbitals per spin.
+"""
+function trip_index(p, q, n)
+  return p + (q - 1) * n
+end
+
 function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
-  double_exc_lists = Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}()
+  double_exc_lists = Vector{Tuple{Int,Int,Float64}}[]
   h_doub_max = 0.0
   
-  # Loop over all pairs of orbitals {p, q} (0-based)
-  for p in 0:(n_orb-1)
-    for q in (p+1):(n_orb-1)  # Only consider p < q to avoid duplicates
+  # Loop over all pairs of orbitals {p, q}
+  for q in 2:n_orb
+    for p in 1:(q-1)  # Only consider p < q to avoid duplicates
       # List of triplets {r, s, |H(rs ← pq)|} for this (p,q) pair
       triplets = Tuple{Int,Int,Float64}[]
       
       # Loop over all distinct pairs of orbitals {r, s} that don't include {p, q}
-      for r in 0:(n_orb-1)
-        if r == p || r == q
+      for s in 2:n_orb
+        if s == p || s == q
           continue
         end
-        for s in (r+1):(n_orb-1)  # Only consider r < s to avoid duplicates
-          if s == p || s == q
+        for r in 1:(s-1)  # Only consider r < s to avoid duplicates
+          if r == p || r == q
             continue
           end
           
@@ -1535,9 +1528,9 @@ function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
           # Matrix element for double excitation p,q → r,s is (pr|qs) - (ps|qr)
           # Note: int2[i,a,j,b] represents integral (ia|jb)
           # Convert to 1-based for array indexing
-          h_val = abs(int2[p+1, r+1, q+1, s+1] - int2[p+1, s+1, q+1, r+1])
+          h_val = abs(int2[p, r, q, s] - int2[p, s, q, r])
           
-          if h_val > 1e-14  # Skip negligible matrix elements
+          if h_val > 1e-10  # Skip negligible matrix elements
             push!(triplets, (r, s, h_val))
             h_doub_max = max(h_doub_max, h_val)
           end
@@ -1547,34 +1540,31 @@ function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
       # Sort triplets by |H| in decreasing order
       sort!(triplets, by=x->x[3], rev=true)
       
-      # Store sorted list for this (p,q) pair (both keys and values use 0-based indices)
-      double_exc_lists[(p, q)] = triplets
+      # Store sorted list for this (p,q) pair
+      push!(double_exc_lists, triplets)
     end
   end
   return double_exc_lists, h_doub_max
 end
 
 function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4})
-  double_exc_ab_lists = Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int,Float64}}}()
+  double_exc_ab_lists = Vector{Tuple{Int,Int,Float64}}[]
   h_doub_max = 0.0
   
-  # Loop over all pairs of orbitals {p, q} (0-based)
+  # Loop over all pairs of orbitals {p, q}
   # For mixed excitations, we don't need antisymmetrization (different spins)
-  for p in 0:(n_orb-1)
-    for q in 0:(n_orb-1)  # Note: can have p >= q for mixed
-      if p == q; continue; end  # Skip same orbital pairs
-      
+  for q in 1:n_orb
+    for p in 1:n_orb
       triplets = Tuple{Int,Int,Float64}[]
-      
-      for r in 0:(n_orb-1)
+      for r in 1:n_orb
         if r == p; continue; end  # Alpha r cannot equal alpha p
-        for s in 0:(n_orb-1)
+        for s in 1:n_orb
           if s == q; continue; end  # Beta s cannot equal beta q
           
           # Mixed integral (pr|qs)_αβ (no antisymmetrization for different spins)
-          h_val = abs(int2ab[p+1, r+1, q+1, s+1])
+          h_val = abs(int2ab[p, r, q, s])
           
-          if h_val > 1e-14
+          if h_val > 1e-10
             push!(triplets, (r, s, h_val))
             h_doub_max = max(h_doub_max, h_val)
           end
@@ -1583,7 +1573,7 @@ function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4})
       
       # Sort triplets by |H| in decreasing order
       sort!(triplets, by=x->x[3], rev=true)
-      double_exc_ab_lists[(p, q)] = triplets
+      push!(double_exc_ab_lists, triplets)
     end
   end
   return double_exc_ab_lists, h_doub_max
@@ -1597,7 +1587,6 @@ function setup_hbci_rhf!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
   n_orb = ctx.n_orb
   
   # Dictionary to store sorted lists for each (p,q) pair
-  # Note: Using 0-based indices to match occupied_orbitals/virtual_orbitals convention
   double_exc_lists, h_doub_max = gen_triplets_list(n_orb, ctx.fcidump.int2)
   double_exc_ab_lists, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2)
   h_doub_max = max(h_doub_max, h_doub_max_ab)
@@ -2141,6 +2130,18 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
       det_i = selected_ctx.selected_dets.determinants[i]
       for j in i:n_selected
         det_j = selected_ctx.selected_dets.determinants[j]
+        # Slater-Condon screening: skip if determinants differ by > 2 orbitals
+        # Count differing orbitals in alpha and beta spins
+        alpha_diff = det_i.alpha ⊻ det_j.alpha
+        beta_diff = det_i.beta ⊻ det_j.beta
+        n_alpha_diff = count_ones(alpha_diff)
+        n_beta_diff = count_ones(beta_diff)
+      
+        # Matrix element is zero if total differences > 4
+        # (4 because each single excitation changes 2 bits: remove one, add one)
+        if n_alpha_diff + n_beta_diff > 4
+          continue  # Skip: matrix element is exactly zero
+        end
         H_matrix[i,j] = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
         if i != j
           H_matrix[j,i] = H_matrix[i,j]

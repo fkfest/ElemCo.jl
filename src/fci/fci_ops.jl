@@ -39,6 +39,54 @@ function Base.show(io::IO, s::SubstResult)
 end
 
 """
+    occupied_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+
+Get list of occupied orbital indices and store in `orbs`.
+"""
+function occupied_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+  empty!(orbs)
+  @inbounds @simd for i in 1:n_orb
+    if (pattern >>> (i-1)) & one(pattern) != zero(pattern)
+      push!(orbs, i)
+    end
+  end
+  return orbs
+end
+
+"""
+    virtual_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+
+Get list of virtual (unoccupied) orbital indices and store in `orbs`.
+"""
+function virtual_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+  empty!(orbs)
+  @inbounds @simd for i in 1:n_orb
+    if (pattern >>> (i-1)) & one(pattern) == zero(pattern)
+      push!(orbs, i)
+    end
+  end
+  return orbs
+end
+
+"""
+    occupied_and_virtual_orbitals!(occ, virt, pattern::OrbPattern, n_orb::Int)
+
+Get lists of occupied and virtual orbital indices and store in `occ` and `virt`.
+"""
+function occupied_and_virtual_orbitals!(occ, virt, pattern::OrbPattern, n_orb::Int)
+  empty!(occ)
+  empty!(virt)
+  @inbounds @simd for i in 1:n_orb
+    if (pattern >>> (i-1)) & one(pattern) != zero(pattern)
+      push!(occ, i)
+    else
+      push!(virt, i)
+    end
+  end
+  return
+end
+
+"""
     form_string_substs_for_spin!(result::Vector{SubstResult}, 
                                 op_matrix_1e, adr::OrbStringAdrTable,
                                 I::OrbPattern) -> Int

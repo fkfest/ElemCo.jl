@@ -142,11 +142,25 @@ end
 # Display
 function Base.show(io::IO, buf::BufVec{T,A}) where {T,A}
     print(io, "BufVec{$T,$A}(length=$(buf.length), capacity=$(capacity(buf)))")
+    if buf.length > 0
+        print(io, " [")
+        for i in 1:buf.length
+            print(io, " ", buf[i])
+        end
+        print(io, "]")
+    end
 end
 
 function Base.show(io::IO, ::MIME"text/plain", buf::BufVec{T,A}) where {T,A}
     if get(io, :compact, false)
         print(io, "BufVec{$T,$A}(length=$(buf.length), capacity=$(capacity(buf)))")
+        if buf.length > 0
+            print(io, " [")
+            for i in 1:buf.length
+                print(io, " ", buf[i])
+            end
+            print(io, "]")
+        end
     else
         println(io, "BufVec{$T,$A} with $(buf.length) elements (capacity=$(capacity(buf))):")
         if buf.length > 0

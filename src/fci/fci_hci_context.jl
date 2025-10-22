@@ -34,6 +34,7 @@ mutable struct FCIContext
   energy_ptrace::Scalar
   method_name::String
   pspace_data::PSpaceData             # P-space calculation data
+  ibuf::Vector{Int}                  # Buffer for indices
 
   function FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing)
     n_elec = headvar(fcidump, "NELEC", Int) 
@@ -45,6 +46,7 @@ mutable struct FCIContext
     coeff = FCIVector(n_elec, n_orb, ms2, false)
     resid = FCIVector(n_elec, n_orb, ms2, false)
     diag_h = FCIVector(n_elec, n_orb, ms2, false)
+    ibuf = zeros(Int, 4*n_orb)
 
     # Select integrals based on RHF vs UHF
     if fcidump.uhf
@@ -101,7 +103,8 @@ mutable struct FCIContext
       0.0,
       fcidump.uhf ? "UHF-FCI" : "FCI",
       PSpaceData(),
-    )  # Initialize empty P-space data
+      ibuf
+    )
 
     # Initialize Hamiltonian terms
     init_hamiltonian_terms!(context)
@@ -152,12 +155,14 @@ struct HCIContext
   reference_det::Determinant
   mod_core_h_a::Matrix{Scalar}
   mod_core_h_b::Matrix{Scalar}
+  ibuf::Vector{Int}                  # Buffer for indices
 
   function HCIContext(fcidump::QFDump, options::HCIOptions = HCIOptions(); occa=nothing, occb=nothing)
     n_orb = headvar(fcidump, "NORB", Int)
     n_elec = headvar(fcidump, "NELEC", Int)
     ms2 = headvar(fcidump, "MS2", Int)
     is_uhf = fcidump.uhf
+    ibuf = zeros(Int, 4*n_orb)
 
     # Validate integrals
     if is_uhf
@@ -206,6 +211,6 @@ struct HCIContext
       reference_det = Determinant(alpha_pattern, beta_pattern)
     end
 
-    new(fcidump, options, n_orb, (n_alpha, n_beta), reference_det, mod_core_h_a, mod_core_h_b)
+    new(fcidump, options, n_orb, (n_alpha, n_beta), reference_det, mod_core_h_a, mod_core_h_b, ibuf)
   end
 end

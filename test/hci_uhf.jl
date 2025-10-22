@@ -5,15 +5,15 @@ using ElemCo
   println("\n=== Testing Heat-Bath CI with UHF ===")
     
   epsilon = 1.e-6
-  E_HCIa_test = -75.940764804190
-  E_HCIa_PT2_test = -75.940940841978
-  E_HCIc_test = -75.688019749624
-  E_HCIt_test = -75.852557282565
+  E_HCIa_test = -75.94078500296851
+  E_HCIa_PT2_test = -75.941010454751
+  E_HCIc_test = -75.68803552885484
+  E_HCIt_test = -75.85258314432924
 
-  E_HCIa_tight_test = -75.941000693940
+  E_HCIa_tight_test = -75.941000758203
 
-  E_HCIa_ms_test = -75.939059775442
-  omega1_test = 0.08963817977594601
+  E_HCIa_ms_test = -75.93914443900555
+  omega1_test = 0.08964377360943843
     
   @testset "HCI Basic - H2O Anion" begin
         

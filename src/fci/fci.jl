@@ -1,7 +1,7 @@
 """
 FCI Module
 
-This module contains a translation of the FCI C++ code of G. Knizia and
+This module contains a translation of the FCI C++ code of Gerald Knizia and
 extensions for selected CI and heat-bath CI.
 """
 module FCI
@@ -14,6 +14,7 @@ using Buffers
 
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
+using ..ElemCo.Utils
 
 # Export main types and functions
 export FCIContext, FCIVector, FCIOptions, FCIDump

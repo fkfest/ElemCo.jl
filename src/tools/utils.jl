@@ -6,6 +6,7 @@ using Printf
 using ..ElemCo.AbstractEC
 using ..ElemCo.DescDict
 using ..ElemCo.Outputs
+using ..ElemCo.VersionInfo
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export warn
@@ -13,6 +14,7 @@ export mainname, print_time, print_memory, free_memory
 export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
 export @istoplevel
+export @assert_devel
 export substr
 export allocfree_permutedims!
 export reshape_buf
@@ -327,9 +329,10 @@ function argmaxN(vals, N; by::Function=identity)
 end
 
 """
-    reshape_buf(buf::AbstractVector, dims...)
+    reshape_buf(buf::AbstractVector, dims...; offset=0)
 
-  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`.
+  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`, 
+  starting from `offset`.
   The buffer is expected to be large enough to fit the reshaped data.
 
   # Example
@@ -337,10 +340,10 @@ end
 julia> buf = zeros(1000)
 julia> reshaped_buf = reshape_buf(buf, 10, 10)
 """
-Base.@propagate_inbounds function reshape_buf(buf::AbstractVector, dims...)
-  len = prod(dims)
+Base.@propagate_inbounds function reshape_buf(buf::AbstractVector, dims...; offset=0)
+  len = prod(dims) + offset
   @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
-  return reshape(@view(buf[1:len]), dims...)
+  return reshape(@view(buf[1+offset:len]), dims...)
 end
 
 
@@ -386,6 +389,25 @@ macro istoplevel()
     $(esc(canary)) = true
     Base.isdefined($__module__, $(QuoteNode(canary)))
   end
+end
+
+"""
+    @assert_devel(cond, text=nothing)
+
+  Assert `cond` only in development mode.
+
+  If `text` is given, it is used as the assertion message.
+  Development mode is determined by `VersionInfo.devel()`.
+
+  Copied from `ToggleableAsserts.jl`.
+"""
+macro assert_devel(cond, text=nothing)
+  if text==nothing
+    assert_stmt = esc(:(@assert $cond))
+  else
+    assert_stmt = esc(:(@assert $cond $text))
+  end
+  :(VersionInfo.devel() ? $assert_stmt  : nothing)
 end
 
 """

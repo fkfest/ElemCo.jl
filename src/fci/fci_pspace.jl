@@ -369,10 +369,12 @@ function select_small_space_determinants(context::HCIContext, target_size::Int, 
   n_alpha, n_beta = context.n_elec
   n_orb = context.n_orb
   
-  alpha_occ = [i for i in 0:(n_orb-1) if (hf_ref.alpha >> i) & 1 == 1]
-  alpha_virt = [a for a in 0:(n_orb-1) if (hf_ref.alpha >> a) & 1 == 0]
-  beta_occ = [i for i in 0:(n_orb-1) if (hf_ref.beta >> i) & 1 == 1]
-  beta_virt = [a for a in 0:(n_orb-1) if (hf_ref.beta >> a) & 1 == 0]
+  alpha_occ = BufVec(reshape_buf(context.ibuf, n_orb))
+  alpha_virt = BufVec(reshape_buf(context.ibuf, n_orb; offset=n_orb))
+  occupied_and_virtual_orbitals!(alpha_occ, alpha_virt, hf_ref.alpha, n_orb)
+  beta_occ = BufVec(reshape_buf(context.ibuf, n_orb; offset=n_orb*2))
+  beta_virt = BufVec(reshape_buf(context.ibuf, n_orb; offset=n_orb*3))
+  occupied_and_virtual_orbitals!(beta_occ, beta_virt, hf_ref.beta, n_orb)
   
   # Generate determinants by excitation level
   candidates_by_level = Vector{Determinant}[]
