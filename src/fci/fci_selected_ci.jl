@@ -162,92 +162,31 @@ Find the two orbitals involved in a single excitation i -> a.
 """
 function find_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPattern)::Tuple{Int, Int}
   diff = pattern_i ⊻ pattern_j
-  # println("Diff: ", bitstring(diff))
   occ = pattern_i & diff
-  # println("Occupied: ", bitstring(occ)) 
   virt = pattern_j & diff
-  # println("Virtual: ", bitstring(virt))
  
-  orb_a = -1  # Orbital being created
-  orb_i = -1  # Orbital being destroyed
-  for i in 1:2
-    index = trailing_zeros(diff)
-    if (pattern_i & (OrbPattern(1) << index)) != 0
-      orb_i = index  # Orbital being destroyed
-    else
-      orb_a = index  # Orbital being created
-    end
-    diff ⊻= (OrbPattern(1) << index)
-  end
+  orb_a = trailing_zeros(virt)  # Orbital being created
+  orb_i = trailing_zeros(occ)   # Orbital being destroyed
 
   return (orb_i, orb_a)
 end
-
-mutable struct IndexPair
-  i::Int
-  j::Int
-  n::Int
-  function IndexPair()
-    new(0, 0, 0)
-  end
-  function IndexPair(i)
-    new(i, 0, 1)
-  end
-  function IndexPair(i, j)
-    new(i, j, 2)
-  end
-end
-
-function Base.push!(pair::IndexPair, val::Int)
-  if pair.n == 0
-    pair.i = val
-  elseif pair.n == 1
-    pair.j = val
-  else
-    throw(ArgumentError("IndexPair can only hold two indices"))
-  end
-  pair.n += 1
-  return pair
-end
-
-function sorted(pair::IndexPair)
-  if pair.i > pair.j
-    return (pair.j, pair.i)
-  end
-  return (pair.i, pair.j)
-end
-
 
 """
     find_double_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPattern) -> (Int, Int, Int, Int)
 
 Find the four orbitals involved in a double excitation ij -> ab.
 """
-function find_double_excitation_orbitals(
-  pattern_i::OrbPattern,
-  pattern_j::OrbPattern,
-)::NTuple{4, Int}
+function find_double_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPattern)
   diff = pattern_i ⊻ pattern_j
-
-  destroyed = IndexPair()  # Orbitals in pattern_i but not pattern_j
-  created = IndexPair()   # Orbitals in pattern_j but not pattern_i
-
-  bit_pos = 0
-  while diff != 0
-    if (diff & 1) != 0
-      if (pattern_i & (OrbPattern(1) << bit_pos)) != 0
-        push!(destroyed, bit_pos)
-      else
-        push!(created, bit_pos)
-      end
-    end
-    diff >>= 1
-    bit_pos += 1
-  end
-
-  # Order: (i, j, a, b) where i < j and a < b
-  orb_i, orb_j = sorted(destroyed)
-  orb_a, orb_b = sorted(created)
+  occ = pattern_i & diff
+  virt = pattern_j & diff
+ 
+  orb_a = trailing_zeros(virt)  # Orbital being created
+  virt ⊻= (OrbPattern(1) << orb_a)
+  orb_b = trailing_zeros(virt)  # Second orbital being created
+  orb_i = trailing_zeros(occ)   # Orbital being destroyed
+  occ ⊻= (OrbPattern(1) << orb_i)
+  orb_j = trailing_zeros(occ)   # Second orbital being destroyed
 
   return (orb_i, orb_j, orb_a, orb_b)
 end
@@ -261,14 +200,10 @@ function calculate_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_a::Int)
   # Count electrons between orb_i and orb_a
   min_orb = min(orb_i, orb_a)
   max_orb = max(orb_i, orb_a)
-
-  n_electrons = 0
-  for orb in (min_orb + 1):(max_orb - 1)
-    if (pattern & (OrbPattern(1) << orb)) != 0
-      n_electrons += 1
-    end
-  end
-
+  # pattern between min_orb and max_orb (exclusive)
+  sub_pattern = pattern & ((OrbPattern(1) << max_orb) - 1) & ~( (OrbPattern(1) << (min_orb + 1)) - 1)
+  # Count number of electrons in sub_pattern
+  n_electrons = count_ones(sub_pattern)
   # Phase is (-1)^n_electrons
   return (n_electrons % 2 == 0) ? Int8(1) : Int8(-1)
 end
@@ -315,7 +250,6 @@ Works with both FCIContext and HCIContext.
 """
 function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext})::Scalar
   excitation = analyze_determinant_excitation(det_i, det_j)
-  # println("Excitation type: ", excitation.excitation_type, ", orbitals: ", excitation.orb_indices, ", phase: ", excitation.phase)
   return evaluate_matrix_element(det_i, det_j, context, excitation)
 end
 
@@ -673,44 +607,30 @@ struct HBCISetupData
   double_excitations_bb::Vector{Vector{Tuple{Int,Int,Float64}}}  # UHF beta-beta
   double_excitations_ab::Vector{Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-beta mixed
   h_doub_max::Float64              # Maximum |H(rs ← pq)| over all excitations
-  
-  # Precomputed h1e2 terms for efficient Fock element calculation
-  # h1e2[i, p, q] = v_{pi}^{qi} - v_{pi}^{iq}
-  h1e2::Array{Float64, 3}          # RHF: spatial orbitals
-  h1e2_aa::Array{Float64, 3}       # UHF: alpha-alpha
-  h1e2_bb::Array{Float64, 3}       # UHF: beta-beta
-  h1e2_ab::Array{Float64, 3}       # UHF and RHF: alpha-beta (no exchange)
-  h1e2_ba::Array{Float64, 3}       # UHF: beta-alpha (no exchange)
 
   function HBCISetupData()
-    new(Vector{Vector{Tuple{Int,Int,Float64}}}(), 
-        Vector{Vector{Tuple{Int,Int,Float64}}}(),
-        Vector{Vector{Tuple{Int,Int,Float64}}}(),
-        0.0, 
-        zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0), zeros(0,0,0))
+    new(Vector{Tuple{Int,Int,Float64}}[], 
+        Vector{Tuple{Int,Int,Float64}}[],
+        Vector{Tuple{Int,Int,Float64}}[],
+        0.0) 
   end
   
   # RHF constructor
   function HBCISetupData(double_exc::Vector{Vector{Tuple{Int,Int,Float64}}}, 
                         double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
-                        h_max::Float64, 
-                        h1e2::Array{Float64, 3}, h1e2_ab::Array{Float64, 3})
+                        h_max::Float64)
     new(double_exc, 
-        Vector{Vector{Tuple{Int,Int,Float64}}}(),
+        Vector{Tuple{Int,Int,Float64}}[],  # Empty for beta-beta
         double_exc_ab,
-        h_max, 
-        h1e2, zeros(0,0,0), zeros(0,0,0), h1e2_ab, zeros(0,0,0))
+        h_max)
   end
   
   # UHF constructor
   function HBCISetupData(double_exc_aa::Vector{Vector{Tuple{Int,Int,Float64}}},
                         double_exc_bb::Vector{Vector{Tuple{Int,Int,Float64}}},
                         double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
-                        h_max::Float64,
-                        h1e2_aa::Array{Float64, 3}, h1e2_bb::Array{Float64, 3},
-                        h1e2_ab::Array{Float64, 3}, h1e2_ba::Array{Float64, 3})
-    new(double_exc_aa, double_exc_bb, double_exc_ab, h_max, 
-        zeros(0,0,0), h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba)
+                        h_max::Float64)
+    new(double_exc_aa, double_exc_bb, double_exc_ab, h_max) 
   end
 end
 
@@ -1029,13 +949,11 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   
   if is_uhf
     int1 = ctx.fcidump.int1a
-    h1e2_same = setup_data.h1e2_aa
-    h1e2_opp = setup_data.h1e2_ab
   else
     int1 = ctx.fcidump.int1
-    h1e2_same = setup_data.h1e2
-    h1e2_opp = setup_data.h1e2_ab
   end
+  h1e2_same = ctx.heval_data.h1e2_aa
+  h1e2_opp = ctx.heval_data.h1e2_ab
   # Alpha single excitations
   for i in alpha_occ
     for a in alpha_virt
@@ -1050,8 +968,8 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   
   if is_uhf
     int1 = ctx.fcidump.int1b
-    h1e2_same = setup_data.h1e2_bb
-    h1e2_opp = setup_data.h1e2_ba
+    h1e2_same = ctx.heval_data.h1e2_bb
+    h1e2_opp = ctx.heval_data.h1e2_ba
   end
   # Beta single excitations
   for i in beta_occ
@@ -1590,16 +1508,7 @@ function setup_hbci_rhf!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
   double_exc_lists, h_doub_max = gen_triplets_list(n_orb, ctx.fcidump.int2)
   double_exc_ab_lists, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2)
   h_doub_max = max(h_doub_max, h_doub_max_ab)
-  
-  # Precompute h1e2 terms for efficient Fock element calculation
-  # h1e2[i, p, q] = v_{pi}^{qi} - v_{pi}^{iq} = (pq|ii) - (pi|iq)
-  h1e2 = zeros(Float64, n_orb, n_orb, n_orb)
-  h1e2_ab = zeros(Float64, n_orb, n_orb, n_orb)
-  for i in 1:n_orb, p in 1:n_orb, q in 1:n_orb
-    h1e2[i, p, q] = ctx.fcidump.int2[p, q, i, i] - ctx.fcidump.int2[p, i, i, q]
-    h1e2_ab[i, p, q] = ctx.fcidump.int2[p, q, i, i]  # (without exchange for opposite spins)
-  end
-  return HBCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max, h1e2, h1e2_ab)
+  return HBCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max)
 end
 
 """
@@ -1620,25 +1529,7 @@ function setup_hbci_uhf!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
   double_exc_ab, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2ab)
   h_doub_max = max(h_doub_max_aa, h_doub_max_bb, h_doub_max_ab)
 
-  # Precompute h1e2 terms for efficient Fock element calculation (UHF)
-  # For alpha: h1e2_aa[i, p, q] = v_{pi}^{qi}_αα - v_{pi}^{iq}_αα 
-  # For beta:  h1e2_bb[i, p, q] = v_{pi}^{qi}_ββ - v_{pi}^{iq}_ββ 
-  # For mixed: h1e2_ab[i, p, q] = v_{pi}^{qi}_αβ (no exchange for different spins)
-  # For mixed: h1e2_ba[i, p, q] = v_{ip}^{iq}_αβ (no exchange for different spins)
-  h1e2_aa = zeros(Float64, n_orb, n_orb, n_orb)
-  h1e2_bb = zeros(Float64, n_orb, n_orb, n_orb)
-  h1e2_ab = zeros(Float64, n_orb, n_orb, n_orb)
-  h1e2_ba = zeros(Float64, n_orb, n_orb, n_orb)
-  
-  for i in 1:n_orb, p in 1:n_orb, q in 1:n_orb
-    h1e2_aa[i, p, q] = ctx.fcidump.int2aa[p, q, i, i] - ctx.fcidump.int2aa[p, i, i, q]
-    h1e2_bb[i, p, q] = ctx.fcidump.int2bb[p, q, i, i] - ctx.fcidump.int2bb[p, i, i, q]
-    h1e2_ab[i, p, q] = ctx.fcidump.int2ab[p, q, i, i]  # No exchange for mixed spin
-    h1e2_ba[i, p, q] = ctx.fcidump.int2ab[i, i, p, q]  # No exchange for mixed spin
-  end
-  
-  return HBCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max,
-                      h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba)
+  return HBCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max)
 end
 
 """

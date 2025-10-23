@@ -35,6 +35,7 @@ mutable struct FCIContext
   method_name::String
   pspace_data::PSpaceData             # P-space calculation data
   ibuf::Vector{Int}                  # Buffer for indices
+  heval_data::HEvalData  # Precomputed arrays for diagonal and Fock elements
 
   function FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing)
     n_elec = headvar(fcidump, "NELEC", Int) 
@@ -103,7 +104,8 @@ mutable struct FCIContext
       0.0,
       fcidump.uhf ? "UHF-FCI" : "FCI",
       PSpaceData(),
-      ibuf
+      ibuf,
+      HEvalData()  # computed later if needed
     )
 
     # Initialize Hamiltonian terms
@@ -146,8 +148,9 @@ For a system with 23 orbitals:
 - `is_uhf::Bool` - Whether using UHF integrals
 - `mod_core_h_a::Matrix{Scalar}` - Modified core Hamiltonian for alpha spin
 - `mod_core_h_b::Matrix{Scalar}` - Modified core Hamiltonian for beta spin
+- `heval_data::HEvalData` - Precomputed arrays for diagonal and Fock elements
 """
-struct HCIContext
+mutable struct HCIContext
   fcidump::QFDump
   options::HCIOptions
   n_orb::Int
@@ -156,6 +159,7 @@ struct HCIContext
   mod_core_h_a::Matrix{Scalar}
   mod_core_h_b::Matrix{Scalar}
   ibuf::Vector{Int}                  # Buffer for indices
+  heval_data::HEvalData              # Precomputed heval_data arrays for diagonal and Fock elements
 
   function HCIContext(fcidump::QFDump, options::HCIOptions = HCIOptions(); occa=nothing, occb=nothing)
     n_orb = headvar(fcidump, "NORB", Int)
@@ -211,6 +215,11 @@ struct HCIContext
       reference_det = Determinant(alpha_pattern, beta_pattern)
     end
 
-    new(fcidump, options, n_orb, (n_alpha, n_beta), reference_det, mod_core_h_a, mod_core_h_b, ibuf)
+    context = new(fcidump, options, n_orb, (n_alpha, n_beta), reference_det, 
+        mod_core_h_a, mod_core_h_b, ibuf, HEvalData())
+
+    # Initialize Hamiltonian terms
+    init_hamiltonian_terms!(context)
+    return context
   end
 end

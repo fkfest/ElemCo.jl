@@ -139,3 +139,126 @@ mutable struct PSpaceData
     )
   end
 end
+
+"""
+    HEvalData
+
+Precomputed data for evaluating diagonal Hamiltonian and single excitations elements.
+
+1. The jkaa, jkbb, jab, ha, hb arrays store precomputed Coulomb and exchange contributions
+   needed for efficient diagonal Hamiltonian element evaluation.
+
+   - `jkaa[i, j] = 0.5 * [(ii|jj) - (ij|ji)]` for alpha spin
+   - `jkbb[i, j] = 0.5 * [(ii|jj) - (ij|ji)]` for beta spin
+   - `jab[i, j] = (ii|jj)` mixed alpha-beta
+   - `ha[i] = ⟨i|h|i⟩` for alpha spin
+   - `hb[i] = ⟨i|h|i⟩` for beta spin
+2. The h1e2 arrays contain combinations of two-electron integrals that appear
+   frequently in single excitation matrix elements and Fock matrix construction.
+    For example, for alpha-alpha excitations:
+   `h1e2[i, p, q] = v_{pi}^{qi} - v_{pi}^{iq} = (pq|ii) - (pi|iq)`
+
+    These arrays enable efficient computation of single excitation matrix elements via `compute_fock_element`.
+"""
+struct HEvalData
+  # Precomputed data for evaluating diagonal Hamiltonian elements
+  jkaa::Matrix{Scalar}      # JKAA: 0.5[(ii|jj) - (ij|ji)]
+  jkbb::Matrix{Scalar}      # JKBB: 0.5[(ii|jj) - (ij|ji)] for beta
+  jab::Matrix{Scalar}      # JAB: (ii|jj) mixed
+  ha::Vector{Scalar}   # ⟨i|h|i⟩ for alpha
+  hb::Vector{Scalar}   # ⟨i|h|i⟩ for beta
+
+  # Precomputed h1e2 terms for efficient Fock element calculation.
+  h1e2_aa::Array{Scalar, 3}       # RHF and UHF: alpha-alpha
+  h1e2_bb::Array{Scalar, 3}       # UHF: beta-beta
+  h1e2_ab::Array{Scalar, 3}       # UHF and RHF: alpha-beta (no exchange)
+  h1e2_ba::Array{Scalar, 3}       # UHF: beta-alpha (no exchange)
+
+  is_uhf::Bool
+  n_orb::Int
+  ibuf::Vector{Int}        # Buffer for indices
+
+  function HEvalData()
+    mat = zeros(Scalar, 0, 0)
+    ten = zeros(Scalar, 0, 0, 0)
+    new(mat, mat, mat, Scalar[], Scalar[],
+        ten, ten, ten, ten, false, 0, Int[])
+  end
+  
+  # RHF constructor
+  function HEvalData(jk::Matrix{Scalar}, jab::Matrix{Scalar}, ha::Vector{Scalar}, 
+                     h1e2::Array{Scalar, 3}, h1e2_ab::Array{Scalar, 3})
+    n_orb = size(jk, 1)
+    new(jk, jk, jab, ha, ha,
+        h1e2, zeros(Scalar, 0, 0, 0), h1e2_ab, zeros(Scalar, 0, 0, 0),
+        false, n_orb, zeros(Int, 4*n_orb))
+  end
+  
+  # UHF constructor
+  function HEvalData(jkaa::Matrix{Scalar}, jkbb::Matrix{Scalar}, jab::Matrix{Scalar},
+                     ha::Vector{Scalar}, hb::Vector{Scalar},
+                     h1e2_aa::Array{Scalar, 3}, h1e2_bb::Array{Scalar, 3},
+                     h1e2_ab::Array{Scalar, 3}, h1e2_ba::Array{Scalar, 3})
+    n_orb = size(jkaa, 1)
+    new(jkaa, jkbb, jab, ha, hb, 
+        h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba, 
+        true, n_orb, zeros(Int, 4*n_orb))
+  end
+end
+
+function HEvalData(int2e, core_h)
+  # RHF case
+  n_orb = size(core_h, 1)
+  
+  # Precompute JK and JAB matrices
+  jk = get_diagonal_pair_antisym_ints(int2e)
+  jab = get_diagonal_pair_ints(int2e)
+  
+  # One-electron integrals
+  ha = diag(core_h)
+  
+  # Precompute h1e2 array for alpha-beta excitations
+  h1e2 = zeros(Scalar, n_orb, n_orb, n_orb)
+  h1e2_ab = zeros(Scalar, n_orb, n_orb, n_orb)
+  for i in 1:n_orb
+    for p in 1:n_orb, q in 1:n_orb
+      h_pqii = int2e[p,q,i,i]
+      h1e2[i,p,q] = h_pqii - int2e[p,i,i,q]
+      h1e2_ab[i,p,q] = h_pqii
+    end
+  end
+  return HEvalData(jk, jab, ha, h1e2, h1e2_ab)
+end
+
+function HEvalData(int2e_aa, int2e_bb, int2e_ab, core_h_a, core_h_b)
+  # UHF case
+  n_orb = size(core_h_a, 1)
+  
+  # Precompute JK and JAB matrices
+  jkaa = get_diagonal_pair_antisym_ints(int2e_aa)
+  jkbb = get_diagonal_pair_antisym_ints(int2e_bb)
+  jab = get_diagonal_pair_ints(int2e_ab)
+  
+  # One-electron integrals
+  ha = diag(core_h_a)
+  hb = diag(core_h_b)
+  
+  # Precompute h1e2 arrays
+  h1e2_aa = zeros(Scalar, n_orb, n_orb, n_orb)
+  h1e2_bb = zeros(Scalar, n_orb, n_orb, n_orb)
+  h1e2_ab = zeros(Scalar, n_orb, n_orb, n_orb)
+  h1e2_ba = zeros(Scalar, n_orb, n_orb, n_orb)
+  for i in 1:n_orb
+    for p in 1:n_orb, q in 1:n_orb
+      # Alpha-alpha
+      h1e2_aa[i,p,q] = int2e_aa[p,q,i,i] - int2e_aa[p,i,i,q]
+      # Beta-beta
+      h1e2_bb[i,p,q] = int2e_bb[p,q,i,i] - int2e_bb[p,i,i,q]
+      # Alpha-beta
+      h1e2_ab[i,p,q] = int2e_ab[p,q,i,i]
+      h1e2_ba[i,p,q] = int2e_ab[i,i,p,q]
+    end
+  end
+  return HEvalData(jkaa, jkbb, jab, ha, hb,
+                   h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba)
+end

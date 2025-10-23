@@ -142,6 +142,267 @@ function form_string_substs_for_spin!(result::Vector{SubstResult}, op_matrix_1e,
 end
 
 """
+    get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar})
+
+Extract diagonal pair antisymmetrized integrals for 2-electron terms.
+"""
+function get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar})
+  n_orb = size(int2e, 1)
+  jk = zeros(Scalar, n_orb, n_orb)
+  @inbounds for i in 1:n_orb
+    for j in 1:i
+      jij = 0.5 * (int2e[i, i, j, j] - int2e[i, j, i, j])  # (ii|jj) - (ij|ij)
+      jk[i, j] = jij
+      jk[j, i] = jij
+    end
+  end
+  return jk
+end
+
+"""
+    get_diagonal_pair_ints(int2e::AbstractArray{Scalar})
+
+Extract diagonal pair integrals for 2-electron terms.
+"""
+function get_diagonal_pair_ints(int2e::AbstractArray{Scalar})
+  n_orb = size(int2e, 1)
+  jab = zeros(Scalar, n_orb, n_orb)
+  @inbounds for i in 1:n_orb
+    for j in 1:i
+      jab[i, j] = int2e[i, i, j, j]       # (ii|jj) - raw integral
+      jab[j, i] = int2e[j, j, i, i]       # (jj|ii)
+    end
+  end
+  return jab
+end
+
+"""
+    calc_diagonalH(hed::HEvalData, str_a::OrbPattern, str_b::OrbPattern) -> Scalar
+
+Evaluate diagonal Hamiltonian element ⟨Ψ|H|Ψ⟩ for determinant |str_a, str_b⟩.
+"""
+function calc_diagonalH(hed::HEvalData, str_a::OrbPattern, str_b::OrbPattern)::Scalar
+  n_orb = Int(hed.n_orb)
+  ibuf = hed.ibuf
+  occa = BufVec(@view(ibuf[1:n_orb]))
+  occb = BufVec(@view(ibuf[n_orb+1:end]))
+  occupied_orbitals!(occa, str_a, n_orb)
+  occupied_orbitals!(occb, str_b, n_orb)
+  return calc_diagonalH(hed, occa, occb)
+end
+
+"""
+    calc_diagonalH(hed::HEvalData, occa::AbstractVector{Int}, occb::AbstractVector{Int}) -> Scalar
+
+Evaluate diagonal Hamiltonian element ⟨Ψ|H|Ψ⟩ for determinant |occa, occb⟩.
+"""
+function calc_diagonalH(hed::HEvalData, occa::AbstractVector{Int}, occb::AbstractVector{Int})::Scalar
+  f_elem = 0.0
+  # One-electron contributions
+  @inbounds @simd for i in occa
+    f_elem += hed.ha[i]
+  end
+  @inbounds @simd for i in occb
+    f_elem += hed.hb[i]
+  end
+
+  # Two-electron contributions
+  @inbounds @simd for ia in occa
+    for ja in occa
+      f_elem += hed.jkaa[ia, ja] 
+    end
+    for jb in occb
+      f_elem += hed.jab[ia, jb]
+    end
+  end
+  @inbounds @simd for ib in occb
+    for jb in occb
+      f_elem += hed.jkbb[ib, jb]
+    end
+  end
+  return f_elem
+end
+
+"""
+    absorb_1e!(int2::Array{Scalar, 4}, n_orb::Integer, n_elec::Integer, 
+               core_h_x::Matrix{Scalar}, core_h_y::Matrix{Scalar})
+
+Absorb one-electron operators into two-electron operator.
+"""
+function absorb_1e!(int2::Array{Scalar, 4}, n_orb::Integer, n_elec::Integer,
+                     core_h_x::Matrix{Scalar}, core_h_y::Matrix{Scalar})
+  @assert size(core_h_x) == size(core_h_y) == (n_orb, n_orb) "core_h_x and core_h_y size mismatch"
+  @assert size(int2) == (n_orb, n_orb, n_orb, n_orb) "int2 size mismatch"
+  
+  f_scale = 1.0 / n_elec
+  @inbounds for k in 1:n_orb
+    for i in 1:n_orb
+      for j in 1:n_orb
+        # Absorb 1e terms into 2e integrals
+        int2[k, k, i, j] += f_scale * core_h_y[j, i]
+        int2[i, j, k, k] += f_scale * core_h_x[j, i]
+      end
+    end
+  end
+end
+
+"""
+    calc_mod_core_h!(mod_core_h::Matrix{Scalar}, int2::Array{Scalar, 4}, n_orb::Integer, c1_integrals::Bool)
+
+Calculate modified core Hamiltonian by absorbing two-electron contributions arising from 
+changed order of creation/annihilation operators.
+"""
+function calc_mod_core_h!(mod_core_h::Matrix{Scalar}, int2::Array{Scalar, 4},
+                          n_orb::Integer, c1_integrals::Bool)
+  @assert size(mod_core_h) == (n_orb, n_orb) "mod_core_h size mismatch"
+  @assert size(int2) == (n_orb, n_orb, n_orb, n_orb) "int2 size mismatch"
+
+  fill!(mod_core_h, 0.0)
+  if !c1_integrals
+    # Use broadcasting for efficient calculation
+    # mod_core_h[m, n] -= 0.5 * sum_i(int2[m, i, n, i])
+    @inbounds for i in 1:n_orb
+      mod_core_h .-= 0.5 .* view(int2, :, i, :, i)
+    end
+  end
+end
+
+"""
+    init_hamiltonian_terms!(context::FCIContext)
+
+Initialize Hamiltonian terms for the FCI calculation and compute diagonal Hamiltonian.
+"""
+function init_hamiltonian_terms!(context::FCIContext)
+  n_orb = context.n_orb
+  n_elec = context.n_elec[1] + context.n_elec[2]
+
+  if context.fcidump.uhf
+    # UHF case: Handle all three spin-separated integral tensors properly
+    # Precompute heval_data for UHF
+    context.heval_data = HEvalData(context.fcidump.int2aa, context.fcidump.int2bb, context.fcidump.int2ab,
+                                  context.fcidump.int1a, context.fcidump.int1b)
+    # Create modified copies of all three integral tensors
+    int2aa_modified = copy(context.fcidump.int2aa)
+    int2bb_modified = copy(context.fcidump.int2bb)
+    int2ab_modified = copy(context.fcidump.int2ab)
+    # Calculate modified core Hamiltonian for alpha spin using int2aa
+    # mod_core_h_a[m,n] = int1a[m,n] - 0.5 * sum_i(int2aa[m,i,n,i])
+    calc_mod_core_h!(context.mod_core_h_a, int2aa_modified, n_orb, false)
+    
+    # Calculate modified core Hamiltonian for beta spin using int2bb
+    # mod_core_h_b[m,n] = int1b[m,n] - 0.5 * sum_i(int2bb[m,i,n,i])
+    calc_mod_core_h!(context.mod_core_h_b, int2bb_modified, n_orb, false)
+    
+    # Add original core Hamiltonian for each spin
+    context.mod_core_h_a .+= context.fcidump.int1a
+    context.mod_core_h_b .+= context.fcidump.int1b
+    
+    if context.absorb_1e
+      # Absorb 1e terms into 2e integrals for each spin block
+      # For UHF, we need to absorb differently:
+      # - int2aa absorbs alpha contributions
+      # - int2bb absorbs beta contributions
+      # - int2ab absorbs mixed contributions
+
+      # Absorb alpha 1e terms into int2aa
+      absorb_1e!(int2aa_modified, n_orb, n_elec, context.mod_core_h_a, context.mod_core_h_a)
+
+      # Absorb beta 1e terms into int2bb
+      absorb_1e!(int2bb_modified, n_orb, n_elec, context.mod_core_h_b, context.mod_core_h_b)
+
+      # Absorb mixed 1e terms into int2ab (alpha-beta coupling)
+      absorb_1e!(int2ab_modified, n_orb, n_elec, context.mod_core_h_a, context.mod_core_h_b)
+      
+      # Use 2e term with all three UHF integral tensors (1e terms absorbed)
+      h2_term = HamiltonianTerm2e(n_orb, int2aa_modified, int2bb_modified, int2ab_modified)
+      push!(context.hamiltonian_terms, h2_term)
+    else
+      # Use separate 1e and 2e terms with all three UHF integral tensors
+      h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
+      h2_term = HamiltonianTerm2e(n_orb, int2aa_modified, int2bb_modified, int2ab_modified)
+      push!(context.hamiltonian_terms, h1_term)
+      push!(context.hamiltonian_terms, h2_term)
+    end
+  else
+    # RHF case: Use spatial integrals
+    # Precompute heval_data for RHF
+    context.heval_data = HEvalData(context.fcidump.int2, context.fcidump.int1)
+
+    int2_modified = copy(context.fcidump.int2)
+    # Compute diagonal with unmodified integrals
+    calc_mod_core_h!(context.mod_core_h_a, int2_modified, n_orb, false)
+    calc_mod_core_h!(context.mod_core_h_b, int2_modified, n_orb, false)
+
+    # Add original core Hamiltonian
+    context.mod_core_h_a .+= context.fcidump.int1
+    context.mod_core_h_b .+= context.fcidump.int1
+
+    if context.absorb_1e
+      # Absorb 1e terms into 2e integrals
+      absorb_1e!(int2_modified, n_orb, n_elec, context.mod_core_h_a, context.mod_core_h_a)
+      # Use only 2e term (1e terms absorbed)
+      h2_term = HamiltonianTerm2e(n_orb, int2_modified)
+      push!(context.hamiltonian_terms, h2_term)
+    else
+      # Use separate 1e and 2e terms
+      h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
+      h2_term = HamiltonianTerm2e(n_orb, int2_modified)
+      push!(context.hamiltonian_terms, h1_term)
+      push!(context.hamiltonian_terms, h2_term)
+    end
+  end
+  make_diagonal_h!(context, context.diag_h)
+end
+
+"""
+    init_hamiltonian_terms!(context::HCIContext)
+
+Initialize Hamiltonian terms for the HCI calculation and precompute intermediate data.
+"""
+function init_hamiltonian_terms!(context::HCIContext)
+  if context.fcidump.uhf
+    # UHF case: Handle all three spin-separated integral tensors properly
+    # Precompute heval_data for UHF
+    context.heval_data = HEvalData(context.fcidump.int2aa, context.fcidump.int2bb, context.fcidump.int2ab,
+                                  context.fcidump.int1a, context.fcidump.int1b)
+  else
+    # RHF case: Use spatial integrals
+    # Precompute heval_data for RHF
+    context.heval_data = HEvalData(context.fcidump.int2, context.fcidump.int1)
+  end
+end
+
+
+"""
+    make_diagonal_h!(context::FCIContext, diag_h::FCIVector)
+
+Compute diagonal Hamiltonian matrix elements using precomputed heval_data.
+"""
+function make_diagonal_h!(context::FCIContext, diag_h::FCIVector)
+  n_str_a = Int(diag_h.n_str_a)
+  n_str_b = Int(diag_h.n_str_b)
+
+  for idx_b in 1:n_str_b
+    str_b = make_pattern(diag_h.adr_b, Address(idx_b))
+    for idx_a in 1:n_str_a
+      str_a = make_pattern(diag_h.adr_a, Address(idx_a))
+      diag_h[idx_a,idx_b] = calc_diagonalH(context.heval_data, str_a, str_b)
+    end
+  end
+end
+
+"""
+    contract_hamiltonian!(context::FCIContext, r::FCIVector, c::FCIVector, prefactor::Scalar)
+
+Apply full Hamiltonian: |r⟩ += prefactor * H |c⟩
+"""
+function contract_hamiltonian!(context::FCIContext, r::FCIVector, c::FCIVector, prefactor::Scalar)
+  for term in context.hamiltonian_terms
+    contract!(term, r, c, prefactor)
+  end
+end
+
+"""
     apply_cop1(input_pattern::OrbPattern, iorb::Integer, create_or_destroy::Integer) -> Tuple{OrbPattern, Int8}
 
 Apply orbital creation (+1) or destruction (-1) operator on a determinant string.
