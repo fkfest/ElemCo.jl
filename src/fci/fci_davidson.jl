@@ -786,14 +786,14 @@ function davidson_selected_ci!(
   max_subspace::Int = 30,
   verbose::Bool = false
 )
-  n_selected::Int = selected_ctx.selected_dets.n_selected
+  n_dets = n_selected(selected_ctx)
   
   n_guess::Int = size(initial_guesses, 2)
   
   # Validate input
   nstates >= 1 || error("nstates must be at least 1")
-  nstates <= n_selected || error("nstates cannot exceed n_selected")
-  size(initial_guesses, 1) == n_selected || error("initial_guess must have ", n_selected, " rows")
+  nstates <= n_dets || error("nstates cannot exceed n_selected")
+  size(initial_guesses, 1) == n_dets || error("initial_guess must have ", n_dets, " rows")
   max_subspace >= 2 * nstates || error("max_subspace must be at least 2*nstates")
 
   # Scale subspace size with number of roots
@@ -802,22 +802,22 @@ function davidson_selected_ci!(
   
   if verbose
     println("\nStarting Davidson Selected CI diagonalization")
-    println("Selected space: $n_selected determinants")
+    println("Selected space: $n_dets determinants")
     println("Computing $nstates eigenstate$(nstates > 1 ? "s" : "")")
     println("Initial guesses provided: $n_guess")
     println("Subspace settings: max=$max_subspace, keep=$n_keep")
   end
   
   # Precompute diagonal elements for preconditioner
-  diagonal = zeros(Scalar, n_selected)
-  for i in 1:n_selected
+  diagonal = zeros(Scalar, n_dets)
+  for i in 1:n_dets
     det_i = selected_ctx.selected_dets.determinants[i]
     diagonal[i] = diagonal_matrix_element(det_i, selected_ctx.base_context)
   end
   
   # Davidson subspace vectors
-  V = [zeros(Scalar, n_selected) for _ in 1:max_subspace]
-  HV = [zeros(Scalar, n_selected) for _ in 1:max_subspace]
+  V = [zeros(Scalar, n_dets) for _ in 1:max_subspace]
+  HV = [zeros(Scalar, n_dets) for _ in 1:max_subspace]
   
   # Initialize with guess vector(s)
   k = min(max(nstates, n_guess), max_subspace)
@@ -852,10 +852,10 @@ function davidson_selected_ci!(
   for i in (n_use_guess+1):k
     if i <= nstates + 1 && n_use_guess > 0
       # Perturb around first guess with different random seeds
-      V[i] .= initial_guesses[:, 1] .+ 0.01 * randn(n_selected)
+      V[i] .= initial_guesses[:, 1] .+ 0.01 * randn(n_dets)
     else
       # Random orthogonal vectors
-      V[i] .= randn(n_selected)
+      V[i] .= randn(n_dets)
     end
     
     # Gram-Schmidt orthogonalization
@@ -876,7 +876,7 @@ function davidson_selected_ci!(
   iteration = 0
   max_residual = Inf  # Initialize outside loop for warning message
   eigenvalues = zeros(Float64, nstates)
-  eigenvectors = zeros(Scalar, n_selected, nstates)
+  eigenvectors = zeros(Scalar, n_dets, nstates)
   
   for iter in 1:max_iterations
     iteration = iter
@@ -904,7 +904,7 @@ function davidson_selected_ci!(
     
     # Compute Ritz vectors and residuals
     max_residual = 0.0
-    residuals = [zeros(Scalar, n_selected) for _ in 1:nstates]
+    residuals = [zeros(Scalar, n_dets) for _ in 1:nstates]
     
     for iroot in 1:nstates
       # Ritz vector: linear combination of subspace vectors
@@ -955,8 +955,8 @@ function davidson_selected_ci!(
       end
       
       # Preconditioned residual: t = r / (E - H_diag)
-      correction = zeros(Scalar, n_selected)
-      for i in 1:n_selected
+      correction = zeros(Scalar, n_dets)
+      for i in 1:n_dets
         denom = eigenvalues[iroot] - diagonal[i]
         if abs(denom) > 1e-10
           correction[i] = residuals[iroot][i] / denom

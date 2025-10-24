@@ -1,7 +1,6 @@
 
 """
-Selected CI implementation that computes H*c matrix-vector products directly
-without constructing or storing full Hamiltonian matrices.
+Selected CI implementation
 
 This provides:
 1. Efficient P-space calculations with O(N²) scaling and O(N) memory
@@ -15,20 +14,6 @@ using LinearAlgebra
 # ===========================================
 # Core Selected CI Data Structures  
 # ===========================================
-"""
-    SelectedCIVector
-
-Vector storing coefficients for a selected set of determinants only.
-Much more memory efficient than full FCIVector for small selected spaces.
-"""
-struct SelectedCIVector
-  coefficients::Vector{Scalar}          # Coefficients for selected determinants only
-  n_selected::Int                       # Number of selected determinants
-
-  function SelectedCIVector(n_selected::Int)
-    new(zeros(Scalar, n_selected), n_selected)
-  end
-end
 
 """
     SelectedCIDeterminants
@@ -38,11 +23,93 @@ Container for selected determinants with efficient storage.
 struct SelectedCIDeterminants
   determinants::Vector{Determinant}     # Selected determinants
   addresses::Vector{Address}           # Corresponding addresses in full CI space
-  n_selected::Int                      # Number of selected determinants
 
   function SelectedCIDeterminants(determinants::Vector{Determinant}, addresses::Vector{Address})
     @assert length(determinants) == length(addresses) "Determinants and addresses must have same length"
-    new(determinants, addresses, length(determinants))
+    new(determinants, addresses)
+  end
+end
+
+"""
+    n_selected(selci::SelectedCIDeterminants) -> Int
+
+Get number of selected determinants.
+"""
+n_selected(selci::SelectedCIDeterminants) = length(selci.determinants)
+
+"""
+    extend!(dets::SelectedCIDeterminants, new_dets::Vector{Determinant}, new_addresses::Vector{Address})
+
+Extend SelectedCIDeterminants with new determinants and addresses.
+"""
+function extend!(dets::SelectedCIDeterminants, new_dets::Vector{Determinant}, new_addresses::Vector{Address})
+  @assert length(new_dets) == length(new_addresses) "New determinants and addresses must have same length"
+  append!(dets.determinants, new_dets)
+  append!(dets.addresses, new_addresses)
+end
+
+"""
+    SelectedHamiltonianRow
+
+Container for one row of the Selected CI Hamiltonian matrix.
+"""
+struct SelectedHamiltonianRow
+  data::Vector{Scalar}                # Hamiltonian row for one determinant
+  idet::Vector{Int}                   # Determinants connected to this determinant
+
+  function SelectedHamiltonianRow()
+    new([], [])
+  end
+end
+
+function Base.push!(row::SelectedHamiltonianRow, value::Scalar, idet::Int)
+  push!(row.data, value)
+  push!(row.idet, idet)
+end
+
+struct SelectedHamiltonianMatrix
+  rows::Vector{SelectedHamiltonianRow}  # Rows of the Hamiltonian matrix
+
+  function SelectedHamiltonianMatrix()
+    new([])
+  end
+end
+
+function Base.push!(sel_ham::SelectedHamiltonianMatrix, row::SelectedHamiltonianRow)
+  push!(sel_ham.rows, row)
+end
+
+"""
+    extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, context)
+
+Extend the SelectedHamiltonianMatrix to include new determinants.
+"""
+function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, context::Union{FCIContext, HCIContext})
+  ndet_old = length(sel_ham.rows)
+  ndet = n_selected(dets)
+  # add new connected determinants to existing rows of Hamiltonian
+  for i in 1:ndet_old
+    det_i = dets.determinants[i]
+    for j in (ndet_old+1):ndet
+      det_j = dets.determinants[j]
+      if slater_condon_allowed(det_i, det_j)
+        h_ij = compute_matrix_element_direct(det_i, det_j, context)
+        push!(sel_ham.rows[i], h_ij, j)
+      end
+    end
+  end
+  # add new rows for new determinants
+  for i in (ndet_old+1):ndet
+    det_i = dets.determinants[i]
+    new_row = SelectedHamiltonianRow()
+    for j in 1:ndet
+      det_j = dets.determinants[j]
+      if slater_condon_allowed(det_i, det_j)
+        h_ij = compute_matrix_element_direct(det_i, det_j, context)
+        push!(new_row, h_ij, j)
+      end
+    end
+    push!(sel_ham, new_row)
   end
 end
 
@@ -54,22 +121,56 @@ Context for Selected CI calculations using direct H*c operations.
 struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
   base_context::ContextType                   # Context for integrals and (optionally) addressing
   selected_dets::SelectedCIDeterminants       # Selected determinants and addresses
+  hamiltonian::SelectedHamiltonianMatrix      # Hamiltonian matrix for selected determinants
 
   # Constructor for FCIContext (uses full addressing)
-  function SelectedCIContext(base_context::FCIContext, determinants::Vector{Determinant})
+  function SelectedCIContext(base_context::FCIContext, determinants::Vector{Determinant}, hamiltonian::SelectedHamiltonianMatrix)
     # Convert determinants to addresses using full addressing
     addresses = [address_from_determinant(base_context, det) for det in determinants]
     selected_dets = SelectedCIDeterminants(determinants, addresses)
-    new{FCIContext}(base_context, selected_dets)
+    extend!(hamiltonian, selected_dets, base_context)
+    new{FCIContext}(base_context, selected_dets, hamiltonian)
   end
 
   # Constructor for HCIContext (on-demand addressing)
-  function SelectedCIContext(base_context::HCIContext, determinants::Vector{Determinant})
+  function SelectedCIContext(base_context::HCIContext, determinants::Vector{Determinant}, hamiltonian::SelectedHamiltonianMatrix)
     # For HCI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
     addresses = UInt64.(1:length(determinants))
     selected_dets = SelectedCIDeterminants(determinants, addresses)
-    new{HCIContext}(base_context, selected_dets)
+    extend!(hamiltonian, selected_dets, base_context)
+    new{HCIContext}(base_context, selected_dets, hamiltonian)
   end
+end
+
+"""
+    n_selected(selci::SelectedCIContext) -> Int
+
+Get number of selected determinants.
+"""
+n_selected(selci::SelectedCIContext) = length(selci.selected_dets.determinants)
+
+"""
+    determinants(selected_ctx::SelectedCIContext) -> Vector{Determinant}
+
+Get selected determinants.
+"""
+determinants(selected_ctx::SelectedCIContext) = selected_ctx.selected_dets.determinants
+
+"""
+    extend!(selected_ctx::SelectedCIContext, new_dets::Vector{Determinant})
+
+Extend the SelectedCIContext with new determinants.
+"""
+function extend!(selected_ctx::SelectedCIContext, new_dets::Vector{Determinant})
+  if selected_ctx.base_context isa FCIContext
+    new_addresses = [address_from_determinant(selected_ctx.base_context, det) for det in new_dets]
+  else
+    # For HCIContext, addresses are just indices
+    start_index = Address(n_selected(selected_ctx)) + 1
+    new_addresses = collect(start_index:(start_index + length(new_dets) - 1))
+  end
+  extend!(selected_ctx.selected_dets, new_dets, new_addresses)
+  extend!(selected_ctx.hamiltonian, selected_ctx.selected_dets, selected_ctx.base_context)
 end
 
 # ===========================================
@@ -331,26 +432,39 @@ end
     contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Scalar}, 
                                   selected_ctx::SelectedCIContext, prefactor::Scalar)
 
-Compute H*c matrix-vector product directly without storing Hamiltonian matrix.
-This is the core function for Selected CI calculations.
+Compute H*c matrix-vector product using precomputed Hamiltonian elements.
 """
 function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Scalar},
                                         selected_ctx::SelectedCIContext, prefactor::Scalar)
-  n_selected = selected_ctx.selected_dets.n_selected
-  @assert length(result) == n_selected "Result vector size mismatch"
-  @assert length(input) == n_selected "Input vector size mismatch"
+  n_det = n_selected(selected_ctx)
+  @assert length(result) == n_det "Result vector size mismatch"
+  @assert length(input) == n_det "Input vector size mismatch"
 
   fill!(result, 0.0)
-  for i in 1:n_selected
-    det_i = selected_ctx.selected_dets.determinants[i]
-    for j in 1:n_selected
-      if abs(input[j]) < ThrNeglect
-        continue  # Skip negligible coefficients for efficiency
-      end
-      det_j = selected_ctx.selected_dets.determinants[j]
-      if slater_condon_allowed(det_i, det_j)
-        h_ij = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
+  if !isempty(selected_ctx.hamiltonian.rows)
+    for i in 1:n_det
+      row = selected_ctx.hamiltonian.rows[i]
+      @inbounds @simd for k in 1:length(row.data)
+        j = row.idet[k]
+        h_ij = row.data[k]
         result[i] += h_ij * input[j]
+      end
+    end
+  else
+    # No precomputed Hamiltonian: compute on-the-fly
+    # This part is currently not used 
+    dets = determinants(selected_ctx)
+    for i in 1:n_det
+      det_i = dets[i]
+      for j in 1:n_det
+        if abs(input[j]) < ThrNeglect
+          continue  # Skip negligible coefficients for efficiency
+        end
+        det_j = dets[j]
+        if slater_condon_allowed(det_i, det_j)
+          h_ij = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
+          result[i] += h_ij * input[j]
+        end
       end
     end
   end
@@ -368,17 +482,38 @@ function contract_hamiltonian!(selected_ctx::SelectedCIContext, result::Vector{S
   contract_hamiltonian_selected!(result, input, selected_ctx, prefactor)
 end
 
+"""
+    hamiltonian_matrix(selected_ctx::SelectedCIContext) -> Matrix{Scalar}
+
+Construct full Hamiltonian matrix for selected determinants.
+"""
+function hamiltonian_matrix(selected_ctx::SelectedCIContext)
+  n_det = n_selected(selected_ctx)
+  H_matrix = zeros(Scalar, n_det, n_det)
+  
+  for i in 1:n_det
+    row = selected_ctx.hamiltonian.rows[i]
+    @inbounds @simd for k in 1:length(row.data)
+      j = row.idet[k]
+      h_ij = row.data[k]
+      H_matrix[i,j] = h_ij
+    end
+  end
+  return H_matrix
+end
+
 # ===========================================
 # Selected CI Solver Integration
 # ===========================================
 
 """
-    setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant}) -> SelectedCIContext
+    setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant}, hamiltonian=SelectedHamiltonianMatrix()) -> SelectedCIContext
 
 Create SelectedCIContext from list of determinants.
 """
-function setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant})
-  return SelectedCIContext(context, determinants)
+function setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant}, 
+                                              hamiltonian::SelectedHamiltonianMatrix=SelectedHamiltonianMatrix())
+  return SelectedCIContext(context, determinants, hamiltonian)
 end
 
 """
@@ -388,7 +523,7 @@ Create SelectedCIContext from list of addresses.
 """
 function setup_selected_ci_from_addresses!(context::FCIContext, addresses::Vector{Address})
   determinants = [determinant_from_address(context, addr) for addr in addresses]
-  return SelectedCIContext(context, determinants)
+  return SelectedCIContext(context, determinants, SelectedHamiltonianMatrix())
 end
 
 """
@@ -401,7 +536,7 @@ function project_selected_to_full!(v_full::FCIVector, v_selected::Vector{Scalar}
                                    selected_ctx::SelectedCIContext)
   fill!(v_full.data, 0.0)
 
-  for i in 1:(selected_ctx.selected_dets.n_selected)
+  for i in 1:n_selected(selected_ctx)
     addr = selected_ctx.selected_dets.addresses[i]
     v_full.data[addr] = v_selected[i]
   end
@@ -416,7 +551,7 @@ end
 Extract selected CI coefficients from full CI vector.
 """
 function extract_full_to_selected!(v_selected::Vector{Scalar}, v_full::FCIVector, selected_ctx::SelectedCIContext)
-  for i in 1:(selected_ctx.selected_dets.n_selected)
+  for i in 1:n_selected(selected_ctx)
     addr = selected_ctx.selected_dets.addresses[i]
     v_selected[i] = v_full.data[addr]
   end
@@ -1517,6 +1652,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     
     # Start with all small-space determinants
     variational_dets = copy(small_space_result.determinants)
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix())
     
     # Initial energies from small-space diagonalization
     E_init_vec = small_space_result.eigenvalues .+ ctx.fcidump.int0
@@ -1539,8 +1675,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     push!(variational_dets, hf_det)
     
     # Get initial HF energy (all states)
-    selected_ctx_hf = SelectedCIContext(ctx, variational_dets)
-    E_electronic_hf_vec, _ = diagonalize_selected_space(selected_ctx_hf, nstates=options.nstates)
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix())
+    E_electronic_hf_vec, _ = diagonalize_selected_space(selected_ctx, nstates=options.nstates)
     E_init_vec = E_electronic_hf_vec .+ ctx.fcidump.int0
     
     if options.verbose
@@ -1566,11 +1702,10 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   for iter in 1:options.max_iterations
     if options.verbose
       println("\nHBCI Iteration $iter:")
-      println("  Current space size: $(length(variational_dets)) determinants")
+      println("  Current space size: $(n_selected(selected_ctx)) determinants")
     end
     
     # 1. Diagonalize Hamiltonian in current space (all requested states)
-    selected_ctx = SelectedCIContext(ctx, variational_dets)
     E_electronic_vec, coeffs_matrix = diagonalize_selected_space(selected_ctx,
                                                                  nstates=options.nstates,
                                                                  previous_vectors=previous_eigenvectors,
@@ -1604,8 +1739,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
         end
       end
     end
-    
-    if ΔE_max < options.tol && length(variational_dets) >= options.target_selection
+
+    if ΔE_max < options.tol && n_selected(selected_ctx) >= options.target_selection
       if options.verbose
         println("  ✓ Converged! max(ΔE) = $ΔE_max < $(options.tol)")
       end
@@ -1618,11 +1753,11 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     candidates = HBCandidate[]
     if options.nstates == 1
       # Single-state: use original single-state function
-      total_prob = compute_heatbath_probabilities!(candidates, variational_dets, coeffs_matrix[:,1], ctx, 
+      total_prob = compute_heatbath_probabilities!(candidates, determinants(selected_ctx), coeffs_matrix[:,1], ctx, 
                                                   E_electronic_vec[1], setup_data, eps_h)
     else
       # Multi-state: use new multi-state function
-      total_prob = compute_heatbath_probabilities_multistate!(candidates, variational_dets, coeffs_matrix, ctx, 
+      total_prob = compute_heatbath_probabilities_multistate!(candidates, determinants(selected_ctx), coeffs_matrix, ctx, 
                                                               E_electronic_vec, setup_data, eps_h)
     end
     
@@ -1656,8 +1791,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     end
     
     # 5. Update variational space
-    append!(variational_dets, new_dets)
-    unique!(variational_dets)
+    extend!(selected_ctx, new_dets)
     
     E_prev_vec = copy(E_current_vec)
     # Save eigenvectors for next iteration as warm start
@@ -1670,10 +1804,9 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   
   # Final diagonalization
   if options.verbose
-    println("\nFinal diagonalization with $(length(variational_dets)) determinants...")
+    println("\nFinal diagonalization with $(n_selected(selected_ctx)) determinants...")
   end
   
-  selected_ctx = SelectedCIContext(ctx, variational_dets)
   E_electronic_vec, coeffs_final_matrix = diagonalize_selected_space(selected_ctx,
                                                                      nstates=options.nstates,
                                                                      previous_vectors=previous_eigenvectors,
@@ -1700,7 +1833,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
         println("  State $i: $E Hartree")
       end
     end
-    println("Final space size: $(length(variational_dets)) determinants")
+    println("Final space size: $(n_selected(selected_ctx)) determinants")
     println("="^70)
   end
   
@@ -1708,7 +1841,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   pt2_result = PT2Result()
   if options.compute_pt2
     # Note: PT2 correction currently only computed for ground state (state 1)
-    pt2_result = compute_pt2_correction!(ctx, variational_dets, coeffs_final_matrix[:,1], 
+    pt2_result = compute_pt2_correction!(ctx, determinants(selected_ctx), coeffs_final_matrix[:,1], 
                                          E_electronic_vec[1], setup_data, options)
     
     E_total_with_pt2 = E_final_vec[1] + pt2_result.energy_correction
@@ -1725,7 +1858,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   end
   
   # Return format: energies (vector), coefficients (matrix), determinants, pt2_result
-  return E_final_vec, coeffs_final_matrix, variational_dets, pt2_result
+  return E_final_vec, coeffs_final_matrix, determinants(selected_ctx), pt2_result
 end
 
 """
@@ -1774,25 +1907,15 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
                                    nstates::Int=1,
                                    previous_vectors::Union{Nothing,Matrix{Float64}}=nothing,
                                    conv_tol::Float64=1e-6)::Tuple{Vector{Scalar}, Matrix{Scalar}}
-  n_selected = selected_ctx.selected_dets.n_selected
-  nstates = min(nstates, n_selected)  # Can't compute more roots than determinants
+  n_dets = n_selected(selected_ctx)
+  dets = determinants(selected_ctx)
+  nstates = min(nstates, n_dets)  # Can't compute more roots than determinants
   
   # For small spaces, use direct diagonalization (faster startup)
-  if n_selected < 1000
-    H_matrix = zeros(Scalar, n_selected, n_selected)
+  if n_dets < 1000
+    H_matrix = hamiltonian_matrix(selected_ctx)
     
-    for i in 1:n_selected
-      det_i = selected_ctx.selected_dets.determinants[i]
-      for j in i:n_selected
-        det_j = selected_ctx.selected_dets.determinants[j]
-        if slater_condon_allowed(det_i, det_j)
-          H_matrix[i,j] = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
-          H_matrix[j,i] = H_matrix[i,j]
-        end
-      end
-    end
-    
-    nval = min(nstates+5, n_selected)
+    nval = min(nstates+5, n_dets)
     eigenvalues, eigenvectors = eigen(Hermitian(H_matrix), 1:nval)
     return real.(eigenvalues[1:nstates]), real.(eigenvectors[:, 1:nstates])
   end
@@ -1801,7 +1924,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
   # This is much faster: O(N²) per iteration vs O(N³) for direct
   
   # Create initial guess(es)
-  if previous_vectors !== nothing && size(previous_vectors, 1) <= n_selected
+  if previous_vectors !== nothing && size(previous_vectors, 1) <= n_dets
     # Use previous eigenvectors as initial guesses
     # The previous vectors correspond to a subset of current determinants
     # (the current space is a superset of the previous space)
@@ -1812,7 +1935,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     # Assume first n_prev determinants are the same (newly added dets are at the end)
     # Pass all available previous eigenvectors for their respective roots
     n_use_prev = min(nstates, n_prev_roots)
-    initial_guesses = zeros(Scalar, n_selected, n_use_prev)
+    initial_guesses = zeros(Scalar, n_dets, n_use_prev)
     
     for i in 1:n_use_prev
       # Copy previous eigenvector (zero-padded for new determinants)
@@ -1832,9 +1955,9 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
   end
   # No previous vectors: use determinant with lowest diagonal element
   diagonal = [compute_diagonal_element(det, selected_ctx.base_context) 
-              for det in selected_ctx.selected_dets.determinants]
+              for det in dets]
   min_idx = argmin(diagonal)
-  initial_guess = zeros(Scalar, n_selected, 1)
+  initial_guess = zeros(Scalar, n_dets, 1)
   initial_guess[min_idx, 1] = 1.0
   
   # Call Davidson solver with single initial guess
