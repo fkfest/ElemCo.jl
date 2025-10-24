@@ -265,7 +265,7 @@ Uses the same hybrid selection method as traditional P-space.
 
 # Arguments
 - `context`: FCI context
-- `target_size`: Target number of determinants (adaptive: max(100, target_selection÷10, 5*nstates))
+- `target_size`: Target number of determinants (adaptive: max(100, sqrt(target_selection), 5*nstates))
 - `nstates`: Number of states to compute (used for sizing)
 
 # Returns
@@ -347,7 +347,7 @@ then calculates diagonal energies only for the generated determinants.
 
 # Arguments
 - `context`: HCI context
-- `target_size`: Target number of determinants (adaptive: max(100, target_selection÷10, 5*nstates))
+- `target_size`: Target number of determinants (adaptive: max(100, sqrt(target_selection), 5*nstates))
 - `nstates`: Number of states to compute (used for sizing)
 
 # Returns
@@ -532,7 +532,7 @@ Initialize multi-state HCI using small-space Hamiltonian diagonalization.
 This provides better initial guesses for all states, preventing missed excited states.
 
 # Algorithm
-1. Select small space: max(100, target_selection÷10, 5*nstates) determinants
+1. Select small space: max(100, sqrt(target_selection), 5*nstates) determinants
 2. Build Hamiltonian in small space
 3. Diagonalize to get nstates lowest eigenstates
 4. Return determinants and eigenvectors as initial guess for HCI
@@ -553,10 +553,10 @@ function initialize_multistate_from_small_space(context::Union{FCIContext, HCICo
   end
   
   # 1. Determine small-space size (adaptive)
-  small_space_size = max(100, target_selection ÷ 10, 5 * nstates)
+  small_space_size = max(100, trunc(Int,sqrt(target_selection)), 5 * nstates)
   
   if context.options.print_level >= 1
-    println("  Adaptive sizing: max(100, $target_selection÷10, 5×$nstates) = $small_space_size")
+    println("  Adaptive sizing: max(100, sqrt($target_selection), 5×$nstates) = $small_space_size")
   end
   
   # 2. Select determinants using hybrid method (same as traditional P-space)

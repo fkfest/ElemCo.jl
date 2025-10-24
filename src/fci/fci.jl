@@ -48,7 +48,7 @@ export double_excitation_alpha, double_excitation_beta, double_excitation_mixed
 export HCIOptions, HBCandidate, HBCISetupData
 export run_heatbath_ci!, get_reference_determinant, setup_hbci!
 export generate_connected_determinants!, generate_excitations_with_threshold!
-export compute_heatbath_probabilities!, compute_heatbath_probabilities_multistate!, select_determinants_heatbath!
+export compute_heatbath_probabilities!, compute_heatbath_probabilities_multistate!, select_determinants_perturbatively!
 # PT2 correction functionality
 export PT2Options, PT2Result, compute_pt2_correction!
 

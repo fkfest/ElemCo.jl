@@ -1217,30 +1217,19 @@ end
 # ===========================================
 
 """
-    select_determinants_heatbath!(selected::Vector{Determinant},
+    select_determinants_perturbatively!(selected::Vector{Determinant},
                                  candidates::Vector{HBCandidate},
-                                 options::HCIOptions) -> Int
+                                 options::HCIOptions,
+                                 target_size::Int) -> Int
 
-Select determinants from candidates using Heat-Bath sampling.
+Select determinants from candidates using precalculated Epstein-Nesbet energy.
 Returns number of determinants selected.
 """
-function select_determinants_heatbath!(selected::Vector{Determinant},
+function select_determinants_perturbatively!(selected::Vector{Determinant},
                                       candidates::Vector{HBCandidate},
-                                      options::HCIOptions)::Int
+                                      options::HCIOptions,
+                                      target_size::Int)
   empty!(selected)
-  return select_deterministic!(selected, candidates, options)
-end
-
-"""
-    select_deterministic!(selected::Vector{Determinant},
-                         candidates::Vector{HBCandidate},
-                         options::HCIOptions) -> Int
-
-Deterministic selection: select top-N by probability.
-"""
-function select_deterministic!(selected::Vector{Determinant},
-                              candidates::Vector{HBCandidate},
-                              options::HCIOptions)::Int
   # Sort by probability (descending)
   sort!(candidates, by=c->c.probability, rev=true)
   
@@ -1250,7 +1239,7 @@ function select_deterministic!(selected::Vector{Determinant},
   epsilon = eps_p^2
   n_selected = 0
   for candidate in candidates
-    if n_selected >= options.target_selection
+    if n_selected >= target_size
       break
     end
     if candidate.probability > epsilon
@@ -1643,7 +1632,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     # Determine small-space size (adaptive or user-specified)
     small_space_size = options.small_space_size > 0 ? 
                        options.small_space_size : 
-                       max(100, options.target_selection ÷ 10, 5 * options.nstates)
+                       max(100, trunc(Int,sqrt(options.target_selection)), 5 * options.nstates)
     
     # Generate initial guess from small-space diagonalization
     small_space_result = initialize_multistate_from_small_space(
@@ -1695,7 +1684,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     println("\nIterative perturbative selection")
   end
   
-  E_prev_vec = copy(E_init_vec)
+  E_prev_vec = zero(E_init_vec)
   previous_eigenvectors = nothing  # Track previous eigenvectors for warm start
   converged = false
   res_tol = options.res_tol * 100  # Looser tolerance for main loop diagonalization
@@ -1740,9 +1729,17 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
       end
     end
 
-    if ΔE_max < options.tol && n_selected(selected_ctx) >= options.target_selection
+    if ΔE_max < options.tol 
       if options.verbose
         println("  ✓ Converged! max(ΔE) = $ΔE_max < $(options.tol)")
+      end
+      converged = true
+      break
+    end
+
+    if n_selected(selected_ctx) >= options.target_selection
+      if options.verbose
+        println("  ✓ Reached target selection size: $(options.target_selection) determinants")
       end
       converged = true
       break
@@ -1776,7 +1773,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     
     # 4. Select new determinants
     new_dets = Determinant[]
-    n_new = select_determinants_heatbath!(new_dets, candidates, options)
+    target_size = options.target_selection - n_selected(selected_ctx)
+    n_new = select_determinants_perturbatively!(new_dets, candidates, options, target_size)
     
     if options.verbose
       println("  Selected $n_new new determinants")
