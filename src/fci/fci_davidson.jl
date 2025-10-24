@@ -812,7 +812,7 @@ function davidson_selected_ci!(
   diagonal = zeros(Scalar, n_selected)
   for i in 1:n_selected
     det_i = selected_ctx.selected_dets.determinants[i]
-    diagonal[i] = compute_diagonal_element(det_i, selected_ctx.base_context)
+    diagonal[i] = diagonal_matrix_element(det_i, selected_ctx.base_context)
   end
   
   # Davidson subspace vectors
@@ -820,12 +820,12 @@ function davidson_selected_ci!(
   HV = [zeros(Scalar, n_selected) for _ in 1:max_subspace]
   
   # Initialize with guess vector(s)
-  k = min(max(nstates + 1, n_guess), max_subspace)
+  k = min(max(nstates, n_guess), max_subspace)
   
   # First vectors from provided initial guesses
   n_use_guess = min(n_guess, k)
   for i in 1:n_use_guess
-    V[i] .= initial_guesses[:, i]
+    V[i] .= @view(initial_guesses[:, i])
     # Normalize
     norm_val = norm(V[i])
     if norm_val > 1e-10
@@ -954,14 +954,14 @@ function davidson_selected_ci!(
         break  # Subspace is full
       end
       
-      # Preconditioned residual: t = -r / (E - H_diag)
+      # Preconditioned residual: t = r / (E - H_diag)
       correction = zeros(Scalar, n_selected)
       for i in 1:n_selected
         denom = eigenvalues[iroot] - diagonal[i]
         if abs(denom) > 1e-10
-          correction[i] = -residuals[iroot][i] / denom
+          correction[i] = residuals[iroot][i] / denom
         else
-          correction[i] = -residuals[iroot][i] / 1e-10
+          correction[i] = residuals[iroot][i] / 1e-10
         end
       end
       

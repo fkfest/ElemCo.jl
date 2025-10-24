@@ -31,26 +31,6 @@ struct SelectedCIVector
 end
 
 """
-    ExcitationInfo
-
-Information about orbital excitation between two determinants.
-Used for efficient matrix element evaluation.
-"""
-struct ExcitationInfo
-  excitation_type::Symbol              # :same, :single_alpha, :single_beta, :double, :invalid
-  orb_indices::NTuple{4, Int}         # Orbital indices involved in excitation (i,j,a,b)
-  phase::Int8                         # Sign factor from orbital reordering (+1 or -1)
-
-  function ExcitationInfo(
-    excitation_type::Symbol,
-    orb_indices::NTuple{4, Int} = (0, 0, 0, 0),
-    phase::Int8 = Int8(1),
-  )
-    new(excitation_type, orb_indices, phase)
-  end
-end
-
-"""
     SelectedCIDeterminants
 
 Container for selected determinants with efficient storage.
@@ -71,16 +51,16 @@ end
 
 Context for Selected CI calculations using direct H*c operations.
 """
-mutable struct SelectedCIContext
-  base_context::Union{FCIContext, HCIContext}  # Context for integrals and (optionally) addressing
-  selected_dets::SelectedCIDeterminants        # Selected determinants and addresses
+struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
+  base_context::ContextType                   # Context for integrals and (optionally) addressing
+  selected_dets::SelectedCIDeterminants       # Selected determinants and addresses
 
   # Constructor for FCIContext (uses full addressing)
   function SelectedCIContext(base_context::FCIContext, determinants::Vector{Determinant})
     # Convert determinants to addresses using full addressing
     addresses = [address_from_determinant(base_context, det) for det in determinants]
     selected_dets = SelectedCIDeterminants(determinants, addresses)
-    new(base_context, selected_dets)
+    new{FCIContext}(base_context, selected_dets)
   end
 
   # Constructor for HCIContext (on-demand addressing)
@@ -88,72 +68,13 @@ mutable struct SelectedCIContext
     # For HCI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
     addresses = UInt64.(1:length(determinants))
     selected_dets = SelectedCIDeterminants(determinants, addresses)
-    new(base_context, selected_dets)
+    new{HCIContext}(base_context, selected_dets)
   end
 end
 
 # ===========================================
 # Orbital Excitation Analysis
 # ===========================================
-
-"""
-    analyze_determinant_excitation(det_i::Determinant, det_j::Determinant) -> ExcitationInfo
-
-Analyze orbital excitation between two determinants.
-Returns excitation type and orbital indices for matrix element evaluation.
-"""
-function analyze_determinant_excitation(det_i::Determinant, det_j::Determinant)::ExcitationInfo
-  # Find differences in alpha and beta strings
-  alpha_diff = det_i.alpha ⊻ det_j.alpha  # XOR to find differing bits
-  beta_diff = det_i.beta ⊻ det_j.beta
-
-  # Count number of differing orbitals
-  n_alpha_diff = count_ones(alpha_diff)
-  n_beta_diff = count_ones(beta_diff)
-
-  # Same determinant
-  if n_alpha_diff == 0 && n_beta_diff == 0
-    return ExcitationInfo(:same)
-  end
-
-  # Single excitation in alpha string
-  if n_alpha_diff == 2 && n_beta_diff == 0
-    orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
-    phase = calculate_excitation_phase(det_i.alpha, orb_i, orb_a)
-    return ExcitationInfo(:single_alpha, (orb_i, orb_a, 0, 0), phase)
-  end
-
-  # Single excitation in beta string  
-  if n_alpha_diff == 0 && n_beta_diff == 2
-    orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
-    phase = calculate_excitation_phase(det_i.beta, orb_i, orb_a)
-    return ExcitationInfo(:single_beta, (orb_i, orb_a, 0, 0), phase)
-  end
-
-  # Double excitation
-  if n_alpha_diff == 4 && n_beta_diff == 0
-    # Double excitation in alpha
-    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.alpha, det_j.alpha)
-    phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
-    return ExcitationInfo(:double, (orb_i, orb_j, orb_a, orb_b), phase)
-  elseif n_alpha_diff == 0 && n_beta_diff == 4
-    # Double excitation in beta
-    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.beta, det_j.beta)
-    phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
-    return ExcitationInfo(:double, (orb_i, orb_j, orb_a, orb_b), phase)
-  elseif n_alpha_diff == 2 && n_beta_diff == 2
-    # Mixed double excitation (alpha and beta)
-    orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
-    orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
-    phase_alpha = calculate_excitation_phase(det_i.alpha, orb_i_alpha, orb_a_alpha)
-    phase_beta = calculate_excitation_phase(det_i.beta, orb_i_beta, orb_a_beta)
-    total_phase = phase_alpha * phase_beta
-    return ExcitationInfo(:double, (orb_i_alpha, orb_i_beta, orb_a_alpha, orb_a_beta), total_phase)
-  end
-
-  # Invalid excitation (more than double)
-  return ExcitationInfo(:invalid)
-end
 
 """
     find_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPattern) -> (Int, Int)
@@ -165,8 +86,8 @@ function find_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPattern):
   occ = pattern_i & diff
   virt = pattern_j & diff
  
-  orb_a = trailing_zeros(virt)  # Orbital being created
-  orb_i = trailing_zeros(occ)   # Orbital being destroyed
+  orb_a = trailing_zeros(virt) + 1  # Orbital being created
+  orb_i = trailing_zeros(occ) + 1  # Orbital being destroyed
 
   return (orb_i, orb_a)
 end
@@ -184,11 +105,10 @@ function find_double_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPa
   orb_a = trailing_zeros(virt)  # Orbital being created
   virt ⊻= (OrbPattern(1) << orb_a)
   orb_b = trailing_zeros(virt)  # Second orbital being created
-  orb_i = trailing_zeros(occ)   # Orbital being destroyed
+  orb_i = trailing_zeros(occ)  # Orbital being destroyed
   occ ⊻= (OrbPattern(1) << orb_i)
-  orb_j = trailing_zeros(occ)   # Second orbital being destroyed
-
-  return (orb_i, orb_j, orb_a, orb_b)
+  orb_j = trailing_zeros(occ)  # Second orbital being destroyed
+  return (orb_i+1, orb_j+1, orb_a+1, orb_b+1)
 end
 
 """
@@ -199,9 +119,9 @@ Calculate phase factor for single excitation i -> a.
 function calculate_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_a::Int)::Int8
   # Count electrons between orb_i and orb_a
   min_orb = min(orb_i, orb_a)
-  max_orb = max(orb_i, orb_a)
+  max_orb = max(orb_i, orb_a) - 1
   # pattern between min_orb and max_orb (exclusive)
-  sub_pattern = pattern & ((OrbPattern(1) << max_orb) - 1) & ~( (OrbPattern(1) << (min_orb + 1)) - 1)
+  sub_pattern = pattern & ((OrbPattern(1) << max_orb) - 1) & ~( (OrbPattern(1) << min_orb) - 1)
   # Count number of electrons in sub_pattern
   n_electrons = count_ones(sub_pattern)
   # Phase is (-1)^n_electrons
@@ -227,9 +147,9 @@ function calculate_double_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_
   
   # Create intermediate determinant: remove electron from orb_i, add to orb_a
   intermediate = pattern
-  intermediate &= ~(OrbPattern(1) << orb_i)  # Remove electron from i
-  intermediate |= (OrbPattern(1) << orb_a)   # Add electron to a
-  
+  intermediate &= ~(OrbPattern(1) << (orb_i - 1))  # Remove electron from i
+  intermediate |= (OrbPattern(1) << (orb_a - 1))   # Add electron to a
+
   # Second excitation: j -> b in the intermediate determinant
   phase2 = calculate_excitation_phase(intermediate, orb_j, orb_b)
   
@@ -249,28 +169,54 @@ Compute ⟨det_i|Ĥ|det_j⟩ directly using orbital excitation analysis.
 Works with both FCIContext and HCIContext.
 """
 function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext})::Scalar
-  excitation = analyze_determinant_excitation(det_i, det_j)
-  return evaluate_matrix_element(det_i, det_j, context, excitation)
-end
+  # Find differences in alpha and beta strings
+  alpha_diff = det_i.alpha ⊻ det_j.alpha  # XOR to find differing bits
+  beta_diff = det_i.beta ⊻ det_j.beta
 
-"""
-    evaluate_matrix_element(det_i::Determinant, det_j::Determinant, 
-                           context, excitation::ExcitationInfo) -> Scalar
+  # Count number of differing orbitals
+  n_alpha_diff = count_ones(alpha_diff)
+  n_beta_diff = count_ones(beta_diff)
 
-Evaluate matrix element based on excitation type.
-Works with both FCIContext and HCIContext.
-"""
-function evaluate_matrix_element(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext},
-                                 excitation::ExcitationInfo)::Scalar
-  if excitation.excitation_type == :same
+  # Same determinant
+  if n_alpha_diff == 0 && n_beta_diff == 0
     return diagonal_matrix_element(det_i, context)
-  elseif excitation.excitation_type == :single_alpha || excitation.excitation_type == :single_beta
-    return single_excitation_matrix_element(det_i, det_j, context, excitation)
-  elseif excitation.excitation_type == :double
-    return double_excitation_matrix_element(det_i, det_j, context, excitation)
-  else
-    return 0.0  # Invalid excitation
   end
+
+  # Single excitation in alpha string
+  if n_alpha_diff == 2 && n_beta_diff == 0
+    orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
+    phase = calculate_excitation_phase(det_i.alpha, orb_i, orb_a)
+    return single_alpha_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+  end
+
+  # Single excitation in beta string  
+  if n_alpha_diff == 0 && n_beta_diff == 2
+    orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
+    phase = calculate_excitation_phase(det_i.beta, orb_i, orb_a)
+    return single_beta_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+  end
+
+  # Double excitation
+  if n_alpha_diff == 4 && n_beta_diff == 0
+    # Double excitation in alpha
+    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.alpha, det_j.alpha)
+    phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
+    return double_alpha_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
+  elseif n_alpha_diff == 0 && n_beta_diff == 4
+    # Double excitation in beta
+    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.beta, det_j.beta)
+    phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
+    return double_beta_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
+  elseif n_alpha_diff == 2 && n_beta_diff == 2
+    # Mixed double excitation (alpha and beta)
+    orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
+    orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
+    phase_alpha = calculate_excitation_phase(det_i.alpha, orb_i_alpha, orb_a_alpha)
+    phase_beta = calculate_excitation_phase(det_i.beta, orb_i_beta, orb_a_beta)
+    total_phase = phase_alpha * phase_beta
+    return double_alpha_beta_excitation_matrix_element(context, orb_i_alpha, orb_i_beta, orb_a_alpha, orb_a_beta) * total_phase
+  end
+  return 0.0  # Invalid excitation
 end
 
 """
@@ -291,168 +237,90 @@ function diagonal_matrix_element(det::Determinant, context::HCIContext)::Scalar
 end
 
 """
-    single_excitation_matrix_element(det_i::Determinant, det_j::Determinant, 
-                                    context, excitation::ExcitationInfo) -> Scalar
+    single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context) -> Scalar 
 
-Compute matrix element for single excitation.
-Works with both FCIContext and HCIContext.
+Compute matrix element for single alpha excitation.
 """
-function single_excitation_matrix_element(det_i::Determinant, det_j::Determinant,
-                                          context::Union{FCIContext, HCIContext}, excitation::ExcitationInfo)::Scalar
-  orb_i = excitation.orb_indices[1] + 1  # Convert to 1-based indexing
-  orb_a = excitation.orb_indices[2] + 1
-  phase = excitation.phase
-
-  # Get fcidump and is_uhf from context
-  fcidump = context.fcidump
-  is_uhf = fcidump.uhf
-
-  # One-electron contribution: h_ia
-  if excitation.excitation_type == :single_alpha
-    h_element = is_uhf ? fcidump.int1a[orb_i, orb_a] : fcidump.int1[orb_i, orb_a]
-  else  # single_beta
-    h_element = is_uhf ? fcidump.int1b[orb_i, orb_a] : fcidump.int1[orb_i, orb_a]
+function single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, 
+                                                context::Union{FCIContext, HCIContext})
+  if context.fcidump.uhf
+    int1 = context.fcidump.int1a
+  else
+    int1 = context.fcidump.int1
   end
-
-  # Two-electron contributions: sum over occupied orbitals in det_i
-  # For single excitation i->a: ⟨det_i|Ĥ|det_j⟩ = phase * (h_ia + sum_k (ia|kk) - (ik|ka))
-
-  if excitation.excitation_type == :single_alpha
-    # Get correct alpha-alpha integrals
-    int2aa = is_uhf ? fcidump.int2aa : fcidump.int2
-    int2ab = is_uhf ? fcidump.int2ab : fcidump.int2
-
-    # Sum over all occupied alpha orbitals in det_i (excluding orbital i)
-    pattern_alpha = det_i.alpha
-    bit_pos = 0
-    while pattern_alpha != 0
-      if (pattern_alpha & 1) != 0  # Orbital k is occupied
-        k = bit_pos + 1  # Convert to 1-based
-        if k != orb_i  # Don't include the orbital being removed
-          h_element += int2aa[orb_i, orb_a, k, k] - int2aa[orb_i, k, k, orb_a]
-        end
-      end
-      pattern_alpha >>= 1
-      bit_pos += 1
-    end
-
-    # Sum over all occupied beta orbitals in det_i
-    pattern_beta = det_i.beta
-    bit_pos = 0
-    while pattern_beta != 0
-      if (pattern_beta & 1) != 0  # Orbital k is occupied
-        k = bit_pos + 1  # Convert to 1-based
-        h_element += int2ab[orb_i, orb_a, k, k]
-      end
-      pattern_beta >>= 1
-      bit_pos += 1
-    end
-
-  else  # single_beta
-    # Get correct beta-beta and alpha-beta integrals
-    int2bb = is_uhf ? fcidump.int2bb : fcidump.int2
-    int2ab = is_uhf ? fcidump.int2ab : fcidump.int2
-    
-    # Sum over all occupied alpha orbitals in det_i
-    pattern_alpha = det_i.alpha
-    bit_pos = 0
-    while pattern_alpha != 0
-      if (pattern_alpha & 1) != 0  # Orbital k is occupied
-        k = bit_pos + 1  # Convert to 1-based
-        # Note: For UHF, int2ab[k, k, orb_i, orb_a] = (k_α k_α | i_β a_β) = (i_β a_β | k_α k_α)
-        h_element += int2ab[k, k, orb_i, orb_a]
-      end
-      pattern_alpha >>= 1
-      bit_pos += 1
-    end
-
-    # Sum over all occupied beta orbitals in det_i (excluding orbital i)
-    pattern_beta = det_i.beta
-    bit_pos = 0
-    while pattern_beta != 0
-      if (pattern_beta & 1) != 0  # Orbital k is occupied
-        k = bit_pos + 1  # Convert to 1-based
-        if k != orb_i  # Don't include the orbital being removed
-          h_element += int2bb[orb_i, orb_a, k, k] - int2bb[orb_i, k, k, orb_a]
-        end
-      end
-      pattern_beta >>= 1
-      bit_pos += 1
-    end
-  end
-
-  return Scalar(phase) * h_element
+  h1e2_same = context.heval_data.h1e2_aa
+  h1e2_opp = context.heval_data.h1e2_ab
+  return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.alpha, det_i.beta, orb_a, orb_i)
 end
 
 """
-    double_excitation_matrix_element(det_i::Determinant, det_j::Determinant, 
-                                    context, excitation::ExcitationInfo) -> Scalar
+    single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context) -> Scalar 
 
-Compute matrix element for double excitation.
-Handles both same-spin and alpha-beta mixed double excitations correctly.
-Works with both FCIContext and HCIContext.
+Compute matrix element for single beta excitation.
 """
-function double_excitation_matrix_element(det_i::Determinant, det_j::Determinant,
-                                          context::Union{FCIContext, HCIContext}, excitation::ExcitationInfo)::Scalar
-  # Determine if this is same-spin or alpha-beta mixed
+function single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, 
+                                                context::Union{FCIContext, HCIContext})
+  if context.fcidump.uhf
+    int1 = context.fcidump.int1b
+    h1e2_same = context.heval_data.h1e2_bb
+    h1e2_opp = context.heval_data.h1e2_ba
+  else
+    int1 = context.fcidump.int1
+    h1e2_same = context.heval_data.h1e2_aa
+    h1e2_opp = context.heval_data.h1e2_ab
+  end
+  return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.beta, det_i.alpha, orb_a, orb_i)
+end
+
+"""
+    double_alpha_excitation_matrix_element(context, orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int) -> Scalar
+
+Compute matrix element for double alpha excitation.
+"""
+function double_alpha_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+                                                orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
+  fcidump = context.fcidump
+  int2aa = fcidump.uhf ? fcidump.int2aa : fcidump.int2
+  return int2aa[orb_a, orb_i, orb_b, orb_j] - int2aa[orb_a, orb_j, orb_b, orb_i]
+end
+
+"""
+    double_beta_excitation_matrix_element(context, orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int) -> Scalar
+
+Compute matrix element for double beta excitation.
+"""
+function double_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+                                                orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
+  fcidump = context.fcidump
+  int2bb = fcidump.uhf ? fcidump.int2bb : fcidump.int2
+  return int2bb[orb_a, orb_i, orb_b, orb_j] - int2bb[orb_a, orb_j, orb_b, orb_i]
+end
+
+"""
+    double_alpha_beta_excitation_matrix_element(context, orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int) -> Scalar
+
+Compute matrix element for double alpha beta excitation.
+"""
+function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+                                                orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
+  fcidump = context.fcidump
+  int2ab = fcidump.uhf ? fcidump.int2ab : fcidump.int2
+  return int2ab[orb_a, orb_i, orb_b, orb_j]
+end
+
+"""
+    slater_condon_allowed(det_i::Determinant, det_j::Determinant) -> Bool
+
+Check if two determinants differ by at most two orbital occupations (same, single, or double excitations).
+Returns true if they differ by ≤ 2 orbitals, false otherwise.
+"""
+@inline function slater_condon_allowed(det_i::Determinant, det_j::Determinant)::Bool
   alpha_diff = det_i.alpha ⊻ det_j.alpha
   beta_diff = det_i.beta ⊻ det_j.beta
   n_alpha_diff = count_ones(alpha_diff)
   n_beta_diff = count_ones(beta_diff)
-
-  phase = excitation.phase
-  fcidump = context.fcidump
-  is_uhf = fcidump.uhf
-
-  if n_alpha_diff == 4 && n_beta_diff == 0
-    # Double alpha excitation: both electrons in alpha spin
-    # Orbitals: (i, j, a, b) where i,j → a,b
-    orb_i = excitation.orb_indices[1] + 1  # Convert to 1-based
-    orb_j = excitation.orb_indices[2] + 1
-    orb_a = excitation.orb_indices[3] + 1
-    orb_b = excitation.orb_indices[4] + 1
-
-    # Get correct alpha-alpha integrals
-    int2aa = is_uhf ? fcidump.int2aa : fcidump.int2
-    
-    # Matrix element: phase * [(ia|jb) - (ib|ja)]
-    h_element = int2aa[orb_i, orb_a, orb_j, orb_b] - int2aa[orb_i, orb_b, orb_j, orb_a]
-    return Scalar(phase) * h_element
-
-  elseif n_alpha_diff == 0 && n_beta_diff == 4
-    # Double beta excitation: both electrons in beta spin
-    # Orbitals: (i, j, a, b) where i,j → a,b
-    orb_i = excitation.orb_indices[1] + 1
-    orb_j = excitation.orb_indices[2] + 1
-    orb_a = excitation.orb_indices[3] + 1
-    orb_b = excitation.orb_indices[4] + 1
-
-    # Get correct beta-beta integrals
-    int2bb = is_uhf ? fcidump.int2bb : fcidump.int2
-    
-    # Matrix element: phase * [(ia|jb) - (ib|ja)]
-    h_element = int2bb[orb_i, orb_a, orb_j, orb_b] - int2bb[orb_i, orb_b, orb_j, orb_a]
-    return Scalar(phase) * h_element
-
-  elseif n_alpha_diff == 2 && n_beta_diff == 2
-    # Alpha-beta mixed excitation: one electron in each spin
-    # Orbitals: (i_α, i_β, a_α, a_β) where i_α → a_α (alpha) and i_β → a_β (beta)
-    orb_i_alpha = excitation.orb_indices[1] + 1
-    orb_i_beta = excitation.orb_indices[2] + 1
-    orb_a_alpha = excitation.orb_indices[3] + 1
-    orb_a_beta = excitation.orb_indices[4] + 1
-
-    # Get correct alpha-beta integrals
-    int2ab = is_uhf ? fcidump.int2ab : fcidump.int2
-    
-    # Matrix element: phase * (i_α a_α | i_β a_β) - NO exchange term!
-    h_element = int2ab[orb_i_alpha, orb_a_alpha, orb_i_beta, orb_a_beta]
-    return Scalar(phase) * h_element
-
-  else
-    # Should never reach here if analyze_determinant_excitation is correct
-    return 0.0
-  end
+  
+  return (n_alpha_diff + n_beta_diff) <= 4
 end
 
 # ===========================================
@@ -465,9 +333,6 @@ end
 
 Compute H*c matrix-vector product directly without storing Hamiltonian matrix.
 This is the core function for Selected CI calculations.
-
-Applies Slater-Condon rule screening: only computes matrix elements between
-determinants differing by at most 2 orbital occupations (same, single, or double excitations).
 """
 function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Scalar},
                                         selected_ctx::SelectedCIContext, prefactor::Scalar)
@@ -478,31 +343,18 @@ function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Sc
   fill!(result, 0.0)
   for i in 1:n_selected
     det_i = selected_ctx.selected_dets.determinants[i]
-
     for j in 1:n_selected
       if abs(input[j]) < ThrNeglect
         continue  # Skip negligible coefficients for efficiency
       end
-
       det_j = selected_ctx.selected_dets.determinants[j]
-      
-      # Slater-Condon screening: skip if determinants differ by > 2 orbitals
-      # Count differing orbitals in alpha and beta spins
-      alpha_diff = det_i.alpha ⊻ det_j.alpha
-      beta_diff = det_i.beta ⊻ det_j.beta
-      n_alpha_diff = count_ones(alpha_diff)
-      n_beta_diff = count_ones(beta_diff)
-      
-      # Matrix element is zero if total differences > 4
-      # (4 because each single excitation changes 2 bits: remove one, add one)
-      if n_alpha_diff + n_beta_diff > 4
-        continue  # Skip: matrix element is exactly zero
+      if slater_condon_allowed(det_i, det_j)
+        h_ij = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
+        result[i] += h_ij * input[j]
       end
-      
-      h_ij = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
-      result[i] += prefactor * h_ij * input[j]
     end
   end
+  result .*= prefactor
 end
 
 """
@@ -891,8 +743,35 @@ where SS = same spin, OS = opposite spin.
 function compute_fock_element(int1, h1e2_same, h1e2_opp, occ_same, occ_opp,
                               a::Int, i::Int)::Float64
   # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
-  return int1[a, i] + sum_h1e2(h1e2_same, occ_same, a, i)
-                    + sum_h1e2(h1e2_opp, occ_opp, a, i)
+  return int1[a, i] + sum_h1e2(h1e2_same, occ_same, a, i) + sum_h1e2(h1e2_opp, occ_opp, a, i)
+end
+
+"""
+    sum_h1e2(h1e2, str::OrbPattern, a, i) -> Float64
+
+Compute Σ_j h1e2[j, a, i] over occupied orbitals j.
+"""
+@inline function sum_h1e2(h1e2, str::OrbPattern, a, i)
+  total = 0.0
+  @inbounds @simd for k in 1:size(h1e2, 1)
+    if (str >>> (k-1)) & one(str) != zero(str)
+      total += h1e2[k, a, i]
+    end
+  end
+  return total
+end
+"""
+    compute_fock_element(int1, h1e2_same, h1e2_opp, str_same::OrbPattern, str_opp::OrbPattern,
+                        a::Int, i::Int) -> Float64
+
+Compute Fock matrix element f_ai
+f_ai = h_ai + Σ_j (v_aijj - v_ajji)_SS + Σ_j (v_aijj)_OS
+where SS = same spin, OS = opposite spin. 
+"""
+function compute_fock_element(int1, h1e2_same, h1e2_opp, str_same::OrbPattern, str_opp::OrbPattern,
+                              a::Int, i::Int)::Float64
+  # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
+  return int1[a, i] + sum_h1e2(h1e2_same, str_same, a, i) + sum_h1e2(h1e2_opp, str_opp, a, i)
 end
 
 """
@@ -993,109 +872,11 @@ end
 """
     compute_diagonal_element(det::Determinant, ctx) -> Scalar
 
-Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant.
+Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
 Works with both FCIContext and HCIContext.
 """
 function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
-  fcidump = ctx.fcidump
-  n_orb = ctx.n_orb
-  n_elec = ctx.n_elec[1] + ctx.n_elec[2]
-  f_scale = 1.0 / n_elec
-  
-  # DiagonalHEvalData uses double loop over ALL orbitals with occupation factors
-  
-  f_elem = 0.0
-  
-  # NOTE: When absorb_1e=true, hbar arrays are empty, so NO 1e contribution
-  # TODO precompute j/k matrices with absorbed 1e integrals for efficiency
-  if fcidump.uhf
-    # UHF case: replicate DiagonalHEvalData formula line-by-line
-    for i in 1:n_orb
-      # Get occupation numbers for orbital i
-      ni_a = Int((det.alpha >> (i-1)) & 1)
-      ni_b = Int((det.beta >> (i-1)) & 1)
-
-      if ni_a + ni_b == 0
-        continue  # Skip if orbital i is completely unoccupied
-      end
-
-      for j in 1:n_orb
-        # Get occupation numbers for orbital j
-        nj_a = Int((det.alpha >> (j-1)) & 1)
-        nj_b = Int((det.beta >> (j-1)) & 1)
-
-        # Compute absorbed jaa, jbb, jab (Coulomb-like terms)
-        # jaa[i,j] = int2aa_absorbed[i,i,j,j]
-        jaa_absorbed = fcidump.int2aa[i, i, j, j]
-        jaa_absorbed += f_scale * (ctx.mod_core_h_a[j, j] + ctx.mod_core_h_a[i, i])
-
-        jbb_absorbed = fcidump.int2bb[i, i, j, j]
-        jbb_absorbed += f_scale * (ctx.mod_core_h_b[j, j] + ctx.mod_core_h_b[i, i])
-
-        jab_absorbed = fcidump.int2ab[i, i, j, j]
-        # For jab: alpha part contributes core_h_a, beta part contributes core_h_b
-        jab_absorbed += f_scale * (ctx.mod_core_h_b[j, j] + ctx.mod_core_h_a[i, i])
-
-        # Compute absorbed kaa, kbb (Exchange-like terms)
-        kaa_absorbed = fcidump.int2aa[i, j, i, j]
-        # kaa only gets absorbed contribution when i==j
-        if i == j
-          kaa_absorbed += 2.0 * f_scale * ctx.mod_core_h_a[i, i]
-        end
-
-        kbb_absorbed = fcidump.int2bb[i, j, i, j]
-        if i == j
-          kbb_absorbed += 2.0 * f_scale * ctx.mod_core_h_b[i, i]
-        end
-        
-        f_elem += ni_a * nj_b * jab_absorbed
-        f_elem += (ni_a * nj_a) * 0.5 * jaa_absorbed
-        f_elem += (ni_b * nj_b) * 0.5 * jbb_absorbed
-        
-        f_elem += 0.5 * kaa_absorbed * (ni_a * (1 - nj_a))
-        f_elem += 0.5 * kbb_absorbed * (ni_b * (1 - nj_b))
-      end
-    end
-  else
-    # RHF case: same structure but int2aa = int2bb = int2ab = int2 (spatial)
-    for i in 1:n_orb
-      ni_a = Int((det.alpha >> (i-1)) & 1)
-      ni_b = Int((det.beta >> (i-1)) & 1)
-
-      if ni_a + ni_b == 0
-        continue
-      end
-
-      for j in 1:n_orb
-        nj_a = Int((det.alpha >> (j-1)) & 1)
-        nj_b = Int((det.beta >> (j-1)) & 1)
-
-        # Compute absorbed integrals
-        jaa_absorbed = fcidump.int2[i, i, j, j]
-        jaa_absorbed += f_scale * (ctx.mod_core_h_a[j, j] + ctx.mod_core_h_a[i, i])
-
-        # For RHF, jbb = jaa and jab = jaa (same spatial integrals)
-        jbb_absorbed = jaa_absorbed
-        jab_absorbed = jaa_absorbed
-
-        kaa_absorbed = fcidump.int2[i, j, i, j]
-        if i == j
-          kaa_absorbed += 2.0 * f_scale * ctx.mod_core_h_a[i, i]
-        end
-        kbb_absorbed = kaa_absorbed
-        
-        # Apply formula
-        f_elem += ni_a * nj_b * jab_absorbed
-        f_elem += (ni_a * nj_a) * 0.5 * jaa_absorbed
-        f_elem += (ni_b * nj_b) * 0.5 * jbb_absorbed
-        
-        f_elem += 0.5 * kaa_absorbed * (ni_a * (1 - nj_a))
-        f_elem += 0.5 * kbb_absorbed * (ni_b * (1 - nj_b))
-      end
-    end
-  end
-  
-  return Scalar(f_elem)
+  return calc_diagonalH(ctx.heval_data, det.alpha, det.beta)
 end
 
 # ===========================================
@@ -1154,9 +935,7 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
   variational_set = Set(variational_dets)
   setdiff!(connected, variational_set)
   
-  println("Generated $(length(connected)) connected determinants from variational space of size $(length(variational_dets))") 
   total_prob = 0.0
-  
   for det_J in connected
     # Compute H_JJ (diagonal element)
     H_JJ = compute_diagonal_element(det_J, ctx)
@@ -1165,21 +944,11 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
     # Compute perturbative contribution: sum over I in variational space
     sum_term = 0.0
     for (i, det_I) in enumerate(variational_dets)
-      # Slater-Condon screening: skip if determinants differ by > 2 orbitals
-      # Count differing orbitals in alpha and beta spins
-      alpha_diff = det_I.alpha ⊻ det_J.alpha
-      beta_diff = det_I.beta ⊻ det_J.beta
-      n_alpha_diff = count_ones(alpha_diff)
-      n_beta_diff = count_ones(beta_diff)
-      
-      # Matrix element is zero if total differences > 4
-      # (4 because each single excitation changes 2 bits: remove one, add one)
-      if n_alpha_diff + n_beta_diff > 4
-        continue  # Skip: matrix element is exactly zero
+      if slater_condon_allowed(det_I, det_J)
+        c_I = variational_coeffs[i]
+        H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
+        sum_term += c_I * H_IJ
       end
-      c_I = variational_coeffs[i]
-      H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
-      sum_term += c_I * H_IJ
     end
     
     # Selection probability: |Σ c_I H_IJ|² / ΔE²
@@ -1279,22 +1048,12 @@ function compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandida
     sum_terms = zeros(Float64, n_states)
     # Compute perturbative contribution for each state: sum over I in variational space
     for (i, det_I) in enumerate(variational_dets)
-      # Slater-Condon screening: skip if determinants differ by > 2 orbitals
-      # Count differing orbitals in alpha and beta spins
-      alpha_diff = det_I.alpha ⊻ det_J.alpha
-      beta_diff = det_I.beta ⊻ det_J.beta
-      n_alpha_diff = count_ones(alpha_diff)
-      n_beta_diff = count_ones(beta_diff)
-    
-      # Matrix element is zero if total differences > 4
-      # (4 because each single excitation changes 2 bits: remove one, add one)
-      if n_alpha_diff + n_beta_diff > 4
-        continue  # Skip: matrix element is exactly zero
-      end
-      H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
-      for state in 1:n_states
-        c_I = variational_coeffs[i, state]
-        sum_terms[state] += c_I * H_IJ
+      if slater_condon_allowed(det_I, det_J)
+        H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
+        for state in 1:n_states
+          c_I = variational_coeffs[i, state]
+          sum_terms[state] += c_I * H_IJ
+        end
       end
     end
       
@@ -1442,7 +1201,6 @@ function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
           end
           
           # Compute antisymmetrized two-electron integral <pq||rs>
-          # Using same convention as double_excitation_matrix_element:
           # Matrix element for double excitation p,q → r,s is (pr|qs) - (ps|qr)
           # Note: int2[i,a,j,b] represents integral (ia|jb)
           # Convert to 1-based for array indexing
@@ -1804,7 +1562,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   E_prev_vec = copy(E_init_vec)
   previous_eigenvectors = nothing  # Track previous eigenvectors for warm start
   converged = false
-  
+  res_tol = options.res_tol * 100  # Looser tolerance for main loop diagonalization
   for iter in 1:options.max_iterations
     if options.verbose
       println("\nHBCI Iteration $iter:")
@@ -1815,7 +1573,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     selected_ctx = SelectedCIContext(ctx, variational_dets)
     E_electronic_vec, coeffs_matrix = diagonalize_selected_space(selected_ctx,
                                                                  nstates=options.nstates,
-                                                                 previous_vectors=previous_eigenvectors)
+                                                                 previous_vectors=previous_eigenvectors,
+                                                                 conv_tol=res_tol)
     E_current_vec = E_electronic_vec .+ ctx.fcidump.int0  # Add nuclear repulsion
     
     if options.verbose
@@ -1832,6 +1591,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     # 2. Check convergence (all states must converge)
     ΔE_vec = abs.(E_current_vec .- E_prev_vec)
     ΔE_max = maximum(ΔE_vec)
+
+    res_tol = max(min(res_tol, ΔE_max/10), options.res_tol)  # Tighten tolerance for next iteration
     
     if options.verbose
       if options.nstates == 1
@@ -1915,7 +1676,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   selected_ctx = SelectedCIContext(ctx, variational_dets)
   E_electronic_vec, coeffs_final_matrix = diagonalize_selected_space(selected_ctx,
                                                                      nstates=options.nstates,
-                                                                     previous_vectors=previous_eigenvectors)
+                                                                     previous_vectors=previous_eigenvectors,
+                                                                     conv_tol=options.res_tol)
   
   # Add nuclear repulsion energy for total energy
   E_final_vec = E_electronic_vec .+ ctx.fcidump.int0
@@ -1986,7 +1748,8 @@ end
 """
     diagonalize_selected_space(selected_ctx::SelectedCIContext; 
                                nstates::Int=1,
-                               previous_vectors::Union{Nothing,Matrix{Float64}}=nothing) 
+                               previous_vectors::Union{Nothing,Matrix{Float64}}=nothing,
+                               conv_tol::Float64=1e-6) 
       -> (Vector{Float64}, Matrix{Float64})
 
 Diagonalize the Hamiltonian in the selected CI space.
@@ -2009,7 +1772,8 @@ For large spaces (≥ 1000 determinants), uses Davidson iterative diagonalizatio
 """
 function diagonalize_selected_space(selected_ctx::SelectedCIContext; 
                                    nstates::Int=1,
-                                   previous_vectors::Union{Nothing,Matrix{Float64}}=nothing)::Tuple{Vector{Scalar}, Matrix{Scalar}}
+                                   previous_vectors::Union{Nothing,Matrix{Float64}}=nothing,
+                                   conv_tol::Float64=1e-6)::Tuple{Vector{Scalar}, Matrix{Scalar}}
   n_selected = selected_ctx.selected_dets.n_selected
   nstates = min(nstates, n_selected)  # Can't compute more roots than determinants
   
@@ -2021,20 +1785,8 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
       det_i = selected_ctx.selected_dets.determinants[i]
       for j in i:n_selected
         det_j = selected_ctx.selected_dets.determinants[j]
-        # Slater-Condon screening: skip if determinants differ by > 2 orbitals
-        # Count differing orbitals in alpha and beta spins
-        alpha_diff = det_i.alpha ⊻ det_j.alpha
-        beta_diff = det_i.beta ⊻ det_j.beta
-        n_alpha_diff = count_ones(alpha_diff)
-        n_beta_diff = count_ones(beta_diff)
-      
-        # Matrix element is zero if total differences > 4
-        # (4 because each single excitation changes 2 bits: remove one, add one)
-        if n_alpha_diff + n_beta_diff > 4
-          continue  # Skip: matrix element is exactly zero
-        end
-        H_matrix[i,j] = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
-        if i != j
+        if slater_condon_allowed(det_i, det_j)
+          H_matrix[i,j] = compute_matrix_element_direct(det_i, det_j, selected_ctx.base_context)
           H_matrix[j,i] = H_matrix[i,j]
         end
       end
@@ -2073,7 +1825,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
       initial_guesses,
       nstates = nstates,
       max_iterations = 50,
-      convergence_threshold = 1e-8,
+      convergence_threshold = conv_tol,
       verbose = false
     )
     return real.(eigenvalues), real.(eigenvectors)
@@ -2091,7 +1843,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     initial_guess,
     nstates = nstates,
     max_iterations = 50,
-    convergence_threshold = 1e-8,
+    convergence_threshold = conv_tol,
     verbose = false
   )
   return real.(eigenvalues), real.(eigenvectors)

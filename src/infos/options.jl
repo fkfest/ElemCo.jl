@@ -280,6 +280,8 @@ end
   epsilon_p::Float64 = -1.0
   """`⟨1e-6⟩` Energy convergence threshold """
   tol::Float64 = 1e-6
+  """`⟨1e-6⟩` Convergence tolerance for residual norm """
+  res_tol::Float64 = 1e-6
   """`⟨50⟩` Maximum HBCI iterations """
   max_iterations::Int = 50
   """`⟨true⟩` Print iteration details """
