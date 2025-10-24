@@ -145,7 +145,6 @@ For a system with 23 orbitals:
 - `n_orb::Int` - Number of spatial orbitals
 - `n_elec::Tuple{Int,Int}` - (n_alpha, n_beta) electron counts
 - `reference_det::Determinant` - Reference determinant
-- `is_uhf::Bool` - Whether using UHF integrals
 - `mod_core_h_a::Matrix{Scalar}` - Modified core Hamiltonian for alpha spin
 - `mod_core_h_b::Matrix{Scalar}` - Modified core Hamiltonian for beta spin
 - `heval_data::HEvalData` - Precomputed arrays for diagonal and Fock elements
@@ -197,8 +196,8 @@ mutable struct HCIContext
       int2aa = fcidump.int2
       int2bb = fcidump.int2
     end
-    @tensor mod_core_h_a[m,n] -= 0.5 * int2aa[m,i,n,i]
-    @tensor mod_core_h_b[m,n] -= 0.5 * int2bb[m,i,n,i]
+    @tensor mod_core_h_a[m,n] -= 0.5 * int2aa[m,i,i,n]
+    @tensor mod_core_h_b[m,n] -= 0.5 * int2bb[m,i,i,n]
 
     n_alpha = (n_elec + ms2) ÷ 2
     n_beta = (n_elec - ms2) ÷ 2

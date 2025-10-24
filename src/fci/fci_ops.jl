@@ -151,7 +151,7 @@ function get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar})
   jk = zeros(Scalar, n_orb, n_orb)
   @inbounds for i in 1:n_orb
     for j in 1:i
-      jij = 0.5 * (int2e[i, i, j, j] - int2e[i, j, i, j])  # (ii|jj) - (ij|ij)
+      jij = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])  # v_ij^ij - v_ij^ji
       jk[i, j] = jij
       jk[j, i] = jij
     end
@@ -169,8 +169,8 @@ function get_diagonal_pair_ints(int2e::AbstractArray{Scalar})
   jab = zeros(Scalar, n_orb, n_orb)
   @inbounds for i in 1:n_orb
     for j in 1:i
-      jab[i, j] = int2e[i, i, j, j]       # (ii|jj) - raw integral
-      jab[j, i] = int2e[j, j, i, i]       # (jj|ii)
+      jab[i, j] = int2e[i, j, i, j]       # v_ij^ij - raw integral
+      jab[j, i] = int2e[j, i, j, i]       # v_ji^ji
     end
   end
   return jab
@@ -239,8 +239,8 @@ function absorb_1e!(int2::Array{Scalar, 4}, n_orb::Integer, n_elec::Integer,
     for i in 1:n_orb
       for j in 1:n_orb
         # Absorb 1e terms into 2e integrals
-        int2[k, k, i, j] += f_scale * core_h_y[j, i]
-        int2[i, j, k, k] += f_scale * core_h_x[j, i]
+        int2[k, i, k, j] += f_scale * core_h_y[j, i]
+        int2[i, k, j, k] += f_scale * core_h_x[j, i]
       end
     end
   end
@@ -260,9 +260,9 @@ function calc_mod_core_h!(mod_core_h::Matrix{Scalar}, int2::Array{Scalar, 4},
   fill!(mod_core_h, 0.0)
   if !c1_integrals
     # Use broadcasting for efficient calculation
-    # mod_core_h[m, n] -= 0.5 * sum_i(int2[m, i, n, i])
+    # mod_core_h[m, n] -= 0.5 * sum_i(int2[m, i, i, n])
     @inbounds for i in 1:n_orb
-      mod_core_h .-= 0.5 .* view(int2, :, i, :, i)
+      mod_core_h .-= 0.5 .* view(int2, :, i, i, :)
     end
   end
 end
@@ -286,11 +286,11 @@ function init_hamiltonian_terms!(context::FCIContext)
     int2bb_modified = copy(context.fcidump.int2bb)
     int2ab_modified = copy(context.fcidump.int2ab)
     # Calculate modified core Hamiltonian for alpha spin using int2aa
-    # mod_core_h_a[m,n] = int1a[m,n] - 0.5 * sum_i(int2aa[m,i,n,i])
+    # mod_core_h_a[m,n] = int1a[m,n] - 0.5 * sum_i(int2aa[m,i,i,n])
     calc_mod_core_h!(context.mod_core_h_a, int2aa_modified, n_orb, false)
     
     # Calculate modified core Hamiltonian for beta spin using int2bb
-    # mod_core_h_b[m,n] = int1b[m,n] - 0.5 * sum_i(int2bb[m,i,n,i])
+    # mod_core_h_b[m,n] = int1b[m,n] - 0.5 * sum_i(int2bb[m,i,i,n])
     calc_mod_core_h!(context.mod_core_h_b, int2bb_modified, n_orb, false)
     
     # Add original core Hamiltonian for each spin
@@ -566,7 +566,7 @@ function convert_op2_to_pair_matrix(op::AbstractArray{Scalar}, n_orb::Int)
         for k in 1:n_orb
           for l in 1:n_orb
             kl = pair_index(k, l)
-            mat[ij, kl] = op[i, j, k, l]
+            mat[ij, kl] = op[i, k, j, l]
           end
         end
       end
@@ -576,59 +576,6 @@ function convert_op2_to_pair_matrix(op::AbstractArray{Scalar}, n_orb::Int)
     mat .= op
   else
     error("Unsupported integral tensor dimensions: $(ndims(op))")
-  end
-  return mat
-end
-
-"""
-    convert_op2_to_pair_matrix_same_spin(op::AbstractArray{Scalar}, n_orb::Int)
-
-Convert 4D integral tensor to pair matrix format for same-spin interactions.
-"""
-function convert_op2_to_pair_matrix_same_spin(op::AbstractArray{Scalar}, n_orb::Int)
-  n_pairs = n_orb * (n_orb + 1) ÷ 2
-  mat = zeros(Scalar, n_pairs, n_pairs)
-  if ndims(op) == 4
-    @inbounds for i in 1:n_orb
-      for j in 1:n_orb
-        ij = pair_index(i, j)
-        for k in 1:n_orb
-          for l in 1:n_orb
-            kl = pair_index(k, l)
-            mat[ij, kl] = op[i, j, k, l]    # Raw (ij|kl)
-          end
-        end
-      end
-    end
-  else
-    error("Same-spin pair matrix requires 4D integral tensor")
-  end
-  return mat
-end
-
-"""
-    convert_op2_to_pair_matrix_opposite_spin(op::AbstractArray{Scalar}, n_orb::Int)
-
-Convert 4D integral tensor to pair matrix format for opposite-spin interactions.
-Stores pure Coulomb integrals: `(ij|kl)` without exchange correction.
-"""
-function convert_op2_to_pair_matrix_opposite_spin(op::AbstractArray{Scalar}, n_orb::Int)
-  n_pairs = n_orb * (n_orb + 1) ÷ 2
-  mat = zeros(Scalar, n_pairs, n_pairs)
-  if ndims(op) == 4
-    @inbounds for i in 1:n_orb
-      for j in 1:n_orb
-        ij = pair_index(i, j)
-        for k in 1:n_orb
-          for l in 1:n_orb
-            kl = pair_index(k, l)
-            mat[ij, kl] = op[i, j, k, l]    # (ij|kl)
-          end
-        end
-      end
-    end
-  else
-    error("Opposite-spin pair matrix requires 4D integral tensor")
   end
   return mat
 end

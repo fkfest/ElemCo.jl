@@ -270,8 +270,8 @@ end
   $(TYPEDFIELDS)
 """
 @kwdef mutable struct HCIOptions
-  """`⟨1000000⟩` Target number of determinants to select """
-  target_selection::Int = 1000000
+  """`⟨1_000_000⟩` Target (i.e., maximum) number of determinants to select """
+  target_selection::Int = 1_000_000
   """`⟨3e-4⟩` Selection threshold """
   epsilon::Float64 = 3e-4
   """`⟨epsilon⟩` HCI selection threshold """

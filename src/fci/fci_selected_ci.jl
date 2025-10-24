@@ -382,7 +382,7 @@ function double_alpha_excitation_matrix_element(context::Union{FCIContext, HCICo
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   fcidump = context.fcidump
   int2aa = fcidump.uhf ? fcidump.int2aa : fcidump.int2
-  return int2aa[orb_a, orb_i, orb_b, orb_j] - int2aa[orb_a, orb_j, orb_b, orb_i]
+  return int2aa[orb_a, orb_b, orb_i, orb_j] - int2aa[orb_a, orb_b, orb_j, orb_i]
 end
 
 """
@@ -394,7 +394,7 @@ function double_beta_excitation_matrix_element(context::Union{FCIContext, HCICon
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   fcidump = context.fcidump
   int2bb = fcidump.uhf ? fcidump.int2bb : fcidump.int2
-  return int2bb[orb_a, orb_i, orb_b, orb_j] - int2bb[orb_a, orb_j, orb_b, orb_i]
+  return int2bb[orb_a, orb_b, orb_i, orb_j] - int2bb[orb_a, orb_b, orb_j, orb_i]
 end
 
 """
@@ -406,7 +406,7 @@ function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   fcidump = context.fcidump
   int2ab = fcidump.uhf ? fcidump.int2ab : fcidump.int2
-  return int2ab[orb_a, orb_i, orb_b, orb_j]
+  return int2ab[orb_a, orb_b, orb_i, orb_j]
 end
 
 """
@@ -1325,10 +1325,8 @@ function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
           end
           
           # Compute antisymmetrized two-electron integral <pq||rs>
-          # Matrix element for double excitation p,q → r,s is (pr|qs) - (ps|qr)
-          # Note: int2[i,a,j,b] represents integral (ia|jb)
-          # Convert to 1-based for array indexing
-          h_val = abs(int2[p, r, q, s] - int2[p, s, q, r])
+          # Matrix element for double excitation p,q → r,s is v_pq^rs - v_pq^sr
+          h_val = abs(int2[p, q, r, s] - int2[p, q, s, r])
           
           if h_val > 1e-10  # Skip negligible matrix elements
             push!(triplets, (r, s, h_val))
@@ -1361,9 +1359,9 @@ function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4})
         for s in 1:n_orb
           if s == q; continue; end  # Beta s cannot equal beta q
           
-          # Mixed integral (pr|qs)_αβ (no antisymmetrization for different spins)
-          h_val = abs(int2ab[p, r, q, s])
-          
+          # Mixed integral v_pq^rs (αβ) (no antisymmetrization for different spins)
+          h_val = abs(int2ab[p, q, r, s])
+
           if h_val > 1e-10
             push!(triplets, (r, s, h_val))
             h_doub_max = max(h_doub_max, h_val)

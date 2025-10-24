@@ -216,15 +216,15 @@ function HEvalData(int2e, core_h)
   
   # One-electron integrals
   ha = diag(core_h)
-  
-  # Precompute h1e2 array for alpha-beta excitations
+
+  # Precompute h1e2 arrays
   h1e2 = zeros(Scalar, n_orb, n_orb, n_orb)
   h1e2_ab = zeros(Scalar, n_orb, n_orb, n_orb)
   for i in 1:n_orb
     for p in 1:n_orb, q in 1:n_orb
-      h_pqii = int2e[p,q,i,i]
-      h1e2[i,p,q] = h_pqii - int2e[p,i,i,q]
-      h1e2_ab[i,p,q] = h_pqii
+      h_piqi = int2e[p,i,q,i]
+      h1e2[i,p,q] = h_piqi - int2e[p,i,i,q]
+      h1e2_ab[i,p,q] = h_piqi
     end
   end
   return HEvalData(jk, jab, ha, h1e2, h1e2_ab)
@@ -251,12 +251,12 @@ function HEvalData(int2e_aa, int2e_bb, int2e_ab, core_h_a, core_h_b)
   for i in 1:n_orb
     for p in 1:n_orb, q in 1:n_orb
       # Alpha-alpha
-      h1e2_aa[i,p,q] = int2e_aa[p,q,i,i] - int2e_aa[p,i,i,q]
+      h1e2_aa[i,p,q] = int2e_aa[p,i,q,i] - int2e_aa[p,i,i,q]
       # Beta-beta
-      h1e2_bb[i,p,q] = int2e_bb[p,q,i,i] - int2e_bb[p,i,i,q]
+      h1e2_bb[i,p,q] = int2e_bb[p,i,q,i] - int2e_bb[p,i,i,q]
       # Alpha-beta
-      h1e2_ab[i,p,q] = int2e_ab[p,q,i,i]
-      h1e2_ba[i,p,q] = int2e_ab[i,i,p,q]
+      h1e2_ab[i,p,q] = int2e_ab[p,i,q,i]
+      h1e2_ba[i,p,q] = int2e_ab[i,p,i,q]
     end
   end
   return HEvalData(jkaa, jkbb, jab, ha, hb,

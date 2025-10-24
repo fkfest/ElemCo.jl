@@ -521,12 +521,12 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
   if EC.fd.uhf
     fdump.int1a = EC.fd.int1a
     fdump.int1b = EC.fd.int1b
-    fdump.int2aa = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
-    fdump.int2bb = permutedims(ints2(EC, "MMMM"), (1,3,2,4))
-    fdump.int2ab = permutedims(ints2(EC, "mMmM"), (1,3,2,4))
+    fdump.int2aa = ints2(EC, "mmmm")
+    fdump.int2bb = ints2(EC, "MMMM")
+    fdump.int2ab = ints2(EC, "mMmM")
   else
     fdump.int1 = EC.fd.int1
-    fdump.int2 = permutedims(ints2(EC, "mmmm"), (1,3,2,4))
+    fdump.int2 = ints2(EC, "mmmm")
   end
   
   # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
