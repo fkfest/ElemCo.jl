@@ -494,20 +494,7 @@ function build_small_space_hamiltonian(context::Union{FCIContext,HCIContext}, de
   selected_ctx = setup_selected_ci_from_determinants!(context, determinants)
   
   # Build Hamiltonian matrix using Selected CI machinery
-  H_small = zeros(Scalar, n_small, n_small)
-  
-  for i in 1:n_small
-    # Create unit vector for determinant i
-    unit_vec = zeros(Scalar, n_small)
-    unit_vec[i] = one(Scalar)
-    
-    # Apply Hamiltonian: H * e_i gives column i
-    result_vec = zeros(Scalar, n_small)
-    contract_hamiltonian_selected!(result_vec, unit_vec, selected_ctx, one(Scalar))
-    
-    # Store column of Hamiltonian matrix
-    H_small[:, i] = result_vec
-  end
+  H_small = hamiltonian_matrix(selected_ctx)
   
   return H_small
 end
@@ -589,13 +576,8 @@ function initialize_multistate_from_small_space(context::Union{FCIContext, HCICo
     end
   end
   
-  return SmallSpaceResult(
-    small_space_dets,
-    eigenvalues_selected,
-    eigenvectors_selected,
-    n_small,
-    nstates
-  )
+  return SmallSpaceResult(small_space_dets, eigenvalues_selected, eigenvectors_selected,
+                          n_small, nstates)
 end
 
 """
@@ -756,11 +738,7 @@ end
 Project P-space eigenvector onto full CI space.
 Zeros coefficients for determinants not in P-space and normalizes.
 """
-function project_pspace_to_fullspace!(
-  v_full::FCIVector,
-  v_pspace::Vector{Scalar},
-  pspace_data::PSpaceData,
-)
+function project_pspace_to_fullspace!(v_full::FCIVector, v_pspace::Vector{Scalar}, pspace_data::PSpaceData)
   # Zero the full vector
   fill!(v_full.data, 0.0)
 
@@ -783,11 +761,7 @@ end
 Generate high-quality initial guess vectors using P-space eigenvectors.
 This replaces the diagonal-based initial guess with P-space enhanced vectors.
 """
-function generate_pspace_initial_guess!(
-  context::FCIContext,
-  guess_vectors::Vector{FCIVector},
-  n_states::Int,
-)
+function generate_pspace_initial_guess!(context::FCIContext, guess_vectors::Vector{FCIVector}, n_states::Int)
   pspace = context.pspace_data
 
   if pspace.n_pspace == 0 || isempty(pspace.eigenvectors)

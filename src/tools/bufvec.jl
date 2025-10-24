@@ -32,7 +32,7 @@ x = buf[1]
 # Iterate with SIMD
 s = 0.0
 @inbounds @simd for i in 1:length(buf)
-    s += buf[i]
+  s += buf[i]
 end
 
 # Clear for reuse
@@ -40,19 +40,19 @@ empty!(buf)
 ```
 """
 mutable struct BufVec{T,A<:AbstractVector{T}} <: AbstractVector{T}
-    data::A
-    length::Int
-    
-    function BufVec{T,A}(data::A) where {T,A<:AbstractVector{T}}
-        new{T,A}(data, 0)
+  data::A
+  length::Int
+  
+  function BufVec{T,A}(data::A) where {T,A<:AbstractVector{T}}
+    new{T,A}(data, 0)
+  end
+  
+  function BufVec{T,A}(data::A, length::Int) where {T,A<:AbstractVector{T}}
+    if length < 0 || length > Base.length(data)
+      throw(ArgumentError("length must be between 0 and $(Base.length(data)), got $length"))
     end
-    
-    function BufVec{T,A}(data::A, length::Int) where {T,A<:AbstractVector{T}}
-        if length < 0 || length > Base.length(data)
-            throw(ArgumentError("length must be between 0 and $(Base.length(data)), got $length"))
-        end
-        new{T,A}(data, length)
-    end
+    new{T,A}(data, length)
+  end
 end
 
 # Convenience constructors
@@ -65,14 +65,14 @@ Base.length(buf::BufVec) = buf.length
 Base.eltype(::Type{BufVec{T,A}}) where {T,A} = T
 
 @inline function Base.getindex(buf::BufVec, i::Int)
-    @boundscheck checkbounds(buf, i)
-    @inbounds return buf.data[i]
+  @boundscheck checkbounds(buf, i)
+  @inbounds return buf.data[i]
 end
 
 @inline function Base.setindex!(buf::BufVec, val, i::Int)
-    @boundscheck checkbounds(buf, i)
-    @inbounds buf.data[i] = val
-    return val
+  @boundscheck checkbounds(buf, i)
+  @inbounds buf.data[i] = val
+  return val
 end
 
 # Capacity management
@@ -82,115 +82,115 @@ end
 
 # Modification operations
 @inline function Base.push!(buf::BufVec{T}, val) where {T}
-    @boundscheck begin
-        if is_full(buf)
-            throw(ArgumentError("Buffer is full (capacity=$(capacity(buf)))"))
-        end
+  @boundscheck begin
+    if is_full(buf)
+      throw(ArgumentError("Buffer is full (capacity=$(capacity(buf)))"))
     end
-    buf.length += 1
-    @inbounds buf.data[buf.length] = val
-    return buf
+  end
+  buf.length += 1
+  @inbounds buf.data[buf.length] = val
+  return buf
 end
 
 function Base.append!(buf::BufVec{T}, items) where {T}
-    n_items = Base.length(items)
-    new_length = buf.length + n_items
-    
-    if new_length > capacity(buf)
-        throw(ArgumentError("Cannot append $n_items items: would exceed capacity $(capacity(buf))"))
-    end
-    
-    @inbounds for item in items
-        buf.length += 1
-        buf.data[buf.length] = item
-    end
-    
-    return buf
+  n_items = Base.length(items)
+  new_length = buf.length + n_items
+  
+  if new_length > capacity(buf)
+    throw(ArgumentError("Cannot append $n_items items: would exceed capacity $(capacity(buf))"))
+  end
+  
+  @inbounds for item in items
+    buf.length += 1
+    buf.data[buf.length] = item
+  end
+  
+  return buf
 end
 
 function Base.pop!(buf::BufVec)
-    if isempty(buf)
-        throw(ArgumentError("Buffer is empty"))
-    end
-    @inbounds val = buf.data[buf.length]
-    buf.length -= 1
-    return val
+  if isempty(buf)
+    throw(ArgumentError("Buffer is empty"))
+  end
+  @inbounds val = buf.data[buf.length]
+  buf.length -= 1
+  return val
 end
 
 function Base.empty!(buf::BufVec)
-    buf.length = 0
-    return buf
+  buf.length = 0
+  return buf
 end
 
 function Base.resize!(buf::BufVec, n::Int)
-    if n < 0 || n > capacity(buf)
-        throw(ArgumentError("Cannot resize to $n: must be between 0 and $(capacity(buf))"))
-    end
-    buf.length = n
-    return buf
+  if n < 0 || n > capacity(buf)
+    throw(ArgumentError("Cannot resize to $n: must be between 0 and $(capacity(buf))"))
+  end
+  buf.length = n
+  return buf
 end
 
 Base.sizehint!(buf::BufVec, n::Int) = buf
 
 # Iteration
 @inline function Base.iterate(buf::BufVec, state=1)
-    state > buf.length && return nothing
-    @inbounds val = buf.data[state]
-    return (val, state + 1)
+  state > buf.length && return nothing
+  @inbounds val = buf.data[state]
+  return (val, state + 1)
 end
 
 # Display
 function Base.show(io::IO, buf::BufVec{T,A}) where {T,A}
-    print(io, "BufVec{$T,$A}(length=$(buf.length), capacity=$(capacity(buf)))")
-    if buf.length > 0
-        print(io, " [")
-        for i in 1:buf.length
-            print(io, " ", buf[i])
-        end
-        print(io, "]")
+  print(io, "BufVec{$T,$A}(length=$(buf.length), capacity=$(capacity(buf)))")
+  if buf.length > 0
+    print(io, " [")
+    for i in 1:buf.length
+      print(io, " ", buf[i])
     end
+    print(io, "]")
+  end
 end
 
 function Base.show(io::IO, ::MIME"text/plain", buf::BufVec{T,A}) where {T,A}
-    if get(io, :compact, false)
-        print(io, "BufVec{$T,$A}(length=$(buf.length), capacity=$(capacity(buf)))")
-        if buf.length > 0
-            print(io, " [")
-            for i in 1:buf.length
-                print(io, " ", buf[i])
-            end
-            print(io, "]")
-        end
-    else
-        println(io, "BufVec{$T,$A} with $(buf.length) elements (capacity=$(capacity(buf))):")
-        if buf.length > 0
-            Base.print_array(io, buf[1:buf.length])
-        end
+  if get(io, :compact, false)
+    print(io, "BufVec{$T,$A}(length=$(buf.length), capacity=$(capacity(buf)))")
+    if buf.length > 0
+      print(io, " [")
+      for i in 1:buf.length
+        print(io, " ", buf[i])
+      end
+      print(io, "]")
     end
+  else
+    println(io, "BufVec{$T,$A} with $(buf.length) elements (capacity=$(capacity(buf))):")
+    if buf.length > 0
+      Base.print_array(io, buf[1:buf.length])
+    end
+  end
 end
 
 # Conversion and copying
 Base.Vector(buf::BufVec{T}) where {T} = buf.length > 0 ? buf.data[1:buf.length] : T[]
 
 function Base.copy(buf::BufVec{T,A}) where {T,A}
-    new_data = copy(buf.data)
-    return BufVec(new_data, buf.length)
+  new_data = copy(buf.data)
+  return BufVec(new_data, buf.length)
 end
 
 function Base.copyto!(dest::BufVec, src::BufVec)
-    if Base.length(src) > capacity(dest)
-        throw(ArgumentError("Source length $(Base.length(src)) exceeds destination capacity $(capacity(dest))"))
-    end
-    @inbounds copyto!(dest.data, 1, src.data, 1, src.length)
-    dest.length = src.length
-    return dest
+  if Base.length(src) > capacity(dest)
+    throw(ArgumentError("Source length $(Base.length(src)) exceeds destination capacity $(capacity(dest))"))
+  end
+  @inbounds copyto!(dest.data, 1, src.data, 1, src.length)
+  dest.length = src.length
+  return dest
 end
 
 # Comparison
 function Base.:(==)(a::BufVec, b::BufVec)
-    a.length == b.length || return false
-    @inbounds for i in 1:a.length
-        a.data[i] == b.data[i] || return false
-    end
-    return true
+  a.length == b.length || return false
+  @inbounds for i in 1:a.length
+    a.data[i] == b.data[i] || return false
+  end
+  return true
 end
