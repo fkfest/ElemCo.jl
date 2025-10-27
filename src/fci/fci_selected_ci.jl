@@ -1024,13 +1024,12 @@ end
                                     variational_coeffs::Vector{Float64},
                                     ctx::FCIContext,
                                     E_current::Float64,
-                                    setup_data::Union{HBCISetupData,Nothing}=nothing,
+                                    setup_data::HBCISetupData,
                                     epsilon::Float64) -> Float64
 
 Compute Heat-Bath selection probabilities for all candidates.
 
-If setup_data is provided, uses efficient excitation generation
-with threshold-based filtering. Otherwise, generates all connected determinants.
+Uses efficient excitation generation with threshold-based filtering.
 Works with both FCIContext and HCIContext.
 
 Returns total selection probability sum.
@@ -1040,36 +1039,30 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
                                         variational_coeffs::Vector{Float64},
                                         ctx::Union{FCIContext, HCIContext},
                                         E_current::Float64,
-                                        setup_data::Union{HBCISetupData,Nothing}=nothing,
-                                        epsilon::Float64=1e-10)::Float64
+                                        setup_data::HBCISetupData,
+                                        epsilon::Float64)::Float64
+  t0 = time_ns()
   empty!(candidates)
   
   # Get all connected determinants from variational space
   connected = Set{Determinant}()
   temp_buffer = Determinant[]
   
-  if setup_data !== nothing
-    # Setup enabled: Use efficient threshold-based excitation generation
-    for (i, det) in enumerate(variational_dets)
-      c_I = variational_coeffs[i]
-      if abs(c_I) < 1e-10
-        continue  # Skip negligible coefficients
-      end
-      eps = epsilon / abs(c_I)
-      generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
-      union!(connected, temp_buffer)
+  # Use efficient threshold-based excitation generation
+  for (i, det) in enumerate(variational_dets)
+    c_I = variational_coeffs[i]
+    if abs(c_I) < 1e-10
+      continue  # Skip negligible coefficients
     end
-  else
-    # Setup disabled: Generate all connected determinants
-    for det in variational_dets
-      generate_connected_determinants!(temp_buffer, det, ctx)
-      union!(connected, temp_buffer)
-    end
+    eps = epsilon / abs(c_I)
+    generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
+    union!(connected, temp_buffer)
   end
   # Remove determinants already in variational space
   variational_set = Set(variational_dets)
   setdiff!(connected, variational_set)
   
+  t0 = print_time(2, t0, "Generated connected determinants", 1)
   total_prob = 0.0
   for det_J in connected
     # Compute H_JJ (diagonal element)
@@ -1094,6 +1087,7 @@ function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
     push!(candidates, HBCandidate(det_J, prob_J, contrib_J))
     total_prob += prob_J
   end
+  t0 = print_time(2, t0, "Generated perturbative contributions", 1)
   return total_prob
 end
 
@@ -1103,8 +1097,8 @@ end
                                               variational_coeffs::Matrix{Float64},
                                               ctx::Union{FCIContext, HCIContext},
                                               E_states::Vector{Float64},
-                                              setup_data::Union{HBCISetupData,Nothing}=nothing,
-                                              epsilon::Float64=1e-10)::Float64
+                                              setup_data::HBCISetupData,
+                                              epsilon::Float64)::Float64
 
 Compute Heat-Bath selection probabilities for multiple states simultaneously.
 
@@ -1117,7 +1111,7 @@ the maximum probability across states (state-max selection strategy).
 - `variational_coeffs`: Matrix (n_dets × n_states) of coefficients for all states
 - `ctx`: FCI or HCI context
 - `E_states`: Vector of energies for all states
-- `setup_data`: Optional setup data
+- `setup_data`: PCHB setup data
 - `epsilon`: Threshold for excitation generation
 
 # Returns
@@ -1128,8 +1122,8 @@ function compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandida
                                                    variational_coeffs::Matrix{Float64},
                                                    ctx::Union{FCIContext, HCIContext},
                                                    E_states::Vector{Float64},
-                                                   setup_data::Union{HBCISetupData,Nothing}=nothing,
-                                                   epsilon::Float64=1e-10)::Float64
+                                                   setup_data::HBCISetupData,
+                                                   epsilon::Float64)::Float64
   empty!(candidates)
   
   n_states = length(E_states)
@@ -1147,25 +1141,16 @@ function compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandida
     end
     return am
   end
-  if setup_data !== nothing
-    # Setup enabled: Use efficient threshold-based excitation generation
-    for (i, det) in enumerate(variational_dets)
-      abs_c_I = absmax(variational_coeffs, i)
-      if abs_c_I < 1e-10
-        continue  # Skip negligible coefficients
-      end
-      eps = epsilon / abs_c_I
-      generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
-      union!(connected, temp_buffer)
+  # Use efficient threshold-based excitation generation
+  for (i, det) in enumerate(variational_dets)
+    abs_c_I = absmax(variational_coeffs, i)
+    if abs_c_I < 1e-10
+      continue  # Skip negligible coefficients
     end
-  else
-    # Setup disabled: Generate all connected determinants
-    for det in variational_dets
-      generate_connected_determinants!(temp_buffer, det, ctx)
-      union!(connected, temp_buffer)
-    end
+    eps = epsilon / abs_c_I
+    generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
+    union!(connected, temp_buffer)
   end
-  
   # Remove determinants already in variational space
   variational_set = Set(variational_dets)
   setdiff!(connected, variational_set)
@@ -1434,7 +1419,7 @@ function compute_pt2_correction!(
   variational_dets::Vector{Determinant},
   coefficients::Vector{Float64},
   E_variational::Float64,
-  setup_data::Union{HBCISetupData, Nothing},
+  setup_data::HBCISetupData,
   options::HCIOptions
 )::PT2Result
   
@@ -1480,13 +1465,8 @@ function compute_pt2_correction!(
     
     # Generate connected determinants with |H_ki| > epsilon_adaptive
     empty!(connected)
-    if setup_data !== nothing
-      # Use efficient setup if available
-      generate_excitations_with_threshold!(connected, det_i, ctx, setup_data, epsilon_adaptive)
-    else
-      # Fallback: generate all connected determinants (slower)
-      generate_connected_determinants!(connected, det_i, ctx)
-    end
+    # Use efficient setup if available
+    generate_excitations_with_threshold!(connected, det_i, ctx, setup_data, epsilon_adaptive)
     
     total_excitations_generated += length(connected)
     
@@ -1597,23 +1577,20 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   # Initialization
   hf_det = get_reference_determinant(ctx)
   
-  # Setup (if enabled)
+  # Setup
   # Pre-compute and store sorted double excitation matrix elements
-  setup_data = nothing
-  if options.use_setup_phase
-    if options.verbose
-      println("\nSetup - Pre-computing double excitation matrix elements")
-      println("  Computing and sorting |H(rs ← pq)| for all orbital pairs...")
-    end
-    
-    setup_data = setup_hbci!(ctx)
-    
-    if options.verbose
-      n_pairs = length(setup_data.double_excitations)
-      total_triplets = sum(length(v) for v in values(setup_data.double_excitations))
-      println("  Stored $(n_pairs) (p,q) pairs with $(total_triplets) total (r,s) triplets")
-      println("  Maximum |H_doub|: $(setup_data.h_doub_max)")
-    end
+  if options.verbose
+    println("\nSetup - Pre-computing double excitation matrix elements")
+    println("  Computing and sorting |H(rs ← pq)| for all orbital pairs...")
+  end
+  
+  setup_data = setup_hbci!(ctx)
+  
+  if options.verbose
+    n_pairs = length(setup_data.double_excitations)
+    total_triplets = sum(length(v) for v in values(setup_data.double_excitations))
+    println("  Stored $(n_pairs) (p,q) pairs with $(total_triplets) total (r,s) triplets")
+    println("  Maximum |H_doub|: $(setup_data.h_doub_max)")
   end
   
   # Enhanced initial guess using small-space Hamiltonian (if enabled)

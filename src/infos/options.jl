@@ -260,8 +260,6 @@ end
   pspace_energy_threshold::Float64 = 5.0
   """`⟨1e-3⟩` HCI selection threshold (epsilon_h) for P-space generation """
   pspace_hci_epsilon::Float64 = 1e-3
-  """`⟨true⟩` Enable setup for HCI P-space generation """
-  pspace_hci_use_setup_phase::Bool = true
 end
 
 """
@@ -286,8 +284,6 @@ end
   max_iterations::Int = 50
   """`⟨true⟩` Print iteration details """
   verbose::Bool = true
-  """`⟨true⟩` Perform setup """
-  use_setup_phase::Bool = true
   """`⟨true⟩` Compute PT2 perturbative correction """
   compute_pt2::Bool = true
   """`⟨1e-6⟩` Threshold for PT2 contributions """

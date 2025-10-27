@@ -667,7 +667,6 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
     epsilon = opts.pspace_hci_epsilon,
     tol = 1e-6,  # Convergence threshold for HBCI iterations
     max_iterations = 10,
-    use_setup_phase = opts.pspace_hci_use_setup_phase,
     compute_pt2 = false,  # Don't need PT2 for P-space
     verbose = false,  # Keep HBCI output minimal
     nstates = n_states  # Match the number of states in the final FCI calculation

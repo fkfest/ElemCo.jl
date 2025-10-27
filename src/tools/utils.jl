@@ -60,8 +60,12 @@ end
   Print time with message `info` if verbosity `verb` is smaller than `PrintOptions.time`.
 """
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
+  return print_time(EC.options.print.time, t1, info, verb)
+end
+
+function print_time(print_time_verbosity::Int, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
-  if verb < EC.options.print.time
+  if verb < print_time_verbosity
     output_time(t2 - t1, info)
   end
   return t2
