@@ -829,31 +829,28 @@ function make_1rdms!(rdm_a::Matrix{Scalar}, rdm_b::Matrix{Scalar}, coeff::FCIVec
 end
 
 """
-    make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, spin_phase::Scalar = 1.0)
+    make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1)
 
 Compute 2-particle reduced density matrix (2-RDM).
 
-Computes: `Γ[r,s,t,u] = <coeff|E^r_s E^t_u|coeff>`
+Computes: `Γ[r,s,t,u] = <coeff|e^{rs}_{tu}|coef> = <coef| E^r_t E^s_u - \\delta_t^s E^r_u |coeff>`
 where `E^r_s = c†_r c_s` is the singlet excitation operator.
-
-If `spin_phase = -1`, computes spin-adapted version with
-`Ẽ^r_s = a†_{rα} a_{sα} - a†_{rβ} a_{sβ}`
 
 The algorithm:
 1. Loop over blocks of alpha/beta strings
 2. Form intermediate matrices: `Inp[kl,K] = <K|c†_k c_l|J> c[J,K]`
-3. Contract to 2-RDM: `Rdm2[rs,tu] += Inp[rs,K] * Inp[tu,K]`
-4. Transpose first two indices for correct ordering
+3. Contract to 2-RDM (E^r_t E^s_u): `R[tr,su] += Inp[tr,K] * Inp[su,K]`
+4. Permute and subtract to get final 2-RDM:
+   `Γ[r,s,t,u] = R[t,r,s,u] - RDM1[r,u] * δ_t^s`
 
 # Arguments
 - `rdm2`: Pre-allocated 4D array [n_orb, n_orb, n_orb, n_orb]
 - `coeff`: FCI vector
-- `spin_phase`: Phase for spin-adapted operators (default: 1.0)
 
 # Notes
 - Computational cost: O(N_det × n_orb^4)
 """
-function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, spin_phase::Scalar = 1.0)
+function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1)
   n_orb = Int(coeff.n_orb)
   n_pairs_n = n_orb * n_orb
   
@@ -919,11 +916,11 @@ function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, spin_phase::Scalar
       block_contract_cc1_nosym!(input_alpha, info_a, coeff_beta, c_sum, 1.0)
       
       # Contract beta strings (add contribution):
-      # Inp[kl,K] += spin_phase * <K_β|c†_k c_l|J_β> c[K_α,J_β]
+      # Inp[kl,K] += <K_β|c†_k c_l|J_β> c[K_α,J_β]
       input_beta = StridedView(input, (n_orb, n_orb, n_blk_b, n_blk_a), (1, n_orb, n_pairs_n * n_blk_a, n_pairs_n))
       alpha_offset = block_a_start - 1
       coeff_alpha = StridedView(coeffs, (n_str_b, n_blk_a), (n_str_a, 1), alpha_offset)
-      block_contract_cc1_nosym!(input_beta, info_b, coeff_alpha, c_sum, spin_phase)
+      block_contract_cc1_nosym!(input_beta, info_b, coeff_alpha, c_sum, 1.0)
       
       # Contract to 2-RDM if contributions are significant
       if c_sum[] > ThrNeglect
@@ -941,29 +938,37 @@ function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, spin_phase::Scalar
       rdm2_flat[tu, rs] = rdm2_flat[rs, tu]
     end
   end
-  
-  # Transpose first two indices: computed <E^s_r E^t_u>, need <E^r_s E^t_u>
-  for tu in 1:n_pairs_n
-    transpose_inplace_sqr!(view(rdm2_flat, :, tu), n_orb)
+
+  # Transpose indices
+  for u in 1:n_orb
+    # Transpose first two indices: computed <E^s_r E^t_u>, need <E^r_s E^t_u>
+    for t in 1:n_orb
+      transpose_inplace_sqr!(@view(rdm2[:, :, t, u]))
+    end
+    # Transpose two middle indices and subtract 1-RDM contribution to get E_rs^tu
+    for r in 1:n_orb
+      transpose_inplace_sqr!(@view(rdm2[r, :, :, u]))
+      for s in 1:n_orb
+        rdm2[r, s, s, u] -= rdm1[r, u]
+      end
+    end
   end
 end
 
 """
-    transpose_inplace_sqr!(mat_view::AbstractVector, n::Int)
+    transpose_inplace_sqr!(mat_view::AbstractMatrix)
 
-Transpose a square matrix in-place stored as a flattened vector.
+Transpose a square matrix in-place.
 
-The matrix is n × n stored in column-major order in mat_view.
 Transposes indices: mat[i,j] ↔ mat[j,i].
 """
-function transpose_inplace_sqr!(mat_view::AbstractVector, n::Int)
-  @assert length(mat_view) == n * n "Vector length must equal n^2"
-  
+function transpose_inplace_sqr!(mat_view::AbstractMatrix)
+  @assert size(mat_view, 1) == size(mat_view, 2) "Matrix must be square"
+
+  n = size(mat_view, 1)
   for i in 1:n
     for j in 1:i-1
-      idx1 = (j - 1) * n + i  # mat[i,j] in column-major
-      idx2 = (i - 1) * n + j  # mat[j,i] in column-major
-      mat_view[idx1], mat_view[idx2] = mat_view[idx2], mat_view[idx1]
+      mat_view[i, j], mat_view[j, i] = mat_view[j, i], mat_view[i, j]
     end
   end
 end

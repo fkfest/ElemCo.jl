@@ -35,8 +35,8 @@ using ElemCo
   @test abs(energies["ω2"] - omega2_test) < epsilon
       
   @set fci nstates=1  # Reset to single root 
-  @set fci conv_tol=1.e-8
-  @set fci max_iter=50
+  @set fci conv_tol=1.e-8 max_iter=100
+  @set fci compute_2rdm=true
   @set fci pspace_selection_method=:hci
   energies = @fci
       

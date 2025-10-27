@@ -46,9 +46,13 @@ function run_fci!(context::FCIContext)
       end
       
       # Compute 2-RDM
-      make_2rdm!(context.rdm2, context.coeff, 1.0)
+      rdm1 = context.rdm1_a + context.rdm1_b
+      make_2rdm!(context.rdm2, context.coeff, rdm1)
       
       # Verify energy from 2-RDM
+      if context.fcidump.uhf
+        error("2-RDM energy verification not implemented for UHF FCI yet.")
+      end
       int2 = context.fcidump.int2
       e_2rdm = 0.0
       for l in 1:n_orb, k in 1:n_orb, j in 1:n_orb, i in 1:n_orb
@@ -57,7 +61,7 @@ function run_fci!(context::FCIContext)
       
       # Add 1-electron contribution if absorb_1e is true
       if context.absorb_1e
-        e_1rdm = tr(context.rdm1_a * context.mod_core_h_a) + tr(context.rdm1_b * context.mod_core_h_b)
+        e_1rdm = tr(rdm1 * context.fcidump.int1)
         e_total_rdm = e_1rdm + e_2rdm + context.fcidump.int0
       else
         e_total_rdm = e_2rdm + context.fcidump.int0
@@ -68,7 +72,7 @@ function run_fci!(context::FCIContext)
       println("  Difference:        $(abs(e_total_rdm - energy)) Hartree")
       
       if abs(e_total_rdm - energy) > 1e-6
-        @warn "2-RDM energy check failed! Difference: $(abs(e_total_rdm - energy))"
+        error("2-RDM energy check failed! Difference: $(abs(e_total_rdm - energy))")
       else
         println("  ✓ 2-RDM energy verified")
       end
