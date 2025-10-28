@@ -4,9 +4,6 @@ const Scalar = Float64          # scalar values for CI coefficients
 
 const FCIUInt = UInt32
 
-# Threshold for neglecting small values
-const ThrNeglect = 1e-16
-
 # Utility functions for bit manipulation
 
 """

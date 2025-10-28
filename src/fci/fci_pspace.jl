@@ -611,7 +611,7 @@ function setup_pspace!(context::FCIContext, n_states::Int=1)
   if context.options.pspace_selection_method == :hci
     # Use Heat-Bath CI for P-space selection
     # Pass n_states so HCI computes the same number of roots
-    setup_pspace_hbci!(context, n_states)
+    setup_pspace_hci!(context, n_states)
   else
     # Traditional P-space selection (single-state only for now)
     select_pspace_determinants!(context)
@@ -636,60 +636,61 @@ function setup_pspace!(context::FCIContext, n_states::Int=1)
 end
 
 """
-    setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
+    setup_pspace_hci!(context::FCIContext, n_states::Int=1)
 
 Use Heat-Bath CI to select P-space determinants.
 This provides a more efficient and targeted selection compared to traditional methods.
 
-The selected determinants from HBCI variational space become the P-space for
+The selected determinants from HCI variational space become the P-space for
 subsequent full FCI Davidson iterations.
 
 # Arguments
 - `context`: FCI context
-- `n_states`: Number of states to compute (HBCI will compute the same number of roots)
+- `n_states`: Number of states to compute (HCI will compute the same number of roots)
 """
-function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
+function setup_pspace_hci!(context::FCIContext, n_states::Int=1)
   opts = context.options
   
   if context.options.print_level >= 1
     println("  Using Heat-Bath CI for P-space selection")
     println("  Target size: $(opts.max_pspace_size)")
-    println("  HBCI ε₁: $(opts.pspace_hci_epsilon)")
+    println("  HCI ε₁: $(opts.pspace_hci_epsilon)")
     if n_states > 1
-      println("  HBCI nstates: $n_states (matching FCI)")
+      println("  HCI nstates: $n_states (matching FCI)")
     end
   end
   
-  # Configure HBCI options for P-space generation
+  # Configure HCI options for P-space generation
   # CRITICAL: Use same nstates as the final FCI calculation for multi-state
-  hbci_options = HCIOptions(
+  hci_options = HCIOptions(
     target_selection = opts.max_pspace_size,
     epsilon = opts.pspace_hci_epsilon,
-    tol = 1e-6,  # Convergence threshold for HBCI iterations
-    max_iterations = 10,
+    tol = 1e-6,  # Convergence threshold for HCI iterations
+    max_iter = 10,
+    shift = opts.shift,
     compute_pt2 = false,  # Don't need PT2 for P-space
-    verbose = false,  # Keep HBCI output minimal
+    verbose = false,  # Keep HCI output minimal
     nstates = n_states  # Match the number of states in the final FCI calculation
   )
-  
-  # Run HBCI to get selected determinants
+
+  # Run HCI to get selected determinants
   # Returns: E_vec (Vector{Float64}), coeffs_matrix (Matrix{Float64}), dets, pt2_result
-  E_hbci_vec, coeffs_hbci_matrix, dets_hbci, _ = run_heatbath_ci!(context, hbci_options)
+  E_hci_vec, coeffs_hci_matrix, dets_hci, _ = run_heatbath_ci!(context, hci_options)
   
   if context.options.print_level >= 1
-    println("  HBCI selected $(length(dets_hbci)) determinants")
+    println("  HBCI selected $(length(dets_hci)) determinants")
     if n_states == 1
-      println("  HBCI energy: $(E_hbci_vec[1]) Hartree")
+      println("  HBCI energy: $(E_hci_vec[1]) Hartree")
     else
       println("  HBCI energies:")
-      for (i, E) in enumerate(E_hbci_vec)
+      for (i, E) in enumerate(E_hci_vec)
         println("    State $i: $E Hartree")
       end
     end
   end
   
   # Convert HBCI determinants to P-space indices
-  n_selected = length(dets_hbci)
+  n_selected = length(dets_hci)
   
   # Limit to requested max_pspace_size if HBCI selected more
   if n_selected > opts.max_pspace_size
@@ -703,7 +704,7 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
   
   # Store selected determinants and their addresses
   for i in 1:n_selected
-    det = dets_hbci[i]
+    det = dets_hci[i]
     addr = address_from_determinant(context, det)
     context.pspace_data.determinants[i] = det
     context.pspace_data.indices[i] = addr
@@ -718,9 +719,9 @@ function setup_pspace_hbci!(context::FCIContext, n_states::Int=1)
   
   # Store HBCI eigenvector coefficients for ground state as first eigenvector (good initial guess)
   # coeffs_hbci_matrix is (n_dets × nstates), extract ground state coefficients
-  if size(coeffs_hbci_matrix, 1) == n_selected
-    context.pspace_data.eigenvalues[1] = E_hbci_vec[1] - context.fcidump.int0  # Electronic energy
-    context.pspace_data.eigenvectors[:, 1] = coeffs_hbci_matrix[:, 1]  # Ground state coefficients
+  if size(coeffs_hci_matrix, 1) == n_selected
+    context.pspace_data.eigenvalues[1] = E_hci_vec[1] - context.fcidump.int0  # Electronic energy
+    context.pspace_data.eigenvectors[:, 1] = coeffs_hci_matrix[:, 1]  # Ground state coefficients
   end
   
   return nothing

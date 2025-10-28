@@ -5,6 +5,7 @@ using XML
 using Printf
 using ..ElemCo.AbstractEC
 using ..ElemCo.DescDict
+using ..ElemCo.VecDicts
 using ..ElemCo.Outputs
 using ..ElemCo.VersionInfo
 
@@ -15,7 +16,7 @@ export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_
 export subspace_in_space, argmaxN
 export @istoplevel
 export @assert_devel
-export substr
+export substr, setdiff4dict!
 export allocfree_permutedims!
 export reshape_buf
 export amdmkl
@@ -25,6 +26,8 @@ export ODDict, getdescription, setdescription!, descriptions
 export OutDict, last_energy
 # from bufvec
 export BufVec, capacity, is_full
+# from VecDicts
+export VecDict, getvalue, setvalue!, values
 
 include("xmltools.jl")
 include("bufvec.jl")
@@ -283,6 +286,19 @@ julia> substr("λabδcd", 2:4)
 """
 function substr(string::AbstractString, range::UnitRange{Int})
   return substr(string, range.start, range.stop-range.start+1)
+end
+
+"""
+    setdiff4dict!(dict::AbstractDict, keys)
+
+  Delete all `keys` from `dict`.
+
+  The same behavior as `setdiff!` for sets.
+"""
+function setdiff4dict!(dict::AbstractDict, keys)
+  for key in keys
+    delete!(dict, key)
+  end
 end
 
 """

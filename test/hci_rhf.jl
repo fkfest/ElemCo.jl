@@ -5,13 +5,13 @@ using ElemCo
   println("\n=== Testing Heat-Bath CI with RHF ===")
   
   epsilon = 1.e-6
-  E_HCI_test = -76.119476107545
-  E_HCI_PT2_test = -76.120245808825
+  E_HCI_test = -76.11949912408672
+  E_HCI_PT2_test = -76.120247129322
   E_HCI_tight_test = -76.120269732906
-  E_HCI_loose_test = -76.116267435887
-  E_HCI_ms_test = -76.11862331240332
-  omega1_test = 0.26746228596144306
-  omega2_test = 0.2948485448507512
+  E_HCI_loose_test = -76.11656271028892
+  E_HCI_ms_test = -76.1187720575988
+  omega1_test = 0.26760701030934797
+  omega2_test = 0.29498027215659306
   
   @print_input
   

@@ -87,6 +87,7 @@ Extend the SelectedHamiltonianMatrix to include new determinants.
 function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, context::Union{FCIContext, HCIContext})
   ndet_old = length(sel_ham.rows)
   ndet = n_selected(dets)
+  ThrNeglect = context.options.thr_negligible
   # add new connected determinants to existing rows of Hamiltonian
   for i in 1:ndet_old
     det_i = dets.determinants[i]
@@ -94,7 +95,9 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
       det_j = dets.determinants[j]
       if slater_condon_allowed(det_i, det_j)
         h_ij = compute_matrix_element_direct(det_i, det_j, context)
-        push!(sel_ham.rows[i], h_ij, j)
+        if abs(h_ij) > ThrNeglect
+          push!(sel_ham.rows[i], h_ij, j)
+        end
       end
     end
   end
@@ -106,7 +109,9 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
       det_j = dets.determinants[j]
       if slater_condon_allowed(det_i, det_j)
         h_ij = compute_matrix_element_direct(det_i, det_j, context)
-        push!(new_row, h_ij, j)
+        if abs(h_ij) > ThrNeglect
+          push!(new_row, h_ij, j)
+        end
       end
     end
     push!(sel_ham, new_row)
@@ -213,11 +218,11 @@ function find_double_excitation_orbitals(pattern_i::OrbPattern, pattern_j::OrbPa
 end
 
 """
-    calculate_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_a::Int) -> Int8
+    calculate_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_a::Int) -> Int
 
 Calculate phase factor for single excitation i -> a.
 """
-function calculate_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_a::Int)::Int8
+function calculate_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_a::Int)::Int
   # Count electrons between orb_i and orb_a
   min_orb = min(orb_i, orb_a)
   max_orb = max(orb_i, orb_a) - 1
@@ -226,11 +231,11 @@ function calculate_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_a::Int)
   # Count number of electrons in sub_pattern
   n_electrons = count_ones(sub_pattern)
   # Phase is (-1)^n_electrons
-  return (n_electrons % 2 == 0) ? Int8(1) : Int8(-1)
+  return (n_electrons % 2 == 0) ? 1 : -1
 end
 
 """
-    calculate_double_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int) -> Int8
+    calculate_double_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int) -> Int
 
 Calculate phase factor for double excitation ij -> ab.
 
@@ -242,7 +247,7 @@ The phase is calculated by decomposing into two successive single excitations:
 This approach correctly handles the fermionic anticommutation relations.
 """
 function calculate_double_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_j::Int,
-                                           orb_a::Int, orb_b::Int)::Int8
+                                           orb_a::Int, orb_b::Int)::Int
   # First excitation: i -> a
   phase1 = calculate_excitation_phase(pattern, orb_i, orb_a)
   
@@ -256,6 +261,60 @@ function calculate_double_excitation_phase(pattern::OrbPattern, orb_i::Int, orb_
   
   # Total phase is the product
   return phase1 * phase2
+end
+
+"""
+    single_alpha_excitation_phase(det::Determinant, orb_i::Int, orb_a::Int) -> (Determinant, Int)
+
+Create determinant and calculate phase factor for single alpha excitation i -> a.
+"""
+function single_alpha_excitation_phase(det::Determinant, orb_i::Int, orb_a::Int)
+  new_det = single_excitation_alpha(det, orb_i, orb_a)
+  return new_det, calculate_excitation_phase(det.alpha, orb_i, orb_a)
+end
+"""
+    single_beta_excitation_phase(det::Determinant, orb_i::Int, orb_a::Int) -> (Determinant, Int)
+
+Create determinant and calculate phase factor for single beta excitation i -> a.
+"""
+function single_beta_excitation_phase(det::Determinant, orb_i::Int, orb_a::Int)
+  new_det = single_excitation_beta(det, orb_i, orb_a)
+  return new_det, calculate_excitation_phase(det.beta, orb_i, orb_a)
+end
+
+"""
+    double_alpha_excitation_phase(det::Determinant, orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int) -> (Determinant, Int)
+
+Create determinant and calculate phase factor for double alpha excitation ij -> ab.
+"""
+function double_alpha_excitation_phase(det::Determinant, orb_i::Int, orb_j::Int,
+                                       orb_a::Int, orb_b::Int)
+  new_det = double_excitation_alpha(det, orb_i, orb_j, orb_a, orb_b)
+  return new_det, calculate_double_excitation_phase(det.alpha, orb_i, orb_j, orb_a, orb_b) 
+end
+"""
+    double_beta_excitation_phase(det::Determinant, orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int) -> (Determinant, Int)
+
+Create determinant and calculate phase factor for double beta excitation ij -> ab.
+"""
+function double_beta_excitation_phase(det::Determinant, orb_i::Int, orb_j::Int,
+                                      orb_a::Int, orb_b::Int)
+  new_det = double_excitation_beta(det, orb_i, orb_j, orb_a, orb_b)
+  return new_det, calculate_double_excitation_phase(det.beta, orb_i, orb_j, orb_a, orb_b)
+end
+
+"""
+    double_alpha_beta_excitation_phase(det::Determinant, orb_i_alpha::Int, orb_i_beta::Int,
+                                       orb_a_alpha::Int, orb_a_beta::Int) -> (Determinant, Int)
+
+Calculate phase factor for double alpha-beta excitation iα jβ -> aα bβ.
+"""
+function double_alpha_beta_excitation_phase(det::Determinant, orb_i_alpha::Int, orb_i_beta::Int,
+                                               orb_a_alpha::Int, orb_a_beta::Int)
+  new_det = double_excitation_mixed(det, orb_i_alpha, orb_i_beta, orb_a_alpha, orb_a_beta)
+  phase_alpha = calculate_excitation_phase(det.alpha, orb_i_alpha, orb_a_alpha)
+  phase_beta = calculate_excitation_phase(det.beta, orb_i_beta, orb_a_beta)
+  return new_det, phase_alpha * phase_beta
 end
 
 # ===========================================
@@ -454,6 +513,7 @@ function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Sc
     # No precomputed Hamiltonian: compute on-the-fly
     # This part is currently not used 
     dets = determinants(selected_ctx)
+    ThrNeglect = selected_ctx.base_context.options.thr_negligible
     for i in 1:n_det
       det_i = dets[i]
       for j in 1:n_det
@@ -558,26 +618,11 @@ function extract_full_to_selected!(v_selected::Vector{Scalar}, v_full::FCIVector
 end
 
 # ===========================================
-# Heat-Bath Configuration Interaction (HBCI)
+# Heat-Bath Configuration Interaction (HCI)
 # ===========================================
 
 """
-    HBCandidate
-
-Heat-Bath selection candidate with probability and energy contribution.
-"""
-struct HBCandidate
-  determinant::Determinant
-  probability::Float64              # Selection probability: |c_I × H_IJ|² / ΔE²
-  contribution::Float64             # Perturbative energy contribution
-  
-  function HBCandidate(det::Determinant, prob::Float64, contrib::Float64)
-    new(det, prob, contrib)
-  end
-end
-
-"""
-    HBCISetupData
+    HCISetupData
 
 Setup data: Pre-computed and sorted double excitation matrix elements.
 
@@ -587,7 +632,7 @@ important excitations during iterative selection.
 
 Following Holmes et al. (2016), Algorithm Step IIa.
 """
-struct HBCISetupData
+struct HCISetupData
   # For RHF: only double_excitations is used
   # For UHF: all three dictionaries are used (aa, bb, ab)
   double_excitations::Vector{Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-alpha
@@ -595,7 +640,7 @@ struct HBCISetupData
   double_excitations_ab::Vector{Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-beta mixed
   h_doub_max::Float64              # Maximum |H(rs ← pq)| over all excitations
 
-  function HBCISetupData()
+  function HCISetupData()
     new(Vector{Tuple{Int,Int,Float64}}[], 
         Vector{Tuple{Int,Int,Float64}}[],
         Vector{Tuple{Int,Int,Float64}}[],
@@ -603,7 +648,7 @@ struct HBCISetupData
   end
   
   # RHF constructor
-  function HBCISetupData(double_exc::Vector{Vector{Tuple{Int,Int,Float64}}}, 
+  function HCISetupData(double_exc::Vector{Vector{Tuple{Int,Int,Float64}}}, 
                         double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
                         h_max::Float64)
     new(double_exc, 
@@ -613,32 +658,11 @@ struct HBCISetupData
   end
   
   # UHF constructor
-  function HBCISetupData(double_exc_aa::Vector{Vector{Tuple{Int,Int,Float64}}},
+  function HCISetupData(double_exc_aa::Vector{Vector{Tuple{Int,Int,Float64}}},
                         double_exc_bb::Vector{Vector{Tuple{Int,Int,Float64}}},
                         double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
                         h_max::Float64)
     new(double_exc_aa, double_exc_bb, double_exc_ab, h_max) 
-  end
-end
-
-"""
-    PT2Result
-
-Results from PT2 perturbative correction computation.
-"""
-struct PT2Result
-  energy_correction::Float64      # ΔE = PT2 correction
-  n_external_dets::Int           # Number of external determinants contributing
-  largest_contribution::Float64  # Largest single |numerator²/denominator|
-  smallest_contribution::Float64 # Smallest (above threshold)
-  
-  function PT2Result(
-    energy::Float64 = 0.0,
-    n_ext::Int = 0,
-    largest::Float64 = 0.0,
-    smallest::Float64 = 0.0
-  )
-    new(energy, n_ext, largest, smallest)
   end
 end
 
@@ -793,15 +817,16 @@ function generate_connected_determinants!(connected::Vector{Determinant},
 end
 
 """
-    add_excitations!(excitations::Vector{Determinant}, det::Determinant,
-                    double_excitation::Function,
+    add_excitations!(excitations::VecDict{Determinant, Scalar}, det::Determinant,
+                    coef::Scalar, double_excitation_phase::Function,
                     occ, pchb_excitations, epsilon::Float64)
 
 Generate same-spin double excitations from occupied orbitals using pre-computed
-Heat-Bath lists, adding only those with |H| > epsilon.
+Heat-Bath lists, adding only those with |H| > epsilon and storing in excitations dictionary
+together with their weighted matrix elements.
 """
-function add_excitations!(excitations::Vector{Determinant}, det::Determinant,
-                          double_excitation::Function,
+function add_excitations!(excitations::VecDict{Determinant, Scalar}, det::Determinant,
+                          coef::Scalar, double_excitation_phase::Function,
                           occ, pchb_excitations, epsilon::Float64)
   for (idx_i, i) in enumerate(occ)
     for j in @view(occ[(idx_i+1):end])
@@ -809,16 +834,16 @@ function add_excitations!(excitations::Vector{Determinant}, det::Determinant,
       pq_key = trip_index(i, j)
       for (r, s, h_val) in pchb_excitations[pq_key]
         # Stop when matrix element falls below threshold
-        if h_val < epsilon
+        if abs(h_val) < epsilon
           break
         end
         
         # Check if r and s are virtual (not occupied)
         if !(r in occ) && !(s in occ)
-          new_det = double_excitation(det, i, j, r, s)
+          new_det, phase = double_excitation_phase(det, i, j, r, s)
           @assert_devel count_ones(new_det.alpha) == count_ones(det.alpha) "Alpha electron count mismatch $i $j -> $r $s from $(bitstring(det.alpha))"
           @assert_devel count_ones(new_det.beta) == count_ones(det.beta) "Beta electron count mismatch $i $j -> $r $s from $(bitstring(det.beta))"
-          push!(excitations, new_det)
+          excitations[new_det] = coef * h_val * phase
         end
       end
     end
@@ -827,26 +852,26 @@ function add_excitations!(excitations::Vector{Determinant}, det::Determinant,
 end
 
 """
-    add_excitations!(excitations::Vector{Determinant}, det::Determinant,
+    add_excitations!(excitations::VecDict{Determinant, Scalar}, det::Determinant, coef::Scalar,
                     alpha_occ, beta_occ, n_orb, pchb_excitations, epsilon::Float64)
 
 Generate mixed-spin double excitations from occupied alpha and beta orbitals
 using pre-computed Heat-Bath lists, adding only those with |H| > epsilon.
 """
-function add_excitations!(excitations::Vector{Determinant}, det::Determinant,
-                          alpha_occ, beta_occ, n_orb, pchb_excitations,
+function add_excitations!(excitations::VecDict{Determinant, Scalar}, det::Determinant,
+                          coef::Scalar, alpha_occ, beta_occ, n_orb, pchb_excitations,
                           epsilon::Float64)
   for i_alpha in alpha_occ
     for i_beta in beta_occ
       pq_key = trip_index(i_alpha, i_beta, n_orb)
       for (r, s, h_val) in pchb_excitations[pq_key]
-        if h_val < epsilon
+        if abs(h_val) < epsilon
           break
         end
         # r is alpha virtual, s is beta virtual
         if !(r in alpha_occ) && !(s in beta_occ)
-          new_det = double_excitation_mixed(det, i_alpha, i_beta, r, s)
-          push!(excitations, new_det)
+          new_det, phase = double_alpha_beta_excitation_phase(det, i_alpha, i_beta, r, s)
+          excitations[new_det] = coef * h_val * phase
         end
       end
     end
@@ -910,10 +935,11 @@ function compute_fock_element(int1, h1e2_same, h1e2_opp, str_same::OrbPattern, s
 end
 
 """
-    generate_excitations_with_threshold!(excitations::Vector{Determinant},
+    generate_excitations!(excitations::VecDict{Determinant, Scalar},
                                          det::Determinant,
+                                         coef::Scalar,
                                          ctx::FCIContext,
-                                         setup_data::HBCISetupData,
+                                         setup_data::HCISetupData,
                                          epsilon::Float64) -> Int
 
 Generate only excitations with |H| > epsilon using pre-computed data.
@@ -922,14 +948,15 @@ This is the efficient excitation generation from Holmes et al. (2016):
 1. For doubles: Use pre-sorted lists to stop early when |H| < epsilon
 2. For singles: Compute on-the-fly and discard if |H| < epsilon
 
-Time complexity: O(N_εcon × M^2) where N_εcon is number of excitations above threshold,
-much faster than O(M^4) for generating all possible excitations.
+Additionally, `H*coef` is computed and stored during generation for efficiency.
+
 Works with both FCIContext and HCIContext.
 """
-function generate_excitations_with_threshold!(excitations::Vector{Determinant},
+function generate_excitations!(excitations::VecDict{Determinant, Scalar},
                                              det::Determinant,
+                                             coef::Scalar,  
                                              ctx::Union{FCIContext, HCIContext},
-                                             setup_data::HBCISetupData,
+                                             setup_data::HCISetupData,
                                              epsilon::Float64)::Int
   empty!(excitations)
   n_orb = ctx.n_orb
@@ -951,11 +978,11 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   if epsilon <= setup_data.h_doub_max
     double_excitations_bb = is_uhf ? setup_data.double_excitations_bb : setup_data.double_excitations
     # Alpha-alpha double excitations
-    add_excitations!(excitations, det, double_excitation_alpha, alpha_occ, setup_data.double_excitations, epsilon)
+    add_excitations!(excitations, det, coef, double_alpha_excitation_phase, alpha_occ, setup_data.double_excitations, epsilon)
     # Beta-beta double excitations
-    add_excitations!(excitations, det, double_excitation_beta, beta_occ, double_excitations_bb, epsilon)
+    add_excitations!(excitations, det, coef, double_beta_excitation_phase, beta_occ, double_excitations_bb, epsilon)
     # Mixed double excitations (alpha-beta) (use int2ab pre-computed lists, i.e., no exchange)
-    add_excitations!(excitations, det, alpha_occ, beta_occ, n_orb, setup_data.double_excitations_ab, epsilon)
+    add_excitations!(excitations, det, coef, alpha_occ, beta_occ, n_orb, setup_data.double_excitations_ab, epsilon)
   end
   # ===========================================
   # 2. Generate single excitations with on-the-fly filtering using Fock elements
@@ -972,10 +999,10 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   for i in alpha_occ
     for a in alpha_virt
       # Compute Fock matrix element f_ai
-      h_val = abs(compute_fock_element(int1, h1e2_same, h1e2_opp, alpha_occ, beta_occ, a, i))
-      if h_val >= epsilon
-        new_det = single_excitation_alpha(det, i, a)
-        push!(excitations, new_det)
+      h_val = compute_fock_element(int1, h1e2_same, h1e2_opp, alpha_occ, beta_occ, a, i)
+      if abs(h_val) >= epsilon
+        new_det, phase = single_alpha_excitation_phase(det, i, a)
+        excitations[new_det] = coef * h_val * phase
       end
     end
   end
@@ -989,10 +1016,10 @@ function generate_excitations_with_threshold!(excitations::Vector{Determinant},
   for i in beta_occ
     for a in beta_virt
       # Compute Fock matrix element f_ai
-      h_val = abs(compute_fock_element(int1, h1e2_same, h1e2_opp, beta_occ, alpha_occ, a, i))
-      if h_val >= epsilon
-        new_det = single_excitation_beta(det, i, a)
-        push!(excitations, new_det)
+      h_val = compute_fock_element(int1, h1e2_same, h1e2_opp, beta_occ, alpha_occ, a, i)
+      if abs(h_val) >= epsilon
+        new_det, phase = single_beta_excitation_phase(det, i, a)
+        excitations[new_det] = coef * h_val * phase
       end
     end
   end
@@ -1015,233 +1042,84 @@ function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCICo
 end
 
 # ===========================================
-# Heat-Bath Probability Computation
+# Heat-Bath Selection 
 # ===========================================
 
 """
-    compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
-                                    variational_dets::Vector{Determinant},
-                                    variational_coeffs::Vector{Float64},
-                                    ctx::FCIContext,
-                                    E_current::Float64,
-                                    setup_data::HBCISetupData,
-                                    epsilon::Float64) -> Float64
+    heatbath_selection(variational_dets::Vector{Determinant},
+                       variational_coeffs::AbstractVector{Scalar},
+                       ctx::Union{FCIContext, HCIContext},
+                       options::HCIOptions,
+                       E_current::Float64,
+                       setup_data::HCISetupData,
+                       store_dets::Bool=true) -> (VecDict{Determinant, Scalar}, Float64)
 
-Compute Heat-Bath selection probabilities for all candidates.
-
+Select determinants using Heat-Bath preselection + perturbative selection.
 Uses efficient excitation generation with threshold-based filtering.
 Works with both FCIContext and HCIContext.
 
-Returns total selection probability sum.
+Returns selected determinants together with the weights and PT2 energy correction.
+If `store_dets` is false, only the PT2 energy is returned (with empty determinant list).
 """
-function compute_heatbath_probabilities!(candidates::Vector{HBCandidate},
-                                        variational_dets::Vector{Determinant},
-                                        variational_coeffs::Vector{Float64},
-                                        ctx::Union{FCIContext, HCIContext},
-                                        E_current::Float64,
-                                        setup_data::HBCISetupData,
-                                        epsilon::Float64)::Float64
+function heatbath_selection(variational_dets::Vector{Determinant},
+                            variational_coeffs::AbstractVector{Scalar},
+                            ctx::Union{FCIContext, HCIContext},
+                            options::HCIOptions,
+                            E_current::Float64,
+                            setup_data::HCISetupData, store_dets::Bool=true)
   t0 = time_ns()
-  empty!(candidates)
-  
-  # Get all connected determinants from variational space
-  connected = Set{Determinant}()
-  temp_buffer = Determinant[]
-  
+  ThrNeglect = options.thr_negligible 
+  # Get HB candidates determinants from variational space together with the H*c values
+  candidates = Dict{Determinant, Scalar}()
+  temp_buffer = VecDict{Determinant, Scalar}()
+
   # Use efficient threshold-based excitation generation
+  eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon/10.0
   for (i, det) in enumerate(variational_dets)
     c_I = variational_coeffs[i]
-    if abs(c_I) < 1e-10
+    if abs(c_I) < ThrNeglect
       continue  # Skip negligible coefficients
     end
-    eps = epsilon / abs(c_I)
-    generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
-    union!(connected, temp_buffer)
+    eps = eps_h / abs(c_I)
+    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, eps)
+    mergewith!(+, candidates, temp_buffer)
   end
   # Remove determinants already in variational space
-  variational_set = Set(variational_dets)
-  setdiff!(connected, variational_set)
-  
-  t0 = print_time(2, t0, "Generated connected determinants", 1)
-  total_prob = 0.0
-  for det_J in connected
+  setdiff4dict!(candidates, variational_dets)
+  if options.verbose
+    println("  Generated $(length(candidates)) candidate determinants")
+  end
+  t0 = print_time(options.print_level, t0, "candidate determinants", 1)
+
+  # Select determinants above threshold or until target reached
+  new_dets = VecDict{Determinant, Scalar}()
+  pt2_correction = 0.0
+  # use square of epsilon_p to match probability definition (T_2^2)
+  eps_p = options.epsilon_p > -0.1 ? options.epsilon_p : options.epsilon
+  epsilon = eps_p^2
+  for (det_J, Hc) in candidates
     # Compute H_JJ (diagonal element)
     H_JJ = compute_diagonal_element(det_J, ctx)
     ΔE_J = E_current - H_JJ
     
-    # Compute perturbative contribution: sum over I in variational space
-    sum_term = 0.0
-    for (i, det_I) in enumerate(variational_dets)
-      if slater_condon_allowed(det_I, det_J)
-        c_I = variational_coeffs[i]
-        H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
-        sum_term += c_I * H_IJ
-      end
-    end
-    
     # Selection probability: |Σ c_I H_IJ|² / ΔE²
-    # Add small epsilon for numerical stability
-    prob_J = abs2(sum_term) / (ΔE_J^2 + 1e-10)
-    contrib_J = prob_J * ΔE_J  # Perturbative energy contribution
-    #TODO: use contrib_J to calculate the PT2 correction later
-    push!(candidates, HBCandidate(det_J, prob_J, contrib_J))
-    total_prob += prob_J
-  end
-  t0 = print_time(2, t0, "Generated perturbative contributions", 1)
-  return total_prob
-end
-
-"""
-    compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandidate},
-                                              variational_dets::Vector{Determinant},
-                                              variational_coeffs::Matrix{Float64},
-                                              ctx::Union{FCIContext, HCIContext},
-                                              E_states::Vector{Float64},
-                                              setup_data::HBCISetupData,
-                                              epsilon::Float64)::Float64
-
-Compute Heat-Bath selection probabilities for multiple states simultaneously.
-
-For each candidate determinant, computes contributions from ALL states and uses
-the maximum probability across states (state-max selection strategy).
-
-# Arguments
-- `candidates`: Output vector to store candidates
-- `variational_dets`: Current variational space determinants
-- `variational_coeffs`: Matrix (n_dets × n_states) of coefficients for all states
-- `ctx`: FCI or HCI context
-- `E_states`: Vector of energies for all states
-- `setup_data`: PCHB setup data
-- `epsilon`: Threshold for excitation generation
-
-# Returns
-- Total selection probability sum across all candidates
-"""
-function compute_heatbath_probabilities_multistate!(candidates::Vector{HBCandidate},
-                                                   variational_dets::Vector{Determinant},
-                                                   variational_coeffs::Matrix{Float64},
-                                                   ctx::Union{FCIContext, HCIContext},
-                                                   E_states::Vector{Float64},
-                                                   setup_data::HBCISetupData,
-                                                   epsilon::Float64)::Float64
-  empty!(candidates)
-  
-  n_states = length(E_states)
-  @assert size(variational_coeffs, 2) == n_states "Coefficient matrix must have n_states columns"
-  
-  # Get all connected determinants from variational space
-  connected = Set{Determinant}()
-  temp_buffer = Determinant[]
- 
-  # Helper to get maximum absolute coefficient for a determinant allocfree
-  function absmax(a, i)
-    am = 0.0
-    for j in axes(a,2)
-      am = max(am, abs(a[i,j]))
+    # Add small shift for numerical stability
+    c_J² = abs2(Hc) / (ΔE_J^2 + 1e-10)
+    pt2_correction += c_J² * ΔE_J  # Perturbative energy contribution
+    if store_dets && c_J² >= epsilon
+      new_dets[det_J] = c_J²
     end
-    return am
   end
-  # Use efficient threshold-based excitation generation
-  for (i, det) in enumerate(variational_dets)
-    abs_c_I = absmax(variational_coeffs, i)
-    if abs_c_I < 1e-10
-      continue  # Skip negligible coefficients
-    end
-    eps = epsilon / abs_c_I
-    generate_excitations_with_threshold!(temp_buffer, det, ctx, setup_data, eps)
-    union!(connected, temp_buffer)
-  end
-  # Remove determinants already in variational space
-  variational_set = Set(variational_dets)
-  setdiff!(connected, variational_set)
-  
-  total_prob = 0.0
-  
-  for det_J in connected
-    # Compute H_JJ (diagonal element) once
-    H_JJ = compute_diagonal_element(det_J, ctx)
-    
-    # Compute probabilities for each state
-    max_prob = 0.0
-    max_contrib = 0.0
-    
-    sum_terms = zeros(Float64, n_states)
-    # Compute perturbative contribution for each state: sum over I in variational space
-    for (i, det_I) in enumerate(variational_dets)
-      if slater_condon_allowed(det_I, det_J)
-        H_IJ = compute_matrix_element_direct(det_I, det_J, ctx)
-        for state in 1:n_states
-          c_I = variational_coeffs[i, state]
-          sum_terms[state] += c_I * H_IJ
-        end
-      end
-    end
-      
-    for state in 1:n_states
-      ΔE_J = E_states[state] - H_JJ
-      # Selection probability for this state: |Σ c_I H_IJ|² / ΔE²
-      prob_state = abs2(sum_terms[state]) / (ΔE_J^2 + 1e-10)
-      contrib_state = prob_state * ΔE_J  # Perturbative energy contribution
-      
-      # Keep maximum across states (state-max selection)
-      if prob_state > max_prob
-        max_prob = prob_state
-        max_contrib = contrib_state
-      end
-    end
-    
-    push!(candidates, HBCandidate(det_J, max_prob, max_contrib))
-    total_prob += max_prob
-  end
-  
-  return total_prob
+  t0 = print_time(options.print_level, t0, "perturbative selection", 1)
+  return new_dets, pt2_correction
 end
 
 # ===========================================
-# Determinant Selection
+# Main HCI Iteration Loop
 # ===========================================
 
 """
-    select_determinants_perturbatively!(selected::Vector{Determinant},
-                                 candidates::Vector{HBCandidate},
-                                 options::HCIOptions,
-                                 target_size::Int) -> Int
-
-Select determinants from candidates using precalculated Epstein-Nesbet energy.
-Returns number of determinants selected.
-"""
-function select_determinants_perturbatively!(selected::Vector{Determinant},
-                                      candidates::Vector{HBCandidate},
-                                      options::HCIOptions,
-                                      target_size::Int)
-  empty!(selected)
-  # Sort by probability (descending)
-  sort!(candidates, by=c->c.probability, rev=true)
-  
-  # Select determinants above threshold or until target reached
-  # use square of epsilon_p to match probability definition (T_2^2)
-  eps_p = options.epsilon_p > -0.1 ? options.epsilon_p : options.epsilon
-  epsilon = eps_p^2
-  n_selected = 0
-  for candidate in candidates
-    if n_selected >= target_size
-      break
-    end
-    if candidate.probability > epsilon
-      push!(selected, candidate.determinant)
-      n_selected += 1
-    end
-  end
-  
-  return n_selected
-end
-
-# ===========================================
-# Main HBCI Iteration Loop
-# ===========================================
-
-"""
-    setup_hbci!(ctx::FCIContext) -> HBCISetupData
+    setup_hci!(ctx::FCIContext) -> HCISetupData
 
 Setup: Pre-compute and store sorted double excitation matrix elements.
 
@@ -1256,16 +1134,16 @@ Algorithm from Holmes et al. (2016), IIa:
 - Space complexity: O(M^4)
 where M is the number of orbitals.
 """
-function setup_hbci!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
+function setup_hci!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   n_orb = ctx.n_orb
   is_uhf = ctx.fcidump.uhf
   
   if !is_uhf
     # RHF case: use standard int2 integrals
-    return setup_hbci_rhf!(ctx)
+    return setup_hci_rhf!(ctx)
   else
     # UHF case: use spin-separated integrals
-    return setup_hbci_uhf!(ctx)
+    return setup_hci_uhf!(ctx)
   end
 end
 
@@ -1289,7 +1167,7 @@ function trip_index(p, q, n)
   return p + (q - 1) * n
 end
 
-function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
+function gen_triplets_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float64=1e-10)
   double_exc_lists = Vector{Tuple{Int,Int,Float64}}[]
   h_doub_max = 0.0
   
@@ -1311,17 +1189,17 @@ function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
           
           # Compute antisymmetrized two-electron integral <pq||rs>
           # Matrix element for double excitation p,q → r,s is v_pq^rs - v_pq^sr
-          h_val = abs(int2[p, q, r, s] - int2[p, q, s, r])
-          
-          if h_val > 1e-10  # Skip negligible matrix elements
+          h_val = int2[p, q, r, s] - int2[p, q, s, r]
+
+          if abs(h_val) > ThrNeglect # Skip negligible matrix elements
             push!(triplets, (r, s, h_val))
-            h_doub_max = max(h_doub_max, h_val)
+            h_doub_max = max(h_doub_max, abs(h_val))
           end
         end
       end
       
       # Sort triplets by |H| in decreasing order
-      sort!(triplets, by=x->x[3], rev=true)
+      sort!(triplets, by=x->abs(x[3]), rev=true)
       
       # Store sorted list for this (p,q) pair
       push!(double_exc_lists, triplets)
@@ -1330,7 +1208,7 @@ function gen_triplets_list(n_orb::Int, int2::Array{Float64,4})
   return double_exc_lists, h_doub_max
 end
 
-function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4})
+function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4}, ThrNeglect::Float64=1e-10)
   double_exc_ab_lists = Vector{Tuple{Int,Int,Float64}}[]
   h_doub_max = 0.0
   
@@ -1345,39 +1223,38 @@ function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4})
           if s == q; continue; end  # Beta s cannot equal beta q
           
           # Mixed integral v_pq^rs (αβ) (no antisymmetrization for different spins)
-          h_val = abs(int2ab[p, q, r, s])
-
-          if h_val > 1e-10
+          h_val = int2ab[p, q, r, s]
+          if abs(h_val) > ThrNeglect
             push!(triplets, (r, s, h_val))
-            h_doub_max = max(h_doub_max, h_val)
+            h_doub_max = max(h_doub_max, abs(h_val))
           end
         end
       end
       
       # Sort triplets by |H| in decreasing order
-      sort!(triplets, by=x->x[3], rev=true)
+      sort!(triplets, by=x->abs(x[3]), rev=true)
       push!(double_exc_ab_lists, triplets)
     end
   end
   return double_exc_ab_lists, h_doub_max
 end
 """
-    setup_hbci_rhf!(ctx::Union{FCIContext, HCIContext}) -> HBCISetupData
+    setup_hci_rhf!(ctx::Union{FCIContext, HCIContext}) -> HCISetupData
 
 Setup for RHF systems using spatial orbital integrals.
 """
-function setup_hbci_rhf!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
+function setup_hci_rhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   n_orb = ctx.n_orb
   
   # Dictionary to store sorted lists for each (p,q) pair
-  double_exc_lists, h_doub_max = gen_triplets_list(n_orb, ctx.fcidump.int2)
-  double_exc_ab_lists, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2)
+  double_exc_lists, h_doub_max = gen_triplets_list(n_orb, ctx.fcidump.int2, ctx.options.thr_negligible)
+  double_exc_ab_lists, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2, ctx.options.thr_negligible)
   h_doub_max = max(h_doub_max, h_doub_max_ab)
-  return HBCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max)
+  return HCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max)
 end
 
 """
-    setup_hbci_uhf!(ctx::Union{FCIContext, HCIContext}) -> HBCISetupData
+    setup_hci_uhf!(ctx::Union{FCIContext, HCIContext}) -> HCISetupData
 
 Setup for UHF systems using spin-separated integrals.
 Handles three types of double excitations:
@@ -1385,16 +1262,16 @@ Handles three types of double excitations:
 - Beta-beta (using int2bb)
 - Mixed alpha-beta (using int2ab)
 """
-function setup_hbci_uhf!(ctx::Union{FCIContext, HCIContext})::HBCISetupData
+function setup_hci_uhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   n_orb = ctx.n_orb
   
   # Three dictionaries for the three types of double excitations
-  double_exc_aa, h_doub_max_aa = gen_triplets_list(n_orb, ctx.fcidump.int2aa)
-  double_exc_bb, h_doub_max_bb = gen_triplets_list(n_orb, ctx.fcidump.int2bb)
-  double_exc_ab, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2ab)
+  double_exc_aa, h_doub_max_aa = gen_triplets_list(n_orb, ctx.fcidump.int2aa, ctx.options.thr_negligible)
+  double_exc_bb, h_doub_max_bb = gen_triplets_list(n_orb, ctx.fcidump.int2bb, ctx.options.thr_negligible)
+  double_exc_ab, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2ab, ctx.options.thr_negligible)
   h_doub_max = max(h_doub_max_aa, h_doub_max_bb, h_doub_max_ab)
 
-  return HBCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max)
+  return HCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max)
 end
 
 """
@@ -1408,23 +1285,14 @@ Following Holmes et al. (2016), Section III.B:
 where k runs over external determinants (not in variational space) and
 i runs over internal determinants (in variational space).
 
-Uses adaptive thresholding: for each internal det i with coefficient c_i,
-generate external dets k with |H_ki| > ε_PT2/|c_i|. This focuses effort
-on important contributions.
-
-Returns PT2Result with energy correction and diagnostics.
+Returns PT2 energies as a vector.
 """
-function compute_pt2_correction!(
-  ctx::Union{FCIContext, HCIContext},
-  variational_dets::Vector{Determinant},
-  coefficients::Vector{Float64},
-  E_variational::Float64,
-  setup_data::HBCISetupData,
-  options::HCIOptions
-)::PT2Result
+function compute_pt2_correction!(ctx::Union{FCIContext, HCIContext}, variational_dets::Vector{Determinant},
+                                 coefficients::Matrix{Float64}, E_variational::Vector{Float64},
+                                 setup_data::HCISetupData, options::HCIOptions)
   
   if !options.compute_pt2
-    return PT2Result()
+    return Float64[]
   end
   
   if options.verbose
@@ -1435,105 +1303,29 @@ function compute_pt2_correction!(
     println("  Threshold ε_PT2: $(options.epsilon_pt2)")
     println("  Variational space size: $(length(variational_dets))")
   end
-  
-  # Dictionary to accumulate contributions: det_k => ∑_i H_ki c_i
-  external_contributions = Dict{Determinant, Float64}()
-  
-  # Create set of variational determinants for fast lookup
-  variational_set = Set(variational_dets)
-  
-  # Buffer for generated excitations
-  connected = Vector{Determinant}()
-  
-  # Step 1: Generate external determinants and accumulate contributions
-  n_internal_processed = 0
-  total_excitations_generated = 0
-  
-  for (i, det_i) in enumerate(variational_dets)
-    c_i = coefficients[i]
-    
-    # Skip negligible coefficients
-    if abs(c_i) < 1e-12
-      continue
+  nstates = size(coefficients, 2)
+  ΔE = zeros(Float64, nstates)
+  save_epsilon_h = options.epsilon_h
+  options.epsilon_h = options.epsilon_pt2
+  for state_idx in 1:nstates
+    if options.verbose
+      println("\nState $state_idx:")
     end
-    
-    n_internal_processed += 1
-    
-    # Adaptive threshold: ε = ε_PT2 / |c_i|
-    # Larger |c_i| → smaller ε → generate more excitations
-    epsilon_adaptive = options.epsilon_pt2 / abs(c_i)
-    
-    # Generate connected determinants with |H_ki| > epsilon_adaptive
-    empty!(connected)
-    # Use efficient setup if available
-    generate_excitations_with_threshold!(connected, det_i, ctx, setup_data, epsilon_adaptive)
-    
-    total_excitations_generated += length(connected)
-    
-    for det_k in connected
-      # Skip if det_k is in variational space
-      if det_k in variational_set
-        continue
-      end
-      
-      # Compute H_ki
-      H_ki = compute_matrix_element_direct(det_i, det_k, ctx)
-      contribution = H_ki * c_i
-      
-      # Only accumulate if |contribution| >= ε_PT2
-      if abs(contribution) >= options.epsilon_pt2
-        external_contributions[det_k] = get(external_contributions, det_k, 0.0) + contribution
-      end
+    _, ΔE[state_idx] = heatbath_selection(variational_dets, @view(coefficients[:, state_idx]), ctx, options,
+                               E_variational[state_idx], setup_data, false)
+    if options.verbose
+      println("  PT2 correction: $(ΔE[state_idx]) Ha")
+      println("  Total energy (VAR+PT2): $(E_variational[state_idx] + ΔE[state_idx]) Ha")
+      println("="^70)
     end
   end
-  
-  if options.verbose
-    println("  Internal dets processed: $n_internal_processed / $(length(variational_dets))")
-    println("  Total excitations generated: $total_excitations_generated")
-    println("  Unique external dets: $(length(external_contributions))")
-  end
-  
-  # Step 2 & 3: Compute PT2 energy
-  ΔE = 0.0
-  contributions = Float64[]
-  
-  for (det_k, numerator) in external_contributions
-    H_kk = compute_diagonal_element(det_k, ctx)
-    denominator = E_variational - H_kk
-    
-    # Guard against near-zero denominators
-    if abs(denominator) < 1e-12
-      @warn "Near-zero denominator in PT2: |E_var - H_kk| = $(abs(denominator)). Skipping."
-      continue
-    end
-    
-    # Compute contribution to PT2 energy
-    pt2_term = numerator^2 / denominator
-    ΔE += pt2_term
-    push!(contributions, abs(pt2_term))
-  end
-  
-  # Diagnostics
-  largest = isempty(contributions) ? 0.0 : maximum(contributions)
-  smallest = isempty(contributions) ? 0.0 : minimum(contributions)
-  
-  if options.verbose
-    println("  PT2 correction: $ΔE Ha")
-    println("  Total energy (VAR+PT2): $(E_variational + ΔE) Ha")
-    println("  Largest contribution: $largest")
-    println("  Smallest contribution: $smallest")
-    if !isempty(contributions)
-      println("  Mean contribution: $(sum(contributions) / length(contributions))")
-    end
-    println("="^70)
-  end
-  
-  return PT2Result(ΔE, length(external_contributions), largest, smallest)
+  options.epsilon_h = save_epsilon_h
+  return ΔE  
 end
 
 """
     run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions) 
-      -> (Vector{Float64}, Matrix{Float64}, Vector{Determinant}, PT2Result)
+      -> (Vector{Float64}, Matrix{Float64}, Vector{Determinant}, Vector{Float64})
 
 Run Heat-Bath CI calculation with support for multiple states.
 
@@ -1545,17 +1337,16 @@ Run Heat-Bath CI calculation with support for multiple states.
 - `energies`: Vector of length nstates with total energies (electronic + nuclear)
 - `coefficients`: Matrix (n_dets × nstates) with CI coefficients for all states
 - `variational_dets`: Vector of determinants in final variational space
-- `pt2_result`: PT2 correction result (currently only for ground state)
+- `pt2_result`: PT2 correction results for all states
 
 # Notes
 - For nstates=1 (default), uses single-state selection strategy
 - For nstates>1, uses multi-state selection with state-maximum probability
-- PT2 correction currently only computed for ground state
 """
-function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
+function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, Vector{Float64}}
   if options.verbose
     println("\n" * "="^70)
-    println("Heat-Bath Configuration Interaction (HBCI)")
+    println("Heat-Bath Configuration Interaction (HCI)")
     println("="^70)
     println("Target selection: $(options.target_selection)")
     println("Selection threshold (ε): $(options.epsilon)")
@@ -1584,7 +1375,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     println("  Computing and sorting |H(rs ← pq)| for all orbital pairs...")
   end
   
-  setup_data = setup_hbci!(ctx)
+  setup_data = setup_hci!(ctx)
   
   if options.verbose
     n_pairs = length(setup_data.double_excitations)
@@ -1663,9 +1454,9 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   previous_eigenvectors = nothing  # Track previous eigenvectors for warm start
   converged = false
   res_tol = options.res_tol * 100  # Looser tolerance for main loop diagonalization
-  for iter in 1:options.max_iterations
+  for iter in 1:options.max_iter
     if options.verbose
-      println("\nHBCI Iteration $iter:")
+      println("\nHCI Iteration $iter:")
       println("  Current space size: $(n_selected(selected_ctx)) determinants")
     end
     
@@ -1721,35 +1512,34 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     end
     
     # 3. Generate candidates and compute probabilities
-    eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon
-    candidates = HBCandidate[]
-    if options.nstates == 1
+    new_dets_dict = Dict{Determinant, Scalar}()  # To hold selected new determinants
+    pt2_corrections = zeros(Float64, options.nstates)
+    for state = 1:options.nstates
       # Single-state: use original single-state function
-      total_prob = compute_heatbath_probabilities!(candidates, determinants(selected_ctx), coeffs_matrix[:,1], ctx, 
-                                                  E_electronic_vec[1], setup_data, eps_h)
-    else
-      # Multi-state: use new multi-state function
-      total_prob = compute_heatbath_probabilities_multistate!(candidates, determinants(selected_ctx), coeffs_matrix, ctx, 
-                                                              E_electronic_vec, setup_data, eps_h)
+      new_dets, pt2_corrections[state] = heatbath_selection(determinants(selected_ctx), @view(coeffs_matrix[:,state]), 
+                                       ctx, options, E_electronic_vec[state], setup_data)
+      mergewith!(max, new_dets_dict, new_dets)
     end
-    
     if options.verbose
-      println("  Generated $(length(candidates)) candidate determinants")
-      println("  Total selection probability: $total_prob")
-    end
-    
-    if isempty(candidates)
-      if options.verbose
-        println("  No new candidates found. Converged.")
+      if options.nstates == 1
+        println("  PT2 correction: $(pt2_corrections[1]) Hartree")
+      else
+        println("  PT2 corrections:")
+        for state in 1:options.nstates
+          println("    State $state: $(pt2_corrections[state]) Hartree")
+        end
       end
-      converged = true
-      break
     end
-    
-    # 4. Select new determinants
-    new_dets = Determinant[]
+    new_dets = collect(keys(new_dets_dict))
     target_size = options.target_selection - n_selected(selected_ctx)
-    n_new = select_determinants_perturbatively!(new_dets, candidates, options, target_size)
+    if options.target_selection > 0 && length(new_dets_dict) > target_size
+      # Select top determinants by weight
+      weights = collect(values(new_dets_dict))
+      sorted_indices = sortperm(weights, rev=true)
+      selected_indices = sorted_indices[1:target_size]
+      new_dets = new_dets[selected_indices]
+    end
+    n_new = length(new_dets)
     
     if options.verbose
       println("  Selected $n_new new determinants")
@@ -1772,7 +1562,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   end
   
   if !converged
-    @warn "HBCI did not converge in $(options.max_iterations) iterations"
+    @warn "HCI did not converge in $(options.max_iter) iterations"
   end
   
   # Final diagonalization
@@ -1790,7 +1580,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   
   if options.verbose
     println("="^70)
-    println("HBCI Complete!")
+    println("HCI Complete!")
     if options.nstates == 1
       println("Electronic energy: $(E_electronic_vec[1]) Hartree")
       println("Nuclear repulsion: $(ctx.fcidump.int0) Hartree")
@@ -1809,23 +1599,25 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     println("Final space size: $(n_selected(selected_ctx)) determinants")
     println("="^70)
   end
-  
-  # Compute PT2 correction if requested (only for ground state currently)
-  pt2_result = PT2Result()
+
+  # Compute PT2 correction if requested
+  pt2_result = Float64[]
   if options.compute_pt2
-    # Note: PT2 correction currently only computed for ground state (state 1)
-    pt2_result = compute_pt2_correction!(ctx, determinants(selected_ctx), coeffs_final_matrix[:,1], 
-                                         E_electronic_vec[1], setup_data, options)
-    
-    E_total_with_pt2 = E_final_vec[1] + pt2_result.energy_correction
-    
+    pt2_result = compute_pt2_correction!(ctx, determinants(selected_ctx), coeffs_final_matrix, 
+                                         E_electronic_vec, setup_data, options)
+
+    E_total_with_pt2 = E_final_vec .+ pt2_result
+
     if options.verbose
       println("\nFinal Energies (Ground State with PT2):")
       println("  Variational:     $(E_final_vec[1]) Ha")
-      println("  PT2 correction:  $(pt2_result.energy_correction) Ha")
-      println("  Total (VAR+PT2): $E_total_with_pt2 Ha")
+      println("  PT2 correction:  $(pt2_result[1]) Ha")
+      println("  Total (VAR+PT2): $(E_total_with_pt2[1]) Ha")
       if options.nstates > 1
-        println("  Note: PT2 currently only computed for ground state")
+        println("\nFinal Energies (Excited States):")
+        for state in 2:options.nstates
+          println("  State $state: $(E_total_with_pt2[state]) Ha")
+        end
       end
     end
   end
@@ -1847,7 +1639,7 @@ This lightweight interface avoids FCIContext initialization overhead:
 # Returns
 Same as run_heatbath_ci!(ctx, options): (energies, coeffs, determinants, pt2_result)
 """
-function run_heatbath_ci!(ctx::HCIContext)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, PT2Result}
+function run_heatbath_ci!(ctx::HCIContext)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant}, Vector{Float64}}
   return run_heatbath_ci!(ctx, ctx.options)
 end
 
@@ -1939,6 +1731,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     initial_guess,
     nstates = nstates,
     max_iterations = 50,
+    shift = selected_ctx.base_context.options.shift,
     convergence_threshold = conv_tol,
     verbose = false
   )

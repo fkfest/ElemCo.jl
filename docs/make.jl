@@ -72,6 +72,7 @@ makedocs(
       "qmtensors.md",
       "tensortools.md",
       "descdict.md",
+      "vecdict.md",
       "utils.md",
       "bufvec.md",
       "versioninfo.md",

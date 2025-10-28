@@ -89,14 +89,14 @@ end
 """
     form_string_substs_for_spin!(result::Vector{SubstResult}, 
                                 op_matrix_1e, adr::OrbStringAdrTable,
-                                I::OrbPattern) -> Int
+                                I::OrbPattern, ThrNeglect=1e-16) -> Int
 
 Form sparse list of all |K> which can be reached by applying c^k_l on string |I>.
 
 Returns number of valid substitutions found.
 """
 function form_string_substs_for_spin!(result::Vector{SubstResult}, op_matrix_1e,
-                                      adr::OrbStringAdrTable, I::OrbPattern)::Int
+                                      adr::OrbStringAdrTable, I::OrbPattern, ThrNeglect=1e-16)::Int
   n_orb_val = n_orb(adr)
   n_entries = 0
 
@@ -314,12 +314,14 @@ function init_hamiltonian_terms!(context::FCIContext)
       absorb_1e!(int2ab_modified, n_orb, n_elec, context.mod_core_h_a, context.mod_core_h_b)
       
       # Use 2e term with all three UHF integral tensors (1e terms absorbed)
-      h2_term = HamiltonianTerm2e(n_orb, int2aa_modified, int2bb_modified, int2ab_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2aa_modified, 
+                                  int2bb_modified, int2ab_modified)
       push!(context.hamiltonian_terms, h2_term)
     else
       # Use separate 1e and 2e terms with all three UHF integral tensors
       h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
-      h2_term = HamiltonianTerm2e(n_orb, int2aa_modified, int2bb_modified, int2ab_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2aa_modified, 
+                                  int2bb_modified, int2ab_modified)
       push!(context.hamiltonian_terms, h1_term)
       push!(context.hamiltonian_terms, h2_term)
     end
@@ -341,12 +343,12 @@ function init_hamiltonian_terms!(context::FCIContext)
       # Absorb 1e terms into 2e integrals
       absorb_1e!(int2_modified, n_orb, n_elec, context.mod_core_h_a, context.mod_core_h_a)
       # Use only 2e term (1e terms absorbed)
-      h2_term = HamiltonianTerm2e(n_orb, int2_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified)
       push!(context.hamiltonian_terms, h2_term)
     else
       # Use separate 1e and 2e terms
       h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
-      h2_term = HamiltonianTerm2e(n_orb, int2_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified)
       push!(context.hamiltonian_terms, h1_term)
       push!(context.hamiltonian_terms, h2_term)
     end
@@ -618,11 +620,12 @@ mutable struct HamiltonianTerm2e <: HamiltonianTerm
   n_orb::FCIUInt
   spatial::Bool
   base_factor::Scalar
+  thr_negligible::Scalar
   op2_matrix_aa::Matrix{Scalar}
   op2_matrix_bb::Matrix{Scalar}
   op2_matrix_ab::Matrix{Scalar}
 
-  function HamiltonianTerm2e(n_orb::Integer, op2_matrix_aa::AbstractArray{Scalar},
+  function HamiltonianTerm2e(n_orb::Integer, thr::Float64, op2_matrix_aa::AbstractArray{Scalar},
                              op2_matrix_bb::Union{AbstractArray{Scalar}, Nothing} = nothing,
                              op2_matrix_ab::Union{AbstractArray{Scalar}, Nothing} = nothing)
     n_orb_int = Int(n_orb)
@@ -630,7 +633,7 @@ mutable struct HamiltonianTerm2e <: HamiltonianTerm
     mat_aa = convert_op2_to_pair_matrix(op2_matrix_aa, n_orb_int)
     mat_bb = spatial ? mat_aa : convert_op2_to_pair_matrix(op2_matrix_bb, n_orb_int)
     mat_ab = spatial ? mat_aa : convert_op2_to_pair_matrix(op2_matrix_ab, n_orb_int)
-    new(FCIUInt(n_orb_int), spatial, 0.5, mat_aa, mat_bb, mat_ab)
+    new(FCIUInt(n_orb_int), spatial, 0.5, thr, mat_aa, mat_bb, mat_ab)
   end
 end
 
@@ -723,9 +726,6 @@ function contract!(term::HamiltonianTerm1e, r::FCIVector, c::FCIVector, prefacto
   @assert compatible(r, c) "Incompatible FCI vectors"
 
   base_prefactor = term.base_factor * prefactor
-  if abs(base_prefactor) < ThrNeglect
-    return
-  end
 
   # Apply on alpha strings, leaving beta invariant
   apply_1e_op!(vec(r.data), vec(c.data), base_prefactor, term.op1_matrix_a, r.adr_a, r.adr_b,
@@ -829,7 +829,7 @@ function make_1rdms!(rdm_a::Matrix{Scalar}, rdm_b::Matrix{Scalar}, coeff::FCIVec
 end
 
 """
-    make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1)
+    make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1::Matrix{Scalar}, ThrNeglect=1e-16)
 
 Compute 2-particle reduced density matrix (2-RDM).
 
@@ -850,7 +850,7 @@ The algorithm:
 # Notes
 - Computational cost: O(N_det × n_orb^4)
 """
-function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1)
+function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1::Matrix{Scalar}, ThrNeglect=1e-16)
   n_orb = Int(coeff.n_orb)
   n_pairs_n = n_orb * n_orb
   
@@ -982,9 +982,6 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector, c::FCIVector, prefacto
   @assert compatible(r, c) "Incompatible FCI vectors"
 
   base_prefactor = term.base_factor * prefactor
-  if abs(base_prefactor) < ThrNeglect
-    return
-  end
 
   n_str_a = Int(r.n_str_a)
   n_str_b = Int(r.n_str_b)
@@ -1072,7 +1069,7 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector, c::FCIVector, prefacto
                                io_beta_offset)
       block_contract_cc1!(input_beta, info_b, coeff_alpha, 'c', csum, 1.0)
 
-      if csum[] > ThrNeglect
+      if csum[] > term.thr_negligible
         input_a_mat = reshape(@view(input[1:spatial_block_len]), n_pairs, n_block_cols)
         output_a_mat = reshape(@view(output[1:spatial_block_len]), n_pairs, n_block_cols)
 

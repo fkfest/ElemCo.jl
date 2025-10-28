@@ -232,6 +232,8 @@ end
 @kwdef mutable struct FCIOptions
   """`⟨50⟩` Maximum number of iterations """
   max_iter::Int = 50
+  """`⟨0.1⟩` Level shift to improve convergence """
+  shift::Float64 = 0.1
   """`⟨1e-8⟩` Convergence tolerance for energy """
   conv_tol::Float64 = 1e-8
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
@@ -242,8 +244,6 @@ end
   n_guess::Int = 2
   """`⟨10⟩` Maximum subspace size for Davidson diagonalization """
   subspace_size::Int = 10
-  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
-  print_level::Int = 1
   """`⟨true⟩` Compute 1-RDMs after convergence """
   compute_rdms::Bool = true
   """`⟨false⟩` Compute 2-RDM after convergence """
@@ -260,6 +260,10 @@ end
   pspace_energy_threshold::Float64 = 5.0
   """`⟨1e-3⟩` HCI selection threshold (epsilon_h) for P-space generation """
   pspace_hci_epsilon::Float64 = 1e-3
+  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
+  print_level::Int = 1
+  """`⟨1e-12⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
+  thr_negligible::Float64 = 1e-12
 end
 
 """
@@ -272,7 +276,7 @@ end
   target_selection::Int = 1_000_000
   """`⟨3e-4⟩` Selection threshold """
   epsilon::Float64 = 3e-4
-  """`⟨epsilon⟩` HCI selection threshold """
+  """`⟨epsilon/10⟩` HCI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
   epsilon_h::Float64 = -1.0
   """`⟨epsilon⟩` CIPSI selection threshold """
   epsilon_p::Float64 = -1.0
@@ -280,8 +284,10 @@ end
   tol::Float64 = 1e-6
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
-  """`⟨50⟩` Maximum HBCI iterations """
-  max_iterations::Int = 50
+  """`⟨50⟩` Maximum HCI iterations """
+  max_iter::Int = 50
+  """`⟨0.1⟩` Level shift to improve convergence """
+  shift::Float64 = 0.1
   """`⟨true⟩` Print iteration details """
   verbose::Bool = true
   """`⟨true⟩` Compute PT2 perturbative correction """
@@ -298,6 +304,8 @@ end
   small_space_method::Symbol = :hybrid
   """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
   print_level::Int = 1
+  """`⟨1e-10⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
+  thr_negligible::Float64 = 1e-10
 end
 
 """ 

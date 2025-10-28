@@ -540,9 +540,14 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
     energies = OutDict()
     for i = 1:length(E_HCI)-1
       energies["ω$i"] = E_HCI[i+1] - Egs
+      if EC.options.hci.compute_pt2
+        energies["ω$i+pt2"] = E_HCI[i+1] + pt2[i+1] - Egs - pt2[1]
+      end
     end
-    return merge(energies, "E-correction" => pt2.energy_correction,
-                   "E" => Egs - ref_energy)
+    if EC.options.hci.compute_pt2
+      push!(energies, "E-correction" => pt2[1])
+    end
+    return merge(energies, "E" => Egs - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)
     fci_ctx = FCIContext(fdump, EC.options.fci; occa=EC.space['o'], occb=EC.space['O'])

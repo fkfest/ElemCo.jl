@@ -47,7 +47,7 @@ function run_fci!(context::FCIContext)
       
       # Compute 2-RDM
       rdm1 = context.rdm1_a + context.rdm1_b
-      make_2rdm!(context.rdm2, context.coeff, rdm1)
+      make_2rdm!(context.rdm2, context.coeff, rdm1, context.options.thr_negligible)
       
       # Verify energy from 2-RDM
       if context.fcidump.uhf

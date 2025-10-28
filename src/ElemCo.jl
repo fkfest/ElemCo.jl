@@ -9,6 +9,7 @@ include("version.jl")
 include("../lib/TREXIO/src/TREXIO.jl")  # Include standalone TREXIO module
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
+include("tools/vecdict.jl")
 include("tools/outputs.jl")
 include("tools/utils.jl")
 include("tools/constants.jl")

@@ -1783,14 +1783,14 @@ Slater-Condon rules:
 
 \textbf{Single excitation} ($|\Phi^J\rangle = \op{a}^\dagger_a \op{a}_i |\Phi^I\rangle$):
 \beq
-\langle \Phi_I | \op{H} | \Phi^J \rangle = \sgn_{ia} \left[ h_{ia} 
-    + \sum_{j \in I} \left[ v_{ij}^{aj} - v_{ij}^{ja} \right] \right]
+\langle \Phi_I | \op{H} | \Phi^J \rangle = \sgn_{ia} \left[ h_{a}^{i} 
+    + \sum_{j \in I} \left[ v_{aj}^{ij} - v_{aj}^{ji} \right] \right]
 \eeq
 where $\sgn_{ia}$ is the fermionic phase factor from orbital reordering.
 
 \textbf{Double excitation} ($|\Phi^J\rangle = \op{a}^\dagger_a \op{a}^\dagger_b \op{a}_j \op{a}_i |\Phi^I\rangle$):
 \beq
-\langle \Phi_I | \op{H} | \Phi^J \rangle = \sgn_{iajb} \left[ v_{ij}^{ab} - v_{ij}^{ba} \right]
+\langle \Phi_I | \op{H} | \Phi^J \rangle = \sgn_{iajb} \left[ v_{ab}^{ij} - v_{ba}^{ij} \right]
 \eeq
 
 \textbf{Higher excitations}: Matrix elements vanish for determinants differing by more than 
@@ -1818,9 +1818,9 @@ The Hamiltonian is decomposed into one-electron and two-electron parts:
        + \op{H}_2^{(\alpha\alpha)} + \op{H}_2^{(\beta\beta)} + \op{H}_2^{(\alpha\beta)}
 \eeq
 
-For each component, string substitutions are performed:
+The one-electron part is absorbed into the two-electron integrals.
+For remaining components, string substitutions are performed:
 \begin{itemize}
-\item \textbf{One-electron terms}: Substitution in one string, sum over other string
 \item \textbf{Same-spin two-electron}: Substitution in one string, sum over other string
 \item \textbf{Opposite-spin two-electron}: Substitution in both strings simultaneously
 \end{itemize}
@@ -1855,7 +1855,7 @@ we use either the diagonal preconditioner,
 u^\st{n}_{I} = \frac{r^\st{n}_{I}}{E^\st{n} - H_{I}^{I}},
 \label{eq:diag_precond}
 \eeq
-or the P-Space enhanced preconditioner (see \sect{sec:jacobi_davidson} and \sect{sec:pspace}).
+or the P-space enhanced preconditioner (see \sect{sec:jacobi_davidson} and \sect{sec:pspace}).
 \subsection{Jacobi-Davidson Preconditioner}
 \label{sec:jacobi_davidson}
 
@@ -1885,7 +1885,7 @@ with coupling terms:
 \alpha &= \vect{x}_{\st{n}\{Q\}}^\dagger (\mat{H}_{\{Q\}} - E^\st{n}) \vect{x}^{\st{n}}_{\{Q\}} \\
 \vect{s}^\st{n}_{\{P\}} &= (\mat{I}_{\{P\}} - \vect{x}^\st{n}_{\{P\}} \vect{x}_{\st{n}\{P\}}^\dagger)
 \left(\mat{H}_{\{P\}} - E^\st{n}\right)\vect{x}^\st{n}_{\{P\}}
-  \left(\vect{x}_{\st{n}\{Q\}}^\dagger \vect{u}_{\{Q\}}\right) + \beta \vect{x}^\st{n}_{\{P\}} \\
+  \left(\vect{x}_{\st{n}\{Q\}}^\dagger \vect{u}^{\st{n}}_{\{Q\}}\right) + \beta \vect{x}^\st{n}_{\{P\}} \\
 \beta &= \vect{x}_{\st{n}\{Q\}}^\dagger(\mat{H}_{\{Q\}} - E^\st{n})
 (\mat{I}_{\{Q\}} - \vect{x}^\st{n}_{\{Q\}} \vect{x}_{\st{n}\{Q\}}^\dagger)\vect{u}^\st{n}_{\{Q\}}.
 \end{align}
@@ -1942,7 +1942,7 @@ The algorithm consists of three phases plus an extension towards CIPSI:
 
 \textbf{Phase I} (Setup): Pre-compute sorted lists of double excitation matrix elements:
 \beq
-\text{For each } (p,q): \quad \{(r,s,|H_{rs \leftarrow pq}|)\} 
+\text{For each } (p,q): \quad \{(r,s,H_{rs \leftarrow pq})\} 
     \text{ sorted by } |H_{rs \leftarrow pq}| \text{ (decreasing)}
 \eeq
 
@@ -1951,30 +1951,35 @@ The algorithm consists of three phases plus an extension towards CIPSI:
 \mat{H}_{\text{sel}} \vect{c} = E_{\text{var}} \vect{c}
 \eeq
 
-\textbf{Phase III} (Selection): Generate candidate determinants connected to the variational 
-space by $|H_{J}^I c_I| \gt \epsilon_1$:
+\textbf{Phase III} (Heat-Bath Selection): Generate candidate determinants connected to the variational 
+space by $|H_{J}^I c_I| \gt \epsilon_h$:
 
 
 For each determinant $|\Phi_I\rangle$ in the variational space:
 \begin{itemize}
-\item Generate single excitations with $|f_{i}^{a} c_I| \gt \epsilon_1$
-\item Use pre-sorted lists to generate only double excitations with $|v_{ij}^{ab} c_I| \gt \epsilon_{\text{adaptive}}$
-\item Adaptive threshold: $\epsilon_{\text{adaptive}} = \epsilon_1 / |c_I|$
+\item Generate single excitations with $|f_{i}^{a} c_I| \gt \epsilon_h$
+\item Use pre-sorted lists to generate only double excitations with $|v_{ij}^{ab} c_I| \gt \epsilon_h$
+\item Adaptive threshold: $\epsilon_{\text{adaptive}} = \epsilon_h / |c_I|$
 \end{itemize}
 
-\textbf{Phase IV} (extension of HCI towards CIPSI): Select determinants with highest selection probabilities:
+\textbf{Phase IV} (Perturbative selection à la CIPSI): Select determinants corresponding to 
+highest perturbative amplitudes:
 \beq
-P_J = \sum_{I \in \text{var}} \frac{|H^I_{J} c_I|^2}{(E_{\text{var}} - H^J_{J})^2}
+\pre{^{pert}} c_J^2 \approx \frac{\left|\sum_{I \in \{|H_{J}^I c_I| \gt \epsilon_h\}} H^I_{J} c_I\right|^2}{(E_{\text{var}} - H^J_{J})^2} \gt \epsilon_p^2
 \eeq
+Note that the sum runs only over determinants that have a large contribution to the $J$ determinant
+according to the heat-bath criterion, and therefore can be calculated during the Phase III,
+essentially at no extra cost.
 
 \subsection{Efficient Excitation Generation}
 
 The key to HCI performance is the setup phase, which pre-computes and sorts excitation lists.
 For restricted Hartree-Fock (RHF), store:
 \beq
-\text{double\_excitations}[(p,q)] = \{(r,s,|H_{rs \leftarrow pq}|)\}_{\text{sorted}},
+\text{double\_excitations}[(p,q)] = \{(r,s,H_{rs \leftarrow pq})\}_{\text{sorted}},
 \eeq
-where $H_{rs \leftarrow pq} = v_{pq}^{rs} - v_{pq}^{sr}$ is the antisymmetrized matrix element.
+where $H_{rs \leftarrow pq} = v_{pq}^{rs} - v_{pq}^{sr}$ is the antisymmetrized matrix element,
+and $H_{rs \leftarrow pq} = v_{pq}^{rs}$ for $p,q$ of opposite spin.
 
 For unrestricted Hartree-Fock (UHF), store separately:
 \begin{itemize}
@@ -1987,8 +1992,8 @@ For unrestricted Hartree-Fock (UHF), store separately:
 
 For multi-state calculations, use \textbf{state-maximum selection}:
 \beq
-P_J = \max_{\st{n}=\st{1},\ldots,\st{N}_{\text{states}}} \left[ \sum_{I \in \text{var}} 
-    \frac{|H^I_{J} c^\st{n}_{I}|^2}{(E^\st{n}_{\text{var}} - H^J_{J})^2} \right]
+\pre{^{pert,max}}c_J^2 = \max_{\st{n}=\st{1},\ldots,\st{N}_{\text{states}}} \left[  
+    \frac{\left|\sum_{I \in \text{var}\epsilon_h}H^I_{J} c^\st{n}_{I}\right|^2}{(E^\st{n}_{\text{var}} - H^J_{J})^2} \right]
 \eeq
 
 This ensures determinants important for \emph{any} state are included, preventing bias 
@@ -1996,14 +2001,12 @@ toward the ground state.
 
 
 The initial guess is generated by diagonalizing a small-space Hamiltonian:
-
 \beq
-N_{\text{small}} = \max\left(100, \frac{N_{\text{target}}}{10}, 5 N_{\text{states}}\right)
+N_{\text{small}} = \max\left(100, \sqrt{N_{\text{target}}}, 5 N_{\text{states}}\right)
 \eeq
-
-Select determinants using hybrid method (energy + excitation level), diagonalize to get 
-initial eigenvectors for all states. This prevents missing excited states due to poor 
-initialization.
+with determinants selected using hybrid method (energy + excitation level), and diagonalized 
+to get initial eigenvectors for all states. 
+This prevents missing excited states due to poor initialization.
 
 
 \subsection{Second-Order Energy Correction}
@@ -2020,9 +2023,12 @@ where $K$ runs over all determinants connected to the variational space but not 
 
 To compute PT2 efficiently, adaptive thresholding is employed. For each variational determinant $|\Phi^I\rangle$,
 \beq
-\epsilon_{\text{adaptive}} = \frac{\epsilon_2}{|c_I|},
+\epsilon_{\text{adaptive}} = \frac{\epsilon_{pt2}}{|c_I|},
 \eeq
-and only excitations are generated with $|H_{IK}| \gt \epsilon_{\text{adaptive}}$ using pre-sorted lists from setup. Accumulate contributions:
+and only excitations are generated with $|H_{K}^{I}| \gt \epsilon_{\text{adaptive}}$ using pre-sorted lists from setup.
+
+In practice, the calculation corresponds to the Phase III + Phase IV of the HCI selection
+with a different (tight) threshold $\epsilon_{pt2}$.
 
 \section{Reduced Density Matrices}
 \label{sec:rdm}

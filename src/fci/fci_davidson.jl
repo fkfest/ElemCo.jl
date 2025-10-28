@@ -124,8 +124,9 @@ function jacobi_davidson_correction!(t::FCIVector, r::FCIVector, u::FCIVector,
   diag_h = context.diag_h
   t_Q = zero(r_perp)
   
+  ThrNeglect = context.options.thr_negligible
   for i in 1:n_data(r_perp)
-    denominator = theta - diag_h.data[i] + shift
+    denominator = theta - diag_h.data[i] - shift
     if abs(denominator) > ThrNeglect
       t_Q.data[i] = r_perp.data[i] / denominator
     else
@@ -285,8 +286,9 @@ function update_ci_vector!(c::FCIVector, r::FCIVector, diag_h::FCIVector,
     # as it can cause linear dependency issues. Use Jacobi-Davidson instead.
     
     # Standard Davidson-Jacobi preconditioning: c = r / (E - H_ii)
+    ThrNeglect = context.options.thr_negligible
     for i in 1:n_data(r)
-      denominator = energy - diag_h.data[i] + shift
+      denominator = energy - diag_h.data[i] - shift
       if abs(denominator) > ThrNeglect
         c.data[i] = r.data[i] / denominator
       else
@@ -642,7 +644,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
         normalize!(u_normalized)
         
         update_ci_vector!(V[new_idx], resid_state, context.diag_h, energy_state,
-                          context, 0.0, u_normalized)
+                          context, context.options.shift, u_normalized)
 
         # Orthogonalize against all existing vectors (including newly added ones)
         for j in 1:k
@@ -652,7 +654,7 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
 
         # Check if vector became zero after orthogonalization
         vec_norm = norm(V[new_idx])
-        if vec_norm < 1e-12
+        if vec_norm < context.options.thr_negligible
           if n_states == 1
             println("  Warning: Vector became zero after orthogonalization - stopping expansion")
           else
@@ -756,6 +758,7 @@ determinants rather than the full CI space.
 - `nstates::Int=1`: Number of lowest eigenvalues to compute
 - `max_iterations::Int=50`: Maximum number of Davidson iterations
 - `convergence_threshold::Float64=1e-8`: Energy convergence threshold
+- `shift::Float64=0.1`: (square of imaginary) level shift for preconditioner
 - `max_subspace::Int=30`: Maximum subspace size before refresh
 - `verbose::Bool=false`: Print iteration information
 
@@ -777,15 +780,13 @@ The key difference from `davidson_fci!` is that matrix elements are computed
 on-the-fly using `contract_hamiltonian_selected!`, maintaining O(N_selected)
 memory usage rather than O(N_full).
 """
-function davidson_selected_ci!(
-  selected_ctx::SelectedCIContext,
-  initial_guesses::Matrix{Scalar};
-  nstates::Int = 1,
-  max_iterations::Int = 50,
-  convergence_threshold::Float64 = 1e-8,
-  max_subspace::Int = 30,
-  verbose::Bool = false
-)
+function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses::Matrix{Scalar};
+                               nstates::Int = 1,
+                               max_iterations::Int = 50,
+                               convergence_threshold::Float64 = 1e-8,
+                               shift::Float64 = 0.1,
+                               max_subspace::Int = 30,
+                               verbose::Bool = false)
   n_dets = n_selected(selected_ctx)
   
   n_guess::Int = size(initial_guesses, 2)
@@ -807,6 +808,8 @@ function davidson_selected_ci!(
     println("Initial guesses provided: $n_guess")
     println("Subspace settings: max=$max_subspace, keep=$n_keep")
   end
+
+  ThrNeglect = selected_ctx.base_context.options.thr_negligible
   
   # Precompute diagonal elements for preconditioner
   diagonal = zeros(Scalar, n_dets)
@@ -828,7 +831,7 @@ function davidson_selected_ci!(
     V[i] .= @view(initial_guesses[:, i])
     # Normalize
     norm_val = norm(V[i])
-    if norm_val > 1e-10
+    if norm_val > ThrNeglect
       V[i] ./= norm_val
     else
       # If guess is zero, use diagonal-based guess
@@ -843,7 +846,7 @@ function davidson_selected_ci!(
       V[i] .-= overlap .* V[j]
     end
     norm_val = norm(V[i])
-    if norm_val > 1e-10
+    if norm_val > ThrNeglect
       V[i] ./= norm_val
     end
   end
@@ -958,11 +961,7 @@ function davidson_selected_ci!(
       correction = zeros(Scalar, n_dets)
       for i in 1:n_dets
         denom = eigenvalues[iroot] - diagonal[i]
-        if abs(denom) > 1e-10
-          correction[i] = residuals[iroot][i] / denom
-        else
-          correction[i] = residuals[iroot][i] / 1e-10
-        end
+        correction[i] = residuals[iroot][i] * denom/(denom^2 + shift)
       end
       
       # Gram-Schmidt orthogonalization
@@ -972,7 +971,7 @@ function davidson_selected_ci!(
       end
       
       correction_norm = norm(correction)
-      if correction_norm < 1e-10
+      if correction_norm < ThrNeglect
         continue  # Skip if correction is too small
       end
       
