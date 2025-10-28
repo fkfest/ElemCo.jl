@@ -11,6 +11,38 @@ ElemCo.jl is a scientific computing package that provides:
 - Quantum chemistry interfaces (Molpro, TREXIO, FCIDUMP)
 - Advanced tensor operations and orbital tools
 - DMRG (Density Matrix Renormalization Group) integration
+- Full Configuration Interaction (FCI) with Selected CI and Heat-Bath CI
+
+## Architecture Overview
+
+### Core Data Flow
+1. **System Definition** → 2. **Integrals** → 3. **SCF** → 4. **CC/Post-HF** → 5. **Properties**
+   - `MSystems` (molecular geometry, basis sets) → `Integrals` (FCIDUMP or DF) → `DFHF`/`BOHF` (orbitals) → `CoupledCluster` (amplitudes) → `CCTools` (properties)
+
+### Central State Object: `ECInfo`
+- **Location**: `src/infos/ecinfos.jl`
+- **Purpose**: Global state container for all calculations
+- **Key fields**:
+  - `EC.system`: Molecular system (`MSystems.MolecularSystem`)
+  - `EC.fd`: FCIDUMP integrals (`FciDumps.FciDump`)
+  - `EC.options`: All calculation options (nested structure: `scf`, `cc`, `cholesky`, `wf`, etc.)
+  - `EC.space`: Orbital space dictionary (`'o'` = occupied, `'v'` = virtual, etc.)
+  - **Usage**: Always passed as first argument: `function_name(EC::ECInfo, ...)`
+
+### Module Organization
+```
+src/
+├── ElemCo.jl              # Main module, includes all submodules, defines macros
+├── infos/                 # ECInfo, Options, ECMethod
+├── system/                # MolecularSystem, BasisSet, Elements
+├── integrals/             # FciDump, DumpTools, DFTools
+├── scf/                   # DFHF, BOHF, DFMCSCF, OrbTools, FockFactory
+├── cc/                    # CoupledCluster, CCTools, Drivers, DMRG
+├── fci/                   # FCI, Davidson, Selected CI, Heat-Bath CI
+├── solvers/               # DIIS, Davidson
+├── tools/                 # TensorTools, QMTensors, MIO, Utils
+└── interfaces/            # Molpro, TREXIO, Molden
+```
 
 ## Code Style and Format
 
@@ -62,22 +94,54 @@ E_corr = calc_ccsd_energy(EC, T1, T2)
 - Always include `@print_input` at the beginning of input scripts
 
 **Tensor Operations:**
-- Use `@mtensor` macro for tensor contractions
+- Use `@mtensor` macro for tensor contractions (wraps `TensorOperations.@tensor`)
 - Follow Einstein summation notation in comments
 - Include LaTeX expressions for tensor equations in comments
 - Example: `# R_e^m += D_{id}^{el} (\\hat v_{ml}^{di}-\\hat v_{lm}^{di})`
+- Example code: `@mtensor A[p,q,L] = B[p,r,L] * C[r,q]`
+- Use `@mview` for memory-efficient array views (based on `StridedViews`)
+
+### Domain-Specific Language (DSL)
+ElemCo uses **macro-based DSL** for user-facing API (see `src/ElemCo.jl` lines 250-600):
+
+**Key Macros:**
+- `@ECinit` / `@tryECinit` - Initialize `EC::ECInfo` global state
+- `@print_input` - prints input for reproducibility
+- `@dfhf` / `@dfuhf` / `@dfmcscf` - Run SCF calculations, store orbitals in `EC.options.wf.orb`
+- `@cc <method>` - Run CC calculations (automatically calls `@dfints` if needed)
+- `@dfcc <method>` - Run CC with on-the-fly density fitting
+- `@set <opt> <key>=<val>` - Set options (e.g., `@set scf thr=1.e-14 maxit=100`)
+- `@fci` - Run FCI calculation
+
+**Reserved Variables:**
+- `fcidump::String` - Path to FCIDUMP file
+- `geometry::String` - Molecular geometry (Cartesian or Z-matrix)
+- `basis::String` or `Dict` - Basis set specification
+- `EC::ECInfo` - Global state object (auto-created by macros)
+
+**Example Input Pattern:**
+```julia
+using ElemCo
+@print_input              # Always first!
+
+geometry = "O 0 0 0; H 0 0 1.8; H 0 1.8 0"
+basis = "cc-pVDZ"
+@dfhf                     # Run HF, stores orbitals
+@cc dcsd                  # Run DCSD using stored orbitals
+```
 
 ### Module Structure
 
 **File Organization:**
 - Main module: `src/ElemCo.jl`
 - Submodules organized by functionality:
-  - `cc/` - Coupled cluster methods
+  - `cc/` - Coupled cluster methods (see `drivers.jl` for entry points)
   - `scf/` - Self-consistent field methods
   - `integrals/` - Integral handling and transformations
   - `system/` - Molecular systems and basis sets
   - `tools/` - Utilities and tensor operations
-  - `interfaces/` - External program interfaces
+  - `interfaces/` - External program interfaces (Molpro, TREXIO)
+  - `fci/` - Full CI implementation
 
 **Constants and Physical Units:**
 - Define physical constants in `Constants` module
@@ -114,7 +178,13 @@ end
 - `libcint_jll` for integral calculations
 
 ### Performance Considerations
-- Use in-place operations where possible
+- **Type stability is essential**: All performance-critical functions must be type-stable
+  - Ensure return types are inferrable from input types at compile time
+  - Use `@code_warntype` to check for type instabilities
+  - Avoid abstract types in struct fields (use parametric types or concrete types)
+  - Use `Val{N}` for dimension-dependent code (see `mioload` in `src/tools/myio.jl`)
+  - Example: Return `Array{Float64,N}` not `Array` from functions
+- Use in-place operations where possible (functions ending with `!`)
 - Leverage BLAS operations via `LinearAlgebra`
 - Memory management is crucial for large tensor operations
 - Use `load4idx()` (`load3idx`, `load2idx`, etc) and `save4idx()` (`save3idx()`, `save2idx()`, etc) for tensor disk I/O
@@ -160,6 +230,7 @@ energies = ElemCo.ccdriver(EC, "ccsd(t)"; fcidump="file.FCIDUMP")
 - Use `fcidump`, `geometry`, `basis` as reserved variable names
 - Methods: `dcsd`, `ccsd`, `ccsd(t)`, `λccsd(t)`, `mp2`, etc.
 - Options set via `@set` macro: `@set scf maxit=50`
+- Occupation can be specified: `@cc dcsd occa="1-5" occb="1-4"`
 
 ## Common Patterns
 
@@ -175,9 +246,10 @@ energies = ElemCo.ccdriver(EC, "ccsd(t)"; fcidump="file.FCIDUMP")
 - ASCII art headers for major calculation sections
 
 ### Memory Management
-- Use `NOTHING4idx` (or `NOTHING3idx`, etc) constant for clearing large tensors
-- Implement scratch directory management
+- Use `NOTHING4idx` (`NOTHING3idx`, `NOTHING2idx`, etc) constant for clearing large tensors
+- Implement scratch directory management (default: system temp dir + "elemcojlscr")
 - Handle temporary files appropriately
+- Memory-mapped I/O for large tensors via `MIO` module (`miosave`, `mioload`, `miommap`)
 
 ## Contributing Guidelines
 

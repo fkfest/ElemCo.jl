@@ -5,7 +5,9 @@ using XML
 using Printf
 using ..ElemCo.AbstractEC
 using ..ElemCo.DescDict
+using ..ElemCo.VecDicts
 using ..ElemCo.Outputs
+using ..ElemCo.VersionInfo
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export warn
@@ -13,7 +15,8 @@ export mainname, print_time, print_memory, free_memory
 export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
 export @istoplevel
-export substr
+export @assert_devel
+export substr, setdiff4dict!
 export allocfree_permutedims!
 export reshape_buf
 export amdmkl
@@ -21,8 +24,13 @@ export xpath
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
 export OutDict, last_energy
+# from bufvec
+export BufVec, capacity, is_full
+# from VecDicts
+export VecDict, getvalue, setvalue!, values
 
 include("xmltools.jl")
+include("bufvec.jl")
 
 """
     mainname(file::String)
@@ -55,8 +63,12 @@ end
   Print time with message `info` if verbosity `verb` is smaller than `PrintOptions.time`.
 """
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
+  return print_time(EC.options.print.time, t1, info, verb)
+end
+
+function print_time(print_time_verbosity::Int, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
-  if verb < EC.options.print.time
+  if verb < print_time_verbosity
     output_time(t2 - t1, info)
   end
   return t2
@@ -277,6 +289,19 @@ function substr(string::AbstractString, range::UnitRange{Int})
 end
 
 """
+    setdiff4dict!(dict::AbstractDict, keys)
+
+  Delete all `keys` from `dict`.
+
+  The same behavior as `setdiff!` for sets.
+"""
+function setdiff4dict!(dict::AbstractDict, keys)
+  for key in keys
+    delete!(dict, key)
+  end
+end
+
+"""
     argmaxN(vals, N; by::Function=identity)
 
   Return the indices of the `N` largest elements in `vals`.
@@ -324,9 +349,10 @@ function argmaxN(vals, N; by::Function=identity)
 end
 
 """
-    reshape_buf(buf::AbstractVector, dims...)
+    reshape_buf(buf::AbstractVector, dims...; offset=0)
 
-  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`.
+  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`, 
+  starting from `offset`.
   The buffer is expected to be large enough to fit the reshaped data.
 
   # Example
@@ -334,10 +360,10 @@ end
 julia> buf = zeros(1000)
 julia> reshaped_buf = reshape_buf(buf, 10, 10)
 """
-Base.@propagate_inbounds function reshape_buf(buf::AbstractVector, dims...)
-  len = prod(dims)
+Base.@propagate_inbounds function reshape_buf(buf::AbstractVector, dims...; offset=0)
+  len = prod(dims) + offset
   @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
-  return reshape(@view(buf[1:len]), dims...)
+  return reshape(@view(buf[1+offset:len]), dims...)
 end
 
 
@@ -383,6 +409,25 @@ macro istoplevel()
     $(esc(canary)) = true
     Base.isdefined($__module__, $(QuoteNode(canary)))
   end
+end
+
+"""
+    @assert_devel(cond, text=nothing)
+
+  Assert `cond` only in development mode.
+
+  If `text` is given, it is used as the assertion message.
+  Development mode is determined by `VersionInfo.devel()`.
+
+  Copied from `ToggleableAsserts.jl`.
+"""
+macro assert_devel(cond, text=nothing)
+  if text==nothing
+    assert_stmt = esc(:(@assert $cond))
+  else
+    assert_stmt = esc(:(@assert $cond $text))
+  end
+  :(VersionInfo.devel() ? $assert_stmt  : nothing)
 end
 
 """
