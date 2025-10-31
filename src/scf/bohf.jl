@@ -264,6 +264,7 @@ function bohf(EC::ECInfo)
       ϵ_new = zeros(Complex{Float64}, norb)
       cMOr_new = zeros(Complex{Float64}, norb, norb)
       ϵ_new[occ],cMOr_new[occ,occ] = eigen(fock[occ,occ])
+      println("eigenvalues occupied: ", ϵ_new[occ])
       ϵ_new[vir],cMOr_new[vir,vir] = eigen(fock[vir,vir])
     else
       perform!(diis, [fock], [Δfock])
@@ -272,8 +273,8 @@ function bohf(EC::ECInfo)
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
+    cMOr[1], cMOl[1] = balance_norms!(cMOr[1])
     restrict!(cMOr)
-    cMOl[1] = (inv(cMOr[1]))'
     restrict!(cMOl)
     # display(ϵ)
   end
@@ -363,7 +364,7 @@ function bouhf(EC::ECInfo)
         ϵ_new, cMOr_new = eigen(fock[ispin])
       end
       cMOr[ispin], ϵ[ispin] = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
-      cMOl[ispin] = (inv(cMOr[ispin]))'
+      cMOr[ispin], cMOl[ispin] = balance_norms!(cMOr[ispin])
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)

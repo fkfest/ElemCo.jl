@@ -16,7 +16,7 @@ export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, loa
 export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
 export ints2!, detri_int2!
-export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
+export sqrtinvchol, invchol, rotate_eigenvectors_to_real, balance_norms!, svd_thr
 export get_spaceblocks
 export print_nonzeros
 export @mtensor, @mtensoropt
@@ -453,9 +453,9 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
     end
     inext = idx[iicc]
     idx[iicc] = -inext
-    evecs_real[:,inext] = imag.(evecs[:,inext])
-    normalize!(evecs_real[:,i])
-    normalize!(evecs_real[:,inext])
+    evecs_real[:,inext] = imag.(@view(evecs[:,inext]))
+    normalize!(@view(evecs_real[:,i]))
+    normalize!(@view(evecs_real[:,inext]))
     evals_real[inext] = real(evals[inext])
     npairs += 1
   end
@@ -466,6 +466,27 @@ end
 
 function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64})
   return evecs, evals
+end
+
+""" 
+    balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
+
+  Balance the norms of left and right eigenvectors.
+
+  Make each pair of left and right eigenvectors have the same norm.
+"""
+function balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
+  if isnothing(leftvecs)
+    leftvecs = (inv(evecs))'
+  end
+  for i in axes(evecs,2)
+    nrm = norm(evecs[:,i])
+    nrm_left = norm(leftvecs[:,i])
+    scale = sqrt(nrm_left / nrm)
+    evecs[:,i] .*= scale
+    leftvecs[:,i] ./= scale
+  end
+  return evecs, leftvecs
 end
 
 """ 
