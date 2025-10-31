@@ -6,6 +6,7 @@
 
 * The fallback basis sets are not used by default anymore. Set `@set int use_fallback_basis=true`
   to enable them.
+* In `@write_ints`, the `tol` argument is a keyword argument now (default is `-1.0`). 
 
 ### Changed
 
@@ -18,11 +19,13 @@
 * automatic augmentation of basis sets by additional diffuse or steep functions.
 * functions to get all elements available in a given basis set (`get_available_elements4basis`) and to output the basis set for a given list of elements in the molpro format (`output_basis`).
 * augmented basis sets for jkfit vXz-jkfit and def2-universal-jkfit basis sets.
+* a keyword argument `format` in `@write_ints` macro to write integrals to npy files (if `format=:npy`) or to ascii file (if `format=:ascii`).
 
 ### Fixed
 
 * A simple sanity check of the fitting basis sets is performed (by checking whether it's 
   an AO basis set). The error message can be turned to a warning by setting `@set int check_fit_basis=false`.
+* Fix normalization of biorthogonal orbitals to a balanced normalization (i.e., the norms of left and right orbitals are equal).
 
 ## Version [v0.14.1] - 2025.07.03
 

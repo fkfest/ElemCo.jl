@@ -7,6 +7,7 @@ module FciDumps
 using DocStringExtensions
 using TensorOperations
 using Printf
+using NPZ
 using ..ElemCo.MNPY
 using ..ElemCo.QMTensors
 
@@ -745,32 +746,68 @@ function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString, ::A
 end
 
 """
-    write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
+    write_fcidump(fd::FDump, fcidump::String; tol=-1.0, format=:ascii)
 
   Write fcidump file.
+
+  If `tol` >= 0.0, integrals with absolute value smaller than `tol` are omitted.
+  If `format` is `:npy`, integrals are written to npy files in the same directory,
+  otherwise if `format` is `:ascii`, integrals are written to ascii fcidump file.
 """
-function write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
+function write_fcidump(fd::FDump, fcidump::String; tol=-1.0, format=:ascii)
   println("Write fcidump $fcidump"...)
   fdf = open(fcidump, "w")
-  write_header(fd, fdf)
-  write_integrals(fd, fdf, tol)
+  write_header(fd, fdf; npy=(format == :npy))
+  if format == :ascii
+    write_integrals(fd, fdf, tol)
+  elseif format == :npy
+    # copy integrals to npy files
+    copy2npy(fd, dirname(fcidump))
+  else
+    error("Unknown format: "*string(format))
+  end
   close(fdf)
 end
 
 """
-    write_header(fd::FDump, fdf)
+    write_header(fd::FDump, fdf; npy=false)
 
   Write header of fcidump file.
+
+  If `npy` is true, write NPY file names for integrals.
 """
-function write_header(fd::FDump, fdf)
+function write_header(fd::FDump, fdf; npy=false)
   println(fdf, "&FCI")
+  head = fd.head
+  if npy
+    if !fd.uhf
+      head["NPY2"] = ["int2.npy"]
+      head["NPY1"] = ["int1.npy"]
+    else
+      head["NPY2AA"] = ["int2aa.npy"]
+      head["NPY2BB"] = ["int2bb.npy"]
+      head["NPY2AB"] = ["int2ab.npy"]
+      head["NPY1A"] = ["int1a.npy"]
+      head["NPY1B"] = ["int1b.npy"]
+    end
+    head["ENUC"] = [fd.int0]
+  else
+    delete!(head.shead, "NPY2")
+    delete!(head.shead, "NPY1")
+    delete!(head.shead, "NPY2AA")
+    delete!(head.shead, "NPY2BB")
+    delete!(head.shead, "NPY2AB")
+    delete!(head.shead, "NPY1A")
+    delete!(head.shead, "NPY1B")
+    delete!(head.fhead, "ENUC")
+  end
   for key in FDUMP_KEYS
     val = headvar(fd, key)
     if !isnothing(val)
       println(fdf, " ", key, "=", join(val, ","), ",")
     end
   end
-  for (key,val) in fd.head
+  for (key,val) in head
     if key in FDUMP_KEYS
       continue
     end
@@ -955,6 +992,23 @@ function write_integrals1(int1, fdf, tol, simtra)
         end
       end
     end
+  end
+end
+
+function copy2npy(fd::FDump, dir::AbstractString)
+  println("Copy integrals to npy files in $dir")
+  if !isdir(dir)
+    mkpath(dir)
+  end
+  if !fd.uhf
+    npzwrite(joinpath(dir,"int2.npy"), fd.int2)
+    npzwrite(joinpath(dir,"int1.npy"), fd.int1)
+  else
+    npzwrite(joinpath(dir,"int2aa.npy"), fd.int2aa)
+    npzwrite(joinpath(dir,"int2bb.npy"), fd.int2bb)
+    npzwrite(joinpath(dir,"int2ab.npy"), fd.int2ab)
+    npzwrite(joinpath(dir,"int1a.npy"), fd.int1a)
+    npzwrite(joinpath(dir,"int1b.npy"), fd.int1b)
   end
 end
 

@@ -290,7 +290,7 @@ function dfdump(EC::ECInfo)
   restore_space!(EC, space_save)
   if length(dumpfile) > 0
     println("writing fcidump $dumpfile")
-    write_fcidump(fdump, dumpfile, -1.0)  
+    write_fcidump(fdump, dumpfile; tol=-1.0)  
   else
     EC.fd = fdump
   end

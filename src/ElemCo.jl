@@ -741,19 +741,22 @@ macro transform_ints(type="")
 end
 
 """
-    @write_ints(file="FCIDUMP", tol=-1.0)
+    @write_ints(file="FCIDUMP", kwargs...)
 
   Write FCIDump integrals to file `file`.
 
-If `tol` is negative, all integrals are written, otherwise only integrals with absolute value larger than `tol` are written.
+  # Keyword arguments
+  - `tol::Float64`: tolerance for writing integrals (default: `-1.0` - all integrals are written).
+  - `format::Symbol`: format for writing integrals (default: `:ascii`). Can be `:npy` for NumPy format.
 """
-macro write_ints(file="FCIDUMP", tol=-1.0)
+macro write_ints(file="FCIDUMP", kwargs...)
+  ekwa = [esc(a) for a in kwargs]
   return quote
     $(esc(:@tryECinit))
     if !fd_exists($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
-    write_fcidump($(esc(:EC)).fd, $file, $tol)
+    write_fcidump($(esc(:EC)).fd, $file; $(ekwa...))
   end
 end
 
