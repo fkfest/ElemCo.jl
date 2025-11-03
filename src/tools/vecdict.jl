@@ -54,6 +54,13 @@ function VecDict{K, V}(pairs::Pair{K, V}...) where {K, V}
   return VecDict(keys, values)
 end
 
+function VecDict(keys::AbstractVector{K}, values::AbstractVector{V}) where {K, V}
+  @assert length(keys) == length(values) "Keys and values must have the same length"
+  return VecDict(Vector{K}(keys), Vector{V}(values))
+end
+
+
+
 function Base.getindex(dict::VecDict{K, V}, key::K) where {K, V}
   index = findlast(isequal(key), dict.keys)
   if isnothing(index)
@@ -93,6 +100,16 @@ end
 
 function Base.length(dict::VecDict)
   return length(dict.keys)
+end
+
+function Base.sizehint!(dict::VecDict, n::Integer)
+  sizehint!(dict.keys, n)
+  sizehint!(dict.values, n)
+end
+
+function Base.resize!(dict::VecDict, n::Integer)
+  resize!(dict.keys, n)
+  resize!(dict.values, n)
 end
 
 function Base.delete!(dict::VecDict{K, V}, key::K) where {K, V}

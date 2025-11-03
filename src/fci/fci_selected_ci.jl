@@ -48,24 +48,7 @@ function extend!(dets::SelectedCIDeterminants, new_dets::Vector{Determinant}, ne
   append!(dets.addresses, new_addresses)
 end
 
-"""
-    SelectedHamiltonianRow
-
-Container for one row of the Selected CI Hamiltonian matrix.
-"""
-struct SelectedHamiltonianRow
-  data::Vector{Scalar}                # Hamiltonian row for one determinant
-  idet::Vector{Int}                   # Determinants connected to this determinant
-
-  function SelectedHamiltonianRow()
-    new([], [])
-  end
-end
-
-function Base.push!(row::SelectedHamiltonianRow, value::Scalar, idet::Int)
-  push!(row.data, value)
-  push!(row.idet, idet)
-end
+const SelectedHamiltonianRow = VecDict{Int, Scalar}
 
 struct SelectedHamiltonianMatrix
   rows::Vector{SelectedHamiltonianRow}  # Rows of the Hamiltonian matrix
@@ -85,6 +68,7 @@ end
 Extend the SelectedHamiltonianMatrix to include new determinants.
 """
 function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, context::Union{FCIContext, HCIContext})
+  t0 = time_ns()
   ndet_old = length(sel_ham.rows)
   ndet = n_selected(dets)
   ThrNeglect = context.options.thr_negligible
@@ -96,26 +80,28 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
       if slater_condon_allowed(det_i, det_j)
         h_ij = compute_matrix_element_direct(det_i, det_j, context)
         if abs(h_ij) > ThrNeglect
-          push!(sel_ham.rows[i], h_ij, j)
+          sel_ham.rows[i][j] = h_ij
         end
       end
     end
   end
   # add new rows for new determinants
+  new_row = SelectedHamiltonianRow()
   for i in (ndet_old+1):ndet
     det_i = dets.determinants[i]
-    new_row = SelectedHamiltonianRow()
     for j in 1:ndet
       det_j = dets.determinants[j]
       if slater_condon_allowed(det_i, det_j)
         h_ij = compute_matrix_element_direct(det_i, det_j, context)
         if abs(h_ij) > ThrNeglect
-          push!(new_row, h_ij, j)
+          new_row[j] = h_ij
         end
       end
     end
-    push!(sel_ham, new_row)
+    push!(sel_ham, copy(new_row))
+    empty!(new_row)
   end
+  print_time(context.options.print_level, t0, "extend Hamiltonian matrix", 1)
 end
 
 """
@@ -338,43 +324,45 @@ function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, c
   n_beta_diff = count_ones(beta_diff)
 
   # Same determinant
-  if n_alpha_diff == 0 && n_beta_diff == 0
-    return diagonal_matrix_element(det_i, context)
-  end
-
-  # Single excitation in alpha string
-  if n_alpha_diff == 2 && n_beta_diff == 0
-    orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
-    phase = calculate_excitation_phase(det_i.alpha, orb_i, orb_a)
-    return single_alpha_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
-  end
-
-  # Single excitation in beta string  
-  if n_alpha_diff == 0 && n_beta_diff == 2
-    orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
-    phase = calculate_excitation_phase(det_i.beta, orb_i, orb_a)
-    return single_beta_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
-  end
-
-  # Double excitation
-  if n_alpha_diff == 4 && n_beta_diff == 0
-    # Double excitation in alpha
-    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.alpha, det_j.alpha)
-    phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
-    return double_alpha_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
-  elseif n_alpha_diff == 0 && n_beta_diff == 4
-    # Double excitation in beta
-    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.beta, det_j.beta)
-    phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
-    return double_beta_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
-  elseif n_alpha_diff == 2 && n_beta_diff == 2
-    # Mixed double excitation (alpha and beta)
-    orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
-    orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
-    phase_alpha = calculate_excitation_phase(det_i.alpha, orb_i_alpha, orb_a_alpha)
-    phase_beta = calculate_excitation_phase(det_i.beta, orb_i_beta, orb_a_beta)
-    total_phase = phase_alpha * phase_beta
-    return double_alpha_beta_excitation_matrix_element(context, orb_i_alpha, orb_i_beta, orb_a_alpha, orb_a_beta) * total_phase
+  if n_alpha_diff == 0 
+    if n_beta_diff == 0
+      return diagonal_matrix_element(det_i, context)
+    elseif n_beta_diff == 2
+      # Single excitation in beta string
+      orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
+      phase = calculate_excitation_phase(det_i.beta, orb_i, orb_a)
+      return single_beta_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+    elseif n_beta_diff == 4
+      # Double excitation in beta string
+      orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.beta, det_j.beta)
+      phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
+      return double_beta_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
+    end
+    return 0.0  # Invalid excitation
+  elseif n_alpha_diff == 2
+    if n_beta_diff == 0
+      # Single excitation in alpha string
+      orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
+      phase = calculate_excitation_phase(det_i.alpha, orb_i, orb_a)
+      return single_alpha_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+    elseif n_beta_diff == 2
+      # Mixed double excitation (alpha and beta)
+      orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
+      orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
+      phase_alpha = calculate_excitation_phase(det_i.alpha, orb_i_alpha, orb_a_alpha)
+      phase_beta = calculate_excitation_phase(det_i.beta, orb_i_beta, orb_a_beta)
+      total_phase = phase_alpha * phase_beta
+      return double_alpha_beta_excitation_matrix_element(context, orb_i_alpha, orb_i_beta, orb_a_alpha, orb_a_beta) * total_phase
+    end
+    return 0.0  # Invalid excitation
+  elseif n_alpha_diff == 4
+    if n_beta_diff == 0
+      # Double excitation in alpha string
+      orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.alpha, det_j.alpha)
+      phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
+      return double_alpha_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
+    end
+    return 0.0  # Invalid excitation
   end
   return 0.0  # Invalid excitation
 end
@@ -476,11 +464,20 @@ Returns true if they differ by ≤ 2 orbitals, false otherwise.
 """
 @inline function slater_condon_allowed(det_i::Determinant, det_j::Determinant)::Bool
   alpha_diff = det_i.alpha ⊻ det_j.alpha
+  n_alpha_diff = UInt(count_ones(alpha_diff))
+  beta_diff = det_i.beta ⊻ det_j.beta
+  n_beta_diff = UInt(count_ones(beta_diff))
+
+  return UInt(n_alpha_diff + n_beta_diff) <= 4
+end
+
+function is_singles_only(det_i::Determinant, det_j::Determinant)::Bool
+  alpha_diff = det_i.alpha ⊻ det_j.alpha
   beta_diff = det_i.beta ⊻ det_j.beta
   n_alpha_diff = count_ones(alpha_diff)
   n_beta_diff = count_ones(beta_diff)
   
-  return (n_alpha_diff + n_beta_diff) <= 4
+  return (n_alpha_diff + n_beta_diff) == 2
 end
 
 # ===========================================
@@ -503,9 +500,9 @@ function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Sc
   if !isempty(selected_ctx.hamiltonian.rows)
     for i in 1:n_det
       row = selected_ctx.hamiltonian.rows[i]
-      @inbounds @simd for k in 1:length(row.data)
-        j = row.idet[k]
-        h_ij = row.data[k]
+      @inbounds @simd for k in 1:length(row)
+        j = row.keys[k]
+        h_ij = row.values[k]
         result[i] += h_ij * input[j]
       end
     end
@@ -553,9 +550,9 @@ function hamiltonian_matrix(selected_ctx::SelectedCIContext)
   
   for i in 1:n_det
     row = selected_ctx.hamiltonian.rows[i]
-    @inbounds @simd for k in 1:length(row.data)
-      j = row.idet[k]
-      h_ij = row.data[k]
+    @inbounds @simd for k in 1:length(row)
+      j = row.keys[k]
+      h_ij = row.values[k]
       H_matrix[i,j] = h_ij
     end
   end
