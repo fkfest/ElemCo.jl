@@ -36,6 +36,11 @@ mutable struct FCIContext
   pspace_data::PSpaceData             # P-space calculation data
   ibuf::Vector{Int}                  # Buffer for indices
   heval_data::HEvalData  # Precomputed arrays for diagonal and Fock elements
+  int1a::Matrix{Scalar}              # Reference to one-electron integrals for alpha spin
+  int1b::Matrix{Scalar}              # Reference to one-electron integrals for beta spin
+  int2aa::Array{Scalar,4}            # Reference to two-electron integrals for alpha-alpha spin
+  int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
+  int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
 
   function FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing)
     n_elec = headvar(fcidump, "NELEC", Int) 
@@ -80,6 +85,20 @@ mutable struct FCIContext
       reference_det = Determinant(alpha_pattern, beta_pattern)
     end
 
+    if fcidump.uhf
+      int1a = fcidump.int1a
+      int1b = fcidump.int1b
+      int2aa = fcidump.int2aa
+      int2bb = fcidump.int2bb
+      int2ab = fcidump.int2ab
+    else
+      int1a = fcidump.int1
+      int1b = fcidump.int1
+      int2aa = fcidump.int2
+      int2bb = fcidump.int2
+      int2ab = fcidump.int2
+    end
+
     context = new(
       fcidump,
       options,
@@ -105,7 +124,8 @@ mutable struct FCIContext
       fcidump.uhf ? "UHF-FCI" : "FCI",
       PSpaceData(),
       ibuf,
-      HEvalData()  # computed later if needed
+      HEvalData(),  # computed later if needed
+      int1a, int1b, int2aa, int2bb, int2ab
     )
 
     # Initialize Hamiltonian terms
@@ -159,6 +179,11 @@ mutable struct HCIContext
   mod_core_h_b::Matrix{Scalar}
   ibuf::Vector{Int}                  # Buffer for indices
   heval_data::HEvalData              # Precomputed heval_data arrays for diagonal and Fock elements
+  int1a::Matrix{Scalar}              # Reference to one-electron integrals for alpha spin
+  int1b::Matrix{Scalar}              # Reference to one-electron integrals for beta spin
+  int2aa::Array{Scalar,4}            # Reference to two-electron integrals for alpha-alpha spin
+  int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
+  int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
 
   function HCIContext(fcidump::QFDump, options::HCIOptions = HCIOptions(); occa=nothing, occb=nothing)
     n_orb = headvar(fcidump, "NORB", Int)
@@ -214,8 +239,22 @@ mutable struct HCIContext
       reference_det = Determinant(alpha_pattern, beta_pattern)
     end
 
-    context = new(fcidump, options, n_orb, (n_alpha, n_beta), reference_det, 
-        mod_core_h_a, mod_core_h_b, ibuf, HEvalData())
+    if fcidump.uhf
+      int1a = fcidump.int1a
+      int1b = fcidump.int1b
+      int2aa = fcidump.int2aa
+      int2bb = fcidump.int2bb
+      int2ab = fcidump.int2ab
+    else
+      int1a = fcidump.int1
+      int1b = fcidump.int1
+      int2aa = fcidump.int2
+      int2bb = fcidump.int2
+      int2ab = fcidump.int2
+    end
+
+    context = new(fcidump, options, n_orb, (n_alpha, n_beta), reference_det,
+        mod_core_h_a, mod_core_h_b, ibuf, HEvalData(), int1a, int1b, int2aa, int2bb, int2ab)
 
     # Initialize Hamiltonian terms
     init_hamiltonian_terms!(context)

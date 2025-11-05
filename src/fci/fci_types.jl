@@ -167,9 +167,9 @@ struct HEvalData
 
   # Precomputed h1e2 terms for efficient Fock element calculation.
   h1e2_aa::Array{Scalar, 3}       # RHF and UHF: alpha-alpha
-  h1e2_bb::Array{Scalar, 3}       # UHF: beta-beta
+  h1e2_bb::Array{Scalar, 3}       # UHF: beta-beta (for RHF: reference to h1e2_aa)
   h1e2_ab::Array{Scalar, 3}       # UHF and RHF: alpha-beta (no exchange)
-  h1e2_ba::Array{Scalar, 3}       # UHF: beta-alpha (no exchange)
+  h1e2_ba::Array{Scalar, 3}       # UHF: beta-alpha (no exchange) (for RHF: reference to h1e2_ab)
 
   is_uhf::Bool
   n_orb::Int
@@ -187,7 +187,7 @@ struct HEvalData
                      h1e2::Array{Scalar, 3}, h1e2_ab::Array{Scalar, 3})
     n_orb = size(jk, 1)
     new(jk, jk, jab, ha, ha,
-        h1e2, zeros(Scalar, 0, 0, 0), h1e2_ab, zeros(Scalar, 0, 0, 0),
+        h1e2, h1e2, h1e2_ab, h1e2_ab,
         false, n_orb, zeros(Int, 4*n_orb))
   end
   

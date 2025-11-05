@@ -207,16 +207,16 @@ function calc_diagonalH(hed::HEvalData, occa::AbstractVector{Int}, occb::Abstrac
   end
 
   # Two-electron contributions
-  @inbounds @simd for ia in occa
-    for ja in occa
+  @inbounds for ia in occa
+    @simd for ja in occa
       f_elem += hed.jkaa[ia, ja] 
     end
-    for jb in occb
+    @simd for jb in occb
       f_elem += hed.jab[ia, jb]
     end
   end
-  @inbounds @simd for ib in occb
-    for jb in occb
+  @inbounds for ib in occb
+    @simd for jb in occb
       f_elem += hed.jkbb[ib, jb]
     end
   end
