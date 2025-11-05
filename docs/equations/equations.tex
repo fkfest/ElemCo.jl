@@ -2008,6 +2008,25 @@ with determinants selected using hybrid method (energy + excitation level), and 
 to get initial eigenvectors for all states. 
 This prevents missing excited states due to poor initialization.
 
+  \subsection{Hamiltonian Matrix Construction}
+The Hamiltonian matrix in the selected space is constructed using the Slater-Condon rules
+(see \sect{sec:fci}) and stored in a sparse format 
+(for each row, store only non-zero elements and their column indices).
+
+The connections between determinants are identified using three helper lists 
+(similar to Ref.~\cite{sharma_semistochastic_2017}):
+\begin{itemize}
+\item \textbf{Same alpha list}: For each alpha string, store all indices of determinants sharing that alpha string.
+This list is used to find beta single and double excitations efficiently.
+\item \textbf{Same beta list}: For each beta string, store all indices of determinants sharing that beta string.
+This list is used to find alpha single and double excitations efficiently.
+\item \textbf{Single alpha excitation list}: For each alpha string, store all alpha strings reachable by a single excitation.
+This list is used to find mixed alpha-beta double excitations efficiently.
+\end{itemize}
+Using these lists, a list of connected determinants $i$ for each determinant $j$ is generated
+(for $i \lt j$) and used to compute and store the Hamiltonian matrix elements.
+
+
 
 \subsection{Second-Order Energy Correction}
 \label{sec:pt2}

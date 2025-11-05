@@ -32,6 +32,7 @@ println(standard_dict) # Output: Dict("c" => 3, "a" => 3, "d" => 4)
 module VecDicts
 
 export VecDict, getvalue, setvalue!, values
+export getkeyat, setkeyat!, getvalueat, setvalueat!, getat, setat!
 
 """
     VecDict{K, V}
@@ -39,7 +40,7 @@ export VecDict, getvalue, setvalue!, values
 A vector-based dictionary that maps keys of type `K` to values of type `V`. 
 The values are stored in a vector, which means that the order of the key-value pairs is preserved.
 """
-mutable struct VecDict{K, V} <: AbstractDict{K, V}
+struct VecDict{K, V} <: AbstractDict{K, V}
   keys::Vector{K}
   values::Vector{V}
 end
@@ -54,7 +55,14 @@ function VecDict{K, V}(pairs::Pair{K, V}...) where {K, V}
   return VecDict(keys, values)
 end
 
-function Base.getindex(dict::VecDict{K, V}, key::K) where {K, V}
+function VecDict(keys::AbstractVector{K}, values::AbstractVector{V}) where {K, V}
+  @assert length(keys) == length(values) "Keys and values must have the same length"
+  return VecDict(Vector{K}(keys), Vector{V}(values))
+end
+
+
+
+Base.@propagate_inbounds function Base.getindex(dict::VecDict{K, V}, key::K) where {K, V}
   index = findlast(isequal(key), dict.keys)
   if isnothing(index)
     throw(KeyError(key))
@@ -62,17 +70,72 @@ function Base.getindex(dict::VecDict{K, V}, key::K) where {K, V}
   return dict.values[index]
 end
 
-function Base.setindex!(dict::VecDict{K, V}, value::V, key::K) where {K, V}
+Base.@propagate_inbounds function Base.setindex!(dict::VecDict{K, V}, value::V, key::K) where {K, V}
   push!(dict.keys, key)
   push!(dict.values, value)
 end
 
-function Base.keys(dict::VecDict)
-  return copy(dict.keys)
+"""
+    getvalueat(dict::VecDict, index::Int)
+
+Get the value at the specified index in the `VecDict`.
+"""
+Base.@propagate_inbounds function getvalueat(dict::VecDict{K, V}, index::Int) where {K, V}
+  return dict.values[index]
 end
 
-function Base.values(dict::VecDict)
-  return copy(dict.values)
+"""
+    setvalueat!(dict::VecDict, index::Int, value)
+
+Set the value at the specified index in the `VecDict`.
+"""
+Base.@propagate_inbounds function setvalueat!(dict::VecDict{K, V}, index::Int, value::V) where {K, V}
+  dict.values[index] = value
+end
+
+"""
+    getkeyat(dict::VecDict, index::Int)
+
+Get the key at the specified index in the `VecDict`.
+"""
+Base.@propagate_inbounds function getkeyat(dict::VecDict{K, V}, index::Int) where {K, V}
+  return dict.keys[index]
+end
+
+"""
+    setkeyat!(dict::VecDict, index::Int, key)
+
+Set the key at the specified index in the `VecDict`.
+"""
+Base.@propagate_inbounds function setkeyat!(dict::VecDict{K, V}, index::Int, key::K) where {K, V}
+  dict.keys[index] = key
+end
+
+"""
+    getat(dict::VecDict, index::Int)::Tuple{K, V}
+
+Get the key-value pair at the specified index in the `VecDict`.
+"""
+Base.@propagate_inbounds function getat(dict::VecDict{K, V}, index::Int) where {K, V}
+  return (dict.keys[index], dict.values[index])
+end
+
+"""
+    setat!(dict::VecDict, index::Int, key, value)
+
+Set the key-value pair at the specified index in the `VecDict`.
+"""
+Base.@propagate_inbounds function setat!(dict::VecDict{K, V}, index::Int, key::K, value::V) where {K, V}
+  dict.keys[index] = key
+  dict.values[index] = value
+end
+
+@inline function Base.keys(dict::VecDict)
+  return dict.keys
+end
+
+@inline function Base.values(dict::VecDict)
+  return dict.values
 end
 
 function Base.getkey(dict::VecDict{K, V}, key::K, default) where {K, V}
@@ -95,7 +158,17 @@ function Base.length(dict::VecDict)
   return length(dict.keys)
 end
 
-function Base.delete!(dict::VecDict{K, V}, key::K) where {K, V}
+Base.@propagate_inbounds function Base.sizehint!(dict::VecDict, n::Integer)
+  sizehint!(dict.keys, n)
+  sizehint!(dict.values, n)
+end
+
+Base.@propagate_inbounds function Base.resize!(dict::VecDict, n::Integer)
+  resize!(dict.keys, n)
+  resize!(dict.values, n)
+end
+
+Base.@propagate_inbounds function Base.delete!(dict::VecDict{K, V}, key::K) where {K, V}
   index = findlast(isequal(key), dict.keys)
   if isnothing(index)
     throw(KeyError(key))
@@ -104,7 +177,7 @@ function Base.delete!(dict::VecDict{K, V}, key::K) where {K, V}
   deleteat!(dict.values, index)
 end
 
-function Base.delete!(dict::VecDict{K, V}, keys::K...) where {K, V}
+Base.@propagate_inbounds function Base.delete!(dict::VecDict{K, V}, keys::K...) where {K, V}
   for key in keys
     delete!(dict, key)
   end
@@ -126,7 +199,7 @@ function Base.last(dict::VecDict)
   return (last(dict.keys), last(dict.values))
 end
 
-function Base.iterate(dict::VecDict, state=1)
+Base.@propagate_inbounds function Base.iterate(dict::VecDict, state=1)
   if state > lastindex(dict)
     return nothing
   end
@@ -135,7 +208,7 @@ function Base.iterate(dict::VecDict, state=1)
   return ((key, value), state+1)
 end
 
-function Base.iterate(rdict::Iterators.Reverse{VecDict}, state=lastindex(rdict.itr))
+Base.@propagate_inbounds function Base.iterate(rdict::Iterators.Reverse{VecDict}, state=lastindex(rdict.itr))
   if state < 1
     return nothing
   end
@@ -145,23 +218,23 @@ function Base.iterate(rdict::Iterators.Reverse{VecDict}, state=lastindex(rdict.i
   return ((key, value), state-1)
 end
 
-function Base.map!(f, dict::VecDict)
+Base.@propagate_inbounds function Base.map!(f, dict::VecDict)
   for i in firstindex(dict):lastindex(dict)
-    @inbounds dict.values[i] = f(dict.values[i])
+    dict.values[i] = f(dict.values[i])
   end
   return dict
 end
 
-function Base.map(f, dict1::VecDict{K, V}, dict2::VecDict{K, V}) where {K, V}
+Base.@propagate_inbounds function Base.map(f, dict1::VecDict{K, V}, dict2::VecDict{K, V}) where {K, V}
   dict = copy(dict1)
   for i in firstindex(dict1):lastindex(dict1)
     @assert dict1.keys[i] == dict2.keys[i] "Keys do not match"
-    @inbounds dict.values[i] = f(dict1.values[i], dict2.values[i])
+    dict.values[i] = f(dict1.values[i], dict2.values[i])
   end
   return dict
 end
 
-function Base.map(f, dict::VecDict{K, V}) where {K, V}
+Base.@propagate_inbounds function Base.map(f, dict::VecDict{K, V}) where {K, V}
   dict1 = copy(dict)
   map!(f, dict1)
   return dict1
@@ -171,28 +244,28 @@ function Base.copy(dict::VecDict)
   return VecDict(copy(dict.keys), copy(dict.values))
 end
 
-function Base.push!(dict::VecDict{K, V}, key::K, value::V) where {K, V}
+Base.@propagate_inbounds function Base.push!(dict::VecDict{K, V}, key::K, value::V) where {K, V}
   push!(dict.keys, key)
   push!(dict.values, value)
   return dict
 end
 
-function Base.push!(dict::VecDict{K, V}, pair::Pair{K, V}) where {K, V}
+Base.@propagate_inbounds function Base.push!(dict::VecDict{K, V}, pair::Pair{K, V}) where {K, V}
   push!(dict, pair.first, pair.second)
 end
 
-function Base.push!(dict::VecDict{K, V}, pair::Pair{K, Tuple{V, String}}) where {K, V}
+Base.@propagate_inbounds function Base.push!(dict::VecDict{K, V}, pair::Pair{K, Tuple{V, String}}) where {K, V}
   push!(dict, pair.first, pair.second...)
 end
 
-function Base.push!(dict::VecDict{K, V}, pairs::Vararg{Pair{K, V},N}) where {K, V, N}
+Base.@propagate_inbounds function Base.push!(dict::VecDict{K, V}, pairs::Vararg{Pair{K, V},N}) where {K, V, N}
   for pair in pairs
     push!(dict, pair.first, pair.second::V)
   end
   return dict
 end
 
-function Base.push!(dict::VecDict{K, V}, dict2::VecDict{K, V}) where {K, V}
+Base.@propagate_inbounds function Base.push!(dict::VecDict{K, V}, dict2::VecDict{K, V}) where {K, V}
   for (key, value) in dict2
     push!(dict, key, value)
   end

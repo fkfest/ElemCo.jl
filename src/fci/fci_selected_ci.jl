@@ -16,17 +16,187 @@ using LinearAlgebra
 # ===========================================
 
 """
+    DeterminantLookupIndex
+
+Fast lookup index for finding connected determinants in O(1) time.
+
+Stores three dictionaries:
+- `same_alpha`: Maps alpha OrbPattern → Vector{Int} of determinant indices sharing that alpha
+- `same_beta`: Maps beta OrbPattern → Vector{Int} of determinant indices sharing that beta  
+- `singlexc_alpha`: Maps alpha OrbPattern → Vector{OrbPattern} of alpha patterns connected by single excitation
+- `connections`: upper triangular list of determinants connected to the current determinant
+
+This enables efficient lookup of candidates for:
+- Double-beta excitations (via same_alpha)
+- Double-alpha excitations (via same_beta)
+- Mixed alpha-beta excitations (via singlexc_alpha then same_alpha)
+- OR any excitation (via connections)
+
+Reduces extend_SelectedHamiltonianMatrix from O(N²) to O(N×N_connections) where N_connections << N.
+"""
+struct DeterminantLookupIndex
+  same_alpha::Dict{OrbPattern, Vector{Int}}
+  same_beta::Dict{OrbPattern, Vector{Int}}
+  singlexc_alpha::Dict{OrbPattern, Vector{OrbPattern}}
+  connections::Vector{Vector{Int}}
+
+  function DeterminantLookupIndex()
+    new(Dict{OrbPattern, Vector{Int}}(),
+        Dict{OrbPattern, Vector{Int}}(),
+        Dict{OrbPattern, Vector{OrbPattern}}(),
+        Vector{Vector{Int}}())
+  end
+end
+
+function add_det2same_spin(dict::Dict{OrbPattern, Vector{Int}}, key::OrbPattern, idet::Int)
+  if haskey(dict, key)
+    push!(dict[key], idet)
+  else
+    dict[key] = [idet]
+  end
+end
+
+"""
+    build_lookup_index!(index::DeterminantLookupIndex, determinants::Vector{Determinant}, 
+                       start_idx::Int, end_idx::Int, verbosity::Int)
+
+Build same_alpha, same_beta and singleexc_alpha index dictionaries for determinants in range [start_idx:end_idx].
+same_alpha/beta: Appends determinant indices to vectors for each unique alpha/beta pattern.
+singleexc_alpha: Maps alpha patterns to vectors of connected alpha patterns via single excitations.
+"""
+function build_lookup_index!(index::DeterminantLookupIndex, determinants::Vector{Determinant},
+                             start_idx::Int, end_idx::Int, verbosity::Int)
+  t1 = time_ns()
+  old_alpha_patterns = collect(keys(index.same_alpha))
+  for i in start_idx:end_idx
+    det = determinants[i]
+    add_det2same_spin(index.same_alpha, det.alpha, i)
+    add_det2same_spin(index.same_beta, det.beta, i)
+  end
+  
+  # Build singlexc_alpha for new alpha patterns only
+  all_alpha_patterns = Set(keys(index.same_alpha))
+  setdiff!(all_alpha_patterns, old_alpha_patterns)
+  new_alpha_patterns = collect(all_alpha_patterns)
+
+  new_connections = VecDict{OrbPattern, Vector{OrbPattern}}()
+  # Check each new pattern against old patterns 
+  connected = OrbPattern[]
+  @inbounds for i in eachindex(new_alpha_patterns)
+    α_new = new_alpha_patterns[i]
+    @simd for j in eachindex(old_alpha_patterns)
+      α_old = old_alpha_patterns[j]
+      # Check if patterns differ by exactly 2 bits (single excitation)
+      if count_ones(α_new ⊻ α_old) == 2
+        push!(connected, α_old)
+      end
+    end
+    new_connections[α_new] = copy(connected)
+    empty!(connected)
+  end
+  
+  # Also add reverse connections (α_old → α_new)
+  for (α_new, connected_list) in new_connections
+    for α_old in connected_list
+      push!(index.singlexc_alpha[α_old], α_new)
+    end
+  end
+  # Check each new pattern against new patterns
+  @inbounds for i in eachindex(new_alpha_patterns)
+    α_i = new_alpha_patterns[i]
+    connected2i = new_connections.values[i]
+    @simd for j in eachindex(new_alpha_patterns)
+      α_j = new_alpha_patterns[j]
+      # Check if patterns differ by exactly 2 bits (single excitation)
+      if count_ones(α_i ⊻ α_j) == 2
+        push!(connected2i, α_j)
+      end
+    end
+  end
+  # Merge new connections into main dict using append! to combine vectors
+  mergewith!(append!, index.singlexc_alpha, new_connections)
+  # Build connections list
+  update_connections!(index, determinants, start_idx, end_idx)
+  print_time(verbosity, t1, "build DeterminantLookupIndex", 1)
+end
+
+function update_connections!(index::DeterminantLookupIndex, determinants::Vector{Determinant}, 
+                             start_idx::Int, end_idx::Int)
+  connected_dets = Vector{Int}(undef, length(determinants))
+  @inbounds for i in start_idx:end_idx
+    det_i = determinants[i]
+    α_i = det_i.alpha
+    β_i = det_i.beta
+    nexc = 0
+    # alpha excitations (same beta)
+    candidates = index.same_beta[β_i]
+    last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
+    @simd for j_indx in 1:last_index
+      j = candidates[j_indx]
+      det_j = determinants[j]
+      if count_ones(α_i ⊻ det_j.alpha) <= 4
+        nexc += 1
+        connected_dets[nexc] = j
+      end
+    end
+    # beta excitations (same alpha)
+    candidates = index.same_alpha[α_i]
+    last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
+    @simd for j_indx in 1:last_index
+      j = candidates[j_indx]
+      det_j = determinants[j]
+      if count_ones(β_i ⊻ det_j.beta) <= 4  # single or double beta excitation
+        nexc += 1
+        connected_dets[nexc] = j
+      end
+    end
+    # alpha-beta mixed excitations
+    for α_excited in index.singlexc_alpha[α_i]
+      candidates = index.same_alpha[α_excited]
+      last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
+      @simd for j_indx in 1:last_index
+        j = candidates[j_indx]
+        det_j = determinants[j]
+        if count_ones(β_i ⊻ det_j.beta) == 2
+          nexc += 1
+          connected_dets[nexc] = j
+        end
+      end
+    end
+    push!(index.connections, connected_dets[1:nexc])
+  end
+end
+
+function Base.issorted(index::DeterminantLookupIndex)::Bool
+  for vec in values(index.same_alpha)
+    if !issorted(vec)
+      return false
+    end
+  end
+  for vec in values(index.same_beta)
+    if !issorted(vec)
+      return false
+    end
+  end
+  return true
+end
+
+"""
     SelectedCIDeterminants
 
-Container for selected determinants with efficient storage.
+Container for selected determinants with efficient storage and fast lookup index.
 """
 struct SelectedCIDeterminants
   determinants::Vector{Determinant}     # Selected determinants
   addresses::Vector{Address}           # Corresponding addresses in full CI space
+  lookup_index::DeterminantLookupIndex  # Fast lookup for connected determinants
+  verbosity::Int                        # Verbosity level for logging
 
-  function SelectedCIDeterminants(determinants::Vector{Determinant}, addresses::Vector{Address})
+  function SelectedCIDeterminants(determinants::Vector{Determinant}, addresses::Vector{Address}, verbosity::Int)
     @assert length(determinants) == length(addresses) "Determinants and addresses must have same length"
-    new(determinants, addresses)
+    lookup_index = DeterminantLookupIndex()
+    build_lookup_index!(lookup_index, determinants, 1, length(determinants), verbosity)
+    new(determinants, addresses, lookup_index, verbosity)
   end
 end
 
@@ -41,37 +211,27 @@ n_selected(selci::SelectedCIDeterminants) = length(selci.determinants)
     extend!(dets::SelectedCIDeterminants, new_dets::Vector{Determinant}, new_addresses::Vector{Address})
 
 Extend SelectedCIDeterminants with new determinants and addresses.
+Incrementally updates the lookup index for efficient connected determinant queries.
 """
 function extend!(dets::SelectedCIDeterminants, new_dets::Vector{Determinant}, new_addresses::Vector{Address})
   @assert length(new_dets) == length(new_addresses) "New determinants and addresses must have same length"
+  
+  ndet_old = length(dets.determinants)
   append!(dets.determinants, new_dets)
   append!(dets.addresses, new_addresses)
+  
+  # Incrementally update lookup index for new determinants only
+  ndet_new = length(dets.determinants)
+  build_lookup_index!(dets.lookup_index, dets.determinants, ndet_old+1, ndet_new, dets.verbosity)
 end
 
-"""
-    SelectedHamiltonianRow
-
-Container for one row of the Selected CI Hamiltonian matrix.
-"""
-struct SelectedHamiltonianRow
-  data::Vector{Scalar}                # Hamiltonian row for one determinant
-  idet::Vector{Int}                   # Determinants connected to this determinant
-
-  function SelectedHamiltonianRow()
-    new([], [])
-  end
-end
-
-function Base.push!(row::SelectedHamiltonianRow, value::Scalar, idet::Int)
-  push!(row.data, value)
-  push!(row.idet, idet)
-end
+const SelectedHamiltonianRow = VecDict{Int, Scalar}
 
 struct SelectedHamiltonianMatrix
   rows::Vector{SelectedHamiltonianRow}  # Rows of the Hamiltonian matrix
-
+  hermitian::Bool                       # Whether the matrix is Hermitian (we still store full matrix)
   function SelectedHamiltonianMatrix()
-    new([])
+    new([], true)
   end
 end
 
@@ -80,42 +240,103 @@ function Base.push!(sel_ham::SelectedHamiltonianMatrix, row::SelectedHamiltonian
 end
 
 """
+    resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, cursize)
+
+Resize the SelectedHamiltonianMatrix to preallocate space for new elements.
+"""
+function Base.resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, cursize)
+  ndet_old = length(sel_ham.rows)
+  ndet = n_selected(dets)
+  index = dets.lookup_index
+  # Calculate new sizes
+  if isnothing(cursize)
+    newsize = ones(Int, ndet) # At least diagonal element
+    for (i, row) in enumerate(sel_ham.rows)
+      newsize[i] = length(row)
+    end
+  else
+    newsize = copy(cursize)
+  end
+  # connected determinants
+  @inbounds for i in (ndet_old+1):ndet
+    connected_dets = index.connections[i]
+    @simd for j in connected_dets
+      newsize[j] += 1
+    end
+    newsize[i] += length(connected_dets)
+  end
+
+  # New rows for new determinants
+  for i in (ndet_old+1):ndet
+    push!(sel_ham.rows, SelectedHamiltonianRow())
+  end
+  # Resize rows
+  for (i, row) in enumerate(sel_ham.rows)
+    resize!(row, newsize[i])
+  end
+  return newsize
+end
+
+"""
     extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, context)
 
 Extend the SelectedHamiltonianMatrix to include new determinants.
+Uses fast lookup index to find connected determinants in O(N×N_connections) instead of O(N²).
 """
 function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, context::Union{FCIContext, HCIContext})
+  t0 = time_ns()
   ndet_old = length(sel_ham.rows)
   ndet = n_selected(dets)
   ThrNeglect = context.options.thr_negligible
-  # add new connected determinants to existing rows of Hamiltonian
-  for i in 1:ndet_old
+  index = dets.lookup_index
+  @assert issorted(index) "DeterminantLookupIndex is not sorted. Skipping lower-triangle will not work correctly."
+
+  # Current size of sel_ham, including the diagonal elements for new determinants
+  cursize = ones(Int, ndet) 
+  for (i, row) in enumerate(sel_ham.rows)
+    cursize[i] = length(row)
+  end
+  resize!(sel_ham, dets, cursize)
+  t0 = print_time(context.options.print_level, t0, "resize Hamiltonian matrix", 1)
+
+  n_orb = context.n_orb
+  occa = zeros(Int, n_orb)
+  occb = zeros(Int, n_orb)
+
+  # Add new entries to existing rows
+  # Find connected determinants using connections list
+  @inbounds for i in (ndet_old+1):ndet
     det_i = dets.determinants[i]
-    for j in (ndet_old+1):ndet
+    occupied_orbitals!(occa, det_i.alpha, n_orb)
+    occupied_orbitals!(occb, det_i.beta, n_orb)
+    new_row = sel_ham.rows[i]
+    cursize_i = 1
+    # Diagonal element
+    setat!(new_row, cursize_i, i, diagonal_matrix_element(occa, occb, context))
+
+    @simd for j in index.connections[i]
       det_j = dets.determinants[j]
-      if slater_condon_allowed(det_i, det_j)
-        h_ij = compute_matrix_element_direct(det_i, det_j, context)
-        if abs(h_ij) > ThrNeglect
-          push!(sel_ham.rows[i], h_ij, j)
-        end
+      h_ij = compute_matrix_element_direct(det_i, det_j, context, occa, occb)
+      if sel_ham.hermitian
+        h_ji = h_ij
+      else
+        h_ji = compute_matrix_element_direct(det_j, det_i, context)
+      end
+      if abs(h_ij) > ThrNeglect
+        cursize_i += 1
+        setat!(new_row, cursize_i, j, h_ij)
+      end
+      if abs(h_ji) > ThrNeglect
+        cursize[j] += 1
+        setat!(sel_ham.rows[j], cursize[j], i, h_ji)
       end
     end
+    cursize[i] = cursize_i
   end
-  # add new rows for new determinants
-  for i in (ndet_old+1):ndet
-    det_i = dets.determinants[i]
-    new_row = SelectedHamiltonianRow()
-    for j in 1:ndet
-      det_j = dets.determinants[j]
-      if slater_condon_allowed(det_i, det_j)
-        h_ij = compute_matrix_element_direct(det_i, det_j, context)
-        if abs(h_ij) > ThrNeglect
-          push!(new_row, h_ij, j)
-        end
-      end
-    end
-    push!(sel_ham, new_row)
+  for (i, row) in enumerate(sel_ham.rows)
+    resize!(row, cursize[i])
   end
+  print_time(context.options.print_level, t0, "extend Hamiltonian matrix", 1)
 end
 
 """
@@ -132,7 +353,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
   function SelectedCIContext(base_context::FCIContext, determinants::Vector{Determinant}, hamiltonian::SelectedHamiltonianMatrix)
     # Convert determinants to addresses using full addressing
     addresses = [address_from_determinant(base_context, det) for det in determinants]
-    selected_dets = SelectedCIDeterminants(determinants, addresses)
+    selected_dets = SelectedCIDeterminants(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
     new{FCIContext}(base_context, selected_dets, hamiltonian)
   end
@@ -141,7 +362,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
   function SelectedCIContext(base_context::HCIContext, determinants::Vector{Determinant}, hamiltonian::SelectedHamiltonianMatrix)
     # For HCI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
     addresses = UInt64.(1:length(determinants))
-    selected_dets = SelectedCIDeterminants(determinants, addresses)
+    selected_dets = SelectedCIDeterminants(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
     new{HCIContext}(base_context, selected_dets, hamiltonian)
   end
@@ -321,14 +542,63 @@ end
 # Direct Matrix Element Evaluation
 # ===========================================
 
+@pib function compute_matrix_element_beta_excitations(det_i::Determinant, det_j::Determinant, 
+                      n_beta_diff, context::Union{FCIContext, HCIContext},
+                      occa=nothing, occb=nothing)::Scalar
+  if n_beta_diff == 2
+    # Single beta excitation
+    orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
+    phase = calculate_excitation_phase(det_i.beta, orb_i, orb_a)
+    return single_beta_excitation_matrix_element(det_i, orb_i, orb_a, context, occa, occb) * phase
+  elseif n_beta_diff == 4
+    # Double beta excitation
+    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.beta, det_j.beta)
+    phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
+    return double_beta_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
+  end
+  return 0.0  # Invalid excitation
+end
+
+@pib function compute_matrix_element_alpha_excitations(det_i::Determinant, det_j::Determinant,
+                      n_alpha_diff, context::Union{FCIContext, HCIContext}, 
+                      occa=nothing, occb=nothing)::Scalar
+  if n_alpha_diff == 2
+    # Single alpha excitation
+    orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
+    phase = calculate_excitation_phase(det_i.alpha, orb_i, orb_a)
+    return single_alpha_excitation_matrix_element(det_i, orb_i, orb_a, context, occa, occb) * phase
+  elseif n_alpha_diff == 4
+    # Double alpha excitation
+    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.alpha, det_j.alpha)
+    phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
+    return double_alpha_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
+  end
+  return 0.0  # Invalid excitation
+end
+
+@pib function compute_matrix_element_mixed_excitations(det_i::Determinant, det_j::Determinant,
+                      context::Union{FCIContext, HCIContext})::Scalar
+  # Mixed single excitations in alpha and beta
+  orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
+  orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
+  phase_alpha = calculate_excitation_phase(det_i.alpha, orb_i_alpha, orb_a_alpha)
+  phase_beta = calculate_excitation_phase(det_i.beta, orb_i_beta, orb_a_beta)
+  total_phase = phase_alpha * phase_beta
+  return double_alpha_beta_excitation_matrix_element(context, orb_i_alpha, orb_i_beta, orb_a_alpha, orb_a_beta) * total_phase
+end
+
 """
     compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
-                                 context) -> Scalar
+                                 context, occa=nothing, occb=nothing) -> Scalar
 
 Compute ⟨det_i|Ĥ|det_j⟩ directly using orbital excitation analysis.
 Works with both FCIContext and HCIContext.
+
+occa/occb are either Nothing or lists of occupied orbitals (makes the calculation more efficient).
 """
-function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext})::Scalar
+@pib function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
+                                                                context::Union{FCIContext, HCIContext}, 
+                                                                occa=nothing, occb=nothing)::Scalar
   # Find differences in alpha and beta strings
   alpha_diff = det_i.alpha ⊻ det_j.alpha  # XOR to find differing bits
   beta_diff = det_i.beta ⊻ det_j.beta
@@ -342,39 +612,17 @@ function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, c
     return diagonal_matrix_element(det_i, context)
   end
 
-  # Single excitation in alpha string
-  if n_alpha_diff == 2 && n_beta_diff == 0
-    orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
-    phase = calculate_excitation_phase(det_i.alpha, orb_i, orb_a)
-    return single_alpha_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+  if n_alpha_diff == 0
+    return compute_matrix_element_beta_excitations(det_i, det_j, n_beta_diff, context, occa, occb)
   end
 
-  # Single excitation in beta string  
-  if n_alpha_diff == 0 && n_beta_diff == 2
-    orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
-    phase = calculate_excitation_phase(det_i.beta, orb_i, orb_a)
-    return single_beta_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+  if n_beta_diff == 0
+    return compute_matrix_element_alpha_excitations(det_i, det_j, n_alpha_diff, context, occa, occb)
   end
-
-  # Double excitation
-  if n_alpha_diff == 4 && n_beta_diff == 0
-    # Double excitation in alpha
-    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.alpha, det_j.alpha)
-    phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
-    return double_alpha_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
-  elseif n_alpha_diff == 0 && n_beta_diff == 4
-    # Double excitation in beta
-    orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.beta, det_j.beta)
-    phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
-    return double_beta_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
-  elseif n_alpha_diff == 2 && n_beta_diff == 2
-    # Mixed double excitation (alpha and beta)
-    orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
-    orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
-    phase_alpha = calculate_excitation_phase(det_i.alpha, orb_i_alpha, orb_a_alpha)
-    phase_beta = calculate_excitation_phase(det_i.beta, orb_i_beta, orb_a_beta)
-    total_phase = phase_alpha * phase_beta
-    return double_alpha_beta_excitation_matrix_element(context, orb_i_alpha, orb_i_beta, orb_a_alpha, orb_a_beta) * total_phase
+  # Mixed excitations
+  if n_alpha_diff == 2 && n_beta_diff == 2
+    # Mixed single excitations in alpha and beta
+    return compute_matrix_element_mixed_excitations(det_i, det_j, context)
   end
   return 0.0  # Invalid excitation
 end
@@ -385,51 +633,59 @@ end
 Compute diagonal matrix element ⟨det|Ĥ|det⟩.
 For FCIContext uses precomputed diagonal, for HCIContext computes on-the-fly.
 """
-function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
+@pib function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
   # Get the address and use existing diagonal computation
   addr = address_from_determinant(context, det)
   return context.diag_h.data[addr]
 end
 
-function diagonal_matrix_element(det::Determinant, context::HCIContext)::Scalar
+@pib function diagonal_matrix_element(det::Determinant, context::HCIContext)::Scalar
   # For HCI, compute diagonal element on-the-fly
   return compute_diagonal_element(det, context)
 end
 
-"""
-    single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context) -> Scalar 
-
-Compute matrix element for single alpha excitation.
-"""
-function single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, 
-                                                context::Union{FCIContext, HCIContext})
-  if context.fcidump.uhf
-    int1 = context.fcidump.int1a
-  else
-    int1 = context.fcidump.int1
-  end
-  h1e2_same = context.heval_data.h1e2_aa
-  h1e2_opp = context.heval_data.h1e2_ab
-  return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.alpha, det_i.beta, orb_a, orb_i)
+@pib function diagonal_matrix_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
+                                      context::Union{HCIContext,FCIContext})::Scalar
+  # For HCI, compute diagonal element on-the-fly
+  return compute_diagonal_element(occa, occb, context)
 end
 
 """
-    single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context) -> Scalar 
+    single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context,
+                                           occa=nothing, occb=nothing) -> Scalar
+
+Compute matrix element for single alpha excitation.
+"""
+@pib function single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int,
+                                                     context::Union{FCIContext, HCIContext}, 
+                                                     occa=nothing, occb=nothing)
+  int1 = context.int1a
+  h1e2_same = context.heval_data.h1e2_aa
+  h1e2_opp = context.heval_data.h1e2_ab
+  if isnothing(occb)
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.alpha, det_i.beta, orb_a, orb_i)
+  else
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, occa, occb, orb_a, orb_i)
+  end
+end
+
+"""
+    single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context,
+                                          occa=nothing, occb=nothing) -> Scalar 
 
 Compute matrix element for single beta excitation.
 """
-function single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, 
-                                                context::Union{FCIContext, HCIContext})
-  if context.fcidump.uhf
-    int1 = context.fcidump.int1b
-    h1e2_same = context.heval_data.h1e2_bb
-    h1e2_opp = context.heval_data.h1e2_ba
+@pib function single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int,
+                                                    context::Union{FCIContext, HCIContext}, 
+                                                    occa=nothing, occb=nothing)
+  int1 = context.int1b
+  h1e2_same = context.heval_data.h1e2_bb
+  h1e2_opp = context.heval_data.h1e2_ba
+  if isnothing(occb)
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.beta, det_i.alpha, orb_a, orb_i)
   else
-    int1 = context.fcidump.int1
-    h1e2_same = context.heval_data.h1e2_aa
-    h1e2_opp = context.heval_data.h1e2_ab
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, occb, occa, orb_a, orb_i)
   end
-  return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.beta, det_i.alpha, orb_a, orb_i)
 end
 
 """
@@ -437,10 +693,9 @@ end
 
 Compute matrix element for double alpha excitation.
 """
-function double_alpha_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_alpha_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
-  fcidump = context.fcidump
-  int2aa = fcidump.uhf ? fcidump.int2aa : fcidump.int2
+  int2aa = context.int2aa
   return int2aa[orb_a, orb_b, orb_i, orb_j] - int2aa[orb_a, orb_b, orb_j, orb_i]
 end
 
@@ -449,10 +704,9 @@ end
 
 Compute matrix element for double beta excitation.
 """
-function double_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
-  fcidump = context.fcidump
-  int2bb = fcidump.uhf ? fcidump.int2bb : fcidump.int2
+  int2bb = context.int2bb
   return int2bb[orb_a, orb_b, orb_i, orb_j] - int2bb[orb_a, orb_b, orb_j, orb_i]
 end
 
@@ -461,10 +715,9 @@ end
 
 Compute matrix element for double alpha beta excitation.
 """
-function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
-  fcidump = context.fcidump
-  int2ab = fcidump.uhf ? fcidump.int2ab : fcidump.int2
+  int2ab = context.int2ab
   return int2ab[orb_a, orb_b, orb_i, orb_j]
 end
 
@@ -476,11 +729,20 @@ Returns true if they differ by ≤ 2 orbitals, false otherwise.
 """
 @inline function slater_condon_allowed(det_i::Determinant, det_j::Determinant)::Bool
   alpha_diff = det_i.alpha ⊻ det_j.alpha
+  n_alpha_diff = UInt(count_ones(alpha_diff))
+  beta_diff = det_i.beta ⊻ det_j.beta
+  n_beta_diff = UInt(count_ones(beta_diff))
+
+  return UInt(n_alpha_diff + n_beta_diff) <= 4
+end
+
+function is_singles_only(det_i::Determinant, det_j::Determinant)::Bool
+  alpha_diff = det_i.alpha ⊻ det_j.alpha
   beta_diff = det_i.beta ⊻ det_j.beta
   n_alpha_diff = count_ones(alpha_diff)
   n_beta_diff = count_ones(beta_diff)
   
-  return (n_alpha_diff + n_beta_diff) <= 4
+  return (n_alpha_diff + n_beta_diff) == 2
 end
 
 # ===========================================
@@ -503,9 +765,9 @@ function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Sc
   if !isempty(selected_ctx.hamiltonian.rows)
     for i in 1:n_det
       row = selected_ctx.hamiltonian.rows[i]
-      @inbounds @simd for k in 1:length(row.data)
-        j = row.idet[k]
-        h_ij = row.data[k]
+      @inbounds @simd for k in 1:length(row)
+        j = row.keys[k]
+        h_ij = row.values[k]
         result[i] += h_ij * input[j]
       end
     end
@@ -553,9 +815,9 @@ function hamiltonian_matrix(selected_ctx::SelectedCIContext)
   
   for i in 1:n_det
     row = selected_ctx.hamiltonian.rows[i]
-    @inbounds @simd for k in 1:length(row.data)
-      j = row.idet[k]
-      h_ij = row.data[k]
+    @inbounds @simd for k in 1:length(row)
+      j = row.keys[k]
+      h_ij = row.values[k]
       H_matrix[i,j] = h_ij
     end
   end
@@ -884,7 +1146,7 @@ end
 
 Compute Σ_j h1e2[j, a, i] over occupied orbitals j.
 """
-@inline function sum_h1e2(h1e2, occ, a, i)
+@pib function sum_h1e2(h1e2, occ, a, i)
   total = 0.0
   @inbounds @simd for j in occ
     total += h1e2[j, a, i]
@@ -900,7 +1162,7 @@ Compute Fock matrix element f_ai
 f_ai = h_ai + Σ_j (v_aijj - v_ajji)_SS + Σ_j (v_aijj)_OS
 where SS = same spin, OS = opposite spin. 
 """
-function compute_fock_element(int1, h1e2_same, h1e2_opp, occ_same, occ_opp,
+@pib function compute_fock_element(int1, h1e2_same, h1e2_opp, occ_same, occ_opp,
                               a::Int, i::Int)::Float64
   # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
   return int1[a, i] + sum_h1e2(h1e2_same, occ_same, a, i) + sum_h1e2(h1e2_opp, occ_opp, a, i)
@@ -911,9 +1173,9 @@ end
 
 Compute Σ_j h1e2[j, a, i] over occupied orbitals j.
 """
-@inline function sum_h1e2(h1e2, str::OrbPattern, a, i)
+@pib function sum_h1e2(h1e2, str::OrbPattern, a, i)
   total = 0.0
-  @inbounds @simd for k in 1:size(h1e2, 1)
+  @inbounds @simd for k in axes(h1e2, 1)
     if (str >>> (k-1)) & one(str) != zero(str)
       total += h1e2[k, a, i]
     end
@@ -928,7 +1190,7 @@ Compute Fock matrix element f_ai
 f_ai = h_ai + Σ_j (v_aijj - v_ajji)_SS + Σ_j (v_aijj)_OS
 where SS = same spin, OS = opposite spin. 
 """
-function compute_fock_element(int1, h1e2_same, h1e2_opp, str_same::OrbPattern, str_opp::OrbPattern,
+@pib function compute_fock_element(int1, h1e2_same, h1e2_opp, str_same::OrbPattern, str_opp::OrbPattern,
                               a::Int, i::Int)::Float64
   # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
   return int1[a, i] + sum_h1e2(h1e2_same, str_same, a, i) + sum_h1e2(h1e2_opp, str_opp, a, i)
@@ -988,11 +1250,7 @@ function generate_excitations!(excitations::VecDict{Determinant, Scalar},
   # 2. Generate single excitations with on-the-fly filtering using Fock elements
   # ===========================================
   
-  if is_uhf
-    int1 = ctx.fcidump.int1a
-  else
-    int1 = ctx.fcidump.int1
-  end
+  int1 = ctx.int1a
   h1e2_same = ctx.heval_data.h1e2_aa
   h1e2_opp = ctx.heval_data.h1e2_ab
   # Alpha single excitations
@@ -1007,11 +1265,9 @@ function generate_excitations!(excitations::VecDict{Determinant, Scalar},
     end
   end
   
-  if is_uhf
-    int1 = ctx.fcidump.int1b
-    h1e2_same = ctx.heval_data.h1e2_bb
-    h1e2_opp = ctx.heval_data.h1e2_ba
-  end
+  int1 = ctx.int1b
+  h1e2_same = ctx.heval_data.h1e2_bb
+  h1e2_opp = ctx.heval_data.h1e2_ba
   # Beta single excitations
   for i in beta_occ
     for a in beta_virt
@@ -1037,9 +1293,21 @@ end
 Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
 Works with both FCIContext and HCIContext.
 """
-function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
+@pib function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
   return calc_diagonalH(ctx.heval_data, det.alpha, det.beta)
 end
+
+"""
+    compute_diagonal_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, ctx) -> Scalar
+
+Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
+Works with both FCIContext and HCIContext.
+"""
+@pib function compute_diagonal_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
+                                       ctx::Union{FCIContext, HCIContext})::Scalar
+  return calc_diagonalH(ctx.heval_data, occa, occb)
+end
+
 
 # ===========================================
 # Heat-Bath Selection 
