@@ -30,6 +30,15 @@ export BufVec, capacity, is_full
 export VecDict, getvalue, setvalue!, values, resize!, push!
 export setat!, getat!, setkeyat!, getkeyat!, setvalueat!, getvalueat!
 
+export @pib # alias for Base.@propagate_inbounds
+
+"""
+    @pib
+
+Alias for Base.@propagate_inbounds
+"""
+var"@pib" = Base.var"@propagate_inbounds"
+
 include("xmltools.jl")
 include("bufvec.jl")
 
@@ -361,7 +370,7 @@ end
 julia> buf = zeros(1000)
 julia> reshaped_buf = reshape_buf(buf, 10, 10)
 """
-Base.@propagate_inbounds function reshape_buf(buf::AbstractVector, dims...; offset=0)
+@pib function reshape_buf(buf::AbstractVector, dims...; offset=0)
   len = prod(dims) + offset
   @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
   return reshape(@view(buf[1+offset:len]), dims...)

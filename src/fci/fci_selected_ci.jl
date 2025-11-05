@@ -299,22 +299,24 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
   resize!(sel_ham, dets, cursize)
   t0 = print_time(context.options.print_level, t0, "resize Hamiltonian matrix", 1)
 
-  # Add diagonal elements
-  @inbounds @simd for i in (ndet_old+1):ndet
-    det_i = dets.determinants[i]
-    # Diagonal element
-    row = sel_ham.rows[i]
-    setat!(row, 1, i, diagonal_matrix_element(det_i, context))
-  end
+  n_orb = context.n_orb
+  occa = zeros(Int, n_orb)
+  occb = zeros(Int, n_orb)
+
   # Add new entries to existing rows
   # Find connected determinants using connections list
   @inbounds for i in (ndet_old+1):ndet
     det_i = dets.determinants[i]
+    occupied_orbitals!(occa, det_i.alpha, n_orb)
+    occupied_orbitals!(occb, det_i.beta, n_orb)
     new_row = sel_ham.rows[i]
-    cursize_i = cursize[i]
+    cursize_i = 1
+    # Diagonal element
+    setat!(new_row, cursize_i, i, diagonal_matrix_element(occa, occb, context))
+
     @simd for j in index.connections[i]
       det_j = dets.determinants[j]
-      h_ij = compute_matrix_element_direct(det_i, det_j, context)
+      h_ij = compute_matrix_element_direct(det_i, det_j, context, occa, occb)
       if sel_ham.hermitian
         h_ji = h_ij
       else
@@ -540,13 +542,14 @@ end
 # Direct Matrix Element Evaluation
 # ===========================================
 
-Base.@propagate_inbounds function compute_matrix_element_beta_excitations(det_i::Determinant, det_j::Determinant, 
-                      n_beta_diff, context::Union{FCIContext, HCIContext})::Scalar
+@pib function compute_matrix_element_beta_excitations(det_i::Determinant, det_j::Determinant, 
+                      n_beta_diff, context::Union{FCIContext, HCIContext},
+                      occa=nothing, occb=nothing)::Scalar
   if n_beta_diff == 2
     # Single beta excitation
     orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
     phase = calculate_excitation_phase(det_i.beta, orb_i, orb_a)
-    return single_beta_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+    return single_beta_excitation_matrix_element(det_i, orb_i, orb_a, context, occa, occb) * phase
   elseif n_beta_diff == 4
     # Double beta excitation
     orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.beta, det_j.beta)
@@ -556,13 +559,14 @@ Base.@propagate_inbounds function compute_matrix_element_beta_excitations(det_i:
   return 0.0  # Invalid excitation
 end
 
-Base.@propagate_inbounds function compute_matrix_element_alpha_excitations(det_i::Determinant, det_j::Determinant,
-                      n_alpha_diff, context::Union{FCIContext, HCIContext})::Scalar
+@pib function compute_matrix_element_alpha_excitations(det_i::Determinant, det_j::Determinant,
+                      n_alpha_diff, context::Union{FCIContext, HCIContext}, 
+                      occa=nothing, occb=nothing)::Scalar
   if n_alpha_diff == 2
     # Single alpha excitation
     orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
     phase = calculate_excitation_phase(det_i.alpha, orb_i, orb_a)
-    return single_alpha_excitation_matrix_element(det_i, orb_i, orb_a, context) * phase
+    return single_alpha_excitation_matrix_element(det_i, orb_i, orb_a, context, occa, occb) * phase
   elseif n_alpha_diff == 4
     # Double alpha excitation
     orb_i, orb_j, orb_a, orb_b = find_double_excitation_orbitals(det_i.alpha, det_j.alpha)
@@ -572,7 +576,7 @@ Base.@propagate_inbounds function compute_matrix_element_alpha_excitations(det_i
   return 0.0  # Invalid excitation
 end
 
-Base.@propagate_inbounds function compute_matrix_element_mixed_excitations(det_i::Determinant, det_j::Determinant,
+@pib function compute_matrix_element_mixed_excitations(det_i::Determinant, det_j::Determinant,
                       context::Union{FCIContext, HCIContext})::Scalar
   # Mixed single excitations in alpha and beta
   orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
@@ -585,12 +589,16 @@ end
 
 """
     compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
-                                 context) -> Scalar
+                                 context, occa=nothing, occb=nothing) -> Scalar
 
 Compute ⟨det_i|Ĥ|det_j⟩ directly using orbital excitation analysis.
 Works with both FCIContext and HCIContext.
+
+occa/occb are either Nothing or lists of occupied orbitals (makes the calculation more efficient).
 """
-Base.@propagate_inbounds function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, context::Union{FCIContext, HCIContext})::Scalar
+@pib function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
+                                                                context::Union{FCIContext, HCIContext}, 
+                                                                occa=nothing, occb=nothing)::Scalar
   # Find differences in alpha and beta strings
   alpha_diff = det_i.alpha ⊻ det_j.alpha  # XOR to find differing bits
   beta_diff = det_i.beta ⊻ det_j.beta
@@ -605,11 +613,11 @@ Base.@propagate_inbounds function compute_matrix_element_direct(det_i::Determina
   end
 
   if n_alpha_diff == 0
-    return compute_matrix_element_beta_excitations(det_i, det_j, n_beta_diff, context)
+    return compute_matrix_element_beta_excitations(det_i, det_j, n_beta_diff, context, occa, occb)
   end
 
   if n_beta_diff == 0
-    return compute_matrix_element_alpha_excitations(det_i, det_j, n_alpha_diff, context)
+    return compute_matrix_element_alpha_excitations(det_i, det_j, n_alpha_diff, context, occa, occb)
   end
   # Mixed excitations
   if n_alpha_diff == 2 && n_beta_diff == 2
@@ -625,40 +633,59 @@ end
 Compute diagonal matrix element ⟨det|Ĥ|det⟩.
 For FCIContext uses precomputed diagonal, for HCIContext computes on-the-fly.
 """
-Base.@propagate_inbounds function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
+@pib function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
   # Get the address and use existing diagonal computation
   addr = address_from_determinant(context, det)
   return context.diag_h.data[addr]
 end
 
-Base.@propagate_inbounds function diagonal_matrix_element(det::Determinant, context::HCIContext)::Scalar
+@pib function diagonal_matrix_element(det::Determinant, context::HCIContext)::Scalar
   # For HCI, compute diagonal element on-the-fly
   return compute_diagonal_element(det, context)
 end
 
-"""
-    single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context) -> Scalar 
-
-Compute matrix element for single alpha excitation.
-"""
-Base.@propagate_inbounds function single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, 
-                                                context::Union{FCIContext, HCIContext})
-  h1e2_same = context.heval_data.h1e2_aa
-  h1e2_opp = context.heval_data.h1e2_ab
-  return compute_fock_element(context.int1a, h1e2_same, h1e2_opp, det_i.alpha, det_i.beta, orb_a, orb_i)
+@pib function diagonal_matrix_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
+                                      context::Union{HCIContext,FCIContext})::Scalar
+  # For HCI, compute diagonal element on-the-fly
+  return compute_diagonal_element(occa, occb, context)
 end
 
 """
-    single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context) -> Scalar 
+    single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context,
+                                           occa=nothing, occb=nothing) -> Scalar
+
+Compute matrix element for single alpha excitation.
+"""
+@pib function single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int,
+                                                     context::Union{FCIContext, HCIContext}, 
+                                                     occa=nothing, occb=nothing)
+  int1 = context.int1a
+  h1e2_same = context.heval_data.h1e2_aa
+  h1e2_opp = context.heval_data.h1e2_ab
+  if isnothing(occb)
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.alpha, det_i.beta, orb_a, orb_i)
+  else
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, occa, occb, orb_a, orb_i)
+  end
+end
+
+"""
+    single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, context,
+                                          occa=nothing, occb=nothing) -> Scalar 
 
 Compute matrix element for single beta excitation.
 """
-Base.@propagate_inbounds function single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int, 
-                                                context::Union{FCIContext, HCIContext})
+@pib function single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int,
+                                                    context::Union{FCIContext, HCIContext}, 
+                                                    occa=nothing, occb=nothing)
   int1 = context.int1b
   h1e2_same = context.heval_data.h1e2_bb
   h1e2_opp = context.heval_data.h1e2_ba
-  return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.beta, det_i.alpha, orb_a, orb_i)
+  if isnothing(occb)
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, det_i.beta, det_i.alpha, orb_a, orb_i)
+  else
+    return compute_fock_element(int1, h1e2_same, h1e2_opp, occb, occa, orb_a, orb_i)
+  end
 end
 
 """
@@ -666,7 +693,7 @@ end
 
 Compute matrix element for double alpha excitation.
 """
-Base.@propagate_inbounds function double_alpha_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_alpha_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   int2aa = context.int2aa
   return int2aa[orb_a, orb_b, orb_i, orb_j] - int2aa[orb_a, orb_b, orb_j, orb_i]
@@ -677,7 +704,7 @@ end
 
 Compute matrix element for double beta excitation.
 """
-Base.@propagate_inbounds function double_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   int2bb = context.int2bb
   return int2bb[orb_a, orb_b, orb_i, orb_j] - int2bb[orb_a, orb_b, orb_j, orb_i]
@@ -688,7 +715,7 @@ end
 
 Compute matrix element for double alpha beta excitation.
 """
-Base.@propagate_inbounds function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   int2ab = context.int2ab
   return int2ab[orb_a, orb_b, orb_i, orb_j]
@@ -1119,7 +1146,7 @@ end
 
 Compute Σ_j h1e2[j, a, i] over occupied orbitals j.
 """
-Base.@propagate_inbounds function sum_h1e2(h1e2, occ, a, i)
+@pib function sum_h1e2(h1e2, occ, a, i)
   total = 0.0
   @inbounds @simd for j in occ
     total += h1e2[j, a, i]
@@ -1135,7 +1162,7 @@ Compute Fock matrix element f_ai
 f_ai = h_ai + Σ_j (v_aijj - v_ajji)_SS + Σ_j (v_aijj)_OS
 where SS = same spin, OS = opposite spin. 
 """
-Base.@propagate_inbounds function compute_fock_element(int1, h1e2_same, h1e2_opp, occ_same, occ_opp,
+@pib function compute_fock_element(int1, h1e2_same, h1e2_opp, occ_same, occ_opp,
                               a::Int, i::Int)::Float64
   # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
   return int1[a, i] + sum_h1e2(h1e2_same, occ_same, a, i) + sum_h1e2(h1e2_opp, occ_opp, a, i)
@@ -1146,7 +1173,7 @@ end
 
 Compute Σ_j h1e2[j, a, i] over occupied orbitals j.
 """
-Base.@propagate_inbounds function sum_h1e2(h1e2, str::OrbPattern, a, i)
+@pib function sum_h1e2(h1e2, str::OrbPattern, a, i)
   total = 0.0
   @inbounds @simd for k in axes(h1e2, 1)
     if (str >>> (k-1)) & one(str) != zero(str)
@@ -1163,7 +1190,7 @@ Compute Fock matrix element f_ai
 f_ai = h_ai + Σ_j (v_aijj - v_ajji)_SS + Σ_j (v_aijj)_OS
 where SS = same spin, OS = opposite spin. 
 """
-Base.@propagate_inbounds function compute_fock_element(int1, h1e2_same, h1e2_opp, str_same::OrbPattern, str_opp::OrbPattern,
+@pib function compute_fock_element(int1, h1e2_same, h1e2_opp, str_same::OrbPattern, str_opp::OrbPattern,
                               a::Int, i::Int)::Float64
   # f_ai = h1_ai + Σ_j_same h1e2_same[j,a,i] + Σ_j_opp h1e2_ab[j,a,i]
   return int1[a, i] + sum_h1e2(h1e2_same, str_same, a, i) + sum_h1e2(h1e2_opp, str_opp, a, i)
@@ -1266,9 +1293,21 @@ end
 Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
 Works with both FCIContext and HCIContext.
 """
-Base.@propagate_inbounds function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
+@pib function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
   return calc_diagonalH(ctx.heval_data, det.alpha, det.beta)
 end
+
+"""
+    compute_diagonal_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, ctx) -> Scalar
+
+Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
+Works with both FCIContext and HCIContext.
+"""
+@pib function compute_diagonal_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
+                                       ctx::Union{FCIContext, HCIContext})::Scalar
+  return calc_diagonalH(ctx.heval_data, occa, occb)
+end
+
 
 # ===========================================
 # Heat-Bath Selection 
