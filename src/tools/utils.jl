@@ -27,7 +27,8 @@ export OutDict, last_energy
 # from bufvec
 export BufVec, capacity, is_full
 # from VecDicts
-export VecDict, getvalue, setvalue!, values
+export VecDict, getvalue, setvalue!, values, resize!, push!
+export setat!, getat!, setkeyat!, getkeyat!, setvalueat!, getvalueat!
 
 include("xmltools.jl")
 include("bufvec.jl")
