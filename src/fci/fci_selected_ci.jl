@@ -24,13 +24,11 @@ Stores three dictionaries:
 - `same_alpha`: Maps alpha OrbPattern → Vector{Int} of determinant indices sharing that alpha
 - `same_beta`: Maps beta OrbPattern → Vector{Int} of determinant indices sharing that beta  
 - `singlexc_alpha`: Maps alpha OrbPattern → Vector{OrbPattern} of alpha patterns connected by single excitation
-- `connections`: upper triangular list of determinants connected to the current determinant
 
 This enables efficient lookup of candidates for:
 - Double-beta excitations (via same_alpha)
 - Double-alpha excitations (via same_beta)
 - Mixed alpha-beta excitations (via singlexc_alpha then same_alpha)
-- OR any excitation (via connections)
 
 Reduces extend_SelectedHamiltonianMatrix from O(N²) to O(N×N_connections) where N_connections << N.
 """
@@ -38,13 +36,11 @@ struct DeterminantLookupIndex
   same_alpha::Dict{OrbPattern, Vector{Int}}
   same_beta::Dict{OrbPattern, Vector{Int}}
   singlexc_alpha::Dict{OrbPattern, Vector{OrbPattern}}
-  connections::Vector{Vector{Int}}
 
   function DeterminantLookupIndex()
     new(Dict{OrbPattern, Vector{Int}}(),
         Dict{OrbPattern, Vector{Int}}(),
-        Dict{OrbPattern, Vector{OrbPattern}}(),
-        Vector{Vector{Int}}())
+        Dict{OrbPattern, Vector{OrbPattern}}())
   end
 end
 
@@ -115,56 +111,7 @@ function build_lookup_index!(index::DeterminantLookupIndex, determinants::Vector
   end
   # Merge new connections into main dict using append! to combine vectors
   mergewith!(append!, index.singlexc_alpha, new_connections)
-  # Build connections list
-  update_connections!(index, determinants, start_idx, end_idx)
   print_time(verbosity, t1, "build DeterminantLookupIndex", 1)
-end
-
-function update_connections!(index::DeterminantLookupIndex, determinants::Vector{Determinant}, 
-                             start_idx::Int, end_idx::Int)
-  connected_dets = Vector{Int}(undef, length(determinants))
-  @inbounds for i in start_idx:end_idx
-    det_i = determinants[i]
-    α_i = det_i.alpha
-    β_i = det_i.beta
-    nexc = 0
-    # alpha excitations (same beta)
-    candidates = index.same_beta[β_i]
-    last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
-    @simd for j_indx in 1:last_index
-      j = candidates[j_indx]
-      det_j = determinants[j]
-      if count_ones(α_i ⊻ det_j.alpha) <= 4
-        nexc += 1
-        connected_dets[nexc] = j
-      end
-    end
-    # beta excitations (same alpha)
-    candidates = index.same_alpha[α_i]
-    last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
-    @simd for j_indx in 1:last_index
-      j = candidates[j_indx]
-      det_j = determinants[j]
-      if count_ones(β_i ⊻ det_j.beta) <= 4  # single or double beta excitation
-        nexc += 1
-        connected_dets[nexc] = j
-      end
-    end
-    # alpha-beta mixed excitations
-    for α_excited in index.singlexc_alpha[α_i]
-      candidates = index.same_alpha[α_excited]
-      last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
-      @simd for j_indx in 1:last_index
-        j = candidates[j_indx]
-        det_j = determinants[j]
-        if count_ones(β_i ⊻ det_j.beta) == 2
-          nexc += 1
-          connected_dets[nexc] = j
-        end
-      end
-    end
-    push!(index.connections, connected_dets[1:nexc])
-  end
 end
 
 function Base.issorted(index::DeterminantLookupIndex)::Bool
@@ -240,11 +187,68 @@ function Base.push!(sel_ham::SelectedHamiltonianMatrix, row::SelectedHamiltonian
 end
 
 """
-    resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, cursize)
+    get_connections(index::DeterminantLookupIndex, determinants::Vector{Determinant}, 
+                    start_idx::Int, end_idx::Int) -> Vector{Vector{Int}}
+
+Get connected determinants for each determinant in range [start_idx:end_idx]
+"""
+function get_connections(index::DeterminantLookupIndex, determinants::Vector{Determinant}, 
+                         start_idx::Int, end_idx::Int)
+  connections = Vector{Int}[]
+  connected_dets = Vector{Int}(undef, length(determinants))
+  @inbounds for i in start_idx:end_idx
+    det_i = determinants[i]
+    α_i = det_i.alpha
+    β_i = det_i.beta
+    nexc = 0
+    # alpha excitations (same beta)
+    candidates = index.same_beta[β_i]
+    last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
+    @simd for j_indx in 1:last_index
+      j = candidates[j_indx]
+      det_j = determinants[j]
+      if count_ones(α_i ⊻ det_j.alpha) <= 4
+        nexc += 1
+        connected_dets[nexc] = j
+      end
+    end
+    # beta excitations (same alpha)
+    candidates = index.same_alpha[α_i]
+    last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
+    @simd for j_indx in 1:last_index
+      j = candidates[j_indx]
+      det_j = determinants[j]
+      if count_ones(β_i ⊻ det_j.beta) <= 4  # single or double beta excitation
+        nexc += 1
+        connected_dets[nexc] = j
+      end
+    end
+    # alpha-beta mixed excitations
+    for α_excited in index.singlexc_alpha[α_i]
+      candidates = index.same_alpha[α_excited]
+      last_index = searchsortedfirst(candidates, i) - 1 # Only consider j < i to avoid double counting
+      @simd for j_indx in 1:last_index
+        j = candidates[j_indx]
+        det_j = determinants[j]
+        if count_ones(β_i ⊻ det_j.beta) == 2
+          nexc += 1
+          connected_dets[nexc] = j
+        end
+      end
+    end
+    push!(connections, connected_dets[1:nexc])
+  end
+  return connections
+end
+
+
+"""
+    resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, connections::Vector{Vector{Int}}, cursize)
 
 Resize the SelectedHamiltonianMatrix to preallocate space for new elements.
 """
-function Base.resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, cursize)
+function Base.resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, 
+                      connections::Vector{Vector{Int}}, cursize)
   ndet_old = length(sel_ham.rows)
   ndet = n_selected(dets)
   index = dets.lookup_index
@@ -259,7 +263,8 @@ function Base.resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterm
   end
   # connected determinants
   @inbounds for i in (ndet_old+1):ndet
-    connected_dets = index.connections[i]
+    inew = i - ndet_old
+    connected_dets = connections[inew]
     @simd for j in connected_dets
       newsize[j] += 1
     end
@@ -290,13 +295,15 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
   ThrNeglect = context.options.thr_negligible
   index = dets.lookup_index
   @assert issorted(index) "DeterminantLookupIndex is not sorted. Skipping lower-triangle will not work correctly."
-
+  # Get connected determinants for new determinants only
+  connections = get_connections(index, dets.determinants, ndet_old + 1, ndet)
+  t0 = print_time(context.options.print_level, t0, "generate connections", 1)
   # Current size of sel_ham, including the diagonal elements for new determinants
   cursize = ones(Int, ndet) 
   for (i, row) in enumerate(sel_ham.rows)
     cursize[i] = length(row)
   end
-  resize!(sel_ham, dets, cursize)
+  resize!(sel_ham, dets, connections, cursize)
   t0 = print_time(context.options.print_level, t0, "resize Hamiltonian matrix", 1)
 
   n_orb = context.n_orb
@@ -307,6 +314,7 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
   # Find connected determinants using connections list
   @inbounds for i in (ndet_old+1):ndet
     det_i = dets.determinants[i]
+    inew = i - ndet_old
     occupied_orbitals!(occa, det_i.alpha, n_orb)
     occupied_orbitals!(occb, det_i.beta, n_orb)
     new_row = sel_ham.rows[i]
@@ -314,7 +322,7 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
     # Diagonal element
     setat!(new_row, cursize_i, i, diagonal_matrix_element(occa, occb, context))
 
-    @simd for j in index.connections[i]
+    @simd for j in connections[inew]
       det_j = dets.determinants[j]
       h_ij = compute_matrix_element_direct(det_i, det_j, context, occa, occb)
       if sel_ham.hermitian
@@ -361,7 +369,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
   # Constructor for HCIContext (on-demand addressing)
   function SelectedCIContext(base_context::HCIContext, determinants::Vector{Determinant}, hamiltonian::SelectedHamiltonianMatrix)
     # For HCI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
-    addresses = UInt64.(1:length(determinants))
+    addresses = Address.(1:length(determinants))
     selected_dets = SelectedCIDeterminants(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
     new{HCIContext}(base_context, selected_dets, hamiltonian)
