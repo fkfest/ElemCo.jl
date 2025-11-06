@@ -1,4 +1,5 @@
-const OrbPattern = UInt64       # orbital occupation patterns
+# const OrbPattern = UInt64       # orbital occupation patterns
+const OrbPattern = UInt128      # orbital occupation patterns
 const Address = UInt64          # addressing patterns and vector elements  
 const Scalar = Float64          # scalar values for CI coefficients
 

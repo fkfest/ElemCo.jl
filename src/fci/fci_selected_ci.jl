@@ -356,6 +356,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
   base_context::ContextType                   # Context for integrals and (optionally) addressing
   selected_dets::SelectedCIDeterminants       # Selected determinants and addresses
   hamiltonian::SelectedHamiltonianMatrix      # Hamiltonian matrix for selected determinants
+  old_ndet::Base.RefValue{Int}                # Number of determinants in previous iteration
 
   # Constructor for FCIContext (uses full addressing)
   function SelectedCIContext(base_context::FCIContext, determinants::Vector{Determinant}, hamiltonian::SelectedHamiltonianMatrix)
@@ -363,7 +364,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
     addresses = [address_from_determinant(base_context, det) for det in determinants]
     selected_dets = SelectedCIDeterminants(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
-    new{FCIContext}(base_context, selected_dets, hamiltonian)
+    new{FCIContext}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 
   # Constructor for HCIContext (on-demand addressing)
@@ -372,7 +373,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
     addresses = Address.(1:length(determinants))
     selected_dets = SelectedCIDeterminants(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
-    new{HCIContext}(base_context, selected_dets, hamiltonian)
+    new{HCIContext}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 end
 
@@ -382,6 +383,22 @@ end
 Get number of selected determinants.
 """
 n_selected(selci::SelectedCIContext) = length(selci.selected_dets.determinants)
+
+"""
+    n_old_dets(selci::SelectedCIContext) -> Int
+
+Get the number of determinants in the previous iteration.
+"""
+n_old_dets(selci::SelectedCIContext) = selci.old_ndet[]
+
+"""
+    set_n_old_dets!(selci::SelectedCIContext, n::Int)
+
+Set the number of determinants in the previous iteration.
+"""
+function set_n_old_dets!(selci::SelectedCIContext, n::Int)
+  selci.old_ndet[] = n
+end
 
 """
     determinants(selected_ctx::SelectedCIContext) -> Vector{Determinant}
@@ -403,8 +420,10 @@ function extend!(selected_ctx::SelectedCIContext, new_dets::Vector{Determinant})
     start_index = Address(n_selected(selected_ctx)) + 1
     new_addresses = collect(start_index:(start_index + length(new_dets) - 1))
   end
+  old_ndets = n_selected(selected_ctx)
   extend!(selected_ctx.selected_dets, new_dets, new_addresses)
   extend!(selected_ctx.hamiltonian, selected_ctx.selected_dets, selected_ctx.base_context)
+  selected_ctx.old_ndet[] = old_ndets
 end
 
 # ===========================================
@@ -1322,9 +1341,8 @@ end
 # ===========================================
 
 """
-    heatbath_selection(variational_dets::Vector{Determinant},
+    heatbath_selection(selected_ctx::SelectedCIContext,
                        variational_coeffs::AbstractVector{Scalar},
-                       ctx::Union{FCIContext, HCIContext},
                        options::HCIOptions,
                        E_current::Float64,
                        setup_data::HCISetupData,
@@ -1337,21 +1355,25 @@ Works with both FCIContext and HCIContext.
 Returns selected determinants together with the weights and PT2 energy correction.
 If `store_dets` is false, only the PT2 energy is returned (with empty determinant list).
 """
-function heatbath_selection(variational_dets::Vector{Determinant},
+function heatbath_selection(selected_ctx::SelectedCIContext,
                             variational_coeffs::AbstractVector{Scalar},
-                            ctx::Union{FCIContext, HCIContext},
                             options::HCIOptions,
                             E_current::Float64,
                             setup_data::HCISetupData, store_dets::Bool=true)
   t0 = time_ns()
-  ThrNeglect = options.thr_negligible 
+  variational_dets = determinants(selected_ctx)
+  ctx = selected_ctx.base_context
+  ThrNeglect = options.thr_negligible
   # Get HB candidates determinants from variational space together with the H*c values
   candidates = Dict{Determinant, Scalar}()
   temp_buffer = VecDict{Determinant, Scalar}()
 
   # Use efficient threshold-based excitation generation
   eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon/10.0
-  for (i, det) in enumerate(variational_dets)
+  # first we run through new determinants
+  n_olddet = n_old_dets(selected_ctx)
+  for i in (n_olddet+1):length(variational_dets)
+    det = variational_dets[i]
     c_I = variational_coeffs[i]
     if abs(c_I) < ThrNeglect
       continue  # Skip negligible coefficients
@@ -1362,6 +1384,20 @@ function heatbath_selection(variational_dets::Vector{Determinant},
   end
   # Remove determinants already in variational space
   setdiff4dict!(candidates, variational_dets)
+  # for the old determinants we only update those that were already added by the new ones.
+  # this avoids adding the same determinants over and over again that will be neglected anyway by PT2
+  # this has a very small effect on the final energy (coming only from the change of the correlation energy
+  # in the denominator in PT2 step), but speeds up the selection significantly in later iterations.
+  for i in 1:n_olddet
+    det = variational_dets[i]
+    c_I = variational_coeffs[i]
+    if abs(c_I) < ThrNeglect
+      continue  # Skip negligible coefficients
+    end
+    eps = eps_h / abs(c_I)
+    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, eps)
+    modifyvalueswith!(+, candidates, temp_buffer)
+  end
   if options.verbose
     println("  Generated $(length(candidates)) candidate determinants")
   end
@@ -1551,7 +1587,7 @@ function setup_hci_uhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
 end
 
 """
-    compute_pt2_correction!(ctx, variational_dets, coefficients, E_var, setup_data, options)
+    compute_pt2_correction!(selected_ctx, coefficients, E_var, setup_data, options)
 
 Compute second-order perturbative correction to variational energy.
 
@@ -1563,7 +1599,7 @@ i runs over internal determinants (in variational space).
 
 Returns PT2 energies as a vector.
 """
-function compute_pt2_correction!(ctx::Union{FCIContext, HCIContext}, variational_dets::Vector{Determinant},
+function compute_pt2_correction!(selected_ctx::SelectedCIContext,
                                  coefficients::Matrix{Float64}, E_variational::Vector{Float64},
                                  setup_data::HCISetupData, options::HCIOptions)
   
@@ -1577,8 +1613,10 @@ function compute_pt2_correction!(ctx::Union{FCIContext, HCIContext}, variational
     println("="^70)
     println("  Variational energy: $E_variational Ha")
     println("  Threshold ε_PT2: $(options.epsilon_pt2)")
-    println("  Variational space size: $(length(variational_dets))")
+    println("  Variational space size: $(n_selected(selected_ctx)) determinants")
   end
+  # set old ndets to zero to ensure all determinants are used for PT2
+  set_n_old_dets!(selected_ctx, 0)
   nstates = size(coefficients, 2)
   ΔE = zeros(Float64, nstates)
   save_epsilon_h = options.epsilon_h
@@ -1587,7 +1625,7 @@ function compute_pt2_correction!(ctx::Union{FCIContext, HCIContext}, variational
     if options.verbose
       println("\nState $state_idx:")
     end
-    _, ΔE[state_idx] = heatbath_selection(variational_dets, @view(coefficients[:, state_idx]), ctx, options,
+    _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]), options,
                                E_variational[state_idx], setup_data, false)
     if options.verbose
       println("  PT2 correction: $(ΔE[state_idx]) Ha")
@@ -1791,9 +1829,9 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     new_dets_dict = Dict{Determinant, Scalar}()  # To hold selected new determinants
     pt2_corrections = zeros(Float64, options.nstates)
     for state = 1:options.nstates
-      # Single-state: use original single-state function
-      new_dets, pt2_corrections[state] = heatbath_selection(determinants(selected_ctx), @view(coeffs_matrix[:,state]), 
-                                       ctx, options, E_electronic_vec[state], setup_data)
+      new_dets, pt2_corrections[state] = heatbath_selection(selected_ctx, @view(coeffs_matrix[:,state]), 
+                                          options, E_electronic_vec[state], setup_data)
+      # Merge new determinants from all states, taking maximum weight (for target_selection)
       mergewith!(max, new_dets_dict, new_dets)
     end
     if options.verbose
@@ -1879,7 +1917,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   # Compute PT2 correction if requested
   pt2_result = Float64[]
   if options.compute_pt2
-    pt2_result = compute_pt2_correction!(ctx, determinants(selected_ctx), coeffs_final_matrix, 
+    pt2_result = compute_pt2_correction!(selected_ctx, coeffs_final_matrix, 
                                          E_electronic_vec, setup_data, options)
 
     E_total_with_pt2 = E_final_vec .+ pt2_result
