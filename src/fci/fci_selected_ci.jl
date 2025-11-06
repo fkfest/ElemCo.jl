@@ -1322,9 +1322,8 @@ end
 # ===========================================
 
 """
-    heatbath_selection(variational_dets::Vector{Determinant},
+    heatbath_selection(selected_ctx::SelectedCIContext,
                        variational_coeffs::AbstractVector{Scalar},
-                       ctx::Union{FCIContext, HCIContext},
                        options::HCIOptions,
                        E_current::Float64,
                        setup_data::HCISetupData,
@@ -1337,14 +1336,15 @@ Works with both FCIContext and HCIContext.
 Returns selected determinants together with the weights and PT2 energy correction.
 If `store_dets` is false, only the PT2 energy is returned (with empty determinant list).
 """
-function heatbath_selection(variational_dets::Vector{Determinant},
+function heatbath_selection(selected_ctx::SelectedCIContext,
                             variational_coeffs::AbstractVector{Scalar},
-                            ctx::Union{FCIContext, HCIContext},
                             options::HCIOptions,
                             E_current::Float64,
                             setup_data::HCISetupData, store_dets::Bool=true)
   t0 = time_ns()
-  ThrNeglect = options.thr_negligible 
+  variational_dets = determinants(selected_ctx)
+  ctx = selected_ctx.base_context
+  ThrNeglect = options.thr_negligible
   # Get HB candidates determinants from variational space together with the H*c values
   candidates = Dict{Determinant, Scalar}()
   temp_buffer = VecDict{Determinant, Scalar}()
@@ -1551,7 +1551,7 @@ function setup_hci_uhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
 end
 
 """
-    compute_pt2_correction!(ctx, variational_dets, coefficients, E_var, setup_data, options)
+    compute_pt2_correction!(selected_ctx, coefficients, E_var, setup_data, options)
 
 Compute second-order perturbative correction to variational energy.
 
@@ -1563,7 +1563,7 @@ i runs over internal determinants (in variational space).
 
 Returns PT2 energies as a vector.
 """
-function compute_pt2_correction!(ctx::Union{FCIContext, HCIContext}, variational_dets::Vector{Determinant},
+function compute_pt2_correction!(selected_ctx::SelectedCIContext,
                                  coefficients::Matrix{Float64}, E_variational::Vector{Float64},
                                  setup_data::HCISetupData, options::HCIOptions)
   
@@ -1577,7 +1577,7 @@ function compute_pt2_correction!(ctx::Union{FCIContext, HCIContext}, variational
     println("="^70)
     println("  Variational energy: $E_variational Ha")
     println("  Threshold ε_PT2: $(options.epsilon_pt2)")
-    println("  Variational space size: $(length(variational_dets))")
+    println("  Variational space size: $(n_selected(selected_ctx)) determinants")
   end
   nstates = size(coefficients, 2)
   ΔE = zeros(Float64, nstates)
@@ -1587,7 +1587,7 @@ function compute_pt2_correction!(ctx::Union{FCIContext, HCIContext}, variational
     if options.verbose
       println("\nState $state_idx:")
     end
-    _, ΔE[state_idx] = heatbath_selection(variational_dets, @view(coefficients[:, state_idx]), ctx, options,
+    _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]), options,
                                E_variational[state_idx], setup_data, false)
     if options.verbose
       println("  PT2 correction: $(ΔE[state_idx]) Ha")
@@ -1791,9 +1791,9 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
     new_dets_dict = Dict{Determinant, Scalar}()  # To hold selected new determinants
     pt2_corrections = zeros(Float64, options.nstates)
     for state = 1:options.nstates
-      # Single-state: use original single-state function
-      new_dets, pt2_corrections[state] = heatbath_selection(determinants(selected_ctx), @view(coeffs_matrix[:,state]), 
-                                       ctx, options, E_electronic_vec[state], setup_data)
+      new_dets, pt2_corrections[state] = heatbath_selection(selected_ctx, @view(coeffs_matrix[:,state]), 
+                                          options, E_electronic_vec[state], setup_data)
+      # Merge new determinants from all states, taking maximum weight (for target_selection)
       mergewith!(max, new_dets_dict, new_dets)
     end
     if options.verbose
@@ -1879,7 +1879,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOption
   # Compute PT2 correction if requested
   pt2_result = Float64[]
   if options.compute_pt2
-    pt2_result = compute_pt2_correction!(ctx, determinants(selected_ctx), coeffs_final_matrix, 
+    pt2_result = compute_pt2_correction!(selected_ctx, coeffs_final_matrix, 
                                          E_electronic_vec, setup_data, options)
 
     E_total_with_pt2 = E_final_vec .+ pt2_result
