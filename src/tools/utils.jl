@@ -16,7 +16,7 @@ export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_
 export subspace_in_space, argmaxN
 export @istoplevel
 export @assert_devel
-export substr, setdiff4dict!
+export substr, setdiff4dict!, modifyvalueswith!
 export allocfree_permutedims!
 export reshape_buf
 export amdmkl
@@ -305,9 +305,28 @@ end
 
   The same behavior as `setdiff!` for sets.
 """
-function setdiff4dict!(dict::AbstractDict, keys)
+@pib function setdiff4dict!(dict::AbstractDict, keys)
   for key in keys
     delete!(dict, key)
+  end
+end
+
+"""
+    modifyvalueswith!(combine, dict::AbstractDict, other::AbstractDict)
+
+  Modify the values in `dict` using the values from `other` and the function `combine`.
+
+  For each key in `other`, if the key exists in `dict`, the value in `dict` is updated
+  to `combine(v1, v2)`, where `v1` is the value in `dict` and `v2` is the value in `other`.
+
+  Similar to `mergewith!`, but only merges existing keys in `dict`.
+"""
+@pib function modifyvalueswith!(combine, dict::AbstractDict, other::AbstractDict)
+  for (key, val) in other
+    v1 = get(dict, key, nothing)
+    if !isnothing(v1)
+      @inbounds dict[key] = combine(v1, val)
+    end
   end
 end
 

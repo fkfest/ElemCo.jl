@@ -356,6 +356,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
   base_context::ContextType                   # Context for integrals and (optionally) addressing
   selected_dets::SelectedCIDeterminants       # Selected determinants and addresses
   hamiltonian::SelectedHamiltonianMatrix      # Hamiltonian matrix for selected determinants
+  old_ndet::Base.RefValue{Int}                # Number of determinants in previous iteration
 
   # Constructor for FCIContext (uses full addressing)
   function SelectedCIContext(base_context::FCIContext, determinants::Vector{Determinant}, hamiltonian::SelectedHamiltonianMatrix)
@@ -363,7 +364,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
     addresses = [address_from_determinant(base_context, det) for det in determinants]
     selected_dets = SelectedCIDeterminants(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
-    new{FCIContext}(base_context, selected_dets, hamiltonian)
+    new{FCIContext}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 
   # Constructor for HCIContext (on-demand addressing)
@@ -372,7 +373,7 @@ struct SelectedCIContext{ContextType <:Union{FCIContext, HCIContext}}
     addresses = Address.(1:length(determinants))
     selected_dets = SelectedCIDeterminants(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
-    new{HCIContext}(base_context, selected_dets, hamiltonian)
+    new{HCIContext}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 end
 
@@ -382,6 +383,22 @@ end
 Get number of selected determinants.
 """
 n_selected(selci::SelectedCIContext) = length(selci.selected_dets.determinants)
+
+"""
+    n_old_dets(selci::SelectedCIContext) -> Int
+
+Get the number of determinants in the previous iteration.
+"""
+n_old_dets(selci::SelectedCIContext) = selci.old_ndet[]
+
+"""
+    set_n_old_dets!(selci::SelectedCIContext, n::Int)
+
+Set the number of determinants in the previous iteration.
+"""
+function set_n_old_dets!(selci::SelectedCIContext, n::Int)
+  selci.old_ndet[] = n
+end
 
 """
     determinants(selected_ctx::SelectedCIContext) -> Vector{Determinant}
@@ -403,8 +420,10 @@ function extend!(selected_ctx::SelectedCIContext, new_dets::Vector{Determinant})
     start_index = Address(n_selected(selected_ctx)) + 1
     new_addresses = collect(start_index:(start_index + length(new_dets) - 1))
   end
+  old_ndets = n_selected(selected_ctx)
   extend!(selected_ctx.selected_dets, new_dets, new_addresses)
   extend!(selected_ctx.hamiltonian, selected_ctx.selected_dets, selected_ctx.base_context)
+  selected_ctx.old_ndet[] = old_ndets
 end
 
 # ===========================================
@@ -1351,7 +1370,10 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
 
   # Use efficient threshold-based excitation generation
   eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon/10.0
-  for (i, det) in enumerate(variational_dets)
+  # first we run through new determinants
+  n_olddet = n_old_dets(selected_ctx)
+  for i in (n_olddet+1):length(variational_dets)
+    det = variational_dets[i]
     c_I = variational_coeffs[i]
     if abs(c_I) < ThrNeglect
       continue  # Skip negligible coefficients
@@ -1362,6 +1384,20 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   end
   # Remove determinants already in variational space
   setdiff4dict!(candidates, variational_dets)
+  # for the old determinants we only update those that were already added by the new ones.
+  # this avoids adding the same determinants over and over again that will be neglected anyway by PT2
+  # this has a very small effect on the final energy (coming only from the change of the correlation energy
+  # in the denominator in PT2 step), but speeds up the selection significantly in later iterations.
+  for i in 1:n_olddet
+    det = variational_dets[i]
+    c_I = variational_coeffs[i]
+    if abs(c_I) < ThrNeglect
+      continue  # Skip negligible coefficients
+    end
+    eps = eps_h / abs(c_I)
+    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, eps)
+    modifyvalueswith!(+, candidates, temp_buffer)
+  end
   if options.verbose
     println("  Generated $(length(candidates)) candidate determinants")
   end
@@ -1579,6 +1615,8 @@ function compute_pt2_correction!(selected_ctx::SelectedCIContext,
     println("  Threshold ε_PT2: $(options.epsilon_pt2)")
     println("  Variational space size: $(n_selected(selected_ctx)) determinants")
   end
+  # set old ndets to zero to ensure all determinants are used for PT2
+  set_n_old_dets!(selected_ctx, 0)
   nstates = size(coefficients, 2)
   ΔE = zeros(Float64, nstates)
   save_epsilon_h = options.epsilon_h

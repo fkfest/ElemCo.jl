@@ -1967,9 +1967,12 @@ highest perturbative amplitudes:
 \beq
 \pre{^{pert}} c_J^2 \approx \frac{\left|\sum_{I \in \{|H_{J}^I c_I| \gt \epsilon_h\}} H^I_{J} c_I\right|^2}{(E_{\text{var}} - H^J_{J})^2} \gt \epsilon_p^2
 \eeq
-Note that the sum runs only over determinants that have a large contribution to the $J$ determinant
+The sum runs only over determinants that have a large contribution to the $J$ determinant
 according to the heat-bath criterion, and therefore can be calculated during the Phase III,
 essentially at no extra cost.
+
+Note that in Phase III, the candidates are generated only for the new determinants, however,
+the $H_{J}^I c_I$ values are accumulated for all determinants in the variational space.
 
 \subsection{Efficient Excitation Generation}
 
