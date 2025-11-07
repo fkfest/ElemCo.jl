@@ -5,45 +5,45 @@ FCI Hamiltonian operators implementation.
 """
 
 """
-    SubstResult
+    SubstResult{OPattern}
 
 Result of string substitution operation c^k c_l.
 """
-mutable struct SubstResult
+mutable struct SubstResult{OPattern}
   k::FCIUInt      # creation orbital
   l::FCIUInt      # annihilation orbital
   sign::Int8      # fermionic sign
-  str::OrbPattern    # resulting orbital pattern
-  i_str::Address     # address of resulting string
+  str::OPattern   # resulting orbital pattern
+  i_str::Address  # address of resulting string
 
-  SubstResult() = new(0, 0, 0, 0, 0)
-  SubstResult(k, l, sign, str, i_str) = new(k, l, sign, str, i_str)
+  SubstResult{OPattern}() where OPattern = new{OPattern}(0, 0, 0, zero(OPattern), 0)
+  SubstResult{OPattern}(k, l, sign, str, i_str) where OPattern = new{OPattern}(k, l, sign, str, i_str)
 end
 
 """
-    StrInfo
+    StrInfo{OPattern}
 
 Information about string substitutions for a block of strings.
 """
-mutable struct StrInfo
+mutable struct StrInfo{OPattern}
   n_subst::FCIUInt
-  subst::Vector{SubstResult}
+  subst::Vector{SubstResult{OPattern}}
 
-  StrInfo() = new(0, SubstResult[])
-  StrInfo(max_subst::Integer) = new(0, [SubstResult() for _ in 1:max_subst])
+  StrInfo{OPattern}() where OPattern = new{OPattern}(0, SubstResult{OPattern}[])
+  StrInfo{OPattern}(max_subst::Integer) where OPattern = new{OPattern}(0, [SubstResult{OPattern}() for _ in 1:max_subst])
 end
 
 # Display functions for debugging
-function Base.show(io::IO, s::SubstResult)
+function Base.show(io::IO, s::SubstResult{OPattern}) where OPattern
   print(io, "-> c^$(s.k) c_$(s.l) -> $(s.sign)$(fmt_pat(s.str, 9))")
 end
 
 """
-    occupied_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+    occupied_orbitals!(orbs, pattern, n_orb)
 
 Get list of occupied orbital indices and store in `orbs`.
 """
-function occupied_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+function occupied_orbitals!(orbs, pattern, n_orb)
   empty!(orbs)
   @inbounds @simd for i in 1:n_orb
     if (pattern >>> (i-1)) & one(pattern) != zero(pattern)
@@ -54,11 +54,11 @@ function occupied_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
 end
 
 """
-    virtual_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+    virtual_orbitals!(orbs, pattern, n_orb)
 
 Get list of virtual (unoccupied) orbital indices and store in `orbs`.
 """
-function virtual_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
+function virtual_orbitals!(orbs, pattern, n_orb)
   empty!(orbs)
   @inbounds @simd for i in 1:n_orb
     if (pattern >>> (i-1)) & one(pattern) == zero(pattern)
@@ -69,11 +69,11 @@ function virtual_orbitals!(orbs, pattern::OrbPattern, n_orb::Int)
 end
 
 """
-    occupied_and_virtual_orbitals!(occ, virt, pattern::OrbPattern, n_orb::Int)
+    occupied_and_virtual_orbitals!(occ, virt, pattern, n_orb)
 
 Get lists of occupied and virtual orbital indices and store in `occ` and `virt`.
 """
-function occupied_and_virtual_orbitals!(occ, virt, pattern::OrbPattern, n_orb::Int)
+function occupied_and_virtual_orbitals!(occ, virt, pattern, n_orb)
   empty!(occ)
   empty!(virt)
   @inbounds @simd for i in 1:n_orb
@@ -87,16 +87,16 @@ function occupied_and_virtual_orbitals!(occ, virt, pattern::OrbPattern, n_orb::I
 end
 
 """
-    form_string_substs_for_spin!(result::Vector{SubstResult}, 
-                                op_matrix_1e, adr::OrbStringAdrTable,
-                                I::OrbPattern, ThrNeglect=1e-16) -> Int
+    form_string_substs_for_spin!(result::Vector{SubstResult{OPattern}}, 
+                                op_matrix_1e, adr::OrbStringAdrTable{OPattern},
+                                I::OPattern, ThrNeglect=1e-16) where OPattern -> Int
 
 Form sparse list of all |K> which can be reached by applying c^k_l on string |I>.
 
 Returns number of valid substitutions found.
 """
-function form_string_substs_for_spin!(result::Vector{SubstResult}, op_matrix_1e,
-                                      adr::OrbStringAdrTable, I::OrbPattern, ThrNeglect=1e-16)::Int
+function form_string_substs_for_spin!(result::Vector{SubstResult{OPattern}}, op_matrix_1e,
+                                      adr::OrbStringAdrTable{OPattern}, I::OPattern, ThrNeglect=1e-16)::Int where OPattern
   n_orb_val = n_orb(adr)
   n_entries = 0
 
@@ -106,7 +106,7 @@ function form_string_substs_for_spin!(result::Vector{SubstResult}, op_matrix_1e,
   end
 
   for l in 0:(n_orb_val - 1)
-    mask_l = OrbPattern(1) << l
+    mask_l = OPattern(1) << l
     if (I & mask_l) == 0
       continue  # c_l annihilates |I>
     end
@@ -115,7 +115,7 @@ function form_string_substs_for_spin!(result::Vector{SubstResult}, op_matrix_1e,
     sign1 = string_parity_before_pos(J, l)
 
     for k in 0:(n_orb_val - 1)
-      mask_k = OrbPattern(1) << k
+      mask_k = OPattern(1) << k
       K = J | mask_k
 
       # Skip if c^k annihilates c_l|I> or matrix element is zero
@@ -177,11 +177,11 @@ function get_diagonal_pair_ints(int2e::AbstractArray{Scalar})
 end
 
 """
-    calc_diagonalH(hed::HEvalData, str_a::OrbPattern, str_b::OrbPattern) -> Scalar
+    calc_diagonalH(hed::HEvalData, str_a::OPattern, str_b::OPattern) where OPattern -> Scalar
 
 Evaluate diagonal Hamiltonian element ⟨Ψ|H|Ψ⟩ for determinant |str_a, str_b⟩.
 """
-function calc_diagonalH(hed::HEvalData, str_a::OrbPattern, str_b::OrbPattern)::Scalar
+function calc_diagonalH(hed::HEvalData, str_a::OPattern, str_b::OPattern)::Scalar where OPattern
   n_orb = Int(hed.n_orb)
   ibuf = hed.ibuf
   occa = BufVec(@view(ibuf[1:n_orb]))
@@ -405,7 +405,7 @@ function contract_hamiltonian!(context::FCIContext, r::FCIVector, c::FCIVector, 
 end
 
 """
-    apply_cop1(input_pattern::OrbPattern, iorb::Integer, create_or_destroy::Integer) -> Tuple{OrbPattern, Int8}
+    apply_cop1(input_pattern::OPattern, iorb::Integer, create_or_destroy::Integer) where OPattern -> Tuple{OPattern, Int8}
 
 Apply orbital creation (+1) or destruction (-1) operator on a determinant string.
 Returns (output_pattern, sign) where:
@@ -413,17 +413,17 @@ Returns (output_pattern, sign) where:
 - sign = -1: operation has negative parity  
 - sign = 0: operation annihilates input
 """
-function apply_cop1(input_pattern::OrbPattern, iorb::Integer, create_or_destroy::Integer)::Tuple{OrbPattern, Int8}
-  mask_l = OrbPattern(1) << iorb
+function apply_cop1(input_pattern::OPattern, iorb::Integer, create_or_destroy::Integer)::Tuple{OPattern, Int8} where OPattern
+  mask_l = OPattern(1) << iorb
 
   if create_or_destroy == -1  # destruction
     if (input_pattern & mask_l) == 0
-      return (OrbPattern(0), Int8(0))  # c_l annihilates |I>
+      return (OPattern(0), Int8(0))  # c_l annihilates |I>
     end
     output_pattern = input_pattern & ~mask_l
   else  # creation
     if (input_pattern & mask_l) != 0
-      return (OrbPattern(0), Int8(0))  # c^l annihilates |I>
+      return (OPattern(0), Int8(0))  # c^l annihilates |I>
     end
     output_pattern = input_pattern | mask_l
   end
@@ -442,7 +442,7 @@ end
 Block contraction for c^k c_l operators.
 Direction: 'c' for contraction, 'R' for residual formation.
 """
-function block_contract_cc1!(data_k::AbstractArray{Scalar, 3}, info1::Vector{StrInfo},
+function block_contract_cc1!(data_k::AbstractArray{Scalar, 3}, info1,
                              coeffs::AbstractMatrix{Scalar}, direction::Char,
                              c_sum::Ref{Scalar}, prefactor::Scalar)
   @assert direction == 'c' || direction == 'R'
@@ -489,7 +489,7 @@ Forms: `data_k[k,l,iBlk1,iBlk2] += <K_1|c†_k c_l|J_1> * coeffs[J_1,K_2] * sign
 - `c_sum`: Accumulator for sum of contributions (for screening)
 - `prefactor`: Multiplicative prefactor (typically ±1)
 """
-function block_contract_cc1_nosym!(data_k::AbstractArray{Scalar, 4}, info_1::AbstractVector{StrInfo},
+function block_contract_cc1_nosym!(data_k::AbstractArray{Scalar, 4}, info_1,
                                    coeffs::AbstractMatrix{Scalar},
                                    c_sum::Ref{Scalar}, prefactor::Scalar)
   n_orb, n_orb, n_blk1, n_blk2 = size(data_k)
@@ -745,12 +745,12 @@ Add contribution to 1-RDM for one spin.
 """
 function add_1rdm_for_spin!(rdm::AbstractMatrix{Scalar}, 
                             coeff_l::AbstractVector{Scalar}, coeff_r::AbstractVector{Scalar},
-                            adr1::OrbStringAdrTable, adr2::OrbStringAdrTable,
-                            st1::Integer, st2::Integer)
+                            adr1::OrbStringAdrTable{OPattern}, adr2::OrbStringAdrTable{OPattern},
+                            st1::Integer, st2::Integer) where OPattern
   n_orb_val = adr1.n_orb
 
   # Pre-allocate substitution buffer (reused for each string)
-  subst_buffer = [SubstResult() for _ in 1:(n_orb_val * n_orb_val)]
+  subst_buffer = [SubstResult{OPattern}() for _ in 1:(n_orb_val * n_orb_val)]
 
   # Iterate through string configurations
   for i_str1 in 1:n_str(adr1)
@@ -850,7 +850,7 @@ The algorithm:
 # Notes
 - Computational cost: O(N_det × n_orb^4)
 """
-function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1::Matrix{Scalar}, ThrNeglect=1e-16)
+function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector{OPattern}, rdm1::Matrix{Scalar}, ThrNeglect=1e-16) where OPattern
   n_orb = Int(coeff.n_orb)
   n_pairs_n = n_orb * n_orb
   
@@ -874,8 +874,8 @@ function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector, rdm1::Matrix{Scala
   input = zeros(Scalar, n_pairs_n * n_tgt_blk_k * n_tgt_blk_kb)
   # Pre-allocate StrInfo arrays with substitution buffers
   max_subst = n_orb * n_orb
-  info_a_pool = [StrInfo(max_subst) for _ in 1:n_tgt_blk_k]
-  info_b_pool = [StrInfo(max_subst) for _ in 1:n_tgt_blk_kb]
+  info_a_pool = [StrInfo{OPattern}(max_subst) for _ in 1:n_tgt_blk_k]
+  info_b_pool = [StrInfo{OPattern}(max_subst) for _ in 1:n_tgt_blk_kb]
   
   # Loop over beta string blocks
   for block_b_start in 1:n_tgt_blk_kb:n_str_b
@@ -978,7 +978,7 @@ end
 
 Apply two-electron Hamiltonian term.
 """
-function contract!(term::HamiltonianTerm2e, r::FCIVector, c::FCIVector, prefactor::Scalar)
+function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector{OPattern}, prefactor::Scalar) where OPattern
   @assert compatible(r, c) "Incompatible FCI vectors"
 
   base_prefactor = term.base_factor * prefactor
@@ -1012,8 +1012,8 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector, c::FCIVector, prefacto
   # Pre-allocate StrInfo arrays with pre-allocated subst vectors
   # Each StrInfo gets its own subst buffer to avoid allocations in loops
   max_subst = n_orb * n_orb
-  info_a = [StrInfo(max_subst) for _ in 1:n_tgt_blk_k]
-  info_b = [StrInfo(max_subst) for _ in 1:n_tgt_blk_kb]
+  info_a = [StrInfo{OPattern}(max_subst) for _ in 1:n_tgt_blk_k]
+  info_b = [StrInfo{OPattern}(max_subst) for _ in 1:n_tgt_blk_kb]
 
   dummy_ref = Ref{Scalar}(0.0)
 

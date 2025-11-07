@@ -3,35 +3,35 @@ FCI vector implementation with orbital string addressing.
 """
 
 """
-    OrbStringAdrTable
+    OrbStringAdrTable{OPattern}
 
 Auxiliary object for addressing orbital occupation patterns for one spin.
 Provides addressing of all patterns with a fixed total number of electrons
 in a given number of orbitals.
 """
-mutable struct OrbStringAdrTable
+mutable struct OrbStringAdrTable{OPattern}
   n_elec::FCIUInt
   n_orb::FCIUInt
   adr_count::Address
-  str_table::Vector{OrbPattern}
+  str_table::Vector{OPattern}
 
-  function OrbStringAdrTable()
-    new(0, 0, 0, OrbPattern[])
+  function OrbStringAdrTable{OPattern}() where OPattern
+    new{OPattern}(0, 0, 0, OPattern[])
   end
 
-  function OrbStringAdrTable(n_elec::Integer, n_orb::Integer)
-    table = new(0, 0, 0, OrbPattern[])
+  function OrbStringAdrTable{OPattern}(n_elec::Integer, n_orb::Integer) where OPattern
+    table = new{OPattern}(0, 0, 0, OPattern[])
     init!(table, n_elec, n_orb)
     return table
   end
 end
 
 """
-    init!(table::OrbStringAdrTable, n_elec::Integer, n_orb::Integer)
+    init!(table::OrbStringAdrTable{OPattern}, n_elec::Integer, n_orb::Integer) where OPattern
 
 Initialize the orbital string addressing table.
 """
-function init!(table::OrbStringAdrTable, n_elec::Integer, n_orb::Integer)
+function init!(table::OrbStringAdrTable{OPattern}, n_elec::Integer, n_orb::Integer) where OPattern
   table.n_elec = FCIUInt(n_elec)
   table.n_orb = FCIUInt(n_orb)
   table.adr_count = sym_dof(n_orb, n_elec)
@@ -40,86 +40,86 @@ function init!(table::OrbStringAdrTable, n_elec::Integer, n_orb::Integer)
 end
 
 """
-    make_string_table!(table::OrbStringAdrTable)
+    make_string_table!(table::OrbStringAdrTable{OPattern}) where OPattern
 
 Create the string table with all valid orbital patterns.
 """
-function make_string_table!(table::OrbStringAdrTable)
+function make_string_table!(table::OrbStringAdrTable{OPattern}) where OPattern
   sizehint!(table.str_table, table.adr_count)
   empty!(table.str_table)
 
-  add_strings_to_table_recursive!(table, OrbPattern(0), Int(table.n_elec), 0)
+  add_strings_to_table_recursive!(table, OPattern(0), Int(table.n_elec), 0)
   sort!(table.str_table)
 end
 
 """
-    add_strings_to_table_recursive!(table::OrbStringAdrTable, old_pat::OrbPattern, 
-                                   n_elec_left::Integer, i_first_orb::Integer)
+    add_strings_to_table_recursive!(table::OrbStringAdrTable{OPattern}, old_pat::OPattern, 
+                                   n_elec_left::Integer, i_first_orb::Integer) where OPattern
 
 Recursively add patterns with n_elec_left electrons in the remaining orbitals.
 """
-function add_strings_to_table_recursive!(table::OrbStringAdrTable, old_pat::OrbPattern,
-                                         n_elec_left::Integer, i_first_orb::Integer)
+function add_strings_to_table_recursive!(table::OrbStringAdrTable{OPattern}, old_pat::OPattern,
+                                         n_elec_left::Integer, i_first_orb::Integer) where OPattern
   if n_elec_left == 0 && i_first_orb <= table.n_orb
     push!(table.str_table, old_pat)
     return
   end
 
   for i_orb in i_first_orb:(table.n_orb - 1)
-    new_pat = old_pat | (OrbPattern(1) << i_orb)
+    new_pat = old_pat | (OPattern(1) << i_orb)
     add_strings_to_table_recursive!(table, new_pat, n_elec_left - 1, i_orb + 1)
   end
 end
 
 """
-    (table::OrbStringAdrTable)(bit_string::OrbPattern) -> Address
+    (table::OrbStringAdrTable{OPattern})(bit_string::OPattern) where OPattern -> Address
 
 Get 1-based address for a given bit string pattern.
 """
-function (table::OrbStringAdrTable)(bit_string::OrbPattern)::Address
+function (table::OrbStringAdrTable{OPattern})(bit_string::OPattern)::Address where OPattern
   idx = searchsortedfirst(table.str_table, bit_string)
   @assert idx <= length(table.str_table) && table.str_table[idx] == bit_string "Invalid bit string"
   return Address(idx)  # Return 1-based address
 end
 
 """
-    make_pattern(table::OrbStringAdrTable, adr::Address) -> OrbPattern
+    make_pattern(table::OrbStringAdrTable{OPattern}, adr::Address) where OPattern -> OPattern
 
 Create orbital pattern from address.
 """
-@inline function make_pattern(table::OrbStringAdrTable, adr::Address)::OrbPattern
+@inline function make_pattern(table::OrbStringAdrTable{OPattern}, adr::Address)::OPattern where OPattern
   @boundscheck checkbounds(table.str_table, adr)
   return table.str_table[adr]
 end
 
 # Accessor functions
-n_str(table::OrbStringAdrTable) = table.adr_count
-n_orb(table::OrbStringAdrTable) = table.n_orb
-n_elec(table::OrbStringAdrTable) = table.n_elec
+n_str(table::OrbStringAdrTable{OPattern}) where OPattern = table.adr_count
+n_orb(table::OrbStringAdrTable{OPattern}) where OPattern = table.n_orb
+n_elec(table::OrbStringAdrTable{OPattern}) where OPattern = table.n_elec
 
 """
-    FCIVector
+    FCIVector{OPattern}
 
 FCI vector storing coefficients as matrix M[iAdrA, iAdrB] where iAdrA and iAdrB 
 are indices of orbital occupation strings for alpha/beta electrons.
 """
-mutable struct FCIVector
+mutable struct FCIVector{OPattern}
   n_elec_a::FCIUInt
   n_elec_b::FCIUInt
   n_orb::FCIUInt
   n_str_a::Address
   n_str_b::Address
-  adr_a::OrbStringAdrTable
-  adr_b::OrbStringAdrTable
+  adr_a::OrbStringAdrTable{OPattern}
+  adr_b::OrbStringAdrTable{OPattern}
   is_spin_projected::Bool
   data::Matrix{Scalar}
 
-  function FCIVector(n_elec::Integer, n_orb::Integer, n_spin::Integer, is_spin_projected::Bool = false)
+  function FCIVector{OPattern}(n_elec::Integer, n_orb::Integer, n_spin::Integer, is_spin_projected::Bool = false) where OPattern
     n_elec_a = (n_elec + n_spin) ÷ 2
     n_elec_b = (n_elec - n_spin) ÷ 2
 
-    adr_a = OrbStringAdrTable(n_elec_a, n_orb)
-    adr_b = OrbStringAdrTable(n_elec_b, n_orb)
+    adr_a = OrbStringAdrTable{OPattern}(n_elec_a, n_orb)
+    adr_b = OrbStringAdrTable{OPattern}(n_elec_b, n_orb)
 
     n_str_a = n_str(adr_a)
     n_str_b = n_str(adr_b)
@@ -127,7 +127,7 @@ mutable struct FCIVector
     # Store data in [alpha, beta] order 
     data = zeros(Scalar, n_str_a, n_str_b)
 
-    new(
+    new{OPattern}(
       FCIUInt(n_elec_a),
       FCIUInt(n_elec_b),
       FCIUInt(n_orb),
@@ -142,55 +142,55 @@ mutable struct FCIVector
 end
 
 """
-    Base.getindex(vec::FCIVector, i_a::Integer, i_b::Integer) -> Scalar
+    Base.getindex(vec::FCIVector{OPattern}, i_a::Integer, i_b::Integer) where OPattern -> Scalar
 
 Access coefficient vec[i_a, i_b].
 """
-@inline function Base.getindex(vec::FCIVector, i_a::Integer, i_b::Integer)::Scalar
+@inline function Base.getindex(vec::FCIVector{OPattern}, i_a::Integer, i_b::Integer)::Scalar where OPattern
   @boundscheck checkbounds(vec.data, i_a, i_b)
   return vec.data[i_a, i_b]
 end
 
 """
-    Base.setindex!(vec::FCIVector, val::Scalar, i_a::Integer, i_b::Integer)
+    Base.setindex!(vec::FCIVector{OPattern}, val::Scalar, i_a::Integer, i_b::Integer) where OPattern
 
 Set coefficient vec[i_a, i_b] = val.
 """
-@inline function Base.setindex!(vec::FCIVector, val::Scalar, i_a::Integer, i_b::Integer)
+@inline function Base.setindex!(vec::FCIVector{OPattern}, val::Scalar, i_a::Integer, i_b::Integer) where OPattern
   @boundscheck checkbounds(vec.data, i_a, i_b)
   vec.data[i_a, i_b] = val
 end
 
 """
-    n_data(vec::FCIVector) -> Int
+    n_data(vec::FCIVector{OPattern}) where OPattern -> Int
 
 Total number of data elements.
 """
-n_data(vec::FCIVector) = Int(vec.n_str_a * vec.n_str_b)
+n_data(vec::FCIVector{OPattern}) where OPattern = Int(vec.n_str_a * vec.n_str_b)
 
 """
-    n_spin(vec::FCIVector) -> FCIUInt
+    n_spin(vec::FCIVector{OPattern}) where OPattern -> FCIUInt
 
 Total spin quantum number.
 """
-n_spin(vec::FCIVector) = vec.n_elec_a - vec.n_elec_b
+n_spin(vec::FCIVector{OPattern}) where OPattern = vec.n_elec_a - vec.n_elec_b
 
 """
-    clear!(vec::FCIVector)
+    clear!(vec::FCIVector{OPattern}) where OPattern
 
 Set all coefficients to zero.
 """
-function clear!(vec::FCIVector)
+function clear!(vec::FCIVector{OPattern}) where OPattern
   fill!(vec.data, zero(Scalar))
 end
 
 """
-    Base.copy(vec::FCIVector) -> FCIVector
+    Base.copy(vec::FCIVector{OPattern}) where OPattern -> FCIVector{OPattern}
 
 Create a deep copy of an FCIVector, including all data.
 """
-function Base.copy(vec::FCIVector)
-  new_vec = FCIVector(
+function Base.copy(vec::FCIVector{OPattern}) where OPattern
+  new_vec = FCIVector{OPattern}(
     vec.n_elec_a + vec.n_elec_b,
     vec.n_orb,
     vec.n_elec_a - vec.n_elec_b,
@@ -201,12 +201,12 @@ function Base.copy(vec::FCIVector)
 end
 
 """
-    Base.zero(vec::FCIVector) -> FCIVector
+    Base.zero(vec::FCIVector{OPattern}) where OPattern -> FCIVector{OPattern}
 
 Create a zero FCIVector with the same dimensions.
 """
-function Base.zero(vec::FCIVector)
-  new_vec = FCIVector(
+function Base.zero(vec::FCIVector{OPattern}) where OPattern
+  new_vec = FCIVector{OPattern}(
     vec.n_elec_a + vec.n_elec_b,
     vec.n_orb,
     vec.n_elec_a - vec.n_elec_b,
@@ -217,11 +217,11 @@ function Base.zero(vec::FCIVector)
 end
 
 """
-    LinearAlgebra.normalize!(vec::FCIVector)
+    LinearAlgebra.normalize!(vec::FCIVector{OPattern}) where OPattern
 
 Normalize the FCI vector.
 """
-function LinearAlgebra.normalize!(vec::FCIVector)
+function LinearAlgebra.normalize!(vec::FCIVector{OPattern}) where OPattern
   norm_val = norm(vec.data)
   if norm_val ≈ 0.0
     throw(ArgumentError("Attempted to normalize a non-normalizable vector"))
@@ -231,20 +231,20 @@ function LinearAlgebra.normalize!(vec::FCIVector)
 end
 
 """
-    LinearAlgebra.norm(vec::FCIVector) -> Scalar
+    LinearAlgebra.norm(vec::FCIVector{OPattern}) where OPattern -> Scalar
 
 Compute norm of FCI vector using LinearAlgebra.
 """
-function LinearAlgebra.norm(vec::FCIVector)::Scalar
+function LinearAlgebra.norm(vec::FCIVector{OPattern})::Scalar where OPattern
   return norm(vec.data)
 end
 
 """
-    compatible(a::FCIVector, b::FCIVector) -> Bool
+    compatible(a::FCIVector{OPattern}, b::FCIVector{OPattern}) where OPattern -> Bool
 
 Check if two FCI vectors are compatible for operations.
 """
-@inline function compatible(a::FCIVector, b::FCIVector)::Bool
+@inline function compatible(a::FCIVector{OPattern}, b::FCIVector{OPattern})::Bool where OPattern
   return (
     a.n_elec_a == b.n_elec_a &&
     a.n_elec_b == b.n_elec_b &&
@@ -255,33 +255,33 @@ Check if two FCI vectors are compatible for operations.
 end
 
 """
-    LinearAlgebra.dot(a::FCIVector, b::FCIVector) -> Scalar
+    LinearAlgebra.dot(a::FCIVector{OPattern}, b::FCIVector{OPattern}) where OPattern -> Scalar
 
 Compute dot product using LinearAlgebra.
 """
-function LinearAlgebra.dot(a::FCIVector, b::FCIVector)::Scalar
+function LinearAlgebra.dot(a::FCIVector{OPattern}, b::FCIVector{OPattern})::Scalar where OPattern
   @assert compatible(a, b) "Vectors not compatible"
   return LinearAlgebra.dot(a.data, b.data)
 end
 
 """
-    add!(r::FCIVector, x::FCIVector, f::Scalar)
+    add!(r::FCIVector{OPattern}, x::FCIVector{OPattern}, f::Scalar) where OPattern
 
 Compute r += f * x using LinearAlgebra.
 """
-function add!(r::FCIVector, x::FCIVector, f::Scalar)
+function add!(r::FCIVector{OPattern}, x::FCIVector{OPattern}, f::Scalar) where OPattern
   @assert compatible(r, x) "Vectors not compatible"
   axpy!(f, x.data, r.data)
 end
 
 """
-    orthogonalize_against!(v::FCIVector, u::FCIVector)
+    orthogonalize_against!(v::FCIVector{OPattern}, u::FCIVector{OPattern}) where OPattern
 
 Remove component of v parallel to u: v = v - (u' * v) * u
 Assumes u is normalized. Modifies v in-place.
 This is the projection operator: (I - u*u^T) * v
 """
-function orthogonalize_against!(v::FCIVector, u::FCIVector)
+function orthogonalize_against!(v::FCIVector{OPattern}, u::FCIVector{OPattern}) where OPattern
   projection = dot(u, v)
   add!(v, u, -projection)  # v = v + (-projection) * u
   return nothing

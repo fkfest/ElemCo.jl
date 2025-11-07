@@ -82,7 +82,7 @@ end
 Convert a determinant address to alpha/beta orbital patterns.
 Uses the addressing tables to reconstruct the determinant.
 """
-function determinant_from_address(context::FCIContext, addr::Address)::Determinant
+function determinant_from_address(context::FCIContext, addr::Address)
   # Convert 1-based address to 0-based for decomposition
   addr_0based = addr - 1
 
@@ -271,7 +271,7 @@ Uses the same hybrid selection method as traditional P-space.
 # Returns
 - Vector of selected determinants
 """
-function select_small_space_determinants(context::FCIContext, target_size::Int, nstates::Int=1)::Vector{Determinant}
+function select_small_space_determinants(context::FCIContext{OPattern}, target_size, nstates=1) where OPattern
   # Build HF reference determinant
   hf_ref = get_reference_determinant(context)
   
@@ -286,7 +286,7 @@ function select_small_space_determinants(context::FCIContext, target_size::Int, 
   
   # Create candidate list with energy and excitation level
   # Use similar criteria as traditional P-space but with larger threshold
-  candidates = Tuple{Determinant, Scalar, Int}[]  # (determinant, energy, excitation_level)
+  candidates = Tuple{Determinant{OPattern}, Scalar, Int}[]  # (determinant, energy, excitation_level)
   
   hf_addr = address_from_determinant(context, hf_ref)
   hf_energy::Scalar = context.diag_h.data[hf_addr]
@@ -353,7 +353,7 @@ then calculates diagonal energies only for the generated determinants.
 # Returns
 - Vector of selected determinants
 """
-function select_small_space_determinants(context::HCIContext, target_size::Int, nstates::Int=1)::Vector{Determinant}
+function select_small_space_determinants(context::HCIContext{OPattern}, target_size, nstates=1) where OPattern
   # Build HF reference determinant
   hf_ref = get_reference_determinant(context)
   
@@ -377,7 +377,7 @@ function select_small_space_determinants(context::HCIContext, target_size::Int, 
   occupied_and_virtual_orbitals!(beta_occ, beta_virt, hf_ref.beta, n_orb)
   
   # Generate determinants by excitation level
-  candidates_by_level = Vector{Determinant}[]
+  candidates_by_level = Vector{Determinant{OPattern}}[]
   
   # Level 0: HF reference
   push!(candidates_by_level, [hf_ref])
@@ -388,7 +388,7 @@ function select_small_space_determinants(context::HCIContext, target_size::Int, 
   
   # Level 1: Singles
   if max_pspace_excitation >= 1
-    singles = Determinant[]
+    singles = Determinant{OPattern}[]
     for i in alpha_occ, a in alpha_virt
       push!(singles, single_excitation_alpha(hf_ref, i, a))
     end
@@ -403,7 +403,7 @@ function select_small_space_determinants(context::HCIContext, target_size::Int, 
   
   # Level 2: Doubles
   if max_pspace_excitation >= 2
-    doubles = Determinant[]
+    doubles = Determinant{OPattern}[]
     # Alpha-alpha doubles
     for i in 1:length(alpha_occ), j in 1:(i-1)
       for a in 1:length(alpha_virt), b in 1:(a-1)
@@ -435,7 +435,7 @@ function select_small_space_determinants(context::HCIContext, target_size::Int, 
   # For now, we'll stop at doubles for efficiency
   
   # Flatten and calculate diagonal energies
-  candidates = Tuple{Determinant, Scalar, Int}[]  # (determinant, energy, excitation_level)
+  candidates = Tuple{Determinant{OPattern}, Scalar, Int}[]  # (determinant, energy, excitation_level)
   
   for (level, dets) in enumerate(candidates_by_level)
     for det in dets
@@ -483,7 +483,7 @@ Uses Selected CI framework for efficient matrix element computation.
 # Returns
 - Hamiltonian matrix H[i,j] = ⟨det_i|H|det_j⟩
 """
-function build_small_space_hamiltonian(context::Union{FCIContext,HCIContext}, determinants::Vector{Determinant})::Matrix{Scalar}
+function build_small_space_hamiltonian(context::Union{FCIContext,HCIContext}, determinants)::Matrix{Scalar}
   n_small = length(determinants)
   
   if context.options.print_level >= 2
@@ -504,8 +504,8 @@ end
 
 Result from small-space Hamiltonian diagonalization.
 """
-struct SmallSpaceResult
-  determinants::Vector{Determinant}    # Determinants in small space
+struct SmallSpaceResult{OPattern}
+  determinants::Vector{Determinant{OPattern}}    # Determinants in small space
   eigenvalues::Vector{Float64}         # Eigenvalues (nstates lowest)
   eigenvectors::Matrix{Float64}        # Eigenvectors in small-space basis (n_small × nstates)
   n_small::Int                         # Size of small space
@@ -532,8 +532,8 @@ This provides better initial guesses for all states, preventing missed excited s
 # Returns
 - `SmallSpaceResult` containing determinants, eigenvalues, and eigenvectors
 """
-function initialize_multistate_from_small_space(context::Union{FCIContext, HCIContext},
-                                target_selection::Int, nstates::Int)::SmallSpaceResult
+function initialize_multistate_from_small_space(context::Union{FCIContext, HCIContext{OPattern}},
+                                target_selection::Int, nstates::Int)::SmallSpaceResult{OPattern} where OPattern
   
   if context.options.print_level >= 1
     println("\nSmall-Space Initial Guess Generation")
@@ -576,7 +576,7 @@ function initialize_multistate_from_small_space(context::Union{FCIContext, HCICo
     end
   end
   
-  return SmallSpaceResult(small_space_dets, eigenvalues_selected, eigenvectors_selected,
+  return SmallSpaceResult{OPattern}(small_space_dets, eigenvalues_selected, eigenvectors_selected,
                           n_small, nstates)
 end
 
@@ -761,7 +761,7 @@ end
 Generate high-quality initial guess vectors using P-space eigenvectors.
 This replaces the diagonal-based initial guess with P-space enhanced vectors.
 """
-function generate_pspace_initial_guess!(context::FCIContext, guess_vectors::Vector{FCIVector}, n_states::Int)
+function generate_pspace_initial_guess!(context::FCIContext, guess_vectors, n_states::Int)
   pspace = context.pspace_data
 
   if pspace.n_pspace == 0 || isempty(pspace.eigenvectors)
