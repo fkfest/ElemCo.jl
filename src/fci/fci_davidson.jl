@@ -16,7 +16,7 @@ Main entry point: `davidson_fci!`
 Map P-space correction vector back to full CI space.
 Sets coefficients at P-space determinant positions.
 """
-function inject_pspace_to_full!(c::FCIVector, c_pspace::Vector{Scalar}, pspace_data::PSpaceData)
+function inject_pspace_to_full!(c::FCIVector, c_pspace::AbstractVector, pspace_data::PSpaceData)
   for i in 1:(pspace_data.n_pspace)
     addr = pspace_data.indices[i]
     c.data[addr] = c_pspace[i]
@@ -314,8 +314,8 @@ This is called when the subspace becomes too large.
 # Returns
 - New subspace size after refresh
 """
-function refresh_davidson_subspace!(V::Vector{FCIVector}, HV::Vector{FCIVector},
-                                    eigenvecs::Matrix{Scalar}, k::Int, n_keep::Int)
+function refresh_davidson_subspace!(V::Vector{FCIVector{OPattern}}, HV::Vector{FCIVector{OPattern}},
+                                    eigenvecs::Matrix{Scalar}, k::Int, n_keep::Int) where OPattern
   # Transform the V and HV to the eigenvector basis
   # Keep the first n_keep eigenvectors (lowest energy ones)
 
@@ -325,8 +325,8 @@ function refresh_davidson_subspace!(V::Vector{FCIVector}, HV::Vector{FCIVector},
   n_orb = Int(V[1].n_orb)
   n_spin = Int(V[1].n_elec_a - V[1].n_elec_b)
 
-  V_new = [FCIVector(n_elec, n_orb, n_spin) for _ in 1:n_keep]
-  HV_new = [FCIVector(n_elec, n_orb, n_spin) for _ in 1:n_keep]
+  V_new = [FCIVector{OPattern}(n_elec, n_orb, n_spin) for _ in 1:n_keep]
+  HV_new = [FCIVector{OPattern}(n_elec, n_orb, n_spin) for _ in 1:n_keep]
 
   # Transform to eigenvector basis and keep only n_keep vectors
   for i in 1:n_keep
@@ -372,7 +372,7 @@ Always returns arrays of energies and states for type stability.
 # Returns
 - `Tuple{Vector{Scalar}, Vector{FCIVector}}`: Arrays of energies and corresponding eigenvectors
 """
-function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = nothing)::Tuple{Vector{Scalar}, Vector{FCIVector}}
+function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothing} = nothing) where OPattern
   # Use nstates from options if n_states not provided
   n_states = isnothing(n_states) ? context.options.nstates : n_states
 
@@ -423,11 +423,11 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
   n_spin = context.n_elec[1] - context.n_elec[2]
   n_elec = context.n_elec[1] + context.n_elec[2]
   V = [
-    FCIVector(n_elec, context.n_orb, n_spin) for
+    FCIVector{OPattern}(n_elec, context.n_orb, n_spin) for
     _ in 1:subspace_size
   ]
   HV = [
-    FCIVector(n_elec, context.n_orb, n_spin) for
+    FCIVector{OPattern}(n_elec, context.n_orb, n_spin) for
     _ in 1:subspace_size
   ]
 
@@ -598,21 +598,21 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
       
       # Store current eigenvector coefficients and Ritz vectors for each state BEFORE expansion
       # This prevents bounds errors when k changes during the loop
-      state_data = Tuple{Int, FCIVector, FCIVector, Float64, Float64}[]  # (istate, coeff, resid, energy, res_norm)
+      state_data = Tuple{Int, FCIVector{OPattern}, FCIVector{OPattern}, Float64, Float64}[]  # (istate, coeff, resid, energy, res_norm)
      
       n_spin = context.n_elec[1] - context.n_elec[2]
       n_elec = context.n_elec[1] + context.n_elec[2]
       for istate in 1:n_states
         if !converged_states[istate]
           # Form current eigenvector for this state using the CURRENT subspace size k_start
-          coeff_state = FCIVector(n_elec, context.n_orb, n_spin)
+          coeff_state = FCIVector{OPattern}(n_elec, context.n_orb, n_spin)
           clear!(coeff_state)
           for j in 1:k_start
             add!(coeff_state, V[j], eigenvecs[j, istate])
           end
 
           # Form residual: r = H|ψ⟩ - E|ψ⟩
-          resid_state = FCIVector(n_elec, context.n_orb, n_spin)
+          resid_state = FCIVector{OPattern}(n_elec, context.n_orb, n_spin)
           clear!(resid_state)
           for j in 1:k_start
             add!(resid_state, HV[j], eigenvecs[j, istate])
@@ -713,13 +713,13 @@ function davidson_fci!(context::FCIContext, n_states::Union{Int, Nothing} = noth
 
   # Extract final states (unified approach)
   final_energies = eigenvals[1:n_states] .+ context.fcidump.int0
-  final_states = Vector{FCIVector}(undef, n_states)
+  final_states = Vector{FCIVector{OPattern}}(undef, n_states)
 
   n_spin = context.n_elec[1] - context.n_elec[2]
   n_elec = context.n_elec[1] + context.n_elec[2]
   for istate in 1:n_states
     final_states[istate] =
-      FCIVector(n_elec, context.n_orb, n_spin)
+      FCIVector{OPattern}(n_elec, context.n_orb, n_spin)
     clear!(final_states[istate])
 
     for j in 1:k

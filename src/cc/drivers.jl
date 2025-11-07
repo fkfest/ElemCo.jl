@@ -532,9 +532,15 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
   # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
   if hci
     println("Setting up HCI (lightweight context)..."); flush(stdout)
-    hci_ctx = HCIContext(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
-    println("HCI context setup complete."); flush(stdout)
-    E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+    if norb < 64
+      hci_ctx = HCIContext{UInt64}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
+      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+    elseif norb < 128
+      hci_ctx = HCIContext{UInt128}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
+      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+    else
+      error("HCIContext only implemented for norb < 128 at this point!")
+    end
     t1 = print_time(EC, t1, "HCI", 1)
     Egs = E_HCI[1]
     energies = OutDict()

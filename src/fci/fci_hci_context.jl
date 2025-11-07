@@ -10,19 +10,19 @@ abstract type HamiltonianTerm end
 
 Main FCI calculation context.
 """
-mutable struct FCIContext
+mutable struct FCIContext{OPattern}
   fcidump::QFDump
   options::FCIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
-  adr_a::OrbStringAdrTable
-  adr_b::OrbStringAdrTable
-  coeff::FCIVector
-  resid::FCIVector
-  diag_h::FCIVector
+  adr_a::OrbStringAdrTable{OPattern}
+  adr_b::OrbStringAdrTable{OPattern}
+  coeff::FCIVector{OPattern}
+  resid::FCIVector{OPattern}
+  diag_h::FCIVector{OPattern}
   absorb_1e::Bool
   hamiltonian_terms::Vector{HamiltonianTerm}
-  reference_det::Determinant
+  reference_det::Determinant{OPattern}
   mod_core_h_a::Matrix{Scalar}
   mod_core_h_b::Matrix{Scalar}
   basis_a::Matrix{Scalar}
@@ -33,25 +33,25 @@ mutable struct FCIContext
   energy_fci::Scalar
   energy_ptrace::Scalar
   method_name::String
-  pspace_data::PSpaceData             # P-space calculation data
+  pspace_data::PSpaceData{OPattern}  # P-space calculation data
   ibuf::Vector{Int}                  # Buffer for indices
-  heval_data::HEvalData  # Precomputed arrays for diagonal and Fock elements
+  heval_data::HEvalData              # Precomputed arrays for diagonal and Fock elements
   int1a::Matrix{Scalar}              # Reference to one-electron integrals for alpha spin
   int1b::Matrix{Scalar}              # Reference to one-electron integrals for beta spin
   int2aa::Array{Scalar,4}            # Reference to two-electron integrals for alpha-alpha spin
   int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
   int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
 
-  function FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing)
+  function FCIContext{OPattern}(fcidump::QFDump, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing) where OPattern
     n_elec = headvar(fcidump, "NELEC", Int) 
     n_orb = headvar(fcidump, "NORB", Int)
     ms2 = headvar(fcidump, "MS2", Int)
     n_alpha = (n_elec + ms2) ÷ 2
     n_beta = (n_elec - ms2) ÷ 2
     # Initialize FCI vectors
-    coeff = FCIVector(n_elec, n_orb, ms2, false)
-    resid = FCIVector(n_elec, n_orb, ms2, false)
-    diag_h = FCIVector(n_elec, n_orb, ms2, false)
+    coeff = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
+    resid = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
+    diag_h = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
     ibuf = zeros(Int, 4*n_orb)
 
     # Select integrals based on RHF vs UHF
@@ -77,11 +77,11 @@ mutable struct FCIContext
       if length(occa) != n_alpha || length(occb) != n_beta
         error("Provided occupation patterns do not match n_alpha/n_beta")
       end
-      reference_det = Determinant(occa, occb)
+      reference_det = Determinant{OPattern}(occa, occb)
     else
       # HF determinant: occupy first n_alpha/n_beta orbitals
-      alpha_pattern = (OrbPattern(1) << n_alpha) - OrbPattern(1)
-      beta_pattern = (OrbPattern(1) << n_beta) - OrbPattern(1)
+      alpha_pattern = (OPattern(1) << n_alpha) - OPattern(1)
+      beta_pattern = (OPattern(1) << n_beta) - OPattern(1)
       reference_det = Determinant(alpha_pattern, beta_pattern)
     end
 
@@ -99,7 +99,7 @@ mutable struct FCIContext
       int2ab = fcidump.int2
     end
 
-    context = new(
+    context = new{OPattern}(
       fcidump,
       options,
       n_orb,
@@ -122,7 +122,7 @@ mutable struct FCIContext
       0.0,
       0.0,
       fcidump.uhf ? "UHF-FCI" : "FCI",
-      PSpaceData(),
+      PSpaceData{OPattern}(),
       ibuf,
       HEvalData(),  # computed later if needed
       int1a, int1b, int2aa, int2bb, int2ab
@@ -134,6 +134,9 @@ mutable struct FCIContext
     return context
   end
 end
+
+# Convenience constructor that defaults to UInt64
+FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); kwargs...) = FCIContext{UInt64}(fcidump, options; kwargs...)
 
 
 """
@@ -169,12 +172,12 @@ For a system with 23 orbitals:
 - `mod_core_h_b::Matrix{Scalar}` - Modified core Hamiltonian for beta spin
 - `heval_data::HEvalData` - Precomputed arrays for diagonal and Fock elements
 """
-mutable struct HCIContext
+mutable struct HCIContext{OPattern}
   fcidump::QFDump
   options::HCIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
-  reference_det::Determinant
+  reference_det::Determinant{OPattern}
   mod_core_h_a::Matrix{Scalar}
   mod_core_h_b::Matrix{Scalar}
   ibuf::Vector{Int}                  # Buffer for indices
@@ -185,7 +188,7 @@ mutable struct HCIContext
   int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
   int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
 
-  function HCIContext(fcidump::QFDump, options::HCIOptions = HCIOptions(); occa=nothing, occb=nothing)
+  function HCIContext{OPattern}(fcidump::QFDump, options::HCIOptions = HCIOptions(); occa=nothing, occb=nothing) where OPattern
     n_orb = headvar(fcidump, "NORB", Int)
     n_elec = headvar(fcidump, "NELEC", Int)
     ms2 = headvar(fcidump, "MS2", Int)
@@ -231,11 +234,11 @@ mutable struct HCIContext
       if length(occa) != n_alpha || length(occb) != n_beta
         error("Provided occupation patterns do not match n_alpha/n_beta")
       end
-      reference_det = Determinant(occa, occb)
+      reference_det = Determinant{OPattern}(occa, occb)
     else
       # HF determinant: occupy first n_alpha/n_beta orbitals
-      alpha_pattern = (OrbPattern(1) << n_alpha) - OrbPattern(1)
-      beta_pattern = (OrbPattern(1) << n_beta) - OrbPattern(1)
+      alpha_pattern = (OPattern(1) << n_alpha) - OPattern(1)
+      beta_pattern = (OPattern(1) << n_beta) - OPattern(1)
       reference_det = Determinant(alpha_pattern, beta_pattern)
     end
 
@@ -253,7 +256,7 @@ mutable struct HCIContext
       int2ab = fcidump.int2
     end
 
-    context = new(fcidump, options, n_orb, (n_alpha, n_beta), reference_det,
+    context = new{OPattern}(fcidump, options, n_orb, (n_alpha, n_beta), reference_det,
         mod_core_h_a, mod_core_h_b, ibuf, HEvalData(), int1a, int1b, int2aa, int2bb, int2ab)
 
     # Initialize Hamiltonian terms
@@ -261,3 +264,6 @@ mutable struct HCIContext
     return context
   end
 end
+
+# Convenience constructor that defaults to UInt128
+HCIContext(fcidump::QFDump, options::HCIOptions = HCIOptions(); kwargs...) = HCIContext{UInt128}(fcidump, options; kwargs...)

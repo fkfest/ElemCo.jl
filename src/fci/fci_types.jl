@@ -1,5 +1,3 @@
-# const OrbPattern = UInt64       # orbital occupation patterns
-const OrbPattern = UInt128      # orbital occupation patterns
 const Address = UInt64          # addressing patterns and vector elements  
 const Scalar = Float64          # scalar values for CI coefficients
 
@@ -8,13 +6,13 @@ const FCIUInt = UInt32
 # Utility functions for bit manipulation
 
 """
-    string_parity_before_pos(pat::OrbPattern, ipos::Integer) -> UInt
+    string_parity_before_pos(pat::OPattern, ipos::Integer) where OPattern -> UInt
 
 Return 0 if number of bits SET in bits [0..ipos) is even, 1 if it is odd.
 """
-function string_parity_before_pos(pat::OrbPattern, ipos::Integer)::UInt
+function string_parity_before_pos(pat::OPattern, ipos::Integer)::UInt where OPattern
   # mask out bits at ipos and above
-  tmp = pat & ((OrbPattern(1) << ipos) - 1)
+  tmp = pat & ((OPattern(1) << ipos) - 1)
 
   # count bit parity
   tmp ⊻= (tmp >> 32)  # only last 16 binary digits used
@@ -56,14 +54,14 @@ function sym_dof(N::Integer, ndim::Integer)::UInt64
 end
 
 """
-    fmt_pat(pat::OrbPattern, n_max_orb::Integer) -> String
+    fmt_pat(pat::OPattern, n_max_orb::Integer) where OPattern -> String
 
 Format orbital pattern as string.
 """
-function fmt_pat(pat::OrbPattern, n_max_orb::Integer)::String
+function fmt_pat(pat::OPattern, n_max_orb::Integer)::String where OPattern
   result = ""
   for i in 0:(n_max_orb - 1)
-    if (pat & (OrbPattern(1) << i)) != 0
+    if (pat & (OPattern(1) << i)) != 0
       result *= "1"
     else
       result *= "0"
@@ -73,11 +71,11 @@ function fmt_pat(pat::OrbPattern, n_max_orb::Integer)::String
 end
 
 """
-    fmt_det(pat_a::OrbPattern, pat_b::OrbPattern, n_max_orb::Integer) -> String
+    fmt_det(pat_a::OPattern, pat_b::OPattern, n_max_orb::Integer) where OPattern -> String
 
 Format determinant (alpha and beta patterns) as string.
 """
-function fmt_det(pat_a::OrbPattern, pat_b::OrbPattern, n_max_orb::Integer)::String
+function fmt_det(pat_a::OPattern, pat_b::OPattern, n_max_orb::Integer)::String where OPattern
   return fmt_pat(pat_a, n_max_orb) * "|" * fmt_pat(pat_b, n_max_orb)
 end
 
@@ -91,22 +89,20 @@ end
 Represents a single determinant with alpha and beta orbital occupation patterns.
 Used for selected space determinant storage and manipulation.
 """
-struct Determinant
-  alpha::OrbPattern    # Alpha electron orbital pattern
-  beta::OrbPattern     # Beta electron orbital pattern
-
-  Determinant(alpha::OrbPattern, beta::OrbPattern) = new(alpha, beta)
+struct Determinant{OPattern}
+  alpha::OPattern    # Alpha electron orbital pattern
+  beta::OPattern     # Beta electron orbital pattern
 end
 
-Determinant() = Determinant(OrbPattern(0), OrbPattern(0))
-function Determinant(occa::Union{AbstractArray, UnitRange}, occb::Union{AbstractArray, UnitRange})
-  alpha = OrbPattern(0)
-  beta = OrbPattern(0)
+Determinant{OPattern}() where OPattern = Determinant(OPattern(0), OPattern(0))
+function Determinant{OPattern}(occa::Union{AbstractArray, UnitRange}, occb::Union{AbstractArray, UnitRange}) where OPattern
+  alpha = OPattern(0)
+  beta = OPattern(0)
   for i in occa
-    alpha |= OrbPattern(1) << (i - 1)
+    alpha |= OPattern(1) << (i - 1)
   end
   for i in occb
-    beta |= OrbPattern(1) << (i - 1)
+    beta |= OPattern(1) << (i - 1)
   end
   return Determinant(alpha, beta)
 end
@@ -116,24 +112,24 @@ end
 Container for P-space determinants, Hamiltonian matrix, and eigenvectors.
 Contains all data needed for P-space enhanced initial guess generation.
 """
-mutable struct PSpaceData
-  determinants::Vector{Determinant}     # P-space determinants
+mutable struct PSpaceData{OPattern}
+  determinants::Vector{Determinant{OPattern}}     # P-space determinants
   indices::Vector{Address}              # Indices of P-space dets in full space
   hamiltonian::Matrix{Scalar}          # P-space Hamiltonian matrix H_ij
   eigenvalues::Vector{Scalar}          # P-space eigenvalues
   eigenvectors::Matrix{Scalar}         # P-space eigenvectors (columns)
   n_pspace::Int                        # Actual P-space size
-  reference_det::Determinant           # HF reference determinant
+  reference_det::Determinant{OPattern}        # HF reference determinant
 
-  function PSpaceData()
-    new(
-      Determinant[],
+  function PSpaceData{OPattern}() where OPattern
+    new{OPattern}(
+      Determinant{OPattern}[],
       Address[],
       Matrix{Scalar}(undef, 0, 0),
       Scalar[],
       Matrix{Scalar}(undef, 0, 0),
       0,
-      Determinant(OrbPattern(0), OrbPattern(0)),
+      Determinant(OPattern(0), OPattern(0)),
     )
   end
 end
