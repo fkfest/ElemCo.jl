@@ -34,7 +34,6 @@ mutable struct FCIContext{OPattern}
   energy_ptrace::Scalar
   method_name::String
   pspace_data::PSpaceData{OPattern}  # P-space calculation data
-  ibuf::Vector{Int}                  # Buffer for indices
   heval_data::HEvalData              # Precomputed arrays for diagonal and Fock elements
   int1a::Matrix{Scalar}              # Reference to one-electron integrals for alpha spin
   int1b::Matrix{Scalar}              # Reference to one-electron integrals for beta spin
@@ -52,7 +51,6 @@ mutable struct FCIContext{OPattern}
     coeff = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
     resid = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
     diag_h = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
-    ibuf = zeros(Int, 4*n_orb)
 
     # Select integrals based on RHF vs UHF
     if fcidump.uhf
@@ -123,7 +121,6 @@ mutable struct FCIContext{OPattern}
       0.0,
       fcidump.uhf ? "UHF-FCI" : "FCI",
       PSpaceData{OPattern}(),
-      ibuf,
       HEvalData(),  # computed later if needed
       int1a, int1b, int2aa, int2bb, int2ab
     )
@@ -180,7 +177,6 @@ mutable struct HCIContext{OPattern}
   reference_det::Determinant{OPattern}
   mod_core_h_a::Matrix{Scalar}
   mod_core_h_b::Matrix{Scalar}
-  ibuf::Vector{Int}                  # Buffer for indices
   heval_data::HEvalData              # Precomputed heval_data arrays for diagonal and Fock elements
   int1a::Matrix{Scalar}              # Reference to one-electron integrals for alpha spin
   int1b::Matrix{Scalar}              # Reference to one-electron integrals for beta spin
@@ -193,7 +189,6 @@ mutable struct HCIContext{OPattern}
     n_elec = headvar(fcidump, "NELEC", Int)
     ms2 = headvar(fcidump, "MS2", Int)
     is_uhf = fcidump.uhf
-    ibuf = zeros(Int, 4*n_orb)
 
     # Validate integrals
     if is_uhf
@@ -257,7 +252,7 @@ mutable struct HCIContext{OPattern}
     end
 
     context = new{OPattern}(fcidump, options, n_orb, (n_alpha, n_beta), reference_det,
-        mod_core_h_a, mod_core_h_b, ibuf, HEvalData(), int1a, int1b, int2aa, int2bb, int2ab)
+        mod_core_h_a, mod_core_h_b, HEvalData(), int1a, int1b, int2aa, int2bb, int2ab)
 
     # Initialize Hamiltonian terms
     init_hamiltonian_terms!(context)

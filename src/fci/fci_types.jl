@@ -79,10 +79,6 @@ function fmt_det(pat_a::OPattern, pat_b::OPattern, n_max_orb::Integer)::String w
   return fmt_pat(pat_a, n_max_orb) * "|" * fmt_pat(pat_b, n_max_orb)
 end
 
-# ===========================================
-# PSpace (P-space) Algorithm Data Structures
-# ===========================================
-
 """
     Determinant
 
@@ -106,6 +102,50 @@ function Determinant{OPattern}(occa::Union{AbstractArray, UnitRange}, occb::Unio
   end
   return Determinant(alpha, beta)
 end
+
+"""
+    OrbSpaces
+
+Holds occupied and virtual orbital indices for alpha and beta spins.
+"""
+struct OrbSpaces{A <: AbstractVector{Int}}
+  occa::A
+  virta::A
+  occb::A
+  virtb::A
+  norb::Int
+end
+
+OrbSpaces() = OrbSpaces(Int[], Int[], Int[], Int[], 0)
+
+"""
+    OrbSpaces(n_orb::Int) -> OrbSpaces
+
+Create OrbSpaces with pre-allocated buffers for occupied and virtual orbitals.
+"""
+function OrbSpaces(n_orb::Int)
+  occa = BufVec(zeros(Int, n_orb))
+  virta = BufVec(zeros(Int, n_orb))
+  occb = BufVec(zeros(Int, n_orb))
+  virtb = BufVec(zeros(Int, n_orb))
+  return OrbSpaces(occa, virta, occb, virtb, n_orb)
+end
+
+"""
+    OrbSpaces(n_orb::Int, buf::AbstractVector{Int}) -> OrbSpaces
+
+Create OrbSpaces using provided buffer for occupied and virtual orbitals.
+Buffer size must be at least n_orb * 4.
+"""
+function OrbSpaces(n_orb::Int, buf::AbstractVector{Int})
+  @assert length(buf) >= n_orb * 4 "Buffer size insufficient for OrbSpaces"
+  occa = BufVec(@view(buf[1:n_orb]))
+  virta = BufVec(@view(buf[n_orb+1:n_orb*2]))
+  occb = BufVec(@view(buf[n_orb*2+1:n_orb*3]))
+  virtb = BufVec(@view(buf[n_orb*3+1:n_orb*4]))
+  return OrbSpaces(occa, virta, occb, virtb, n_orb)
+end
+
 """
     PSpaceData
 
@@ -170,13 +210,13 @@ struct HEvalData
 
   is_uhf::Bool
   n_orb::Int
-  ibuf::Vector{Int}        # Buffer for indices
+  spaces_buf::OrbSpaces           # Buffer for indices for diagonal element calculations
 
   function HEvalData()
     mat = zeros(Scalar, 0, 0)
     ten = zeros(Scalar, 0, 0, 0)
     new(mat, mat, mat, Scalar[], Scalar[],
-        ten, ten, ten, ten, false, 0, Int[])
+        ten, ten, ten, ten, false, 0, OrbSpaces())
   end
   
   # RHF constructor
@@ -185,7 +225,7 @@ struct HEvalData
     n_orb = size(jk, 1)
     new(jk, jk, jab, ha, ha,
         h1e2, h1e2, h1e2_ab, h1e2_ab,
-        false, n_orb, zeros(Int, 4*n_orb))
+        false, n_orb, OrbSpaces(n_orb))
   end
   
   # UHF constructor
@@ -196,7 +236,7 @@ struct HEvalData
     n_orb = size(jkaa, 1)
     new(jkaa, jkbb, jab, ha, hb, 
         h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba, 
-        true, n_orb, zeros(Int, 4*n_orb))
+        true, n_orb, OrbSpaces(n_orb))
   end
 end
 
