@@ -1025,89 +1025,6 @@ function double_excitation_mixed(det::Determinant{OPattern}, i_alpha::Int, i_bet
   return Determinant(new_alpha, new_beta)
 end
 
-# ===========================================
-# Connected Determinant Generation
-# ===========================================
-
-"""
-    generate_connected_determinants!(connected::Vector{Determinant}, 
-                                     det::Determinant, 
-                                     ctx::FCIContext) -> Int
-
-Generate all determinants connected to `det` by single and double excitations.
-Returns number of connected determinants generated.
-"""
-function generate_connected_determinants!(connected::Vector{Determinant{OPattern}}, 
-                                         det::Determinant{OPattern},
-                                         ctx::FCIContext{OPattern})::Int where OPattern
-  empty!(connected)
-  n_orb = ctx.n_orb
-  
-  # Get occupied and virtual orbitals for alpha and beta
-  alpha_occ = BufVec(@view(ctx.ibuf[1:n_orb]))
-  alpha_virt = BufVec(@view(ctx.ibuf[n_orb+1:n_orbs*2]))
-  occupied_and_virtual_orbitals!(alpha_occ, alpha_virt, det.alpha, n_orb)
-  beta_occ = BufVec(@view(ctx.ibuf[n_orb*2+1:n_orb*3]))
-  beta_virt = BufVec(@view(ctx.ibuf[n_orb*3+1:end]))
-  occupied_and_virtual_orbitals!(beta_occ, beta_virt, det.beta, n_orb)
-  
-  # Alpha single excitations: i -> a
-  @inbounds for i in alpha_occ
-    for a in alpha_virt
-      new_det = single_excitation_alpha(det, i, a)
-      push!(connected, new_det)
-    end
-  end
-  
-  # Beta single excitations: i -> a
-  @inbounds for i in beta_occ
-    for a in beta_virt
-      new_det = single_excitation_beta(det, i, a)
-      push!(connected, new_det)
-    end
-  end
-  
-  # Alpha double excitations: ij -> ab
-  @inbounds for (idx_i, i) in enumerate(alpha_occ)
-    for j in @view(alpha_occ[(idx_i+1):end])  # j > i to avoid duplicates
-      for (idx_a, a) in enumerate(alpha_virt)
-        for b in @view(alpha_virt[(idx_a+1):end])  # b > a to avoid duplicates
-          new_det = double_excitation_alpha(det, i, j, a, b)
-          push!(connected, new_det)
-        end
-      end
-    end
-  end
-  
-  # Beta double excitations: ij -> ab
-  for (idx_i, i) in enumerate(beta_occ)
-    for j in @view(beta_occ[(idx_i+1):end])
-      for (idx_a, a) in enumerate(beta_virt)
-        for b in @view(beta_virt[(idx_a+1):end])
-          new_det = double_excitation_beta(det, i, j, a, b)
-          push!(connected, new_det)
-        end
-      end
-    end
-  end
-  
-  # Mixed double excitations: i_alpha -> a_alpha, i_beta -> a_beta
-  for i_alpha in alpha_occ
-    for a_alpha in alpha_virt
-      for i_beta in beta_occ
-        for a_beta in beta_virt
-          new_det = double_excitation_mixed(det, i_alpha, i_beta, a_alpha, a_beta)
-          @assert_devel count_ones(new_det.alpha) == count_ones(det.alpha) "Alpha electron count mismatch"
-          @assert_devel count_ones(new_det.beta) == count_ones(det.beta) "Beta electron count mismatch"
-          push!(connected, new_det)
-        end
-      end
-    end
-  end
-  
-  return length(connected)
-end
-
 """
     add_excitations!(excitations::VecDict{Determinant, Scalar}, det::Determinant,
                     coef::Scalar, double_excitation_phase::Function,
@@ -1227,12 +1144,44 @@ where SS = same spin, OS = opposite spin.
 end
 
 """
+    FockDiagonal
+
+Holds diagonal of the Fock matrix for alpha and beta spins.
+"""
+struct FockDiagonal
+  """ alpha f_p^p vector """
+  alpha::Vector{Float64}
+  """ beta f_P^P vector """
+  beta::Vector{Float64}
+end
+
+function FockDiagonal(n_orb::Int)
+  alpha = zeros(Float64, n_orb)
+  beta = zeros(Float64, n_orb)
+  return FockDiagonal(alpha, beta)
+end
+
+"""
+    calc_fock_diagonal4det!(fock::FockDiagonal, ctx::Union{FCIContext, HCIContext}, occa, occb)
+
+Compute diagonal of the Fock matrix for a given determinant defined by occupied orbitals `occa` and `occb`.
+
+`fock` is modified in-place and returned.
+"""
+function calc_fock_diagonal4det!(fock::FockDiagonal, ctx::Union{FCIContext, HCIContext}, occa, occb)
+  for m in eachindex(fock.alpha)
+    fock.alpha[m] = compute_fock_element(ctx.int1a, ctx.heval_data.h1e2_aa, ctx.heval_data.h1e2_ab, occa, occb, m, m)
+    fock.beta[m] = compute_fock_element(ctx.int1b, ctx.heval_data.h1e2_bb, ctx.heval_data.h1e2_ba, occb, occa, m, m)
+  end
+  return fock
+end
+
+"""
     generate_excitations!(excitations::VecDict{Determinant, Scalar},
-                                         det::Determinant,
-                                         coef::Scalar,
-                                         ctx::FCIContext,
-                                         setup_data::HCISetupData,
-                                         epsilon::Float64) -> Int
+                          det::Determinant, coef::Scalar,
+                          ctx::FCIContext,
+                          setup_data::HCISetupData, spaces::OrbSpaces,
+                          epsilon::Float64) -> Int
 
 Generate only excitations with |H| > epsilon using pre-computed data.
 
@@ -1243,24 +1192,23 @@ This is the efficient excitation generation from Holmes et al. (2016):
 Additionally, `H*coef` is computed and stored during generation for efficiency.
 
 Works with both FCIContext and HCIContext.
+
+`spaces` is an OrbSpaces object used for temporary storage of occupied and virtual orbitals.
 """
 function generate_excitations!(excitations::VecDict{Determinant{OPattern}, Scalar},
-                                             det::Determinant{OPattern},
-                                             coef::Scalar,  
-                                             ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}},
-                                             setup_data::HCISetupData,
-                                             epsilon::Float64)::Int where OPattern
+                               det::Determinant{OPattern}, coef::Scalar,  
+                               ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}},
+                               setup_data::HCISetupData, spaces::OrbSpaces,
+                               epsilon::Float64)::Int where OPattern
   empty!(excitations)
   n_orb = ctx.n_orb
   is_uhf = ctx.fcidump.uhf
   
-  # Get occupied and virtual orbitals
-  alpha_occ = BufVec(reshape_buf(ctx.ibuf, n_orb))
-  alpha_virt = BufVec(reshape_buf(ctx.ibuf, n_orb; offset=n_orb))
-  occupied_and_virtual_orbitals!(alpha_occ, alpha_virt, det.alpha, n_orb)
-  beta_occ = BufVec(reshape_buf(ctx.ibuf, n_orb; offset=n_orb*2))
-  beta_virt = BufVec(reshape_buf(ctx.ibuf, n_orb; offset=n_orb*3))
-  occupied_and_virtual_orbitals!(beta_occ, beta_virt, det.beta, n_orb)
+  set_orbspaces!(spaces, det)
+  alpha_occ = spaces.occa
+  alpha_virt = spaces.virta
+  beta_occ = spaces.occb
+  beta_virt = spaces.virtb
   
   # ===========================================
   # 1. Generate double excitations using pre-computed lists
@@ -1313,6 +1261,86 @@ function generate_excitations!(excitations::VecDict{Determinant{OPattern}, Scala
   return length(excitations)
 end
 
+"""
+    generate_connected_determinants!(connected::Vector{Determinant}, 
+                                     det::Determinant, spaces::OrbSpaces, 
+                                     ctx::FCIContext) -> Int
+
+Generate all determinants connected to `det` by single and double excitations.
+Returns number of connected determinants generated.
+
+`spaces` is used to hold occupied and virtual orbital lists for efficiency.
+"""
+function generate_connected_determinants!(connected::Vector{Determinant{OPattern}}, 
+                                         det::Determinant{OPattern}, spaces::OrbSpaces,
+                                         ctx::FCIContext{OPattern})::Int where OPattern
+  empty!(connected)
+  n_orb = ctx.n_orb
+  
+  set_orbspaces!(spaces, det)
+  alpha_occ = spaces.occa
+  alpha_virt = spaces.virta
+  beta_occ = spaces.occb
+  beta_virt = spaces.virtb
+  
+  # Alpha single excitations: i -> a
+  @inbounds for i in alpha_occ
+    for a in alpha_virt
+      new_det = single_excitation_alpha(det, i, a)
+      push!(connected, new_det)
+    end
+  end
+  
+  # Beta single excitations: i -> a
+  @inbounds for i in beta_occ
+    for a in beta_virt
+      new_det = single_excitation_beta(det, i, a)
+      push!(connected, new_det)
+    end
+  end
+  
+  # Alpha double excitations: ij -> ab
+  @inbounds for (idx_i, i) in enumerate(alpha_occ)
+    for j in @view(alpha_occ[(idx_i+1):end])  # j > i to avoid duplicates
+      for (idx_a, a) in enumerate(alpha_virt)
+        for b in @view(alpha_virt[(idx_a+1):end])  # b > a to avoid duplicates
+          new_det = double_excitation_alpha(det, i, j, a, b)
+          push!(connected, new_det)
+        end
+      end
+    end
+  end
+  
+  # Beta double excitations: ij -> ab
+  for (idx_i, i) in enumerate(beta_occ)
+    for j in @view(beta_occ[(idx_i+1):end])
+      for (idx_a, a) in enumerate(beta_virt)
+        for b in @view(beta_virt[(idx_a+1):end])
+          new_det = double_excitation_beta(det, i, j, a, b)
+          push!(connected, new_det)
+        end
+      end
+    end
+  end
+  
+  # Mixed double excitations: i_alpha -> a_alpha, i_beta -> a_beta
+  for i_alpha in alpha_occ
+    for a_alpha in alpha_virt
+      for i_beta in beta_occ
+        for a_beta in beta_virt
+          new_det = double_excitation_mixed(det, i_alpha, i_beta, a_alpha, a_beta)
+          @assert_devel count_ones(new_det.alpha) == count_ones(det.alpha) "Alpha electron count mismatch"
+          @assert_devel count_ones(new_det.beta) == count_ones(det.beta) "Beta electron count mismatch"
+          push!(connected, new_det)
+        end
+      end
+    end
+  end
+  
+  return length(connected)
+end
+
+
 # ===========================================
 # Diagonal Element Computation
 # ===========================================
@@ -1324,7 +1352,9 @@ Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using H
 Works with both FCIContext and HCIContext.
 """
 @pib function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
-  return calc_diagonalH(ctx.heval_data, det.alpha, det.beta)
+  spaces = ctx.heval_data.spaces_buf
+  set_occupied_orbspaces!(spaces, det)
+  return calc_diagonalH(ctx.heval_data, spaces.occa, spaces.occb)
 end
 
 """
@@ -1371,7 +1401,8 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   DetType = eltype(variational_dets)
   candidates = Dict{DetType, Scalar}()
   temp_buffer = VecDict{DetType, Scalar}()
-
+  fockd_buf = FockDiagonal(ctx.n_orb) # Reusable Fock diagonal buffer
+  spaces_buf = OrbSpaces(ctx.n_orb)  # Reusable orbital spaces buffer
   # Use efficient threshold-based excitation generation
   eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon/10.0
   # first we run through new determinants
@@ -1383,7 +1414,7 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
       continue  # Skip negligible coefficients
     end
     eps = eps_h / abs(c_I)
-    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, eps)
+    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, spaces_buf, eps)
     mergewith!(+, candidates, temp_buffer)
   end
   # Remove determinants already in variational space
@@ -1399,7 +1430,7 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
       continue  # Skip negligible coefficients
     end
     eps = eps_h / abs(c_I)
-    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, eps)
+    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, spaces_buf, eps)
     modifyvalueswith!(+, candidates, temp_buffer)
   end
   if options.verbose

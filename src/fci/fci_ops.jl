@@ -5,6 +5,25 @@ FCI Hamiltonian operators implementation.
 """
 
 """
+    noccupied(pattern::OPattern) where OPattern -> Int  
+
+Count number of occupied orbitals in the given orbital pattern.
+"""
+noccupied(pattern::OPattern) where OPattern = count_ones(pattern)
+"""
+    noccupied_alpha(det::Determinant) -> Int  
+
+Count number of occupied alpha orbitals in the determinant.
+"""
+noccupied_alpha(det::Determinant) = noccupied(det.alpha)
+"""
+    noccupied_beta(det::Determinant) -> Int
+
+Count number of occupied beta orbitals in the determinant.
+"""
+noccupied_beta(det::Determinant) = noccupied(det.beta)
+
+"""
     SubstResult{OPattern}
 
 Result of string substitution operation c^k c_l.
@@ -36,6 +55,32 @@ end
 # Display functions for debugging
 function Base.show(io::IO, s::SubstResult{OPattern}) where OPattern
   print(io, "-> c^$(s.k) c_$(s.l) -> $(s.sign)$(fmt_pat(s.str, 9))")
+end
+
+"""
+    set_orbspaces!(orbspaces::OrbSpaces, det::Determinant)  
+
+Set occupied and virtual orbital indices in `orbspaces` based on the given `det`.
+
+The `occa`, `virta`, `occb`, and `virtb` fields of `orbspaces` have to be pre-allocated
+with sufficient size (at least `norb`).
+"""
+function set_orbspaces!(orbspaces::OrbSpaces, det::Determinant)
+  occupied_and_virtual_orbitals!(orbspaces.occa, orbspaces.virta, det.alpha, orbspaces.norb)
+  occupied_and_virtual_orbitals!(orbspaces.occb, orbspaces.virtb, det.beta, orbspaces.norb)
+end
+
+"""
+    set_occupied_orbspaces!(orbspaces::OrbSpaces, det::Determinant)  
+
+Set occupied orbital indices in `orbspaces` based on the given `det`.
+
+The `occa`, and `occb` fields of `orbspaces` have to be pre-allocated
+with sufficient size (at least `norb`).
+"""
+function set_occupied_orbspaces!(orbspaces::OrbSpaces, det::Determinant)
+  occupied_orbitals!(orbspaces.occa, det.alpha, orbspaces.norb)
+  occupied_orbitals!(orbspaces.occb, det.beta, orbspaces.norb)
 end
 
 """
@@ -149,8 +194,8 @@ Extract diagonal pair antisymmetrized integrals for 2-electron terms.
 function get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar})
   n_orb = size(int2e, 1)
   jk = zeros(Scalar, n_orb, n_orb)
-  @inbounds for i in 1:n_orb
-    for j in 1:i
+  @inbounds for i in 2:n_orb
+    for j in 1:i-1
       jij = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])  # v_ij^ij - v_ij^ji
       jk[i, j] = jij
       jk[j, i] = jij
@@ -168,27 +213,11 @@ function get_diagonal_pair_ints(int2e::AbstractArray{Scalar})
   n_orb = size(int2e, 1)
   jab = zeros(Scalar, n_orb, n_orb)
   @inbounds for i in 1:n_orb
-    for j in 1:i
+    for j in 1:n_orb
       jab[i, j] = int2e[i, j, i, j]       # v_ij^ij - raw integral
-      jab[j, i] = int2e[j, i, j, i]       # v_ji^ji
     end
   end
   return jab
-end
-
-"""
-    calc_diagonalH(hed::HEvalData, str_a::OPattern, str_b::OPattern) where OPattern -> Scalar
-
-Evaluate diagonal Hamiltonian element ⟨Ψ|H|Ψ⟩ for determinant |str_a, str_b⟩.
-"""
-function calc_diagonalH(hed::HEvalData, str_a::OPattern, str_b::OPattern)::Scalar where OPattern
-  n_orb = Int(hed.n_orb)
-  ibuf = hed.ibuf
-  occa = BufVec(@view(ibuf[1:n_orb]))
-  occb = BufVec(@view(ibuf[n_orb+1:end]))
-  occupied_orbitals!(occa, str_a, n_orb)
-  occupied_orbitals!(occb, str_b, n_orb)
-  return calc_diagonalH(hed, occa, occb)
 end
 
 """
@@ -383,12 +412,13 @@ Compute diagonal Hamiltonian matrix elements using precomputed heval_data.
 function make_diagonal_h!(context::FCIContext, diag_h::FCIVector)
   n_str_a = Int(diag_h.n_str_a)
   n_str_b = Int(diag_h.n_str_b)
-
+  spaces = context.heval_data.spaces_buf
   for idx_b in 1:n_str_b
     str_b = make_pattern(diag_h.adr_b, Address(idx_b))
     for idx_a in 1:n_str_a
       str_a = make_pattern(diag_h.adr_a, Address(idx_a))
-      diag_h[idx_a,idx_b] = calc_diagonalH(context.heval_data, str_a, str_b)
+      set_occupied_orbspaces!(spaces, Determinant(str_a, str_b))
+      diag_h[idx_a,idx_b] = calc_diagonalH(context.heval_data, spaces.occa, spaces.occb)
     end
   end
 end
