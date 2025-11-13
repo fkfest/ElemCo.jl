@@ -294,6 +294,8 @@ end
   compute_pt2::Bool = true
   """`⟨1e-6⟩` Threshold for PT2 contributions """
   epsilon_pt2::Float64 = 1e-6
+  """`⟨1e-10⟩` Small value added to denominators in PT2 to avoid divergences """
+  pt2_shift::Float64 = 1e-10
   """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
   nstates::Int = 1
   """`⟨true⟩` Use small-space Hamiltonian for initial guess """

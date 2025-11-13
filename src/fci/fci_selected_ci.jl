@@ -349,6 +349,16 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
 end
 
 """
+    get_diagonal_element(sel_ham::SelectedHamiltonianMatrix, idet::Int) -> Scalar
+
+Get diagonal Hamiltonian element for selected determinant index.
+"""
+function get_diagonal_element(sel_ham::SelectedHamiltonianMatrix, idet::Int)
+  @assert_devel idet <= length(sel_ham.rows) "Invalid determinant index"
+  return getvalueat(sel_ham.rows[idet], 1)
+end
+
+"""
     SelectedCIContext
 
 Context for Selected CI calculations using direct H*c operations.
@@ -428,6 +438,14 @@ function extend!(selected_ctx::SelectedCIContext, new_dets)
   extend!(selected_ctx.hamiltonian, selected_ctx.selected_dets, selected_ctx.base_context)
   selected_ctx.old_ndet[] = old_ndets
 end
+
+"""
+    get_diagonal_element(selected_ctx::SelectedCIContext, idet::Int) -> Scalar
+
+Get diagonal Hamiltonian element for selected determinant index.
+"""
+get_diagonal_element(selected_ctx::SelectedCIContext, idet::Int) =
+  get_diagonal_element(selected_ctx.hamiltonian, idet)
 
 # ===========================================
 # Orbital Excitation Analysis
@@ -913,6 +931,14 @@ end
 # Heat-Bath Configuration Interaction (HCI)
 # ===========================================
 
+struct PCHBEntry
+  a::Int
+  b::Int
+  value::Float64
+  dagger::Float64
+  denom::Float64
+end
+
 """
     HCISetupData
 
@@ -925,37 +951,53 @@ important excitations during iterative selection.
 Following Holmes et al. (2016), Algorithm Step IIa.
 """
 struct HCISetupData
-  # For RHF: only double_excitations is used
-  # For UHF: all three dictionaries are used (aa, bb, ab)
-  double_excitations::Vector{Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-alpha
-  double_excitations_bb::Vector{Vector{Tuple{Int,Int,Float64}}}  # UHF beta-beta
-  double_excitations_ab::Vector{Vector{Tuple{Int,Int,Float64}}}  # RHF or UHF alpha-beta mixed
+  double_excitations_aa::Vector{Vector{PCHBEntry}}  # alpha-alpha
+  double_excitations_bb::Vector{Vector{PCHBEntry}}  # beta-beta
+  double_excitations_ab::Vector{Vector{PCHBEntry}}  # alpha-beta mixed
   h_doub_max::Float64              # Maximum |H(rs ← pq)| over all excitations
+  # Integrals for Epstein-Nesbet singles denominator -v_{ia}^{ia} + v_{ia}^{ai}
+  singles_denoma::Matrix{Float64}
+  singles_denomb::Matrix{Float64}
 
   function HCISetupData()
-    new(Vector{Tuple{Int,Int,Float64}}[], 
-        Vector{Tuple{Int,Int,Float64}}[],
-        Vector{Tuple{Int,Int,Float64}}[],
-        0.0) 
+    new(Vector{PCHBEntry}[],
+        Vector{PCHBEntry}[],
+        Vector{PCHBEntry}[],
+        0.0,
+        zeros(Float64, 0, 0),
+        zeros(Float64, 0, 0))
   end
   
   # RHF constructor
-  function HCISetupData(double_exc::Vector{Vector{Tuple{Int,Int,Float64}}}, 
-                        double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
-                        h_max::Float64)
-    new(double_exc, 
-        Vector{Tuple{Int,Int,Float64}}[],  # Empty for beta-beta
-        double_exc_ab,
-        h_max)
+  function HCISetupData(double_exc::Vector{Vector{PCHBEntry}}, 
+                        double_exc_ab::Vector{Vector{PCHBEntry}},
+                        h_max::Float64, singles_denom::Matrix{Float64})
+    new(double_exc, double_exc, double_exc_ab, h_max, singles_denom, singles_denom)
   end
   
   # UHF constructor
-  function HCISetupData(double_exc_aa::Vector{Vector{Tuple{Int,Int,Float64}}},
-                        double_exc_bb::Vector{Vector{Tuple{Int,Int,Float64}}},
-                        double_exc_ab::Vector{Vector{Tuple{Int,Int,Float64}}},
-                        h_max::Float64)
-    new(double_exc_aa, double_exc_bb, double_exc_ab, h_max) 
+  function HCISetupData(double_exc_aa::Vector{Vector{PCHBEntry}},
+                        double_exc_bb::Vector{Vector{PCHBEntry}},
+                        double_exc_ab::Vector{Vector{PCHBEntry}},
+                        h_max::Float64, 
+                        singles_denoma::Matrix{Float64}, singles_denomb::Matrix{Float64})
+    new(double_exc_aa, double_exc_bb, double_exc_ab, h_max, singles_denoma, singles_denomb)
   end
+end
+
+"""
+    ExcVals
+
+Holds excitation values: coefficient and Hamiltonian matrix element required to calculate 
+the contribution to the perturbative energy.
+"""
+struct ExcVals
+  coef::Scalar
+  hval::Scalar
+end
+
+function Base.:+(ev1::ExcVals, ev2::ExcVals)
+  return ExcVals(ev1.coef + ev2.coef, ev1.hval + ev2.hval)
 end
 
 # ===========================================
@@ -1026,33 +1068,45 @@ function double_excitation_mixed(det::Determinant{OPattern}, i_alpha::Int, i_bet
 end
 
 """
-    add_excitations!(excitations::VecDict{Determinant, Scalar}, det::Determinant,
-                    coef::Scalar, double_excitation_phase::Function,
-                    occ, pchb_excitations, epsilon::Float64)
+    add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant,
+                    coef::Scalar, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function,
+                    occ, pchb_excitations, fdiag, ecorr, shift, epsilon::Float64)
 
 Generate same-spin double excitations from occupied orbitals using pre-computed
 Heat-Bath lists, adding only those with |H| > epsilon and storing in excitations dictionary
 together with their weighted matrix elements.
 """
-function add_excitations!(excitations::VecDict{Determinant{OPattern}, Scalar}, det::Determinant{OPattern},
-                          coef::Scalar, double_excitation_phase::Function,
-                          occ, pchb_excitations, epsilon::Float64) where OPattern
-  for (idx_i, i) in enumerate(occ)
-    for j in @view(occ[(idx_i+1):end])
+function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, det::Determinant{OPattern},
+                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function,
+                          occ, pchb_excitations, fdiag, ecorr, shift, epsilon::Float64) where OPattern
+  for idx_i in eachindex(occ)
+    i = occ[idx_i]
+    for idx_j in (idx_i+1):length(occ)
+      j = occ[idx_j]
       # Look up pre-sorted list for (i,j) pair
       pq_key = trip_index(i, j)
-      for (r, s, h_val) in pchb_excitations[pq_key]
+      for entry in pchb_excitations[pq_key]
+        a, b, h_val = entry.a, entry.b, entry.value
         # Stop when matrix element falls below threshold
         if abs(h_val) < epsilon
           break
         end
         
         # Check if r and s are virtual (not occupied)
-        if !(r in occ) && !(s in occ)
-          new_det, phase = double_excitation_phase(det, i, j, r, s)
-          @assert_devel count_ones(new_det.alpha) == count_ones(det.alpha) "Alpha electron count mismatch $i $j -> $r $s from $(bitstring(det.alpha))"
-          @assert_devel count_ones(new_det.beta) == count_ones(det.beta) "Beta electron count mismatch $i $j -> $r $s from $(bitstring(det.beta))"
-          excitations[new_det] = coef * h_val * phase
+        if !(a in occ) && !(b in occ)
+          new_det, phase = double_excitation_phase(det, i, j, a, b)
+          @assert_devel count_ones(new_det.alpha) == count_ones(det.alpha) "Alpha electron count mismatch $i $j -> $a $b from $(bitstring(det.alpha))"
+          @assert_devel count_ones(new_det.beta) == count_ones(det.beta) "Beta electron count mismatch $i $j -> $a $b from $(bitstring(det.beta))"
+
+          denom = fdiag[a] + fdiag[b] - fdiag[i] - fdiag[j] + entry.denom - ecorr
+          fac = -denom/(denom^2 + shift)
+          hc = coef * h_val * phase
+          if isnothing(coef_dg)
+            excitations[new_det] = ExcVals(hc * fac, hc)
+          else
+            h_val_dg = entry.dagger
+            excitations[new_det] = ExcVals(hc * fac, coef_dg * h_val_dg * phase)
+          end
         end
       end
     end
@@ -1061,26 +1115,69 @@ function add_excitations!(excitations::VecDict{Determinant{OPattern}, Scalar}, d
 end
 
 """
-    add_excitations!(excitations::VecDict{Determinant, Scalar}, det::Determinant, coef::Scalar,
-                    alpha_occ, beta_occ, n_orb, pchb_excitations, epsilon::Float64)
+    add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant, coef::Scalar,
+                    coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, n_orb, 
+                    pchb_excitations, fa, fb, ecorr, shift, epsilon::Float64)
 
 Generate mixed-spin double excitations from occupied alpha and beta orbitals
 using pre-computed Heat-Bath lists, adding only those with |H| > epsilon.
 """
-function add_excitations!(excitations::VecDict{Determinant{OPattern}, Scalar}, det::Determinant{OPattern},
-                          coef::Scalar, alpha_occ, beta_occ, n_orb, pchb_excitations,
-                          epsilon::Float64) where OPattern
+function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, det::Determinant{OPattern},
+                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, 
+                          n_orb, pchb_excitations, fa, fb, ecorr, shift, epsilon::Float64) where OPattern
   for i_alpha in alpha_occ
     for i_beta in beta_occ
       pq_key = trip_index(i_alpha, i_beta, n_orb)
-      for (r, s, h_val) in pchb_excitations[pq_key]
+      for entry in pchb_excitations[pq_key]
+        a, b, h_val = entry.a, entry.b, entry.value
         if abs(h_val) < epsilon
           break
         end
         # r is alpha virtual, s is beta virtual
-        if !(r in alpha_occ) && !(s in beta_occ)
-          new_det, phase = double_alpha_beta_excitation_phase(det, i_alpha, i_beta, r, s)
-          excitations[new_det] = coef * h_val * phase
+        if !(a in alpha_occ) && !(b in beta_occ)
+          new_det, phase = double_alpha_beta_excitation_phase(det, i_alpha, i_beta, a, b)
+          denom = fa[a] + fb[b] - fa[i_alpha] - fb[i_beta] + entry.denom - ecorr
+          fac = -denom/(denom^2 + shift)
+          hc = coef * h_val * phase
+          if isnothing(coef_dg)
+            excitations[new_det] = ExcVals(hc * fac, hc)
+          else
+            h_val_dg = entry.dagger
+            excitations[new_det] = ExcVals(hc * fac, coef_dg * h_val_dg * phase)
+          end
+        end
+      end
+    end
+  end
+  return
+end
+
+"""
+    add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant,
+                    coef::Scalar, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
+                    occs, virts, occs_opp, int1, h1e2_same, h1e2_opp,
+                    fdiag, ecorr, shift, epsilon::Float64)
+
+Add single excitations to the excitations dictionary.
+"""
+function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, det::Determinant{OPattern},
+                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
+                          occs, virts, occs_opp, int1, h1e2_same, h1e2_opp, singles_denom,
+                          fdiag, ecorr, shift, epsilon::Float64) where OPattern
+  for i in occs
+    for a in virts
+      # Compute Fock matrix element f_ai
+      h_val = compute_fock_element(int1, h1e2_same, h1e2_opp, occs, occs_opp, a, i)
+      if abs(h_val) >= epsilon
+        new_det, phase = single_excitation_phase(det, i, a)
+        denom = fdiag[a] - fdiag[i] + singles_denom[a, i] - ecorr
+        fac = -denom/(denom^2 + shift)
+        hc = coef * h_val * phase
+        if isnothing(coef_dg)
+          excitations[new_det] = ExcVals(hc * fac, hc)
+        else
+          h_val_dg = compute_fock_element(int1, h1e2_same, h1e2_opp, occs, occs_opp, i, a)
+          excitations[new_det] = ExcVals(hc * fac, coef_dg * h_val_dg * phase)
         end
       end
     end
@@ -1177,11 +1274,12 @@ function calc_fock_diagonal4det!(fock::FockDiagonal, ctx::Union{FCIContext, HCIC
 end
 
 """
-    generate_excitations!(excitations::VecDict{Determinant, Scalar},
-                          det::Determinant, coef::Scalar,
+    generate_excitations!(excitations::VecDict{Determinant, ExcVals},
+                          det::Determinant, coef::Scalar, 
+                          coef_dg::Union{Scalar, Nothing}, ecorr::Scalar,
                           ctx::FCIContext,
-                          setup_data::HCISetupData, spaces::OrbSpaces,
-                          epsilon::Float64) -> Int
+                          setup_data::HCISetupData, spaces::OrbSpaces, fockd::FockDiagonal,
+                          epsilon::Float64, shift) -> Int
 
 Generate only excitations with |H| > epsilon using pre-computed data.
 
@@ -1189,26 +1287,33 @@ This is the efficient excitation generation from Holmes et al. (2016):
 1. For doubles: Use pre-sorted lists to stop early when |H| < epsilon
 2. For singles: Compute on-the-fly and discard if |H| < epsilon
 
-Additionally, `H*coef` is computed and stored during generation for efficiency.
+Additionally, `H*coef/denom` and `coef*H` is computed and stored during generation for efficiency.
 
 Works with both FCIContext and HCIContext.
 
 `spaces` is an OrbSpaces object used for temporary storage of occupied and virtual orbitals.
+`fockd` is the Fock diagonal object used to store Fock matrix diagonals for the determinant.
+`coef_dg` is the bra coefficient of the determinant (dagger) if needed, otherwise `nothing`.
 """
-function generate_excitations!(excitations::VecDict{Determinant{OPattern}, Scalar},
-                               det::Determinant{OPattern}, coef::Scalar,  
+function generate_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals},
+                               det::Determinant{OPattern}, coef::Scalar, 
+                               coef_dg::Union{Scalar, Nothing}, ecorr::Scalar,
                                ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}},
-                               setup_data::HCISetupData, spaces::OrbSpaces,
-                               epsilon::Float64)::Int where OPattern
+                               setup_data::HCISetupData, spaces::OrbSpaces, fockd::FockDiagonal,
+                               epsilon::Float64, shift)::Int where OPattern
   empty!(excitations)
   n_orb = ctx.n_orb
-  is_uhf = ctx.fcidump.uhf
   
   set_orbspaces!(spaces, det)
   alpha_occ = spaces.occa
   alpha_virt = spaces.virta
   beta_occ = spaces.occb
   beta_virt = spaces.virtb
+
+  # Pre-compute Fock matrix elements for the current determinant
+  calc_fock_diagonal4det!(fockd, ctx, alpha_occ, beta_occ)
+  fa = fockd.alpha
+  fb = fockd.beta
   
   # ===========================================
   # 1. Generate double excitations using pre-computed lists
@@ -1216,48 +1321,33 @@ function generate_excitations!(excitations::VecDict{Determinant{OPattern}, Scala
   
   # Check if we should skip all double excitations
   if epsilon <= setup_data.h_doub_max
-    double_excitations_bb = is_uhf ? setup_data.double_excitations_bb : setup_data.double_excitations
     # Alpha-alpha double excitations
-    add_excitations!(excitations, det, coef, double_alpha_excitation_phase, alpha_occ, setup_data.double_excitations, epsilon)
+    add_excitations!(excitations, det, coef, coef_dg, double_alpha_excitation_phase, alpha_occ, 
+                     setup_data.double_excitations_aa, fa, ecorr, shift, epsilon)
     # Beta-beta double excitations
-    add_excitations!(excitations, det, coef, double_beta_excitation_phase, beta_occ, double_excitations_bb, epsilon)
+    add_excitations!(excitations, det, coef, coef_dg, double_beta_excitation_phase, beta_occ,
+                     setup_data.double_excitations_bb, fb, ecorr, shift, epsilon)
     # Mixed double excitations (alpha-beta) (use int2ab pre-computed lists, i.e., no exchange)
-    add_excitations!(excitations, det, coef, alpha_occ, beta_occ, n_orb, setup_data.double_excitations_ab, epsilon)
+    add_excitations!(excitations, det, coef, coef_dg, alpha_occ, beta_occ, n_orb,
+                     setup_data.double_excitations_ab, fa, fb, ecorr, shift, epsilon)
   end
   # ===========================================
   # 2. Generate single excitations with on-the-fly filtering using Fock elements
   # ===========================================
-  
-  int1 = ctx.int1a
-  h1e2_same = ctx.heval_data.h1e2_aa
-  h1e2_opp = ctx.heval_data.h1e2_ab
+
   # Alpha single excitations
-  for i in alpha_occ
-    for a in alpha_virt
-      # Compute Fock matrix element f_ai
-      h_val = compute_fock_element(int1, h1e2_same, h1e2_opp, alpha_occ, beta_occ, a, i)
-      if abs(h_val) >= epsilon
-        new_det, phase = single_alpha_excitation_phase(det, i, a)
-        excitations[new_det] = coef * h_val * phase
-      end
-    end
-  end
-  
-  int1 = ctx.int1b
-  h1e2_same = ctx.heval_data.h1e2_bb
-  h1e2_opp = ctx.heval_data.h1e2_ba
+  add_excitations!(excitations, det, coef, coef_dg, single_alpha_excitation_phase,
+                  alpha_occ, alpha_virt, beta_occ,
+                  ctx.int1a, ctx.heval_data.h1e2_aa, ctx.heval_data.h1e2_ab,
+                  setup_data.singles_denoma,
+                  fa, ecorr, shift, epsilon)
   # Beta single excitations
-  for i in beta_occ
-    for a in beta_virt
-      # Compute Fock matrix element f_ai
-      h_val = compute_fock_element(int1, h1e2_same, h1e2_opp, beta_occ, alpha_occ, a, i)
-      if abs(h_val) >= epsilon
-        new_det, phase = single_beta_excitation_phase(det, i, a)
-        excitations[new_det] = coef * h_val * phase
-      end
-    end
-  end
-  
+  add_excitations!(excitations, det, coef, coef_dg, single_beta_excitation_phase,
+                  beta_occ, beta_virt, alpha_occ,
+                  ctx.int1b, ctx.heval_data.h1e2_bb, ctx.heval_data.h1e2_ba,
+                  setup_data.singles_denomb,
+                  fb, ecorr, shift, epsilon)
+
   return length(excitations)
 end
 
@@ -1394,13 +1484,14 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
                             E_current::Float64,
                             setup_data::HCISetupData, store_dets::Bool=true)
   t0 = time_ns()
+  shift = options.pt2_shift
   variational_dets = determinants(selected_ctx)
   ctx = selected_ctx.base_context
   ThrNeglect = options.thr_negligible
   # Get HB candidates determinants from variational space together with the H*c values
   DetType = eltype(variational_dets)
-  candidates = Dict{DetType, Scalar}()
-  temp_buffer = VecDict{DetType, Scalar}()
+  candidates = Dict{DetType, ExcVals}()
+  temp_buffer = VecDict{DetType, ExcVals}()
   fockd_buf = FockDiagonal(ctx.n_orb) # Reusable Fock diagonal buffer
   spaces_buf = OrbSpaces(ctx.n_orb)  # Reusable orbital spaces buffer
   # Use efficient threshold-based excitation generation
@@ -1414,7 +1505,8 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
       continue  # Skip negligible coefficients
     end
     eps = eps_h / abs(c_I)
-    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, spaces_buf, eps)
+    ecorr = E_current - get_diagonal_element(selected_ctx, i)
+    generate_excitations!(temp_buffer, det, c_I, nothing, ecorr, ctx, setup_data, spaces_buf, fockd_buf, eps, shift)
     mergewith!(+, candidates, temp_buffer)
   end
   # Remove determinants already in variational space
@@ -1430,7 +1522,8 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
       continue  # Skip negligible coefficients
     end
     eps = eps_h / abs(c_I)
-    generate_excitations!(temp_buffer, det, c_I, ctx, setup_data, spaces_buf, eps)
+    ecorr = E_current - get_diagonal_element(selected_ctx, i)
+    generate_excitations!(temp_buffer, det, c_I, nothing, ecorr, ctx, setup_data, spaces_buf, fockd_buf, eps, shift)
     modifyvalueswith!(+, candidates, temp_buffer)
   end
   if options.verbose
@@ -1444,15 +1537,12 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   # use square of epsilon_p to match probability definition (T_2^2)
   eps_p = options.epsilon_p > -0.1 ? options.epsilon_p : options.epsilon
   epsilon = eps_p^2
-  for (det_J, Hc) in candidates
-    # Compute H_JJ (diagonal element)
-    H_JJ = compute_diagonal_element(det_J, ctx)
-    ΔE_J = E_current - H_JJ
-    
+  for (det_J, ev) in candidates
+    c_J = ev.coef
+    hval_J = ev.hval
     # Selection probability: |Σ c_I H_IJ|² / ΔE²
-    # Add small shift for numerical stability
-    c_J² = abs2(Hc) / (ΔE_J^2 + 1e-10)
-    pt2_correction += c_J² * ΔE_J  # Perturbative energy contribution
+    c_J² = abs2(c_J)
+    pt2_correction += c_J * hval_J  # Perturbative energy contribution
     if store_dets && c_J² >= epsilon
       new_dets[det_J] = c_J²
     end
@@ -1513,15 +1603,36 @@ function trip_index(p, q, n)
   return p + (q - 1) * n
 end
 
-function gen_triplets_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float64=1e-10)
-  double_exc_lists = Vector{Tuple{Int,Int,Float64}}[]
+function doubles_denom(int2::Array{Float64,4}, i, j, a, b)
+  denom = int2[i, j, i, j] - int2[i, j, j, i] +
+          int2[a, b, a, b] - int2[a, b, b, a] -
+          int2[a, j, a, j] + int2[a, j, j, a] -
+          int2[b, i, b, i] + int2[b, i, i, b] -
+          int2[a, i, a, i] + int2[a, i, i, a] -
+          int2[b, j, b, j] + int2[b, j, j, b]
+  return denom
+end
+
+function doubles_denom_ab(int2ab::Array{Float64,4}, int2aa, int2bb, iα, iβ, aα, aβ)
+  denom = int2ab[iα, iβ, iα, iβ] +
+          int2ab[aα, aβ, aα, aβ] -
+          int2ab[aα, iβ, aα, iβ] -
+          int2ab[iα, aβ, iα, aβ] -
+          int2aa[aα, iα, aα, iα] + int2aa[aα, iα, iα, aα] -
+          int2bb[aβ, iβ, aβ, iβ] + int2bb[aβ, iβ, iβ, aβ]
+  return denom
+end
+
+
+function gen_pchb_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float64=1e-10)
+  double_exc_lists = Vector{PCHBEntry}[]
   h_doub_max = 0.0
   
   # Loop over all pairs of orbitals {p, q}
   for q in 2:n_orb
     for p in 1:(q-1)  # Only consider p < q to avoid duplicates
       # List of triplets {r, s, |H(rs ← pq)|} for this (p,q) pair
-      triplets = Tuple{Int,Int,Float64}[]
+      entries = PCHBEntry[]
       
       # Loop over all distinct pairs of orbitals {r, s} that don't include {p, q}
       for s in 2:n_orb
@@ -1535,34 +1646,37 @@ function gen_triplets_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float
           
           # Compute antisymmetrized two-electron integral <pq||rs>
           # Matrix element for double excitation p,q → r,s is v_pq^rs - v_pq^sr
-          h_val = int2[p, q, r, s] - int2[p, q, s, r]
+          h_val = int2[r, s, p, q] - int2[r, s, q, p]
 
           if abs(h_val) > ThrNeglect # Skip negligible matrix elements
-            push!(triplets, (r, s, h_val))
+            denom = doubles_denom(int2, p, q, r, s)
+            h_val_dagger = int2[p, q, r, s] - int2[p, q, s, r]
+            push!(entries, PCHBEntry(r, s, h_val, h_val_dagger, denom))
             h_doub_max = max(h_doub_max, abs(h_val))
           end
         end
       end
       
       # Sort triplets by |H| in decreasing order
-      sort!(triplets, by=x->abs(x[3]), rev=true)
+      sort!(entries, by=x->abs(x.value), rev=true)
       
       # Store sorted list for this (p,q) pair
-      push!(double_exc_lists, triplets)
+      push!(double_exc_lists, entries)
     end
   end
   return double_exc_lists, h_doub_max
 end
 
-function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4}, ThrNeglect::Float64=1e-10)
-  double_exc_ab_lists = Vector{Tuple{Int,Int,Float64}}[]
+function gen_pchb_list_ab(n_orb::Int, int2ab::Array{Float64,4}, int2aa::Array{Float64,4}, 
+                          int2bb::Array{Float64,4}, ThrNeglect::Float64=1e-10)
+  double_exc_ab_lists = Vector{PCHBEntry}[]
   h_doub_max = 0.0
   
   # Loop over all pairs of orbitals {p, q}
   # For mixed excitations, we don't need antisymmetrization (different spins)
   for q in 1:n_orb
     for p in 1:n_orb
-      triplets = Tuple{Int,Int,Float64}[]
+      entries = PCHBEntry[]
       for r in 1:n_orb
         if r == p; continue; end  # Alpha r cannot equal alpha p
         for s in 1:n_orb
@@ -1571,19 +1685,35 @@ function gen_triplets_list_ab(n_orb::Int, int2ab::Array{Float64,4}, ThrNeglect::
           # Mixed integral v_pq^rs (αβ) (no antisymmetrization for different spins)
           h_val = int2ab[p, q, r, s]
           if abs(h_val) > ThrNeglect
-            push!(triplets, (r, s, h_val))
+            denom = doubles_denom_ab(int2ab, int2aa, int2bb, p, q, r, s)
+            h_val_dagger = int2ab[r, s, p, q]
+            push!(entries, PCHBEntry(r, s, h_val, h_val_dagger, denom))
             h_doub_max = max(h_doub_max, abs(h_val))
           end
         end
       end
       
       # Sort triplets by |H| in decreasing order
-      sort!(triplets, by=x->abs(x[3]), rev=true)
-      push!(double_exc_ab_lists, triplets)
+      sort!(entries, by=x->abs(x.value), rev=true)
+      push!(double_exc_ab_lists, entries)
     end
   end
   return double_exc_ab_lists, h_doub_max
 end
+
+function gen_singles_denom(int2::Array{Float64,4})
+  n_orb = size(int2, 1)
+  denom = zeros(Scalar, n_orb, n_orb)
+  @inbounds for i in 2:n_orb
+    for j in 1:i-1
+      jij = int2[i, j, i, j] - int2[i, j, j, i]  # v_ij^ij - v_ij^ji
+      denom[i, j] = -jij
+      denom[j, i] = -jij
+    end
+  end
+  return denom
+end
+
 """
     setup_hci_rhf!(ctx::Union{FCIContext, HCIContext}) -> HCISetupData
 
@@ -1591,12 +1721,14 @@ Setup for RHF systems using spatial orbital integrals.
 """
 function setup_hci_rhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   n_orb = ctx.n_orb
-  
+  int2 = ctx.fcidump.int2
+  thr_negligible = ctx.options.thr_negligible
   # Dictionary to store sorted lists for each (p,q) pair
-  double_exc_lists, h_doub_max = gen_triplets_list(n_orb, ctx.fcidump.int2, ctx.options.thr_negligible)
-  double_exc_ab_lists, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2, ctx.options.thr_negligible)
+  double_exc_lists, h_doub_max = gen_pchb_list(n_orb, int2, thr_negligible)
+  double_exc_ab_lists, h_doub_max_ab = gen_pchb_list_ab(n_orb, int2, int2, int2, thr_negligible)
   h_doub_max = max(h_doub_max, h_doub_max_ab)
-  return HCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max)
+  sdenom = gen_singles_denom(int2)
+  return HCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max, sdenom)
 end
 
 """
@@ -1610,14 +1742,18 @@ Handles three types of double excitations:
 """
 function setup_hci_uhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   n_orb = ctx.n_orb
-  
+  int2aa = ctx.fcidump.int2aa
+  int2bb = ctx.fcidump.int2bb
+  int2ab = ctx.fcidump.int2ab
+  thr_negligible = ctx.options.thr_negligible 
   # Three dictionaries for the three types of double excitations
-  double_exc_aa, h_doub_max_aa = gen_triplets_list(n_orb, ctx.fcidump.int2aa, ctx.options.thr_negligible)
-  double_exc_bb, h_doub_max_bb = gen_triplets_list(n_orb, ctx.fcidump.int2bb, ctx.options.thr_negligible)
-  double_exc_ab, h_doub_max_ab = gen_triplets_list_ab(n_orb, ctx.fcidump.int2ab, ctx.options.thr_negligible)
+  double_exc_aa, h_doub_max_aa = gen_pchb_list(n_orb, int2aa, thr_negligible)
+  double_exc_bb, h_doub_max_bb = gen_triplets_list(n_orb, int2bb, thr_negligible)
+  double_exc_ab, h_doub_max_ab = gen_pchb_list_ab(n_orb, int2ab, int2aa, int2bb, thr_negligible)
   h_doub_max = max(h_doub_max_aa, h_doub_max_bb, h_doub_max_ab)
-
-  return HCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max)
+  sdenom_a = gen_singles_denom(int2aa)
+  sdenom_b = gen_singles_denom(int2bb)
+  return HCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max, sdenom_a, sdenom_b)
 end
 
 """
@@ -1726,8 +1862,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
   setup_data = setup_hci!(ctx)
   
   if options.verbose
-    n_pairs = length(setup_data.double_excitations)
-    total_triplets = sum(length(v) for v in values(setup_data.double_excitations))
+    n_pairs = length(setup_data.double_excitations_aa)
+    total_triplets = sum(length(v) for v in values(setup_data.double_excitations_aa))
     println("  Stored $(n_pairs) (p,q) pairs with $(total_triplets) total (r,s) triplets")
     println("  Maximum |H_doub|: $(setup_data.h_doub_max)")
   end
