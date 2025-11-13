@@ -1624,7 +1624,7 @@ function doubles_denom_ab(int2ab::Array{Float64,4}, int2aa, int2bb, iα, iβ, a�
 end
 
 
-function gen_pchb_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float64=1e-10)
+function gen_pchb_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float64=1e-10, use_mp2_denom::Bool=false)
   double_exc_lists = Vector{PCHBEntry}[]
   h_doub_max = 0.0
   
@@ -1649,7 +1649,11 @@ function gen_pchb_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float64=1
           h_val = int2[r, s, p, q] - int2[r, s, q, p]
 
           if abs(h_val) > ThrNeglect # Skip negligible matrix elements
-            denom = doubles_denom(int2, p, q, r, s)
+            if use_mp2_denom
+              denom = 0.0
+            else
+              denom = doubles_denom(int2, p, q, r, s)
+            end
             h_val_dagger = int2[p, q, r, s] - int2[p, q, s, r]
             push!(entries, PCHBEntry(r, s, h_val, h_val_dagger, denom))
             h_doub_max = max(h_doub_max, abs(h_val))
@@ -1668,7 +1672,7 @@ function gen_pchb_list(n_orb::Int, int2::Array{Float64,4}, ThrNeglect::Float64=1
 end
 
 function gen_pchb_list_ab(n_orb::Int, int2ab::Array{Float64,4}, int2aa::Array{Float64,4}, 
-                          int2bb::Array{Float64,4}, ThrNeglect::Float64=1e-10)
+                          int2bb::Array{Float64,4}, ThrNeglect::Float64=1e-10, use_mp2_denom::Bool=false)
   double_exc_ab_lists = Vector{PCHBEntry}[]
   h_doub_max = 0.0
   
@@ -1685,7 +1689,11 @@ function gen_pchb_list_ab(n_orb::Int, int2ab::Array{Float64,4}, int2aa::Array{Fl
           # Mixed integral v_pq^rs (αβ) (no antisymmetrization for different spins)
           h_val = int2ab[p, q, r, s]
           if abs(h_val) > ThrNeglect
-            denom = doubles_denom_ab(int2ab, int2aa, int2bb, p, q, r, s)
+            if use_mp2_denom
+              denom = 0.0
+            else
+              denom = doubles_denom_ab(int2ab, int2aa, int2bb, p, q, r, s)
+            end
             h_val_dagger = int2ab[r, s, p, q]
             push!(entries, PCHBEntry(r, s, h_val, h_val_dagger, denom))
             h_doub_max = max(h_doub_max, abs(h_val))
@@ -1723,11 +1731,19 @@ function setup_hci_rhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   n_orb = ctx.n_orb
   int2 = ctx.fcidump.int2
   thr_negligible = ctx.options.thr_negligible
+  use_mp2_denom = false
+  if ctx isa HCIContext
+    use_mp2_denom = ctx.options.use_mp2
+  end
   # Dictionary to store sorted lists for each (p,q) pair
-  double_exc_lists, h_doub_max = gen_pchb_list(n_orb, int2, thr_negligible)
-  double_exc_ab_lists, h_doub_max_ab = gen_pchb_list_ab(n_orb, int2, int2, int2, thr_negligible)
+  double_exc_lists, h_doub_max = gen_pchb_list(n_orb, int2, thr_negligible, use_mp2_denom)
+  double_exc_ab_lists, h_doub_max_ab = gen_pchb_list_ab(n_orb, int2, int2, int2, thr_negligible, use_mp2_denom)
   h_doub_max = max(h_doub_max, h_doub_max_ab)
-  sdenom = gen_singles_denom(int2)
+  if use_mp2_denom
+    sdenom = zeros(Scalar, n_orb, n_orb)
+  else
+    sdenom = gen_singles_denom(int2)
+  end
   return HCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max, sdenom)
 end
 
@@ -1746,13 +1762,22 @@ function setup_hci_uhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   int2bb = ctx.fcidump.int2bb
   int2ab = ctx.fcidump.int2ab
   thr_negligible = ctx.options.thr_negligible 
+  use_mp2_denom = false
+  if ctx isa HCIContext
+    use_mp2_denom = ctx.options.use_mp2
+  end
   # Three dictionaries for the three types of double excitations
-  double_exc_aa, h_doub_max_aa = gen_pchb_list(n_orb, int2aa, thr_negligible)
-  double_exc_bb, h_doub_max_bb = gen_triplets_list(n_orb, int2bb, thr_negligible)
-  double_exc_ab, h_doub_max_ab = gen_pchb_list_ab(n_orb, int2ab, int2aa, int2bb, thr_negligible)
+  double_exc_aa, h_doub_max_aa = gen_pchb_list(n_orb, int2aa, thr_negligible, use_mp2_denom)
+  double_exc_bb, h_doub_max_bb = gen_triplets_list(n_orb, int2bb, thr_negligible, use_mp2_denom)
+  double_exc_ab, h_doub_max_ab = gen_pchb_list_ab(n_orb, int2ab, int2aa, int2bb, thr_negligible, use_mp2_denom)
   h_doub_max = max(h_doub_max_aa, h_doub_max_bb, h_doub_max_ab)
-  sdenom_a = gen_singles_denom(int2aa)
-  sdenom_b = gen_singles_denom(int2bb)
+  if use_mp2_denom
+    sdenom_a = zeros(Scalar, n_orb, n_orb)
+    sdenom_b = zeros(Scalar, n_orb, n_orb)
+  else
+    sdenom_a = gen_singles_denom(int2aa)
+    sdenom_b = gen_singles_denom(int2bb)
+  end
   return HCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max, sdenom_a, sdenom_b)
 end
 
