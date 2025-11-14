@@ -27,7 +27,7 @@ include("fci_vec.jl")
 include("fci_hci_context.jl")
 include("fci_ops.jl")
 include("fci_main.jl")
-include("fci_selected_ci.jl")
+include("sci_main.jl")
 include("fci_pspace.jl")
 include("fci_davidson.jl")
 
