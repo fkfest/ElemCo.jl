@@ -8,7 +8,8 @@
                        options::HCIOptions,
                        E_current::Float64,
                        setup_data::HCISetupData,
-                       store_dets::Bool=true) -> (VecDict{Determinant, Scalar}, Float64)
+                       detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true) 
+                       -> (VecDict{Determinant, Scalar}, (Float64, Float64))
 
 Select determinants using Heat-Bath preselection + perturbative selection.
 Uses efficient excitation generation with threshold-based filtering.
@@ -21,7 +22,8 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
                             variational_coeffs::AbstractVector{Scalar},
                             options::HCIOptions,
                             E_current::Float64,
-                            setup_data::HCISetupData, store_dets::Bool=true)
+                            setup_data::HCISetupData,
+                            detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true)
   t0 = time_ns()
   shift = options.pt2_shift
   variational_dets = determinants(selected_ctx)
@@ -30,31 +32,28 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   # Get HB candidates determinants from variational space together with the H*c values
   DetType = eltype(variational_dets)
   candidates = Dict{DetType, ExcVals}()
-  temp_buffer = VecDict{DetType, ExcVals}()
+  newcandidates = VecDict{DetType, ExcVals}()  # Temporary storage for new candidates
   fockd_buf = FockDiagonal(ctx.n_orb) # Reusable Fock diagonal buffer
   spaces_buf = OrbSpaces(ctx.n_orb)  # Reusable orbital spaces buffer
+  pt_negl = 0.0
   # Use efficient threshold-based excitation generation
   eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon/10.0
+  eps_c = options.epsilon_c > -0.1 ? options.epsilon_c : options.epsilon_h
   # first we run through new determinants
-  n_olddet = n_old_dets(selected_ctx)
-  for i in (n_olddet+1):length(variational_dets)
-    det = variational_dets[i]
-    c_I = variational_coeffs[i]
-    if abs(c_I) < ThrNeglect
-      continue  # Skip negligible coefficients
-    end
-    eps = eps_h / abs(c_I)
-    ecorr = E_current - get_diagonal_element(selected_ctx, i)
-    generate_excitations!(temp_buffer, det, c_I, nothing, ecorr, ctx, setup_data, spaces_buf, fockd_buf, eps, shift)
-    mergewith!(+, candidates, temp_buffer)
-  end
-  # Remove determinants already in variational space
-  setdiff4dict!(candidates, variational_dets)
   # for the old determinants we only update those that were already added by the new ones.
   # this avoids adding the same determinants over and over again that will be neglected anyway by PT2
   # this has a very small effect on the final energy (coming only from the change of the correlation energy
   # in the denominator in PT2 step), but speeds up the selection significantly in later iterations.
-  for i in 1:n_olddet
+  n_olddet = n_old_dets(selected_ctx)
+  det_indices = Iterators.flatten(((n_olddet+1):length(variational_dets), 1:n_olddet))
+  for idx in det_indices
+    if isnothing(detorder)
+      # use natural order
+      i = idx
+    else
+      # use provided order
+      i = detorder[idx]
+    end
     det = variational_dets[i]
     c_I = variational_coeffs[i]
     if abs(c_I) < ThrNeglect
@@ -62,9 +61,16 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
     end
     eps = eps_h / abs(c_I)
     ecorr = E_current - get_diagonal_element(selected_ctx, i)
-    generate_excitations!(temp_buffer, det, c_I, nothing, ecorr, ctx, setup_data, spaces_buf, fockd_buf, eps, shift)
-    modifyvalueswith!(+, candidates, temp_buffer)
+    if i <= n_olddet
+      eps_c = Inf  # Skip adding new contributions for old determinants
+    end
+    pt_negl += generate_excitations!(candidates, newcandidates, det, c_I, nothing, ecorr, ctx, setup_data,
+                          spaces_buf, fockd_buf, eps, eps_c, shift)
+    mergewith!(+, candidates, newcandidates)
   end
+  newcandidates = nothing  # Free memory
+  # Remove determinants already in variational space
+  setdiff4dict!(candidates, variational_dets)
   if options.verbose
     println("  Generated $(length(candidates)) candidate determinants")
   end
@@ -87,7 +93,31 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
     end
   end
   t0 = print_time(options.print_level, t0, "perturbative selection", 1)
-  return new_dets, pt2_correction
+  if n_olddet == 0 
+    # add it only in the calculation of the PT2 corrections, otherwise there is a huge overshoot in PT2 energy
+    # use pt of neglected determinants as error bar estimate for PT2 correction
+    pt2_correction += pt_negl
+  end
+  return new_dets, (pt2_correction, pt_negl)
+end
+
+"""
+    modify_excitation!(excitations::Dict{Determinant, ExcVals},
+                       det::Determinant, vals::ExcVals) -> Float64
+
+Modify existing excitation entry in the excitations dictionary by adding new ExcVals.
+If the determinant is not present, returns the energy contribution from the new ExcVals.
+"""
+function modify_excitation!(excitations::Dict{Determinant{OPattern}, ExcVals},
+                 det::Determinant{OPattern}, vals::ExcVals) where OPattern
+  v1 = get(excitations, det, nothing)
+  en = 0.0
+  if !isnothing(v1)
+    @inbounds excitations[det] = v1 + vals
+  else
+    en = vals.coef * vals.hval
+  end
+  return en
 end
 
 """
@@ -112,15 +142,16 @@ Works with both FCIContext and HCIContext.
 `fockd` is the Fock diagonal object used to store Fock matrix diagonals for the determinant.
 `coef_dg` is the bra coefficient of the determinant (dagger) if needed, otherwise `nothing`.
 """
-function generate_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals},
+function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals},
+                               newexcitations::VecDict{Determinant{OPattern}, ExcVals},
                                det::Determinant{OPattern}, coef::Scalar, 
                                coef_dg::Union{Scalar, Nothing}, ecorr::Scalar,
                                ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}},
-                               setup_data::HCISetupData, spaces::OrbSpaces, fockd::FockDiagonal,
-                               epsilon::Float64, shift)::Int where OPattern
-  empty!(excitations)
+                               setup_data::HCISetupData,
+                               spaces::OrbSpaces, fockd::FockDiagonal,
+                               epsilon::Float64, epsilon_c::Float64, shift) where OPattern
   n_orb = ctx.n_orb
-  
+  empty!(newexcitations)
   set_orbspaces!(spaces, det)
   alpha_occ = spaces.occa
   alpha_virt = spaces.virta
@@ -132,6 +163,8 @@ function generate_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVa
   fa = fockd.alpha
   fb = fockd.beta
   
+  pt = 0.0
+
   # ===========================================
   # 1. Generate double excitations using pre-computed lists
   # ===========================================
@@ -139,47 +172,51 @@ function generate_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVa
   # Check if we should skip all double excitations
   if epsilon <= setup_data.h_doub_max
     # Alpha-alpha double excitations
-    add_excitations!(excitations, det, coef, coef_dg, double_alpha_excitation_phase, alpha_occ, 
-                     setup_data.double_excitations_aa, fa, ecorr, shift, epsilon)
+    pt += add_excitations!(excitations, newexcitations, det, coef, coef_dg, double_alpha_excitation_phase, alpha_occ,
+                     setup_data.double_excitations_aa, fa, ecorr, shift, epsilon, epsilon_c)
     # Beta-beta double excitations
-    add_excitations!(excitations, det, coef, coef_dg, double_beta_excitation_phase, beta_occ,
-                     setup_data.double_excitations_bb, fb, ecorr, shift, epsilon)
+    pt += add_excitations!(excitations, newexcitations, det, coef, coef_dg, double_beta_excitation_phase, beta_occ,
+                     setup_data.double_excitations_bb, fb, ecorr, shift, epsilon, epsilon_c)
     # Mixed double excitations (alpha-beta) (use int2ab pre-computed lists, i.e., no exchange)
-    add_excitations!(excitations, det, coef, coef_dg, alpha_occ, beta_occ, n_orb,
-                     setup_data.double_excitations_ab, fa, fb, ecorr, shift, epsilon)
+    pt += add_excitations!(excitations, newexcitations, det, coef, coef_dg, alpha_occ, beta_occ, n_orb,
+                     setup_data.double_excitations_ab, fa, fb, ecorr, shift, epsilon, epsilon_c)
   end
   # ===========================================
   # 2. Generate single excitations with on-the-fly filtering using Fock elements
   # ===========================================
 
   # Alpha single excitations
-  add_excitations!(excitations, det, coef, coef_dg, single_alpha_excitation_phase,
+  pt += add_excitations!(excitations, newexcitations, det, coef, coef_dg, single_alpha_excitation_phase,
                   alpha_occ, alpha_virt, beta_occ,
                   ctx.int1a, ctx.heval_data.h1e2_aa, ctx.heval_data.h1e2_ab,
                   setup_data.singles_denoma,
-                  fa, ecorr, shift, epsilon)
+                  fa, ecorr, shift, epsilon, epsilon_c)
   # Beta single excitations
-  add_excitations!(excitations, det, coef, coef_dg, single_beta_excitation_phase,
+  pt += add_excitations!(excitations, newexcitations, det, coef, coef_dg, single_beta_excitation_phase,
                   beta_occ, beta_virt, alpha_occ,
                   ctx.int1b, ctx.heval_data.h1e2_bb, ctx.heval_data.h1e2_ba,
                   setup_data.singles_denomb,
-                  fb, ecorr, shift, epsilon)
+                  fb, ecorr, shift, epsilon, epsilon_c)
 
-  return length(excitations)
+  return pt
 end
 
 """
     add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant,
                     coef::Scalar, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function,
-                    occ, pchb_excitations, fdiag, ecorr, shift, epsilon::Float64)
+                    occ, pchb_excitations, fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64)
 
 Generate same-spin double excitations from occupied orbitals using pre-computed
 Heat-Bath lists, adding only those with |H| > epsilon and storing in excitations dictionary
 together with their weighted matrix elements.
 """
-function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, det::Determinant{OPattern},
-                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function,
-                          occ, pchb_excitations, fdiag, ecorr, shift, epsilon::Float64) where OPattern
+function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
+                          newexcitations::VecDict{Determinant{OPattern}, ExcVals},
+                          det::Determinant{OPattern},
+                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function, 
+                          occ, pchb_excitations,
+                          fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where OPattern
+  pt = 0.0
   for idx_i in eachindex(occ)
     i = occ[idx_i]
     for idx_j in (idx_i+1):length(occ)
@@ -202,30 +239,39 @@ function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, 
           denom = fdiag[a] + fdiag[b] - fdiag[i] - fdiag[j] + entry.denom - ecorr
           fac = -denom/(denom^2 + shift)
           hc = coef * h_val * phase
-          if isnothing(coef_dg)
-            excitations[new_det] = ExcVals(hc * fac, hc)
+          c = hc * fac
+          if !isnothing(coef_dg)
+            hc = coef_dg * entry.dagger * phase
+          end
+          if abs(c) < epsilon_c
+            # negligible contribution, modify existing entry if present
+            pt += modify_excitation!(excitations, new_det, ExcVals(c, hc))
           else
-            h_val_dg = entry.dagger
-            excitations[new_det] = ExcVals(hc * fac, coef_dg * h_val_dg * phase)
+            # significant contribution, add new entry if not present
+            newexcitations[new_det] = ExcVals(c, hc)
           end
         end
       end
     end
   end
-  return
+  return pt
 end
 
 """
     add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant, coef::Scalar,
                     coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, n_orb, 
-                    pchb_excitations, fa, fb, ecorr, shift, epsilon::Float64)
+                    pchb_excitations, fa, fb, ecorr, shift, epsilon::Float64, epsilon_c::Float64)
 
 Generate mixed-spin double excitations from occupied alpha and beta orbitals
 using pre-computed Heat-Bath lists, adding only those with |H| > epsilon.
 """
-function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, det::Determinant{OPattern},
+function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
+                          newexcitations::VecDict{Determinant{OPattern}, ExcVals},
+                          det::Determinant{OPattern},
                           coef::Scalar, coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, 
-                          n_orb, pchb_excitations, fa, fb, ecorr, shift, epsilon::Float64) where OPattern
+                          n_orb, pchb_excitations,
+                          fa, fb, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where OPattern
+  pt = 0.0
   for i_alpha in alpha_occ
     for i_beta in beta_occ
       pq_key = trip_index(i_alpha, i_beta, n_orb)
@@ -240,31 +286,40 @@ function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, 
           denom = fa[a] + fb[b] - fa[i_alpha] - fb[i_beta] + entry.denom - ecorr
           fac = -denom/(denom^2 + shift)
           hc = coef * h_val * phase
-          if isnothing(coef_dg)
-            excitations[new_det] = ExcVals(hc * fac, hc)
+          c = hc * fac
+          if !isnothing(coef_dg)
+            hc = coef_dg * entry.dagger * phase
+          end
+          if abs(c) < epsilon_c
+            # negligible contribution, modify existing entry if present
+            pt += modify_excitation!(excitations, new_det, ExcVals(c, hc))
           else
-            h_val_dg = entry.dagger
-            excitations[new_det] = ExcVals(hc * fac, coef_dg * h_val_dg * phase)
+            # significant contribution, add new entry if not present
+            newexcitations[new_det] = ExcVals(c, hc)
           end
         end
       end
     end
   end
-  return
+  return pt
 end
 
 """
     add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant,
                     coef::Scalar, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
                     occs, virts, occs_opp, int1, h1e2_same, h1e2_opp,
-                    fdiag, ecorr, shift, epsilon::Float64)
+                    fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64)
 
 Add single excitations to the excitations dictionary.
 """
-function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, det::Determinant{OPattern},
+function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
+                          newexcitations::VecDict{Determinant{OPattern}, ExcVals},
+                          det::Determinant{OPattern},
                           coef::Scalar, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
                           occs, virts, occs_opp, int1, h1e2_same, h1e2_opp, singles_denom,
-                          fdiag, ecorr, shift, epsilon::Float64) where OPattern
+                          fdiag, ecorr, shift, 
+                          epsilon::Float64, epsilon_c::Float64) where OPattern
+  pt = 0.0
   for i in occs
     for a in virts
       # Compute Fock matrix element f_ai
@@ -274,14 +329,19 @@ function add_excitations!(excitations::VecDict{Determinant{OPattern}, ExcVals}, 
         denom = fdiag[a] - fdiag[i] + singles_denom[a, i] - ecorr
         fac = -denom/(denom^2 + shift)
         hc = coef * h_val * phase
-        if isnothing(coef_dg)
-          excitations[new_det] = ExcVals(hc * fac, hc)
+        c = hc * fac
+        if !isnothing(coef_dg)
+          hc = coef_dg * entry.dagger * phase
+        end
+        if abs(c) < epsilon_c
+          # negligible contribution, modify existing entry if present
+          pt += modify_excitation!(excitations, new_det, ExcVals(c, hc))
         else
-          h_val_dg = compute_fock_element(int1, h1e2_same, h1e2_opp, occs, occs_opp, i, a)
-          excitations[new_det] = ExcVals(hc * fac, coef_dg * h_val_dg * phase)
+          # significant contribution, add new entry if not present
+          newexcitations[new_det] = ExcVals(c, hc)
         end
       end
     end
   end
-  return
+  return pt
 end

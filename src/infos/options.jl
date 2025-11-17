@@ -278,6 +278,8 @@ end
   epsilon::Float64 = 3e-4
   """`⟨epsilon/10⟩` HCI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
   epsilon_h::Float64 = -1.0
+  """`⟨epsilon_h⟩` instantaneous PT selection threshold. """
+  epsilon_c::Float64 = -1.0
   """`⟨epsilon⟩` CIPSI selection threshold """
   epsilon_p::Float64 = -1.0
   """`⟨1e-6⟩` Energy convergence threshold """
@@ -294,6 +296,10 @@ end
   compute_pt2::Bool = true
   """`⟨1e-6⟩` Threshold for PT2 contributions """
   epsilon_pt2::Float64 = 1e-6
+  """`⟨epsilon_pt2/2⟩` Threshold for instantaneous PT2 contributions """
+  epsilon_pt2_c::Float64 = -1.0
+  """`⟨true⟩` Sort determinants by absolute value of coefficients before computing PT2 correction """
+  sort4pt2::Bool = true
   """`⟨1e-10⟩` Small value added to denominators in PT2 to avoid divergences """
   pt2_shift::Float64 = 1e-10
   """`⟨false⟩` Use uncontracted MP2 instead of EN2 """

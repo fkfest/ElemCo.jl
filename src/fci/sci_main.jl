@@ -82,7 +82,7 @@ end
 
 """
     run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions) 
-      -> (Vector{Float64}, Matrix{Float64}, Vector{Determinant}, Vector{Float64})
+      -> (Vector{Float64}, Matrix{Float64}, Vector{Determinant}, Vector{(Float64, Float64)})
 
 Run Heat-Bath CI calculation with support for multiple states.
 
@@ -100,7 +100,7 @@ Run Heat-Bath CI calculation with support for multiple states.
 - For nstates=1 (default), uses single-state selection strategy
 - For nstates>1, uses multi-state selection with state-maximum probability
 """
-function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}, options::HCIOptions)::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant{OPattern}}, Vector{Float64}} where OPattern
+function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}, options::HCIOptions) where OPattern
   if options.verbose
     println("\n" * "="^70)
     println("Heat-Bath Configuration Interaction (HCI)")
@@ -270,7 +270,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
     
     # 3. Generate candidates and compute probabilities
     new_dets_dict = Dict{Determinant{OPattern}, Scalar}()  # To hold selected new determinants
-    pt2_corrections = zeros(Float64, options.nstates)
+    pt2_corrections = Array{Tuple{Float64, Float64}}(undef, options.nstates)
     for state = 1:options.nstates
       new_dets, pt2_corrections[state] = heatbath_selection(selected_ctx, @view(coeffs_matrix[:,state]), 
                                           options, E_electronic_vec[state], setup_data)
@@ -279,11 +279,11 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
     end
     if options.verbose
       if options.nstates == 1
-        println("  PT2 correction: $(pt2_corrections[1]) Hartree")
+        println("  PT2 correction: $(pt2_corrections[1][1]) ± $(pt2_corrections[1][2]) Hartree")
       else
         println("  PT2 corrections:")
         for state in 1:options.nstates
-          println("    State $state: $(pt2_corrections[state]) Hartree")
+          println("    State $state: $(pt2_corrections[state][1]) ± $(pt2_corrections[state][2]) Hartree")
         end
       end
     end
@@ -358,22 +358,22 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
   end
 
   # Compute PT2 correction if requested
-  pt2_result = Float64[]
+  pt2_result = Array{Tuple{Float64, Float64}}(undef, 0)
   if options.compute_pt2
     pt2_result = compute_pt2_correction!(selected_ctx, coeffs_final_matrix, 
                                          E_electronic_vec, setup_data, options)
 
-    E_total_with_pt2 = E_final_vec .+ pt2_result
+    E_total_with_pt2 = E_final_vec .+ [e[1] for e in pt2_result]
 
     if options.verbose
       println("\nFinal Energies (Ground State with PT2):")
       println("  Variational:     $(E_final_vec[1]) Ha")
-      println("  PT2 correction:  $(pt2_result[1]) Ha")
-      println("  Total (VAR+PT2): $(E_total_with_pt2[1]) Ha")
+      println("  PT2 correction:  $(pt2_result[1][1]) ± $(pt2_result[1][2]) Ha")
+      println("  Total (VAR+PT2): $(E_total_with_pt2[1]) ± $(pt2_result[1][2]) Ha")
       if options.nstates > 1
         println("\nFinal Energies (Excited States):")
         for state in 2:options.nstates
-          println("  State $state: $(E_total_with_pt2[state]) Ha")
+          println("  State $state: $(E_total_with_pt2[state]) ± $(pt2_result[state][2]) Ha")
         end
       end
     end
@@ -396,7 +396,7 @@ This lightweight interface avoids FCIContext initialization overhead:
 # Returns
 Same as run_heatbath_ci!(ctx, options): (energies, coeffs, determinants, pt2_result)
 """
-function run_heatbath_ci!(ctx::HCIContext{OPattern})::Tuple{Vector{Scalar}, Matrix{Scalar}, Vector{Determinant{OPattern}}, Vector{Float64}} where OPattern
+function run_heatbath_ci!(ctx::HCIContext{OPattern}) where OPattern
   return run_heatbath_ci!(ctx, ctx.options)
 end
 
@@ -432,22 +432,32 @@ function compute_pt2_correction!(selected_ctx::SelectedCIContext,
   # set old ndets to zero to ensure all determinants are used for PT2
   set_n_old_dets!(selected_ctx, 0)
   nstates = size(coefficients, 2)
-  ΔE = zeros(Float64, nstates)
+  ΔE = Array{Tuple{Float64, Float64}}(undef, nstates)
   save_epsilon_h = options.epsilon_h
   options.epsilon_h = options.epsilon_pt2
+  save_epsilon_c = options.epsilon_c
+  options.epsilon_c = options.epsilon_pt2_c < 0.0 ? options.epsilon_pt2/2 : options.epsilon_pt2_c
   for state_idx in 1:nstates
     if options.verbose
       println("\nState $state_idx:")
     end
+    # sort coefficients for current state
+    if options.sort4pt2
+      sort_indices = sortperm(@view(coefficients[:, state_idx]), rev=true, by=abs)
+    else
+      sort_indices = nothing
+    end
+    sort_indices = sortperm(@view(coefficients[:, state_idx]), rev=true, by=abs)
     _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]), options,
-                               E_variational[state_idx], setup_data, false)
+                               E_variational[state_idx], setup_data, sort_indices, false)
     if options.verbose
-      println("  PT2 correction: $(ΔE[state_idx]) Ha")
-      println("  Total energy (VAR+PT2): $(E_variational[state_idx] + ΔE[state_idx]) Ha")
+      println("  PT2 correction: $(ΔE[state_idx][1]) ± $(ΔE[state_idx][2]) Ha")
+      println("  Total energy (VAR+PT2): $(E_variational[state_idx] + ΔE[state_idx][1]) ± $(ΔE[state_idx][2]) Ha")
       println("="^70)
     end
   end
   options.epsilon_h = save_epsilon_h
+  options.epsilon_c = save_epsilon_c
   return ΔE  
 end
 
