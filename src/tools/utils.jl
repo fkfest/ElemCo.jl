@@ -26,9 +26,11 @@ export ODDict, getdescription, setdescription!, descriptions
 export OutDict, last_energy
 # from bufvec
 export BufVec, capacity, is_full
+# from pairdict
+export PairDict
 # from VecDicts
 export VecDict, getvalue, setvalue!, values, resize!, push!
-export setat!, getat!, setkeyat!, getkeyat!, setvalueat!, getvalueat!
+export setat!, getat, setkeyat!, getkeyat, setvalueat!, getvalueat
 
 export @pib # alias for Base.@propagate_inbounds
 
@@ -41,6 +43,7 @@ var"@pib" = Base.var"@propagate_inbounds"
 
 include("xmltools.jl")
 include("bufvec.jl")
+include("pairdict.jl")
 
 """
     mainname(file::String)

@@ -2049,6 +2049,14 @@ To compute PT2 efficiently, adaptive thresholding is employed. For each variatio
 \eeq
 and only excitations are generated with $|H_{K}^{I}| \gt \epsilon_{\text{adaptive}}$ using pre-sorted lists from setup.
 
+In order to reduce memory usage, an additional layer of thresholding is applied during PT2 calculation.
+This involves discarding excitations with small contributions before they are fully generated.
+For this purpose, the instantaneous PT2 amplitudes are calculated as $H_{K}^{I} c_I / (E_{\text{var}} - H_{K}^{K})$,
+and excitations with amplitudes below a second threshold $\epsilon_{pt2}^c$ are not added to the 
+list of candidates for PT2 correction. If the $K$ determinant is already present in the list, 
+its amplitude is updated accordingly, otherwise an energy contribution of this instantaneous
+excitation is added to the PT2 energy directly and also to the uncertainty estimate of the PT2 energy.
+
 In practice, the calculation corresponds to the Phase III + Phase IV of the HCI selection
 with a different (tight) threshold $\epsilon_{pt2}$.
 

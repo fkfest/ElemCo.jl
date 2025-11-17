@@ -276,6 +276,9 @@ function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=
       println()
     end
     push!(energies_out, mname*"-correction" => (En["E-correction"], "correction to the correlation energy")) 
+    if haskey(En, "E-correction δ")
+      push!(energies_out, mname*"-correction δ" => (En["E-correction δ"], "uncertainty in the correction to the correlation energy")) 
+    end
   end
   if haskey(En, "Expect")
     enecor = En["Expect"]
@@ -547,11 +550,13 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
     for i = 1:length(E_HCI)-1
       energies["ω$i"] = E_HCI[i+1] - Egs
       if EC.options.hci.compute_pt2
-        energies["ω$i+pt2"] = E_HCI[i+1] + pt2[i+1] - Egs - pt2[1]
+        energies["ω$i+pt2"] = E_HCI[i+1] + pt2[i+1][1] - Egs - pt2[1][1]
+        energies["ω$(i)δpt2"] = pt2[i+1][2]
       end
     end
     if EC.options.hci.compute_pt2
-      push!(energies, "E-correction" => pt2[1])
+      push!(energies, "E-correction" => pt2[1][1])
+      push!(energies, "E-correction δ" => pt2[1][2])
     end
     return merge(energies, "E" => Egs - ref_energy)
   else
