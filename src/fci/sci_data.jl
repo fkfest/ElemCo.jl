@@ -164,8 +164,8 @@ const SelectedHamiltonianRow = VecDict{Int, Scalar}
 struct SelectedHamiltonianMatrix
   rows::Vector{SelectedHamiltonianRow}  # Rows of the Hamiltonian matrix
   hermitian::Bool                       # Whether the matrix is Hermitian (we still store full matrix)
-  function SelectedHamiltonianMatrix()
-    new([], true)
+  function SelectedHamiltonianMatrix(hermitian::Bool=true)
+    new([], hermitian)
   end
 end
 
@@ -312,11 +312,11 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
 
     @simd for j in connections[inew]
       det_j = dets.determinants[j]
-      h_ij = compute_matrix_element_direct(det_i, det_j, context, occa, occb)
+      h_ji = compute_matrix_element_direct(det_i, det_j, context, occa, occb)
       if sel_ham.hermitian
-        h_ji = h_ij
+        h_ij = h_ji
       else
-        h_ji = compute_matrix_element_direct(det_j, det_i, context)
+        h_ij = compute_matrix_element_direct(det_j, det_i, context)
       end
       if abs(h_ij) > ThrNeglect
         cursize_i += 1
@@ -406,6 +406,13 @@ end
 Get selected determinants.
 """
 determinants(selected_ctx::SelectedCIContext) = selected_ctx.selected_dets.determinants
+
+"""
+    is_hermitian(ctx::SelectedCIContext) -> Bool
+
+Get whether the Hamiltonian is Hermitian.
+"""
+is_hermitian(ctx::SelectedCIContext) = is_hermitian(ctx.base_context)
 
 """
     extend!(selected_ctx::SelectedCIContext, new_dets::Vector{Determinant})

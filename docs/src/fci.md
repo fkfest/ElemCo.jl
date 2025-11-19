@@ -13,7 +13,7 @@ FCI
 ```@autodocs
 Modules = [FCI]
 Private = false
-Order = [:function, :type, :macro]
+Order = [:type, :function, :macro]
 ```
 
 ## Internal functions
@@ -21,5 +21,5 @@ Order = [:function, :type, :macro]
 ```@autodocs
 Modules = [FCI]
 Public = false
-Order = [:function, :type, :macro]
+Order = [:type, :function, :macro]
 ```

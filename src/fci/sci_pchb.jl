@@ -188,14 +188,14 @@ function gen_pchb_list_ab(n_orb::Int, int2ab::Array{Float64,4}, int2aa::Array{Fl
           if s == q; continue; end  # Beta s cannot equal beta q
           
           # Mixed integral v_pq^rs (αβ) (no antisymmetrization for different spins)
-          h_val = int2ab[p, q, r, s]
+          h_val = int2ab[r, s, p, q]
           if abs(h_val) > ThrNeglect
             if use_mp2_denom
               denom = 0.0
             else
               denom = doubles_denom_ab(int2ab, int2aa, int2bb, p, q, r, s)
             end
-            h_val_dagger = int2ab[r, s, p, q]
+            h_val_dagger = int2ab[p, q, r, s]
             push!(entries, PCHBEntry(r, s, h_val, h_val_dagger, denom))
             h_doub_max = max(h_doub_max, abs(h_val))
           end

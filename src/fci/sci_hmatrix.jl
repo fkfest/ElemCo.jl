@@ -51,7 +51,7 @@ end
     compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
                                  context, occa=nothing, occb=nothing) -> Scalar
 
-Compute ⟨det_i|Ĥ|det_j⟩ directly using orbital excitation analysis.
+Compute ⟨det_j|Ĥ|det_i⟩ directly using orbital excitation analysis.
 Works with both FCIContext and HCIContext.
 
 occa/occb are either Nothing or lists of occupied orbitals (makes the calculation more efficient).

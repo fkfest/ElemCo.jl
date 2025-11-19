@@ -516,11 +516,9 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
   nbeta = length(EC.space['O'])
   ms2 = nalpha - nbeta
   nelec = nalpha + nbeta
-  fdump = QFDump(norb, nelec, ms2=ms2, uhf=EC.fd.uhf)
+  simtra = is_similarity_transformed(EC.fd)
+  fdump = QFDump(norb, nelec, ms2=ms2, uhf=EC.fd.uhf, simtra=simtra)
   fdump.int0 = EC.fd.int0
-  if is_similarity_transformed(EC.fd)
-    error("FCI not implemented for similarity transformed Hamiltonians!")
-  end
   if EC.fd.uhf
     fdump.int1a = EC.fd.int1a
     fdump.int1b = EC.fd.int1b
@@ -530,6 +528,9 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
   else
     fdump.int1 = EC.fd.int1
     fdump.int2 = ints2(EC, "mmmm")
+
+    # fdump.int1 = permutedims(EC.fd.int1, (2,1))
+    # fdump.int2 = permutedims(ints2(EC, "mmmm"), (3,4,1,2))
   end
   
   # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
@@ -561,6 +562,9 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
     return merge(energies, "E" => Egs - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)
+    if is_similarity_transformed(EC.fd)
+      error("FCI not implemented for similarity transformed Hamiltonians!")
+    end
     fci_ctx = FCIContext(fdump, EC.options.fci; occa=EC.space['o'], occb=EC.space['O'])
     println("FCI context setup complete."); flush(stdout)
     E_FCI = run_fci!(fci_ctx)

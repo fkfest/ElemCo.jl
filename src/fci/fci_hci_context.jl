@@ -262,3 +262,5 @@ end
 
 # Convenience constructor that defaults to UInt128
 HCIContext(fcidump::QFDump, options::HCIOptions = HCIOptions(); kwargs...) = HCIContext{UInt128}(fcidump, options; kwargs...)
+
+is_hermitian(ctx::Union{HCIContext, FCIContext}) = !is_similarity_transformed(ctx.fcidump)
