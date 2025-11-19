@@ -23,6 +23,7 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
                             options::HCIOptions,
                             E_current::Float64,
                             setup_data::HCISetupData,
+                            coeffs_dg::Union{Nothing, AbstractVector{Scalar}}=nothing,
                             detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true)
   t0 = time_ns()
   shift = options.pt2_shift
@@ -59,12 +60,17 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
     if abs(c_I) < ThrNeglect
       continue  # Skip negligible coefficients
     end
+    if isnothing(coeffs_dg)
+      c_I_dg = nothing
+    else
+      c_I_dg = coeffs_dg[i]
+    end
     eps = eps_h / abs(c_I)
     ecorr = E_current - get_diagonal_element(selected_ctx, i)
     if i <= n_olddet
       eps_c = Inf  # Skip adding new contributions for old determinants
     end
-    pt_negl += generate_excitations!(candidates, newcandidates, det, c_I, nothing, ecorr, ctx, setup_data,
+    pt_negl += generate_excitations!(candidates, newcandidates, det, c_I, c_I_dg, ecorr, ctx, setup_data,
                           spaces_buf, fockd_buf, eps, eps_c, shift)
     mergewith!(+, candidates, newcandidates)
   end
@@ -93,11 +99,7 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
     end
   end
   t0 = print_time(options.print_level, t0, "perturbative selection", 1)
-  if n_olddet == 0 
-    # add it only in the calculation of the PT2 corrections, otherwise there is a huge overshoot in PT2 energy
-    # use pt of neglected determinants as error bar estimate for PT2 correction
-    pt2_correction += pt_negl
-  end
+  pt2_correction += pt_negl
   return new_dets, (pt2_correction, pt_negl)
 end
 
@@ -158,7 +160,7 @@ function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}
   beta_occ = spaces.occb
   beta_virt = spaces.virtb
 
-  # Pre-compute Fock matrix elements for the current determinant
+  # Pre-compute diagonal Fock matrix elements for the current determinant
   calc_fock_diagonal4det!(fockd, ctx, alpha_occ, beta_occ)
   fa = fockd.alpha
   fb = fockd.beta
@@ -331,7 +333,8 @@ function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals},
         hc = coef * h_val * phase
         c = hc * fac
         if !isnothing(coef_dg)
-          hc = coef_dg * entry.dagger * phase
+          h_val_dg = compute_fock_element(int1, h1e2_same, h1e2_opp, occs, occs_opp, i, a)
+          hc = coef_dg * h_val_dg * phase
         end
         if abs(c) < epsilon_c
           # negligible contribution, modify existing entry if present

@@ -750,6 +750,9 @@ the Hamiltonian matrix elements are computed on-the-fly. It uses the same
 Davidson algorithm as `davidson_fci!` but operates on a selected subset of
 determinants rather than the full CI space.
 
+Automatically detects whether the Hamiltonian is Hermitian or non-Hermitian
+based on the context (similarity-transformed integrals are non-Hermitian).
+
 # Arguments
 - `selected_ctx::SelectedCIContext`: Selected CI context containing determinants
 - `initial_guesses::Matrix{Scalar}`: Initial guess vector in selected CI basis (n_selected × n_guess)
@@ -765,16 +768,21 @@ determinants rather than the full CI space.
 # Returns
 - `Tuple{Vector{Float64}, Matrix{Float64}}`: Eigenvalues and eigenvectors
   - eigenvalues: Vector of lowest `nstates` eigenvalues
-  - eigenvectors: Matrix of eigenvectors (n_selected × nstates)
+  - eigenvectors: Matrix of eigenvectors (n_selected × nstates(times 2 for non-Hermitian))
 
 # Algorithm
 Uses the Davidson iterative diagonalization method:
 1. Build subspace by expanding with correction vectors
 2. Project Hamiltonian onto subspace
-3. Diagonalize small projected Hamiltonian
+3. Diagonalize small projected Hamiltonian (Hermitian or non-Hermitian)
 4. Compute residuals and check convergence
 5. Add correction vectors to expand subspace
 6. Refresh subspace when it becomes too large
+
+For non-Hermitian Hamiltonians (similarity-transformed integrals):
+- Uses standard eigen() instead of eigen(Hermitian())
+- Preconditioner uses complex shift to handle non-real eigenvalues
+- The left eigenvectors are returned in the same array as right eigenvectors (after the right ones)
 
 The key difference from `davidson_fci!` is that matrix elements are computed
 on-the-fly using `contract_hamiltonian_selected!`, maintaining O(N_selected)
@@ -797,6 +805,9 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
   size(initial_guesses, 1) == n_dets || error("initial_guess must have ", n_dets, " rows")
   max_subspace >= 2 * nstates || error("max_subspace must be at least 2*nstates")
 
+  # Detect if Hamiltonian is Hermitian
+  hermitian = is_hermitian(selected_ctx)
+  
   # Scale subspace size with number of roots
   max_subspace = max(max_subspace, 3 * nstates)
   n_keep = max(nstates + 2, max_subspace ÷ 3)
@@ -804,6 +815,7 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
   if verbose
     println("\nStarting Davidson Selected CI diagonalization")
     println("Selected space: $n_dets determinants")
+    println("Hamiltonian type: $(hermitian ? "Hermitian" : "non-Hermitian")")
     println("Computing $nstates eigenstate$(nstates > 1 ? "s" : "")")
     println("Initial guesses provided: $n_guess")
     println("Subspace settings: max=$max_subspace, keep=$n_keep")
@@ -880,30 +892,44 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
   max_residual = Inf  # Initialize outside loop for warning message
   eigenvalues = zeros(Float64, nstates)
   eigenvectors = zeros(Scalar, n_dets, nstates)
-  
+  sub_vecs = zeros(Scalar, 1, 1)  # Placeholder
+
   for iter in 1:max_iterations
     iteration = iter
     
-    # Build subspace Hamiltonian and overlap matrices
+    # Build subspace Hamiltonian matrix
     H_sub = zeros(Scalar, k, k)
-    S_sub = zeros(Scalar, k, k)
     
-    for i in 1:k
-      for j in 1:i
-        H_sub[i,j] = dot(V[i], HV[j])
-        H_sub[j,i] = conj(H_sub[i,j])
-        
-        S_sub[i,j] = dot(V[i], V[j])
-        S_sub[j,i] = conj(S_sub[i,j])
+    if hermitian
+      for i in 1:k
+        for j in 1:i
+          H_sub[i,j] = dot(V[i], HV[j])
+          H_sub[j,i] = conj(H_sub[i,j])
+        end
       end
+      # Solve eigenvalue problem for Hermitian matrix
+      sub_vals, sub_vecs = eigen(Hermitian(H_sub))
+    else
+      # For non-Hermitian case, compute full matrix
+      for i in 1:k
+        for j in 1:k
+          H_sub[i,j] = dot(V[i], HV[j])
+        end
+      end
+      # Solve eigenvalue problem for non-Hermitian matrix
+      sub_vals, sub_vecs = eigen(H_sub)
     end
-    
-    # Solve generalized eigenvalue problem: H * c = E * S * c
-    # For orthonormal basis, S ≈ I, so we can use standard eigen
-    sub_vals, sub_vecs = eigen(Hermitian(H_sub))
     
     # Extract lowest nstates eigenvalues
     eigenvalues .= real.(sub_vals[1:nstates])
+    
+    # For non-Hermitian case, check if eigenvalues have significant imaginary parts
+    if !hermitian && iter == 1
+      max_imag = maximum(abs.(imag.(sub_vals[1:nstates])))
+      if max_imag > 1e-6
+        @warn "Non-Hermitian Hamiltonian has eigenvalues with significant imaginary parts (max: $max_imag)"
+      end
+    end
     
     # Compute Ritz vectors and residuals
     max_residual = 0.0
@@ -957,7 +983,9 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
         break  # Subspace is full
       end
       
-      # Preconditioned residual: t = r / (E - H_diag)
+      # Preconditioned residual with level shift
+      # For Hermitian: standard Davidson preconditioner with shift
+      # For non-Hermitian: same formula works (shift prevents small denominators)
       correction = zeros(Scalar, n_dets)
       for i in 1:n_dets
         denom = eigenvalues[iroot] - diagonal[i]
@@ -1006,6 +1034,18 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
   if !converged
     @warn "Davidson did not converge in $max_iterations iterations (max residual: $max_residual)"
   end
-  
+ 
+  if !hermitian
+    # calculate the left eigenvectors for non-Hermitian case
+    left_eigenvectors = zeros(Scalar, n_dets, nstates)
+    left_sub_vecs = inv(sub_vecs')
+    for iroot in 1:nstates
+      # Ritz vector: linear combination of subspace vectors
+      for i in 1:k
+        left_eigenvectors[:, iroot] .+= left_sub_vecs[i, iroot] .* V[i]
+      end
+    end
+    eigenvectors = hcat(eigenvectors, left_eigenvectors)
+  end
   return (eigenvalues, eigenvectors)
 end

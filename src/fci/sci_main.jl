@@ -29,7 +29,10 @@ include("sci_hb_selection.jl")
 Create SelectedCIContext from list of determinants.
 """
 function setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants, 
-                                              hamiltonian::SelectedHamiltonianMatrix=SelectedHamiltonianMatrix())
+                                              hamiltonian::Union{Nothing,SelectedHamiltonianMatrix}=nothing)
+  if isnothing(hamiltonian) 
+    hamiltonian = SelectedHamiltonianMatrix(is_hermitian(context))
+  end
   return SelectedCIContext(context, determinants, hamiltonian)
 end
 
@@ -40,7 +43,7 @@ Create SelectedCIContext from list of addresses.
 """
 function setup_selected_ci_from_addresses!(context::FCIContext, addresses::Vector{Address})
   determinants = [determinant_from_address(context, addr) for addr in addresses]
-  return SelectedCIContext(context, determinants, SelectedHamiltonianMatrix())
+  return SelectedCIContext(context, determinants, SelectedHamiltonianMatrix(is_hermitian(context)))
 end
 
 """
@@ -164,7 +167,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
     
     # Start with all small-space determinants
     variational_dets = copy(small_space_result.determinants)
-    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix())
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix(is_hermitian(ctx)))
     
     # Initial energies from small-space diagonalization
     E_init_vec = small_space_result.eigenvalues .+ ctx.fcidump.int0
@@ -187,7 +190,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
     push!(variational_dets, hf_det)
     
     # Get initial HF energy (all states)
-    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix())
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix(is_hermitian(ctx)))
     E_electronic_hf_vec, _ = diagonalize_selected_space(selected_ctx, nstates=options.nstates)
     E_init_vec = E_electronic_hf_vec .+ ctx.fcidump.int0
     
@@ -277,7 +280,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
       # Merge new determinants from all states, taking maximum weight (for target_selection)
       mergewith!(max, new_dets_dict, new_dets)
     end
-    if options.verbose
+    if options.verbose && is_hermitian(selected_ctx)
       if options.nstates == 1
         println("  PT2 correction: $(pt2_corrections[1][1]) ± $(pt2_corrections[1][2]) Hartree")
       else
@@ -315,7 +318,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
     
     E_prev_vec = copy(E_current_vec)
     # Save eigenvectors for next iteration as warm start
-    previous_eigenvectors = coeffs_matrix
+    previous_eigenvectors = coeffs_matrix[:, 1:options.nstates]
   end
   
   if !converged
@@ -431,7 +434,7 @@ function compute_pt2_correction!(selected_ctx::SelectedCIContext,
   end
   # set old ndets to zero to ensure all determinants are used for PT2
   set_n_old_dets!(selected_ctx, 0)
-  nstates = size(coefficients, 2)
+  nstates = options.nstates
   ΔE = Array{Tuple{Float64, Float64}}(undef, nstates)
   save_epsilon_h = options.epsilon_h
   options.epsilon_h = options.epsilon_pt2
@@ -448,8 +451,17 @@ function compute_pt2_correction!(selected_ctx::SelectedCIContext,
       sort_indices = nothing
     end
     sort_indices = sortperm(@view(coefficients[:, state_idx]), rev=true, by=abs)
-    _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]), options,
-                               E_variational[state_idx], setup_data, sort_indices, false)
+    if is_hermitian(selected_ctx)
+      # For Hermitian case, only need right coefficients
+      _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
+                                            options, E_variational[state_idx], setup_data, 
+                                            nothing, sort_indices, false)
+    else
+      left_idx = state_idx + nstates
+      _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
+                                            options, E_variational[state_idx], setup_data,
+                                            @view(coefficients[:, left_idx]), sort_indices, false)
+    end
     if options.verbose
       println("  PT2 correction: $(ΔE[state_idx][1]) ± $(ΔE[state_idx][2]) Ha")
       println("  Total energy (VAR+PT2): $(E_variational[state_idx] + ΔE[state_idx][1]) ± $(ΔE[state_idx][2]) Ha")
@@ -485,6 +497,8 @@ For large spaces (≥ 1000 determinants), uses Davidson iterative diagonalizatio
 # Returns
 - `eigenvalues`: Vector of length nstates with lowest eigenvalues
 - `eigenvectors`: Matrix of size (n_selected, nstates) with eigenvectors
+- For non-Hermitian Hamiltonians (similarity-transformed integrals), both right and left
+  eigenvectors are computed and returned in the same matrix (right vectors first, then left).
 """
 function diagonalize_selected_space(selected_ctx::SelectedCIContext; 
                                    nstates::Int=1,
@@ -499,8 +513,16 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     H_matrix = hamiltonian_matrix(selected_ctx)
     
     nval = min(nstates+5, n_dets)
-    eigenvalues, eigenvectors = eigen(Hermitian(H_matrix), 1:nval)
-    return real.(eigenvalues[1:nstates]), real.(eigenvectors[:, 1:nstates])
+    if is_hermitian(selected_ctx)
+      # Use Hermitian eigenvalue solver
+      eigenvalues, eigenvectors = eigen(Hermitian(H_matrix), 1:nval)
+      eigenvectors = real.(eigenvectors[:, 1:nstates])
+    else
+      eigenvalues, eigenvectors = eigen(H_matrix)
+      left_eigenvectors = inv(eigenvectors')
+      eigenvectors = real.(hcat(eigenvectors[:, 1:nstates], left_eigenvectors[:, 1:nstates]))
+    end
+    return real.(eigenvalues[1:nstates]), eigenvectors
   end
 
   # For large spaces, use Davidson iterative diagonalization
