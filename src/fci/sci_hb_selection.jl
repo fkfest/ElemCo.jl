@@ -85,6 +85,7 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   # Select determinants above threshold or until target reached
   new_dets = VecDict{DetType, Scalar}()
   pt2_correction = 0.0
+  t2sq = 0.0
   # use square of epsilon_p to match probability definition (T_2^2)
   eps_p = options.epsilon_p > -0.1 ? options.epsilon_p : options.epsilon
   epsilon = eps_p^2
@@ -94,11 +95,20 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
     # Selection probability: |Σ c_I H_IJ|² / ΔE²
     c_J² = abs2(c_J)
     pt2_correction += c_J * hval_J  # Perturbative energy contribution
+    t2sq += c_J²
     if store_dets && c_J² >= epsilon
       new_dets[det_J] = c_J²
     end
   end
   t0 = print_time(options.print_level, t0, "perturbative selection", 1)
+  # Apply renormalization if requested
+  if options.renorm_pt2
+    renorm_factor = 1.0 / (1.0 + t2sq)
+    pt2_correction *= renorm_factor
+    if options.verbose
+      println("  Renormalized PT2 correction by factor $renorm_factor")
+    end
+  end
   pt2_correction += pt_negl
   return new_dets, (pt2_correction, pt_negl)
 end
