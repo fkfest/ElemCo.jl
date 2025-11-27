@@ -20,7 +20,7 @@ using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
 using ..ElemCo.FCI
 
-export ccdriver, dfccdriver, fcidriver
+export ccdriver, dfccdriver, fcidriver, extrapolate
 
 """ 
     ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
@@ -598,5 +598,34 @@ function eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
   t1 = print_time(EC, t1,"DMRG",1)
   return energies
 end
+
+"""
+    extrapolate(energies1::OutDict, energies2::OutDict)
+
+  Extrapolate energies using two sets of energies with corresponding corrections.
+
+  The keys with suffix `"-correction"` are used for extrapolation.
+  Return a new `OutDict` with the extrapolated energies.
+  Extrapolation is done to the limit where the correction goes to zero.
+"""
+function extrapolate(energies1::OutDict, energies2::OutDict)
+  extrapolated_energies = OutDict()
+  for (key, val, desc) in energies1
+    if endswith(key, "-correction")
+      name = replace(key, "-correction"=>"")
+      if haskey(energies2, key) && haskey(energies1, name) && haskey(energies2, name)
+        e1 = energies1[name]
+        e2 = energies2[name]
+        c1 = val
+        c2 = energies2[key]
+        eex = (e2 * c1 - e1 * c2) / (c1 - c2)
+        d1 = energies1(name)
+        push!(extrapolated_energies, name => (eex, d1*" (extrapolated)"))
+      end
+    end
+  end
+  return extrapolated_energies
+end
+
 
 end #module

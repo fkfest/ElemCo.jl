@@ -304,6 +304,8 @@ end
   pt2_shift::Float64 = 1e-10
   """`⟨false⟩` Use uncontracted MP2 instead of EN2 """
   use_mp2::Bool = false
+  """`⟨false⟩` Use renormalized PT2 correction: `E_PT2 → E_PT2 / (1 + T2^2)` with `T2` being the PT2 amplitudes. """
+  renorm_pt2::Bool = false
   """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
   nstates::Int = 1
   """`⟨true⟩` Use small-space Hamiltonian for initial guess """

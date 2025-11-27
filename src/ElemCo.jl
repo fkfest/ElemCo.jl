@@ -103,6 +103,8 @@ export @molpro_input, @molpro_output, @check_molproinfo
 export last_energy
 # from DescDict
 export ODDict
+# from Drivers
+export extrapolate
 
 """
     __init__()
