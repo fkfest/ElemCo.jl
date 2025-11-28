@@ -24,7 +24,8 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
                             E_current::Float64,
                             setup_data::HCISetupData,
                             coeffs_dg::Union{Nothing, AbstractVector{Scalar}}=nothing,
-                            detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true)
+                            detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true;
+                            pt2_correct::Bool=false)
   t0 = time_ns()
   shift = options.pt2_shift
   variational_dets = determinants(selected_ctx)
@@ -34,6 +35,13 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   DetType = eltype(variational_dets)
   candidates = Dict{DetType, ExcVals}()
   newcandidates = VecDict{DetType, ExcVals}()  # Temporary storage for new candidates
+  if pt2_correct
+    # for the correct PT2 it's important to add the variational determinants to the candidates space
+    # otherwise the neglected pt estimation might include contributions from variational determinants
+    for det in variational_dets
+      candidates[det] = ExcVals(0.0, 0.0)  # Initialize with zero coefficient
+    end
+  end
   fockd_buf = FockDiagonal(ctx.n_orb) # Reusable Fock diagonal buffer
   spaces_buf = OrbSpaces(ctx.n_orb)  # Reusable orbital spaces buffer
   pt_negl = 0.0
@@ -108,6 +116,9 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
     if options.verbose
       println("  Renormalized PT2 correction by factor $renorm_factor")
     end
+  end
+  if options.verbose
+    println("  |T₂|²(PT2) = $t2sq")
   end
   pt2_correction += pt_negl
   return new_dets, (pt2_correction, pt_negl)
