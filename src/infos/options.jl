@@ -308,6 +308,8 @@ end
   renorm_pt2::Bool = false
   """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
   nstates::Int = 1
+  """`⟨2⟩` Number of steps in the iterative HCI selection (if > 1, the selection process is repeated after convergence)"""
+  nsteps::Int = 2
   """`⟨true⟩` Use small-space Hamiltonian for initial guess """
   use_small_space_guess::Bool = true
   """`⟨0⟩` Size of small space (0 = auto: max(100, target÷10, 5*n_roots)) """

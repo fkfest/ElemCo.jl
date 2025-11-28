@@ -209,7 +209,8 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
   if options.verbose
     println("\nIterative perturbative selection")
   end
-  
+  nsteps = max(options.nsteps, 1)
+
   E_prev_vec = zero(E_init_vec)
   previous_eigenvectors = nothing  # Track previous eigenvectors for warm start
   converged = false
@@ -259,8 +260,16 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
       if options.verbose
         println("  ✓ Converged! max(ΔE) = $ΔE_max < $(options.tol)")
       end
-      converged = true
-      break
+      if nsteps <= 1
+        converged = true
+        break
+      else
+        nsteps -= 1
+        set_n_old_dets!(selected_ctx, 0)
+        if options.verbose
+          println("  Refresh perturbative selection: Remaining steps: $nsteps")
+        end
+      end
     end
 
     if n_selected(selected_ctx) >= options.target_selection
@@ -306,11 +315,19 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
     end
     
     if isempty(new_dets)
-      if options.verbose
-        println("  No new determinants selected. Converged.")
+      if nsteps <= 1
+        if options.verbose
+          println("  No new determinants selected. Converged.")
+        end
+        converged = true
+        break
+      else
+        nsteps -= 1
+        set_n_old_dets!(selected_ctx, 0)
+        if options.verbose
+          println("  Refresh perturbative selection: Remaining steps: $nsteps")
+        end
       end
-      converged = true
-      break
     end
     
     # 5. Update variational space
@@ -454,13 +471,14 @@ function compute_pt2_correction!(selected_ctx::SelectedCIContext,
     if is_hermitian(selected_ctx)
       # For Hermitian case, only need right coefficients
       _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
-                                            options, E_variational[state_idx], setup_data, 
-                                            nothing, sort_indices, false)
+                                            options, E_variational[state_idx], setup_data,
+                                            nothing, sort_indices, false; pt2_correct=true)
     else
       left_idx = state_idx + nstates
       _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
                                             options, E_variational[state_idx], setup_data,
-                                            @view(coefficients[:, left_idx]), sort_indices, false)
+                                            @view(coefficients[:, left_idx]), sort_indices, false; 
+                                            pt2_correct=true)
     end
     if options.verbose
       println("  PT2 correction: $(ΔE[state_idx][1]) ± $(ΔE[state_idx][2]) Ha")

@@ -5,8 +5,8 @@ using ElemCo
   println("\n=== Testing Heat-Bath CI with RHF xTC ===")
   
   epsilon = 1.e-6
-  E_HCI_test = -76.379227285415
-  E_HCI_PT2_test = -76.379742592201
+  E_HCI_test = -76.379229376455
+  E_HCI_PT2_test = -76.379775159873
   
   @print_input
   
