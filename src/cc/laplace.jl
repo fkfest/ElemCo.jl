@@ -24,7 +24,7 @@ Returns (weights, points).
 """
 function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
     # Initial guess for t: geometric progression or from table
-    t = get_initial_laplace_points(npoints, emax-emin; filename=LAPLACE_LIB)
+    t = get_initial_laplace_points(npoints, emax/emin; filename=LAPLACE_LIB)
     # Initial reference points: Chebyshev nodes in [emin,emax]
     x_ref = [0.5*(emin+emax) + 0.5*(emax-emin)*cos(pi*(2*j-1)/(2*npoints+2)) for j in 1:(npoints+1)]
     x_ref = sort(x_ref)
@@ -504,7 +504,7 @@ function get_initial_laplace_points(npoints::Int, delta::Float64; filename::Stri
         t = Float64[]
         while !eof(io)
             line = readline(io)
-            if startswith(line, "t_q")
+            if startswith(line, "n_q")
                 parts = split(line)
                 if length(parts) >= 3 && parse(Int, parts[2]) == npoints && parse(Float64, parts[3]) >= delta
                     # Read npoints numbers in the next line
@@ -791,8 +791,8 @@ function get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoi
     if use_distribution
         return calc_laplace_points_weighted(εo, εv, npoints; use_distribution=true)
     else
-        emin = minimum(εv) - maximum(εo)
-        emax = maximum(εv) - minimum(εo)
+        emin = 2 * (minimum(εv) - maximum(εo))
+        emax = 2 * (maximum(εv) - minimum(εo))
         if emin <= 0
             error("Non-positive energy gap detected.")
         end
