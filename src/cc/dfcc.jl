@@ -19,10 +19,12 @@ using ..ElemCo.OrbTools
 using ..ElemCo.DFTools
 using ..ElemCo.CCTools
 using ..ElemCo.DIIS
+using ..ElemCo.LaplaceQuadrature
 
 export calc_dressed_3idx, save_pseudodressed_3idx, calc_svd_dc
-export calc_dfmp2
+export calc_dfmp2, calc_df_lt_sos_mp2
 include("dfmp2.jl")
+include("df_lt_mp2.jl")
 
 """
     get_ssv_osvˣˣ(EC::ECInfo)

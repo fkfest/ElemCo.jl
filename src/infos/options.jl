@@ -246,6 +246,11 @@ end
   ampsvdtol::Float64 = 1.e-5
 end
 
+@kwdef mutable struct LaplaceOptions
+  """`⟨8⟩` number of Laplace quadrature points. """
+  npoints::Int = 8
+end
+
 """ 
   Options for DMRG calculation.
 
@@ -352,6 +357,8 @@ end
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """
   cholesky::CholeskyOptions = CholeskyOptions()
+  """ Laplace options ([`LaplaceOptions`](@ref)). """
+  laplace::LaplaceOptions = LaplaceOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
   """ Davidson options ([`DavidsonOptions`](@ref)). """

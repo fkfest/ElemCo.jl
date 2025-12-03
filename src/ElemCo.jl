@@ -28,7 +28,6 @@ include("tools/tensortools.jl")
 include("solvers/diis.jl")
 include("solvers/davidson.jl")
 include("cc/laplace.jl")
-include("cc/laplace_noai.jl")
 include("scf/orbtools.jl")
 include("scf/fockfactory.jl")
 include("integrals/dumptools.jl")
@@ -86,7 +85,6 @@ using .DFMCSCF
 using .DfDump
 using .DMRG
 using .Interfaces
-using .LaplaceQuadrature_NOAI 
 
 
 export @mainname, @print_input
@@ -99,7 +97,6 @@ export @import_matrix, @export_molden
 export last_energy
 # from DescDict
 export ODDict
-export get_laplace_quadrature_noai
 
 """
     __init__()

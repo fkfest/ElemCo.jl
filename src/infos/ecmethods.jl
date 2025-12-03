@@ -10,7 +10,7 @@ export has_suffix, set_suffix!
 
 const ExcLevels = "SDTQP"
 
-const Prefix4Methods = String["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R","QV-"]
+const Prefix4Methods = String["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R","QV-","SOS-"]
 const Suffix4Methods = String[]
 
 """

@@ -125,9 +125,14 @@ function dfccdriver(EC::ECInfo, method)
     groundstate_method_name = "SVD-DCSD"
     ECC = calc_svd_dc(EC, ecmethod)
     energies = output_energy(EC, ECC, energies, groundstate_method_name)
-  elseif root_name == "MP2"
-    ECC = calc_dfmp2(EC)
-    energies = output_energy(EC, ECC, energies, main_name)
+  elseif root_name == "MP2" 
+    if has_prefix(ecmethod, "SOS")
+      ECC = calc_df_lt_sos_mp2(EC)
+      energies = output_energy(EC, ECC, energies, main_name)
+    else
+      ECC = calc_dfmp2(EC)
+      energies = output_energy(EC, ECC, energies, main_name)
+    end
   elseif root_name == "CCS"
   else
     error("$main_name DF method not implemented!")
