@@ -39,15 +39,15 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
   
     R = emax/emin
     #ACHTUNG! HIER DANIELS FUNKTION EINFUEGEN UND PRUEFEN, OB ZUERST W ODER T!!!!  
-    t = get_initial_laplace_points_or_weights(npoints, R; filename=LAPLACE_LIB_POINTS)
-    w = get_initial_laplace_points_or_weights(npoints, R; filename=LAPLACE_LIB_WEIGHTS)    
+    t = get_initial_laplace_points_or_weights(npoints, R, LAPLACE_LIB_POINTS)
+    w = get_initial_laplace_points_or_weights(npoints, R, LAPLACE_LIB_WEIGHTS)
 
-    tol = 1e-12 
-    
-         
-    Eta(x) = sum(w[k]*exp(-t[k]*x) for k=1:npoints) - 1/x 
-    d_Eta_dpoints(x,t_q,w_q) = -x * w_q * exp(-t_q * x) 
-    d_Eta_dweights(x,t_q) = exp(-t_q*x)   
+    tol = 1e-6
+    tol_newton = 1e-10
+
+    Eta(x) = sum(w[k]*exp(-t[k]*x) for k=1:npoints) - 1/x
+    d_Eta_dpoints(x,t_q,w_q) = -x * w_q * exp(-t_q * x)
+    d_Eta_dweights(x,t_q) = exp(-t_q*x)
 
     # Find nodal points of Eta(x) in (emin,emax) to set intervals
     roots = Float64[]
@@ -69,7 +69,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
         prev = curr
     end
     # Always use endpoints as reference points
-    nodal_points_of_Eta = [sort(roots)[1:2*npoints]]
+    nodal_points_of_Eta = sort(roots)[1:2*npoints]
     
     if length(nodal_points_of_Eta) < 2*npoints
         println("ATTENTION! Not enough nodal points to span intervals!!!")
@@ -79,7 +79,6 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
 
     maxiter = 100
     
-    x_extrema_list = zeros(2*npoints-1)
     
     #das Nachfolgende ist falsch, da nur 2*npoints-1, oder??
     #x_extrema_list = zeros(2*npoints+1)
@@ -91,6 +90,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
         #determine extrema within respective intervals with grid search
         gridsearch_pointnumber = 1000
        
+        x_extrema_list = [1.0]  #start with 1.0 as first point
         #only until 2*npoints-1 since +1 is within the definiton of the interval limit 
         for i in 1:2*npoints-1
         
@@ -98,19 +98,17 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
             interval_limit_right = nodal_points_of_Eta[i+1]
             interval_steps = abs(interval_limit_right - interval_limit_left)/gridsearch_pointnumber
             
-            gridsearch_points_within_interval =  [interval_limit_left:interval_steps:interval_limit_right;]
-            
             x_max_for_interval = interval_limit_left           
             Eta_old = 0
-            for i in gridsearch_points_within_interval
+            for xi in interval_limit_left:interval_steps:interval_limit_right
                  
-                if Eta(i) > Eta_old
-                    Eta_old = Eta(i)
-                    x_max_for_interval = i
+                if abs(Eta(xi)) > Eta_old
+                    Eta_old = abs(Eta(xi))
+                    x_max_for_interval = xi
                 end           
                     
             end         
-            push!(x_extrema_list,i)  
+            push!(x_extrema_list, x_max_for_interval)  
         end
        
         if length(x_extrema_list) < 2*npoints-1
@@ -118,52 +116,59 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
         end 
        
         #to get to 2k+1 x values, before only 2k-1 extrema were determined
-        x_extrema_list_with_1_and_R = [1,x_extrema_list,R]         
-  
-
+        push!(x_extrema_list, R)
        
+        for i in 1:2*npoints
+            #evaluate Eta(x_i) + Eta(x_(i+1)) for new set of t's and w's
+            gradient[i] = Eta(x_extrema_list[i]) + Eta(x_extrema_list[i+1])
+        end 
+
+        #Hier noch ergaenzen!!!
+        if norm(gradient) < tol
+            break
+        end
+
         vector_weights_and_points_update = zeros(2*npoints) 
         #the gradient only has 2*npoints since it depends on x_i and x_(i+1) 
         #-> it matches the dimension of the number of weigths + points which is each npoints big
         #so the Hessian can be inverted
         gradient = zeros(2*npoints)
         Hessian = zeros(2*npoints,2*npoints) 
-
-        for i in 1:2*npoints
-            #evaluate Eta(x_i) + Eta(x_(i+1))
-            gradient[i] = Eta(x_extrema_list_with_1_and_R[i]) + Eta(x_extrema_list_with_1_and_R[i+1])
-        end 
+        for it_newton in 1:maxiter
+            for i in 1:2*npoints
+                #evaluate Eta(x_i) + Eta(x_(i+1))
+                gradient[i] = Eta(x_extrema_list[i]) + Eta(x_extrema_list[i+1])
+            end 
 
         
-        for i in 1:2*npoints
-            for j in 1:npoints
-                Hessian[i,j] = d_Eta_dpoints(x_extrema_list_with_1_and_R[i],t[j],w[j]) + d_Eta_dpoints(x_extrema_list_with_1_and_R[i+1],t[j],w[j])
-                Hessian[i,j+npoints] = d_Eta_dweights(x_extrema_list_with_1_and_R[i],t[j]) + d_Eta_dweights(x_extrema_list_with_1_and_R[i+1],t[j])
+            for i in 1:2*npoints
+                for j in 1:npoints
+                    Hessian[i,j] = d_Eta_dpoints(x_extrema_list[i],t[j],w[j]) + d_Eta_dpoints(x_extrema_list[i+1],t[j],w[j])
+                    Hessian[i,j+npoints] = d_Eta_dweights(x_extrema_list[i],t[j]) + d_Eta_dweights(x_extrema_list[i+1],t[j])
+                end
             end
-        end
-        
-        vector_weights_and_points_update = Hessian \ (-gradient)        
 
-        #update t's and w's
-        for i in 1:npoints
-            t[i] += vector_weights_and_points_update[i] 
-            w[i] += vector_weights_and_points_update[i+npoints]  
-        end
+            vector_weights_and_points_update = Hessian \ gradient
 
-        #define new eta
-        Eta(x) = sum(w[k]*exp(-t[k]*x) for k=1:npoints) - 1/x 
-                
-        for i in 1:2*npoints
-            #evaluate Eta(x_i) + Eta(x_(i+1)) for new set of t's and w's
-            gradient[i] = Eta(x_extrema_list_with_1_and_R[i]) + Eta(x_extrema_list_with_1_and_R[i+1])
-        end 
+            #update t's and w's
+            for i in 1:npoints
+                t[i] -= vector_weights_and_points_update[i] 
+                w[i] -= vector_weights_and_points_update[i+npoints]  
+            end
+            for i in 1:2*npoints
+                #evaluate Eta(x_i) + Eta(x_(i+1)) for new set of t's and w's
+                gradient[i] = Eta(x_extrema_list[i]) + Eta(x_extrema_list[i+1])
+            end 
 
-        #Hier noch ergaenzen!!!
-        if sum(gradient,dims=1) < tol
-            break
-        end
+            #Hier noch ergaenzen!!!
+            if sum(abs, gradient) < tol_newton
+                break
+            end
+
+        end #iters of Newton-Raphson
 
 
+    
     end #iter
 
 
