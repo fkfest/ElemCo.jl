@@ -32,20 +32,28 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
   t = get_initial_laplace(npoints, R, LAPLACE_LIB_POINTS)
   w = get_initial_laplace(npoints, R, LAPLACE_LIB_WEIGHTS)
 
-  tol = 1e-6
+  tol = 1e-5
   tol_newton = 1e-10
 
   Eta(x) = sum(w[k]*exp(-t[k]*x) for k=1:npoints) - 1/x
   d_Eta_dpoints(x,t_q,w_q) = -x * w_q * exp(-t_q * x)
   d_Eta_dweights(x,t_q) = exp(-t_q*x)
-  
+  d_Eta_dx(x) = - sum(t[k]*w[k]*exp(-t[k]*x) for k=1:npoints) + 1/(x^2) 
+ 
   #evaluate Eta(x_i) + Eta(x_(i+1))
   gradient(xi1,xi2) = Eta(xi1) + Eta(xi2)
 
   #starting guess for extrema in interval 1,R 
-  x_extrema_list = [cos((pi*(j-1))/(2*npoints)) *(R-1)/2 + (R+1)/2 for j in 1:(2*npoints+1)]
+  #x_extrema_list = [cos((pi*(j-1))/(2*npoints)) *(R-1)/2 + (R+1)/2 for j in 1:(2*npoints+1)]
+  
+  x_extrema_list =  determine_nodal_points(d_Eta_dx,R,tol)
   x_extrema_list = sort(x_extrema_list)
+  x_extrema_list = cat(1,x_extrema_list,R,dims=1)
   println(x_extrema_list)
+
+  println(size(x_extrema_list))
+  println(2*npoints+1)
+
   if length(x_extrema_list) < 2*npoints+1
     println("ATTENTION! Not enough extrema!!!")
     #break
@@ -53,7 +61,9 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
 
   maxiter = 100
   for iter = 1:maxiter
-
+    print("iter:")
+    println(iter)
+ 
     vector_weights_and_points_update = zeros(2*npoints) 
     #the gradient only has 2*npoints since it depends on x_i and x_(i+1) 
     #-> it matches the dimension of the number of weigths + points which is each npoints big
@@ -73,7 +83,11 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
         end
       end
 
+      println(det(Hessian))
+
       vector_weights_and_points_update = Hessian \ gradient_vector
+
+      println("Test") 
 
       #update t's and w's
       for i in 1:npoints
@@ -94,26 +108,29 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
     end #iters of Newton-Raphson
     
     # Find nodal points of Eta(x) in (emin,emax) to set intervals
-    roots = Float64[]
-    #scan = range(emin, emax, length=10000)
-    scan = range(1, R, length=10000)
-    prev = Eta(scan[1])
-    for i in 2:length(scan)
-      curr = Eta(scan[i])
-      if prev*curr < 0
-        # Bisection
-        a, b = scan[i-1], scan[i]
-        for _ in 1:200
-          m = (a+b)/2
-          v = Eta(m)
-          if abs(v) < tol; break; end
-          if Eta(a)*v < 0; b = m; else; a = m; end
-        end
-        push!(roots, (a+b)/2)
-      end
-      prev = curr
-    end
     
+   # roots = Float64[]
+   # #scan = range(emin, emax, length=10000)
+   # scan = range(1, R, length=10000)
+   # prev = Eta(scan[1])
+   # for i in 2:length(scan)
+   #   curr = Eta(scan[i])
+   #   if prev*curr < 0
+   #     # Bisection
+   #     a, b = scan[i-1], scan[i]
+   #     for _ in 1:200
+   #       m = (a+b)/2
+   #       v = Eta(m)
+   #       if abs(v) < tol; break; end
+   #       if Eta(a)*v < 0; b = m; else; a = m; end
+   #     end
+   #     push!(roots, (a+b)/2)
+   #   end
+   #   prev = curr
+   # end
+    
+    roots = determine_nodal_points(Eta,R,tol)
+
     if length(roots) < 2*npoints
       println("ATTENTION! Not enough nodal points to span intervals!!!")
       #break
@@ -159,9 +176,10 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
       gradient_vector[i] = gradient(x_extrema_list[i],x_extrema_list[i+1])
     end
 
-
-    #Hier noch ergaenzen!!!
+    
+    println("Test2")
     if norm(gradient_vector) < tol
+      println("Converged!")
       break
     end
         
@@ -177,8 +195,35 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
     t_transformed[i] = t[i]/emin
     w_transformed[i] = w[i]/emin
   end
+  println(t_transformed)
+  println(w_transformed)
   return w_transformed, t_transformed
 end
+
+
+function determine_nodal_points(f::Function,R::Float64,tol::Float64)
+  roots = Float64[]
+  #scan = range(emin, emax, length=10000)
+  scan = range(1, R, length=10000)
+  prev = f(scan[1])
+  for i in 2:length(scan)
+    curr = f(scan[i])
+    if prev*curr < 0
+      # Bisection
+      a, b = scan[i-1], scan[i]
+      for _ in 1:200
+        m = (a+b)/2
+        v = f(m)
+        if abs(v) < tol; break; end
+        if f(a)*v < 0; b = m; else; a = m; end
+      end
+      push!(roots, (a+b)/2)
+    end
+    prev = curr
+  end
+  return roots
+end
+
 
 """
     build_distribution_function(εo::Vector{Float64}, εv::Vector{Float64})
@@ -452,7 +497,7 @@ function get_initial_laplace(npoints::Int, delta::Float64, filename::String)
       line = readline(io)
       if startswith(line, "n_q")
         parts = split(line)
-        if length(parts) >= 3 && parse(Int, parts[2]) == npoints && parse(Float64, parts[3]) >= delta
+        if length(parts) >= 3 && parse(Int, parts[2]) == npoints && parse(Float64, parts[3]) <= delta
           # Read npoints numbers in the next line
           found = true
           t_line = readline(io)
@@ -461,7 +506,9 @@ function get_initial_laplace(npoints::Int, delta::Float64, filename::String)
           for i in 1:npoints
             push!(t, parse(Float64, t_parts[i]))
           end
-          break
+          if parse(Int, parts[2]) > npoints || (parse(Int, parts[2]) == npoints && parse(Float64, parts[3]) > delta)
+            break
+          end
         end
       end
     end
