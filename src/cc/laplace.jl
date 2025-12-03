@@ -32,7 +32,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
   t = get_initial_laplace(npoints, R, LAPLACE_LIB_POINTS)
   w = get_initial_laplace(npoints, R, LAPLACE_LIB_WEIGHTS)
 
-  tol = 1e-5
+  tol = 1e-6
   tol_newton = 1e-10
 
   Eta(x) = sum(w[k]*exp(-t[k]*x) for k=1:npoints) - 1/x
