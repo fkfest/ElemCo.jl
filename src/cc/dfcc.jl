@@ -420,7 +420,45 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     save!(EC, "T_vvoo", T2)
     T2 = nothing
   end
-  UaiX = svd_decompose(reshape(voL, (nvirt*nocc,nL)), nvirt, nocc, tol2)
+  
+
+  println("Test")
+  eps = load1idx(EC, "e_m")
+  ϵo = eps[SP['o']]
+  ϵv = eps[SP['v']]
+  w_laplace, t_laplace = get_laplace_quadrature(ϵo, ϵv, EC.options.laplace.npoints,
+                                                algo=EC.options.laplace.algo)
+  println(w_laplace)
+  println(t_laplace)
+
+  
+  TvoL = zeros(nvirt, nocc, nL*length(t_laplace))
+  #println(length(t_laplace))
+  #println("nL: " * string(nL))
+  for q in eachindex(t_laplace)
+    tq = t_laplace[q]
+    wq = w_laplace[q]
+    for a in 1:nvirt, i in 1:nocc
+      fac = sqrt(abs(wq)) * exp(-tq * (ϵv[a] - ϵo[i]))
+      
+       
+      #println("q: " * string(q))
+      #println(((q-1)*nL))
+      for L in 1:nL
+        TvoL[a,i,L+((q-1)*nL)] = voL[a,i,L] * fac
+      end
+    end
+  end
+
+
+  UaiX = svd_decompose(reshape(TvoL, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
+
+  #UaiX = svd_decompose(reshape(voL, (nvirt*nocc,nL)), nvirt, nocc, tol2)
+  
+
+
+
+
   t1 = print_time(EC, t1, "SVD decomposition", 2)
   # UaiX = calc_3idx_svd_decomposition(EC, voL, tol2) 
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
