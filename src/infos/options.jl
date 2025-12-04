@@ -206,6 +206,8 @@ end
   mp2_osfac::Float64 = 1.2
   """`⟨0.0⟩` Factor for open-shell component in SCS-MP2. """
   mp2_ofac::Float64 = 0.0
+  """`⟨1.3⟩` Factor for opposite-spin component in SOS-MP2. """
+  mp2_sosfac::Float64 = 1.3
   """`⟨1.13⟩` Factor for same-spin component in SCS-CCSD. """
   ccsd_ssfac::Float64 = 1.13
   """`⟨1.27⟩` Factor for opposite-spin component in SCS-CCSD. """
@@ -249,6 +251,8 @@ end
 @kwdef mutable struct LaplaceOptions
   """`⟨8⟩` number of Laplace quadrature points. """
   npoints::Int = 8
+  """`⟨:minimax⟩` algorithm for Laplace quadrature points. (`:minimax` or `:simplex`) """
+  algo::Symbol = :minimax
 end
 
 """ 

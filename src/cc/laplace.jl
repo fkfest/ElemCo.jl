@@ -28,31 +28,41 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
   # Initial guess for t: geometric progression or from table
 
   R = emax/emin
+  println(R)
   #ACHTUNG! HIER DANIELS FUNKTION EINFUEGEN UND PRUEFEN, OB ZUERST W ODER T!!!!  
-  t = get_initial_laplace(npoints, R, LAPLACE_LIB_POINTS)
-  w = get_initial_laplace(npoints, R, LAPLACE_LIB_WEIGHTS)
+  w, t, Rtab = get_initial_laplace_weights_and_points(npoints, R)
 
   tol = 1e-6
+  tol_zero = 1e-10
   tol_newton = 1e-10
 
   Eta(x) = sum(w[k]*exp(-t[k]*x) for k=1:npoints) - 1/x
   d_Eta_dpoints(x,t_q,w_q) = -x * w_q * exp(-t_q * x)
   d_Eta_dweights(x,t_q) = exp(-t_q*x)
-  d_Eta_dx(x) = - sum(t[k]*w[k]*exp(-t[k]*x) for k=1:npoints) + 1/(x^2) 
- 
+  d_Eta_dx(x) = - sum(t[k]*w[k]*exp(-t[k]*x) for k=1:npoints) + 1/(x^2)
+
   #evaluate Eta(x_i) + Eta(x_(i+1))
   gradient(xi1,xi2) = Eta(xi1) + Eta(xi2)
 
   #starting guess for extrema in interval 1,R 
   #x_extrema_list = [cos((pi*(j-1))/(2*npoints)) *(R-1)/2 + (R+1)/2 for j in 1:(2*npoints+1)]
-  
-  x_extrema_list =  determine_nodal_points(d_Eta_dx,R,tol)
+  x_extrema_list =  determine_nodal_points(d_Eta_dx,R,tol_zero)
+
+  if length(x_extrema_list) < 2*npoints-1
+    println("ATTENTION! Not enough extrema for the initial R value 
+    probably since for this pointnumber no smaller R is tabulated as a starting guess.")
+    x_extrema_list =  determine_nodal_points(d_Eta_dx,Rtab,tol_zero)
+    for i in 1:length(x_extrema_list)
+      x_extrema_list[i] = (x_extrema_list[i] - (R-Rtab)/(R-1))/((Rtab-1)/(R-1))
+    end
+  end
+
   x_extrema_list = sort(x_extrema_list)
   x_extrema_list = cat(1,x_extrema_list,R,dims=1)
-  println(x_extrema_list)
+  # println(x_extrema_list)
 
-  println(size(x_extrema_list))
-  println(2*npoints+1)
+  # println(size(x_extrema_list))
+  # println(2*npoints+1)
 
   if length(x_extrema_list) < 2*npoints+1
     println("ATTENTION! Not enough extrema!!!")
@@ -60,9 +70,10 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
   end    
 
   maxiter = 100
+  coverged = false
   for iter = 1:maxiter
-    print("iter:")
-    println(iter)
+    # print("iter:")
+    # println(iter)
  
     vector_weights_and_points_update = zeros(2*npoints) 
     #the gradient only has 2*npoints since it depends on x_i and x_(i+1) 
@@ -83,11 +94,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
         end
       end
 
-      println(det(Hessian))
-
-      vector_weights_and_points_update = Hessian \ gradient_vector
-
-      println("Test") 
+      vector_weights_and_points_update = svd(Hessian) \ gradient_vector
 
       #update t's and w's
       for i in 1:npoints
@@ -129,7 +136,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
    #   prev = curr
    # end
     
-    roots = determine_nodal_points(Eta,R,tol)
+    roots = determine_nodal_points(Eta,R,tol_zero)
 
     if length(roots) < 2*npoints
       println("ATTENTION! Not enough nodal points to span intervals!!!")
@@ -170,21 +177,22 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
     #to get to 2k+1 x values, before only 2k-1 extrema were determined
     push!(x_extrema_list, R)
 
-    gradient_vector = zeros(2*npoints)
     for i in 1:2*npoints
       #evaluate Eta(x_i) + Eta(x_(i+1))
       gradient_vector[i] = gradient(x_extrema_list[i],x_extrema_list[i+1])
     end
 
     
-    println("Test2")
     if norm(gradient_vector) < tol
-      println("Converged!")
+      coverged = true
       break
     end
         
   end #iter
 
+  if !coverged
+    println("WARNING: Laplace point optimization did not converge in $maxiter iterations.")
+  end
 
   #rescale w's and t's
   
@@ -195,8 +203,8 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
     t_transformed[i] = t[i]/emin
     w_transformed[i] = w[i]/emin
   end
-  println(t_transformed)
-  println(w_transformed)
+  # println(t_transformed)
+  # println(w_transformed)
   return w_transformed, t_transformed
 end
 
@@ -204,18 +212,18 @@ end
 function determine_nodal_points(f::Function,R::Float64,tol::Float64)
   roots = Float64[]
   #scan = range(emin, emax, length=10000)
-  scan = range(1, R, length=10000)
+  scan = range(1, R, length=100000)
   prev = f(scan[1])
   for i in 2:length(scan)
     curr = f(scan[i])
-    if prev*curr < 0
+    if prev*curr <= 0.0
       # Bisection
       a, b = scan[i-1], scan[i]
       for _ in 1:200
         m = (a+b)/2
         v = f(m)
         if abs(v) < tol; break; end
-        if f(a)*v < 0; b = m; else; a = m; end
+        if f(a)*v <= 0.0; b = m; else; a = m; end
       end
       push!(roots, (a+b)/2)
     end
@@ -480,42 +488,65 @@ function find_roots(H::Function, tmin::Float64, tmax::Float64, nroots::Int, tol:
 end
 
 """
-    get_initial_laplace(npoints::Int, delta::Float64, filename::String)
+    get_initial_laplace_weights_and_points(npoints::Int, R::Float64, filename::String)
+
+Obtain initial guess for Laplace quadrature points and weights from a table file and rescale them.
+- npoints: number of quadrature points
+- R: emax/emin
+- filename: path to the table file
+
+Returns: Vector of weights (w) and points (t)
+"""
+function get_initial_laplace_weights_and_points(npoints::Int, R::Float64) 
+  w, Rtab = get_initial_laplace(npoints, R, LAPLACE_LIB_WEIGHTS)
+  t, Rtab = get_initial_laplace(npoints, R, LAPLACE_LIB_POINTS)
+  println("Using tabulated Laplace points and weights with Rtab = $Rtab for R = $R")
+  return w, t, Rtab
+end
+
+"""
+    get_initial_laplace(npoints::Int, R::Float64, filename::String)
 
 Obtain initial guess for Laplace quadrature points from a table file.
 - npoints: number of quadrature points
-- delta: emax/emin
+- R: emax/emin
 - filename: path to the table file
 
-Returns: Vector of points (t)
+Returns: Vector of points (t) or weights (w) and the tabulated R
 """
-function get_initial_laplace(npoints::Int, delta::Float64, filename::String)
+function get_initial_laplace(npoints::Int, R::Float64, filename::String)
   open(filename, "r") do io
     found = false
     t = Float64[]
+    Rtab = R
     while !eof(io)
       line = readline(io)
       if startswith(line, "n_q")
         parts = split(line)
-        if length(parts) >= 3 && parse(Int, parts[2]) == npoints && parse(Float64, parts[3]) <= delta
-          # Read npoints numbers in the next line
-          found = true
-          t_line = readline(io)
-          t_parts = split(t_line)
-          t = Float64[] 
-          for i in 1:npoints
-            push!(t, parse(Float64, t_parts[i]))
+        if length(parts) >= 3
+          nq = parse(Int, parts[2])
+          Rval = parse(Float64, parts[3])
+          if nq == npoints && ( Rval <= R || !found )
+            # Read npoints numbers in the next line
+            found = true
+            t_line = readline(io)
+            t_parts = split(t_line)
+            t = Float64[] 
+            for i in 1:npoints
+              push!(t, parse(Float64, t_parts[i]))
+            end
+            Rtab = Rval
           end
-          if parse(Int, parts[2]) > npoints || (parse(Int, parts[2]) == npoints && parse(Float64, parts[3]) > delta)
+          if nq > npoints || (nq == npoints && Rval > R)
             break
           end
         end
       end
     end
     if !found
-      error("No entry found in $(filename) for npoints=$(npoints), delta>=$(delta)")
+      error("No entry found in $(filename) for npoints=$(npoints), R>=$(R)")
     end
-    return t
+    return t, Rtab
   end
 end
 
@@ -744,7 +775,7 @@ function calc_laplace_points_simplex(εo::Vector{Float64}, εv::Vector{Float64},
   else
     # Optimize all points
     # Initial guess (geometric progression)
-    t_init = get_initial_laplace(npoints, xmax-xmin, LAPLACE_LIB_POINTS)
+    t_init, Rtab = get_initial_laplace(npoints, xmax-xmin, LAPLACE_LIB_POINTS)
     # t_init = [xmin * (xmax/xmin)^((k-1)/(npoints-1)) for k in 1:npoints]
     
     # Objective function
@@ -763,7 +794,12 @@ end
 """
     get_laplace_quadrature_simplex(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int)
 
+Given occupied and virtual orbital energies, compute Laplace quadrature points and weights.
+When use_distribution=true, uses distribution function weighting for improved accuracy.
 Wrapper function for simplex-based Laplace quadrature calculation.
+
+Returns:
+- Tuple (weights, points): wq and tq for Laplace quadrature
 """
 function get_laplace_quadrature_simplex(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int)
   emin = minimum(εv) - maximum(εo)
@@ -775,15 +811,18 @@ function get_laplace_quadrature_simplex(εo::Vector{Float64}, εv::Vector{Float6
 end
 
 """
-    get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; use_distribution::Bool=false)
+    get_laplace_quadrature_minimax(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; use_distribution::Bool=false)
 
 Given occupied and virtual orbital energies, compute Laplace quadrature points and weights.
 When use_distribution=true, uses distribution function weighting for improved accuracy.
+Wrapper function for minimax-based Laplace quadrature calculation.
 
 Returns:
 - Tuple (weights, points): wq and tq for Laplace quadrature
 """
-function get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; use_distribution::Bool=false)
+function get_laplace_quadrature_minimax(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; 
+                                use_distribution::Bool=false)
+  
   if use_distribution
     error("Weighted Laplace quadrature not yet implemented in this function.")
     # return calc_laplace_points_weighted(εo, εv, npoints; use_distribution=true)
@@ -794,6 +833,28 @@ function get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoi
       error("Non-positive energy gap detected.")
     end
     return calc_laplace_points(emin, emax, npoints)
+  end
+end
+
+"""
+    get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; use_distribution::Bool=false, algo=:minimax)
+
+Given occupied and virtual orbital energies, compute Laplace quadrature points and weights.
+When use_distribution=true, uses distribution function weighting for improved accuracy.
+`algo` parameter selects the algorithm (:minimax or :simplex).
+
+Returns:
+- Tuple (weights, points): wq and tq for Laplace quadrature
+"""
+function get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; 
+                                use_distribution::Bool=false, algo=:minimax)
+  
+  if algo == :simplex
+    return get_laplace_quadrature_simplex(εo, εv, npoints)
+  elseif algo == :minimax
+     return get_laplace_quadrature_minimax(εo, εv, npoints; use_distribution=use_distribution)
+  else
+    error("Unknown algorithm specified: $algo. Use :minimax or :simplex.")
   end
 end
 
