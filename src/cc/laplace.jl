@@ -9,28 +9,28 @@ or using the Häser-Almlöf simplex method.
 It includes functions for both unweighted and weighted Laplace quadrature, where the latter uses a distribution function to improve accuracy.
 """
 module LaplaceQuadrature
-
 using LinearAlgebra
 export get_laplace_quadrature, get_laplace_quadrature_simplex
 
-const LAPLACE_LIB_POINTS = joinpath(@__DIR__, "..", "..", "lib", "laplace_points")
-const LAPLACE_LIB_WEIGHTS = joinpath(@__DIR__, "..", "..", "lib", "laplace_weights")
+const LAPLACE_LIB = joinpath(@__DIR__, "..", "..", "lib", "laplace_points")
+
+const Scalar = Float64
 
 """
-    calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
+    calc_laplace_points(emin, emax, npoints::Int)
 
 Compute Laplace quadrature points and weights for Laplace MP2 using the minimax (Remez) algorithm
 from Takatsuka et al., J. Chem. Phys. 129, 044112 (2008).
 Returns (weights, points).
 """
-function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
+function calc_laplace_points(emin, emax, npoints::Int)
   # Initial guess for t and w from table
-  R = emax/emin
-  w, t, Rtab = get_initial_laplace_weights_and_points(npoints, R)
+  R = Scalar(emax)/Scalar(emin)
+  t, w, Rtab = get_initial_laplace(npoints, R, LAPLACE_LIB)
 
-  tol = 1e-8
-  tol_zero = 1e-10
-  tol_newton = 1e-10
+  tol = Scalar(1e-8)
+  tol_zero = Scalar(1e-10)
+  tol_newton = Scalar(1e-10)
 
   Eta(x) = sum(w[k]*exp(-t[k]*x) for k=1:npoints) - 1/x
   d_Eta_dpoints(x,t_q,w_q) = -x * w_q * exp(-t_q * x)
@@ -42,12 +42,12 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
 
   #starting guess for extrema in interval 1,R 
   #x_extrema_list = [cos((pi*(j-1))/(2*npoints)) *(R-1)/2 + (R+1)/2 for j in 1:(2*npoints+1)]
-  x_extrema_list =  determine_nodal_points(d_Eta_dx,R,tol_zero)
+  x_extrema_list =  determine_nodal_points(d_Eta_dx, R, tol_zero)
 
   if length(x_extrema_list) < 2*npoints-1
     println("ATTENTION! Not enough extrema for the initial R value 
     probably since for this pointnumber no smaller R is tabulated as a starting guess.")
-    x_extrema_list =  determine_nodal_points(d_Eta_dx,Rtab,tol_zero)
+    x_extrema_list =  determine_nodal_points(d_Eta_dx, Rtab, tol_zero)
     for i in eachindex(x_extrema_list)
       x_extrema_list[i] = (x_extrema_list[i] - (R-Rtab)/(R-1))/((Rtab-1)/(R-1))
     end
@@ -71,12 +71,12 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
     # print("iter:")
     # println(iter)
  
-    vector_weights_and_points_update = zeros(2*npoints) 
+    vector_weights_and_points_update = zeros(Scalar, 2*npoints) 
     #the gradient only has 2*npoints since it depends on x_i and x_(i+1) 
     #-> it matches the dimension of the number of weigths + points which is each npoints big
     #so the Hessian can be inverted
-    gradient_vector = zeros(2*npoints)
-    Hessian = zeros(2*npoints,2*npoints) 
+    gradient_vector = zeros(Scalar, 2*npoints)
+    Hessian = zeros(Scalar, 2*npoints,2*npoints) 
     for it_newton in 1:maxiter
       for i in 1:2*npoints
         #evaluate Eta(x_i) + Eta(x_(i+1))
@@ -132,7 +132,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
    #   prev = curr
    # end
     
-    roots = determine_nodal_points(Eta,R,tol_zero)
+    roots = determine_nodal_points(Eta, R, tol_zero)
 
     if length(roots) < 2*npoints
       println("ATTENTION! Not enough nodal points to span intervals!!!")
@@ -205,8 +205,8 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
 end
 
 
-function determine_nodal_points(f::Function,R::Float64,tol::Float64)
-  roots = Float64[]
+function determine_nodal_points(f::Function, R::Scalar, tol::Scalar)
+  roots = Scalar[]
   #scan = range(emin, emax, length=10000)
   scan = range(1, R, length=100000)
   prev = f(scan[1])
@@ -242,7 +242,7 @@ Returns:
 """
 function build_distribution_function(εo::Vector{Float64}, εv::Vector{Float64})
   # Calculate all energy denominators Δᵢᵃ = εₐ - εᵢ
-  Δ = [εv[a] - εo[i] for i in eachindex(εo), a in eachindex(εv)]
+  Δ = [Scalar(εv[a] - εo[i]) for i in eachindex(εo), a in eachindex(εv)]
   Δ_vec = vec(Δ)
   
   xmin = minimum(Δ_vec)
@@ -251,7 +251,7 @@ function build_distribution_function(εo::Vector{Float64}, εv::Vector{Float64})
   # First histogram: 600 bins for individual Δᵢᵃ
   nbins_single = 600
   bin_edges = range(xmin, xmax, length=nbins_single+1)
-  hist1 = zeros(nbins_single)
+  hist1 = zeros(Scalar, nbins_single)
   
   # Fill histogram with Δᵢᵃ values
   for δ in Δ_vec
@@ -264,8 +264,8 @@ function build_distribution_function(εo::Vector{Float64}, εv::Vector{Float64})
   
   # Combined histogram: 1200 bins
   nbins_total = 1200
-  x_grid = zeros(nbins_total)
-  f_x = zeros(nbins_total)
+  x_grid = zeros(Scalar, nbins_total)
+  f_x = zeros(Scalar, nbins_total)
   
   # Create logarithmic grid for final distribution
   log_xmin = log(xmin)
@@ -276,7 +276,7 @@ function build_distribution_function(εo::Vector{Float64}, εv::Vector{Float64})
   end
   
   # Interpolate and combine histograms
-  bin_centers = [(bin_edges[i] + bin_edges[i+1]) / 2 for i in 1:nbins_single]
+  bin_centers = [Scalar((bin_edges[i] + bin_edges[i+1]) / 2) for i in 1:nbins_single]
   
   for i in 1:nbins_total
     x = x_grid[i]
@@ -298,11 +298,11 @@ function build_distribution_function(εo::Vector{Float64}, εv::Vector{Float64})
 end
 
 """
-    interpolate_linear(x_data::Vector{Float64}, y_data::Vector{Float64}, x::Float64)
+    interpolate_linear(x_data::Vector{Scalar}, y_data::Vector{Scalar}, x::Scalar)
 
 Linear interpolation helper function.
 """
-function interpolate_linear(x_data::Vector{Float64}, y_data::Vector{Float64}, x::Float64)
+function interpolate_linear(x_data::Vector{Scalar}, y_data::Vector{Scalar}, x::Scalar)
   if x <= x_data[1]
     return y_data[1]
   elseif x >= x_data[end]
@@ -325,17 +325,17 @@ function interpolate_linear(x_data::Vector{Float64}, y_data::Vector{Float64}, x:
 end
 
 """
-    select_weighted_reference_points(x_grid::Vector{Float64}, f_x::Vector{Float64}, nref::Int, emin::Float64, emax::Float64)
+    select_weighted_reference_points(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, nref::Int, emin::Scalar, emax::Scalar)
 
 Select initial reference points using distribution function weighting.
 """
-function select_weighted_reference_points(x_grid::Vector{Float64}, f_x::Vector{Float64}, nref::Int, emin::Float64, emax::Float64)
+function select_weighted_reference_points(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, nref::Int, emin::Scalar, emax::Scalar)
   # Start with Chebyshev nodes as base points
   x_cheb = [0.5*(emin+emax) + 0.5*(emax-emin)*cos(pi*(2*j-1)/(2*nref)) for j in 1:nref]
   sort!(x_cheb)
   
   # Ensure endpoints are included and points are well-separated
-  x_ref = Float64[]
+  x_ref = Scalar[]
   push!(x_ref, emin)
   
   # Add interior points, ensuring minimum separation
@@ -356,11 +356,11 @@ function select_weighted_reference_points(x_grid::Vector{Float64}, f_x::Vector{F
 end
 
 """
-    interpolate_distribution(x::Float64, x_grid::Vector{Float64}, f_x::Vector{Float64})
+    interpolate_distribution(x::Scalar, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
 
 Interpolate distribution function value at point x.
 """
-function interpolate_distribution(x::Float64, x_grid::Vector{Float64}, f_x::Vector{Float64})
+function interpolate_distribution(x::Scalar, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
   if x <= x_grid[1]
     return f_x[1]
   elseif x >= x_grid[end]
@@ -376,14 +376,14 @@ function interpolate_distribution(x::Float64, x_grid::Vector{Float64}, f_x::Vect
 end
 
 """
-    find_weighted_extrema(E::Function, dE::Function, x_grid::Vector{Float64}, f_x::Vector{Float64}, 
-                         emin::Float64, emax::Float64, nroots::Int, tol::Float64)
+    find_weighted_extrema(E::Function, dE::Function, x_grid::Vector{Scalar}, f_x::Vector{Scalar}, 
+                         emin::Scalar, emax::Scalar, nroots::Int, tol::Scalar)
 
 Find extrema of the error function weighted by the distribution function.
 """
-function find_weighted_extrema(E::Function, dE::Function, x_grid::Vector{Float64}, f_x::Vector{Float64}, 
-                            emin::Float64, emax::Float64, nroots::Int, tol::Float64)
-  roots = Float64[]
+function find_weighted_extrema(E::Function, dE::Function, x_grid::Vector{Scalar}, f_x::Vector{Scalar}, 
+                            emin::Scalar, emax::Scalar, nroots::Int, tol::Scalar)
+  roots = Scalar[]
   scan = range(emin, emax, length=2000)
   
   # Weighted derivative: f(x) * dE(x)
@@ -410,11 +410,11 @@ function find_weighted_extrema(E::Function, dE::Function, x_grid::Vector{Float64
 end
 
 """
-    sample_from_distribution(x_grid::Vector{Float64}, f_x::Vector{Float64}, emin::Float64, emax::Float64)
+    sample_from_distribution(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, emin::Scalar, emax::Scalar)
 
 Sample a point from the distribution function (inverse transform sampling).
 """
-function sample_from_distribution(x_grid::Vector{Float64}, f_x::Vector{Float64}, emin::Float64, emax::Float64)
+function sample_from_distribution(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, emin::Scalar, emax::Scalar)
   # Find grid points within [emin, emax]
   mask = (x_grid .>= emin) .& (x_grid .<= emax)
   x_sub = x_grid[mask]
@@ -437,13 +437,13 @@ function sample_from_distribution(x_grid::Vector{Float64}, f_x::Vector{Float64},
 end
 
 """
-    compute_weighted_barycentric_weights(x_ref::Vector{Float64}, x_grid::Vector{Float64}, f_x::Vector{Float64})
+    compute_weighted_barycentric_weights(x_ref::Vector{Scalar}, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
 
 Compute barycentric weights considering distribution function.
 """
-function compute_weighted_barycentric_weights(x_ref::Vector{Float64}, x_grid::Vector{Float64}, f_x::Vector{Float64})
+function compute_weighted_barycentric_weights(x_ref::Vector{Scalar}, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
   n = length(x_ref)
-  beta = zeros(n)
+  beta = zeros(Scalar, n)
   
   for j in 1:n
     weight_j = interpolate_distribution(x_ref[j], x_grid, f_x)
@@ -455,12 +455,12 @@ function compute_weighted_barycentric_weights(x_ref::Vector{Float64}, x_grid::Ve
 end
 
 """
-    find_roots(H::Function, tmin::Float64, tmax::Float64, nroots::Int, tol::Float64)
+    find_roots(H::Function, tmin::Scalar, tmax::Scalar, nroots::Int, tol::Scalar)
 
 Find roots of function H in interval [tmin, tmax].
 """
-function find_roots(H::Function, tmin::Float64, tmax::Float64, nroots::Int, tol::Float64)
-  roots = Float64[]
+function find_roots(H::Function, tmin::Scalar, tmax::Scalar, nroots::Int, tol::Scalar)
+  roots = Scalar[]
   scan = range(tmin, tmax, length=2000)
   
   prev = H(scan[1])
@@ -484,36 +484,20 @@ function find_roots(H::Function, tmin::Float64, tmax::Float64, nroots::Int, tol:
 end
 
 """
-    get_initial_laplace_weights_and_points(npoints::Int, R::Float64, filename::String)
-
-Obtain initial guess for Laplace quadrature points and weights from a table file and rescale them.
-- npoints: number of quadrature points
-- R: emax/emin
-- filename: path to the table file
-
-Returns: Vector of weights (w) and points (t)
-"""
-function get_initial_laplace_weights_and_points(npoints::Int, R::Float64) 
-  w, Rtab = get_initial_laplace(npoints, R, LAPLACE_LIB_WEIGHTS)
-  t, Rtab = get_initial_laplace(npoints, R, LAPLACE_LIB_POINTS)
-  println("Using tabulated Laplace points and weights with Rtab = $Rtab for R = $R")
-  return w, t, Rtab
-end
-
-"""
-    get_initial_laplace(npoints::Int, R::Float64, filename::String)
+    get_initial_laplace(npoints::Int, R::Scalar, filename::String)
 
 Obtain initial guess for Laplace quadrature points from a table file.
 - npoints: number of quadrature points
 - R: emax/emin
 - filename: path to the table file
 
-Returns: Vector of points (t) or weights (w) and the tabulated R
+Returns: Vector of points (t), weights (w) and the tabulated R
 """
-function get_initial_laplace(npoints::Int, R::Float64, filename::String)
+function get_initial_laplace(npoints::Int, R::Scalar, filename::String)
   open(filename, "r") do io
     found = false
-    t = Float64[]
+    t = Scalar[]
+    w = Scalar[]
     Rtab = R
     while !eof(io)
       line = readline(io)
@@ -521,15 +505,21 @@ function get_initial_laplace(npoints::Int, R::Float64, filename::String)
         parts = split(line)
         if length(parts) >= 3
           nq = parse(Int, parts[2])
-          Rval = parse(Float64, parts[3])
+          Rval = parse(Scalar, parts[3])
           if nq == npoints && ( Rval <= R || !found )
             # Read npoints numbers in the next line
             found = true
             t_line = readline(io)
             t_parts = split(t_line)
-            t = Float64[] 
+            t = Scalar[] 
             for i in 1:npoints
-              push!(t, parse(Float64, t_parts[i]))
+              push!(t, parse(Scalar, t_parts[i]))
+            end
+            w = Scalar[]
+            w_line = readline(io)
+            w_parts = split(w_line)
+            for i in 1:npoints
+              push!(w, parse(Scalar, w_parts[i]))
             end
             Rtab = Rval
           end
@@ -539,15 +529,17 @@ function get_initial_laplace(npoints::Int, R::Float64, filename::String)
         end
       end
     end
-    if !found
+    if found
+      println("Using tabulated Laplace points and weights for npoints=$(npoints) with Rtab = $Rtab for R = $R")
+    else
       error("No entry found in $(filename) for npoints=$(npoints), R>=$(R)")
     end
-    return t, Rtab
+    return t, w, Rtab
   end
 end
 
 """
-    calculate_weights(t_points::Vector{Float64}, x_grid::Vector{Float64}, f_x::Vector{Float64})
+    calculate_weights(t_points::Vector{Scalar}, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
 
 Calculate optimal weights for given t_points by solving the linear least-squares system.
 The weights minimize ∫ f(x) * (1/x - Σq wq * exp(-x*tq))² dx.
@@ -555,7 +547,7 @@ The weights minimize ∫ f(x) * (1/x - Σq wq * exp(-x*tq))² dx.
 Returns:
 - w: Optimal weights
 """
-function calculate_weights(t_points::Vector{Float64}, x_grid::Vector{Float64}, f_x::Vector{Float64})
+function calculate_weights(t_points::Vector{Scalar}, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
   npoints = length(t_points)
   ngrid = length(x_grid)
   
@@ -563,8 +555,8 @@ function calculate_weights(t_points::Vector{Float64}, x_grid::Vector{Float64}, f
   # where A[i,j] = ∫ f(x) * exp(-x*tᵢ) * exp(-x*tⱼ) dx
   # and   b[i]   = ∫ f(x) * exp(-x*tᵢ) * (1/x) dx
   
-  A = zeros(npoints, npoints)
-  b = zeros(npoints)
+  A = zeros(Scalar, npoints, npoints)
+  b = zeros(Scalar, npoints)
   
   # Numerical integration using trapezoidal rule
   for k in 1:ngrid-1
@@ -603,12 +595,12 @@ function calculate_weights(t_points::Vector{Float64}, x_grid::Vector{Float64}, f
 end
 
 """
-    objective_function(t_points::Vector{Float64}, x_grid::Vector{Float64}, f_x::Vector{Float64})
+    objective_function(t_points::Vector{Scalar}, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
 
 Compute the least-squares objective function for given t_points.
 Returns the value of ∫ f(x) * (1/x - Σq wq * exp(-x*tq))² dx.
 """
-function objective_function(t_points::Vector{Float64}, x_grid::Vector{Float64}, f_x::Vector{Float64})
+function objective_function(t_points::Vector{Scalar}, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
   w = calculate_weights(t_points, x_grid, f_x)
   
   objective = 0.0
@@ -635,7 +627,7 @@ function objective_function(t_points::Vector{Float64}, x_grid::Vector{Float64}, 
 end
 
 """
-    nelder_mead_simplex(f, x0::Vector{Float64}; 
+    nelder_mead_simplex(f, x0::Vector{Scalar}; 
                         maxiter=1000, tol=1e-8, α=1.0, β=0.5, γ=2.0, δ=0.5)
 
 Simple Nelder-Mead simplex optimization.
@@ -643,12 +635,12 @@ Simple Nelder-Mead simplex optimization.
 - x0: initial point
 - Returns: optimized point
 """
-function nelder_mead_simplex(f, x0::Vector{Float64}; 
+function nelder_mead_simplex(f, x0::Vector{Scalar}; 
                            maxiter=1000, tol=1e-8, α=1.0, β=0.5, γ=2.0, δ=0.5)
   n = length(x0)
   
   # Initialize simplex
-  simplex = Vector{Vector{Float64}}(undef, n+1)
+  simplex = Vector{Vector{Scalar}}(undef, n+1)
   simplex[1] = copy(x0)
   
   for i in 2:n+1
@@ -723,7 +715,7 @@ end
 
 """
     calc_laplace_points_simplex(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int;
-                               include_zero::Bool=true, maxiter::Int=1000, tol::Float64=1e-8)
+                               include_zero::Bool=true, maxiter::Int=1000, tol::Scalar=1e-8)
 
 Calculate Laplace quadrature points and weights using the Häser-Almlöf simplex method.
 
@@ -739,7 +731,7 @@ Returns:
 - Tuple (weights, points): wq and tq for Laplace quadrature
 """
 function calc_laplace_points_simplex(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int;
-                                   include_zero::Bool=true, maxiter::Int=1000, tol::Float64=1e-8)
+                                   include_zero::Bool=true, maxiter::Int=1000, tol::Scalar=1e-8)
     
   # Build distribution function
   x_grid, f_x, xmin, xmax = build_distribution_function(εo, εv)
@@ -752,11 +744,11 @@ function calc_laplace_points_simplex(εo::Vector{Float64}, εv::Vector{Float64},
     if n_optimize > 0
       t_init = [xmin * (xmax/xmin)^((k-1)/(n_optimize-1)) for k in 1:n_optimize]
     else
-      t_init = Float64[]
+      t_init = Scalar[]
     end
     
     # Objective function that includes t=0
-    function obj_with_zero(t_vars::Vector{Float64})
+    function obj_with_zero(t_vars::Vector{Scalar})
       t_full = [0.0; t_vars]
       return objective_function(t_full, x_grid, f_x)
     end
@@ -771,7 +763,7 @@ function calc_laplace_points_simplex(εo::Vector{Float64}, εv::Vector{Float64},
   else
     # Optimize all points
     # Initial guess (geometric progression)
-    t_init, Rtab = get_initial_laplace(npoints, xmax-xmin, LAPLACE_LIB_POINTS)
+    t_init, w_init, Rtab = get_initial_laplace(npoints, xmax-xmin, LAPLACE_LIB)
     # t_init = [xmin * (xmax/xmin)^((k-1)/(npoints-1)) for k in 1:npoints]
     
     # Objective function
