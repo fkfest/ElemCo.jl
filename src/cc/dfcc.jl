@@ -400,7 +400,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   # TODO: add shifted Laplace transform!
   mmLfile, mmL = mmap3idx(EC, "mmL")
   nL = size(mmL, 3)
-  tol2 = sqrt(EC.options.cc.ampsvdtol)*EC.options.cc.ampsvdfac
+  tol2 = sqrt(EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
   voL = mmL[SP['v'],SP['o'],:]
   shifti = EC.options.cc.deco_ishiftp
   fullEMP2 = calc_MP2_from_3idx(EC, voL, shifti)
@@ -421,44 +421,24 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     T2 = nothing
   end
   
-
-  println("Test")
-  eps = load1idx(EC, "e_m")
-  ϵo = eps[SP['o']]
-  ϵv = eps[SP['v']]
+  ϵo, ϵv = orbital_energies(EC)
   w_laplace, t_laplace = get_laplace_quadrature(ϵo, ϵv, EC.options.laplace.npoints,
                                                 algo=EC.options.laplace.algo)
-  println(w_laplace)
-  println(t_laplace)
-
-  
+  # println(w_laplace)
+  # println(t_laplace)
   TvoL = zeros(nvirt, nocc, nL*length(t_laplace))
-  #println(length(t_laplace))
-  #println("nL: " * string(nL))
   for q in eachindex(t_laplace)
     tq = t_laplace[q]
     wq = w_laplace[q]
     for a in 1:nvirt, i in 1:nocc
       fac = sqrt(abs(wq)) * exp(-tq * (ϵv[a] - ϵo[i]))
-      
-       
-      #println("q: " * string(q))
-      #println(((q-1)*nL))
       for L in 1:nL
         TvoL[a,i,L+((q-1)*nL)] = voL[a,i,L] * fac
       end
     end
   end
-
-
   UaiX = svd_decompose(reshape(TvoL, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
-
-  #UaiX = svd_decompose(reshape(voL, (nvirt*nocc,nL)), nvirt, nocc, tol2)
-  
-
-
-
-
+  # UaiX = svd_decompose(reshape(voL, (nvirt*nocc,nL)), nvirt, nocc, tol2)
   t1 = print_time(EC, t1, "SVD decomposition", 2)
   # UaiX = calc_3idx_svd_decomposition(EC, voL, tol2) 
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
@@ -467,7 +447,6 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   # calculate half-decomposed imaginary-shifted MP2 amplitudes 
   # T^i_{aX} = -v_{aX}^{i} * (ϵ_a - ϵ_i + ϵ_X)/((ϵ_a - ϵ_i - ϵ_X)^2 + ω)
   # TODO: use a better method than MP2
-  ϵo, ϵv = orbital_energies(EC)
   for I ∈ CartesianIndices(voX)
     a,i,X = Tuple(I)
     den = ϵX[X] + ϵv[a] - ϵo[i]

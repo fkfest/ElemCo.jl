@@ -24,15 +24,11 @@ from Takatsuka et al., J. Chem. Phys. 129, 044112 (2008).
 Returns (weights, points).
 """
 function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
-
-  # Initial guess for t: geometric progression or from table
-
+  # Initial guess for t and w from table
   R = emax/emin
-  println(R)
-  #ACHTUNG! HIER DANIELS FUNKTION EINFUEGEN UND PRUEFEN, OB ZUERST W ODER T!!!!  
   w, t, Rtab = get_initial_laplace_weights_and_points(npoints, R)
 
-  tol = 1e-6
+  tol = 1e-8
   tol_zero = 1e-10
   tol_newton = 1e-10
 
@@ -52,7 +48,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
     println("ATTENTION! Not enough extrema for the initial R value 
     probably since for this pointnumber no smaller R is tabulated as a starting guess.")
     x_extrema_list =  determine_nodal_points(d_Eta_dx,Rtab,tol_zero)
-    for i in 1:length(x_extrema_list)
+    for i in eachindex(x_extrema_list)
       x_extrema_list[i] = (x_extrema_list[i] - (R-Rtab)/(R-1))/((Rtab-1)/(R-1))
     end
   end
@@ -94,7 +90,7 @@ function calc_laplace_points(emin::Float64, emax::Float64, npoints::Int)
         end
       end
 
-      vector_weights_and_points_update = svd(Hessian) \ gradient_vector
+      vector_weights_and_points_update = Hessian \ gradient_vector
 
       #update t's and w's
       for i in 1:npoints
@@ -850,6 +846,7 @@ function get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoi
                                 use_distribution::Bool=false, algo=:minimax)
   
   if algo == :simplex
+    @warn("Simplex-based Laplace quadrature is not tested, use with caution.")
     return get_laplace_quadrature_simplex(εo, εv, npoints)
   elseif algo == :minimax
      return get_laplace_quadrature_minimax(εo, εv, npoints; use_distribution=use_distribution)
