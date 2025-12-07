@@ -45,8 +45,8 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
 
         w_laplace, t_laplace = get_laplace_quadrature(ϵo, ϵv, EC.options.laplace.npoints,
                                                       algo=EC.options.laplace.algo,εexc_state=energies[st])
-        println(w_laplace)
-        println(t_laplace)
+        #println(w_laplace)
+        #println(t_laplace)
         
         ooLfile, dv_ooL = mmap3idx(EC, "d_ooL")
         vvLfile, dv_vvL = mmap3idx(EC, "d_vvL") 
@@ -88,10 +88,10 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
         #close(voLfile)
         #Second_UaiX = svd_decompose(reshape(TA, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
 
-        include_integrals_in_svd_space=3      
+        svd_space_option=4 
 
-        if include_integrals_in_svd_space == 1
-
+        if svd_space_option == 1
+         println("Option 1")
           voLfile, dv_voL = mmap3idx(EC, "d_voL")
           for q in eachindex(t_laplace)
             tq = t_laplace[q]
@@ -104,31 +104,71 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
             end
           end
           close(voLfile)
-          
           @mtensor TAP[a,i,L] := TA[a,i,L] - First_UaiX[a,i,bX] * First_UaiX[b,j,bX] * TA[b,j,L]
-          
           Second_UaiX = svd_decompose(reshape(TAP, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
-         
-          
           Combination_UaiX = cat(First_UaiX, Second_UaiX, dims=3)
           println(size(First_UaiX)) 
           println(size(Second_UaiX)) 
           println(size(Combination_UaiX))         
-         
           UaiX = svd_decompose(reshape(Combination_UaiX, (nvirt*nocc,size(Combination_UaiX)[3])), nvirt, nocc, tol2) 
         
-        elseif include_integrals_in_svd_space == 2
+        elseif svd_space_option == 2
+          println("Option 2")
           UaiX = First_UaiX
         
-        elseif include_integrals_in_svd_space == 3
-        
+        elseif svd_space_option == 3 
+          println("Option 3")
           R2 = calc_R2_df_cis_pert_d(EC, U1)
           new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2        
           ovLfile, dv_ovL = mmap3idx(EC, "d_ovL")
           @mtensor A[a,i,L] := R2[a,b,i,j] * dv_ovL[j,b,L]
           close(ovLfile) 
-        
           UaiX = svd_decompose(reshape(A, (nvirt*nocc,nL)), nvirt, nocc, tol2)
+        
+        elseif svd_space_option == 4
+          println("Option 4") 
+          R2 = calc_R2_df_cis_pert_d(EC, U1)
+          new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2
+          println(size(R2))          
+          println(size(First_UaiX))
+          @mtensor A[a,i,X] := R2[a,b,i,j] * First_UaiX[b,j,X]
+          println(size(First_UaiX)[3])
+          UaiX = svd_decompose(reshape(A, (nvirt*nocc,size(First_UaiX)[3])), nvirt, nocc, tol2)
+       
+        elseif svd_space_option == 5
+          println("Option 5")
+          voLfile, dv_voL = mmap3idx(EC, "d_voL")
+          for q in eachindex(t_laplace)
+            tq = t_laplace[q]
+            wq = w_laplace[q]
+            for a in 1:nvirt, i in 1:nocc
+              fac = sqrt(abs(wq)) * exp(-tq * (ϵv[a] - ϵo[i]-(0.5*energies[st])))
+              for L in 1:nL
+                 TA[a,i,L+((q-1)*nL)] = dv_voL[a,i,L] * fac
+              end
+            end
+          end
+          close(voLfile)
+          @mtensor TAP[a,i,L] := TA[a,i,L] - First_UaiX[a,i,bX] * First_UaiX[b,j,bX] * TA[b,j,L]
+          Second_UaiX = svd_decompose(reshape(TAP, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
+          Combination_UaiX = cat(First_UaiX, Second_UaiX, dims=3)
+          #println(size(First_UaiX))
+          #println(size(Second_UaiX))
+          #println(size(Combination_UaiX))
+          UaiX = svd_decompose(reshape(Combination_UaiX, (nvirt*nocc,size(Combination_UaiX)[3])), nvirt, nocc, tol2)
+          R2 = calc_R2_df_cis_pert_d(EC, U1)
+          new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2
+          println(size(R2))
+          println(size(First_UaiX))
+          @mtensor A[a,i,X] := R2[a,b,i,j] * UaiX[b,j,X]
+          println(size(First_UaiX)[3])
+          UaiX = svd_decompose(reshape(A, (nvirt*nocc,size(A)[3])), nvirt, nocc, tol2)
+
+        else
+          println("Option decomposition of full U2")
+          R2 = calc_R2_df_cis_pert_d(EC, U1)
+          new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2
+          UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.eom.ampsvdtol))
         end
 
         #R2 = calc_R2_df_cis_pert_d(EC, U1)
