@@ -6,7 +6,6 @@ Calculates doubles residuals for CIS(D) with dressed integrals.
 """
 function calc_R2_df_cis_pert_d(EC::ECInfo, U1)
   t1 = time_ns()
-  SP = EC.space
 
   #attention, dressed integrals are used on purpose! (then it is closer to CC2 than to CIS(D))
   voLfile, dv_voL = mmap3idx(EC, "d_voL")

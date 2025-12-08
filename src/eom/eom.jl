@@ -17,6 +17,7 @@ using ..ElemCo.CCTools
 using ..ElemCo.OrbTools
 using ..ElemCo.Outputs
 using ..ElemCo.DecompTools
+using ..ElemCo.LaplaceQuadrature
 
 export calc_eom
 export calc_df_eom

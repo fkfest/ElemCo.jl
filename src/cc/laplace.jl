@@ -809,14 +809,14 @@ Returns:
 - Tuple (weights, points): wq and tq for Laplace quadrature
 """
 function get_laplace_quadrature_minimax(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; 
-                                use_distribution::Bool=false)
+                                use_distribution::Bool=false,εexc_state::Float64=0.0)
   
   if use_distribution
     error("Weighted Laplace quadrature not yet implemented in this function.")
     # return calc_laplace_points_weighted(εo, εv, npoints; use_distribution=true)
   else
-    emin = 2 * (minimum(εv) - maximum(εo))
-    emax = 2 * (maximum(εv) - minimum(εo))
+    emin = 2 * (minimum(εv) - maximum(εo)) - εexc_state
+    emax = 2 * (maximum(εv) - minimum(εo)) - εexc_state
     if emin <= 0
       error("Non-positive energy gap detected.")
     end
@@ -835,13 +835,13 @@ Returns:
 - Tuple (weights, points): wq and tq for Laplace quadrature
 """
 function get_laplace_quadrature(εo::Vector{Float64}, εv::Vector{Float64}, npoints::Int; 
-                                use_distribution::Bool=false, algo=:minimax)
+                                use_distribution::Bool=false, algo=:minimax, εexc_state::Float64=0.0)
   
   if algo == :simplex
     @warn("Simplex-based Laplace quadrature is not tested, use with caution.")
     return get_laplace_quadrature_simplex(εo, εv, npoints)
   elseif algo == :minimax
-     return get_laplace_quadrature_minimax(εo, εv, npoints; use_distribution=use_distribution)
+     return get_laplace_quadrature_minimax(εo, εv, npoints; use_distribution=use_distribution,εexc_state=εexc_state)
   else
     error("Unknown algorithm specified: $algo. Use :minimax or :simplex.")
   end
