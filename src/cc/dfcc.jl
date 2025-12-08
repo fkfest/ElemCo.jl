@@ -419,6 +419,11 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
     end
     save!(EC, "T_vvoo", T2)
     T2 = nothing
+    T1 = try2start_singles(EC)
+    if length(T1) != 0
+      save!(EC, "T_vo", T1)
+      T1 = nothing
+    end
   end
   
   ϵo, ϵv = orbital_energies(EC)
@@ -1095,11 +1100,20 @@ function calc_svd_dc(EC::ECInfo, method::ECMethod)
   t1 = print_time(EC, t1, "intermediates", 2)
 
   if EC.options.cc.use_full_t2
-    T2 = load4idx(EC,"T_vvoo")
-    return svd_dc_iterations!(T1, T2, EC, methodname)
+    T2 = load4idx(EC, "T_vvoo")
+    En = svd_dc_iterations!(T1, T2, EC, methodname)
+    save!(EC, "T_vvoo", T2)
+    if length(T1) > 0
+      save!(EC, "T_vo", T1)
+    end
+    return En
   else
-    T2 = load2idx(EC,"T_XX")
+    T2 = load2idx(EC, "T_XX")
     Eh = svd_dc_iterations!(T1, T2, EC, methodname)
+    save!(EC, "T_XX", T2)
+    if length(T1) > 0
+      save!(EC, "T_vo", T1)
+    end
     # ΔMP2 correction
     push!(Eh, "E-correction"=>(fullEMP2["E"] - Eh["SVD-MP2"],"ΔMP2 correction"))
     return Eh
@@ -1136,9 +1150,9 @@ function svd_dc_iterations!(T1, T2, EC::ECInfo, methodname)
     if length(T1) > 0
       NormT1 = calc_singles_norm(T1)
       NormR1 = calc_singles_norm(R1)
-      T1 += update_singles(EC, R1)
+      T1 .+= update_singles(EC, R1)
     end
-    T2 += update_deco_doubles(EC, R2)
+    T2 .+= update_deco_doubles(EC, R2)
     t1 = print_time(EC,t1,"update amplitudes",2)
     perform!(diis, (T1,T2), (R1,R2))
     t1 = print_time(EC,t1,"DIIS",2)
