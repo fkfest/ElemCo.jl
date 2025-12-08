@@ -88,7 +88,8 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
         #close(voLfile)
         #Second_UaiX = svd_decompose(reshape(TA, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
 
-        svd_space_option=4 
+
+        svd_space_option = EC.options.eom.svd_space_option 
 
         if svd_space_option == 1
          println("Option 1")

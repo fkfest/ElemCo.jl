@@ -246,6 +246,8 @@ end
   save::String = "eigenvectors"
   """`⟨1.e-5⟩` amplitude decomposition threshold. """
   ampsvdtol::Float64 = 1.e-5
+  """`⟨6⟩` Choice how excited state SVD basis is generated. Default is decomposition of full U2. """
+  svd_space_option::Int = 6
 end
 
 @kwdef mutable struct LaplaceOptions
