@@ -18,7 +18,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
   T1 = load2idx(EC, "T_vo")
   T2 = load4idx(EC, "T_vvoo")
   # Calculate 1RDM intermediates
-  D1, dD1 = calc_1RDM(EC, U1, U2, T1, T2)
+  D1, dD1 = calc_1RDM(EC, U1, U2, T1, T2; jacobian=!with_rhs)
   t1 = print_time(EC, t1, "calculate 1RDM",2)
 
   fock = load2idx(EC,"f_mm")
@@ -794,14 +794,17 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1
 end
 
 """
-    calc_1RDM(EC::ECInfo, U1, U2, T1, T2)
+    calc_1RDM(EC::ECInfo, U1, U2, T1, T2; jacobian=false)
 
 Calculate the 1RDM for the closed-shell CCSD or DCSD equations.
 
 Return `D1[p,q]`=``D_p^q``, the 1RDM without T1 singles terms, 
 and `dD1[p,q]`=``\\hat D_p^q``, the 1RDM with all T1 terms included.
+
+if `jacobian=true`, the T1 contributions to `dD1` are calculated without the +2 T1 term,
+to be used in the calculation of the CCSD Jacobian.
 """
-function calc_1RDM(EC::ECInfo, U1, U2, T1, T2)
+function calc_1RDM(EC::ECInfo, U1, U2, T1, T2; jacobian=false)
   # 1RDM without T1 singles terms
   @mtensor begin
     Doo[i,j] := -2.0 * (U2[c,d,i,k] * T2[c,d,j,k])
@@ -823,7 +826,10 @@ function calc_1RDM(EC::ECInfo, U1, U2, T1, T2)
       dDoo[i,j] := Doo[i,j] - Dov[i,c] * T1[c,j]
       dDvv[a,b] := Dvv[a,b] + Dov[k,b] * T1[a,k]
     end
-    @mtensor dDvo[a,i] := Dvo[a,i] + 2.0 * T1[a,i] - Dvv[a,c] * T1[c,i] + dDoo[k,i] * T1[a,k]
+    @mtensor dDvo[a,i] := Dvo[a,i] - Dvv[a,c] * T1[c,i] + dDoo[k,i] * T1[a,k]
+    if !jacobian
+      @mtensor dDvo[a,i] +=  2.0 * T1[a,i]
+    end
   else
     dDov = Dov
     dDoo = Doo
@@ -848,7 +854,7 @@ function calc_1RDM(EC::ECInfo, U1, U2, T1, T2)
 end
 
 """
-    calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin)
+    calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=false)
 
 Calculate the `spin`-1RDM for the unrestricted CCSD or DCSD equations.
 
@@ -858,8 +864,11 @@ and `U2ab`, `T2ab` are the αβ Lagrange multipliers and amplitudes.
 
 Return `D1[p,q]`=``D_p^q``, the 1RDM without T1 singles terms, 
 and `dD1[p,q]`=``\\hat D_p^q``, the 1RDM with all T1 terms included.
+
+if `jacobian=true`, the T1 contributions to `dD1` are calculated without the + T1 term,
+to be used in the calculation of the CCSD Jacobian.
 """
-function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin)
+function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=false)
   # 1RDM without T1 singles terms
   @mtensor begin 
     Doo[i,j] := -0.5 * (U2[c,d,i,k] * T2[c,d,j,k])
@@ -898,7 +907,10 @@ function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin)
       dDoo[i,j] := Doo[i,j] - Dov[i,c] * T1[c,j]
       dDvv[a,b] := Dvv[a,b] + Dov[k,b] * T1[a,k]
     end
-    @mtensor dDvo[a,i] := Dvo[a,i] + T1[a,i] - Dvv[a,c] * T1[c,i] + dDoo[k,i] * T1[a,k]
+    @mtensor dDvo[a,i] := Dvo[a,i] - Dvv[a,c] * T1[c,i] + dDoo[k,i] * T1[a,k]
+    if !jacobian
+      @mtensor dDvo[a,i] +=  T1[a,i]
+    end
   else
     dDov = Dov
     dDoo = Doo
