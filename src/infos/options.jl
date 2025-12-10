@@ -222,6 +222,106 @@ end
   dcsd_ofac::Float64 = 0.15
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
+  """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
+  keepOQVorbitals::Bool = false
+end
+
+"""
+  Option for FCI calculations.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct FCIOptions
+  """`⟨50⟩` Maximum number of iterations """
+  max_iter::Int = 50
+  """`⟨0.1⟩` Level shift to improve convergence """
+  shift::Float64 = 0.1
+  """`⟨1e-8⟩` Convergence tolerance for energy """
+  conv_tol::Float64 = 1e-8
+  """`⟨1e-6⟩` Convergence tolerance for residual norm """
+  res_tol::Float64 = 1e-6
+  """`⟨1⟩` Number of states to compute """
+  nstates::Int = 1
+  """`⟨2⟩` Number of guess vectors to use """
+  n_guess::Int = 2
+  """`⟨10⟩` Maximum subspace size for Davidson diagonalization """
+  subspace_size::Int = 10
+  """`⟨true⟩` Compute 1-RDMs after convergence """
+  compute_rdms::Bool = true
+  """`⟨false⟩` Compute 2-RDM after convergence """
+  compute_2rdm::Bool = false
+  """`⟨true⟩` Use projected Jacobi-Davidson correction (prevents linear dependency) """
+  jacobi_davidson::Bool = true
+  """`⟨1000⟩` Maximum P-space size (typically 100-1000) """
+  max_pspace_size::Int = 1000
+  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
+  pspace_selection_method::Symbol = :hybrid
+  """`⟨4⟩` Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
+  max_pspace_excitation::Int = 4
+  """`⟨5.0⟩` Energy cutoff for determinant inclusion """
+  pspace_energy_threshold::Float64 = 5.0
+  """`⟨1e-3⟩` HCI selection threshold (epsilon_h) for P-space generation """
+  pspace_hci_epsilon::Float64 = 1e-3
+  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
+  print_level::Int = 1
+  """`⟨1e-12⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
+  thr_negligible::Float64 = 1e-12
+end
+
+"""
+  Option for HCI calculations.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct HCIOptions
+  """`⟨1_000_000⟩` Target (i.e., maximum) number of determinants to select """
+  target_selection::Int = 1_000_000
+  """`⟨3e-4⟩` Selection threshold """
+  epsilon::Float64 = 3e-4
+  """`⟨epsilon/10⟩` HCI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
+  epsilon_h::Float64 = -1.0
+  """`⟨epsilon_h⟩` instantaneous PT selection threshold. """
+  epsilon_c::Float64 = -1.0
+  """`⟨epsilon⟩` CIPSI selection threshold """
+  epsilon_p::Float64 = -1.0
+  """`⟨1e-6⟩` Energy convergence threshold """
+  tol::Float64 = 1e-6
+  """`⟨1e-6⟩` Convergence tolerance for residual norm """
+  res_tol::Float64 = 1e-6
+  """`⟨50⟩` Maximum HCI iterations """
+  max_iter::Int = 50
+  """`⟨0.1⟩` Level shift to improve convergence """
+  shift::Float64 = 0.1
+  """`⟨true⟩` Print iteration details """
+  verbose::Bool = true
+  """`⟨true⟩` Compute PT2 perturbative correction """
+  compute_pt2::Bool = true
+  """`⟨1e-6⟩` Threshold for PT2 contributions """
+  epsilon_pt2::Float64 = 1e-6
+  """`⟨epsilon_pt2/2⟩` Threshold for instantaneous PT2 contributions """
+  epsilon_pt2_c::Float64 = -1.0
+  """`⟨true⟩` Sort determinants by absolute value of coefficients before computing PT2 correction """
+  sort4pt2::Bool = true
+  """`⟨1e-10⟩` Small value added to denominators in PT2 to avoid divergences """
+  pt2_shift::Float64 = 1e-10
+  """`⟨false⟩` Use uncontracted MP2 instead of EN2 """
+  use_mp2::Bool = false
+  """`⟨false⟩` Use renormalized PT2 correction: `E_PT2 → E_PT2 / (1 + T2^2)` with `T2` being the PT2 amplitudes. """
+  renorm_pt2::Bool = false
+  """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
+  nstates::Int = 1
+  """`⟨2⟩` Number of steps in the iterative HCI selection (if > 1, the selection process is repeated after convergence)"""
+  nsteps::Int = 2
+  """`⟨true⟩` Use small-space Hamiltonian for initial guess """
+  use_small_space_guess::Bool = true
+  """`⟨0⟩` Size of small space (0 = auto: max(100, target÷10, 5*n_roots)) """
+  small_space_size::Int = 0
+  """`⟨:hybrid⟩` Selection method: :hybrid (energy + excitation) """
+  small_space_method::Symbol = :hybrid
+  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
+  print_level::Int = 1
+  """`⟨1e-10⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
+  thr_negligible::Float64 = 1e-10
 end
 
 """
@@ -287,6 +387,12 @@ end
   cartesian::Bool = false
   """`⟨1000⟩` target batch length for the integral transformation. """
   target_batch_length::Int = 1000
+  """`⟨false⟩` use fallback basis sets (in case of missing basis sets). """
+  use_fallback_basis::Bool = false
+  """`⟨true⟩` sanity check of the fit basis (i.e., that it's not an AO basis)"""
+  check_fit_basis::Bool = true
+  """`⟨true⟩` split independent angular shells (important for efficiency). """
+  split_ashells::Bool = true
 end
 
 """ 
@@ -359,6 +465,10 @@ end
   cc::CcOptions = CcOptions()
   """ EOM options ([`EomOptions`](@ref)). """
   eom::EomOptions = EomOptions()
+  """ FCI options ([`FCIOptions`](@ref)). """
+  fci::FCIOptions = FCIOptions()
+  """ HCI options ([`HCIOptions`](@ref)). """
+  hci::HCIOptions = HCIOptions()
   """ DMRG options ([`DmrgOptions`](@ref)). """
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """

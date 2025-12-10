@@ -1,7 +1,7 @@
 # ElemCo.jl Documentation
 
 
-`ElemCo.jl` is a Julia package for computing electronic structure properties of molecules and materials. It provides a set of tools for performing quantum chemical calculations, including Hartree-Fock and post-HF methods.
+`ElemCo.jl` (*elemcoil*) is a Julia package for computing electronic structure properties of molecules and materials. It provides a set of tools for performing quantum chemical calculations, including Hartree-Fock and post-HF methods.
 
 ## Installation
 
@@ -60,6 +60,12 @@ On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none o
 Default scratch folder name is `elemcojlscr`.
 
 Variable names `fcidump`, `geometry` and `basis` are reserved for the file name of FCIDUMP, geometry specification and basis sets, respectively.
+
+### Input generation and orbital visualizer
+
+`ElemCo.jl` input files can be generated using [`jlmol`](https://github.com/fkfest/jlmol),
+which can also be used to visualize the molecular orbitals.
+The browser version of `jlmol` can be found at [app.jlmol.com](https://app.jlmol.com).
 
 ### Computing density-fitted Hartree-Fock and Coupled Cluster methods
 

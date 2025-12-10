@@ -6,8 +6,10 @@
 module ElemCo
 
 include("version.jl")
+include("../lib/TREXIO/src/TREXIO.jl")  # Include standalone TREXIO module
 include("infos/abstractEC.jl")
 include("tools/descdict.jl")
+include("tools/vecdict.jl")
 include("tools/outputs.jl")
 include("tools/utils.jl")
 include("tools/constants.jl")
@@ -20,6 +22,7 @@ include("system/msystems.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
+include("interfaces/trexio.jl")
 include("system/wavefunctions.jl")
 
 include("infos/ecinfos.jl")
@@ -33,12 +36,13 @@ include("scf/fockfactory.jl")
 include("integrals/dumptools.jl")
 include("integrals/dftools.jl")
 include("integrals/decomptools.jl")
+include("fci/fci.jl")
 include("cc/cctools.jl")
 include("cc/dfcc.jl")
 include("cc/cc.jl")
 include("cc/dmrg.jl")
 include("eom/eom.jl")
-include("cc/ccdriver.jl")
+include("cc/drivers.jl")
 
 include("scf/bohf.jl")
 
@@ -71,7 +75,7 @@ using .TensorTools
 using .FockFactory
 using .CCTools
 using .CoupledCluster
-using .CCDriver
+using .Drivers
 using .DFCoupledCluster
 using .FciDumps
 using .DumpTools
@@ -85,6 +89,8 @@ using .DFMCSCF
 using .DfDump
 using .DMRG
 using .Interfaces
+using .TREXIO  # Use the standalone TREXIO module
+using .TrexioInterface
 
 
 export @mainname, @print_input
@@ -92,11 +98,15 @@ export @loadfile, @savefile, @copyfile
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
+export @fci, @hci
 export @import_matrix, @export_molden
+export @molpro_input, @molpro_output, @check_molproinfo
 # from Utils
 export last_energy
 # from DescDict
 export ODDict
+# from Drivers
+export extrapolate
 
 """
     __init__()
@@ -593,6 +603,74 @@ macro dfmp2()
 end
 
 """ 
+    @fci(kwargs...)
+
+  Run FCI calculation.
+
+  # Keyword arguments
+  - `occa::String`: occupied α orbitals (default: "-").
+  - `occb::String`: occupied β orbitals (default: "-").
+
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+
+  # Examples
+```julia
+geometry="bohr
+O      0.000000000    0.000000000   -0.130186067
+H1     0.000000000    1.489124508    1.033245507
+H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
+@dfhf
+@fci
+```
+"""
+macro fci(kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECinit))
+    if !fd_exists($(esc(:EC)).fd)
+      $(esc(:@dfints))
+    end
+    fcidriver($(esc(:EC)); $(ekwa...))
+  end
+end
+
+""" 
+    @hci(kwargs...)
+
+  Run Heat-bath CI calculation.
+
+  # Keyword arguments
+  - `occa::String`: occupied α orbitals (default: "-").
+  - `occb::String`: occupied β orbitals (default: "-").
+
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+
+  # Examples
+```julia
+geometry="bohr
+O      0.000000000    0.000000000   -0.130186067
+H1     0.000000000    1.489124508    1.033245507
+H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
+@dfhf
+@hci
+```
+"""
+macro hci(kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@tryECinit))
+    if !fd_exists($(esc(:EC)).fd)
+      $(esc(:@dfints))
+    end
+    fcidriver($(esc(:EC)); $(ekwa...), hci=true)
+  end
+end
+
+""" 
     @bohf()
 
   Run bi-orthogonal HF calculation using FCIDUMP integrals.
@@ -667,19 +745,22 @@ macro transform_ints(type="")
 end
 
 """
-    @write_ints(file="FCIDUMP", tol=-1.0)
+    @write_ints(file="FCIDUMP", kwargs...)
 
   Write FCIDump integrals to file `file`.
 
-If `tol` is negative, all integrals are written, otherwise only integrals with absolute value larger than `tol` are written.
+  # Keyword arguments
+  - `tol::Float64`: tolerance for writing integrals (default: `-1.0` - all integrals are written).
+  - `format::Symbol`: format for writing integrals (default: `:ascii`). Can be `:npy` for NumPy format.
 """
-macro write_ints(file="FCIDUMP", tol=-1.0)
+macro write_ints(file="FCIDUMP", kwargs...)
+  ekwa = [esc(a) for a in kwargs]
   return quote
     $(esc(:@tryECinit))
     if !fd_exists($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
-    write_fcidump($(esc(:EC)).fd, $file, $tol)
+    write_fcidump($(esc(:EC)).fd, $file; $(ekwa...))
   end
 end
 
@@ -804,6 +885,80 @@ macro export_molden(filename)
     export_molden_orbitals($(esc(:EC)), strfilename)
   end
 end
+
+"""
+    @molpro_input(filename="elemcoil")
+
+  Initialize the Molpro interface with the given filename.
+
+  It relies on the Molpro XML file to set up the molecule and basis set.
+  If the `basis` variable exists, it will be updated with the AO basis set from the XML file.
+
+  See [`MolproInterface`](@ref) for more details on the Molpro interface.
+"""
+macro molpro_input(filename="elemcoil")
+  return quote
+    $(esc(:MI)) = MolproInterface.MolproInfo($(esc(filename)))
+    mol_node = MolproInterface.get_molecule($(esc(:MI)))
+    $(esc(:geometry)), ao_basis = MolproInterface.get_xml_geometry_basis(mol_node)
+    newbasis = [true]
+    try
+      if $(esc(:basis)) isa Dict{String,String}
+        $(esc(:basis))["ao"] = ao_basis
+        newbasis[1] = false
+      end
+    catch
+    end
+    if newbasis[1]
+      $(esc(:basis)) = ao_basis
+    end
+    $(esc(:@ECinit))
+    MolproInterface.set_options_from_xml!($(esc(:EC)), mol_node)
+    if haskey($(esc(:MI)), "ORBITALS")
+      orbs = MolproInterface.import_orbitals($(esc(:EC)), $(esc(:MI))["ORBITALS"])
+      if !isempty(orbs)
+        save!($(esc(:EC)), $(esc(:EC)).options.wf.orb, orbs)
+        println("Orbitals imported from Molpro: ", size(orbs, 2), " orbitals.")
+      end
+    end
+  end
+end
+
+"""
+    @check_molproinfo()
+
+  Check if [`MolproInterface.MolproInfo`](@ref) is initialized and return the files.
+  If not initialized, throw an error.
+"""
+macro check_molproinfo()
+  return quote
+    try
+      $(esc(:MI)).files
+    catch
+      error("MolproInfo is not initialized. Please run @molpro_input first.")
+    end
+  end
+end
+
+"""
+    @molpro_output(ecvariables, kwargs...)
+
+  Save key-value pairs from `ecvariables` to a `ECVARIABLES` file in the [`MolproInterface.MolproInfo`](@ref) object.
+  
+  The `ecvariables` is a dictionary with the variables to be included in the output.
+  The keyword arguments are passed to the [`MolproInterface.save_ecvariables_to_file`](@ref) function.
+  Possible keyword arguments include:
+  - `prefix::String`: prefix for each variable in the output file (default: "")
+  - `new::Bool`: if `true`, create a new file, otherwise append to the existing file (default: `true`)
+"""
+macro molpro_output(ecvariables, kwargs...)
+  ekwa = [esc(a) for a in kwargs]
+  return quote
+    $(esc(:@check_molproinfo))
+    MolproInterface.save_ecvariables_to_file($(esc(:MI)), $(esc(ecvariables)); $(ekwa...))
+  end
+end
+
 
 # precompile if not in development mode
 if !devel()

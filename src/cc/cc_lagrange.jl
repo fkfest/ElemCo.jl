@@ -58,9 +58,9 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
     @mtensor Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
     dU2 = nothing
     Kmmoo = Array{Float64}(undef,norb,norb,nocc,nocc)
-    tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+    tripp = uppertriangular_cut(norb)
     Kmmoo[tripp,:,:] = Kxoo
-    trippr = CartesianIndex.(reverse.(Tuple.(tripp)))
+    trippr = swapped_uppertriangular_cut(norb)
     @mtensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
     Kxoo = nothing
     t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
@@ -360,9 +360,9 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
       @mtensor Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
       Kmmoo = dU2
       dU2 = nothing
-      tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+      tripp = uppertriangular_cut(norb)
       Kmmoo[tripp,:,:] = Kxoo
-      trippr = CartesianIndex.(reverse.(Tuple.(tripp)))
+      trippr = swapped_uppertriangular_cut(norb)
       @mtensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
       Kxoo = nothing
     end
@@ -564,11 +564,11 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1
       int2_3idx = integ2_ss(EC.fd)
       # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``, ``r ≤ S``
       @mtensor Kxoo[x,m,N] := int2_3idx[p,Q,x] * dU2[p,Q,m,N]
-      tripp = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+      tripp = uppertriangular_cut(norb)
       Kmmoo[tripp,:,:] = Kxoo
       # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{Qp}^{Sr}``, ``S ≤ r``
       @mtensor Kxoo[x,m,N] = int2_3idx[Q,p,x] * dU2[p,Q,m,N]
-      trippr = CartesianIndex.(reverse.(Tuple.(tripp)))
+      trippr = swapped_uppertriangular_cut(norb)
       @mtensor Kmmoo[trippr,:,:][x,m,N] = Kxoo[x,m,N]
       Kxoo = NOTHING3idx
       int2_3idx = NOTHING3idx

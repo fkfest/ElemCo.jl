@@ -12,7 +12,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.FockFactory
 using ..ElemCo.OrbTools
 
-export calc_fock_matrix, calc_HF_energy
+export calc_fock_matrix, calc_HF_energy, calc_rotated_HF_energy
 export calc_singles_energy_using_dfock
 export update_singles, update_doubles, update_singles!, update_doubles!, update_triples!, update_deco_doubles, update_deco_triples
 export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
@@ -29,18 +29,20 @@ export calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot
 export triples_4ext!
 
 """ 
-    calc_fock_matrix(EC::ECInfo, closed_shell)
+    calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
 
   Calculate fock matrix from FCIDump
 """
-function calc_fock_matrix(EC::ECInfo, closed_shell)
+function calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
   t1 = time_ns()
   if closed_shell
     fock = gen_fock(EC)
     save!(EC, "f_mm", fock)
     save!(EC, "f_MM", fock)
     eps = diag(fock)
-    println("Occupied orbital energies: ", eps[EC.space['o']])
+    if print_out
+      println("Occupied orbital energies: ", eps[EC.space['o']])
+    end
     save!(EC, "e_m", eps)
     save!(EC, "e_M", eps)
   else
@@ -55,7 +57,9 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
     save!(EC,"f_MM", fock)
     save!(EC,"e_M", eps)
   end
-  t1 = print_time(EC,t1,"fock matrix",1)
+  if print_out
+    t1 = print_time(EC,t1,"fock matrix",1)
+  end
 end
 
 """ 
@@ -72,6 +76,23 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
     ϵo = load1idx(EC,"e_m")[SP['o']]
     ϵob = load1idx(EC,"e_M")[SP['O']]
     EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(ints1(EC, "oo"))) + sum(diag(ints1(EC, "OO")))) + EC.fd.int0
+  end
+  return EHF
+end
+
+"""
+    calc_rotated_HF_energy(EC::ECInfo)
+
+  Calculate the Hartree-Fock energy in the rotated orbital basis.
+"""
+function calc_rotated_HF_energy(EC::ECInfo, closed_shell)
+  SP = EC.space
+  if closed_shell
+    ϵo = load1idx(EC,"e_m")[SP['o']]
+    int1_r = load2idx(EC,"int1_r")[SP['o'],SP['o']]
+    EHF = sum(ϵo) + sum(diag(int1_r)) + EC.fd.int0
+  else
+    # TODO
   end
   return EHF
 end

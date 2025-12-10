@@ -1,9 +1,9 @@
 """
-    CCDriver
+    Drivers
 
-Module for coupled-cluster drivers.
+Module for methods drivers (ccdriver, dfccdriver, etc).
 """
-module CCDriver
+module Drivers
 using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
@@ -18,9 +18,10 @@ using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
+using ..ElemCo.FCI
 using ..ElemCo.EOM
 
-export ccdriver, dfccdriver
+export ccdriver, dfccdriver, fcidriver, extrapolate
 
 """ 
     ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
@@ -122,9 +123,9 @@ function dfccdriver(EC::ECInfo, method)
         warn("SVD-EOM-DCSD requires `cc.use_full_t2=true` and `cc.project_vovo_t2=1`!")
       end 
     end
-    groundstate_method_name = "SVD-DCSD"
+    methodname = "SVD-"*root_name
     ECC = calc_svd_dc(EC, ecmethod)
-    energies = output_energy(EC, ECC, energies, groundstate_method_name)
+    energies = output_energy(EC, ECC, energies, methodname)
   elseif root_name == "MP2" 
     if has_prefix(ecmethod, "SOS")
       ECC = calc_df_lt_sos_mp2(EC)
@@ -153,6 +154,28 @@ function dfccdriver(EC::ECInfo, method)
   delete_temporary_files!(EC)
   restore_space!(EC, space_save)
   draw_endline()
+  return energies
+end
+
+function fcidriver(EC::ECInfo; occa="-", occb="-", hci=false)
+  t1 = time_ns()
+  save_occs = check_occs(EC, occa, occb)
+  setup_space_fd!(EC)
+  closed_shell = is_closed_shell(EC)
+
+  energies = OutDict()
+  energies = eval_hf_energy(EC, energies, closed_shell)
+  # t1 = print_time(EC, t1, "HF energy", 1)
+
+  E_FCI = eval_fci(EC, energies["HF"]; hci=hci)
+  method = hci ? "HCI" : "FCI"
+  energies = output_energy(EC, E_FCI, energies, method)
+  t1 = print_time(EC, t1, method, 1)
+
+  delete_temporary_files!(EC)
+  draw_endline()
+  # restore occs
+  EC.options.wf.occa, EC.options.wf.occb = save_occs
   return energies
 end
 
@@ -216,16 +239,25 @@ end
   Evaluate the Hartree-Fock energy for the integrals in `EC.fd`.
   Return the updated `energies::OutDict` with the Hartree-Fock energy (field `HF`).
 """
-function eval_hf_energy(EC::ECInfo, energies::OutDict, closed_shell)
+function eval_hf_energy(EC::ECInfo, energies::OutDict, closed_shell; rotated=false)
   t1 = time_ns()
-  calc_fock_matrix(EC, closed_shell)
-  EHF = calc_HF_energy(EC, closed_shell)
+  if !rotated
+    calc_fock_matrix(EC, closed_shell)
+    EHF = calc_HF_energy(EC, closed_shell)
+  else
+    EHF = calc_rotated_HF_energy(EC, closed_shell)
+  end
   hfname = closed_shell ? "HF" : "UHF"
   output_E_method(EHF, hfname, "energy:")
   t1 = print_time(EC, t1, "$hfname energy", 1)
   println()
   flush_output()
-  return merge(energies, "HF"=>(EHF, "$hfname energy"))
+  if !rotated
+    energies = merge(energies, "HF"=>(EHF, "$hfname energy"))
+  else
+    energies = merge(energies, "HF(rotated)"=>(EHF, "$hfname energy"))
+  end
+  return energies
 end
 
 """
@@ -262,6 +294,9 @@ end
 function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=true)
   enecor = En["E"]
   enetot = En["E"]+energies["HF"]
+  if haskey(energies, "HF(rotated)")
+    enetot = En["E"]+energies["HF(rotated)"]
+  end
   energies_out = copy(energies)
   if print
     output_E_method(enecor, mname, "correlation energy:")
@@ -277,6 +312,9 @@ function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=
       println()
     end
     push!(energies_out, mname*"-correction" => (En["E-correction"], "correction to the correlation energy")) 
+    if haskey(En, "E-correction δ")
+      push!(energies_out, mname*"-correction δ" => (En["E-correction δ"], "uncertainty in the correction to the correlation energy")) 
+    end
   end
   if haskey(En, "Expect")
     enecor = En["Expect"]
@@ -307,6 +345,13 @@ function output_energy(EC::ECInfo, En::OutDict, energies::OutDict, mname; print=
         println()
       end
       push!(energies_out, "SCS-"*mname=>(enescs, "SCS-$mname energy"))
+    end
+  end
+
+  for (type, en, desc) in En
+    if startswith(type, "ω")
+      push!(energies_out, mname*type => (en, "$mname excitation energy $type"),
+                          type => (en, "$mname excitation energy $type"))
     end
   end
   push!(energies_out, mname*"c"=>(enecor, "$mname correlation energy"),
@@ -395,6 +440,15 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   EHF = energies["HF"]
   main_name = method_name(ecmethod)
   ECC = calc_cc(EC, ECMethod(main_name))
+  if has_prefix(ecmethod, "O") && has_prefix(ecmethod, "QV")
+    closed_shell = is_closed_shell(EC)
+    if EC.options.cc.keepOQVorbitals
+      push!(energies, "HF(original)"=>(energies["HF"], "HF energy"))
+      energies = eval_hf_energy(EC, energies, closed_shell)
+    else
+      energies = eval_hf_energy(EC, energies, closed_shell; rotated=true)
+    end
+  end
   if has_prefix(ecmethod, "2D")
     energies = output_2d_energy(EC, ECC, energies, main_name)
   else
@@ -490,6 +544,76 @@ function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
 end
 
+function eval_fci(EC::ECInfo, ref_energy; hci=false)
+  t1 = time_ns()
+  # Create basic FCI setup
+  norb = length(EC.space[':'])
+  nalpha = length(EC.space['o'])
+  nbeta = length(EC.space['O'])
+  ms2 = nalpha - nbeta
+  nelec = nalpha + nbeta
+  simtra = is_similarity_transformed(EC.fd)
+  fdump = QFDump(norb, nelec, ms2=ms2, uhf=EC.fd.uhf, simtra=simtra)
+  fdump.int0 = EC.fd.int0
+  if EC.fd.uhf
+    fdump.int1a = EC.fd.int1a
+    fdump.int1b = EC.fd.int1b
+    fdump.int2aa = ints2(EC, "mmmm")
+    fdump.int2bb = ints2(EC, "MMMM")
+    fdump.int2ab = ints2(EC, "mMmM")
+  else
+    fdump.int1 = EC.fd.int1
+    fdump.int2 = ints2(EC, "mmmm")
+
+    # fdump.int1 = permutedims(EC.fd.int1, (2,1))
+    # fdump.int2 = permutedims(ints2(EC, "mmmm"), (3,4,1,2))
+  end
+  
+  # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
+  if hci
+    println("Setting up HCI (lightweight context)..."); flush(stdout)
+    if norb < 64
+      hci_ctx = HCIContext{UInt64}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
+      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+    elseif norb < 128
+      hci_ctx = HCIContext{UInt128}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
+      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+    else
+      error("HCIContext only implemented for norb < 128 at this point!")
+    end
+    t1 = print_time(EC, t1, "HCI", 1)
+    Egs = E_HCI[1]
+    energies = OutDict()
+    for i = 1:length(E_HCI)-1
+      energies["ω$i"] = E_HCI[i+1] - Egs
+      if EC.options.hci.compute_pt2
+        energies["ω$i+pt2"] = E_HCI[i+1] + pt2[i+1][1] - Egs - pt2[1][1]
+        energies["ω$(i)δpt2"] = pt2[i+1][2]
+      end
+    end
+    if EC.options.hci.compute_pt2
+      push!(energies, "E-correction" => pt2[1][1])
+      push!(energies, "E-correction δ" => pt2[1][2])
+    end
+    return merge(energies, "E" => Egs - ref_energy)
+  else
+    println("Setting up FCI..."); flush(stdout)
+    if is_similarity_transformed(EC.fd)
+      error("FCI not implemented for similarity transformed Hamiltonians!")
+    end
+    fci_ctx = FCIContext(fdump, EC.options.fci; occa=EC.space['o'], occb=EC.space['O'])
+    println("FCI context setup complete."); flush(stdout)
+    E_FCI = run_fci!(fci_ctx)
+    t1 = print_time(EC, t1, "FCI", 1)
+    Egs = E_FCI[1]
+    energies = OutDict()
+    for i = 1:length(E_FCI)-1
+      energies["ω$i"] = E_FCI[i+1] - Egs
+    end
+    return merge(energies, "E" => Egs - ref_energy)
+  end
+end
+
 """
     eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
 
@@ -510,5 +634,34 @@ function eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
   t1 = print_time(EC, t1,"DMRG",1)
   return energies
 end
+
+"""
+    extrapolate(energies1::OutDict, energies2::OutDict)
+
+  Extrapolate energies using two sets of energies with corresponding corrections.
+
+  The keys with suffix `"-correction"` are used for extrapolation.
+  Return a new `OutDict` with the extrapolated energies.
+  Extrapolation is done to the limit where the correction goes to zero.
+"""
+function extrapolate(energies1::OutDict, energies2::OutDict)
+  extrapolated_energies = OutDict()
+  for (key, val, desc) in energies1
+    if endswith(key, "-correction")
+      name = replace(key, "-correction"=>"")
+      if haskey(energies2, key) && haskey(energies1, name) && haskey(energies2, name)
+        e1 = energies1[name]
+        e2 = energies2[name]
+        c1 = val
+        c2 = energies2[key]
+        eex = (e2 * c1 - e1 * c2) / (c1 - c2)
+        d1 = energies1(name)
+        push!(extrapolated_energies, name => (eex, d1*" (extrapolated)"))
+      end
+    end
+  end
+  return extrapolated_energies
+end
+
 
 end #module

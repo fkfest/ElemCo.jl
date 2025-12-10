@@ -57,9 +57,9 @@ mutable struct Davidson
     end
     maxdav_tot = maxdav*nstates
     states = zeros(Int, maxdav_tot)
-    tvecfiles = [ joinpath(EC.scr, "dav_tvec"*string(i)*EC.ext) for i in 1:maxdav_tot ]
-    prodfiles = [ joinpath(EC.scr, "dav_prod"*string(i)*EC.ext) for i in 1:maxdav_tot ]
-    eigvecfiles = [ joinpath(EC.scr, "dav_eigvec"*string(i)*EC.ext) for i in 1:nstates ]
+    tvecfiles = [ fullfilename(EC, "dav_tvec"*string(i)) for i in 1:maxdav_tot ]
+    prodfiles = [ fullfilename(EC, "dav_prod"*string(i)) for i in 1:maxdav_tot ]
+    eigvecfiles = [ fullfilename(EC, "dav_eigvec"*string(i)) for i in 1:nstates ]
     for i in 1:maxdav_tot
       add_file!(EC, "dav_tvec"*string(i), "tmp", overwrite=true)
       add_file!(EC, "dav_prod"*string(i), "tmp", overwrite=true)

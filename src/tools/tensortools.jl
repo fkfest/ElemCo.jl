@@ -16,7 +16,7 @@ export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, loa
 export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
 export ints2!, detri_int2!
-export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
+export sqrtinvchol, invchol, rotate_eigenvectors_to_real, balance_norms!, svd_thr
 export get_spaceblocks
 export print_nonzeros
 export @mtensor, @mtensoropt
@@ -106,7 +106,18 @@ end
   Add file to `EC.files` with `description`.
 """
 function save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
-  miosave(joinpath(EC.scr, fname*EC.ext), a...)
+  miosave(fullfilename(EC, fname), a...)
+  add_file!(EC, fname, description; overwrite)
+end
+
+"""
+    save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
+
+  Save tuple of arrays `a` to file `fname` in EC.scr directory.
+  Add file to `EC.files` with `description`.
+"""
+function save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
+  miosave(fullfilename(EC, fname), a...)
   add_file!(EC, fname, description; overwrite)
 end
 
@@ -116,7 +127,7 @@ end
   Load array from file `fname` in EC.scr directory.
 """
 function load(EC::ECInfo, fname::String)
-  return mioload(joinpath(EC.scr, fname*EC.ext))
+  return mioload(fullfilename(EC, fname))
 end
 
 """
@@ -128,7 +139,7 @@ end
   If `skip_error` is true, return empty `Array{T,N}` if the dimension/type is wrong.
 """
 function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)[1]
+  return mioload(fullfilename(EC, fname), Val(N), T; skip_error)[1]
 end
 
 """
@@ -141,7 +152,7 @@ end
   If `skip_error` is true, return empty `Array{T,N}[Array{T,N}()]` if the dimension/type is wrong.
 """
 function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)
+  return mioload(fullfilename(EC, fname), Val(N), T; skip_error)
 end
 
 for N in 1:6
@@ -166,7 +177,7 @@ end
   If `skip_error` is true, return false if the dimension/type is wrong.
 """
 function load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_error=false) where {T,N}
-  return mioload!(joinpath(EC.scr, fname*EC.ext), arrs...; skip_error)
+  return mioload!(fullfilename(EC, fname), arrs...; skip_error)
 end
 
 """
@@ -178,7 +189,7 @@ end
 """
 function newmmap(EC::ECInfo, fname::String, dims::NTuple{N,Int}, Type=Float64; description="tmp") where {N}
   add_file!(EC, fname, description; overwrite=true)
-  return mionewmmap(joinpath(EC.scr, fname*EC.ext), dims, Type)
+  return mionewmmap(fullfilename(EC, fname), dims, Type)
 end
 
 """
@@ -206,11 +217,11 @@ end
   Return a pointer to the file and the mmaped array.
 """
 function mmap(EC::ECInfo, fname::String)
-  return miommap(joinpath(EC.scr, fname*EC.ext))
+  return miommap(fullfilename(EC, fname))
 end
 
 function mmap(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
-  return miommap(joinpath(EC.scr, fname*EC.ext), Val(N), T)
+  return miommap(fullfilename(EC, fname), Val(N), T)
 end
 
 for N in 1:6
@@ -463,9 +474,9 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
     end
     inext = idx[iicc]
     idx[iicc] = -inext
-    evecs_real[:,inext] = imag.(evecs[:,inext])
-    normalize!(evecs_real[:,i])
-    normalize!(evecs_real[:,inext])
+    evecs_real[:,inext] = imag.(@view(evecs[:,inext]))
+    normalize!(@view(evecs_real[:,i]))
+    normalize!(@view(evecs_real[:,inext]))
     evals_real[inext] = real(evals[inext])
     npairs += 1
   end
@@ -476,6 +487,27 @@ end
 
 function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64})
   return evecs, evals
+end
+
+""" 
+    balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
+
+  Balance the norms of left and right eigenvectors.
+
+  Make each pair of left and right eigenvectors have the same norm.
+"""
+function balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
+  if isnothing(leftvecs)
+    leftvecs = (inv(evecs))'
+  end
+  for i in axes(evecs,2)
+    nrm = norm(evecs[:,i])
+    nrm_left = norm(leftvecs[:,i])
+    scale = sqrt(nrm_left / nrm)
+    evecs[:,i] .*= scale
+    leftvecs[:,i] ./= scale
+  end
+  return evecs, leftvecs
 end
 
 """ 
