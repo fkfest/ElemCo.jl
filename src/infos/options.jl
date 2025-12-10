@@ -206,6 +206,8 @@ end
   mp2_osfac::Float64 = 1.2
   """`⟨0.0⟩` Factor for open-shell component in SCS-MP2. """
   mp2_ofac::Float64 = 0.0
+  """`⟨1.3⟩` Factor for opposite-spin component in SOS-MP2. """
+  mp2_sosfac::Float64 = 1.3
   """`⟨1.13⟩` Factor for same-spin component in SCS-CCSD. """
   ccsd_ssfac::Float64 = 1.13
   """`⟨1.27⟩` Factor for opposite-spin component in SCS-CCSD. """
@@ -322,6 +324,44 @@ end
   thr_negligible::Float64 = 1e-10
 end
 
+"""
+  Options for excited states calculation.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct EomOptions
+  """`⟨1.e-6⟩` convergence threshold. """
+  thr::Float64 = 1.e-6
+  """`⟨1⟩` number of states to calculate. """
+  nstates::Int = 1
+  """`⟨50⟩` maximum number of iterations. """
+  maxit::Int = 50
+  """`⟨0.0⟩` level shift for the Davidson algorithm. """
+  shift::Float64 = 0.0
+  """`⟨"eigenvectors"⟩` main part of filename for start eigenvectors. 
+      For example, the singles eigenvectors for state 2 are read from `start*"_1^2"`. """
+  start::String = "eigenvectors"
+  """`⟨"eigenvectors"⟩` main part of filename to save eigenvectors.
+      For example, the singles eigenvectors for state 2 are saved to `save*"_1^2"`. """
+  save::String = "eigenvectors"
+  """`⟨1.e-5⟩` amplitude decomposition threshold. """
+  ampsvdtol::Float64 = 1.e-5
+  """`⟨6⟩` Choice how excited state SVD basis is generated. Default is decomposition of full U2. """
+  svd_space_option::Int = 6
+end
+
+"""
+  Options for Laplace quadrature.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct LaplaceOptions
+  """`⟨8⟩` number of Laplace quadrature points. """
+  npoints::Int = 8
+  """`⟨:minimax⟩` algorithm for Laplace quadrature points. (`:minimax` or `:simplex`) """
+  algo::Symbol = :minimax
+end
+
 """ 
   Options for DMRG calculation.
 
@@ -397,6 +437,8 @@ end
 @kwdef mutable struct DavidsonOptions
   """`⟨10⟩` maximum number of Davidson vectors per state. """
   maxdav::Int = 10
+  """`⟨true⟩` use overlap in hermitian Davidson. """
+  use_overlap::Bool = true
 end
 
 
@@ -426,6 +468,8 @@ end
   int::IntOptions = IntOptions()
   """ Coupled-Cluster options ([`CcOptions`](@ref)). """
   cc::CcOptions = CcOptions()
+  """ EOM options ([`EomOptions`](@ref)). """
+  eom::EomOptions = EomOptions()
   """ FCI options ([`FCIOptions`](@ref)). """
   fci::FCIOptions = FCIOptions()
   """ HCI options ([`HCIOptions`](@ref)). """
@@ -434,6 +478,8 @@ end
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """
   cholesky::CholeskyOptions = CholeskyOptions()
+  """ Laplace options ([`LaplaceOptions`](@ref)). """
+  laplace::LaplaceOptions = LaplaceOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
   """ Davidson options ([`DavidsonOptions`](@ref)). """

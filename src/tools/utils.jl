@@ -10,7 +10,7 @@ using ..ElemCo.Outputs
 using ..ElemCo.VersionInfo
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
-export warn
+export warnerror
 export mainname, print_time, print_memory, free_memory
 export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
@@ -111,17 +111,17 @@ function print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
 end
 
 """
-    warn(msg::AbstractString, err=false)
+    warnerror(msg::AbstractString, err=false)
 
   Print a warning message. If `err` is `true`, the message is printed as an error message.
 
   The message is printed with a scull emoji.
   # Example
 ```julia
-julia> warn("This is a warning message.")
+julia> warnerror("This is a warning message.")
 ```
 """
-function warn(msg::AbstractString, err=false)
+function warnerror(msg::AbstractString, err=false)
   if err
     error(msg)
   end

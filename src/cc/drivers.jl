@@ -19,6 +19,7 @@ using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
 using ..ElemCo.FCI
+using ..ElemCo.EOM
 
 export ccdriver, dfccdriver, fcidriver, extrapolate
 
@@ -60,7 +61,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   elseif ecmethod.theory == "DMRG"
     energies = eval_dmrg_groundstate(EC, energies)
     t1 = print_time(EC, t1, "DMRG", 1)
-  else
+  elseif ecmethod.exclevel[2] != :none
     energies = eval_cc_groundstate(EC, ecmethod, energies)
     t1 = print_time(EC, t1, "ground state CC", 1)
   end
@@ -69,6 +70,12 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     calc_lm_cc(EC, ecmethod)
     t1 = print_time(EC, t1, "CC Lagrange multipliers", 1)
   end
+
+  if has_prefix(ecmethod, "EOM")
+    calc_eom(EC, ecmethod)
+    t1 = print_time(EC, t1, "EOM", 1)
+  end
+
   delete_temporary_files!(EC)
   draw_endline()
   # restore occs
@@ -101,18 +108,47 @@ function dfccdriver(EC::ECInfo, method)
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
 
   main_name = method_name(ecmethod)
-  if has_prefix(ecmethod, "SVD")
+  
+  if has_prefix(ecmethod, "SVD") 
     @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
     if !closed_shell_method
       error("Only closed-shell SVD methods implemented!")
     end
+    if has_prefix(ecmethod, "EOM")
+      save_use_full_t2 = EC.options.cc.use_full_t2
+      EC.options.cc.use_full_t2 = true
+      save_project_vovo_t2 = EC.options.cc.project_vovo_t2
+      EC.options.cc.project_vovo_t2 = 1
+      if !save_use_full_t2 || save_project_vovo_t2 != 1
+        warnerror("SVD-EOM-DCSD requires `cc.use_full_t2=true` and `cc.project_vovo_t2=1`!")
+      end 
+    end
+    methodname = "SVD-"*root_name
     ECC = calc_svd_dc(EC, ecmethod)
-    energies = output_energy(EC, ECC, energies, main_name)
-  elseif root_name == "MP2"
-    ECC = calc_dfmp2(EC)
-    energies = output_energy(EC, ECC, energies, main_name)
+    energies = output_energy(EC, ECC, energies, methodname)
+  elseif root_name == "MP2" 
+    if has_prefix(ecmethod, "SOS")
+      ECC = calc_df_lt_sos_mp2(EC)
+      energies = output_energy(EC, ECC, energies, main_name)
+    else
+      ECC = calc_dfmp2(EC)
+      energies = output_energy(EC, ECC, energies, main_name)
+    end
+  elseif root_name == "CCS"
   else
     error("$main_name DF method not implemented!")
+  end
+
+  if has_prefix(ecmethod, "EOM")
+    if has_prefix(ecmethod, "SVD")
+      calc_svd_eom(EC, ecmethod)
+      t1 = print_time(EC, t1, "SVD", 1)
+      EC.options.cc.use_full_t2 = save_use_full_t2
+      EC.options.cc.project_vovo_t2 = save_project_vovo_t2
+    else
+      calc_df_eom(EC, ecmethod)
+      t1 = print_time(EC, t1, "DF-EOM", 1)      
+    end
   end
 
   delete_temporary_files!(EC)
@@ -427,7 +463,7 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
 
   if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
     if is_similarity_transformed(EC.fd) && !has_prefix(ecmethod, "Λ")
-      warn("Perturbative triples for similarity transformed Hamiltonians must be calculated
+      warnerror("Perturbative triples for similarity transformed Hamiltonians must be calculated
       with ΛCCSD(T) method! The error can be ignored by setting the option `cc.ignore_error=true`.",
       !EC.options.cc.ignore_error)
     end
