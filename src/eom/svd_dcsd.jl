@@ -39,9 +39,6 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
         load!(EC, filename, U1)
         add_trial_vector!(dav, Vecs, st, custom_dots)
         #display(U1)
-       
-        println("Test")
-
 
         w_laplace, t_laplace = get_laplace_quadrature(ϵo, ϵv, EC.options.laplace.npoints,
                                                       algo=EC.options.laplace.algo,εexc_state=energies[st])
@@ -71,23 +68,6 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
         end
         tol2 = sqrt(EC.options.eom.ampsvdtol)
         First_UaiX = svd_decompose(reshape(TA, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
-
-        #voLfile, dv_voL = mmap3idx(EC, "d_voL")
-        #@mtensor A[a,i,L] = dv_voL[a,i,L] - First_UaiX[a,i,bX] * First_UaiX[b,j,bX] * dv_voL[b,j,L]  
-
-        #for q in eachindex(t_laplace)
-        #  tq = t_laplace[q]
-        #  wq = w_laplace[q]
-        #  for a in 1:nvirt, i in 1:nocc
-        #    fac = sqrt(abs(wq)) * exp(-tq * (ϵv[a] - ϵo[i]-(0.5*energies[st])))
-        #    for L in 1:nL
-        #       TA[a,i,L+((q-1)*nL)] = A[a,i,L] * fac
-        #    end
-        #  end
-        #end
-        #close(voLfile)
-        #Second_UaiX = svd_decompose(reshape(TA, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
-
 
         svd_space_option = EC.options.eom.svd_space_option 
 
@@ -172,14 +152,6 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
           UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.eom.ampsvdtol))
         end
 
-        #R2 = calc_R2_df_cis_pert_d(EC, U1)
-        #display(R2)        
-
-        #new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2       
-        #display(U2)        
-        
-        #UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.eom.ampsvdtol)) 
-        #display(UaiX) 
         save!(EC, "C_voX^$st", UaiX)        
 
       else
@@ -228,31 +200,15 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
     end
     states = states2do
   end
-
-
-
-## store the final eigenvectors
-#  excitation_level = 1
-#  mainfilename, descr = save_or_start_file(EC, "X", excitation_level)
-#  if mainfilename != ""
-#    for st in 1:nstates
-#      filename = mainfilename*"_$excitation_level"*"^$st"
-#      println("Saving $descr for state $st to $filename")
-#      U11 = rand([0, 1], nvirt, nocc)
-#      display(U11)
-#      save!(EC, filename, U11, description=descr)
-#    end
-#  end
-
 end
 
 
 """
-    calc_eom_svd_au(EC::ECInfo)
+    calc_eom_svd_au(EC::ECInfo, U1, U2, st)
 
   Calculate singles and doubles AUs for SVD-EOM-DCSD.
 """
-function calc_eom_svd_au(EC::ECInfo,U1, U2, st)
+function calc_eom_svd_au(EC::ECInfo, U1, U2, st)
   t1 = time_ns()
   mem1 = free_memory()
   U_voX = load3idx(EC, "C_voX")

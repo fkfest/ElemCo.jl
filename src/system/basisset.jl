@@ -416,7 +416,7 @@ function check_fit_basis_name(basis_name, type, err)
     return
   end
   if endswith(type, "fit") && !endswith(basis_name, "fit")
-    warn("Basis set $basis_name is not a valid fitting basis! 
+    warnerror("Basis set $basis_name is not a valid fitting basis! 
            Use a fitting basis set (e.g., `avtz-jkfit` for JK fit or `avtz-mpfit` for MP fit) 
            instead of AO basis set!
            This error can be ignored by setting option `int.check_fit_basis=false`)", err)

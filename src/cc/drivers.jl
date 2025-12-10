@@ -120,7 +120,7 @@ function dfccdriver(EC::ECInfo, method)
       save_project_vovo_t2 = EC.options.cc.project_vovo_t2
       EC.options.cc.project_vovo_t2 = 1
       if !save_use_full_t2 || save_project_vovo_t2 != 1
-        warn("SVD-EOM-DCSD requires `cc.use_full_t2=true` and `cc.project_vovo_t2=1`!")
+        warnerror("SVD-EOM-DCSD requires `cc.use_full_t2=true` and `cc.project_vovo_t2=1`!")
       end 
     end
     methodname = "SVD-"*root_name
@@ -463,7 +463,7 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
 
   if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
     if is_similarity_transformed(EC.fd) && !has_prefix(ecmethod, "Λ")
-      warn("Perturbative triples for similarity transformed Hamiltonians must be calculated
+      warnerror("Perturbative triples for similarity transformed Hamiltonians must be calculated
       with ΛCCSD(T) method! The error can be ignored by setting the option `cc.ignore_error=true`.",
       !EC.options.cc.ignore_error)
     end

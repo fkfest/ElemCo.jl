@@ -201,7 +201,7 @@ function generate_DF_Fock(EC::ECInfo, cMO::SpinMatrix; check_diagonal=false)
       maxoff = maximum(abs, fock_MO - Diagonal(fock_MO))
       if maxoff > 1e-8
         if EC.options.wf.ignore_error
-          warn("The largest off-diagonal element of fock matrix is $maxoff > 1e-8")
+          warnerror("The largest off-diagonal element of fock matrix is $maxoff > 1e-8")
         else
           error("The largest off-diagonal element of fock matrix is $maxoff > 1e-8 
           The error can be ignored by setting wf,ignore_error=true.")

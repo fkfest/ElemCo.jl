@@ -127,18 +127,22 @@ end
   and the final position after specs.
 """
 function check_specs(mname::AbstractString, pos::Int, specs::Vector{String})
-  matches = []
-  for spec in specs
-    if length(mname)-pos+1 >= length(spec)
-      if substr(mname, pos, length(spec)) == spec
-        if length(spec) > 2 && last(spec) == '-'
-          push!(matches, substr(spec,1,length(spec)-1))
-        elseif length(spec) > 2 && first(spec) == '-'
-          push!(matches, substr(spec,2))
-        else
-          push!(matches, spec)
+  matches = String[]
+  nmatches_before = -1
+  while length(matches) != nmatches_before
+    nmatches_before = length(matches)
+    for spec in specs
+      if length(mname)-pos+1 >= length(spec)
+        if substr(mname, pos, length(spec)) == spec
+          if length(spec) > 2 && last(spec) == '-'
+            push!(matches, substr(spec,1,length(spec)-1))
+          elseif length(spec) > 2 && first(spec) == '-'
+            push!(matches, substr(spec,2))
+          else
+            push!(matches, spec)
+          end
+          pos += length(spec)
         end
-        pos += length(spec)
       end
     end
   end

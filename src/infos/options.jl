@@ -350,6 +350,11 @@ end
   svd_space_option::Int = 6
 end
 
+"""
+  Options for Laplace quadrature.
+
+  $(TYPEDFIELDS)
+"""
 @kwdef mutable struct LaplaceOptions
   """`⟨8⟩` number of Laplace quadrature points. """
   npoints::Int = 8

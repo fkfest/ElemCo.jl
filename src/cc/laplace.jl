@@ -66,11 +66,8 @@ function calc_laplace_points(emin, emax, npoints::Int)
   end    
 
   maxiter = 100
-  coverged = false
+  converged = false
   for iter = 1:maxiter
-    # print("iter:")
-    # println(iter)
- 
     vector_weights_and_points_update = zeros(Scalar, 2*npoints) 
     #the gradient only has 2*npoints since it depends on x_i and x_(i+1) 
     #-> it matches the dimension of the number of weigths + points which is each npoints big
@@ -109,28 +106,6 @@ function calc_laplace_points(emin, emax, npoints::Int)
       end
 
     end #iters of Newton-Raphson
-    
-    # Find nodal points of Eta(x) in (emin,emax) to set intervals
-    
-   # roots = Float64[]
-   # #scan = range(emin, emax, length=10000)
-   # scan = range(1, R, length=10000)
-   # prev = Eta(scan[1])
-   # for i in 2:length(scan)
-   #   curr = Eta(scan[i])
-   #   if prev*curr < 0
-   #     # Bisection
-   #     a, b = scan[i-1], scan[i]
-   #     for _ in 1:200
-   #       m = (a+b)/2
-   #       v = Eta(m)
-   #       if abs(v) < tol; break; end
-   #       if Eta(a)*v < 0; b = m; else; a = m; end
-   #     end
-   #     push!(roots, (a+b)/2)
-   #   end
-   #   prev = curr
-   # end
     
     roots = determine_nodal_points(Eta, R, tol_zero)
 
@@ -180,13 +155,13 @@ function calc_laplace_points(emin, emax, npoints::Int)
 
     
     if norm(gradient_vector) < tol
-      coverged = true
+      converged = true
       break
     end
         
   end #iter
 
-  if !coverged
+  if !converged
     println("WARNING: Laplace point optimization did not converge in $maxiter iterations.")
   end
 

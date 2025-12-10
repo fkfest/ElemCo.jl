@@ -25,7 +25,7 @@ export calc_dmrg
   Perform DMRG calculation
 """
 function calc_dmrg()
-  warn("For DMRG calculations, please load ITensors.jl and ITensorMPS.jl packages.", true)
+  warnerror("For DMRG calculations, please load ITensors.jl and ITensorMPS.jl packages.", true)
 end
 
 end # module DMRG

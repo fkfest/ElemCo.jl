@@ -274,7 +274,7 @@ function update_Seff!(dav::Davidson, tvecs, state, customdots=())
 end
 
 """
-    add_trial_vector!(dav::Davidson, tvecs, state=1, customdots=())
+    add_trial_vector!(dav::Davidson, tvecs, state=0, customdots=())
 
   Add a trial vector for `state` to Davidson object and update effective overlap
   and Hamiltonian matrix.
