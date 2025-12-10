@@ -54,6 +54,35 @@ macro mtensoropt(args::Vararg{Expr})
 end
 
 """
+    replace_ref_begin_end!(ex::Expr)
+
+  Replace `begin` and `end` in reference expression `ex` with `firstindex` and `lastindex`.
+
+  This is needed for macros that generate code with `begin` and `end` in references,
+  because those macros are expanded before the actual indices are known.
+"""
+function replace_ref_begin_end!(ex::Expr)
+  Meta.isexpr(ex, :ref) || return ex
+  arr = ex.args[1]
+  for (dim, arg) in enumerate(@view ex.args[2:end])
+    ex.args[dim + 1] = _replace_begin_end(arg, arr, dim)
+  end
+  return ex
+end
+
+function _replace_begin_end(arg, arr, dim)
+  if arg === :begin
+    return :(firstindex($arr, $dim))
+  elseif arg === :end
+    return :(lastindex($arr, $dim))
+  elseif arg isa Expr
+    return Expr(arg.head, (_replace_begin_end(a, arr, dim) for a in arg.args)...)
+  else
+    return arg
+  end
+end
+
+"""
     @mview(ex)
 
   StridedView based version of `@view`.
@@ -62,7 +91,7 @@ macro mview(ex)
   # NOTE it's largely based on the @view macro from Base.
   Meta.isexpr(ex, :ref) || throw(ArgumentError(
       "Invalid use of @mview macro: argument must be a reference expression A[...]."))
-  ex = Base.replace_ref_begin_end!(ex)
+  ex = replace_ref_begin_end!(ex)
   # NOTE We embed `view` as a function object itself directly into the AST.
   #      By doing this, we prevent the creation of function definitions like
   #      `view(A, idx) = xxx` in cases such as `@view(A[idx]) = xxx.`
