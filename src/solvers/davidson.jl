@@ -457,9 +457,9 @@ function diagonalize(dav::Davidson)
     vals, vecs = eigen(Hermitian(dav.hmat[1:dav.nDim,1:dav.nDim]))
   end
   # make sure the eigenvalues are real 
-  vecs, vals = rotate_eigenvectors_to_real(vecs, vals)
-  dav.eigvals[1:dav.nstates] = vals[1:dav.nstates]
-  dav.eigvecs[1:dav.nDim,1:dav.nstates] = vecs[:,1:dav.nstates]
+  vecs, vals = rotate_eigenvectors_to_real(vecs[:, 1:dav.nstates], vals[1:dav.nstates])
+  dav.eigvals[1:dav.nstates] = vals
+  dav.eigvecs[1:dav.nDim,1:dav.nstates] = vecs
   return vals, vecs
 end
 
