@@ -175,7 +175,7 @@ c, 1.1, 1.0000000
 function read_basis_block(basisfile::AbstractString, atom::ACentre; fallback="")
   elem = lowercase(element_fullname(atom))
   # search for `! $elem  ....`
-  reg_start = Regex("^!\\s$elem\\s+")
+  reg_start = Regex("^!\\s$elem\\s*")
   reg_end = Regex("^\\s*[!}]\\s*")
   basisblock::String = ""
   open(basisfile) do f
@@ -247,8 +247,8 @@ function parse_basis_block(basis_block::AbstractString, atom::ACentre; add_diffu
   basisblock = lowercase(basis_block)
   elem = lowercase(element_LABEL(atom))
   # search for ` s, $elem , 13...`
-  reg_exp = Regex("^\\s*[$SUBSHELLS_NAMES]\\s*,\\s*$elem\\s*,")
-  reg_con = Regex("^\\s*c,\\s*")
+  reg_exp = Regex("^\\s*[$SUBSHELLS_NAMES]\\s*[, ]\\s*$elem\\s*[, ]")
+  reg_con = Regex("^\\s*c[, ]\\s*")
   ashells = AngularShell[]
   for line in split(basisblock, "\n")
     #remove comments ` abc !...` -> `abc`
@@ -307,7 +307,7 @@ end
 """
 function parse_exponents(expline::AbstractString; add_diffuse=0, add_steep=0)
   # parse exponents
-  exponents = strip.(split(expline, ","))
+  exponents = strip.(split(expline, [',',' '], keepempty=false))
   lval = SUBSHELL2L[exponents[1][1]]
   # remove angular momentum and element symbol and convert to Float64
   exponents = parse.(Float64, exponents[3:end])
@@ -383,7 +383,7 @@ end
 """
 function parse_contraction(conline::AbstractString)
   # parse contraction coefficients
-  contraction = strip.(split(conline, ","))
+  contraction = strip.(split(conline, [',',' '], keepempty=false))
   # parse exponent range
   start, stop = parse.(Int, split(contraction[2], "."))
   exprange = start:stop
