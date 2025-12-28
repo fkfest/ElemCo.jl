@@ -180,12 +180,12 @@ function calc_laplace_points(emin, emax, npoints::Int)
 end
 
 
-function determine_nodal_points(f::Function, R::Scalar, tol::Scalar)
+function determine_nodal_points(f::Function, R, tol)
   roots = Scalar[]
   #scan = range(emin, emax, length=10000)
   scan = range(1, R, length=100000)
   prev = f(scan[1])
-  for i in 2:length(scan)
+  for i in eachindex(@view(scan[2:end]))
     curr = f(scan[i])
     if prev*curr <= 0.0
       # Bisection
@@ -277,7 +277,7 @@ end
 
 Linear interpolation helper function.
 """
-function interpolate_linear(x_data::Vector{Scalar}, y_data::Vector{Scalar}, x::Scalar)
+function interpolate_linear(x_data::Vector{Scalar}, y_data::Vector{Scalar}, x)
   if x <= x_data[1]
     return y_data[1]
   elseif x >= x_data[end]
@@ -304,7 +304,7 @@ end
 
 Select initial reference points using distribution function weighting.
 """
-function select_weighted_reference_points(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, nref::Int, emin::Scalar, emax::Scalar)
+function select_weighted_reference_points(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, nref::Int, emin, emax)
   # Start with Chebyshev nodes as base points
   x_cheb = [0.5*(emin+emax) + 0.5*(emax-emin)*cos(pi*(2*j-1)/(2*nref)) for j in 1:nref]
   sort!(x_cheb)
@@ -335,7 +335,7 @@ end
 
 Interpolate distribution function value at point x.
 """
-function interpolate_distribution(x::Scalar, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
+function interpolate_distribution(x, x_grid::Vector{Scalar}, f_x::Vector{Scalar})
   if x <= x_grid[1]
     return f_x[1]
   elseif x >= x_grid[end]
@@ -357,7 +357,7 @@ end
 Find extrema of the error function weighted by the distribution function.
 """
 function find_weighted_extrema(E::Function, dE::Function, x_grid::Vector{Scalar}, f_x::Vector{Scalar}, 
-                            emin::Scalar, emax::Scalar, nroots::Int, tol::Scalar)
+                            emin, emax, nroots::Int, tol)
   roots = Scalar[]
   scan = range(emin, emax, length=2000)
   
@@ -365,7 +365,7 @@ function find_weighted_extrema(E::Function, dE::Function, x_grid::Vector{Scalar}
   weighted_dE(x) = interpolate_distribution(x, x_grid, f_x) * dE(x)
   
   prev = weighted_dE(scan[1])
-  for i in 2:length(scan)
+  for i in eachindex(@view(scan[2:end]))
     curr = weighted_dE(scan[i])
     if prev*curr < 0
       # Bisection to find root
@@ -389,7 +389,7 @@ end
 
 Sample a point from the distribution function (inverse transform sampling).
 """
-function sample_from_distribution(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, emin::Scalar, emax::Scalar)
+function sample_from_distribution(x_grid::Vector{Scalar}, f_x::Vector{Scalar}, emin, emax)
   # Find grid points within [emin, emax]
   mask = (x_grid .>= emin) .& (x_grid .<= emax)
   x_sub = x_grid[mask]
@@ -434,12 +434,12 @@ end
 
 Find roots of function H in interval [tmin, tmax].
 """
-function find_roots(H::Function, tmin::Scalar, tmax::Scalar, nroots::Int, tol::Scalar)
+function find_roots(H::Function, tmin, tmax, nroots::Int, tol)
   roots = Scalar[]
   scan = range(tmin, tmax, length=2000)
   
   prev = H(scan[1])
-  for i in 2:length(scan)
+  for i in eachindex(@view(scan[2:end]))
     curr = H(scan[i])
     if prev*curr < 0
       # Bisection
@@ -468,7 +468,7 @@ Obtain initial guess for Laplace quadrature points from a table file.
 
 Returns: Vector of points (t), weights (w) and the tabulated R
 """
-function get_initial_laplace(npoints::Int, R::Scalar, filename::String)
+function get_initial_laplace(npoints::Int, R, filename::String)
   open(filename, "r") do io
     found = false
     t = Scalar[]

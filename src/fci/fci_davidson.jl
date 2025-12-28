@@ -46,8 +46,7 @@ Arguments:
 Returns: Correction vector t_P (orthogonal to u_P)
 """
 function solve_projected_pspace_system(r_P::Vector{Scalar}, u_P::Vector{Scalar}, 
-                                       theta::Scalar, pspace_data::PSpaceData, shift::Scalar,
-                                       alpha::Scalar)
+                                       theta, pspace_data::PSpaceData, shift, alpha)
   n_p = pspace_data.n_pspace
   H_P = pspace_data.hamiltonian
   
@@ -104,7 +103,7 @@ Arguments:
 Result: t is orthogonal to u by construction (dot(t, u) ≈ 0)
 """
 function jacobi_davidson_correction!(t::FCIVector, r::FCIVector, u::FCIVector,
-                                     theta::Scalar, context::FCIContext, shift::Scalar)
+                                     theta, context::FCIContext, shift)
   # Corrected Jacobi-Davidson with proper P-Q space coupling
   debug = context.options.print_level >= 2
   
@@ -272,7 +271,7 @@ Arguments:
 - u: Current Ritz vector (normalized approximate eigenvector). Required for Jacobi-Davidson mode.
 """
 function update_ci_vector!(c::FCIVector, r::FCIVector, diag_h::FCIVector,
-                           energy::Scalar, context::FCIContext, shift::Scalar,
+                           energy, context::FCIContext, shift,
                            u::Union{FCIVector, Nothing} = nothing)
   # Decide which method to use
   jacobi_davidson = context.options.jacobi_davidson && u !== nothing

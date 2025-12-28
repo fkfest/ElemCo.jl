@@ -454,7 +454,7 @@ end
   Copied from `ToggleableAsserts.jl`.
 """
 macro assert_devel(cond, text=nothing)
-  if text==nothing
+  if isnothing(text)
     assert_stmt = esc(:(@assert $cond))
   else
     assert_stmt = esc(:(@assert $cond $text))

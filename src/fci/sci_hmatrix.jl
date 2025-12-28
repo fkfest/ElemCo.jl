@@ -216,7 +216,7 @@ end
 Compute H*c matrix-vector product using precomputed Hamiltonian elements.
 """
 function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Scalar},
-                                        selected_ctx::SelectedCIContext, prefactor::Scalar)
+                                        selected_ctx::SelectedCIContext, prefactor)
   n_det = n_selected(selected_ctx)
   @assert length(result) == n_det "Result vector size mismatch"
   @assert length(input) == n_det "Input vector size mismatch"
@@ -260,7 +260,7 @@ end
 Interface to existing Davidson solver infrastructure for Selected CI.
 """
 function contract_hamiltonian!(selected_ctx::SelectedCIContext, result::Vector{Scalar},
-                               input::Vector{Scalar}, prefactor::Scalar)
+                               input::Vector{Scalar}, prefactor)
   contract_hamiltonian_selected!(result, input, selected_ctx, prefactor)
 end
 

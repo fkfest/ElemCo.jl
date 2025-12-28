@@ -55,7 +55,7 @@ end
     # Test SIMD iteration
     function sum_with_simd(buf::BufVec{Float64})
         s = 0.0
-        @inbounds @simd for i in 1:length(buf)
+        @inbounds @simd for i in eachindex(buf)
             s += buf[i]
         end
         return s

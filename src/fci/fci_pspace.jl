@@ -82,7 +82,7 @@ end
 Convert a determinant address to alpha/beta orbital patterns.
 Uses the addressing tables to reconstruct the determinant.
 """
-function determinant_from_address(context::FCIContext, addr::Address)
+function determinant_from_address(context::FCIContext, addr)
   # Convert 1-based address to 0-based for decomposition
   addr_0based = addr - 1
 
@@ -405,15 +405,15 @@ function select_small_space_determinants(context::HCIContext{OPattern}, target_s
   if max_pspace_excitation >= 2
     doubles = Determinant{OPattern}[]
     # Alpha-alpha doubles
-    for i in 1:length(alpha_occ), j in 1:(i-1)
-      for a in 1:length(alpha_virt), b in 1:(a-1)
+    for i in eachindex(alpha_occ), j in 1:(i-1)
+      for a in eachindex(alpha_virt), b in 1:(a-1)
         det = double_excitation_alpha(hf_ref, alpha_occ[i], alpha_occ[j], alpha_virt[a], alpha_virt[b])
         push!(doubles, det)
       end
     end
     # Beta-beta doubles
-    for i in 1:length(beta_occ), j in 1:(i-1)
-      for a in 1:length(beta_virt), b in 1:(a-1)
+    for i in eachindex(beta_occ), j in 1:(i-1)
+      for a in eachindex(beta_virt), b in 1:(a-1)
         det = double_excitation_beta(hf_ref, beta_occ[i], beta_occ[j], beta_virt[a], beta_virt[b])
         push!(doubles, det)
       end

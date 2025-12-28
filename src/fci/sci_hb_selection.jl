@@ -167,8 +167,8 @@ Works with both FCIContext and HCIContext.
 """
 function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals},
                                newexcitations::VecDict{Determinant{OPattern}, ExcVals},
-                               det::Determinant{OPattern}, coef::Scalar, 
-                               coef_dg::Union{Scalar, Nothing}, ecorr::Scalar,
+                               det::Determinant{OPattern}, coef, 
+                               coef_dg::Union{Scalar, Nothing}, ecorr,
                                ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}},
                                setup_data::HCISetupData,
                                spaces::OrbSpaces, fockd::FockDiagonal,
@@ -236,7 +236,7 @@ together with their weighted matrix elements.
 function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
                           newexcitations::VecDict{Determinant{OPattern}, ExcVals},
                           det::Determinant{OPattern},
-                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function, 
+                          coef, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function, 
                           occ, pchb_excitations,
                           fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where OPattern
   pt = 0.0
@@ -291,7 +291,7 @@ using pre-computed Heat-Bath lists, adding only those with |H| > epsilon.
 function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
                           newexcitations::VecDict{Determinant{OPattern}, ExcVals},
                           det::Determinant{OPattern},
-                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, 
+                          coef, coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, 
                           n_orb, pchb_excitations,
                           fa, fb, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where OPattern
   pt = 0.0
@@ -338,7 +338,7 @@ Add single excitations to the excitations dictionary.
 function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
                           newexcitations::VecDict{Determinant{OPattern}, ExcVals},
                           det::Determinant{OPattern},
-                          coef::Scalar, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
+                          coef, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
                           occs, virts, occs_opp, int1, h1e2_same, h1e2_opp, singles_denom,
                           fdiag, ecorr, shift, 
                           epsilon::Float64, epsilon_c::Float64) where OPattern

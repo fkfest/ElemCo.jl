@@ -87,7 +87,7 @@ end
 
 Create orbital pattern from address.
 """
-@inline function make_pattern(table::OrbStringAdrTable{OPattern}, adr::Address)::OPattern where OPattern
+@inline function make_pattern(table::OrbStringAdrTable{OPattern}, adr)::OPattern where OPattern
   @boundscheck checkbounds(table.str_table, adr)
   return table.str_table[adr]
 end
@@ -156,7 +156,7 @@ end
 
 Set coefficient vec[i_a, i_b] = val.
 """
-@inline function Base.setindex!(vec::FCIVector{OPattern}, val::Scalar, i_a::Integer, i_b::Integer) where OPattern
+@inline function Base.setindex!(vec::FCIVector{OPattern}, val, i_a::Integer, i_b::Integer) where OPattern
   @boundscheck checkbounds(vec.data, i_a, i_b)
   vec.data[i_a, i_b] = val
 end
@@ -269,7 +269,7 @@ end
 
 Compute r += f * x using LinearAlgebra.
 """
-function add!(r::FCIVector{OPattern}, x::FCIVector{OPattern}, f::Scalar) where OPattern
+function add!(r::FCIVector{OPattern}, x::FCIVector{OPattern}, f) where OPattern
   @assert compatible(r, x) "Vectors not compatible"
   axpy!(f, x.data, r.data)
 end

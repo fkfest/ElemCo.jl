@@ -428,7 +428,7 @@ end
 
 Apply full Hamiltonian: |r⟩ += prefactor * H |c⟩
 """
-function contract_hamiltonian!(context::FCIContext, r::FCIVector, c::FCIVector, prefactor::Scalar)
+function contract_hamiltonian!(context::FCIContext, r::FCIVector, c::FCIVector, prefactor)
   for term in context.hamiltonian_terms
     contract!(term, r, c, prefactor)
   end
@@ -474,7 +474,7 @@ Direction: 'c' for contraction, 'R' for residual formation.
 """
 function block_contract_cc1!(data_k::AbstractArray{Scalar, 3}, info1,
                              coeffs::AbstractMatrix{Scalar}, direction::Char,
-                             c_sum::Ref{Scalar}, prefactor::Scalar)
+                             c_sum::Ref{Scalar}, prefactor)
   @assert direction == 'c' || direction == 'R'
   n_pair, n_blk1, n_blk2 = size(data_k)
   for i_blk1 in 1:n_blk1
@@ -521,7 +521,7 @@ Forms: `data_k[k,l,iBlk1,iBlk2] += <K_1|c†_k c_l|J_1> * coeffs[J_1,K_2] * sign
 """
 function block_contract_cc1_nosym!(data_k::AbstractArray{Scalar, 4}, info_1,
                                    coeffs::AbstractMatrix{Scalar},
-                                   c_sum::Ref{Scalar}, prefactor::Scalar)
+                                   c_sum::Ref{Scalar}, prefactor)
   n_orb, n_orb, n_blk1, n_blk2 = size(data_k)
   for i_blk1 in 1:n_blk1
     info = info_1[i_blk1]
@@ -676,7 +676,7 @@ end
 Apply 1-electron operator on specified spin branch.
 """
 function apply_1e_op!(result::AbstractVector{Scalar}, coeffs::AbstractVector{Scalar},
-                      prefactor::Scalar, op_matrix_1e::AbstractMatrix{Scalar},
+                      prefactor, op_matrix_1e::AbstractMatrix{Scalar},
                       adr1::OrbStringAdrTable, adr2::OrbStringAdrTable, st1::Integer, st2::Integer)
   if n_elec(adr1) == 0
     return
@@ -752,7 +752,7 @@ end
 
 Apply one-electron Hamiltonian term.
 """
-function contract!(term::HamiltonianTerm1e, r::FCIVector, c::FCIVector, prefactor::Scalar)
+function contract!(term::HamiltonianTerm1e, r::FCIVector, c::FCIVector, prefactor)
   @assert compatible(r, c) "Incompatible FCI vectors"
 
   base_prefactor = term.base_factor * prefactor
@@ -1008,7 +1008,7 @@ end
 
 Apply two-electron Hamiltonian term.
 """
-function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector{OPattern}, prefactor::Scalar) where OPattern
+function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector{OPattern}, prefactor) where OPattern
   @assert compatible(r, c) "Incompatible FCI vectors"
 
   base_prefactor = term.base_factor * prefactor
