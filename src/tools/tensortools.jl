@@ -343,10 +343,10 @@ function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, s
   end
   SP = EC.space
   if EC.options.wf.npositron > 0 && spincase == :p
-    return integ2(EC.fd,spincase)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
+    return integ2(EC.fd,spincase)[sp1,sp2,sp3,sp4]
   end
   if EC.fd.uhf && spincase == :αβ 
-    return integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
+    return integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
   end
   allint = integ2_ss(EC.fd, spincase)
   @assert ndims(allint) == 3
