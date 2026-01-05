@@ -12,7 +12,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.FockFactory
 using ..ElemCo.OrbTools
 
-export calc_fock_matrix, calc_HF_energy
+export calc_fock_matrix, calc_HF_energy, calc_rotated_HF_energy
 export calc_singles_energy_using_dfock
 export update_singles, update_doubles, update_singles!, update_doubles!, update_triples!, update_deco_doubles, update_deco_triples
 export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_singles_norm, calc_contra_doubles_norm, calc_deco_doubles_norm, calc_deco_triples_norm
@@ -25,21 +25,24 @@ export clean_cs_triples!
 export calc_cs_singles_dot, calc_u_singles_dot
 export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
 export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
+export calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot
 export triples_4ext!
 
 """ 
-    calc_fock_matrix(EC::ECInfo, closed_shell)
+    calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
 
   Calculate fock matrix from FCIDump
 """
-function calc_fock_matrix(EC::ECInfo, closed_shell)
+function calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
   t1 = time_ns()
   if closed_shell
     fock = gen_fock(EC)
     save!(EC, "f_mm", fock)
     save!(EC, "f_MM", fock)
     eps = diag(fock)
-    println("Occupied orbital energies: ", eps[EC.space['o']])
+    if print_out
+      println("Occupied orbital energies: ", eps[EC.space['o']])
+    end
     save!(EC, "e_m", eps)
     save!(EC, "e_M", eps)
     if EC.options.wf.npositron > 0
@@ -62,7 +65,9 @@ function calc_fock_matrix(EC::ECInfo, closed_shell)
     save!(EC,"f_MM", fock)
     save!(EC,"e_M", eps)
   end
-  t1 = print_time(EC,t1,"fock matrix",1)
+  if print_out
+    t1 = print_time(EC,t1,"fock matrix",1)
+  end
 end
 
 """ 
@@ -84,6 +89,23 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
     ϵo = load1idx(EC,"e_m")[SP['o']]
     ϵob = load1idx(EC,"e_M")[SP['O']]
     EHF = 0.5*(sum(ϵo)+sum(ϵob) + sum(diag(ints1(EC, "oo"))) + sum(diag(ints1(EC, "OO")))) + EC.fd.int0
+  end
+  return EHF
+end
+
+"""
+    calc_rotated_HF_energy(EC::ECInfo)
+
+  Calculate the Hartree-Fock energy in the rotated orbital basis.
+"""
+function calc_rotated_HF_energy(EC::ECInfo, closed_shell)
+  SP = EC.space
+  if closed_shell
+    ϵo = load1idx(EC,"e_m")[SP['o']]
+    int1_r = load2idx(EC,"int1_r")[SP['o'],SP['o']]
+    EHF = sum(ϵo) + sum(diag(int1_r)) + EC.fd.int0
+  else
+    # TODO
   end
   return EHF
 end
@@ -465,28 +487,39 @@ function calc_contra_singles_norm(T1a, T1b)
 end
 
 """
-    calc_cs_singles_dot(T1, T1_)
+    calc_cs_singles_dot(T1, T1_, state=0)
 
   Calculate dot product of closed-shell singles amplitudes.
 """
-function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
+function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
   @mtensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
   return DotT1::Float64
 end
-calc_cs_singles_dot(T1, T1_) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
+calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
 
 """
-    calc_u_singles_dot(T1, T1_)
+    calc_contra_cs_singles_dot(T1, T1_, state=0)
+
+  Calculate dot product of contravariant closed-shell singles amplitudes.
+"""
+function calc_contra_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
+  @mtensor DotT1 = 0.5*T1[a,i]*T1_[a,i]
+  return DotT1::Float64
+end
+calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot: T1 and T1_ must be matrices!")
+
+"""
+    calc_u_singles_dot(T1, T1_, state=0)
 
   Calculate dot of unrestricted singles amplitudes.
 """
-function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64})
+function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
   @mtensor begin
     DotT1 = T1[a,i]*T1_[a,i]
   end
   return DotT1::Float64
 end
-calc_u_singles_dot(T1, T1_) = error("calc_u_singles_dot: T1 and T1_ must be matrices!")
+calc_u_singles_dot(T1, T1_, state=0) = error("calc_u_singles_dot: T1 and T1_ must be matrices!")
 
 """
     calc_doubles_norm(T2)
@@ -527,37 +560,48 @@ end
 
   Calculate dot of closed-shell doubles amplitudes.
 """
-function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
   @mtensor DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
   return DotT2::Float64
 end
-calc_cs_doubles_dot(T2, T2_) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
+calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
+
+"""
+    calc_contra_cs_doubles_dot(T2, T2_)
+
+  Calculate dot of contravariant closed-shell doubles amplitudes.
+"""
+function calc_contra_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+  @mtensor DotT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2_[a,b,i,j]
+  return (DotT2/3.0)::Float64
+end
+calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
 
 """
     calc_samespin_doubles_dot(T2, T2_)
 
   Calculate dot of unrestricted same-spin doubles amplitudes.
 """
-function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
   @mtensor begin
     DotT2 = 0.25*(T2[a,b,i,j]*T2_[a,b,i,j])
   end
   return DotT2::Float64
 end
-calc_samespin_doubles_dot(T2, T2_) = error("calc_samespin_doubles_dot: T2 and T2_ must be 4D arrays!")
+calc_samespin_doubles_dot(T2, T2_, state=0) = error("calc_samespin_doubles_dot: T2 and T2_ must be 4D arrays!")
 
 """
     calc_ab_doubles_dot(T2, T2_)
 
   Calculate dot of unrestricted αβ doubles amplitudes.
 """
-function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4})
+function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
   @mtensor begin
     DotT2 = T2[a,b,i,j]*T2_[a,b,i,j]
   end
   return DotT2::Float64
 end
-calc_ab_doubles_dot(T2, T2_) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D arrays!")
+calc_ab_doubles_dot(T2, T2_, state=0) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D arrays!")
 
 """
     calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
@@ -747,6 +791,9 @@ function save_or_start_file(EC::ECInfo, type, excitation_level, save=true)
   elseif type == "LM"
     descr *= " Lagrange multipliers"
     mainfilename = save ? EC.options.cc.save_lm : EC.options.cc.start_lm
+  elseif type == "X"
+    descr *= " eigenvectors"
+    mainfilename = save ? EC.options.eom.save : EC.options.eom.start
   else
     error("unknown type $type")
   end

@@ -16,7 +16,7 @@ export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, loa
 export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
 export ints2!, detri_int2!
-export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
+export sqrtinvchol, invchol, rotate_eigenvectors_to_real, balance_norms!, svd_thr
 export get_spaceblocks
 export print_nonzeros
 export @mtensor, @mtensoropt
@@ -54,6 +54,35 @@ macro mtensoropt(args::Vararg{Expr})
 end
 
 """
+    replace_ref_begin_end!(ex::Expr)
+
+  Replace `begin` and `end` in reference expression `ex` with `firstindex` and `lastindex`.
+
+  This is needed for macros that generate code with `begin` and `end` in references,
+  because those macros are expanded before the actual indices are known.
+"""
+function replace_ref_begin_end!(ex::Expr)
+  Meta.isexpr(ex, :ref) || return ex
+  arr = ex.args[1]
+  for (dim, arg) in enumerate(@view ex.args[2:end])
+    ex.args[dim + 1] = _replace_begin_end(arg, arr, dim)
+  end
+  return ex
+end
+
+function _replace_begin_end(arg, arr, dim)
+  if arg === :begin
+    return :(firstindex($arr, $dim))
+  elseif arg === :end
+    return :(lastindex($arr, $dim))
+  elseif arg isa Expr
+    return Expr(arg.head, (_replace_begin_end(a, arr, dim) for a in arg.args)...)
+  else
+    return arg
+  end
+end
+
+"""
     @mview(ex)
 
   StridedView based version of `@view`.
@@ -62,7 +91,7 @@ macro mview(ex)
   # NOTE it's largely based on the @view macro from Base.
   Meta.isexpr(ex, :ref) || throw(ArgumentError(
       "Invalid use of @mview macro: argument must be a reference expression A[...]."))
-  ex = Base.replace_ref_begin_end!(ex)
+  ex = replace_ref_begin_end!(ex)
   # NOTE We embed `view` as a function object itself directly into the AST.
   #      By doing this, we prevent the creation of function definitions like
   #      `view(A, idx) = xxx` in cases such as `@view(A[idx]) = xxx.`
@@ -106,7 +135,18 @@ end
   Add file to `EC.files` with `description`.
 """
 function save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
-  miosave(joinpath(EC.scr, fname*EC.ext), a...)
+  miosave(fullfilename(EC, fname), a...)
+  add_file!(EC, fname, description; overwrite)
+end
+
+"""
+    save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
+
+  Save tuple of arrays `a` to file `fname` in EC.scr directory.
+  Add file to `EC.files` with `description`.
+"""
+function save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
+  miosave(fullfilename(EC, fname), a...)
   add_file!(EC, fname, description; overwrite)
 end
 
@@ -116,7 +156,7 @@ end
   Load array from file `fname` in EC.scr directory.
 """
 function load(EC::ECInfo, fname::String)
-  return mioload(joinpath(EC.scr, fname*EC.ext))
+  return mioload(fullfilename(EC, fname))
 end
 
 """
@@ -128,7 +168,7 @@ end
   If `skip_error` is true, return empty `Array{T,N}` if the dimension/type is wrong.
 """
 function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)[1]
+  return mioload(fullfilename(EC, fname), Val(N), T; skip_error)[1]
 end
 
 """
@@ -141,7 +181,7 @@ end
   If `skip_error` is true, return empty `Array{T,N}[Array{T,N}()]` if the dimension/type is wrong.
 """
 function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
-  return mioload(joinpath(EC.scr, fname*EC.ext), Val(N), T; skip_error)
+  return mioload(fullfilename(EC, fname), Val(N), T; skip_error)
 end
 
 for N in 1:6
@@ -166,7 +206,7 @@ end
   If `skip_error` is true, return false if the dimension/type is wrong.
 """
 function load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_error=false) where {T,N}
-  return mioload!(joinpath(EC.scr, fname*EC.ext), arrs...; skip_error)
+  return mioload!(fullfilename(EC, fname), arrs...; skip_error)
 end
 
 """
@@ -178,7 +218,7 @@ end
 """
 function newmmap(EC::ECInfo, fname::String, dims::NTuple{N,Int}, Type=Float64; description="tmp") where {N}
   add_file!(EC, fname, description; overwrite=true)
-  return mionewmmap(joinpath(EC.scr, fname*EC.ext), dims, Type)
+  return mionewmmap(fullfilename(EC, fname), dims, Type)
 end
 
 """
@@ -206,11 +246,11 @@ end
   Return a pointer to the file and the mmaped array.
 """
 function mmap(EC::ECInfo, fname::String)
-  return miommap(joinpath(EC.scr, fname*EC.ext))
+  return miommap(fullfilename(EC, fname))
 end
 
 function mmap(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
-  return miommap(joinpath(EC.scr, fname*EC.ext), Val(N), T)
+  return miommap(fullfilename(EC, fname), Val(N), T)
 end
 
 for N in 1:6
@@ -286,32 +326,47 @@ function spincase_from_4spaces(spaces::String)
 end
 
 """ 
-    ints2(EC::ECInfo, spaces::String, spincase = nothing)
+    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
 
-  Return subset of 2e⁻ integrals according to spaces. 
-  
-  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
-  from upper/lower case of spaces specification.
+  Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
+
+  The `sp1`, `sp2`, `sp3`, `sp4` are arrays or ranges of indices.
+  The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given. 
   If the last two indices are stored as triangular - make them full.
+  The result is stored in `out`.
 """
-function ints2(EC::ECInfo, spaces::String, spincase = nothing)
-  if isnothing(spincase)
-    sc = spincase_from_4spaces(spaces)
-  else 
-    sc::Symbol = spincase
+function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+  if EC.fd.uhf && spincase == :αβ
+    @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
+    out .= @view integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
+    return out
   end
   SP = EC.space
-  if EC.options.wf.npositron > 0 && sc == :p
-    return integ2(EC.fd,sc)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
+  if EC.options.wf.npositron > 0 && spincase == :p
+    return integ2(EC.fd,spincase)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
   end
-  if EC.fd.uhf && sc == :αβ 
+  if EC.fd.uhf && spincase == :αβ 
     return integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
   end
-  allint = integ2_ss(EC.fd, sc)
+  allint = integ2_ss(EC.fd, spincase)
   @assert ndims(allint) == 3
   norb = length(EC.space[':'])
   # last two indices as a triangular index, desymmetrize
-  return detri_int2(allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+  return detri_int2!(out, allint, norb, sp1, sp2, sp3, sp4)
+end
+
+""" 
+    ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+
+  Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
+
+  The `sp1`, `sp2`, `sp3`, `sp4` are arrays or ranges of indices.
+  The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given.
+  If the last two indices are stored as triangular - make them full.
+"""
+function ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+  return ints2!(out, EC, sp1, sp2, sp3, sp4, spincase)  
 end
 
 """ 
@@ -319,7 +374,7 @@ end
 
   Return subset of 2e⁻ integrals according to spaces. 
   
-  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
+  The `spincase`∈{`:α`,`:β`,`:αβ`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification.
   If the last two indices are stored as triangular - make them full.
   The result is stored in `out`.
@@ -331,16 +386,26 @@ function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spinc
     sc::Symbol = spincase
   end
   SP = EC.space
-  if EC.fd.uhf && sc == :αβ
-    @assert size(out) == (length(SP[spaces[1]]),length(SP[spaces[2]]),length(SP[spaces[3]]),length(SP[spaces[4]]))
-    out .= @view integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
-    return out
+  return ints2!(out, EC, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]], sc)
+end
+
+""" 
+    ints2(EC::ECInfo, spaces::String, spincase = nothing)
+
+  Return subset of 2e⁻ integrals according to spaces. 
+  
+  The `spincase`∈{`:α`,`:β`,`:αβ`} can explicitly be given, or will be deduced 
+  from upper/lower case of spaces specification.
+  If the last two indices are stored as triangular - make them full.
+"""
+function ints2(EC::ECInfo, spaces::String, spincase = nothing)
+  if isnothing(spincase)
+    sc = spincase_from_4spaces(spaces)
+  else 
+    sc::Symbol = spincase
   end
-  allint = integ2_ss(EC.fd, sc)
-  @assert ndims(allint) == 3
-  norb = length(EC.space[':'])
-  # last two indices as a triangular index, desymmetrize
-  return detri_int2!(out, allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+  SP = EC.space
+  return ints2(EC, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]], sc)
 end
 
 """ 
@@ -447,9 +512,9 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
     end
     inext = idx[iicc]
     idx[iicc] = -inext
-    evecs_real[:,inext] = imag.(evecs[:,inext])
-    normalize!(evecs_real[:,i])
-    normalize!(evecs_real[:,inext])
+    evecs_real[:,inext] = imag.(@view(evecs[:,inext]))
+    normalize!(@view(evecs_real[:,i]))
+    normalize!(@view(evecs_real[:,inext]))
     evals_real[inext] = real(evals[inext])
     npairs += 1
   end
@@ -460,6 +525,27 @@ end
 
 function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64})
   return evecs, evals
+end
+
+""" 
+    balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
+
+  Balance the norms of left and right eigenvectors.
+
+  Make each pair of left and right eigenvectors have the same norm.
+"""
+function balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
+  if isnothing(leftvecs)
+    leftvecs = (inv(evecs))'
+  end
+  for i in axes(evecs,2)
+    nrm = norm(evecs[:,i])
+    nrm_left = norm(leftvecs[:,i])
+    scale = sqrt(nrm_left / nrm)
+    evecs[:,i] .*= scale
+    leftvecs[:,i] ./= scale
+  end
+  return evecs, leftvecs
 end
 
 """ 

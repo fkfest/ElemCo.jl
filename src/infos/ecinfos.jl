@@ -15,10 +15,12 @@ export setup_space_fd!, setup_space_system!, setup_space!, reset_wf_info!
 export is_closed_shell
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
-export file_exists, add_file!, copy_file!, delete_file!, delete_files!, delete_temporary_files!
+export fullfilename, file_exists, add_file!, copy_file!
+export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 export get_options
+export FCIOptions, HCIOptions
 
 include("options.jl")
 
@@ -513,6 +515,37 @@ function set_options!(opt, allopts)
 end
 
 """
+    canonicalize_filename(name::String)
+
+  Canonicalize a filename by stripping whitespace and changing each capital letter to 
+  the corresponding lowercase letter plus 'ß'.
+"""
+function canonicalize_filename(name::String)
+  name = strip(name)
+  nameout = ""
+  for c in name
+    if isuppercase(c)
+      nameout *= lowercase(c) * 'ß'
+    else
+      nameout *= c
+    end
+  end
+  return nameout
+end
+
+"""
+  fullfilename(EC::ECInfo, name::String)
+
+  Return the full filename for file `name` in ECInfo.
+
+The file is assumed to be in the scratch directory `EC.scr` with extension `EC.ext`.
+The filename is canonicalized by `canonicalize_filename(name)` and the extension is added.
+"""
+function fullfilename(EC::ECInfo, name::String)
+  return joinpath(EC.scr, canonicalize_filename(name)*EC.ext)
+end
+
+"""
     file_exists(EC::ECInfo, name::String)
 
   Check if file `name` exists in ECInfo.
@@ -558,7 +591,7 @@ function copy_file!(EC::ECInfo, from::AbstractString, to::AbstractString; overwr
   end
   if !file_exists(EC, to) || overwrite
     EC.files[to] = EC.files[from]
-    cp(joinpath(EC.scr, from*EC.ext), joinpath(EC.scr, to*EC.ext), force=true)
+    cp(fullfilename(EC, from), fullfilename(EC, to), force=true)
   else
     error("File $to already exists in ECInfo. Use overwrite=true to overwrite.")
   end
@@ -573,7 +606,7 @@ function delete_file!(EC::ECInfo, name::AbstractString)
   if !file_exists(EC, name)
     error("File $name is not registered in ECInfo.")
   end
-  rm(joinpath(EC.scr, name*EC.ext), force=true)
+  rm(fullfilename(EC, name), force=true)
   delete!(EC.files, name)
 end
 
@@ -591,7 +624,7 @@ function delete_files!(EC::ECInfo, which::AbstractString)
   for (name,descr) in EC.files
     delete = all([w in split(descr) for w in split(which)])
     if delete
-      rm(joinpath(EC.scr, name*EC.ext), force=true)
+      rm(fullfilename(EC, name), force=true)
       delete!(EC.files, name)
     end
   end
@@ -618,6 +651,7 @@ end
   Delete all temporary files in ECInfo.  
 """
 function delete_temporary_files!(EC::ECInfo)
+  GC.gc(); GC.gc()
   delete_files!(EC, "tmp")
 end
 

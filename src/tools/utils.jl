@@ -1,22 +1,49 @@
 """ various utilities """
 module Utils
 using MKL
+using XML
 using Printf
 using ..ElemCo.AbstractEC
 using ..ElemCo.DescDict
+using ..ElemCo.VecDicts
 using ..ElemCo.Outputs
+using ..ElemCo.VersionInfo
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
-export warn
+export warnerror
 export mainname, print_time, print_memory, free_memory
 export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
 export subspace_in_space, argmaxN
 export @istoplevel
-export substr
+export @assert_devel
+export substr, setdiff4dict!, modifyvalueswith!
+export allocfree_permutedims!
+export reshape_buf
 export amdmkl
+export xpath
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
 export OutDict, last_energy
+# from bufvec
+export BufVec, capacity, is_full
+# from pairdict
+export PairDict
+# from VecDicts
+export VecDict, getvalue, setvalue!, values, resize!, push!
+export setat!, getat, setkeyat!, getkeyat, setvalueat!, getvalueat
+
+export @pib # alias for Base.@propagate_inbounds
+
+"""
+    @pib
+
+Alias for Base.@propagate_inbounds
+"""
+var"@pib" = Base.var"@propagate_inbounds"
+
+include("xmltools.jl")
+include("bufvec.jl")
+include("pairdict.jl")
 
 """
     mainname(file::String)
@@ -49,8 +76,12 @@ end
   Print time with message `info` if verbosity `verb` is smaller than `PrintOptions.time`.
 """
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
+  return print_time(EC.options.print.time, t1, info, verb)
+end
+
+function print_time(print_time_verbosity::Int, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
-  if verb < EC.options.print.time
+  if verb < print_time_verbosity
     output_time(t2 - t1, info)
   end
   return t2
@@ -80,17 +111,17 @@ function print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
 end
 
 """
-    warn(msg::AbstractString, err=false)
+    warnerror(msg::AbstractString, err=false)
 
   Print a warning message. If `err` is `true`, the message is printed as an error message.
 
   The message is printed with a scull emoji.
   # Example
 ```julia
-julia> warn("This is a warning message.")
+julia> warnerror("This is a warning message.")
 ```
 """
-function warn(msg::AbstractString, err=false)
+function warnerror(msg::AbstractString, err=false)
   if err
     error(msg)
   end
@@ -271,6 +302,38 @@ function substr(string::AbstractString, range::UnitRange{Int})
 end
 
 """
+    setdiff4dict!(dict::AbstractDict, keys)
+
+  Delete all `keys` from `dict`.
+
+  The same behavior as `setdiff!` for sets.
+"""
+@pib function setdiff4dict!(dict::AbstractDict, keys)
+  for key in keys
+    delete!(dict, key)
+  end
+end
+
+"""
+    modifyvalueswith!(combine, dict::AbstractDict, other::AbstractDict)
+
+  Modify the values in `dict` using the values from `other` and the function `combine`.
+
+  For each key in `other`, if the key exists in `dict`, the value in `dict` is updated
+  to `combine(v1, v2)`, where `v1` is the value in `dict` and `v2` is the value in `other`.
+
+  Similar to `mergewith!`, but only merges existing keys in `dict`.
+"""
+@pib function modifyvalueswith!(combine, dict::AbstractDict, other::AbstractDict)
+  for (key, val) in other
+    v1 = get(dict, key, nothing)
+    if !isnothing(v1)
+      @inbounds dict[key] = combine(v1, val)
+    end
+  end
+end
+
+"""
     argmaxN(vals, N; by::Function=identity)
 
   Return the indices of the `N` largest elements in `vals`.
@@ -318,6 +381,54 @@ function argmaxN(vals, N; by::Function=identity)
 end
 
 """
+    reshape_buf(buf::AbstractVector, dims...; offset=0)
+
+  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`, 
+  starting from `offset`.
+  The buffer is expected to be large enough to fit the reshaped data.
+
+  # Example
+```julia
+julia> buf = zeros(1000)
+julia> reshaped_buf = reshape_buf(buf, 10, 10)
+"""
+@pib function reshape_buf(buf::AbstractVector, dims...; offset=0)
+  len = prod(dims) + offset
+  @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
+  return reshape(@view(buf[1+offset:len]), dims...)
+end
+
+
+"""
+    allocfree_permutedims!(dest::AbstractArray{T1,N}, src::AbstractArray{T2,N}, perm::NTuple{N,Int}) where {T1,T2,N}
+
+  Copy data from `src` to `dest` with the dimensions permuted according to `perm`.
+  The `dest` array is expected to be preallocated and have the same size as `src` after permutation.
+  This function has the same functionality as `permutedims!`, but has much lower allocation overhead
+  for views of arrays (there is still one allocation left somewhere...).
+  
+  # Example
+```julia
+julia> src = rand(3, 4)
+julia> dest = zeros(10, 10)
+julia> allocfree_permutedims!(@view(dest[1:4,2:4]), src, (2, 1))
+"""
+function allocfree_permutedims!(dest::AbstractArray{T1,2}, src::AbstractArray{T2,2}, perm::NTuple{2,Int}) where {T1,T2}
+  @inbounds for I in CartesianIndices(src)
+    dest[I[perm[1]],I[perm[2]]] = src[I]
+  end
+end
+function allocfree_permutedims!(dest::AbstractArray{T1,3}, src::AbstractArray{T2,3}, perm::NTuple{3,Int}) where {T1,T2}
+  @inbounds for I in CartesianIndices(src)
+    dest[I[perm[1]],I[perm[2]],I[perm[3]]] = src[I]
+  end
+end
+function allocfree_permutedims!(dest::AbstractArray{T1,4}, src::AbstractArray{T2,4}, perm::NTuple{4,Int}) where {T1,T2}
+  @inbounds for I in CartesianIndices(src)
+    dest[I[perm[1]],I[perm[2]],I[perm[3]],I[perm[4]]] = src[I]
+  end
+end
+"""
     @istoplevel
 
   Macro to check if the current scope is the top level scope.
@@ -330,6 +441,25 @@ macro istoplevel()
     $(esc(canary)) = true
     Base.isdefined($__module__, $(QuoteNode(canary)))
   end
+end
+
+"""
+    @assert_devel(cond, text=nothing)
+
+  Assert `cond` only in development mode.
+
+  If `text` is given, it is used as the assertion message.
+  Development mode is determined by `VersionInfo.devel()`.
+
+  Copied from `ToggleableAsserts.jl`.
+"""
+macro assert_devel(cond, text=nothing)
+  if isnothing(text)
+    assert_stmt = esc(:(@assert $cond))
+  else
+    assert_stmt = esc(:(@assert $cond $text))
+  end
+  :(VersionInfo.devel() ? $assert_stmt  : nothing)
 end
 
 """

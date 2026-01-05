@@ -1,0 +1,23 @@
+$XML='files/mol.xml'
+$ORBITALS='files/orbs.dat'
+!$ECORBITALS='files/ecorbs.dat'
+$ECVARIABLES='files/ecvars.dat'
+
+system,'mkdir -p','files'
+
+put,xml,$XML
+
+{matrop
+load ORB ORB
+write,ORB,$ORBITALS,new,sci
+}
+
+system,'julia test.jl',' > test.log'
+
+
+!{matrop
+!read,ORB,file=$ECORBITALS
+!save,ORB,3200.2,ORBITALS
+!}
+
+readvar,$ECVARIABLES

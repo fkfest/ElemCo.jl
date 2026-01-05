@@ -74,7 +74,7 @@ end
   Guess BO-MO coefficients (right) from core Hamiltonian.
 """
 function guess_bo_hcore(EC::ECInfo, uhf)
-  CMOr_final = SpinMatrix()
+  cMOr_final = SpinMatrix{Float64}()
   if uhf
     spins = [:α, :β]
     if !EC.fd.uhf
@@ -91,9 +91,9 @@ function guess_bo_hcore(EC::ECInfo, uhf)
     isp += 1
   end
   if !uhf
-    restrict!(CMOr_final)
+    restrict!(cMOr_final)
   end
-  return CMOr_final
+  return cMOr_final
 end
 
 """
@@ -264,6 +264,7 @@ function bohf(EC::ECInfo)
       ϵ_new = zeros(Complex{Float64}, norb)
       cMOr_new = zeros(Complex{Float64}, norb, norb)
       ϵ_new[occ],cMOr_new[occ,occ] = eigen(fock[occ,occ])
+      println("eigenvalues occupied: ", ϵ_new[occ])
       ϵ_new[vir],cMOr_new[vir,vir] = eigen(fock[vir,vir])
     else
       perform!(diis, [fock], [Δfock])
@@ -272,8 +273,8 @@ function bohf(EC::ECInfo)
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
+    cMOr[1], cMOl[1] = balance_norms!(cMOr[1])
     restrict!(cMOr)
-    cMOl[1] = (inv(cMOr[1]))'
     restrict!(cMOl)
     # display(ϵ)
   end
@@ -282,7 +283,7 @@ function bohf(EC::ECInfo)
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMOr[1], description="BOHF right orbitals")
   save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl[1], description="BOHF left orbitals")
-  return EHF
+  return OutDict("HF"=>(EHF, "closed-shell BO-HF energy"), "E"=>(EHF, "closed-shell BO-HF energy"))
 end
 
 """ 
@@ -363,7 +364,7 @@ function bouhf(EC::ECInfo)
         ϵ_new, cMOr_new = eigen(fock[ispin])
       end
       cMOr[ispin], ϵ[ispin] = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
-      cMOl[ispin] = (inv(cMOr[ispin]))'
+      cMOr[ispin], cMOl[ispin] = balance_norms!(cMOr[ispin])
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
     # display(ϵ)
@@ -373,10 +374,7 @@ function bouhf(EC::ECInfo)
   delete_temporary_files!(EC)
   save!(EC, EC.options.wf.orb, cMOr..., description="BOHF right orbitals")
   save!(EC, EC.options.wf.orb*EC.options.wf.left, cMOl..., description="BOHF left orbitals")
-  return EHF
+  return OutDict("UHF"=>(EHF, "BO-UHF energy"), "HF"=>(EHF, "BO-UHF energy"), "E"=>(EHF, "BO-UHF energy"))
 end
-
-
-
 
 end # module BOHF

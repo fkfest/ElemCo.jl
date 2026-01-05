@@ -10,7 +10,7 @@ export has_suffix, set_suffix!
 
 const ExcLevels = "SDTQP"
 
-const Prefix4Methods = String["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R","QV-"]
+const Prefix4Methods = String["EOM-","SVD-","2D-","FRS-","FRT-","Λ","U","R","O","QV-","SOS-"]
 const Suffix4Methods = String[]
 
 """
@@ -23,7 +23,7 @@ $(FIELDS)
 mutable struct ECMethod
   """theory level: `"MP"`, `"CC"`, `"DC"`."""
   theory::String
-  """prefix of the methods, e.g., `"EOM"`, `"U"`, `"R"`, `"2D"`, `"FRS"`, `"FRT"`, `"QV"`."""
+  """prefix of the methods, e.g., `"EOM"`, `"U"`, `"R"`, `"2D"`, `"FRS"`, `"FRT"`, `"O"`, `"QV"`."""
   prefix::Vector{String}
   """suffix of the methods."""
   suffix::Vector{String}
@@ -48,9 +48,6 @@ mutable struct ECMethod
     ipos = 1
     # check for prefix
     prefix, ipos = check_specs(Mname, ipos, Prefix4Methods)
-    if "EOM" ∈ prefix
-      error("EOM methods not implemented!")
-    end
     # if pure PT: all excitation levels are perturbative, otherwise only the highest
     pure_PT = false
     if substr(Mname, ipos, 2) == "CC"
@@ -130,18 +127,22 @@ end
   and the final position after specs.
 """
 function check_specs(mname::AbstractString, pos::Int, specs::Vector{String})
-  matches = []
-  for spec in specs
-    if length(mname)-pos+1 >= length(spec)
-      if substr(mname, pos, length(spec)) == spec
-        if length(spec) > 2 && last(spec) == '-'
-          push!(matches, substr(spec,1,length(spec)-1))
-        elseif length(spec) > 2 && first(spec) == '-'
-          push!(matches, substr(spec,2))
-        else
-          push!(matches, spec)
+  matches = String[]
+  nmatches_before = -1
+  while length(matches) != nmatches_before
+    nmatches_before = length(matches)
+    for spec in specs
+      if length(mname)-pos+1 >= length(spec)
+        if substr(mname, pos, length(spec)) == spec
+          if length(spec) > 2 && last(spec) == '-'
+            push!(matches, substr(spec,1,length(spec)-1))
+          elseif length(spec) > 2 && first(spec) == '-'
+            push!(matches, substr(spec,2))
+          else
+            push!(matches, spec)
+          end
+          pos += length(spec)
         end
-        pos += length(spec)
       end
     end
   end

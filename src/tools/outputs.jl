@@ -9,7 +9,7 @@ module Outputs
 using Printf
 export output_time, output_memory, flush_output
 export output_iteration
-export output_E_var, output_E_method, output_norms
+export output_E_var, output_E_method, output_norms, output_state
 
 """
     output_time(Δtime, info::AbstractString)
@@ -63,6 +63,25 @@ function output_iteration(it, var, Δt, floats...)
     @printf "%12.8f " f
   end
   @printf "%10.2e %8.2f \n" var Δt/10^9
+  flush(stdout)
+end
+
+"""
+    output_state(state, var, floats...; converged=false)
+
+  Output state number `state`, variance `var`, and additional floats.
+"""
+function output_state(state, var, floats...; converged=false)
+  @printf "    %3i " state
+  for f in floats
+    @printf "%12.8f " f
+  end
+  @printf "%10.2e " var
+  if converged
+    println("Converged")
+  else
+    println()
+  end
   flush(stdout)
 end
 

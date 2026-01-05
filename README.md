@@ -1,4 +1,4 @@
-# ElemCo.jl <img align="right" src="files/coil.png" height=74> <br/><br/>
+# ElemCo.jl <img align="right" src="files/coil.png" height=74> <br/> <span style="font-weight:normal"> *elemcoil*</span><br/>
 
 Julia implementation of various electron-correlation methods (main focus on coupled cluster methods).
 The integrals are obtained from a FCIDUMP file or calculated using an interface to [libcint](https://github.com/sunqm/libcint).
@@ -95,6 +95,12 @@ On all other operating systems `TMPDIR`, `TMP`, `TEMP`, and `TEMPDIR`. If none o
 Default scratch folder name is `elemcojlscr`.
 
 Variable names `fcidump`, `geometry` and `basis` are reserved for the file name of FCIDUMP, geometry specification and basis sets, respectively.
+
+### Input generation and orbital visualizer
+
+`ElemCo.jl` input files can be generated using [`jlmol`](https://github.com/fkfest/jlmol),
+which can also be used to visualize the molecular orbitals.
+The browser version of `jlmol` can be found at [app.jlmol.com](https://app.jlmol.com).
 
 ### Example
 
