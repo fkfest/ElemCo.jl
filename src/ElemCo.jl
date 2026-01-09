@@ -306,7 +306,7 @@ end
 
   Copy wavefunction data from the current trexio dump file to another dump file.
 
-  If `to_file` is not provided, the wavefunction is copied to [`EC.options.wf.dump_new`](@ref ECInfos.WfOptions) file.
+  If `to_file` is not provided, the wavefunction is copied to [`EC.options.wf.store`](@ref ECInfos.WfOptions) file.
   Note: This does not check the contents of the files.
 """
 macro copywf(to_file="")
@@ -898,7 +898,7 @@ end
   Rotate orbitals `orb1` and `orb2` from [`WfOptions.dump`](@ref ECInfos.WfOptions) 
   by `angle` (in degrees). For UHF, `spin` can be `:α` or `:β` (keyword argument).
   
-  The orbitals are stored to [`WfOptions.dump_new`](@ref ECInfos.WfOptions).
+  The orbitals are stored to [`WfOptions.store`](@ref ECInfos.WfOptions).
 
   # Keyword arguments
   - `spin::Symbol`: spin of the orbitals (default: `:α`).

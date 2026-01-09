@@ -26,7 +26,7 @@ Returns `(filename::String, full_path_filename::String)`.
 function dumpfile(EC::ECInfo, intent)
   filename = ""
   if intent == "w"
-    filename = EC.options.wf.dump_new
+    filename = EC.options.wf.store
   end
   if filename == ""
     filename = EC.options.wf.dump
@@ -315,7 +315,8 @@ end
 """
     save_wavefunction(EC::ECInfo, wf::AbstractDict)
 
-  Save parts of the wavefunction to file [`WfOptions.dump_new`](@ref ECInfos.WfOptions) or [`WfOptions.dump`](@ref ECInfos.WfOptions).
+  Save parts of the wavefunction to file [`WfOptions.store`](@ref ECInfos.WfOptions) or 
+  [`WfOptions.dump`](@ref ECInfos.WfOptions) (if `store` is empty).
 
   `wf` can contain any of the following keys:
   - `basis`: basis set information

@@ -15,8 +15,8 @@
   charge::Int = 0
   """`⟨"wf.h5"⟩` filename for wavefunction dump (stored in TREXIO format). """
   dump::String = "wf.h5"
-  """`⟨""⟩` filename for new (output) wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
-  dump_new::String = ""
+  """`⟨""⟩` filename to store the output wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
+  store::String = ""
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
   """`⟨:large⟩` core type for frozen-core approximation: 
