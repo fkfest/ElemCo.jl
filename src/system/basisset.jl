@@ -57,6 +57,8 @@ struct BasisSet
   lib::ILibcint
 end
 
+BasisSet() = BasisSet(BasisCentre[])
+
 function BasisSet(centres::Vector{BasisCentre}, cartesian::Bool=false, lib::AbstractILib=ILibcint(centres, cartesian))
   shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centres) for j in 1:n_angularshells(c)]
   centre_ranges = [1:length(centres)]
@@ -114,6 +116,10 @@ function Base.iterate(bs::BasisSet, state=1)
   else
     return (bs[state], state+1)
   end
+end
+
+function Base.isempty(bs::BasisSet)
+  return isempty(bs.centres)
 end
 
 """

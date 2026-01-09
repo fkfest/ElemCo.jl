@@ -8,6 +8,7 @@ module ElemCo
 include("version.jl")
 include("../lib/TREXIO/src/TREXIO.jl")  # Include standalone TREXIO module
 include("infos/abstractEC.jl")
+include("tools/mtensoroperations.jl")
 include("tools/descdict.jl")
 include("tools/vecdict.jl")
 include("tools/outputs.jl")
@@ -22,10 +23,11 @@ include("system/msystems.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
+include("infos/ecinfos.jl")
+
 include("interfaces/trexio.jl")
 include("system/wavefunctions.jl")
 
-include("infos/ecinfos.jl")
 include("infos/ecmethods.jl")
 include("tools/tensortools.jl")
 include("solvers/diis.jl")
@@ -95,6 +97,7 @@ using .TrexioInterface
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile
+export @loadwf, @savewf, @copywf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
@@ -182,7 +185,6 @@ end
   # Example
 ```julia
 fock = @loadfile("f_mm")
-orbs = @loadfile("C_Am")
 ```
 """
 macro loadfile(filename)
@@ -230,6 +232,92 @@ macro copyfile(from_file, to_file, kwargs...)
   end
 end
 
+"""
+    @loadwf(what...)
+
+  Load wavefunction data from the trexio dump file.
+
+  The arguments `what` can be a vector of strings, a string variable or a list of arguments 
+  specifying what to load.
+  Possible values are: 
+
+  - `orbital_energies`: molecular orbital energies
+  - `orbital_occupations`: molecular orbital occupations
+  - `amplitudes`: coupled cluster amplitudes
+
+  The loaded data are returned as a dictionary with keys corresponding to the requested data.
+  `basis`, `orbitals` and `orbital_type` are always included in the output.
+
+  # Examples
+```julia
+julia> wf = @loadwf orbital_energies orbital_occupations
+julia> wf["basis"]  # basis set information
+julia> wf = @loadwf ["orbital_energies", "orbital_occupations"]
+```
+"""
+macro loadwf(what...)
+  strwhat = String[clean_exprstring(w) for w in what]
+  if length(strwhat) == 1
+    return quote
+      $(esc(:@tryECinit))
+      strwhat = @var2string($(esc(what[1])), $(esc(strwhat)), AbstractArray)
+      load_wavefunction($(esc(:EC)), strwhat)
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      load_wavefunction($(esc(:EC)), $(esc(strwhat)))
+    end
+  end
+end
+
+"""
+    @savewf(wf::AbstractDict)
+
+  Save wavefunction data to the trexio dump file.
+
+  The argument `wf` is a dictionary with the data to be saved.
+  Possible keys are:
+  - `basis`: basis set information
+  - `orbitals`: molecular orbitals
+  - `orbital_type`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
+  - `orbital_energies`: molecular orbital energies
+  - `orbital_occupations`: molecular orbital occupations
+  - `amplitudes`: coupled cluster amplitudes
+
+  # Examples
+```julia
+julia> wf = @loadwf orbital_energies orbital_occupations
+julia> orbs = wf["orbitals"]
+[...]
+julia> wf1 = Dict("basis"=>wf["basis"], "orbitals"=>orbs, "orbital_type"=>"modified RHF") 
+julia> @savewf wf1
+```
+"""
+macro savewf(wf)
+  return quote
+    $(esc(:@tryECinit))
+    save_wavefunction($(esc(:EC)), $(esc(wf)))
+  end
+end
+
+"""
+    @copywf(to_file::AbstractString="")
+
+  Copy wavefunction data from the current trexio dump file to another dump file.
+
+  If `to_file` is not provided, the wavefunction is copied to [`EC.options.wf.dump_new`](@ref ECInfos.WfOptions) file.
+  Note: This does not check the contents of the files.
+"""
+macro copywf(to_file="")
+  strto = clean_exprstring(to_file)
+  return quote
+    $(esc(:@tryECinit))
+    strto = @var2string($(esc(to_file)), $(esc(strto)))
+    copy_wavefunction($(esc(:EC)), strto)
+  end
+end
+
 """ 
     @ECinit()
 
@@ -263,19 +351,6 @@ macro ECinit()
   end
 end
 
-# """ 
-#     @checkEC()
-
-#   Check current molecular system and/or fcidump in `EC::ECInfo` vs the defined variables.
-#   If variables `geometry::String` and `basis::Dict{String,Any}`
-#   and/or `fcidump::String` have changed, update `EC`.
-# """
-# macro checkEC()
-#   return quote
-#     $(esc(:@setupEC))
-#   end
-# end
-
 """ 
     @setupEC()
 
@@ -284,17 +359,29 @@ end
 macro setupEC()
   return quote
     try
-      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
-      println("Geometry: ",$(esc(:geometry)))
-      println("Basis: ",$(esc(:basis)))
-      $(esc(:EC)).system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
+      @assert(typeof($(esc(:fcidump))) <: AbstractString, "fcidump must be a String")
+      if fd_origin($(esc(:EC)).fd) != $(esc(:fcidump))
+        println("FCIDump: ",$(esc(:fcidump)))
+        $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+      end
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
     try
-      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
-      println("FCIDump: ",$(esc(:fcidump)))
-      $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
+      @assert(typeof($(esc(:geometry))) <: AbstractString, "geometry must be a String")
+      @assert(typeof($(esc(:basis))) <: Union{AbstractDict, AbstractString}, "basis must be a Dict or a String")
+      system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
+      if !isapprox(system, $(esc(:EC)).system) && !isempty($(esc(:EC)).fd)
+        println("Geometry or basis changed, the integrals will be regenerated.")
+        $(esc(:EC)).fd = TFDump()  # reset fcidump
+      end
+      if !issame(system, $(esc(:EC)).system)
+        println("Geometry: ",$(esc(:geometry)))
+        println("Basis: ",$(esc(:basis)))
+        $(esc(:EC)).system = system
+      end
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
@@ -316,6 +403,8 @@ macro tryECinit()
     end
     if runECinit[1]
       $(esc(:@ECinit))
+    else
+      $(esc(:@setupEC))
     end
   end
 end
@@ -382,6 +471,7 @@ var"@opt" = var"@set"
 macro reset(opt)
   stropt="$opt"
   return quote
+    $(esc(:@tryECinit))
     if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
       $(esc(:EC)).options.$opt = typeof($(esc(:EC)).options.$opt)()
     else
@@ -420,11 +510,11 @@ function clean_exprstring(expr)
 end
 
 """
-    @var2string(var, strvar="")
+    @var2string(var, strvar="", type=AbstractString)
 
   Return string representation of `var`.
 
-  If `var` is a String variable, return the value of the variable.
+  If `var` is a String (or `type`) variable, return the value of the variable.
   Otherwise, return the string representation of `var` (or `strvar` if provided).
 
   # Examples
@@ -436,14 +526,14 @@ julia> @var2string(CCSD)
 "UCCSD"
 ```
 """
-macro var2string(var, strvar="")
+macro var2string(var, strvar="", type=AbstractString)
   if strvar == ""
     strvar = clean_exprstring(var)
   end
   valvar = :($(esc(var)))
   return quote
     isvar = [false]
-    try @assert(typeof($(esc(var))) <: AbstractString)
+    try @assert(typeof($(esc(var))) <: $(esc(type)))  # check if var is defined and of correct type
       isvar[1] = true
     catch
     end
@@ -458,7 +548,7 @@ end
 """ 
     @dfhf()
 
-  Run DF-HF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  Run DF-HF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
 """
 macro dfhf()
   return quote
@@ -474,7 +564,7 @@ end
 """ 
     @dfuhf()
 
-  Run DF-UHF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  Run DF-UHF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
 """
 macro dfuhf()
   return quote
@@ -486,7 +576,7 @@ end
 """
     @dfmcscf()
 
-  Run DF-MCSCF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  Run DF-MCSCF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
 """
 macro dfmcscf()
   return quote
@@ -499,7 +589,7 @@ end
     @dfints()
 
   Generate 2 and 4-idx MO integrals using density fitting.
-  The MO coefficients are read from [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  The MO coefficients are read from [`WfOptions.dump`](@ref ECInfos.WfOptions).
 """
 macro dfints()
   return quote
@@ -549,7 +639,7 @@ macro cc(method, kwargs...)
   else
     return quote
       $(esc(:@tryECinit))
-      if !fd_exists($(esc(:EC)).fd)
+      if isempty($(esc(:EC)).fd)
         $(esc(:@dfints))
       end
       strmethod = @var2string($(esc(method)), $(esc(strmethod)))
@@ -629,7 +719,7 @@ macro fci(kwargs...)
   ekwa = [esc(a) for a in kwargs]
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       $(esc(:@dfints))
     end
     fcidriver($(esc(:EC)); $(ekwa...))
@@ -663,7 +753,7 @@ macro hci(kwargs...)
   ekwa = [esc(a) for a in kwargs]
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       $(esc(:@dfints))
     end
     fcidriver($(esc(:EC)); $(ekwa...), hci=true)
@@ -675,7 +765,7 @@ end
 
   Run bi-orthogonal HF calculation using FCIDUMP integrals.
 
-  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  The orbital rotations are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
   For open-shell systems (or UHF FCIDUMPs), the BO-UHF energy is calculated.
 
   # Examples
@@ -687,7 +777,7 @@ fcidump = "FCIDUMP"
 macro bohf()
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     if is_closed_shell($(esc(:EC)))
@@ -706,7 +796,7 @@ end
 macro bouhf()
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     bouhf($(esc(:EC)))
@@ -714,33 +804,23 @@ macro bouhf()
 end
 
 """
-    @transform_ints(type="")
+    @transform_ints()
 
-  Rotate FCIDump integrals using [`WfOptions.orb`](@ref ECInfos.WfOptions) as transformation 
-  matrices.
+  Rotate FCIDump integrals using rotations from [`WfOptions.dump`](@ref ECInfos.WfOptions) 
+  as transformation matrices.
 
-  The orbitals are read from [`WfOptions.orb`](@ref ECInfos.WfOptions).
-  If type is one of [bo, BO, bi-orthogonal, Bi-orthogonal, biorth, biorthogonal, Biorthogonal], 
-  the bi-orthogonal orbitals are used and the left transformation matrix is
-  read from [`WfOptions.orb`](@ref ECInfos.WfOptions)*[`WfOptions.left`](@ref ECInfos.WfOptions).
+  The orbital rotations are read from [`WfOptions.dump`](@ref ECInfos.WfOptions).
+  If type of the rotations contains the word `biorthogonal`, 
+  the bi-orthogonal orbitals are used.
 """
-macro transform_ints(type="")
-  strtype = clean_exprstring(type)
+macro transform_ints()
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
-    CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
-    strtype = @var2string($(esc(type)), $(esc(strtype)))
-    if strtype ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
-      CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
-    elseif strtype == ""
-      CMOl = CMOr
-    else
-      error("Unknown type in @transform_ints: ", strtype)
-    end
-    transform_fcidump($(esc(:EC)).fd, CMOl, CMOr)
+    CMOl, CMOr = load_left_right_rotations($(esc(:EC)))
+    transform_fcidump!($(esc(:EC)).fd, CMOl, CMOr)
   end
 end
 
@@ -757,7 +837,7 @@ macro write_ints(file="FCIDUMP", kwargs...)
   ekwa = [esc(a) for a in kwargs]
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     write_fcidump($(esc(:EC)).fd, $file; $(ekwa...))
@@ -815,10 +895,10 @@ end
 """
     @rotate_orbs(orb1, orb2, angle, kwargs...)
 
-  Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  Rotate orbitals `orb1` and `orb2` from [`WfOptions.dump`](@ref ECInfos.WfOptions) 
   by `angle` (in degrees). For UHF, `spin` can be `:α` or `:β` (keyword argument).
   
-  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  The orbitals are stored to [`WfOptions.dump_new`](@ref ECInfos.WfOptions).
 
   # Keyword arguments
   - `spin::Symbol`: spin of the orbitals (default: `:α`).
@@ -881,6 +961,7 @@ end
 macro export_molden(filename)
   strfilename = clean_exprstring(filename)
   return quote
+    $(esc(:@tryECinit))
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
   end
@@ -912,12 +993,12 @@ macro molpro_input(filename="elemcoil")
     if newbasis[1]
       $(esc(:basis)) = ao_basis
     end
-    $(esc(:@ECinit))
+    $(esc(:@ECinit)) # TODO replace with @tryECinit once the mo classes are properly handled
     MolproInterface.set_options_from_xml!($(esc(:EC)), mol_node)
     if haskey($(esc(:MI)), "ORBITALS")
       orbs = MolproInterface.import_orbitals($(esc(:EC)), $(esc(:MI))["ORBITALS"])
       if !isempty(orbs)
-        save!($(esc(:EC)), $(esc(:EC)).options.wf.orb, orbs)
+        dump_orbitals($(esc(:EC)), SpinMatrix(orbs))
         println("Orbitals imported from Molpro: ", size(orbs, 2), " orbitals.")
       end
     end

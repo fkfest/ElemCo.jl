@@ -22,7 +22,7 @@ end
 #EC.fd = read_fcidump(fcidump)
 @set scf pseudo=true
 EBOHF = @bouhf
-@transform_ints biorthogonal
+@transform_ints 
 @test abs(EBOHF["E"]-EHF_test) < epsilon
 energies = @cc udcsd
 @test abs(last_energy(energies)-EHF_test-ECC_test[2]) < epsilon

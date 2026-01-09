@@ -145,7 +145,7 @@ end
   Return reference energy (calculated using `jkfit` fitting basis).
 """
 function generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix; save3idx=true)
-  if !system_exists(EC.system)
+  if isempty(EC.system)
     error("Molecular system not specified!")
   end
   # calculate fock matrix in AO basis (integral direct)
@@ -165,7 +165,7 @@ end
   Return reference energy.
 """
 function generate_DF_Fock(EC::ECInfo, cMO::SpinMatrix; check_diagonal=false)
-  if !system_exists(EC.system)
+  if isempty(EC.system)
     error("Molecular system not specified!")
   end
   occα = EC.space['o']

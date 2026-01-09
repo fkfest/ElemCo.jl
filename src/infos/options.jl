@@ -13,18 +13,12 @@
   nelec::Int = -1
   """`⟨0⟩` charge of the system (relative to nelec/FCIDump/neutral system!). """
   charge::Int = 0
-  """`⟨"C_Am"⟩` filename of MO coefficients. 
-  Used by all programs to read and write orbitals from/to file. """
-  orb::String = "C_Am"
+  """`⟨"wf.h5"⟩` filename for wavefunction dump (stored in TREXIO format). """
+  dump::String = "wf.h5"
+  """`⟨""⟩` filename for new (output) wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
+  dump_new::String = ""
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
-  """`⟨"e_m_pos"⟩` filename of the positron orbital energies. """
-  eps_pos::String = "e_m_pos"
-  """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 
-  Used by all programs to read and write positron orbitals from/to file. """
-  orb_pos::String = "C_Am_pos"
-  """`⟨"-left"⟩` addition to the filename for left orbitals (for biorthogonal calculations). """
-  left::String = "-left"
   """`⟨:large⟩` core type for frozen-core approximation: 
   - `:none` no frozen-core approximation, 
   - `:small` semi-core orbitals correlated, 
@@ -73,7 +67,7 @@ end
   - `:HCORE` from core Hamiltonian
   - `:SAD` from atomic densities
   - `:GWH` not implemented yet
-  - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
+  - `:ORB` from previous orbitals stored in dump file [`WfOptions.dump`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
   """`⟨:HCORE⟩` positron orbital guess. Only `:HCORE` is implemented. """
