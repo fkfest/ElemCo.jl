@@ -24,12 +24,14 @@ energies = @cc svd-dc-ccsdt
 @test abs(last_energy(energies)-EDC_CCSDT_test) < epsilon
 @test abs(energies["SVD-DC-CCSDT+"]-EDC_CCSDTp_test) < epsilon
 
-@set cc calc_t3_for_decomposition=true
-energies = @cc svd-dc-ccsdt 
+energies = @cc svd-dc-ccsdt begin 
+  @set cc calc_t3_for_decomposition=true
+end
 @test abs(last_energy(energies)-EDC_CCSDT_useT3_test) < epsilon
 
-@set cc calc_t3_for_decomposition=false project_voXL=true
-energies = @cc svd-dc-ccsdt 
+energies = @cc svd-dc-ccsdt begin
+  @set cc project_voXL=true
+end
 @test abs(last_energy(energies)-EDC_CCSDT_voXL_test[:combined]) < epsilon
 @test abs(energies["SVD-DC-CCSDT+"]-EDC_CCSDTp_voXL_test[:combined]) < epsilon
 

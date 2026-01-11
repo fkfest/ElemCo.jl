@@ -18,7 +18,7 @@ export fullfilename, file_exists, add_file!, copy_file!
 export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
-export get_options
+export get_options, with_local_options
 export FCIOptions, HCIOptions
 
 include("options.jl")
@@ -745,6 +745,44 @@ function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
     end
   end
   return occa, virta, occb, virtb
+end
+
+"""
+    with_local_options(f::Function, EC::ECInfo, local_opts::NamedTuple)
+
+Execute function `f` with local options applied, then restore original options.
+
+The `local_opts` is a `NamedTuple` where keys are option category names 
+(e.g., `wf`, `cc`, `scf`) and values are `NamedTuple`s of option key-value pairs.
+
+# Example
+```julia
+with_local_options(EC, (wf=(charge=-1, ms2=1), cc=(maxit=30,))) do
+  ccdriver(EC, "ccsd")
+end
+```
+"""
+function with_local_options(f::Function, EC::ECInfo, local_opts::NamedTuple)
+  saved_opts = deepcopy(EC.options)
+  try
+    for (opt_name, opt_kwargs) in pairs(local_opts)
+      if hasproperty(EC.options, opt_name)
+        opt_obj = getfield(EC.options, opt_name)
+        for (key, value) in pairs(opt_kwargs)
+          if hasproperty(opt_obj, key)
+            setproperty!(opt_obj, key, value)
+          else
+            error("Invalid option '$key' for '$opt_name'")
+          end
+        end
+      else
+        error("Unknown option category: $opt_name")
+      end
+    end
+    return f()
+  finally
+    EC.options = saved_opts
+  end
 end
 
 end #module

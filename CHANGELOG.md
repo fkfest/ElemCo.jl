@@ -21,6 +21,7 @@
 
 ### Added
 
+* Local options for macros: All calculation macros (`@cc`, `@dfcc`, `@dfhf`, `@dfuhf`, `@dfmcscf`, `@dfmp2`, `@fci`, `@hci`, `@bohf`, `@bouhf`) now accept an optional `begin...end` block to set options locally for that specific call. Options are automatically restored after the call completes. This is the recommended way to set options for individual calculations.
 * Automatic augmentation of basis sets by additional diffuse or steep functions.
 * Functions to get all elements available in a given basis set (`get_available_elements4basis`) and to output the basis set for a given list of elements in the molpro format (`output_basis`).
 * Augmented basis sets for jkfit vXz-jkfit and def2-universal-jkfit basis sets.

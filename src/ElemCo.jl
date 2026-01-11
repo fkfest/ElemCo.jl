@@ -510,6 +510,128 @@ function clean_exprstring(expr)
 end
 
 """
+    is_options_block(arg)
+
+Check if `arg` is a `begin...end` block for local options.
+"""
+function is_options_block(arg)
+  return arg isa Expr && arg.head == :block
+end
+
+"""
+    parse_options_block(block::Expr)
+
+Parse a `begin...end` block with local options and return code that constructs 
+a NamedTuple for `with_local_options`.
+
+Each line in the block should have one of these formats:
+- Set-macro style: `@set option_name key1=val1 key2=val2 ...`
+- Function-call style: `option_name(key1=val1, key2=val2, ...)`
+
+Multiple lines for the same option category are merged together.
+
+For example:
+```julia
+begin
+  @set wf charge=-1 ms2=1
+  @set cc maxit=30
+  @set cc thr=1.e-10
+end
+# or equivalently:
+begin
+  wf(charge=-1, ms2=1)
+  cc(maxit=30, thr=1.e-10)
+end
+```
+Returns an expression that creates: `(wf=(charge=-1, ms2=1), cc=(maxit=30, thr=1.e-10))`
+"""
+function parse_options_block(block::Expr)
+  @assert block.head == :block "Expected begin...end block"
+  # Use a Dict to collect options per category (to allow merging)
+  opts_dict = Dict{Symbol, Vector{Expr}}()
+  
+  for arg in block.args
+    arg isa LineNumberNode && continue
+    if arg isa Symbol
+      # Just option name without any settings - skip or error
+      error("Option category '$arg' specified without any settings")
+    elseif arg isa Expr
+      if arg.head == :macrocall
+        macro_sym = arg.args[1]
+        if macro_sym == Symbol("@set")
+          # Parse @set style: @set wf charge=-1 ms2=1
+          # args[1] = @set, args[2] = LineNumberNode, args[3] = option_name, args[4+] = key=value pairs
+          opt_name = nothing
+          for i in 2:length(arg.args)
+            item = arg.args[i]
+            item isa LineNumberNode && continue
+            if isnothing(opt_name)
+              # First non-LineNumberNode argument is the option category
+              if item isa Symbol
+                opt_name = item
+              else
+                error("Expected option category name after @set, got: $item")
+              end
+            elseif item isa Expr && item.head == :(=)
+              if !haskey(opts_dict, opt_name)
+                opts_dict[opt_name] = Expr[]
+              end
+              push!(opts_dict[opt_name], Expr(:(=), item.args[1], item.args[2]))
+            elseif item isa Expr && item.head == :kw
+              if !haskey(opts_dict, opt_name)
+                opts_dict[opt_name] = Expr[]
+              end
+              push!(opts_dict[opt_name], Expr(:(=), item.args[1], item.args[2]))
+            else
+              error("Expected key=value pair in options block, got: $item")
+            end
+          end
+        else
+          error("Unknown macro '$macro_sym' in options block. Use: @set category key=value")
+        end
+      elseif arg.head == :call
+        # Parse function-call style: wf(charge=-1, ms2=1)
+        opt_name = arg.args[1]
+        for i in 2:length(arg.args)
+          kw = arg.args[i]
+          if kw isa Expr && kw.head == :(=)
+            if !haskey(opts_dict, opt_name)
+              opts_dict[opt_name] = Expr[]
+            end
+            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], kw.args[2]))
+          elseif kw isa Expr && kw.head == :kw
+            if !haskey(opts_dict, opt_name)
+              opts_dict[opt_name] = Expr[]
+            end
+            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], kw.args[2]))
+          else
+            error("Expected key=value pair in options block, got: $kw")
+          end
+        end
+      elseif arg.head == :(=)
+        # Single assignment like: cc = saved_opts  
+        # This would be for restoring, but we don't support it in blocks
+        error("Direct assignment not supported in options block. Use: @set category key=value")
+      else
+        error("Unexpected expression in options block: $arg")
+      end
+    end
+  end
+  
+  if isempty(opts_dict)
+    return :(NamedTuple())
+  end
+  
+  # Build the final NamedTuple expression from the collected options
+  opts = Expr[]
+  for (opt_name, kwargs) in opts_dict
+    inner_tuple = Expr(:tuple, kwargs...)
+    push!(opts, Expr(:(=), opt_name, inner_tuple))
+  end
+  return Expr(:tuple, opts...)
+end
+
+"""
     @var2string(var, strvar="", type=AbstractString)
 
   Return string representation of `var`.
@@ -546,42 +668,114 @@ macro var2string(var, strvar="", type=AbstractString)
 end
 
 """ 
-    @dfhf()
+    @dfhf(opts_block=nothing)
 
   Run DF-HF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+@dfhf
+# with local options:
+@dfhf begin
+  @set scf maxit=100 thr=1.e-12
+  @set wf charge=-1
+end
+```
 """
-macro dfhf()
-  return quote
-    $(esc(:@tryECinit))
-    if $(esc(:EC)).options.wf.npositron > 0
-      dfhf_positron($(esc(:EC)))
-    else
-      dfhf($(esc(:EC)))
+macro dfhf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        if $(esc(:EC)).options.wf.npositron > 0
+          dfhf_positron($(esc(:EC)))
+        else
+          dfhf($(esc(:EC)))
+        end
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if $(esc(:EC)).options.wf.npositron > 0
+        dfhf_positron($(esc(:EC)))
+      else
+        dfhf($(esc(:EC)))
+      end
     end
   end
 end
 
 """ 
-    @dfuhf()
+    @dfuhf(opts_block=nothing)
 
   Run DF-UHF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+@dfuhf
+# with local options:
+@dfuhf begin
+  @set scf maxit=100
+end
+```
 """
-macro dfuhf()
-  return quote
-    $(esc(:@tryECinit))
-    dfuhf($(esc(:EC)))
+macro dfuhf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        dfuhf($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      dfuhf($(esc(:EC)))
+    end
   end
 end
 
 """
-    @dfmcscf()
+    @dfmcscf(opts_block=nothing)
 
   Run DF-MCSCF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+@dfmcscf
+# with local options:
+@dfmcscf begin
+  @set scf maxit=100
+  @set wf active="(4,4)"
+end
+```
 """
-macro dfmcscf()
-  return quote
-    $(esc(:@tryECinit))
-    dfmcscf($(esc(:EC)))
+macro dfmcscf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        dfmcscf($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      dfmcscf($(esc(:EC)))
+    end
   end
 end
 
@@ -599,13 +793,16 @@ macro dfints()
 end
 
 """ 
-    @cc(method, kwargs...)
+    @cc(method, args...)
 
   Run coupled cluster calculation.
 
   The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc).
   The method can be specified as a string or as a variable, e.g., 
   `@cc CCSD` or `@cc "CCSD"` or `ccmethod="CCSD";  @cc ccmethod`.
+  
+  Optionally, a `begin...end` block can be provided as the last argument to set 
+  local options for this call. The options are reset after the call completes.
   
   # Keyword arguments
   - `fcidump::String`: fcidump file (default: "", i.e., use integrals from `EC`).
@@ -625,37 +822,79 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 @dfhf
 @dfints
 @cc ccsd
+# with local options:
+@cc ccsd begin
+  @set wf charge=-1 ms2=1
+  @set cc maxit=30
+end
 ```
 """
-macro cc(method, kwargs...)
+macro cc(method, args...)
   strmethod = clean_exprstring(method)
+  # Check if last argument is an options block
+  local_opts_expr = nothing
+  if !isempty(args) && is_options_block(args[end])
+    local_opts_expr = parse_options_block(args[end])
+    kwargs = args[1:end-1]
+  else
+    kwargs = args
+  end
   ekwa = [esc(a) for a in kwargs]
-  if kwarg_provided_in_macro(kwargs, :fcidump)
-    return quote
-      $(esc(:@tryECinit))
-      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
-      ccdriver($(esc(:EC)), strmethod; $(ekwa...))
+  
+  if !isnothing(local_opts_expr)
+    # With local options
+    if kwarg_provided_in_macro(kwargs, :fcidump)
+      return quote
+        $(esc(:@tryECinit))
+        with_local_options($(esc(:EC)), $local_opts_expr) do
+          strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+          ccdriver($(esc(:EC)), strmethod; $(ekwa...))
+        end
+      end
+    else
+      return quote
+        $(esc(:@tryECinit))
+        with_local_options($(esc(:EC)), $local_opts_expr) do
+          if isempty($(esc(:EC)).fd)
+            dfdump($(esc(:EC)))
+          end
+          strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+          ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+        end
+      end
     end
   else
-    return quote
-      $(esc(:@tryECinit))
-      if isempty($(esc(:EC)).fd)
-        $(esc(:@dfints))
+    # Without local options (original behavior)
+    if kwarg_provided_in_macro(kwargs, :fcidump)
+      return quote
+        $(esc(:@tryECinit))
+        strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+        ccdriver($(esc(:EC)), strmethod; $(ekwa...))
       end
-      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
-      ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+    else
+      return quote
+        $(esc(:@tryECinit))
+        if isempty($(esc(:EC)).fd)
+          $(esc(:@dfints))
+        end
+        strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+        ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+      end
     end
   end
 end
 
 """
-    @dfcc(method="svd-dcsd")
+    @dfcc(method="svd-dcsd", opts_block=nothing)
 
   Run coupled cluster calculation using density fitted integrals.
 
   The type of the method is determined by the first argument.
   The method can be specified as a string or as a variable, e.g., 
   `@dfcc SVD-DCSD` or `@dfcc "SVD-DCSD"` or `ccmethod="SVD-DCSD";  @dfcc ccmethod`.
+  
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
   
   # Examples
 ```julia
@@ -666,36 +905,76 @@ H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
 @dfcc svd-dcsd
+# with local options:
+@dfcc svd-dcsd begin
+  @set cc maxit=30
+end
 ```
 """
-macro dfcc(method="svd-dcsd")
+macro dfcc(method="svd-dcsd", opts_block=nothing)
   strmethod = clean_exprstring(method)
-  return quote
-    $(esc(:@tryECinit))
-    strmethod = @var2string($(esc(method)), $(esc(strmethod)))
-    dfccdriver($(esc(:EC)), strmethod)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+        dfccdriver($(esc(:EC)), strmethod)
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+      dfccdriver($(esc(:EC)), strmethod)
+    end
   end
 end
 
 """ 
-    @dfmp2()
+    @dfmp2(opts_block=nothing)
 
   Run density-fitted MP2 calculation.
 
   If `save` is set in [`CcOptions.save`](@ref ECInfos.CcOptions), 
   the MP2 doubles amplitudes are saved to `save`*"_2" file.
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+@dfmp2
+# with local options:
+@dfmp2 begin
+  @set cc save="mp2_amplitudes"
+end
+```
 """
-macro dfmp2()
-  return quote
-    $(esc(:@tryECinit))
-    dfccdriver($(esc(:EC)), "MP2")
+macro dfmp2(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        dfccdriver($(esc(:EC)), "MP2")
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      dfccdriver($(esc(:EC)), "MP2")
+    end
   end
 end
 
 """ 
-    @fci(kwargs...)
+    @fci(args...)
 
   Run FCI calculation.
+
+  Optionally, a `begin...end` block can be provided as the last argument to set 
+  local options for this call. The options are reset after the call completes.
 
   # Keyword arguments
   - `occa::String`: occupied α orbitals (default: "-").
@@ -713,23 +992,51 @@ H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
 @dfhf
 @fci
+# with local options:
+@fci begin
+  @set wf charge=-1
+end
 ```
 """
-macro fci(kwargs...)
+macro fci(args...)
+  # Check if last argument is an options block
+  local_opts_expr = nothing
+  if !isempty(args) && is_options_block(args[end])
+    local_opts_expr = parse_options_block(args[end])
+    kwargs = args[1:end-1]
+  else
+    kwargs = args
+  end
   ekwa = [esc(a) for a in kwargs]
-  return quote
-    $(esc(:@tryECinit))
-    if isempty($(esc(:EC)).fd)
-      $(esc(:@dfints))
+  
+  if !isnothing(local_opts_expr)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts_expr) do
+        if isempty($(esc(:EC)).fd)
+          dfdump($(esc(:EC)))
+        end
+        fcidriver($(esc(:EC)); $(ekwa...))
+      end
     end
-    fcidriver($(esc(:EC)); $(ekwa...))
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        $(esc(:@dfints))
+      end
+      fcidriver($(esc(:EC)); $(ekwa...))
+    end
   end
 end
 
 """ 
-    @hci(kwargs...)
+    @hci(args...)
 
   Run Heat-bath CI calculation.
+
+  Optionally, a `begin...end` block can be provided as the last argument to set 
+  local options for this call. The options are reset after the call completes.
 
   # Keyword arguments
   - `occa::String`: occupied α orbitals (default: "-").
@@ -747,59 +1054,134 @@ H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
 @dfhf
 @hci
+# with local options:
+@hci begin
+  @set fci epsilon1=1.e-4
+end
 ```
 """
-macro hci(kwargs...)
+macro hci(args...)
+  # Check if last argument is an options block
+  local_opts_expr = nothing
+  if !isempty(args) && is_options_block(args[end])
+    local_opts_expr = parse_options_block(args[end])
+    kwargs = args[1:end-1]
+  else
+    kwargs = args
+  end
   ekwa = [esc(a) for a in kwargs]
-  return quote
-    $(esc(:@tryECinit))
-    if isempty($(esc(:EC)).fd)
-      $(esc(:@dfints))
+  
+  if !isnothing(local_opts_expr)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts_expr) do
+        if isempty($(esc(:EC)).fd)
+          dfdump($(esc(:EC)))
+        end
+        fcidriver($(esc(:EC)); $(ekwa...), hci=true)
+      end
     end
-    fcidriver($(esc(:EC)); $(ekwa...), hci=true)
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        $(esc(:@dfints))
+      end
+      fcidriver($(esc(:EC)); $(ekwa...), hci=true)
+    end
   end
 end
 
 """ 
-    @bohf()
+    @bohf(opts_block=nothing)
 
   Run bi-orthogonal HF calculation using FCIDUMP integrals.
 
   The orbital rotations are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
   For open-shell systems (or UHF FCIDUMPs), the BO-UHF energy is calculated.
 
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
   # Examples
 ```julia
 fcidump = "FCIDUMP"
 @bohf
+# with local options:
+@bohf begin
+  @set scf maxit=100
+end
 ```
 """
-macro bohf()
-  return quote
-    $(esc(:@tryECinit))
-    if isempty($(esc(:EC)).fd)
-      error("No FCIDump found.")
+macro bohf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      with_local_options($(esc(:EC)), $local_opts) do
+        if is_closed_shell($(esc(:EC)))
+          bohf($(esc(:EC)))
+        else
+          bouhf($(esc(:EC)))
+        end
+      end
     end
-    if is_closed_shell($(esc(:EC)))
-      bohf($(esc(:EC)))
-    else
-      bouhf($(esc(:EC)))
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      if is_closed_shell($(esc(:EC)))
+        bohf($(esc(:EC)))
+      else
+        bouhf($(esc(:EC)))
+      end
     end
   end
 end
 
 """ 
-    @bouhf()
+    @bouhf(opts_block=nothing)
 
   Run bi-orthogonal UHF calculation using FCIDUMP integrals.
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+fcidump = "FCIDUMP"
+@bouhf
+# with local options:
+@bouhf begin
+  @set scf maxit=100
+end
+```
 """
-macro bouhf()
-  return quote
-    $(esc(:@tryECinit))
-    if isempty($(esc(:EC)).fd)
-      error("No FCIDump found.")
+macro bouhf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      with_local_options($(esc(:EC)), $local_opts) do
+        bouhf($(esc(:EC)))
+      end
     end
-    bouhf($(esc(:EC)))
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      bouhf($(esc(:EC)))
+    end
   end
 end
 
