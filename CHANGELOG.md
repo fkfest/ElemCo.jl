@@ -37,6 +37,7 @@
   an AO basis set). The error message can be turned to a warning by setting `@set int check_fit_basis=false`.
 * Fix normalization of biorthogonal orbitals to a balanced normalization (i.e., the norms of left and right orbitals are equal).
 * Integral transformation now should use much less memory and be faster.
+* Fix incompatibility with julia 1.13 (replace call of an internal Base function with a simple custom implementation).
 
 ## Version [v0.14.1] - 2025.07.03
 
