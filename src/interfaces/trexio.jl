@@ -34,6 +34,8 @@ export read_trexio_orbital_classes, read_trexio_orbital_energies, read_trexio_or
 export write_trexio_amplitudes
 export read_trexio_singles, read_trexio_doubles
 export read_trexio_unrestricted_singles, read_trexio_unrestricted_doubles
+export has_trexio_amplitudes
+export orbital_indices_from_classes, occupied_virtual_from_classes
 
 # Re-export the standalone TREXIO types for compatibility
 const TrexioFile = TREXIO.TrexioFile
@@ -756,6 +758,90 @@ function read_trexio_unrestricted_doubles(trexio::TrexioFile)
     @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2ab amplitudes from TREXIO with status $status"
   end
   return (T2a_full, T2b_full, T2ab)
+end
+
+"""
+    has_trexio_amplitudes(trexio::TrexioFile; unrestricted::Bool=false)
+
+Check if amplitudes are stored in the TREXIO file using TREXIO has_* functions.
+
+Returns `true` if any amplitude data (singles or doubles) is found.
+This function does not read the amplitudes, only checks for their presence.
+"""
+function has_trexio_amplitudes(trexio::TrexioFile; unrestricted::Bool=false)
+  if unrestricted
+    # Check for unrestricted amplitudes
+    has_t1a = TREXIO.trexio_has_amplitude_single_up_dense(trexio)
+    has_t1b = TREXIO.trexio_has_amplitude_single_dn_dense(trexio)
+    has_t2a = TREXIO.trexio_has_amplitude_double_upup_dense(trexio)
+    has_t2b = TREXIO.trexio_has_amplitude_double_dndn_dense(trexio)
+    has_t2ab = TREXIO.trexio_has_amplitude_double_updn_dense(trexio)
+    return has_t1a || has_t1b || has_t2a || has_t2b || has_t2ab
+  else
+    # Check for restricted amplitudes
+    has_t1 = TREXIO.trexio_has_amplitude_single_dense(trexio)
+    has_t2 = TREXIO.trexio_has_amplitude_double_dense(trexio)
+    return has_t1 || has_t2
+  end
+end
+
+"""
+    orbital_indices_from_classes(classes::Vector{String}; include::Vector{String}=["Inactive", "Active", "Virtual"])
+
+Extract orbital indices for each orbital class type from orbital class labels.
+
+# Arguments
+- `classes`: Vector of orbital class labels ("Core", "Inactive", "Active", "Virtual", "Deleted")
+- `include`: Which classes to include in the result (default: ["Inactive", "Active", "Virtual"])
+
+# Returns
+A `Dict{String,Vector{Int}}` mapping each class name to the orbital indices with that class.
+
+# Example
+```julia
+classes = ["Core", "Inactive", "Inactive", "Virtual", "Virtual", "Virtual", "Deleted"]
+result = orbital_indices_from_classes(classes)
+# result["Inactive"] = [2, 3]
+# result["Active"] = Int[]
+# result["Virtual"] = [4, 5, 6]
+```
+"""
+function orbital_indices_from_classes(classes::Vector{String}; 
+                                       include::Vector{String}=["Inactive", "Active", "Virtual"])
+  result = Dict{String,Vector{Int}}()
+  for class_name in include
+    result[class_name] = Int[]
+  end
+  for (i, c) in enumerate(classes)
+    if c in include
+      push!(result[c], i)
+    end
+  end
+  return result
+end
+
+"""
+    occupied_virtual_from_classes(classes::Vector{String})
+
+Extract occupied and virtual orbital indices from orbital class labels.
+
+Returns `(occ_indices, virt_indices)` where:
+- `occ_indices` are orbitals with class "Inactive" or "Active"
+- `virt_indices` are orbitals with class "Virtual"
+
+Note: "Core" and "Deleted" orbitals are not included in either list.
+"""
+function occupied_virtual_from_classes(classes::Vector{String})
+  occ_indices = Int[]
+  virt_indices = Int[]
+  for (i, c) in enumerate(classes)
+    if c == "Inactive" || c == "Active"
+      push!(occ_indices, i)
+    elseif c == "Virtual"
+      push!(virt_indices, i)
+    end
+  end
+  return occ_indices, virt_indices
 end
 
 end # module TrexioInterface

@@ -2768,19 +2768,35 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     error("only implemented upto triples")
   end
   if is_unrestricted(method) || has_prefix(method, "R")
-    if method.exclevel[1] == :full
-      T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
-      T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
+    # Try to restart from dump file first
+    T1a_start, T1b_start, T2a_start, T2b_start, T2ab_start, from_dump = try_fetch_unrestricted_starting_amplitudes(EC)
+    if from_dump
+      println("Restarting from amplitudes in dump file $(EC.options.wf.dump)")
+      T1a = T1a_start
+      T1b = T1b_start
+      T2a = T2a_start
+      T2b = T2b_start
+      T2ab = T2ab_start
     else
+      if method.exclevel[1] == :full
+        T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
+        T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
+      else
+        T1a = zeros(0,0)
+        T1b = zeros(0,0)
+      end
+      if method.exclevel[2] != :full
+        error("No doubles is not implemented")
+      end
+      T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
+      T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
+      T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    end
+    # Handle no-singles case
+    if method.exclevel[1] != :full
       T1a = zeros(0,0)
       T1b = zeros(0,0)
     end
-    if method.exclevel[2] != :full
-      error("No doubles is not implemented")
-    end
-    T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
-    T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
-    T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
     # custom functions for dot products in diis
     dots1 = (calc_u_singles_dot, calc_u_singles_dot)
     dots2 = (calc_samespin_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot)
@@ -2796,15 +2812,27 @@ function calc_cc(EC::ECInfo, method::ECMethod)
                           [1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     end
   else
-    if method.exclevel[1] == :full
-      T1 = read_starting_guess4amplitudes(EC, Val(1))
+    # Try to restart from dump file first
+    T1_start, T2_start, from_dump = try_fetch_restricted_starting_amplitudes(EC)
+    if from_dump
+      println("Restarting from amplitudes in dump file $(EC.options.wf.dump)")
+      T1 = T1_start
+      T2 = T2_start
     else
+      if method.exclevel[1] == :full
+        T1 = read_starting_guess4amplitudes(EC, Val(1))
+      else
+        T1 = zeros(0,0)
+      end
+      if method.exclevel[2] != :full
+        error("No doubles is not implemented")
+      end
+      T2 = read_starting_guess4amplitudes(EC, Val(2))
+    end
+    # Handle no-singles case
+    if method.exclevel[1] != :full
       T1 = zeros(0,0)
     end
-    if method.exclevel[2] != :full
-      error("No doubles is not implemented")
-    end
-    T2 = read_starting_guess4amplitudes(EC, Val(2))
     # custom functions for dot products in diis
     dots1 = (calc_cs_singles_dot,)
     dots2 = (calc_cs_doubles_dot,)
@@ -2962,6 +2990,8 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
     try2save_singles!(EC, Amps1...)
   end
   try2save_doubles!(EC, Amps2...)
+  # Dump to TREXIO file if wf.store is set
+  dump_wavefunction_with_amplitudes!(EC, Amps1, Amps2)
   println()
   if length(Amps3) > 0
     output_norms("T1"=>NormT1, "T2"=>NormT2, "T3"=>NormT3)

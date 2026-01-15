@@ -17,6 +17,10 @@
   dump::String = "wf.h5"
   """`⟨""⟩` filename to store the output wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
   store::String = ""
+  """`⟨""⟩` filename to read starting amplitudes from (TREXIO format). 
+  If empty, amplitudes are read from `dump`. If provided, amplitudes (and MOs/basis) 
+  are read from this file and projected to the current MO basis. """
+  start::String = ""
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
   """`⟨:large⟩` core type for frozen-core approximation: 

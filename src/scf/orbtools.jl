@@ -201,7 +201,7 @@ end
   Returns `::SpinMatrix`. 
 """
 function load_positron_orbitals(EC::ECInfo)
-  cMO, type, basis = fetch_orbitals(EC, "po")
+  cMO, type, basis = fetch_orbitals(EC; MO="po")
   current_basis = generate_basis(EC, "ao")
   return project_onto_basis(cMO, basis, current_basis; check=true)
 end

@@ -10,23 +10,29 @@ using ..ElemCo.BasisSets
 using ..ElemCo.TrexioInterface
 
 export open_dump, close_dump
-export dump_orbitals, fetch_orbitals
+export dump_orbitals, fetch_orbitals, fetch_orbital_classes
 export dump_rotations, fetch_rotations, is_rotation, is_biorthogonal
 export fetch_orbital_energies, fetch_orbital_occupations
 export load_wavefunction, save_wavefunction, copy_wavefunction
+export dump_amplitudes, has_amplitudes
+export fetch_restricted_amplitudes, fetch_unrestricted_amplitudes
+export transfer_orbitals_to_store!
 
 """
-    dumpfile(EC::ECInfo, intent)
+    dumpfile(EC::ECInfo, intent; start=false)
 
   Get the dump file name for wavefunction.
 
 If `intent="w"`, the dump file for writing is returned. Otherwise, the dump file for reading is returned.
+If `start=true` and `intent != "w"`, the start file (`wf.start`) is returned.
 Returns `(filename::String, full_path_filename::String)`.
 """
-function dumpfile(EC::ECInfo, intent)
+function dumpfile(EC::ECInfo, intent; start::Bool=false)
   filename = ""
   if intent == "w"
     filename = EC.options.wf.store
+  elseif start
+    filename = EC.options.wf.start
   end
   if filename == ""
     filename = EC.options.wf.dump
@@ -36,16 +42,18 @@ function dumpfile(EC::ECInfo, intent)
 end
 
 """
-    open_dump(EC::ECInfo, intent) -> TrexioFile
+    open_dump(EC::ECInfo, intent; start=false) -> TrexioFile
 
   Open the dump file for wavefunction. 
 
 `intent` can be "r", "w", or "u" (read, write, or update).
+If `start=true`, opens the start file (`wf.start`) instead.
 """
-function open_dump(EC::ECInfo, intent)
-  filename, full_filename = dumpfile(EC, intent)
+function open_dump(EC::ECInfo, intent; start::Bool=false)
+  filename, full_filename = dumpfile(EC, intent; start=start)
   mode = "reading"
   if intent == "w"
+    @assert !start "Cannot open start file for writing."
     mode = "writing"
   elseif intent == "u"
     mode = "updating (unsafe mode)"
@@ -55,15 +63,16 @@ function open_dump(EC::ECInfo, intent)
 end
 
 """
-    open_dump(f::Function, EC::ECInfo, intent)
+    open_dump(f::Function, EC::ECInfo, intent; start=false)
 
   Open the dump file for wavefunction, execute function `f` with the opened `TrexioFile`, and close the file.
 
 To be used as `open_dump(EC, intent) do io ... end`.
 `intent` can be "r", "w", or "u" (read, write, or update).
+If `start=true`, opens the start file (`wf.start`) instead.
 """
-function open_dump(f::Function, EC::ECInfo, intent)
-  trexio = open_dump(EC, intent)
+function open_dump(f::Function, EC::ECInfo, intent; start::Bool=false)
+  trexio = open_dump(EC, intent; start=start)
   try
     f(trexio)
   finally
@@ -149,23 +158,41 @@ function prepare_orb_classes(EC::ECInfo, restricted)
   if !haskey(EC.space, 'm')
     setup_space_system!(EC)
   end
+  
+  # Save current space, apply freezing to determine core/deleted, then restore
+  space_save = save_space(EC)
+  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=false)
+  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=false)
+  
+  # Now EC.space has the frozen configuration
   classa = fill("Deleted", length(EC.space['m']))
+  classa[EC.space['o']] .= "Inactive"
+  classa[EC.space['v']] .= "Virtual"
+  classa[EC.space['a']] .= "Active"
+  # Mark frozen core: compare with saved space to find removed occupied orbitals
+  frozen_occ = setdiff(space_save['o'], EC.space['o'])
+  classa[frozen_occ] .= "Core"
+    
   if restricted
-    classa[EC.space['o']] .= "Inactive"
-    classa[EC.space['v']] .= "Virtual"
-    classa[EC.space['a']] .= "Active"
     classb = String[]
   else
-    classb = fill("", length(EC.space['M']))
+    classb = fill("Deleted", length(EC.space['M']))
     classb[EC.space['O']] .= "Inactive"
     classb[EC.space['V']] .= "Virtual"
     classb[EC.space['a']] .= "Active"
+    # Mark frozen core: compare with saved space to find removed occupied orbitals
+    frozen_occ = setdiff(space_save['O'], EC.space['O'])
+    classb[frozen_occ] .= "Core"
   end
+    
+  # Restore original space
+  restore_space!(EC, space_save)
+  
   return (classa, classb)
 end
 
 """
-    fetch_orbitals([io::TrexioFile,] EC::ECInfo, MO="mo") -> (SpinMatrix, String, BasisSet)
+    fetch_orbitals([io::TrexioFile,] EC::ECInfo; MO="mo", start=false) -> (SpinMatrix, String, BasisSet)
 
   Fetch the molecular orbitals from the trexio dump.
 
@@ -174,14 +201,15 @@ end
 If the basis information is not stored in the dump file (i.e., we have a rotation instead of orbitals), 
 `basis` is returned as empty `BasisSet`.
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+If `start=true`, reads from the start file (`wf.start`) instead of the current dump file.
 """
 function fetch_orbitals end
-function fetch_orbitals(EC::ECInfo, MO="mo")
-  open_dump(EC, "r") do io
-    return fetch_orbitals(io, EC, MO)
+function fetch_orbitals(EC::ECInfo; MO="mo", start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_orbitals(io, EC; MO=MO)
   end
 end
-function fetch_orbitals(io::TrexioFile, EC::ECInfo, MO="mo")
+function fetch_orbitals(io::TrexioFile, EC::ECInfo; MO="mo")
   println("Fetching orbitals ...")
   basis = read_trexio_basis(io)
   if isnothing(basis)
@@ -189,6 +217,28 @@ function fetch_orbitals(io::TrexioFile, EC::ECInfo, MO="mo")
   else
     return read_trexio_orbitals(io, basis; MO=MO)..., basis
   end
+end
+
+"""
+    fetch_orbital_classes([io::TrexioFile,] EC::ECInfo; MO="mo", start=false) -> (Vector{String}, Vector{String})
+
+  Fetch orbital classes from the trexio dump.
+
+Returns tuples of orbital classes for alpha and beta spins.
+Classes can be "Core", "Inactive", "Active", "Virtual", "Deleted".
+
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+If `start=true`, reads from the start file (`wf.start`) instead of the current dump file.
+"""
+function fetch_orbital_classes end
+function fetch_orbital_classes(EC::ECInfo; MO="mo", start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_orbital_classes(io, EC; MO=MO)
+  end
+end
+function fetch_orbital_classes(io::TrexioFile, EC::ECInfo; MO="mo")
+  println("Fetching orbital classes ...")
+  return read_trexio_orbital_classes(io, MO)
 end
 
 """
@@ -229,6 +279,50 @@ end
 function fetch_orbital_occupations(io::TrexioFile, EC::ECInfo, MO="mo")
   println("Fetching orbital occupations ...")
   return read_trexio_orbital_occupations(io, MO)
+end
+
+"""
+    transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo; MO="mo")
+
+  Transfer orbitals from the dump file to an already opened store file.
+
+  Fetches orbitals, classes, energies, and occupations from the dump file 
+  and writes them to the store file using `dump_orbitals`.
+  
+  This properly handles cases where frozen orbitals or geometry differ
+  between dump and store files.
+
+# Arguments
+- `io_store`: An already opened TrexioFile for writing
+- `EC`: Electronic structure information object
+- `MO`: "mo" for molecular orbitals or "po" for positron orbitals
+"""
+function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo; MO="mo")
+  # Fetch orbitals from dump file
+  cMO, mo_type, basis = fetch_orbitals(EC; MO=MO)
+  # Get orbital metadata
+  energies = fetch_orbital_energies(EC, MO)
+  occupations = fetch_orbital_occupations(EC, MO)
+  
+  # Generate orbital classes from the system (not from dump file, 
+  # because core orbital count may have changed)
+  if !isempty(EC.system)
+    # Save current space, setup from system, generate classes, then restore
+    space_save = save_space(EC)
+    setup_space_system!(EC; verbose=false)
+    classes = prepare_orb_classes(EC, is_restricted(cMO))
+    restore_space!(EC, space_save)
+  else
+    # No system available (FCIDUMP only) - skip class generation
+    classes = (String[], String[])
+  end
+  
+  # Write to store file
+  println("Dumping orbitals ...")
+  write_trexio_system(io_store, EC.system)
+  #TODO check whether basis is available or has changed (and if so, project orbitals)
+  write_trexio_orbitals(io_store, cMO, basis; type=mo_type, classes=classes,
+                        energies=energies, occupations=occupations, MO=MO)
 end
 
 """ 
@@ -381,5 +475,119 @@ is_rotation(type) = "rotation" ∈ split(lowercase(type))
   Returns true if the given orbital type is a bi-orthogonal rotation.
 """
 is_biorthogonal(type::AbstractString) = "biorthogonal" ∈ split(lowercase(type))
+
+"""
+    dump_amplitudes([io::TrexioFile,] EC::ECInfo, T1, T2)
+
+  Dump closed-shell CC amplitudes to TREXIO file.
+
+  `T1` is the singles amplitude matrix (nvirt × nocc).
+  `T2` is the doubles amplitude tensor (nvirt × nvirt × nocc × nocc).
+"""
+function dump_amplitudes end
+function dump_amplitudes(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+  open_dump(EC, "u") do io
+    dump_amplitudes(io, EC, T1, T2)
+  end
+  return
+end
+function dump_amplitudes(io::TrexioFile, EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+  println("Dumping amplitudes ...")
+  write_trexio_amplitudes(io, T1, T2)
+  return
+end
+
+"""
+    dump_amplitudes([io::TrexioFile,] EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
+
+  Dump unrestricted CC amplitudes to TREXIO file.
+
+  `T1a`, `T1b` are the α and β singles amplitude matrices.
+  `T2a`, `T2b`, `T2ab` are the αα, ββ, and αβ doubles amplitude tensors.
+"""
+function dump_amplitudes(EC::ECInfo, T1a::AbstractMatrix, T1b::AbstractMatrix, 
+                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
+                         T2ab::AbstractArray{<:Real,4})
+  open_dump(EC, "u") do io
+    dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
+  end
+  return
+end
+function dump_amplitudes(io::TrexioFile, EC::ECInfo, 
+                         T1a::AbstractMatrix, T1b::AbstractMatrix, 
+                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
+                         T2ab::AbstractArray{<:Real,4})
+  println("Dumping amplitudes ...")
+  write_trexio_amplitudes(io, T1a, T1b, T2a, T2b, T2ab)
+  return
+end
+
+"""
+    fetch_restricted_amplitudes([io::TrexioFile,] EC::ECInfo; start=false)
+
+  Fetch restricted CC amplitudes from the trexio dump.
+
+  Returns `(T1, T2)` for closed-shell case.
+  If `start=true`, reads from the start file (`wf.start`) first.
+
+  Returns empty arrays if amplitudes are not found in the dump file.
+"""
+function fetch_restricted_amplitudes end
+function fetch_restricted_amplitudes(EC::ECInfo; start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_restricted_amplitudes(io, EC)
+  end
+end
+function fetch_restricted_amplitudes(io::TrexioFile, EC::ECInfo)
+  println("Fetching restricted amplitudes ...")
+  T1 = read_trexio_singles(io)
+  T2 = read_trexio_doubles(io)
+  return (T1, T2)
+end
+
+"""
+    fetch_unrestricted_amplitudes([io::TrexioFile,] EC::ECInfo; start=false)
+
+  Fetch unrestricted CC amplitudes from the trexio dump.
+
+  Returns `(T1a, T1b, T2a, T2b, T2ab)` for unrestricted case.
+  If `start=true`, reads from the start file (`wf.start`) first.
+
+  Returns empty arrays if amplitudes are not found in the dump file.
+"""
+function fetch_unrestricted_amplitudes end
+function fetch_unrestricted_amplitudes(EC::ECInfo; start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_unrestricted_amplitudes(io, EC)
+  end
+end
+function fetch_unrestricted_amplitudes(io::TrexioFile, EC::ECInfo)
+  println("Fetching unrestricted amplitudes ...")
+  T1a, T1b = read_trexio_unrestricted_singles(io)
+  T2a, T2b, T2ab = read_trexio_unrestricted_doubles(io)
+  return (T1a, T1b, T2a, T2b, T2ab)
+end
+
+"""
+    has_amplitudes([io::TrexioFile,] EC::ECInfo; unrestricted=false, start=false)
+
+  Check if amplitudes are stored in the dump file.
+  If `start=true`, checks the start file (`wf.start`) first.
+
+  Returns `true` if amplitudes (singles or doubles) are found.
+"""
+function has_amplitudes end
+function has_amplitudes(EC::ECInfo; unrestricted::Bool=false, start::Bool=false)
+  filename, full_filename = dumpfile(EC, "r"; start=start)
+  if !isfile(full_filename)
+    return false
+  end
+  open_dump(EC, "r"; start=start) do io
+    return has_amplitudes(io, EC; unrestricted=unrestricted)
+  end
+end
+function has_amplitudes(io::TrexioFile, EC::ECInfo; unrestricted::Bool=false)
+  return has_trexio_amplitudes(io; unrestricted=unrestricted)
+end
 
 end #module

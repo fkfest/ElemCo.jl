@@ -11,6 +11,11 @@ using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
 using ..ElemCo.FockFactory
 using ..ElemCo.OrbTools
+using ..ElemCo.Wavefunctions
+using ..ElemCo.BasisSets
+using ..ElemCo.Integrals
+using ..ElemCo.QMTensors
+using ..ElemCo.TrexioInterface
 
 export calc_fock_matrix, calc_HF_energy, calc_rotated_HF_energy
 export calc_singles_energy_using_dfock
@@ -27,6 +32,9 @@ export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
 export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
 export calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot
 export triples_4ext!
+export project_amplitudes, check_projection_rank
+export dump_wavefunction_with_amplitudes!
+export try_fetch_restricted_starting_amplitudes, try_fetch_unrestricted_starting_amplitudes
 
 """ 
     calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
@@ -1011,6 +1019,517 @@ function triples_4ext!(EC::ECInfo, R3, T3)
     @mtensor vR3[c,a,b,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
   end
   return R3
+end
+
+"""
+    check_projection_rank(P, expected_rank::Int, space_name::String)
+
+  Check if the projection matrix `P` has full rank for the expected dimension.
+
+  Returns `(is_full_rank::Bool, actual_rank::Int)`.
+  Prints a warning if the rank is less than expected.
+"""
+function check_projection_rank(P::AbstractMatrix, expected_rank::Int, space_name::String)
+  actual_rank = rank(P)
+  is_full_rank = (actual_rank >= expected_rank)
+  if !is_full_rank
+    println("WARNING: $space_name projection is not full rank!")
+    println("         Expected rank: $expected_rank, actual rank: $actual_rank")
+    println("         Amplitude restart may not be accurate.")
+  end
+  return is_full_rank, actual_rank
+end
+
+"""
+    project_amplitudes(EC::ECInfo, T1_old, T2_old, cMO_old::SpinMatrix, cMO_new::SpinMatrix, 
+                       basis_old::BasisSet, basis_new::BasisSet; 
+                       classes_old::Tuple{Vector{String},Vector{String}}=(String[], String[]),
+                       classes_new::Tuple{Vector{String},Vector{String}}=(String[], String[]))
+
+  Project CC amplitudes from an old orbital basis to a new one.
+
+  The projection is performed as:
+  - Singles: ``T_{a}^{i,\\text{new}} = P_v^{a'} T_{a'}^{i',\\text{old}} P_o^{i'}``
+  - Doubles: ``T_{ab}^{ij,\\text{new}} = P_v^{a'} P_v^{b'} T_{a'b'}^{i'j',\\text{old}} P_o^{i'} P_o^{j'}``
+
+  where ``P`` are projection matrices between old and new orbital spaces.
+
+  If `classes_old` is provided, it is used to determine which orbitals in the old basis
+  were occupied ("Inactive"/"Active") vs virtual ("Virtual"). This is essential when
+  core orbitals are frozen, as the MO coefficient matrix includes all orbitals but
+  amplitudes only involve active orbitals.
+
+  If `classes_new` is provided, it is used similarly for the new basis. Otherwise, 
+  `EC.space['o']` and `EC.space['v']` are used (which may have frozen core indices 
+  renumbered from FCIDUMP).
+
+  Returns `(T1_new, T2_new)` for closed-shell case.
+"""
+function project_amplitudes(EC::ECInfo, T1_old::AbstractMatrix, T2_old::AbstractArray{<:Real,4}, 
+                            cMO_old::SpinMatrix, cMO_new::SpinMatrix,
+                            basis_old::BasisSet, basis_new::BasisSet;
+                            classes_old::Tuple{Vector{String},Vector{String}}=(String[], String[]),
+                            classes_new::Tuple{Vector{String},Vector{String}}=(String[], String[]))
+  SP = EC.space
+  nocc_new = length(SP['o'])
+  nvirt_new = length(SP['v'])
+  
+  # Get old orbital dimensions from amplitudes
+  if length(T1_old) > 0
+    nvirt_old, nocc_old = size(T1_old)
+  elseif length(T2_old) > 0
+    nvirt_old = size(T2_old, 1)
+    nocc_old = size(T2_old, 3)
+  else
+    # No amplitudes to project
+    return zeros(nvirt_new, nocc_new), zeros(nvirt_new, nvirt_new, nocc_new, nocc_new)
+  end
+  
+  # Determine old orbital indices from classes (Core is skipped, Inactive/Active → occ, Virtual → virt)
+  if !isempty(classes_old[1])
+    occ_old_indices, virt_old_indices = occupied_virtual_from_classes(classes_old[1])
+  else
+    # No classes available - assume consecutive indices (no frozen core)
+    occ_old_indices = collect(1:nocc_old)
+    virt_old_indices = collect((nocc_old+1):(nocc_old+nvirt_old))
+  end
+  
+  # Calculate overlap between bases
+  if isempty(basis_old) || isempty(basis_new)
+    # Assume same basis, just orbital rotation
+    SAO = I
+    S_old_new = I
+  else
+    SAO = overlap(basis_new)
+    S_old_new = overlap(basis_new, basis_old)
+  end
+  
+  # Build projection matrix in AO basis: P = S_new^{-1} * S_new_old
+  if SAO isa UniformScaling
+    proj_ao = I
+  else
+    proj_ao = inv(SAO) * S_old_new
+  end
+  
+  # Project to MO basis
+  # P_MO = C_new^T * S_new * proj_ao * C_old = C_new^T * S_old_new * C_old
+  if proj_ao isa UniformScaling
+    P_full = cMO_new[1]' * cMO_old[1]
+  else
+    P_full = cMO_new[1]' * S_old_new * cMO_old[1]
+  end
+  
+  # Extract occupied and virtual blocks using orbital class information
+  # P_full is (norb_new × norb_old)
+  # We need occ_new ← occ_old and virt_new ← virt_old projections
+  
+  # Determine new orbital indices from classes (Core is skipped, Inactive/Active → occ, Virtual → virt)
+  # If no classes provided, fall back to EC.space (which may have renumbered indices from FCIDUMP)
+  if !isempty(classes_new[1])
+    occ_new_indices, virt_new_indices = occupied_virtual_from_classes(classes_new[1])
+  else
+    occ_new_indices = collect(SP['o'])
+    virt_new_indices = collect(SP['v'])
+  end
+  
+  # Projection matrices for occupied and virtual spaces
+  P_o = P_full[occ_new_indices, occ_old_indices]   # (nocc_new × nocc_old)
+  P_v = P_full[virt_new_indices, virt_old_indices]  # (nvirt_new × nvirt_old)
+  
+  # Check projection rank
+  check_projection_rank(P_o, min(nocc_new, nocc_old), "Occupied space")
+  check_projection_rank(P_v, min(nvirt_new, nvirt_old), "Virtual space")
+  
+  # Project singles: T1_new[a,i] = P_v[a,a'] * T1_old[a',i'] * P_o[i,i']^T
+  if length(T1_old) > 0
+    T1_new = P_v * T1_old * P_o'
+  else
+    T1_new = zeros(nvirt_new, nocc_new)
+  end
+  
+  # Project doubles: T2_new[a,b,i,j] = P_v[a,a'] * P_v[b,b'] * T2_old[a',b',i',j'] * P_o[i,i']^T * P_o[j,j']^T
+  if length(T2_old) > 0
+    # First, contract virtual indices
+    @mtensor T2_tmp1[a,b_old,i_old,j_old] := P_v[a,a_old] * T2_old[a_old,b_old,i_old,j_old]
+    @mtensor T2_tmp2[a,b,i_old,j_old] := P_v[b,b_old] * T2_tmp1[a,b_old,i_old,j_old]
+    # Then, contract occupied indices  
+    @mtensor T2_tmp3[a,b,i,j_old] := T2_tmp2[a,b,i_old,j_old] * P_o[i,i_old]
+    @mtensor T2_new[a,b,i,j] := T2_tmp3[a,b,i,j_old] * P_o[j,j_old]
+  else
+    T2_new = zeros(nvirt_new, nvirt_new, nocc_new, nocc_new)
+  end
+  
+  return T1_new, T2_new
+end
+
+"""
+    project_amplitudes(EC::ECInfo, T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old,
+                       cMO_old::SpinMatrix, cMO_new::SpinMatrix,
+                       basis_old::BasisSet, basis_new::BasisSet;
+                       classes_old=(String[], String[])=(String[], String[]))
+
+  Project unrestricted CC amplitudes from an old orbital basis to a new one.
+
+  # Arguments
+  - `classes_old`: Tuple of (alpha_classes, beta_classes) orbital class vectors from old calculation.
+    If empty, assumes occupied orbitals start from 1.
+
+  Returns `(T1a_new, T1b_new, T2a_new, T2b_new, T2ab_new)`.
+"""
+function project_amplitudes(EC::ECInfo, 
+                            T1a_old::AbstractMatrix, T1b_old::AbstractMatrix,
+                            T2a_old::AbstractArray{<:Real,4}, T2b_old::AbstractArray{<:Real,4}, 
+                            T2ab_old::AbstractArray{<:Real,4},
+                            cMO_old::SpinMatrix, cMO_new::SpinMatrix,
+                            basis_old::BasisSet, basis_new::BasisSet;
+                            classes_old::Tuple{Vector{String},Vector{String}}=(String[], String[]),
+                            classes_new::Tuple{Vector{String},Vector{String}}=(String[], String[]))
+  SP = EC.space
+  nocc_a_new = length(SP['o'])
+  nocc_b_new = length(SP['O'])
+  nvirt_a_new = length(SP['v'])
+  nvirt_b_new = length(SP['V'])
+  
+  # Get old orbital dimensions from amplitudes
+  if length(T1a_old) > 0
+    nvirt_a_old, nocc_a_old = size(T1a_old)
+  elseif length(T2a_old) > 0
+    nvirt_a_old = size(T2a_old, 1)
+    nocc_a_old = size(T2a_old, 3)
+  elseif length(T2ab_old) > 0
+    nvirt_a_old = size(T2ab_old, 1)
+    nocc_a_old = size(T2ab_old, 3)
+  else
+    nvirt_a_old, nocc_a_old = 0, 0
+  end
+  
+  if length(T1b_old) > 0
+    nvirt_b_old, nocc_b_old = size(T1b_old)
+  elseif length(T2b_old) > 0
+    nvirt_b_old = size(T2b_old, 1)
+    nocc_b_old = size(T2b_old, 3)
+  elseif length(T2ab_old) > 0
+    nvirt_b_old = size(T2ab_old, 2)
+    nocc_b_old = size(T2ab_old, 4)
+  else
+    nvirt_b_old, nocc_b_old = 0, 0
+  end
+  
+  # No amplitudes to project
+  if nvirt_a_old == 0 && nvirt_b_old == 0
+    return (zeros(nvirt_a_new, nocc_a_new), zeros(nvirt_b_new, nocc_b_new),
+            zeros(nvirt_a_new, nvirt_a_new, nocc_a_new, nocc_a_new),
+            zeros(nvirt_b_new, nvirt_b_new, nocc_b_new, nocc_b_new),
+            zeros(nvirt_a_new, nvirt_b_new, nocc_a_new, nocc_b_new))
+  end
+  
+  # Calculate overlap between bases
+  if isempty(basis_old) || isempty(basis_new)
+    S_old_new = I
+  else
+    S_old_new = overlap(basis_new, basis_old)
+  end
+  
+  # Alpha projection matrices
+  if is_restricted(cMO_old) 
+    cMO_old_a = cMO_old[1]
+    cMO_old_b = cMO_old[1]
+  else
+    cMO_old_a = cMO_old[1]
+    cMO_old_b = cMO_old[2]
+  end
+  if is_restricted(cMO_new)
+    cMO_new_a = cMO_new[1]
+    cMO_new_b = cMO_new[1]
+  else
+    cMO_new_a = cMO_new[1]
+    cMO_new_b = cMO_new[2]
+  end
+  
+  if S_old_new isa UniformScaling
+    P_full_a = cMO_new_a' * cMO_old_a
+    P_full_b = cMO_new_b' * cMO_old_b
+  else
+    P_full_a = cMO_new_a' * S_old_new * cMO_old_a
+    P_full_b = cMO_new_b' * S_old_new * cMO_old_b
+  end
+  
+  # Determine old orbital indices from classes (Core is skipped, Inactive/Active → occ, Virtual → virt)
+  classes_a_old, classes_b_old = classes_old
+  if !isempty(classes_a_old)
+    occ_a_old_indices, virt_a_old_indices = occupied_virtual_from_classes(classes_a_old)
+  else
+    occ_a_old_indices = collect(1:nocc_a_old)
+    virt_a_old_indices = collect((nocc_a_old+1):(nocc_a_old+nvirt_a_old))
+  end
+  if !isempty(classes_b_old)
+    occ_b_old_indices, virt_b_old_indices = occupied_virtual_from_classes(classes_b_old)
+  else
+    occ_b_old_indices = collect(1:nocc_b_old)
+    virt_b_old_indices = collect((nocc_b_old+1):(nocc_b_old+nvirt_b_old))
+  end
+  
+  # Determine new orbital indices from classes (Core is skipped, Inactive/Active → occ, Virtual → virt)
+  # If no classes provided, fall back to EC.space
+  if !isempty(classes_new[1])
+    occ_a_new_indices, virt_a_new_indices = occupied_virtual_from_classes(classes_new[1])
+  else
+    occ_a_new_indices = collect(SP['o'])
+    virt_a_new_indices = collect(SP['v'])
+  end
+  if !isempty(classes_new[2])
+    occ_b_new_indices, virt_b_new_indices = occupied_virtual_from_classes(classes_new[2])
+  else
+    occ_b_new_indices = collect(SP['O'])
+    virt_b_new_indices = collect(SP['V'])
+  end
+  
+  P_oa = P_full_a[occ_a_new_indices, occ_a_old_indices]
+  P_va = P_full_a[virt_a_new_indices, virt_a_old_indices]
+  P_ob = P_full_b[occ_b_new_indices, occ_b_old_indices]
+  P_vb = P_full_b[virt_b_new_indices, virt_b_old_indices]
+  
+  # Check projection ranks
+  check_projection_rank(P_oa, min(nocc_a_new, nocc_a_old), "Alpha occupied space")
+  check_projection_rank(P_va, min(nvirt_a_new, nvirt_a_old), "Alpha virtual space")
+  check_projection_rank(P_ob, min(nocc_b_new, nocc_b_old), "Beta occupied space")
+  check_projection_rank(P_vb, min(nvirt_b_new, nvirt_b_old), "Beta virtual space")
+  
+  # Project alpha singles
+  if length(T1a_old) > 0
+    T1a_new = P_va * T1a_old * P_oa'
+  else
+    T1a_new = zeros(nvirt_a_new, nocc_a_new)
+  end
+  
+  # Project beta singles
+  if length(T1b_old) > 0
+    T1b_new = P_vb * T1b_old * P_ob'
+  else
+    T1b_new = zeros(nvirt_b_new, nocc_b_new)
+  end
+  
+  # Project alpha-alpha doubles
+  if length(T2a_old) > 0
+    @mtensor T2_tmp1[a,b_old,i_old,j_old] := P_va[a,a_old] * T2a_old[a_old,b_old,i_old,j_old]
+    @mtensor T2_tmp2[a,b,i_old,j_old] := P_va[b,b_old] * T2_tmp1[a,b_old,i_old,j_old]
+    @mtensor T2_tmp3[a,b,i,j_old] := T2_tmp2[a,b,i_old,j_old] * P_oa[i,i_old]
+    @mtensor T2a_new[a,b,i,j] := T2_tmp3[a,b,i,j_old] * P_oa[j,j_old]
+  else
+    T2a_new = zeros(nvirt_a_new, nvirt_a_new, nocc_a_new, nocc_a_new)
+  end
+  
+  # Project beta-beta doubles
+  if length(T2b_old) > 0
+    @mtensor T2_tmp1[a,b_old,i_old,j_old] := P_vb[a,a_old] * T2b_old[a_old,b_old,i_old,j_old]
+    @mtensor T2_tmp2[a,b,i_old,j_old] := P_vb[b,b_old] * T2_tmp1[a,b_old,i_old,j_old]
+    @mtensor T2_tmp3[a,b,i,j_old] := T2_tmp2[a,b,i_old,j_old] * P_ob[i,i_old]
+    @mtensor T2b_new[a,b,i,j] := T2_tmp3[a,b,i,j_old] * P_ob[j,j_old]
+  else
+    T2b_new = zeros(nvirt_b_new, nvirt_b_new, nocc_b_new, nocc_b_new)
+  end
+  
+  # Project alpha-beta doubles
+  if length(T2ab_old) > 0
+    @mtensor T2_tmp1[a,b_old,i_old,j_old] := P_va[a,a_old] * T2ab_old[a_old,b_old,i_old,j_old]
+    @mtensor T2_tmp2[a,b,i_old,j_old] := P_vb[b,b_old] * T2_tmp1[a,b_old,i_old,j_old]
+    @mtensor T2_tmp3[a,b,i,j_old] := T2_tmp2[a,b,i_old,j_old] * P_oa[i,i_old]
+    @mtensor T2ab_new[a,b,i,j] := T2_tmp3[a,b,i,j_old] * P_ob[j,j_old]
+  else
+    T2ab_new = zeros(nvirt_a_new, nvirt_b_new, nocc_a_new, nocc_b_new)
+  end
+  
+  return T1a_new, T1b_new, T2a_new, T2b_new, T2ab_new
+end
+
+"""
+    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1, T2)
+
+  Dump orbitals and CC amplitudes to the TREXIO file specified in `wf.store`.
+
+  Does nothing if `EC.options.wf.store` is empty or if no orbitals are available
+  (e.g., when running from FCIDUMP without a dump file).
+  For closed-shell case with singles `T1` and doubles `T2`.
+"""
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+  if EC.options.wf.store == ""
+    return
+  end
+  println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
+  open_dump(EC, "w") do io
+    transfer_orbitals_to_store!(io, EC)
+    dump_amplitudes(io, EC, T1, T2)
+  end
+  return
+end
+
+"""
+    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
+
+  Dump orbitals and unrestricted CC amplitudes to the TREXIO file.
+
+  Does nothing if `EC.options.wf.store` is empty or if no orbitals are available
+  (e.g., when running from FCIDUMP without a dump file).
+"""
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
+                                            T1a::AbstractMatrix, T1b::AbstractMatrix,
+                                            T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4},
+                                            T2ab::AbstractArray{<:Real,4})
+  if EC.options.wf.store == ""
+    return
+  end
+  println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
+  open_dump(EC, "w") do io
+    transfer_orbitals_to_store!(io, EC)
+    dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
+  end
+  return
+end
+
+# Convenience wrappers for tuple arguments
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::Tuple{<:AbstractMatrix}, T2::Tuple{<:AbstractArray{<:Real,4}})
+  dump_wavefunction_with_amplitudes!(EC, T1[1], T2[1])
+end
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
+                                            T1::Tuple{<:AbstractMatrix,<:AbstractMatrix}, 
+                                            T2::Tuple{<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4}})
+  dump_wavefunction_with_amplitudes!(EC, T1[1], T1[2], T2[1], T2[2], T2[3])
+end
+
+"""
+    try_fetch_restricted_starting_amplitudes(EC::ECInfo)
+
+  Try to read and project restricted amplitudes from a TREXIO file.
+
+  The logic is:
+  - If `wf.start` is not empty: read amplitudes, MOs, and basis from `wf.start`, 
+    then project amplitudes to the current MO basis (obtained via `fetch_orbitals` from `wf.dump`).
+  - If `wf.start` is empty: try to read amplitudes from `wf.dump` (no projection needed).
+
+  The occupied space projection rank is checked and a warning is printed if not full rank.
+
+  Returns `(T1, T2, success::Bool)` for closed-shell case.
+"""
+function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
+  # Determine whether to use wf.start file
+  use_start = EC.options.wf.start != ""
+  
+  # Check if amplitudes exist
+  if !has_amplitudes(EC; unrestricted=false, start=use_start)
+    return empty_restricted_amplitudes(EC)
+  end
+  
+  # Read orbitals and orbital classes from source file (start or dump)
+  cMO_old, type_old, basis_old = fetch_orbitals(EC; start=use_start)
+  classes_old = use_start ? fetch_orbital_classes(EC; start=true) : (String[], String[])
+  
+  # Get target orbitals and classes from dump file (or same file if not using start)
+  if use_start
+    cMO_new, type_new, current_basis = fetch_orbitals(EC)
+    classes_new = fetch_orbital_classes(EC)
+  else
+    # Same file - project onto current basis (in case orbitals were modified)
+    current_basis = generate_basis(EC, "ao")
+    cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+    classes_new = (String[], String[])
+  end
+  
+  # Fetch amplitudes
+  T1_old, T2_old = fetch_restricted_amplitudes(EC; start=use_start)
+  
+  if length(T1_old) == 0 && length(T2_old) == 0
+    return empty_restricted_amplitudes(EC)
+  end
+  
+  # Project amplitudes
+  T1, T2 = project_amplitudes(EC, T1_old, T2_old, cMO_old, cMO_new, basis_old, current_basis;
+                               classes_old=classes_old, classes_new=classes_new)
+  return (T1, T2, true)
+end
+
+"""
+    try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
+
+  Try to read and project unrestricted amplitudes from a TREXIO file.
+
+  The logic is:
+  - If `wf.start` is not empty: read amplitudes, MOs, and basis from `wf.start`, 
+    then project amplitudes to the current MO basis (obtained via `fetch_orbitals` from `wf.dump`).
+  - If `wf.start` is empty: try to read amplitudes from `wf.dump` (no projection needed).
+
+  The occupied space projection rank is checked and a warning is printed if not full rank.
+
+  Returns `(T1a, T1b, T2a, T2b, T2ab, success::Bool)` for unrestricted case.
+"""
+function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
+  # Determine whether to use wf.start file
+  use_start = EC.options.wf.start != ""
+  
+  # Check if amplitudes exist
+  if !has_amplitudes(EC; unrestricted=true, start=use_start)
+    return empty_unrestricted_amplitudes(EC)
+  end
+  
+  # Read orbitals and orbital classes from source file (start or dump)
+  cMO_old, type_old, basis_old = fetch_orbitals(EC; start=use_start)
+  classes_old = use_start ? fetch_orbital_classes(EC; start=true) : (String[], String[])
+  
+  # Get target orbitals and classes from dump file (or same file if not using start)
+  if use_start
+    cMO_new, type_new, current_basis = fetch_orbitals(EC)
+    classes_new = fetch_orbital_classes(EC)
+  else
+    # Same file - project onto current basis (in case orbitals were modified)
+    current_basis = generate_basis(EC, "ao")
+    cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+    classes_new = (String[], String[])
+  end
+  
+  # Fetch amplitudes
+  T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old = fetch_unrestricted_amplitudes(EC; start=use_start)
+  
+  if length(T1a_old) == 0 && length(T2a_old) == 0 && length(T2ab_old) == 0
+    return empty_unrestricted_amplitudes(EC)
+  end
+  
+  # Project amplitudes
+  T1a, T1b, T2a, T2b, T2ab = project_amplitudes(EC, T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old,
+                                                 cMO_old, cMO_new, basis_old, current_basis;
+                                                 classes_old=classes_old, classes_new=classes_new)
+  return (T1a, T1b, T2a, T2b, T2ab, true)
+end
+
+"""
+    empty_restricted_amplitudes(EC::ECInfo)
+
+  Return empty restricted amplitudes of the correct size.
+
+  Returns `(T1, T2, false)` where T1 and T2 are zero arrays.
+"""
+function empty_restricted_amplitudes(EC::ECInfo)
+  SP = EC.space
+  nocc = length(SP['o'])
+  nvirt = length(SP['v'])
+  return (zeros(nvirt, nocc), zeros(nvirt, nvirt, nocc, nocc), false)
+end
+
+"""
+    empty_unrestricted_amplitudes(EC::ECInfo)
+
+  Return empty unrestricted amplitudes of the correct size.
+
+  Returns `(T1a, T1b, T2a, T2b, T2ab, false)` where all arrays are zero.
+"""
+function empty_unrestricted_amplitudes(EC::ECInfo)
+  SP = EC.space
+  nocc_a = length(SP['o'])
+  nocc_b = length(SP['O'])
+  nvirt_a = length(SP['v'])
+  nvirt_b = length(SP['V'])
+  return (zeros(nvirt_a, nocc_a), zeros(nvirt_b, nocc_b),
+          zeros(nvirt_a, nvirt_a, nocc_a, nocc_a),
+          zeros(nvirt_b, nvirt_b, nocc_b, nocc_b),
+          zeros(nvirt_a, nvirt_b, nocc_a, nocc_b), false)
 end
 
 end # module
