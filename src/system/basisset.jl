@@ -57,7 +57,11 @@ struct BasisSet
   lib::ILibcint
 end
 
-BasisSet() = BasisSet(BasisCentre[])
+# Empty BasisSet constructor - avoids calling ILibcint with empty centres
+function BasisSet()
+  return BasisSet(BasisCentre[], CartesianIndex{2}[], [1:0], [1:0], false, 
+                  ILibcint(Cint[], Cint(0), Cint[], Cint(0), Cdouble[]))
+end
 
 function BasisSet(centres::Vector{BasisCentre}, cartesian::Bool=false, lib::AbstractILib=ILibcint(centres, cartesian))
   shell_indices = [CartesianIndex(i, j) for (i,c) in enumerate(centres) for j in 1:n_angularshells(c)]

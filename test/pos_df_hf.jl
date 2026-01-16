@@ -19,7 +19,7 @@ basis_H = Dict("ao"=>"cc-pVDZ",
 basis_LiH = Dict("ao"=>"aug-cc-pVqZ",
      "jkfit"=>"def2-universal-jkfit",
      "mp2fit"=>"cc-pvqz-rifit")
-
+geometry = fcidump = nothing  # avoid accidental usage
 EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_H,basis_H))
 @set wf charge=-1
 @set wf npositron=1

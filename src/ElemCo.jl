@@ -576,12 +576,14 @@ function parse_options_block(block::Expr)
               if !haskey(opts_dict, opt_name)
                 opts_dict[opt_name] = Expr[]
               end
-              push!(opts_dict[opt_name], Expr(:(=), item.args[1], item.args[2]))
+              # Escape the value so variables are evaluated in caller's scope
+              push!(opts_dict[opt_name], Expr(:(=), item.args[1], esc(item.args[2])))
             elseif item isa Expr && item.head == :kw
               if !haskey(opts_dict, opt_name)
                 opts_dict[opt_name] = Expr[]
               end
-              push!(opts_dict[opt_name], Expr(:(=), item.args[1], item.args[2]))
+              # Escape the value so variables are evaluated in caller's scope
+              push!(opts_dict[opt_name], Expr(:(=), item.args[1], esc(item.args[2])))
             else
               error("Expected key=value pair in options block, got: $item")
             end
@@ -598,12 +600,14 @@ function parse_options_block(block::Expr)
             if !haskey(opts_dict, opt_name)
               opts_dict[opt_name] = Expr[]
             end
-            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], kw.args[2]))
+            # Escape the value so variables are evaluated in caller's scope
+            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], esc(kw.args[2])))
           elseif kw isa Expr && kw.head == :kw
             if !haskey(opts_dict, opt_name)
               opts_dict[opt_name] = Expr[]
             end
-            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], kw.args[2]))
+            # Escape the value so variables are evaluated in caller's scope
+            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], esc(kw.args[2])))
           else
             error("Expected key=value pair in options block, got: $kw")
           end

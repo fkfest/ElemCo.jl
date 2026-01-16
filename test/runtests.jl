@@ -22,7 +22,7 @@ end
 # tests is a list of test file names (without the .jl extension)
 TESTS = [
 ("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_bohf", "h2o_triplet", "2d_cc"]),
-("CC", ["h2-"]),
+("CC", ["h2-", "amp_restart"]),
 ("FCI", ["fci_rhf", "fci_uhf"]),
 ("HCI", ["hci_rhf", "hci_uhf", "hci_rhf_st"]),
 ("QV-CC", ["h2o_qv-ccd"]),

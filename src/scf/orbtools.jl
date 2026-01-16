@@ -19,6 +19,7 @@ export guess_orb, guess_pos_orb, load_orbitals, load_rotations, load_left_right_
 export orbital_energies, load_positron_orbitals 
 export show_orbitals
 export rotate_orbs, rotate_orbs!, normalize_phase!
+export try_load_starting_orbitals
 export left_from_right_rotations, project_onto_basis
 
 """
@@ -126,17 +127,41 @@ function guess_pos_orb(EC::ECInfo, guess::Symbol)
 end
 
 """
-    load_orbitals(EC::ECInfo)
+    load_orbitals(EC::ECInfo; start::Bool=false)
 
   Load (last) orbitals from file [`WfOptions.dump`](@ref ECInfos.WfOptions). 
 
+  If `start=true`, load from `wf.start` instead.
   If the basis has changed, the orbitals will be projected onto the new basis.
   Returns `::SpinMatrix`. 
 """
-function load_orbitals(EC::ECInfo)
-  cMO, type, basis = fetch_orbitals(EC)
+function load_orbitals(EC::ECInfo; start::Bool=false)
+  cMO, type, basis = fetch_orbitals(EC; start=start)
   current_basis = generate_basis(EC, "ao")
   return project_onto_basis(cMO, basis, current_basis; check=true)
+end
+
+"""
+    try_load_starting_orbitals(EC::ECInfo) -> (SpinMatrix, Bool)
+
+  Try to load starting orbitals from `wf.start` file.
+
+  If `wf.start` is set, load and project orbitals from that file.
+  
+  Returns `(cMO, loaded)` where `loaded` indicates if orbitals were successfully loaded.
+  If no orbitals are available, returns `(SpinMatrix{Float64}(), false)`.
+"""
+function try_load_starting_orbitals(EC::ECInfo)
+  if EC.options.wf.start == "" 
+    return SpinMatrix{Float64}(), false
+  end
+  if has_dumpfile(EC; start=true)
+    println("Loading starting orbitals from ", EC.options.wf.start, " ...")
+    cMO = load_orbitals(EC; start=true)
+    return cMO, true
+  end
+  println("Warning: Start file ", EC.options.wf.start, " not found.")
+  return SpinMatrix{Float64}(), false
 end
 
 """
@@ -232,7 +257,7 @@ end
 """
 function rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
   cMO, descr = fetch_rotations(EC)
-  basis = nothing
+  basis = BasisSet()
   if !is_rotation(descr)
     cMO, descr, basis = fetch_orbitals(EC)
   end
@@ -243,7 +268,7 @@ function rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
   end
   rotate_orbs!(cMOrot, orb1, orb2, angle)
   descr *= " rot$(orb1)&$(orb2)by$(angle)"
-  if isnothing(basis)
+  if isempty(basis)
     dump_rotations(EC, cMO; type=descr)
   else
     dump_orbitals(EC, cMO; basis=basis, type=descr)

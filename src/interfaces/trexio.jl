@@ -35,7 +35,7 @@ export write_trexio_amplitudes
 export read_trexio_singles, read_trexio_doubles
 export read_trexio_unrestricted_singles, read_trexio_unrestricted_doubles
 export has_trexio_amplitudes
-export orbital_indices_from_classes, occupied_virtual_from_classes
+export orbital_indices_from_classes, occupied_virtual_from_classes, occupied_virtual_from_occupations
 
 # Re-export the standalone TREXIO types for compatibility
 const TrexioFile = TREXIO.TrexioFile
@@ -271,14 +271,19 @@ end
     read_trexio_basis(trexio::TrexioFile) -> BasisSet
 
 Read basis set information from TREXIO file.
+
+Returns empty `BasisSet()` if no molecular system or basis is stored (e.g., FCIDUMP-only case).
 """
 function read_trexio_basis(trexio::TrexioFile)
   system = read_trexio_system(trexio)
   if isempty(system)
-    return BasisSet()  # empty basis set
+    return BasisSet()  # No system stored (FCIDUMP-only case)
   end
 
   type, status = trexio_read_basis_type(trexio)
+  if status == TREXIO.TREXIO_HAS_NOT
+    return BasisSet()  # No basis set stored
+  end
   if type != "Gaussian"
     error("Unsupported basis set type: $type")
   end
@@ -380,7 +385,7 @@ end
 """
 function read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true, MO="mo")
   # Read basis first
-  if isnothing(basis)
+  if isnothing(basis) || isempty(basis)
     basis = read_trexio_basis(trexio)
   end
   order = ao_order2internal(basis, order4l(basis))
@@ -838,6 +843,42 @@ function occupied_virtual_from_classes(classes::Vector{String})
     if c == "Inactive" || c == "Active"
       push!(occ_indices, i)
     elseif c == "Virtual"
+      push!(virt_indices, i)
+    end
+  end
+  return occ_indices, virt_indices
+end
+
+"""
+    occupied_virtual_from_occupations(occupations::Vector{Float64}, classes::Vector{String}=String[]; 
+                                      occ_threshold::Float64=0.5)
+
+Extract occupied and virtual orbital indices from occupation numbers and optionally class labels.
+
+Orbitals with occupation ≥ `occ_threshold` are considered occupied.
+If classes are provided, "Core" and "Deleted" orbitals are excluded from both lists.
+
+Returns `(occ_indices, virt_indices)`.
+
+This is more reliable than `occupied_virtual_from_classes` for UHF orbitals where the same
+orbital index may be occupied for one spin but virtual for the other.
+"""
+function occupied_virtual_from_occupations(occupations::Vector{Float64}, 
+                                           classes::Vector{String}=String[];
+                                           occ_threshold::Float64=0.5)
+  occ_indices = Int[]
+  virt_indices = Int[]
+  for (i, occ) in enumerate(occupations)
+    # Skip Core and Deleted orbitals if classes are provided
+    if !isempty(classes) && length(classes) >= i
+      c = classes[i]
+      if c == "Core" || c == "Deleted"
+        continue
+      end
+    end
+    if occ >= occ_threshold
+      push!(occ_indices, i)
+    else
       push!(virt_indices, i)
     end
   end

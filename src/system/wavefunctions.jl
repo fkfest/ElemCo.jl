@@ -4,6 +4,7 @@
   Module for handling wavefunctions: dumping and fetching orbitals/amplitudes etc to/from TREXIO files.
 """
 module Wavefunctions
+using LinearAlgebra
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.BasisSets
@@ -14,9 +15,9 @@ export dump_orbitals, fetch_orbitals, fetch_orbital_classes
 export dump_rotations, fetch_rotations, is_rotation, is_biorthogonal
 export fetch_orbital_energies, fetch_orbital_occupations
 export load_wavefunction, save_wavefunction, copy_wavefunction
-export dump_amplitudes, has_amplitudes
+export dump_amplitudes, has_amplitudes, has_dumpfile
 export fetch_restricted_amplitudes, fetch_unrestricted_amplitudes
-export transfer_orbitals_to_store!
+export transfer_orbitals_to_store!, OrbitalData, fetch_orbital_data
 
 """
     dumpfile(EC::ECInfo, intent; start=false)
@@ -39,6 +40,19 @@ function dumpfile(EC::ECInfo, intent; start::Bool=false)
   end
   full_filename = joinpath(EC.scr, filename)
   return filename, full_filename
+end
+
+"""
+    has_dumpfile(EC::ECInfo; start=false)
+
+  Check if the dump file exists.
+
+If `start=true`, checks for the start file (`wf.start`) instead.
+Returns `true` if the file exists.
+"""
+function has_dumpfile(EC::ECInfo; start::Bool=false)
+  _, full_filename = dumpfile(EC, "r"; start=start)
+  return isfile(full_filename)
 end
 
 """
@@ -212,8 +226,9 @@ end
 function fetch_orbitals(io::TrexioFile, EC::ECInfo; MO="mo")
   println("Fetching orbitals ...")
   basis = read_trexio_basis(io)
-  if isnothing(basis)
-    return read_trexio_rotations(io; MO=MO)..., basis
+  if isempty(basis)
+    cMO, type = read_trexio_rotations(io; MO=MO)
+    return cMO, type, BasisSet()  # Return empty basis for rotations
   else
     return read_trexio_orbitals(io, basis; MO=MO)..., basis
   end
@@ -262,18 +277,19 @@ function fetch_orbital_energies(io::TrexioFile, EC::ECInfo, MO="mo")
 end
 
 """
-    fetch_orbital_occupations([io::TrexioFile,] EC::ECInfo, MO="mo") -> (Vector{Float64}, Vector{Float64})
+    fetch_orbital_occupations([io::TrexioFile,] EC::ECInfo, MO="mo"; start=false) -> (Vector{Float64}, Vector{Float64})
 
   Fetch orbital occupations from the trexio dump.
 
 Returns tuples of orbital occupations for alpha and beta spins.
 
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+If `start=true`, reads from the start file (`wf.start`) instead of the current dump file.
 """
 function fetch_orbital_occupations end
-function fetch_orbital_occupations(ECInfo, MO="mo")
-  open_dump(ECInfo, "r") do io
-    return fetch_orbital_occupations(io, ECInfo, MO)
+function fetch_orbital_occupations(EC::ECInfo, MO="mo"; start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_orbital_occupations(io, EC, MO)
   end
 end
 function fetch_orbital_occupations(io::TrexioFile, EC::ECInfo, MO="mo")
@@ -282,27 +298,98 @@ function fetch_orbital_occupations(io::TrexioFile, EC::ECInfo, MO="mo")
 end
 
 """
-    transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo; MO="mo")
+    OrbitalData
+
+  Container for orbital data fetched from a dump file.
+"""
+struct OrbitalData
+  cMO::SpinMatrix
+  mo_type::String
+  basis::BasisSet
+  energies::NTuple{2,Vector{Float64}}
+  occupations::NTuple{2,Vector{Float64}}
+end
+
+"""
+    fetch_orbital_data(EC::ECInfo; MO="mo") -> Union{OrbitalData, Nothing}
+
+  Fetch all orbital data from the dump file.
+  
+  Returns `nothing` if no dump file exists (FCIDUMP-only case).
+  This should be called BEFORE opening the store file for writing,
+  to avoid issues when dump and store are the same file.
+"""
+function fetch_orbital_data(EC::ECInfo; MO="mo")
+  if !has_dumpfile(EC)
+    return nothing
+  end
+  cMO, mo_type, basis = fetch_orbitals(EC; MO=MO)
+  energies = fetch_orbital_energies(EC, MO)
+  occupations = fetch_orbital_occupations(EC, MO)
+  return OrbitalData(cMO, mo_type, basis, energies, occupations)
+end
+
+"""
+    transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, orbital_data::Union{OrbitalData, Nothing}=nothing; MO="mo")
 
   Transfer orbitals from the dump file to an already opened store file.
 
-  Fetches orbitals, classes, energies, and occupations from the dump file 
-  and writes them to the store file using `dump_orbitals`.
+  If `orbital_data` is provided, uses it directly. Otherwise fetches from dump file.
+  
+  **Important**: When dump and store files are the same, `orbital_data` must be
+  pre-fetched before opening the store file to avoid reading from a truncated file.
   
   This properly handles cases where frozen orbitals or geometry differ
   between dump and store files.
+  
+  For FCIDUMP-only calculations (no dump file), stores a unity rotation matrix
+  instead of orbitals, allowing amplitude storage and restart.
 
 # Arguments
 - `io_store`: An already opened TrexioFile for writing
 - `EC`: Electronic structure information object
+- `orbital_data`: Pre-fetched orbital data, or `nothing` to fetch from dump
 - `MO`: "mo" for molecular orbitals or "po" for positron orbitals
 """
-function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo; MO="mo")
-  # Fetch orbitals from dump file
-  cMO, mo_type, basis = fetch_orbitals(EC; MO=MO)
-  # Get orbital metadata
-  energies = fetch_orbital_energies(EC, MO)
-  occupations = fetch_orbital_occupations(EC, MO)
+function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, 
+                                     orbital_data::Union{OrbitalData,Nothing}=nothing; MO="mo")
+  # If no orbital data was pre-fetched, this is a FCIDUMP-only case.
+  # Create a unity rotation for amplitude storage.
+  if isnothing(orbital_data)
+    println("No dump file found - storing unity rotation for FCIDUMP-only calculation ...")
+    norb = n_orbs(EC)
+    restricted = is_closed_shell(EC)
+    
+    # Create unity rotation matrix
+    unity = Matrix{Float64}(I, norb, norb)
+    if restricted
+      cRot = SpinMatrix(unity)
+    else
+      cRot = SpinMatrix(unity, copy(unity))
+    end
+    
+    # No classes for FCIDUMP-only
+    classes = (String[], String[])
+    
+    # Write unity rotation to store file
+    write_trexio_rotations(io_store, cRot; type="Rotation", classes=classes, MO=MO)
+    return
+  end
+  
+  cMO = orbital_data.cMO
+  mo_type = orbital_data.mo_type
+  basis = orbital_data.basis
+  energies = orbital_data.energies
+  occupations = orbital_data.occupations
+  
+  # If the basis is empty, we have rotations (not orbitals) - write as rotations
+  if isempty(basis)
+    println("Dumping rotations ...")
+    classes = (String[], String[])
+    write_trexio_rotations(io_store, cMO; type=mo_type, classes=classes, 
+                          energies=energies, occupations=occupations, MO=MO)
+    return
+  end
   
   # Generate orbital classes from the system (not from dump file, 
   # because core orbital count may have changed)
@@ -312,6 +399,8 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo; MO="mo")
     setup_space_system!(EC; verbose=false)
     classes = prepare_orb_classes(EC, is_restricted(cMO))
     restore_space!(EC, space_save)
+    # Use current basis for output (projection is done when retrieving amplitudes)
+    basis = generate_basis(EC, "ao")
   else
     # No system available (FCIDUMP only) - skip class generation
     classes = (String[], String[])
@@ -320,7 +409,6 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo; MO="mo")
   # Write to store file
   println("Dumping orbitals ...")
   write_trexio_system(io_store, EC.system)
-  #TODO check whether basis is available or has changed (and if so, project orbitals)
   write_trexio_orbitals(io_store, cMO, basis; type=mo_type, classes=classes,
                         energies=energies, occupations=occupations, MO=MO)
 end

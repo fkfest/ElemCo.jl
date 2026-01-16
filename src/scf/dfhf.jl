@@ -40,7 +40,11 @@ function dfhf(EC::ECInfo)
     bfit = generate_basis(EC, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-  cMO = guess_orb(EC, guess)
+  # Try to load starting orbitals from wf.start
+  cMO, loaded = try_load_starting_orbitals(EC)
+  if !loaded
+    cMO = guess_orb(EC, guess)
+  end
   t1 = print_time(EC, t1, "guess orbitals", 2)
   @assert is_restricted(cMO) "DF-HF only implemented for closed-shell"
   cMO = cMO.α
@@ -204,7 +208,11 @@ function dfuhf(EC::ECInfo)
     bfit = generate_basis(EC, "jkfit")
   end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-  cMO = guess_orb(EC, guess)
+  # Try to load starting orbitals from wf.start
+  cMO, loaded = try_load_starting_orbitals(EC)
+  if !loaded
+    cMO = guess_orb(EC, guess)
+  end
   t1 = print_time(EC, t1, "guess orbitals", 2)
   unrestrict!(cMO)
   ϵ = [zeros(norb), zeros(norb)] 

@@ -1166,13 +1166,16 @@ end
     project_amplitudes(EC::ECInfo, T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old,
                        cMO_old::SpinMatrix, cMO_new::SpinMatrix,
                        basis_old::BasisSet, basis_new::BasisSet;
-                       classes_old=(String[], String[])=(String[], String[]))
+                       classes_old=(String[], String[]), occupations_old=(Float64[], Float64[]))
 
   Project unrestricted CC amplitudes from an old orbital basis to a new one.
 
   # Arguments
   - `classes_old`: Tuple of (alpha_classes, beta_classes) orbital class vectors from old calculation.
-    If empty, assumes occupied orbitals start from 1.
+    Used to identify Core/Deleted orbitals to exclude.
+  - `occupations_old`: Tuple of (alpha_occupations, beta_occupations) from old calculation.
+    If provided, used to determine occupied/virtual orbitals (more reliable for UHF).
+    If empty, falls back to classes_old or assumes contiguous occupied orbitals.
 
   Returns `(T1a_new, T1b_new, T2a_new, T2b_new, T2ab_new)`.
 """
@@ -1183,7 +1186,9 @@ function project_amplitudes(EC::ECInfo,
                             cMO_old::SpinMatrix, cMO_new::SpinMatrix,
                             basis_old::BasisSet, basis_new::BasisSet;
                             classes_old::Tuple{Vector{String},Vector{String}}=(String[], String[]),
-                            classes_new::Tuple{Vector{String},Vector{String}}=(String[], String[]))
+                            classes_new::Tuple{Vector{String},Vector{String}}=(String[], String[]),
+                            occupations_old::Tuple{Vector{Float64},Vector{Float64}}=(Float64[], Float64[]),
+                            occupations_new::Tuple{Vector{Float64},Vector{Float64}}=(Float64[], Float64[]))
   SP = EC.space
   nocc_a_new = length(SP['o'])
   nocc_b_new = length(SP['O'])
@@ -1254,30 +1259,46 @@ function project_amplitudes(EC::ECInfo,
     P_full_b = cMO_new_b' * S_old_new * cMO_old_b
   end
   
-  # Determine old orbital indices from classes (Core is skipped, Inactive/Active → occ, Virtual → virt)
+  # Determine old orbital indices
+  # Priority: occupations > classes > contiguous from 1
+  # For UHF, occupations are more reliable since alpha/beta can have different occ/virt
   classes_a_old, classes_b_old = classes_old
-  if !isempty(classes_a_old)
+  occ_a_old, occ_b_old = occupations_old
+  
+  if !isempty(occ_a_old)
+    # Use occupations - more reliable for UHF
+    occ_a_old_indices, virt_a_old_indices = occupied_virtual_from_occupations(occ_a_old, classes_a_old)
+  elseif !isempty(classes_a_old)
     occ_a_old_indices, virt_a_old_indices = occupied_virtual_from_classes(classes_a_old)
   else
     occ_a_old_indices = collect(1:nocc_a_old)
     virt_a_old_indices = collect((nocc_a_old+1):(nocc_a_old+nvirt_a_old))
   end
-  if !isempty(classes_b_old)
+  
+  if !isempty(occ_b_old)
+    # Use occupations - more reliable for UHF
+    occ_b_old_indices, virt_b_old_indices = occupied_virtual_from_occupations(occ_b_old, classes_b_old)
+  elseif !isempty(classes_b_old)
     occ_b_old_indices, virt_b_old_indices = occupied_virtual_from_classes(classes_b_old)
   else
     occ_b_old_indices = collect(1:nocc_b_old)
     virt_b_old_indices = collect((nocc_b_old+1):(nocc_b_old+nvirt_b_old))
   end
   
-  # Determine new orbital indices from classes (Core is skipped, Inactive/Active → occ, Virtual → virt)
-  # If no classes provided, fall back to EC.space
-  if !isempty(classes_new[1])
+  # Determine new orbital indices
+  # Priority: occupations > classes > EC.space
+  occ_a_new, occ_b_new = occupations_new
+  if !isempty(occ_a_new)
+    occ_a_new_indices, virt_a_new_indices = occupied_virtual_from_occupations(occ_a_new, classes_new[1])
+  elseif !isempty(classes_new[1])
     occ_a_new_indices, virt_a_new_indices = occupied_virtual_from_classes(classes_new[1])
   else
     occ_a_new_indices = collect(SP['o'])
     virt_a_new_indices = collect(SP['v'])
   end
-  if !isempty(classes_new[2])
+  if !isempty(occ_b_new)
+    occ_b_new_indices, virt_b_new_indices = occupied_virtual_from_occupations(occ_b_new, classes_new[2])
+  elseif !isempty(classes_new[2])
     occ_b_new_indices, virt_b_new_indices = occupied_virtual_from_classes(classes_new[2])
   else
     occ_b_new_indices = collect(SP['O'])
@@ -1356,8 +1377,11 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::
     return
   end
   println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
+  # Pre-fetch orbital data BEFORE opening store file for writing
+  # This is crucial when dump and store are the same file
+  orbital_data = fetch_orbital_data(EC)
   open_dump(EC, "w") do io
-    transfer_orbitals_to_store!(io, EC)
+    transfer_orbitals_to_store!(io, EC, orbital_data)
     dump_amplitudes(io, EC, T1, T2)
   end
   return
@@ -1379,8 +1403,11 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
     return
   end
   println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
+  # Pre-fetch orbital data BEFORE opening store file for writing
+  # This is crucial when dump and store are the same file
+  orbital_data = fetch_orbital_data(EC)
   open_dump(EC, "w") do io
-    transfer_orbitals_to_store!(io, EC)
+    transfer_orbitals_to_store!(io, EC, orbital_data)
     dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
   end
   return
@@ -1424,13 +1451,20 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
   classes_old = use_start ? fetch_orbital_classes(EC; start=true) : (String[], String[])
   
   # Get target orbitals and classes from dump file (or same file if not using start)
+  use_projection = false
   if use_start
-    cMO_new, type_new, current_basis = fetch_orbitals(EC)
-    classes_new = fetch_orbital_classes(EC)
+    if has_dumpfile(EC)
+      cMO_new, type_new, current_basis = fetch_orbitals(EC)
+      classes_new = fetch_orbital_classes(EC)
+      use_projection = true
+    end
   else
     # Same file - project onto current basis (in case orbitals were modified)
-    current_basis = generate_basis(EC, "ao")
-    cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+    if !isempty(EC.system)
+      current_basis = generate_basis(EC, "ao")
+      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+      use_projection = true
+    end
     classes_new = (String[], String[])
   end
   
@@ -1440,7 +1474,11 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
   if length(T1_old) == 0 && length(T2_old) == 0
     return empty_restricted_amplitudes(EC)
   end
-  
+ 
+  if !use_projection
+    # No projection needed, return as-is
+    return (T1_old, T2_old, true)
+  end 
   # Project amplitudes
   T1, T2 = project_amplitudes(EC, T1_old, T2_old, cMO_old, cMO_new, basis_old, current_basis;
                                classes_old=classes_old, classes_new=classes_new)
@@ -1470,18 +1508,28 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
     return empty_unrestricted_amplitudes(EC)
   end
   
-  # Read orbitals and orbital classes from source file (start or dump)
+  # Read orbitals, classes, and occupations from source file (start or dump)
   cMO_old, type_old, basis_old = fetch_orbitals(EC; start=use_start)
   classes_old = use_start ? fetch_orbital_classes(EC; start=true) : (String[], String[])
+  occupations_old = use_start ? fetch_orbital_occupations(EC, "mo"; start=true) : (Float64[], Float64[])
   
-  # Get target orbitals and classes from dump file (or same file if not using start)
+  # Get target orbitals, classes, and occupations from dump file (or same file if not using start)
+  use_projection = false
+  occupations_new = (Float64[], Float64[])
   if use_start
-    cMO_new, type_new, current_basis = fetch_orbitals(EC)
-    classes_new = fetch_orbital_classes(EC)
+    if has_dumpfile(EC)
+      cMO_new, type_new, current_basis = fetch_orbitals(EC)
+      classes_new = fetch_orbital_classes(EC)
+      occupations_new = fetch_orbital_occupations(EC, "mo")
+      use_projection = true
+    end
   else
     # Same file - project onto current basis (in case orbitals were modified)
-    current_basis = generate_basis(EC, "ao")
-    cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+    if !isempty(EC.system)
+      current_basis = generate_basis(EC, "ao")
+      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+      use_projection = true
+    end
     classes_new = (String[], String[])
   end
   
@@ -1491,11 +1539,15 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
   if length(T1a_old) == 0 && length(T2a_old) == 0 && length(T2ab_old) == 0
     return empty_unrestricted_amplitudes(EC)
   end
-  
-  # Project amplitudes
+  if !use_projection
+    # No projection needed, return as-is
+    return (T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old, true)
+  end 
+  # Project amplitudes using occupations for reliable occ/virt determination
   T1a, T1b, T2a, T2b, T2ab = project_amplitudes(EC, T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old,
                                                  cMO_old, cMO_new, basis_old, current_basis;
-                                                 classes_old=classes_old, classes_new=classes_new)
+                                                 classes_old=classes_old, classes_new=classes_new,
+                                                 occupations_old=occupations_old, occupations_new=occupations_new)
   return (T1a, T1b, T2a, T2b, T2ab, true)
 end
 
