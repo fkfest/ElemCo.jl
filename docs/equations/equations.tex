@@ -676,6 +676,86 @@ If the $\bf{SO\_SCI\_origin}$ option is set to be $false$,
 \end{equation}
 and the rest blocks of Hessian matrix remain the same.
 
+\chapter{MP2: Second-Order M{\o}ller--Plesset Perturbation Theory}
+\label{ch:mp2}
+
+\section{Closed-Shell RHF--MP2}
+\label{sec:rhf-mp2}
+
+Using the M{\o}ller--Plesset partition $\op H = \op H_0 + \op V$ with
+$\op H_0 = \sum_p \varepsilon_p \op E_{pp}$ (plus a constant ensuring
+$E^{(0)} = E_{\mathrm{HF}}$), the first-order doubles amplitudes are
+\begin{equation}
+T_{ij}^{ab} = \frac{v_{ij}^{ab}}{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b},
+\end{equation}
+where $v_{ij}^{ab} = \langle ij | ab \rangle$ are non-antisymmetrized integrals
+over spatial orbitals.
+
+The first-order wave function is
+\begin{equation}
+|\Psi^{(1)}\rangle = \half \sum_{ijab} T_{ij}^{ab} \sum_{\sigma\tau}
+\op a^\dagger_{a\sigma} \op a_{i\sigma}\,
+\op a^\dagger_{b\tau} \op a_{j\tau} |\Phi_0\rangle,
+\end{equation}
+where $|\Phi_0\rangle$ is the closed-shell HF reference and $\sigma,\tau \in \{\alpha,\beta\}$.
+
+The RHF--MP2 correlation energy is
+\begin{equation}
+\label{eq:rhf-mp2}
+E^{(2)}_{\mathrm{RHF}} = \sum_{ijab}
+\frac{v_{ij}^{ab}\bigl(2 v_{ij}^{ab} - v_{ij}^{ba}\bigr)}
+{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b}.
+\end{equation}
+The factor of 2 arises from spin summation, and the exchange term $v_{ij}^{ba}$
+accounts for Fermi correlation among same-spin electrons.
+
+\section{RHF--MP2 with Positron}
+\label{sec:positron-mp2}
+
+For a closed-shell electron reference plus a single positron,
+we use barred indices $\spb{p}, \spb{q}, \ldots$ for positron orbitals
+and ordinary Latin indices for electrons.
+The zeroth-order Hamiltonian becomes
+\begin{equation}
+\op H_0 = \sum_p \varepsilon_p \op E_{pp}
++ \sum_{\spb{p}} \varepsilon_{\spb{p}} \op a^\dagger_{\spb{p}} \op a_{\spb{p}}
+\; (+\text{constant}).
+\end{equation}
+
+The electron--positron first-order amplitudes are
+\begin{equation}
+T_{i\spb{\imath}}^{a\spb{a}} = \frac{-v_{i\spb{\imath}}^{a\spb{a}}}
+{\varepsilon_i + \varepsilon_{\spb{\imath}} - \varepsilon_a - \varepsilon_{\spb{a}}},
+\end{equation}
+where the minus sign arises from the attractive electron--positron interaction.
+
+The first-order wave function acquires an additional electron--positron component,
+\begin{equation}
+|\Psi^{(1)}\rangle = |\Psi^{(1)}_{ee}\rangle + |\Psi^{(1)}_{ep}\rangle,
+\end{equation}
+where $|\Psi^{(1)}_{ee}\rangle$ is the pure electron part as before, and
+\begin{equation}
+|\Psi^{(1)}_{ep}\rangle = \sum_{i\spb{\imath} a\spb{a}} T_{i\spb{\imath}}^{a\spb{a}} \sum_{\sigma}
+\op a^\dagger_{a\sigma} \op a_{i\sigma}\,
+\op a^\dagger_{\spb{a}} \op a_{\spb{\imath}} |\Phi_0\rangle.
+\end{equation}
+The sum over $\sigma \in \{\alpha,\beta\}$ acts on the electron part,
+while $\op a^\dagger_{\spb{a}} \op a_{\spb{\imath}}$ excites the single positron.
+
+The total MP2 correlation energy with positron is
+\begin{equation}
+E^{(2)} = E^{(2)}_{ee} + E^{(2)}_{ep},
+\end{equation}
+where $E^{(2)}_{ee}$ is given by \eq{eq:rhf-mp2}, and
+\begin{equation}
+\label{eq:positron-mp2}
+E^{(2)}_{ep} = 2\sum_{i\spb{\imath} a\spb{a}}
+\frac{\bigl|v_{i\spb{\imath}}^{a\spb{a}}\bigr|^2}
+{\varepsilon_i + \varepsilon_{\spb{\imath}} - \varepsilon_a - \varepsilon_{\spb{a}}}.
+\end{equation}
+The factor of 2 comes from summing over electron spin orientations.
+There is no exchange term because electrons and positrons are distinguishable particles.
+
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
 \section{Closed-shell CCSD/DCSD Lagrangian} \label{sec:cs-ccsd}
 The singles-dressed factorization of the closed-shell CCSD and DCSD amplitude equations 

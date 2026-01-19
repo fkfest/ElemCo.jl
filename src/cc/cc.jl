@@ -175,15 +175,15 @@ end
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2, T2ep)
-  oovv = ints2(EC,"oovv")
+  oovv = ints2(EC, "oovv")
   @mtensor begin
     ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
     ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
-    ET2ep = T2ep[a,b,i,j] * ints2(EC,"opve",:p)[i,j,a,b]
+    ET2ep = T2ep[a,b,i,j] * ints2(EC, "opve", :p)[i,j,a,b]
   end
   ET2SS = ET2d - ET2ex
   ET2OS = ET2d
-  ET2 = ET2SS + ET2OS + ET2ep
+  ET2 = ET2SS + ET2OS + 2.0 * ET2ep
   return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
 
