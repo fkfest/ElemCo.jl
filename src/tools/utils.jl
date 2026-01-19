@@ -31,8 +31,13 @@ export PairDict
 # from VecDicts
 export VecDict, getvalue, setvalue!, values, resize!, push!
 export setat!, getat, setkeyat!, getkeyat, setvalueat!, getvalueat
+# from input_utils
+export clean_exprstring, is_options_block, parse_options_block
+export @var2string
 
 export @pib # alias for Base.@propagate_inbounds
+
+include("input_utils.jl")
 
 """
     @pib
