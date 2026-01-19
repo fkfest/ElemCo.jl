@@ -29,6 +29,67 @@ function is_options_block(arg)
 end
 
 """
+    add_kwarg!(opts_dict, opt_name, item)
+
+Add a key=value pair `item` to `opts_dict` under category `opt_name`.
+
+The `item` must be an expression with head `:(=)` or `:kw`.
+The value is escaped so variables are evaluated in the caller's scope.
+"""
+function add_kwarg!(opts_dict::Dict{Symbol, Vector{Expr}}, opt_name::Symbol, item::Expr)
+  if item.head == :(=) || item.head == :kw
+    if !haskey(opts_dict, opt_name)
+      opts_dict[opt_name] = Expr[]
+    end
+    # Escape the value so variables are evaluated in caller's scope
+    push!(opts_dict[opt_name], Expr(:(=), item.args[1], esc(item.args[2])))
+  else
+    error("Expected key=value pair in options block, got: $item")
+  end
+end
+
+"""
+    parse_macro_options!(opts_dict, arg)
+
+Parse a macro-style option expression (`@set category key=val ...`) and add entries to `opts_dict`.
+"""
+function parse_macro_options!(opts_dict::Dict{Symbol, Vector{Expr}}, arg::Expr)
+  macro_sym = arg.args[1]
+  if macro_sym != Symbol("@set") && macro_sym != Symbol("@opt")
+    error("Unknown macro '$macro_sym' in options block. Use: @set category key=value")
+  end
+  # Parse @set style: @set wf charge=-1 ms2=1
+  # args[1] = @set, args[2] = LineNumberNode, args[3] = option_name, args[4+] = key=value pairs
+  opt_name = nothing
+  for i in 2:length(arg.args)
+    item = arg.args[i]
+    item isa LineNumberNode && continue
+    if isnothing(opt_name)
+      # First non-LineNumberNode argument is the option category
+      if item isa Symbol
+        opt_name = item
+      else
+        error("Expected option category name after @set, got: $item")
+      end
+    else
+      add_kwarg!(opts_dict, opt_name, item)
+    end
+  end
+end
+
+"""
+    parse_call_options!(opts_dict, arg)
+
+Parse a function-call style option expression (`category(key=val, ...)`) and add entries to `opts_dict`.
+"""
+function parse_call_options!(opts_dict::Dict{Symbol, Vector{Expr}}, arg::Expr)
+  opt_name = arg.args[1]
+  for i in 2:length(arg.args)
+    add_kwarg!(opts_dict, opt_name, arg.args[i])
+  end
+end
+
+"""
     parse_options_block(block::Expr)
 
 Parse a `begin...end` block with local options and return code that constructs 
@@ -63,68 +124,13 @@ function parse_options_block(block::Expr)
   for arg in block.args
     arg isa LineNumberNode && continue
     if arg isa Symbol
-      # Just option name without any settings - skip or error
       error("Option category '$arg' specified without any settings")
     elseif arg isa Expr
       if arg.head == :macrocall
-        macro_sym = arg.args[1]
-        if macro_sym == Symbol("@set") || macro_sym == Symbol("@opt")
-          # Parse @set style: @set wf charge=-1 ms2=1
-          # args[1] = @set, args[2] = LineNumberNode, args[3] = option_name, args[4+] = key=value pairs
-          opt_name = nothing
-          for i in 2:length(arg.args)
-            item = arg.args[i]
-            item isa LineNumberNode && continue
-            if isnothing(opt_name)
-              # First non-LineNumberNode argument is the option category
-              if item isa Symbol
-                opt_name = item
-              else
-                error("Expected option category name after @set, got: $item")
-              end
-            elseif item isa Expr && item.head == :(=)
-              if !haskey(opts_dict, opt_name)
-                opts_dict[opt_name] = Expr[]
-              end
-              # Escape the value so variables are evaluated in caller's scope
-              push!(opts_dict[opt_name], Expr(:(=), item.args[1], esc(item.args[2])))
-            elseif item isa Expr && item.head == :kw
-              if !haskey(opts_dict, opt_name)
-                opts_dict[opt_name] = Expr[]
-              end
-              # Escape the value so variables are evaluated in caller's scope
-              push!(opts_dict[opt_name], Expr(:(=), item.args[1], esc(item.args[2])))
-            else
-              error("Expected key=value pair in options block, got: $item")
-            end
-          end
-        else
-          error("Unknown macro '$macro_sym' in options block. Use: @set category key=value")
-        end
+        parse_macro_options!(opts_dict, arg)
       elseif arg.head == :call
-        # Parse function-call style: wf(charge=-1, ms2=1)
-        opt_name = arg.args[1]
-        for i in 2:length(arg.args)
-          kw = arg.args[i]
-          if kw isa Expr && kw.head == :(=)
-            if !haskey(opts_dict, opt_name)
-              opts_dict[opt_name] = Expr[]
-            end
-            # Escape the value so variables are evaluated in caller's scope
-            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], esc(kw.args[2])))
-          elseif kw isa Expr && kw.head == :kw
-            if !haskey(opts_dict, opt_name)
-              opts_dict[opt_name] = Expr[]
-            end
-            # Escape the value so variables are evaluated in caller's scope
-            push!(opts_dict[opt_name], Expr(:(=), kw.args[1], esc(kw.args[2])))
-          else
-            error("Expected key=value pair in options block, got: $kw")
-          end
-        end
+        parse_call_options!(opts_dict, arg)
       elseif arg.head == :(=)
-        # Single assignment like: cc = saved_opts  
-        # This would be for restoring, but we don't support it in blocks
         error("Direct assignment not supported in options block. Use: @set category key=value")
       else
         error("Unexpected expression in options block: $arg")
