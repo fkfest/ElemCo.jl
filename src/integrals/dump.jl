@@ -289,7 +289,7 @@ end
 """
 function integ1(fd::FDump, spincase::Symbol=:α)
   if spincase == :p
-    @assert fd.epdump "Only for positron fcidump"
+    @assert fd.epdump "Spincase :p only for positron fcidump"
     return fd.int1p
   end
   if !fd.uhf
@@ -304,7 +304,7 @@ end
 """
     integ2(fd::FDump, spincase::Symbol=:α)
 
-  Return 2-e⁻ integrals (for UHF fcidump: for `spincase`).
+  Return 2-e⁻ or e⁻e⁺ integrals (for UHF fcidump: for `spincase`).
   `spincase` can be `:α`, `:β`, `:αβ` or `:p`.
 
   Use type-stable versions instead: 
@@ -312,7 +312,7 @@ end
 """
 function integ2(fd::FDump, spincase::Symbol=:α)
   if spincase == :p
-    @assert fd.epdump "Only for positron fcidump"
+    @assert fd.epdump "Spincase :p only for positron fcidump"
     return fd.int2ep
   end
   if !fd.uhf
@@ -329,12 +329,12 @@ end
 """
     integ2_ss(fd::FDump, spincase::Symbol=:α)
 
-  Return 2-e⁻ integrals (for UHF fcidump: for `spincase`).
+  Return 2-e⁻ or e⁻e⁺ integrals (for UHF fcidump: for `spincase`).
   `spincase` can be `:α`, `:β`, or `:p`.
 """
 function integ2_ss(fd::FDump, spincase::Symbol=:α)
   if spincase == :p
-    @assert fd.epdump "Only for positron fcidump"
+    @assert fd.epdump "^Only for positron fcidump"
     return fd.int2ep
   end
   if !fd.uhf
@@ -376,7 +376,10 @@ function read_fcidump(fcidump::String, ::Val{N}) where N
   if !isnothing(positron)
     fd.epdump = (positron > 0)
     if fd.epdump
-      println("Positron fcidump")
+      if fd.uhf
+        error("UHF positron fcidump not supported")
+      end
+      println("Positron fcidump elements detected")
     end
   end
   done = false
@@ -736,7 +739,6 @@ function read_integrals!(int1::Matrix{Float64}, int2::Array{Float64,N},
   for linestr in eachline(fdfile)
     line = split(linestr)
     if length(line) != 5
-      # If the line has not exactly 5 tokens, skip it (could be header remnants).
       continue
     end
 
@@ -751,34 +753,25 @@ function read_integrals!(int1::Matrix{Float64}, int2::Array{Float64,N},
     end
 
     if i4 > 0
-      # Two-body integral line.
       if section == 0
-        # Electron-electron integrals.
         set_int2!(int2, i1, i2, i3, i4, integ, simtra, false)
       elseif section == 1
-        # Electron-positron integrals.
         set_int2!(int2ep, i1, i2, i3, i4, integ, simtra, false)
       else
         error("Unexpected 2-electron integral line in section $(section)")
       end
     elseif i2 > 0
-      # One-body integral line.
       if section == 2
-        # Electron one-electron integrals.
         set_int1!(int1, i1, i2, integ, simtra)
       elseif section == 3
-        # Positron one-electron integrals.
         set_int1!(int1p, i1, i2, integ, simtra)
       else
         error("Unexpected 1-electron integral line in section $(section)")
       end
     elseif i1 <= 0
-      # A separator or core energy marker.
       if section < 4
-        # We are at a separator: increment section to move to next block.
         section += 1
       else
-      # This line now holds the core energy.
       int0 = integ
       readint0 = true
       end
@@ -1331,17 +1324,9 @@ end
     int1_npy_filename(fd::FDump, spincase::Symbol=:α)
 
   Return filename for 1-e integrals in npy format.
-  `spincase` can be `:α`, `:β`, or `:p` for UHF fcidump.
+  `spincase` can be `:α` or `:β` for UHF fcidump.
 """
 function int1_npy_filename(fd::FDump, spincase::Symbol=:α)
-  if spincase == :p
-    file = headvar(fd, "NPY1P", String)
-    if isnothing(file)
-      file = "int1p.npy"
-      # fd.head["NPY1P"] = [file]
-    end
-    return file::String
-  end
   if !fd.uhf
     file = headvar(fd, "NPY1", String)
     if isnothing(file)
@@ -1370,17 +1355,9 @@ end
     int2_npy_filename(fd::FDump, spincase::Symbol=:α)
 
   Return filename for 2-e integrals in npy format. 
-  `spincase` can be `:α`, `:β`, `:αβ`, or `ep` for UHF fcidump.
+  `spincase` can be `:α`, `:β` or `:αβ` for UHF fcidump.
 """
 function int2_npy_filename(fd::FDump, spincase::Symbol=:α)
-  if spincase == :ep
-    file = headvar(fd, "NPY2EP", String)
-    if isnothing(file)
-      file = "int2ep.npy"
-      # fd.head["NPY2EP"] = [file]
-    end
-    return file::String
-  end
   if !fd.uhf
     file = headvar(fd, "NPY2", String)
     if isnothing(file)
