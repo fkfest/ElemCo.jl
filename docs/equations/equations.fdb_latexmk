@@ -1,15 +1,15 @@
 # Fdb version 3
-["bibtex equations"] 1768828283 "equations.aux" "equations.bbl" "equations" 1768829361
+["bibtex equations"] 1768934912 "equations.aux" "equations.bbl" "equations" 1768935203
   "/usr/share/texmf/bibtex/bst/nature/naturemag.bst" 1136766823 34867 ae05936b307e5838449d1bb5fdbb2c19 ""
-  "equations.aux" 1768828335 12496 a3830e3b3f4aff6a4aefe7b647c2b007 "pdflatex"
+  "equations.aux" 1768934913 15662 0536e089199c5cd75bbb5bad567b22bd "pdflatex"
   "references.bib" 1767629318 10697 3bb904dd6f521f8d49aca37f2762c411 ""
   (generated)
-  "equations.bbl"
   "equations.blg"
-["pdflatex"] 1768828334 "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.tex" "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.pdf" "equations" 1768829361
+  "equations.bbl"
+["pdflatex"] 1768934912 "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.tex" "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.pdf" "equations" 1768935203
   "/etc/texmf/web2c/texmf.cnf" 1617974667 40935 950c859ef6aa64cd9f8caa18792b2c7d ""
-  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.aux" 1768828335 12496 a3830e3b3f4aff6a4aefe7b647c2b007 ""
-  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.tex" 1768828336 124546 543812044c15f7983937910c839df398 ""
+  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.aux" 1768934913 15662 0536e089199c5cd75bbb5bad567b22bd ""
+  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.tex" 1768935193 131220 60e41922018c5a1621c99c68553d4045 ""
   "/usr/share/texmf/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1136849721 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "/usr/share/texmf/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texmf/fonts/tfm/jknappen/ec/tcrm1200.tfm" 1136768653 1536 74b7293ec3713bb7fdca8dd1bd1f469c ""
@@ -130,16 +130,16 @@
   "/usr/share/texmf/web2c/texmf.cnf" 1617974667 40935 950c859ef6aa64cd9f8caa18792b2c7d ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1761029440 5103607 ae8d035eb49640d40d14b44ef6f070f5 ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1741958352 2544835 c66b54ab9248c8d4b720b8e109ae6f8a ""
-  "equations.aux" 1768828335 12496 a3830e3b3f4aff6a4aefe7b647c2b007 "pdflatex"
-  "equations.bbl" 1768828283 6956 77e3315b4fb63a0209012540546d45ba "bibtex equations"
-  "equations.out" 1768828335 4408 8e1d27d88c0a1d1c427eb9dcafd2b016 "pdflatex"
-  "equations.tex" 1768828336 124546 543812044c15f7983937910c839df398 ""
-  "equations.toc" 1768828335 5452 2d7e3f28bb0b3ea1e9f333bb978205ae "pdflatex"
+  "equations.aux" 1768934913 15662 0536e089199c5cd75bbb5bad567b22bd "pdflatex"
+  "equations.bbl" 1768934912 6956 77e3315b4fb63a0209012540546d45ba "bibtex equations"
+  "equations.out" 1768934913 5520 f5451b3bb0ef7f5b822eeaebd101adf2 "pdflatex"
+  "equations.tex" 1768935193 131220 60e41922018c5a1621c99c68553d4045 ""
+  "equations.toc" 1768934913 7393 d06a913e67553361b0652a2f6b9bf307 "pdflatex"
   (generated)
   "equations.out"
-  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.log"
-  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.pdf"
-  "equations.aux"
-  "equations.log"
-  "equations.pdf"
   "equations.toc"
+  "equations.log"
+  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.log"
+  "equations.aux"
+  "equations.pdf"
+  "/home/simula/dev/ElemCo.jl-devel/docs/equations/equations.pdf"

@@ -614,6 +614,7 @@ INPUT /usr/share/texmf/fonts/tfm/public/cm/cmbx8.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/cm/cmbx6.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/cm/cmti12.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/cm/cmbx12.tfm
+INPUT /usr/share/texmf/fonts/tfm/jknappen/ec/tcrm1200.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/cm/cmmi12.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/cm/cmmi12.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/cm/cmmi12.tfm
@@ -630,7 +631,6 @@ INPUT /usr/share/texmf/fonts/tfm/public/amsfonts/symbols/msam10.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/amsfonts/symbols/msbm10.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/amsfonts/symbols/msbm10.tfm
 INPUT /usr/share/texmf/fonts/tfm/public/amsfonts/symbols/msbm10.tfm
-INPUT /usr/share/texmf/fonts/tfm/jknappen/ec/tcrm1200.tfm
 INPUT /usr/share/texmf/tex/latex/amsfonts/ueuf.fd
 INPUT /usr/share/texmf/tex/latex/amsfonts/ueuf.fd
 INPUT /usr/share/texmf/tex/latex/amsfonts/ueuf.fd

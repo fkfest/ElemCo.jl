@@ -679,82 +679,244 @@ and the rest blocks of Hessian matrix remain the same.
 \chapter{MP2: Second-Order M{\o}ller--Plesset Perturbation Theory}
 \label{ch:mp2}
 
+\section{Spin-Orbital Formulation}
+\label{sec:spin-orbital-mp2}
+
+In the spin-orbital basis, the MP2 correlation energy is
+\begin{equation}
+\label{eq:spin-orbital-mp2}
+E^{(2)} = \frac{1}{4} \sum_{ijab} \frac{|\langle ij \| ab \rangle|^2}
+{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b},
+\end{equation}
+where $i,j,a,b$ denote \emph{spin-orbitals}, and the antisymmetrized integral is
+\begin{equation}
+\langle ij \| ab \rangle = \langle ij | ab \rangle - \langle ij | ba \rangle.
+\end{equation}
+The factor $\tfrac{1}{4}$ compensates for unrestricted summation over equivalent 
+excitations $(ij \leftrightarrow ji, ab \leftrightarrow ba)$.
+
+
 \section{Closed-Shell RHF--MP2}
 \label{sec:rhf-mp2}
 
-Using the M{\o}ller--Plesset partition $\op H = \op H_0 + \op V$ with
-$\op H_0 = \sum_p \varepsilon_p \op E_{pp}$ (plus a constant ensuring
-$E^{(0)} = E_{\mathrm{HF}}$), the first-order doubles amplitudes are
-\begin{equation}
-T_{ij}^{ab} = \frac{v_{ij}^{ab}}{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b},
-\end{equation}
-where $v_{ij}^{ab} = \langle ij | ab \rangle$ are non-antisymmetrized integrals
-over spatial orbitals.
+For a closed-shell RHF reference, $\alpha$ and $\beta$ electrons occupy 
+the same spatial orbitals with identical orbital energies. We sum over 
+spin explicitly.
 
-The first-order wave function is
-\begin{equation}
-|\Psi^{(1)}\rangle = \half \sum_{ijab} T_{ij}^{ab} \sum_{\sigma\tau}
-\op a^\dagger_{a\sigma} \op a_{i\sigma}\,
-\op a^\dagger_{b\tau} \op a_{j\tau} |\Phi_0\rangle,
-\end{equation}
-where $|\Phi_0\rangle$ is the closed-shell HF reference and $\sigma,\tau \in \{\alpha,\beta\}$.
+\subsection{Spin Cases}
+The integral $\langle i_{\sigma_1} j_{\sigma_2} | a_{\sigma_3} b_{\sigma_4} \rangle$
+is nonzero only when $\sigma_1 = \sigma_3$ and $\sigma_2 = \sigma_4$ (spin conservation).
 
-The RHF--MP2 correlation energy is
+\paragraph{Same-spin ($\alpha\alpha$ and $\beta\beta$).}
+Both direct and exchange terms survive:
+\begin{equation}
+\langle i_\alpha j_\alpha \| a_\alpha b_\alpha \rangle 
+= \langle ij | ab \rangle - \langle ij | ba \rangle.
+\end{equation}
+
+\paragraph{Opposite-spin ($\alpha\beta$ and $\beta\alpha$).}
+The exchange term vanishes by spin orthogonality:
+\begin{equation}
+\langle i_\alpha j_\beta \| a_\alpha b_\beta \rangle = \langle ij | ab \rangle.
+\end{equation}
+
+\subsection{Spin Summation}
+Denoting $\Delta_{ijab} = \varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b$
+and converting to spatial orbitals, we must account for overcounting.
+
+\paragraph{Same-spin ($\alpha\alpha + \beta\beta$).}
+Each spatial configuration $(i,j,a,b)$ appears 4 times in the spin-orbital sum
+(swapping $i \leftrightarrow j$ and $a \leftrightarrow b$). With two identical 
+spin cases and the $\tfrac{1}{4}$ factor:
+\begin{equation}
+E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} 
+= 2 \times \frac{1}{4} \sum_{ijab} \frac{(\langle ij|ab\rangle - \langle ij|ba\rangle)^2}{\Delta_{ijab}}.
+\end{equation}
+
+\paragraph{Opposite-spin ($\alpha\beta + \beta\alpha$).}
+Each spatial configuration appears twice (swapping both pairs simultaneously).
+With two identical spin cases:
+\begin{equation}
+E^{(2)}_{\alpha\beta} + E^{(2)}_{\beta\alpha} 
+= 2 \times \frac{1}{2} \sum_{ijab} \frac{\langle ij|ab\rangle^2}{\Delta_{ijab}}.
+\end{equation}
+
+\subsection{Expanding the Same-Spin Term}
+Expand the squared antisymmetric integral:
+\begin{equation}
+(\langle ij|ab\rangle - \langle ij|ba\rangle)^2 
+= \langle ij|ab\rangle^2 - 2\langle ij|ab\rangle\langle ij|ba\rangle + \langle ij|ba\rangle^2.
+\end{equation}
+Since $\sum_{ijab} \langle ij|ba\rangle^2 = \sum_{ijab} \langle ij|ab\rangle^2$ 
+by relabeling $a \leftrightarrow b$:
+\begin{equation}
+\sum_{ijab} (\langle ij|ab\rangle - \langle ij|ba\rangle)^2 
+= 2 \sum_{ijab} \bigl(\langle ij|ab\rangle^2 - \langle ij|ab\rangle\langle ij|ba\rangle\bigr).
+\end{equation}
+
+\subsection{SS and OS Contributions}
+Substituting the expansion into the same-spin term:
+\begin{equation}
+E^{(2)}_{\mathrm{SS}} = \frac{1}{2} \cdot 2 \sum_{ijab} 
+  \frac{\langle ij|ab\rangle^2 - \langle ij|ab\rangle\langle ij|ba\rangle}{\Delta_{ijab}}
+= \sum_{ijab} \frac{\langle ij|ab\rangle(\langle ij|ab\rangle - \langle ij|ba\rangle)}{\Delta_{ijab}}.
+\end{equation}
+The opposite-spin contribution simplifies to:
+\begin{equation}
+E^{(2)}_{\mathrm{OS}} = \sum_{ijab} \frac{\langle ij|ab\rangle^2}{\Delta_{ijab}}.
+\end{equation}
+
+\subsection{Final RHF--MP2 Formula}
+Adding SS and OS:
+\begin{equation}
+\begin{aligned}
+E^{(2)}_{\mathrm{RHF}} &= E^{(2)}_{\mathrm{SS}} + E^{(2)}_{\mathrm{OS}} \\[4pt]
+&= \sum_{ijab} \frac{\langle ij|ab\rangle^2 - \langle ij|ab\rangle\langle ij|ba\rangle 
+   + \langle ij|ab\rangle^2}{\Delta_{ijab}} \\[4pt]
+&= \sum_{ijab} \frac{2\langle ij|ab\rangle^2 - \langle ij|ab\rangle\langle ij|ba\rangle}{\Delta_{ijab}}.
+\end{aligned}
+\end{equation}
+Factoring:
 \begin{equation}
 \label{eq:rhf-mp2}
-E^{(2)}_{\mathrm{RHF}} = \sum_{ijab}
-\frac{v_{ij}^{ab}\bigl(2 v_{ij}^{ab} - v_{ij}^{ba}\bigr)}
-{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b}.
-\end{equation}
-The factor of 2 arises from spin summation, and the exchange term $v_{ij}^{ba}$
-accounts for Fermi correlation among same-spin electrons.
-
-\section{RHF--MP2 with Positron}
-\label{sec:positron-mp2}
-
-For a closed-shell electron reference plus a single positron,
-we use barred indices $\spb{p}, \spb{q}, \ldots$ for positron orbitals
-and ordinary Latin indices for electrons.
-The zeroth-order Hamiltonian becomes
-\begin{equation}
-\op H_0 = \sum_p \varepsilon_p \op E_{pp}
-+ \sum_{\spb{p}} \varepsilon_{\spb{p}} \op a^\dagger_{\spb{p}} \op a_{\spb{p}}
-\; (+\text{constant}).
+\boxed{E^{(2)}_{\mathrm{RHF}} = \sum_{ijab} 
+\frac{\langle ij|ab\rangle (2\langle ij|ab\rangle - \langle ij|ba\rangle)}{\Delta_{ijab}}.}
 \end{equation}
 
-The electron--positron first-order amplitudes are
+\subsection{Amplitude Form}
+Using spatial-orbital amplitudes $T_{ij}^{ab} = \langle ij|ab\rangle / \Delta_{ijab}$:
 \begin{equation}
-T_{i\spb{\imath}}^{a\spb{a}} = \frac{-v_{i\spb{\imath}}^{a\spb{a}}}
-{\varepsilon_i + \varepsilon_{\spb{\imath}} - \varepsilon_a - \varepsilon_{\spb{a}}},
+\begin{aligned}
+E^{(2)}_{\mathrm{SS}} &= \sum_{ijab} \langle ij|ab\rangle (T_{ij}^{ab} - T_{ij}^{ba}), \\
+E^{(2)}_{\mathrm{OS}} &= \sum_{ijab} \langle ij|ab\rangle \, T_{ij}^{ab}, \\
+E^{(2)}_{\mathrm{RHF}} &= \sum_{ijab} \langle ij|ab\rangle (2T_{ij}^{ab} - T_{ij}^{ba}).
+\end{aligned}
 \end{equation}
-where the minus sign arises from the attractive electron--positron interaction.
 
-The first-order wave function acquires an additional electron--positron component,
-\begin{equation}
-|\Psi^{(1)}\rangle = |\Psi^{(1)}_{ee}\rangle + |\Psi^{(1)}_{ep}\rangle,
-\end{equation}
-where $|\Psi^{(1)}_{ee}\rangle$ is the pure electron part as before, and
-\begin{equation}
-|\Psi^{(1)}_{ep}\rangle = \sum_{i\spb{\imath} a\spb{a}} T_{i\spb{\imath}}^{a\spb{a}} \sum_{\sigma}
-\op a^\dagger_{a\sigma} \op a_{i\sigma}\,
-\op a^\dagger_{\spb{a}} \op a_{\spb{\imath}} |\Phi_0\rangle.
-\end{equation}
-The sum over $\sigma \in \{\alpha,\beta\}$ acts on the electron part,
-while $\op a^\dagger_{\spb{a}} \op a_{\spb{\imath}}$ excites the single positron.
 
-The total MP2 correlation energy with positron is
+\section{RHF--MP2 with a Single Positron}
+\label{sec:rhf-positron-mp2}
+
+Consider a closed-shell RHF system with an additional single positron.
+We use indices $i,j,a,b$ for electrons and $p,q,r,s$ for positrons, where
+$i,j,p$ denote occupied and $a,b,q$ denote virtual orbitals.
+
+\subsection{Contributions}
+The total MP2 energy has two parts:
 \begin{equation}
-E^{(2)} = E^{(2)}_{ee} + E^{(2)}_{ep},
+E^{(2)} = E^{(2)}_{\mathrm{ee}} + E^{(2)}_{\mathrm{ep}},
 \end{equation}
-where $E^{(2)}_{ee}$ is given by \eq{eq:rhf-mp2}, and
+where $E^{(2)}_{\mathrm{ee}}$ is the standard RHF electron--electron correlation 
+from Eq.~\eqref{eq:rhf-mp2}, and $E^{(2)}_{\mathrm{ep}}$ is the electron--positron 
+correlation. With only one positron, there is no positron--positron contribution.
+
+\subsection{Electron--Positron Correlation}
+The electron--positron integral $\langle ip|aq\rangle$ describes 
+electron~1 in orbital~$i$ and positron~2 in orbital~$p$ scattering to 
+virtual orbitals $a$ and $q$. The attractive electron--positron interaction 
+has the opposite sign to electron--electron repulsion; we assume this sign 
+is already absorbed into the integral definition.
+
+Since electrons and positrons are distinguishable particles, there is 
+\emph{no exchange} between them---only the direct (Coulomb) term contributes.
+The spin-orbital expression is:
 \begin{equation}
-\label{eq:positron-mp2}
-E^{(2)}_{ep} = 2\sum_{i\spb{\imath} a\spb{a}}
-\frac{\bigl|v_{i\spb{\imath}}^{a\spb{a}}\bigr|^2}
-{\varepsilon_i + \varepsilon_{\spb{\imath}} - \varepsilon_a - \varepsilon_{\spb{a}}}.
+E^{(2)}_{\mathrm{ep}} = \sum_{ipaq} 
+\frac{|\langle i_\sigma p_\tau | a_\sigma q_\tau \rangle|^2}
+{\varepsilon_i + \varepsilon_p - \varepsilon_a - \varepsilon_q},
 \end{equation}
-The factor of 2 comes from summing over electron spin orientations.
-There is no exchange term because electrons and positrons are distinguishable particles.
+where spin is conserved independently for each particle type 
+($\sigma_i = \sigma_a$ and $\tau_p = \tau_q$).
+
+\subsection{Spin Integration}
+For RHF electrons, the $\alpha$ and $\beta$ spatial orbitals are identical.
+The single positron occupies one spatial orbital $p$ with a definite spin 
+(say $\alpha$). There are two contributing spin configurations:
+\begin{itemize}
+\item $\alpha$-electron with $\alpha$-positron: $e_\alpha p_\alpha \to a_\alpha q_\alpha$
+\item $\beta$-electron with $\alpha$-positron: $e_\beta p_\alpha \to a_\beta q_\alpha$
+\end{itemize}
+Both give the same spatial integral $\langle ip|aq\rangle$. Summing over 
+electron spin:
+\begin{equation}
+E^{(2)}_{\mathrm{ep}} = 2 \sum_{ipaq} 
+\frac{\langle ip|aq\rangle^2}{\Delta_{ipaq}},
+\end{equation}
+where $\Delta_{ipaq} = \varepsilon_i + \varepsilon_p - \varepsilon_a - \varepsilon_q$,
+with $i,a$ running over spatial electron orbitals and $p,q$ over spatial 
+positron orbitals (one occupied, several virtual).
+
+\subsection{Amplitude Form}
+Defining the electron--positron amplitude:
+\begin{equation}
+T_{ip}^{aq} = \frac{\langle ip|aq\rangle}{\Delta_{ipaq}},
+\end{equation}
+the electron--positron correlation energy becomes:
+\begin{equation}
+\label{eq:ep-mp2}
+\boxed{E^{(2)}_{\mathrm{ep}} = 2 \sum_{ipaq} \langle ip|aq\rangle \, T_{ip}^{aq}.}
+\end{equation}
+
+
+\section{Unrestricted UHF--MP2}
+\label{sec:uhf-mp2}
+
+For UHF, $\alpha$ and $\beta$ electrons occupy \emph{different} spatial orbitals 
+with different orbital energies. We use lowercase $(i,j,a,b)$ for $\alpha$ 
+and uppercase $(I,J,A,B)$ for $\beta$.
+
+\subsection{Three Spin Contributions}
+\begin{equation}
+E^{(2)}_{\mathrm{UHF}} = E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} + E^{(2)}_{\alpha\beta}.
+\end{equation}
+
+\paragraph{Same-spin $\alpha\alpha$.}
+With antisymmetrized integrals and antisymmetric amplitudes:
+\begin{equation}
+E^{(2)}_{\alpha\alpha} = \frac{1}{4} \sum_{ijab}
+\frac{(\langle ij|ab\rangle - \langle ij|ba\rangle)^2}{\Delta_{ijab}^\alpha}
+= \frac{1}{2} \sum_{ijab} \langle ij|ab\rangle \, T_{ij}^{ab,\alpha\alpha}.
+\end{equation}
+The $\tfrac{1}{4} \to \tfrac{1}{2}$ follows from amplitude antisymmetry.
+
+\paragraph{Same-spin $\beta\beta$.}
+\begin{equation}
+E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{IJAB} \langle IJ|AB\rangle \, T_{IJ}^{AB,\beta\beta}.
+\end{equation}
+
+\paragraph{Opposite-spin $\alpha\beta$.}
+No exchange, no antisymmetry, no overcounting:
+\begin{equation}
+E^{(2)}_{\alpha\beta} = \sum_{iJaB} \frac{\langle iJ|aB\rangle^2}{\Delta_{iJaB}^{\alpha\beta}}
+= \sum_{iJaB} \langle iJ|aB\rangle \, T_{iJ}^{aB,\alpha\beta}.
+\end{equation}
+
+\subsection{Final UHF--MP2 Formula}
+\begin{equation}
+\label{eq:uhf-mp2}
+\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{ijab} \langle ij|ab\rangle \, T_{ij}^{ab,\alpha\alpha}
++ \frac{1}{2} \sum_{IJAB} \langle IJ|AB\rangle \, T_{IJ}^{AB,\beta\beta}
++ \sum_{iJaB} \langle iJ|aB\rangle \, T_{iJ}^{aB,\alpha\beta},}
+\end{equation}
+with amplitudes
+\begin{equation}
+\begin{aligned}
+T_{ij}^{ab,\alpha\alpha} &= \frac{\langle ij|ab\rangle - \langle ij|ba\rangle}
+{\varepsilon_i^\alpha + \varepsilon_j^\alpha - \varepsilon_a^\alpha - \varepsilon_b^\alpha}, \\[4pt]
+T_{IJ}^{AB,\beta\beta} &= \frac{\langle IJ|AB\rangle - \langle IJ|BA\rangle}
+{\varepsilon_I^\beta + \varepsilon_J^\beta - \varepsilon_A^\beta - \varepsilon_B^\beta}, \\[4pt]
+T_{iJ}^{aB,\alpha\beta} &= \frac{\langle iJ|aB\rangle}
+{\varepsilon_i^\alpha + \varepsilon_J^\beta - \varepsilon_a^\alpha - \varepsilon_B^\beta}.
+\end{aligned}
+\end{equation}
+
+\subsection{Key Differences from RHF}
+\begin{itemize}
+  \item No factor of 2 on SS terms ($\alpha$ and $\beta$ orbitals differ).
+  \item Separate integrals and orbital energies for each spin.
+  \item No exchange in the OS contribution.
+\end{itemize}
+
 
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
 \section{Closed-shell CCSD/DCSD Lagrangian} \label{sec:cs-ccsd}
