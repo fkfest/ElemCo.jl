@@ -96,7 +96,7 @@ using .TrexioInterface
 
 
 export @mainname, @print_input
-export @loadfile, @savefile, @copyfile
+export @loadfile, @savefile, @copyfile, @deletefile
 export @loadwf, @savewf, @copywf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
@@ -229,6 +229,19 @@ macro copyfile(from_file, to_file, kwargs...)
     strfrom = @var2string($(esc(from_file)), $(esc(strfrom)))
     strto = @var2string($(esc(to_file)), $(esc(strto)))
     copy_file!($(esc(:EC)), strfrom, strto; $(ekwa...))
+  end
+end
+
+"""
+    @deletefile(filename)
+
+  Delete file `filename` from `EC.scr` directory.
+"""
+macro deletefile(filename)
+  strfilename = clean_exprstring(filename)
+  return quote
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    delete_file!($(esc(:EC)), strfilename)
   end
 end
 

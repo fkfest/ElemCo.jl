@@ -24,7 +24,7 @@ TESTS = [
 ("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_bohf", "h2o_triplet", "2d_cc"]),
 ("CC", ["h2-", "amp_restart"]),
 ("FCI", ["fci_rhf", "fci_uhf"]),
-("HCI", ["hci_rhf", "hci_uhf", "hci_rhf_st"]),
+("HCI", ["hci_rhf", "hci_uhf", "hci_rhf_st", "hci_restart"]),
 ("QV-CC", ["h2o_qv-ccd"]),
 ("DF", ["df_hf", "basis", "df_uhf", "df_mcscf", "levenshtein"]),
 ("System", ["dummy"]),

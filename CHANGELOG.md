@@ -30,6 +30,8 @@
 * A check for changes of the molecular geometry/basis/fcidump is performed in every macro-command call. If a change is detected, the integrals are set to be recalculated or reloaded from the fcidump file. With this, the user doesn't need to worry about calling `@ECinit` after changing the geometry/basis/fcidump.
 * A test for dummy atoms is added. At the moment, if dummy atoms are detected, the integrals are recalculated. In the future, once we have AO-FDump support, the integrals can be reused.
 * Macros `@loadwf` and `@savewf` to load and save orbitals (etc) from/to trexio dump files. `@copywf` to copy trexio dump files (e.g., to make a local backup).
+* Wavefunction store/start functionality for coupled cluster and selected CI methods. Use `@set wf store="filename.h5"` to store the wavefunction (amplitudes for CC, determinants/coefficients for HCI) to a TREXIO file. Use `@set wf start="filename.h5"` to restart a calculation from a previously stored wavefunction. Multi-state HCI calculations store each state in separate files (e.g., `filename_state2.h5`).
+* `pt2_only` option for HCI calculations (`@set hci pt2_only=true`) to skip variational iterations and compute only the PT2 correction using stored determinants.
 
 ### Fixed
 

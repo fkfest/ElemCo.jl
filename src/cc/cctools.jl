@@ -16,6 +16,7 @@ using ..ElemCo.BasisSets
 using ..ElemCo.Integrals
 using ..ElemCo.QMTensors
 using ..ElemCo.TrexioInterface
+using ..ElemCo.AbstractEC: AbstractDeterminant
 
 export calc_fock_matrix, calc_HF_energy, calc_rotated_HF_energy
 export calc_singles_energy_using_dfock
@@ -34,6 +35,7 @@ export calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot
 export triples_4ext!
 export project_amplitudes, check_projection_rank
 export dump_wavefunction_with_amplitudes!
+export dump_wavefunction_with_determinants!, try_fetch_starting_determinants
 export try_fetch_restricted_starting_amplitudes, try_fetch_unrestricted_starting_amplitudes
 
 """ 
@@ -1421,6 +1423,98 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
                                             T1::Tuple{<:AbstractMatrix,<:AbstractMatrix}, 
                                             T2::Tuple{<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4}})
   dump_wavefunction_with_amplitudes!(EC, T1[1], T1[2], T2[1], T2[2], T2[3])
+end
+
+# ============================================================================
+# HCI determinant wavefunction storage
+# ============================================================================
+
+"""
+    dump_wavefunction_with_determinants!(EC::ECInfo, dets, coeffs; nstates=0)
+
+Dump orbitals and HCI determinants with CI coefficients to TREXIO file(s).
+
+For single-state (nstates=0 or nstates=1), writes to `wf.store`.
+For multi-state, writes each state to a separate file per TREXIO standard:
+- State 1: `wf.store`
+- State n>1: `wf.store` with `_stateN` suffix
+
+Does nothing if `EC.options.wf.store` is empty.
+
+# Arguments
+- `dets::Vector{<:AbstractDeterminant}`: Determinants 
+- `coeffs::AbstractVecOrMat{Float64}`: CI coefficients (vector for 1 state, matrix for multi-state)
+- `nstates::Int=0`: Number of states (0 = infer from coeffs)
+"""
+function dump_wavefunction_with_determinants!(EC::ECInfo, dets::Vector{D}, 
+                                              coeffs::AbstractVecOrMat{Float64};
+                                              nstates::Int=0) where {D}
+  if EC.options.wf.store == ""
+    return
+  end
+  
+  # Determine number of states
+  if nstates == 0
+    nstates = coeffs isa AbstractMatrix ? size(coeffs, 2) : 1
+  end
+  
+  if nstates == 1
+    # Single state
+    coeffs_vec = coeffs isa AbstractMatrix ? coeffs[:, 1] : coeffs
+    dump_determinants(EC, dets, coeffs_vec; state=1)
+  else
+    # Multi-state: write each state to separate file
+    dump_determinants_multistate(EC, dets, coeffs isa AbstractMatrix ? coeffs : reshape(coeffs, :, 1))
+  end
+  return
+end
+
+"""
+    try_fetch_starting_determinants(EC::ECInfo; OPattern=UInt64, nstates=1)
+
+Try to read determinants and CI coefficients from a TREXIO file for HCI restart.
+
+The logic follows CC amplitude restart:
+- If `wf.start` is not empty: read from `wf.start` file(s)
+- If `wf.start` is empty: try to read from `wf.dump` file(s)
+
+For multi-state, reads from separate files per TREXIO standard.
+
+Returns `(dets, coeffs, success::Bool)`.
+"""
+function try_fetch_starting_determinants(EC::ECInfo; OPattern::Type=UInt64, nstates::Int=1)
+  use_start = EC.options.wf.start != ""
+  
+  # Check if ground state determinants exist
+  if !has_determinants(EC; start=use_start, state=1)
+    return SimpleDeterminant{OPattern}[], zeros(Float64, 0, nstates), false
+  end
+  
+  if nstates == 1
+    dets, coeffs = fetch_determinants(EC; start=use_start, OPattern=OPattern, state=1)
+    return dets, reshape(coeffs, :, 1), true
+  else
+    # Multi-state: read from separate files
+    dets_gs, coeffs_gs = fetch_determinants(EC; start=use_start, OPattern=OPattern, state=1)
+    ndets = length(dets_gs)
+    coeffs_matrix = zeros(Float64, ndets, nstates)
+    coeffs_matrix[:, 1] = coeffs_gs
+    
+    for state in 2:nstates
+      if has_determinants(EC; start=use_start, state=state)
+        dets_s, coeffs_s = fetch_determinants(EC; start=use_start, OPattern=OPattern, state=state)
+        if length(dets_s) == ndets
+          coeffs_matrix[:, state] = coeffs_s
+        else
+          @warn "State $state has different number of determinants ($(length(dets_s)) vs $ndets)"
+        end
+      else
+        @warn "State $state determinants not found"
+      end
+    end
+    
+    return dets_gs, coeffs_matrix, true
+  end
 end
 
 """

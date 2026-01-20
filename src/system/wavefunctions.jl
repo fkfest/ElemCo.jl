@@ -18,6 +18,9 @@ export load_wavefunction, save_wavefunction, copy_wavefunction
 export dump_amplitudes, has_amplitudes, has_dumpfile
 export fetch_restricted_amplitudes, fetch_unrestricted_amplitudes
 export transfer_orbitals_to_store!, OrbitalData, fetch_orbital_data
+# Determinant I/O for HCI
+export dump_determinants, fetch_determinants, has_determinants
+export dump_determinants_multistate, state_filename
 
 """
     dumpfile(EC::ECInfo, intent; start=false)
@@ -69,6 +72,8 @@ function open_dump(EC::ECInfo, intent; start::Bool=false)
   if intent == "w"
     @assert !start "Cannot open start file for writing."
     mode = "writing"
+    # Register the file in EC.files
+    add_file!(EC, filename, "TREXIO wavefunction dump"; overwrite=true)
   elseif intent == "u"
     mode = "updating (unsafe mode)"
   end
@@ -676,6 +681,172 @@ function has_amplitudes(EC::ECInfo; unrestricted::Bool=false, start::Bool=false)
 end
 function has_amplitudes(io::TrexioFile, EC::ECInfo; unrestricted::Bool=false)
   return has_trexio_amplitudes(io; unrestricted=unrestricted)
+end
+
+# ============================================================================
+# Determinant I/O for HCI wave functions
+# ============================================================================
+
+"""
+    state_filename(filename::String, state::Int) -> String
+
+Generate state-specific filename for multi-state storage.
+Per TREXIO standard, each state is stored in a separate file:
+- State 1 (ground): `filename.h5`
+- State 2: `filename_state2.h5`
+- State n: `filename_state{n}.h5`
+"""
+function state_filename(filename::String, state::Int)
+  state == 1 && return filename
+  base, ext = splitext(filename)
+  return "$(base)_state$(state)$(ext)"
+end
+
+"""
+    dump_determinants([io::TrexioFile,] EC::ECInfo, dets, coeffs; state=1)
+
+Dump HCI determinants and CI coefficients to TREXIO file.
+
+For multi-state calculations, each state should be stored separately using
+the `state` parameter. State 1 goes to the main file, state n goes to
+`filename_state{n}.h5`.
+
+# Arguments
+- `dets::Vector{<:AbstractDeterminant}`: Determinants with alpha/beta occupation patterns
+- `coeffs::AbstractVector{Float64}`: CI coefficients for this state
+- `state::Int=1`: State number (1 = ground state)
+
+# Example
+```julia
+# Store ground state
+dump_determinants(EC, dets, coeffs[:, 1]; state=1)
+# Store excited state
+dump_determinants(EC, dets, coeffs[:, 2]; state=2)
+```
+"""
+function dump_determinants end
+
+function dump_determinants(EC::ECInfo, dets::Vector{D}, coeffs::AbstractVector{Float64}; 
+                           state::Int=1) where {D}
+  if EC.options.wf.store == ""
+    return
+  end
+  filename = state_filename(EC.options.wf.store, state)
+  full_filename = joinpath(EC.scr, filename)
+  println("Storing determinants (state $state) to $filename ...")
+  
+  # Register the file in EC.files
+  add_file!(EC, filename, "TREXIO HCI determinants state $state"; overwrite=true)
+  
+  # Pre-fetch orbital data BEFORE opening store file for writing
+  orbital_data = fetch_orbital_data(EC)
+  
+  open_trexio(full_filename, "w") do io
+    transfer_orbitals_to_store!(io, EC, orbital_data)
+    dump_determinants(io, dets, coeffs)
+  end
+  return
+end
+
+function dump_determinants(io::TrexioFile, dets::Vector{D}, 
+                           coeffs::AbstractVector{Float64}) where {D}
+  write_trexio_determinants(io, dets, coeffs)
+  return
+end
+
+"""
+    fetch_determinants([io::TrexioFile,] EC::ECInfo; start=false, OPattern=UInt64, state=1)
+
+Fetch HCI determinants and CI coefficients from TREXIO file.
+
+# Arguments
+- `start::Bool=false`: If true, read from `wf.start` file instead of `wf.dump`
+- `OPattern::Type=UInt64`: Type for orbital patterns (use UInt128 for >64 orbitals)
+- `state::Int=1`: State number to read
+
+# Returns
+- `(determinants, coefficients)`: Tuple of determinant vector and coefficient vector
+
+# Example
+```julia
+dets, coeffs = fetch_determinants(EC; state=1)
+# For systems with >64 orbitals:
+dets, coeffs = fetch_determinants(EC; OPattern=UInt128)
+```
+"""
+function fetch_determinants end
+
+function fetch_determinants(EC::ECInfo; start::Bool=false, OPattern::Type=UInt64, state::Int=1)
+  base_filename, base_full = dumpfile(EC, "r"; start=start)
+  filename = state_filename(base_filename, state)
+  full_filename = joinpath(EC.scr, filename)
+  
+  if !isfile(full_filename)
+    println("Determinant file $filename not found.")
+    return SimpleDeterminant{OPattern}[], Float64[]
+  end
+  
+  println("Fetching determinants (state $state) from $filename ...")
+  open_trexio(full_filename, "r") do io
+    return fetch_determinants(io; OPattern=OPattern)
+  end
+end
+
+function fetch_determinants(io::TrexioFile; OPattern::Type=UInt64)
+  return read_trexio_determinants(io; OPattern=OPattern)
+end
+
+"""
+    has_determinants([io::TrexioFile,] EC::ECInfo; start=false, state=1)
+
+Check if determinants are stored in the TREXIO file.
+
+# Arguments
+- `start::Bool=false`: If true, check `wf.start` file instead of `wf.dump`
+- `state::Int=1`: State number to check
+
+# Returns
+`true` if determinants are found in the file.
+"""
+function has_determinants end
+
+function has_determinants(EC::ECInfo; start::Bool=false, state::Int=1)
+  base_filename, _ = dumpfile(EC, "r"; start=start)
+  filename = state_filename(base_filename, state)
+  full_filename = joinpath(EC.scr, filename)
+  
+  if !isfile(full_filename)
+    return false
+  end
+  
+  open_trexio(full_filename, "r") do io
+    return has_determinants(io)
+  end
+end
+
+function has_determinants(io::TrexioFile)
+  return has_trexio_determinants(io)
+end
+
+"""
+    dump_determinants_multistate(EC::ECInfo, dets, coeffs_matrix)
+
+Dump determinants and coefficients for multiple states to separate files.
+
+# Arguments
+- `EC::ECInfo`: Electronic structure information
+- `dets::Vector{<:AbstractDeterminant}`: Determinants (same for all states)
+- `coeffs_matrix::Matrix{Float64}`: CI coefficients matrix (n_dets × n_states)
+
+Each state is stored in a separate file per TREXIO standard.
+"""
+function dump_determinants_multistate(EC::ECInfo, dets::Vector{D}, 
+                                      coeffs_matrix::AbstractMatrix{Float64}) where {D}
+  nstates = size(coeffs_matrix, 2)
+  for state in 1:nstates
+    dump_determinants(EC, dets, coeffs_matrix[:, state]; state=state)
+  end
+  return
 end
 
 end #module

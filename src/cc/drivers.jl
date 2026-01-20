@@ -572,12 +572,22 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
   # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
   if hci
     println("Setting up HCI (lightweight context)..."); flush(stdout)
+    
+    # Check for starting determinants from previous calculation
+    nstates = EC.options.hci.nstates
+    
     if norb < 64
       hci_ctx = HCIContext{UInt64}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
-      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+      start_dets, start_coeffs, has_start = try_fetch_starting_determinants(EC; OPattern=UInt64, nstates=nstates)
+      initial_dets = has_start ? start_dets : nothing
+      initial_coeffs = has_start ? start_coeffs : nothing
+      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx; initial_dets=initial_dets, initial_coeffs=initial_coeffs)
     elseif norb < 128
       hci_ctx = HCIContext{UInt128}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
-      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+      start_dets, start_coeffs, has_start = try_fetch_starting_determinants(EC; OPattern=UInt128, nstates=nstates)
+      initial_dets = has_start ? start_dets : nothing
+      initial_coeffs = has_start ? start_coeffs : nothing
+      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx; initial_dets=initial_dets, initial_coeffs=initial_coeffs)
     else
       error("HCIContext only implemented for norb < 128 at this point!")
     end
@@ -595,6 +605,9 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
       push!(energies, "E-correction" => pt2[1][1])
       push!(energies, "E-correction δ" => pt2[1][2])
     end
+    # Store determinants if wf.store is set
+    nstates = length(E_HCI)
+    dump_wavefunction_with_determinants!(EC, dets, coefs; nstates=nstates)
     return merge(energies, "E" => Egs - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)

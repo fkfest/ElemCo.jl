@@ -318,6 +318,8 @@ end
   small_space_method::Symbol = :hybrid
   """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
   print_level::Int = 1
+  """`⟨false⟩` Skip variational HCI iterations and only compute PT2 correction (use with restart) """
+  pt2_only::Bool = false
   """`⟨1e-10⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
   thr_negligible::Float64 = 1e-10
 end

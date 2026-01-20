@@ -567,6 +567,10 @@ const TREXIO_DETERMINANT_FIELDS = [
     TrexioField("determinant", "num", Int, SCALAR, "number of determinants"),
     TrexioField("determinant", "list", Int, ["determinant.num"], "list of determinants as integer bit fields"),
     TrexioField("determinant", "coefficient", Float64, ["determinant.num"], "coefficients of the determinants from the CI expansion"),
+    # Extended fields for separate alpha/beta storage with flexible n_int
+    TrexioField("determinant", "n_int", Int, SCALAR, "number of 64-bit integers per spin pattern (ceil(mo.num/64))", violator=true),
+    TrexioField("determinant", "alpha", Int, ["determinant.n_int", "determinant.num"], "alpha spin orbital patterns as 64-bit integer bit fields", violator=true),
+    TrexioField("determinant", "beta", Int, ["determinant.n_int", "determinant.num"], "beta spin orbital patterns as 64-bit integer bit fields", violator=true),
 ]
 
 ## 5.2 Configuration state functions (csf group)

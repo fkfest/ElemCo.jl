@@ -15,6 +15,7 @@ using Buffers
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.Utils
+using ..ElemCo.AbstractEC: AbstractDeterminant
 
 # Export main types and functions
 export FCIContext

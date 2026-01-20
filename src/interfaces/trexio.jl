@@ -19,6 +19,7 @@ module TrexioInterface
 using ..ElemCo.MSystems
 using ..ElemCo.Utils
 using ..ElemCo.QMTensors
+using ..ElemCo.AbstractEC: AbstractDeterminant
 using ..ElemCo.BasisSets
 using ..ElemCo.TREXIO  # Use the standalone TREXIO module
 using LinearAlgebra
@@ -36,6 +37,8 @@ export read_trexio_singles, read_trexio_doubles
 export read_trexio_unrestricted_singles, read_trexio_unrestricted_doubles
 export has_trexio_amplitudes
 export orbital_indices_from_classes, occupied_virtual_from_classes, occupied_virtual_from_occupations
+# FCI determinant I/O
+export write_trexio_determinants, read_trexio_determinants, has_trexio_determinants
 
 # Re-export the standalone TREXIO types for compatibility
 const TrexioFile = TREXIO.TrexioFile
@@ -884,5 +887,7 @@ function occupied_virtual_from_occupations(occupations::Vector{Float64},
   end
   return occ_indices, virt_indices
 end
+
+include("trexio_fci.jl")
 
 end # module TrexioInterface
