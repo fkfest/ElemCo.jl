@@ -134,7 +134,7 @@ end
 
   Returns `::SpinMatrix`. 
 """
-function load_orbitals(EC::ECInfo, orbsfile::String="", porbsfile::String="")
+function load_orbitals(EC::ECInfo, orbsfile::String="")
   if !isempty(strip(orbsfile))
     # orbsfile will be used
   elseif !isempty(strip(EC.options.wf.orb))
