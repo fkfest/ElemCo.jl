@@ -345,9 +345,6 @@ function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, s
   if EC.options.wf.npositron > 0 && spincase == :p
     return integ2(EC.fd,spincase)[sp1,sp2,sp3,sp4]
   end
-  if EC.fd.uhf && spincase == :αβ 
-    return integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
-  end
   allint = integ2_ss(EC.fd, spincase)
   @assert ndims(allint) == 3
   norb = length(EC.space[':'])
