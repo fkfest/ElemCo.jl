@@ -32,6 +32,11 @@ function gen_fock(EC::ECInfo)
   return fock
 end
 
+"""
+    gen_pfock(EC::ECInfo)
+
+  Calculate positron fock matrix from FCIDump integrals.
+"""
 function gen_pfock(EC::ECInfo)
   @mtensor pfock[p,q] := integ1(EC.fd,:p)[p,q] - 2.0*ints2(EC,"o:o:",:p)[i,p,i,q]
   return pfock
@@ -252,7 +257,7 @@ function gen_dffock(EC::ECInfo, cMO::AbstractMatrix, bao, bfit)
 end
 
 """ 
-    gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, bao, bfit)
+    gen_dffock(EC::ECInfo, cMO::Matrix{Float64}, cPO::Matrix{Float64}, bao, bfit)
 
   Compute closed-shell DF-HF electron and positron Fock matrices
   (integral direct) in AO basis.
