@@ -1,4 +1,4 @@
-# Full/Heat-Bath CI
+# Full/CIPHI CI
 
 ```@meta
 CurrentModule = ElemCo.FCI
@@ -10,28 +10,28 @@ FCI
 
 ## Store and Restart
 
-HCI calculations can be stored and restarted using the `wf.store` and `wf.start` options. This is useful for:
+CIPHI calculations can be stored and restarted using the `wf.store` and `wf.start` options. This is useful for:
 - Continuing a calculation with tighter thresholds
 - Computing PT2 corrections on a pre-converged determinant space
 - Multi-state calculations where states are stored separately
 
-### Storing HCI Calculations
+### Storing CIPHI Calculations
 
 ```julia
-@hci begin
-  @set hci epsilon=1e-3 nstates=2
-  @set wf store="my_hci.h5"
+@ciphi begin
+  @set ciphi epsilon=1e-3 nstates=2
+  @set wf store="my_ciphi.h5"
 end
 ```
 
-This stores the final determinants and CI coefficients to TREXIO files. For multi-state calculations, each state is stored in a separate file (e.g., `my_hci.h5`, `my_hci_state2.h5`).
+This stores the final determinants and CI coefficients to TREXIO files. For multi-state calculations, each state is stored in a separate file (e.g., `my_ciphi.h5`, `my_ciphi_state2.h5`).
 
 ### Restarting from Stored Determinants
 
 ```julia
-@hci begin
-  @set hci epsilon=5e-4
-  @set wf start="my_hci.h5"
+@ciphi begin
+  @set ciphi epsilon=5e-4
+  @set wf start="my_ciphi.h5"
 end
 ```
 
@@ -42,9 +42,9 @@ The restart loads the stored determinants as the initial space and uses the stor
 To compute only the PT2 correction without additional variational iterations:
 
 ```julia
-@hci begin
-  @set hci pt2_only=true
-  @set wf start="my_hci.h5"
+@ciphi begin
+  @set ciphi pt2_only=true
+  @set wf start="my_ciphi.h5"
 end
 ```
 

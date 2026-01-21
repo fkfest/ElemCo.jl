@@ -1,5 +1,5 @@
 # ===========================================
-# Heat-Bath Configuration Interaction (HCI)
+# CIPHI - CI via Perturbative and Heat-Bath Iterative selection
 # ===========================================
 
 struct PCHBEntry
@@ -11,7 +11,7 @@ struct PCHBEntry
 end
 
 """
-    HCISetupData
+    CIPHISetupData
 
 Setup data: Pre-computed and sorted double excitation matrix elements.
 
@@ -21,7 +21,7 @@ important excitations during iterative selection.
 
 Following Holmes et al. (2016), Algorithm Step IIa.
 """
-struct HCISetupData
+struct CIPHISetupData
   double_excitations_aa::Vector{Vector{PCHBEntry}}  # alpha-alpha
   double_excitations_bb::Vector{Vector{PCHBEntry}}  # beta-beta
   double_excitations_ab::Vector{Vector{PCHBEntry}}  # alpha-beta mixed
@@ -30,7 +30,7 @@ struct HCISetupData
   singles_denoma::Matrix{Float64}
   singles_denomb::Matrix{Float64}
 
-  function HCISetupData()
+  function CIPHISetupData()
     new(Vector{PCHBEntry}[],
         Vector{PCHBEntry}[],
         Vector{PCHBEntry}[],
@@ -40,14 +40,14 @@ struct HCISetupData
   end
   
   # RHF constructor
-  function HCISetupData(double_exc::Vector{Vector{PCHBEntry}}, 
+  function CIPHISetupData(double_exc::Vector{Vector{PCHBEntry}}, 
                         double_exc_ab::Vector{Vector{PCHBEntry}},
                         h_max::Float64, singles_denom::Matrix{Float64})
     new(double_exc, double_exc, double_exc_ab, h_max, singles_denom, singles_denom)
   end
   
   # UHF constructor
-  function HCISetupData(double_exc_aa::Vector{Vector{PCHBEntry}},
+  function CIPHISetupData(double_exc_aa::Vector{Vector{PCHBEntry}},
                         double_exc_bb::Vector{Vector{PCHBEntry}},
                         double_exc_ab::Vector{Vector{PCHBEntry}},
                         h_max::Float64, 
@@ -57,7 +57,7 @@ struct HCISetupData
 end
 
 """
-    setup_hci!(ctx::FCIContext) -> HCISetupData
+    setup_ciphi!(ctx::Union{FCIContext, CIPHIContext}) -> CIPHISetupData
 
 Setup: Pre-compute and store sorted double excitation matrix elements.
 
@@ -72,15 +72,15 @@ Algorithm from Holmes et al. (2016), IIa:
 - Space complexity: O(M^4)
 where M is the number of orbitals.
 """
-function setup_hci!(ctx::Union{FCIContext, HCIContext})::HCISetupData
+function setup_ciphi!(ctx::Union{FCIContext, CIPHIContext})::CIPHISetupData
   is_uhf = ctx.fcidump.uhf
   
   if !is_uhf
     # RHF case: use standard int2 integrals
-    return setup_hci_rhf!(ctx)
+    return setup_ciphi_rhf!(ctx)
   else
     # UHF case: use spin-separated integrals
-    return setup_hci_uhf!(ctx)
+    return setup_ciphi_uhf!(ctx)
   end
 end
 
@@ -224,16 +224,16 @@ function gen_singles_denom(int2::Array{Float64,4})
 end
 
 """
-    setup_hci_rhf!(ctx::Union{FCIContext, HCIContext}) -> HCISetupData
+    setup_ciphi_rhf!(ctx::Union{FCIContext, CIPHIContext}) -> CIPHISetupData
 
 Setup for RHF systems using spatial orbital integrals.
 """
-function setup_hci_rhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
+function setup_ciphi_rhf!(ctx::Union{FCIContext, CIPHIContext})::CIPHISetupData
   n_orb = ctx.n_orb
   int2 = ctx.fcidump.int2
   thr_negligible = ctx.options.thr_negligible
   use_mp2_denom = false
-  if ctx isa HCIContext
+  if ctx isa CIPHIContext
     use_mp2_denom = ctx.options.use_mp2
   end
   # Dictionary to store sorted lists for each (p,q) pair
@@ -245,11 +245,11 @@ function setup_hci_rhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
   else
     sdenom = gen_singles_denom(int2)
   end
-  return HCISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max, sdenom)
+  return CIPHISetupData(double_exc_lists, double_exc_ab_lists, h_doub_max, sdenom)
 end
 
 """
-    setup_hci_uhf!(ctx::Union{FCIContext, HCIContext}) -> HCISetupData
+    setup_ciphi_uhf!(ctx::Union{FCIContext, CIPHIContext}) -> CIPHISetupData
 
 Setup for UHF systems using spin-separated integrals.
 Handles three types of double excitations:
@@ -257,14 +257,14 @@ Handles three types of double excitations:
 - Beta-beta (using int2bb)
 - Mixed alpha-beta (using int2ab)
 """
-function setup_hci_uhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
+function setup_ciphi_uhf!(ctx::Union{FCIContext, CIPHIContext})::CIPHISetupData
   n_orb = ctx.n_orb
   int2aa = ctx.fcidump.int2aa
   int2bb = ctx.fcidump.int2bb
   int2ab = ctx.fcidump.int2ab
   thr_negligible = ctx.options.thr_negligible 
   use_mp2_denom = false
-  if ctx isa HCIContext
+  if ctx isa CIPHIContext
     use_mp2_denom = ctx.options.use_mp2
   end
   # Three dictionaries for the three types of double excitations
@@ -279,7 +279,7 @@ function setup_hci_uhf!(ctx::Union{FCIContext, HCIContext})::HCISetupData
     sdenom_a = gen_singles_denom(int2aa)
     sdenom_b = gen_singles_denom(int2bb)
   end
-  return HCISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max, sdenom_a, sdenom_b)
+  return CIPHISetupData(double_exc_aa, double_exc_bb, double_exc_ab, h_doub_max, sdenom_a, sdenom_b)
 end
 
 

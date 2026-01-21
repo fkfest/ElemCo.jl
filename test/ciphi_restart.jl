@@ -1,8 +1,8 @@
 using Test
 using ElemCo
 
-@testset "Heat-Bath CI - Store/Restart" begin
-  println("\n=== Testing Heat-Bath CI Store/Restart ===")
+@testset "CIPHI - Store/Restart" begin
+  println("\n=== Testing CIPHI Store/Restart ===")
   
   epsilon = 1.e-8  # Tolerance for comparing essentially identical calculations
   epsilon_energy = 1.e-5  # Standard tolerance for energy comparisons (allows for small selection differences)
@@ -24,21 +24,21 @@ using ElemCo
     println("\n--- Test 1: Single-state store/restart (pt2_only) ---")
     
     # First calculation: store determinants
-    energies1 = @hci begin
-      @set wf store="hci_test1.h5"
-      @set hci epsilon=1.e-3 nstates=1
+    energies1 = @ciphi begin
+      @set wf store="ciphi_test1.h5"
+      @set ciphi epsilon=1.e-3 nstates=1
     end
-    E1_var = energies1["HCI"]
-    E1_corr = energies1["HCI-correction"]
+    E1_var = energies1["CIPHI"]
+    E1_corr = energies1["CIPHI-correction"]
     println("First run - Variational: $E1_var, PT2 correction: $E1_corr")
     
     # Second calculation: restart with pt2_only (should give identical result)
-    energies2 = @hci begin
-      @set wf start="hci_test1.h5"
-      @set hci epsilon=1.e-3 nstates=1 pt2_only=true
+    energies2 = @ciphi begin
+      @set wf start="ciphi_test1.h5"
+      @set ciphi epsilon=1.e-3 nstates=1 pt2_only=true
     end
-    E2_var = energies2["HCI"]
-    E2_corr = energies2["HCI-correction"]
+    E2_var = energies2["CIPHI"]
+    E2_corr = energies2["CIPHI-correction"]
     println("Restart (pt2_only) - Variational: $E2_var, PT2 correction: $E2_corr")
     
     # Energies should be identical (same space, pt2_only)
@@ -47,7 +47,7 @@ using ElemCo
     println("✓ Single-state store/restart (pt2_only): energies match")
     
     # Cleanup
-    @deletefile("hci_test1.h5")
+    @deletefile("ciphi_test1.h5")
   end
   
   #==========================================================================
@@ -57,21 +57,21 @@ using ElemCo
     println("\n--- Test 2: Multi-state store/restart (pt2_only) ---")
     
     # First calculation: store determinants for 3 states
-    energies1 = @hci begin
-      @set wf store="hci_test2.h5" 
-      @set hci epsilon=5.e-4 nstates=3
+    energies1 = @ciphi begin
+      @set wf store="ciphi_test2.h5" 
+      @set ciphi epsilon=5.e-4 nstates=3
     end
-    E1_gs = energies1["HCI"]
+    E1_gs = energies1["CIPHI"]
     E1_omega1 = energies1["ω1"]
     E1_omega2 = energies1["ω2"]
     println("First run - GS: $E1_gs, ω1: $E1_omega1, ω2: $E1_omega2")
     
     # Second calculation: restart with pt2_only (exact match)
-    energies2 = @hci begin
-      @set wf start="hci_test2.h5"
-      @set hci epsilon=5.e-4 nstates=3 pt2_only=true
+    energies2 = @ciphi begin
+      @set wf start="ciphi_test2.h5"
+      @set ciphi epsilon=5.e-4 nstates=3 pt2_only=true
     end
-    E2_gs = energies2["HCI"]
+    E2_gs = energies2["CIPHI"]
     E2_omega1 = energies2["ω1"]
     E2_omega2 = energies2["ω2"]
     println("Restart (pt2_only) - GS: $E2_gs, ω1: $E2_omega1, ω2: $E2_omega2")
@@ -83,9 +83,9 @@ using ElemCo
     println("✓ Multi-state store/restart (pt2_only): all state energies match")
     
     # Cleanup
-    @deletefile("hci_test2.h5")
-    @deletefile("hci_test2_state2.h5")
-    @deletefile("hci_test2_state3.h5")
+    @deletefile("ciphi_test2.h5")
+    @deletefile("ciphi_test2_state2.h5")
+    @deletefile("ciphi_test2_state3.h5")
   end
   
   #==========================================================================
@@ -95,19 +95,19 @@ using ElemCo
     println("\n--- Test 3: Warm start with tighter threshold ---")
     
     # First calculation: loose threshold
-    energies1 = @hci begin
-      @set wf store="hci_test3.h5"
-      @set hci epsilon=1.e-3 nstates=2
+    energies1 = @ciphi begin
+      @set wf store="ciphi_test3.h5"
+      @set ciphi epsilon=1.e-3 nstates=2
     end
-    E1_var = energies1["HCI"]
+    E1_var = energies1["CIPHI"]
     println("First run (ε=1e-3) - Energy: $E1_var")
     
     # Second calculation: restart with tighter threshold
-    energies2 = @hci begin
-      @set wf start="hci_test3.h5"
-      @set hci epsilon=3.e-4 nstates=2
+    energies2 = @ciphi begin
+      @set wf start="ciphi_test3.h5"
+      @set ciphi epsilon=3.e-4 nstates=2
     end
-    E2_var = energies2["HCI"]
+    E2_var = energies2["CIPHI"]
     println("Restart run (ε=3e-4) - Energy: $E2_var")
     
     # Energy should improve with tighter threshold
@@ -116,8 +116,8 @@ using ElemCo
     println("✓ Warm start: energy improved from $E1_var to $E2_var")
     
     # Cleanup
-    @deletefile("hci_test3.h5")
-    @deletefile("hci_test3_state2.h5")
+    @deletefile("ciphi_test3.h5")
+    @deletefile("ciphi_test3_state2.h5")
   end
   
   #==========================================================================
@@ -126,23 +126,23 @@ using ElemCo
   @testset "PT2-only mode" begin
     println("\n--- Test 4: PT2-only mode ---")
     
-    # First calculation: full HCI with store
-    energies1 = @hci begin
-      @set wf store="hci_test4.h5"
-      @set hci epsilon=1.e-3 nstates=2
+    # First calculation: full CIPHI with store
+    energies1 = @ciphi begin
+      @set wf store="ciphi_test4.h5"
+      @set ciphi epsilon=1.e-3 nstates=2
     end
-    E1_var = energies1["HCI"]
-    E1_corr = energies1["HCI-correction"]
+    E1_var = energies1["CIPHI"]
+    E1_corr = energies1["CIPHI-correction"]
     E1_total = E1_var + E1_corr
-    println("Full HCI - Var: $E1_var, PT2: $E1_corr, Total: $E1_total")
+    println("Full CIPHI - Var: $E1_var, PT2: $E1_corr, Total: $E1_total")
     
     # Second calculation: pt2_only mode (skip variational iterations)
-    energies2 = @hci begin
-      @set wf start="hci_test4.h5"
-      @set hci pt2_only=true nstates=2
+    energies2 = @ciphi begin
+      @set wf start="ciphi_test4.h5"
+      @set ciphi pt2_only=true nstates=2
     end
-    E2_var = energies2["HCI"]
-    E2_corr = energies2["HCI-correction"]
+    E2_var = energies2["CIPHI"]
+    E2_corr = energies2["CIPHI-correction"]
     E2_total = E2_var + E2_corr
     println("PT2-only - Var: $E2_var, PT2: $E2_corr, Total: $E2_total")
     
@@ -153,8 +153,8 @@ using ElemCo
     println("✓ PT2-only mode: energies match full calculation")
     
     # Cleanup
-    @deletefile("hci_test4.h5")
-    @deletefile("hci_test4_state2.h5")
+    @deletefile("ciphi_test4.h5")
+    @deletefile("ciphi_test4_state2.h5")
   end
   
   #==========================================================================
@@ -164,19 +164,19 @@ using ElemCo
     println("\n--- Test 5: PT2-only with different epsilon_pt2 ---")
     
     # First calculation: store determinants
-    energies1 = @hci begin
-      @set wf store="hci_test5.h5"
-      @set hci epsilon=5.e-4 epsilon_pt2=1.e-6
+    energies1 = @ciphi begin
+      @set wf store="ciphi_test5.h5"
+      @set ciphi epsilon=5.e-4 epsilon_pt2=1.e-6
     end
-    E1_corr = energies1["HCI-correction"]
+    E1_corr = energies1["CIPHI-correction"]
     println("Original PT2 (ε_pt2=1e-6): $E1_corr")
     
     # Second calculation: pt2_only with tighter epsilon_pt2
-    energies2 = @hci begin
-      @set wf start="hci_test5.h5"
-      @set hci pt2_only=true epsilon_pt2=1.e-8
+    energies2 = @ciphi begin
+      @set wf start="ciphi_test5.h5"
+      @set ciphi pt2_only=true epsilon_pt2=1.e-8
     end
-    E2_corr = energies2["HCI-correction"]
+    E2_corr = energies2["CIPHI-correction"]
     println("PT2-only (ε_pt2=1e-8): $E2_corr")
     
     # PT2 corrections should be similar but may differ slightly due to threshold
@@ -184,7 +184,7 @@ using ElemCo
     println("✓ PT2-only with different threshold: corrections are consistent")
     
     # Cleanup
-    @deletefile("hci_test5.h5")
+    @deletefile("ciphi_test5.h5")
   end
   
   #==========================================================================
@@ -195,8 +195,8 @@ using ElemCo
     
     # pt2_only without restart should throw an error
     
-    @test_throws ErrorException @hci begin
-      @set hci pt2_only=true
+    @test_throws ErrorException @ciphi begin
+      @set ciphi pt2_only=true
     end
     println("✓ PT2-only without restart correctly throws error")
   end
@@ -208,20 +208,20 @@ using ElemCo
     println("\n--- Test 7: Restart with different nstates ---")
     
     # First calculation: 3 states
-    energies1 = @hci begin
-      @set wf store="hci_test7.h5"
-      @set hci epsilon=5.e-4 nstates=3
+    energies1 = @ciphi begin
+      @set wf store="ciphi_test7.h5"
+      @set ciphi epsilon=5.e-4 nstates=3
     end
-    E1_gs = energies1["HCI"]
+    E1_gs = energies1["CIPHI"]
     println("First run (3 states) - GS: $E1_gs")
     
     # Second calculation: restart with pt2_only, request only 2 states
     # Using pt2_only ensures we get exact match on the same determinant space
-    energies2 = @hci begin
-      @set wf start="hci_test7.h5"
-      @set hci epsilon=5.e-4 nstates=2 pt2_only=true
+    energies2 = @ciphi begin
+      @set wf start="ciphi_test7.h5"
+      @set ciphi epsilon=5.e-4 nstates=2 pt2_only=true
     end
-    E2_gs = energies2["HCI"]
+    E2_gs = energies2["CIPHI"]
     println("Restart (pt2_only, 2 states) - GS: $E2_gs")
     
     # Ground state energy should be identical (same determinant space, pt2_only)
@@ -229,9 +229,9 @@ using ElemCo
     println("✓ Restart with different nstates: ground state energies match")
     
     # Cleanup
-    @deletefile("hci_test7.h5")
-    @deletefile("hci_test7_state2.h5")
-    @deletefile("hci_test7_state3.h5")
+    @deletefile("ciphi_test7.h5")
+    @deletefile("ciphi_test7_state2.h5")
+    @deletefile("ciphi_test7_state3.h5")
   end
   
   #==========================================================================
@@ -241,27 +241,27 @@ using ElemCo
     println("\n--- Test 8: Chain of restarts ---")
     
     # First calculation: very loose threshold
-    energies_a = @hci begin
-      @set wf store="hci_chain_a.h5"
-      @set hci epsilon=2.e-3
+    energies_a = @ciphi begin
+      @set wf store="ciphi_chain_a.h5"
+      @set ciphi epsilon=2.e-3
     end
-    E_a = energies_a["HCI"]
+    E_a = energies_a["CIPHI"]
     println("Chain A (ε=2e-3): $E_a")
     
     # Second calculation: restart from A, use medium threshold, store as B
-    energies_b = @hci begin
-      @set wf start="hci_chain_a.h5" store="hci_chain_b.h5"
-      @set hci epsilon=1.e-3
+    energies_b = @ciphi begin
+      @set wf start="ciphi_chain_a.h5" store="ciphi_chain_b.h5"
+      @set ciphi epsilon=1.e-3
     end
-    E_b = energies_b["HCI"]
+    E_b = energies_b["CIPHI"]
     println("Chain B (ε=1e-3): $E_b")
     
     # Third calculation: restart from B, use tight threshold
-    energies_c = @hci begin
-      @set wf start="hci_chain_b.h5"
-      @set hci epsilon=5.e-4
+    energies_c = @ciphi begin
+      @set wf start="ciphi_chain_b.h5"
+      @set ciphi epsilon=5.e-4
     end
-    E_c = energies_c["HCI"]
+    E_c = energies_c["CIPHI"]
     println("Chain C (ε=5e-4): $E_c")
     
     # Energy should monotonically decrease
@@ -271,8 +271,8 @@ using ElemCo
     println("  $E_a -> $E_b -> $E_c")
     
     # Cleanup
-    @deletefile("hci_chain_a.h5")
-    @deletefile("hci_chain_b.h5")
+    @deletefile("ciphi_chain_a.h5")
+    @deletefile("ciphi_chain_b.h5")
   end
   
   #==========================================================================
@@ -282,20 +282,20 @@ using ElemCo
     println("\n--- Test 9: Warm restart energy improvement ---")
     
     # Store determinants with 2 states
-    energies1 = @hci begin
-      @set wf store="hci_test9.h5"
-      @set hci epsilon=5.e-4 nstates=2
+    energies1 = @ciphi begin
+      @set wf store="ciphi_test9.h5"
+      @set ciphi epsilon=5.e-4 nstates=2
     end
-    E1_gs = energies1["HCI"]
+    E1_gs = energies1["CIPHI"]
     E1_omega = energies1["ω1"]
     println("Original - GS: $E1_gs, ω1: $E1_omega")
     
     # Restart with same parameters - may add more determinants, energy can only improve
-    energies2 = @hci begin
-      @set wf start="hci_test9.h5"
-      @set hci epsilon=5.e-4 nstates=2
+    energies2 = @ciphi begin
+      @set wf start="ciphi_test9.h5"
+      @set ciphi epsilon=5.e-4 nstates=2
     end
-    E2_gs = energies2["HCI"]
+    E2_gs = energies2["CIPHI"]
     E2_omega = energies2["ω1"]
     println("Warm restart - GS: $E2_gs, ω1: $E2_omega")
     
@@ -306,9 +306,9 @@ using ElemCo
     println("✓ Warm restart: energy improved or maintained")
     
     # Cleanup
-    @deletefile("hci_test9.h5")
-    @deletefile("hci_test9_state2.h5")
+    @deletefile("ciphi_test9.h5")
+    @deletefile("ciphi_test9_state2.h5")
   end
 
-  println("\n=== Heat-Bath CI Store/Restart Tests Passed ===\n")
+  println("\n=== CIPHI Store/Restart Tests Passed ===\n")
 end

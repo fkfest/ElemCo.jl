@@ -1426,13 +1426,13 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
 end
 
 # ============================================================================
-# HCI determinant wavefunction storage
+# CIPHI determinant wavefunction storage
 # ============================================================================
 
 """
     dump_wavefunction_with_determinants!(EC::ECInfo, dets, coeffs; nstates=0)
 
-Dump orbitals and HCI determinants with CI coefficients to TREXIO file(s).
+Dump orbitals and CIPHI determinants with CI coefficients to TREXIO file(s).
 
 For single-state (nstates=0 or nstates=1), writes to `wf.store`.
 For multi-state, writes each state to a separate file per TREXIO standard:
@@ -1472,7 +1472,7 @@ end
 """
     try_fetch_starting_determinants(EC::ECInfo; OPattern=UInt64, nstates=1)
 
-Try to read determinants and CI coefficients from a TREXIO file for HCI restart.
+Try to read determinants and CI coefficients from a TREXIO file for CIPHI restart.
 
 The logic follows CC amplitude restart:
 - If `wf.start` is not empty: read from `wf.start` file(s)

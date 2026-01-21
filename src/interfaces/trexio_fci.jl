@@ -1,5 +1,5 @@
 # ============================================================================
-# Determinant I/O for HCI/FCI wave functions
+# Determinant I/O for CIPHI/FCI wave functions
 # ============================================================================
 # This file is included inside TrexioInterface module
 

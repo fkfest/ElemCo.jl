@@ -101,7 +101,7 @@ export @loadwf, @savewf, @copywf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
-export @fci, @hci
+export @fci, @ciphi, @sci, @ciϕ
 export @import_matrix, @export_molden
 export @molpro_input, @molpro_output, @check_molproinfo
 # from Utils
@@ -866,9 +866,9 @@ macro fci(args...)
 end
 
 """ 
-    @hci(args...)
+    @ciphi(args...)
 
-  Run Heat-bath CI calculation.
+  Run CIPHI (CIΦ - CI via Perturbative and Heat-Bath Iterative selection) calculation.
 
   Optionally, a `begin...end` block can be provided as the last argument to set 
   local options for this call. The options are reset after the call completes.
@@ -880,6 +880,8 @@ end
   The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
   Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
 
+  `@sci` and `@ciϕ` are aliases for this macro.
+
   # Examples
 ```julia
 geometry="bohr
@@ -888,14 +890,14 @@ H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
 @dfhf
-@hci
+@ciphi
 # with local options:
-@hci begin
-  @set fci epsilon1=1.e-4
+@ciphi begin
+  @set ciphi epsilon=1.e-4
 end
 ```
 """
-macro hci(args...)
+macro ciphi(args...)
   # Check if last argument is an options block
   local_opts_expr = nothing
   if !isempty(args) && is_options_block(args[end])
@@ -913,7 +915,7 @@ macro hci(args...)
         if isempty($(esc(:EC)).fd)
           dfdump($(esc(:EC)))
         end
-        fcidriver($(esc(:EC)); $(ekwa...), hci=true)
+        fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
       end
     end
   else
@@ -922,10 +924,24 @@ macro hci(args...)
       if isempty($(esc(:EC)).fd)
         $(esc(:@dfints))
       end
-      fcidriver($(esc(:EC)); $(ekwa...), hci=true)
+      fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
     end
   end
 end
+
+"""
+    @sci(args...)
+
+  Alias for [`@ciphi`](@ref).
+"""
+var"@sci" = var"@ciphi"
+
+"""
+    @ciϕ(args...)
+
+  Alias for [`@ciphi`](@ref).
+"""
+var"@ciϕ" = var"@ciphi"
 
 """ 
     @bohf(opts_block=nothing)

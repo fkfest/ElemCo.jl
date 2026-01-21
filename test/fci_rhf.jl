@@ -38,7 +38,7 @@ using ElemCo
   energies = @fci begin
     @set fci conv_tol=1.e-8 max_iter=100
     @set fci compute_2rdm=true
-    @set fci pspace_selection_method=:hci
+    @set fci pspace_selection_method=:ciphi
   end
       
   @test abs(energies["FCI"] - E_FCI_test) < epsilon

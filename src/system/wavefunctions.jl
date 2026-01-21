@@ -18,7 +18,7 @@ export load_wavefunction, save_wavefunction, copy_wavefunction
 export dump_amplitudes, has_amplitudes, has_dumpfile
 export fetch_restricted_amplitudes, fetch_unrestricted_amplitudes
 export transfer_orbitals_to_store!, OrbitalData, fetch_orbital_data
-# Determinant I/O for HCI
+# Determinant I/O for CIPHI
 export dump_determinants, fetch_determinants, has_determinants
 export dump_determinants_multistate, state_filename
 
@@ -684,7 +684,7 @@ function has_amplitudes(io::TrexioFile, EC::ECInfo; unrestricted::Bool=false)
 end
 
 # ============================================================================
-# Determinant I/O for HCI wave functions
+# Determinant I/O for CIPHI wave functions
 # ============================================================================
 
 """
@@ -705,7 +705,7 @@ end
 """
     dump_determinants([io::TrexioFile,] EC::ECInfo, dets, coeffs; state=1)
 
-Dump HCI determinants and CI coefficients to TREXIO file.
+Dump CIPHI determinants and CI coefficients to TREXIO file.
 
 For multi-state calculations, each state should be stored separately using
 the `state` parameter. State 1 goes to the main file, state n goes to
@@ -736,7 +736,7 @@ function dump_determinants(EC::ECInfo, dets::Vector{D}, coeffs::AbstractVector{F
   println("Storing determinants (state $state) to $filename ...")
   
   # Register the file in EC.files
-  add_file!(EC, filename, "TREXIO HCI determinants state $state"; overwrite=true)
+  add_file!(EC, filename, "TREXIO CIPHI determinants state $state"; overwrite=true)
   
   # Pre-fetch orbital data BEFORE opening store file for writing
   orbital_data = fetch_orbital_data(EC)
@@ -757,7 +757,7 @@ end
 """
     fetch_determinants([io::TrexioFile,] EC::ECInfo; start=false, OPattern=UInt64, state=1)
 
-Fetch HCI determinants and CI coefficients from TREXIO file.
+Fetch CIPHI determinants and CI coefficients from TREXIO file.
 
 # Arguments
 - `start::Bool=false`: If true, read from `wf.start` file instead of `wf.dump`

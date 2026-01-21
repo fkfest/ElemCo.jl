@@ -2,7 +2,7 @@
 FCI Module
 
 This module contains a translation of the FCI C++ code of Gerald Knizia and
-extensions for selected CI and heat-bath CI.
+extensions for selected CI and CIPHI (CIΦ - Selected CI via Perturbation, Heat-Bath and Iterations).
 """
 module FCI
 
@@ -19,13 +19,13 @@ using ..ElemCo.AbstractEC: AbstractDeterminant
 
 # Export main types and functions
 export FCIContext
-export HCIContext  # Lightweight context for Heat-Bath CI
+export CIPHIContext  # Lightweight context for CIPHI
 export run_fci!
-export run_heatbath_ci!
+export run_ciphi!
 
 include("fci_types.jl")
 include("fci_vec.jl")
-include("fci_hci_context.jl")
+include("fci_ciphi_context.jl")
 include("fci_ops.jl")
 include("fci_main.jl")
 include("sci_main.jl")

@@ -59,7 +59,7 @@ println("="^80 * "\n")
                             #) ElemCo.Drivers.ccdriver(EC,"λCCSD")
                             # ) ElemCo.Drivers.ccdriver(EC,"SVD-DC-CCSDT")
                             #) ElemCo.Drivers.dfccdriver(EC,"SVD-DCSD")
-                             ) ElemCo.Drivers.fcidriver(EC,hci=true)
+                             ) ElemCo.Drivers.fcidriver(EC,ciphi=true)
                             
 
 end

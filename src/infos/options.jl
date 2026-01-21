@@ -252,14 +252,14 @@ end
   jacobi_davidson::Bool = true
   """`⟨1000⟩` Maximum P-space size (typically 100-1000) """
   max_pspace_size::Int = 1000
-  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
+  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :ciphi) """
   pspace_selection_method::Symbol = :hybrid
   """`⟨4⟩` Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
   max_pspace_excitation::Int = 4
   """`⟨5.0⟩` Energy cutoff for determinant inclusion """
   pspace_energy_threshold::Float64 = 5.0
-  """`⟨1e-3⟩` HCI selection threshold (epsilon_h) for P-space generation """
-  pspace_hci_epsilon::Float64 = 1e-3
+  """`⟨1e-3⟩` CIPHI selection threshold (epsilon_h) for P-space generation """
+  pspace_ciphi_epsilon::Float64 = 1e-3
   """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
   print_level::Int = 1
   """`⟨1e-12⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
@@ -267,16 +267,16 @@ end
 end
 
 """
-  Option for HCI calculations.
+  Option for CIΦ (CIPHI) calculations - Selected CI via Perturbation, Heat-Bath and Iterations.
 
   $(TYPEDFIELDS)
 """
-@kwdef mutable struct HCIOptions
+@kwdef mutable struct CIPHIOptions
   """`⟨1_000_000⟩` Target (i.e., maximum) number of determinants to select """
   target_selection::Int = 1_000_000
   """`⟨3e-4⟩` Selection threshold """
   epsilon::Float64 = 3e-4
-  """`⟨epsilon/10⟩` HCI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
+  """`⟨epsilon/10⟩` CIPHI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
   epsilon_h::Float64 = -1.0
   """`⟨epsilon_h⟩` instantaneous PT selection threshold. """
   epsilon_c::Float64 = -1.0
@@ -286,7 +286,7 @@ end
   tol::Float64 = 1e-6
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
-  """`⟨50⟩` Maximum HCI iterations """
+  """`⟨50⟩` Maximum CIPHI iterations """
   max_iter::Int = 50
   """`⟨0.1⟩` Level shift to improve convergence """
   shift::Float64 = 0.1
@@ -308,7 +308,7 @@ end
   renorm_pt2::Bool = false
   """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
   nstates::Int = 1
-  """`⟨2⟩` Number of steps in the iterative HCI selection (if > 1, the selection process is repeated after convergence)"""
+  """`⟨2⟩` Number of steps in the iterative CIPHI selection (if > 1, the selection process is repeated after convergence)"""
   nsteps::Int = 2
   """`⟨true⟩` Use small-space Hamiltonian for initial guess """
   use_small_space_guess::Bool = true
@@ -318,7 +318,7 @@ end
   small_space_method::Symbol = :hybrid
   """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
   print_level::Int = 1
-  """`⟨false⟩` Skip variational HCI iterations and only compute PT2 correction (use with restart) """
+  """`⟨false⟩` Skip variational CIPHI iterations and only compute PT2 correction (use with restart) """
   pt2_only::Bool = false
   """`⟨1e-10⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
   thr_negligible::Float64 = 1e-10
@@ -472,8 +472,8 @@ end
   eom::EomOptions = EomOptions()
   """ FCI options ([`FCIOptions`](@ref)). """
   fci::FCIOptions = FCIOptions()
-  """ HCI options ([`HCIOptions`](@ref)). """
-  hci::HCIOptions = HCIOptions()
+  """ CIPHI options ([`CIPHIOptions`](@ref)). """
+  ciphi::CIPHIOptions = CIPHIOptions()
   """ DMRG options ([`DmrgOptions`](@ref)). """
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """
