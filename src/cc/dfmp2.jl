@@ -16,7 +16,7 @@ function calc_dfmp2(EC::ECInfo)
   print_info("DF-MP2")
   savet2 = !isempty(EC.options.cc.save)
   SP = EC.space
-  cMO = load_orbitals(EC, EC.options.wf.orb)
+  cMO = load_orbitals(EC)
   if !is_restricted(cMO) || SP['o'] != SP['O']
     error("Unrestricted orbitals not supported in DF-MP2. Call DF-UMP instead.")
   end

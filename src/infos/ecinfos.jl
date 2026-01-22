@@ -1,6 +1,5 @@
 """ Various global infos """
 module ECInfos
-using HDF5
 using Dates
 using DocStringExtensions
 using ..ElemCo.VersionInfo
@@ -19,8 +18,8 @@ export fullfilename, file_exists, add_file!, copy_file!
 export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
-export get_options
-export FCIOptions, HCIOptions
+export get_options, with_local_options
+export FCIOptions, CIPHIOptions
 
 include("options.jl")
 
@@ -40,59 +39,6 @@ Return a `NamedTuple` with the current options for options `opt`.
 """
 function get_options(opt)
   return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
-end
-
-mutable struct ECDump
-  """ file name of the HDF5 dump. """
-  filename::String
-  """ an HDF5 file with calculation information (for restarts etc). 
-  The structure of the HDF5 file is as follows (with `track_order=true`):
-```
-/EC
-  /Molecule1
-    <name>
-    <geometry>
-    /BasisSet1
-      <basis set information>
-      /State1
-        <number of electrons>
-        <spin multiplicity>
-        <occupation (alpha/beta)>
-        <MO coefficients>
-        <list of frozen orbitals>
-        <CC amplitudes>
-        <other information>
-      /State2
-      ...
-    /BasisSet2
-    ...
-  /Molecule2
-    ...
-```
-  """
-  file::HDF5.Group
-  function ECDump(filename::AbstractString)
-    return new(filename, create_empty_dump(filename))
-  end
-end
-
-"""
-    create_empty_dump(filename::AbstractString)
-
-  Create an empty HDF5 dump file with the given `filename` and information about the package.
-
-  Returns an "EC" group in HDF5 file.
-"""
-function create_empty_dump(filename)
-  file = h5open(filename, "w")
-  g = create_group(file, "EC", track_order=true)
-  g["version"] = version()
-  g["git_hash"] = git_hash()
-  g["julia"] = "$VERSION"
-  g["hostname"] = gethostname()
-  g["scratch"] = tempdir()
-  g["date"] = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
-  return file["EC"]
 end
 
 """
@@ -115,8 +61,6 @@ end
   system::MSystem = MSystem()
   """ fcidump. """
   fd::TFDump = TFDump()
-  """ dump with calculation information (for restarts etc). """
-  dump::ECDump = ECDump(joinpath(scr,"ec.h5"))
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -173,7 +117,7 @@ end
   Setup EC.space from fcidump EC.fd.
 """
 function setup_space_fd!(EC::ECInfo; verbose=true)
-  @assert fd_exists(EC.fd) "EC.fd is not set up!"
+  @assert !isempty(EC.fd) "EC.fd is not set up!"
   nelec = EC.options.wf.nelec
   npositron = EC.options.wf.npositron
   charge = EC.options.wf.charge
@@ -201,7 +145,7 @@ end
   Setup EC.space from molecular system EC.system.
 """
 function setup_space_system!(EC::ECInfo; verbose=true)
-  @assert system_exists(EC.system) "EC.system is not set up!"
+  @assert !isempty(EC.system) "EC.system is not set up!"
   nelec = EC.options.wf.nelec
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
@@ -803,7 +747,42 @@ function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
   return occa, virta, occb, virtb
 end
 
+"""
+    with_local_options(f::Function, EC::ECInfo, local_opts::NamedTuple)
 
-include("ecdump.jl")
+Execute function `f` with local options applied, then restore original options.
+
+The `local_opts` is a `NamedTuple` where keys are option category names 
+(e.g., `wf`, `cc`, `scf`) and values are `NamedTuple`s of option key-value pairs.
+
+# Example
+```julia
+with_local_options(EC, (wf=(charge=-1, ms2=1), cc=(maxit=30,))) do
+  ccdriver(EC, "ccsd")
+end
+```
+"""
+function with_local_options(f::Function, EC::ECInfo, local_opts::NamedTuple)
+  saved_opts = deepcopy(EC.options)
+  try
+    for (opt_name, opt_kwargs) in pairs(local_opts)
+      if hasproperty(EC.options, opt_name)
+        opt_obj = getfield(EC.options, opt_name)
+        for (key, value) in pairs(opt_kwargs)
+          if hasproperty(opt_obj, key)
+            setproperty!(opt_obj, key, value)
+          else
+            error("Invalid option '$key' for '$opt_name'")
+          end
+        end
+      else
+        error("Unknown option category: $opt_name")
+      end
+    end
+    return f()
+  finally
+    EC.options = saved_opts
+  end
+end
 
 end #module

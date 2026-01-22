@@ -137,31 +137,26 @@ FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); kwargs...) = FCI
 
 
 """
-    HCIContext
+    CIPHIContext
 
-Lightweight context for Heat-Bath Configuration Interaction (HCI) calculations.
+Lightweight context for CIPHI (CIΦ - CI via Perturbative and Heat-Bath Iterative selection) calculations.
 
-Unlike FCIContext, HCIContext does NOT pre-compute full-space address tables
+Unlike FCIContext, CIPHIContext does NOT pre-compute full-space address tables
 or diagonal Hamiltonian elements. Instead, it only stores the minimal data needed:
 - Integral data (FCIDump)
-- Calculation options (HCIOptions)
+- Calculation options (CIPHIOptions)
 - System size parameters
 - Modified core Hamiltonian (for correct diagonal element calculation)
 
 Address tables and diagonal elements are computed on-demand only for the selected
-determinants during HCI iterations. This provides:
+determinants during CIPHI iterations. This provides:
 - Faster initialization (no full-space addressing)
 - Lower memory usage (proportional to N_selected, not N_determinants)
 - Better scaling for large orbital spaces
 
-For a system with 23 orbitals:
-- Full FCI space: ~4 million determinants
-- HCI selected space: ~1500-4000 determinants
-- Memory savings: ~99.9% (only store what's needed)
-
 # Fields
 - `fcidump::FCIDump` - Integral data
-- `options::HCIOptions` - HCI-specific calculation options
+- `options::CIPHIOptions` - CIPHI-specific calculation options
 - `n_orb::Int` - Number of spatial orbitals
 - `n_elec::Tuple{Int,Int}` - (n_alpha, n_beta) electron counts
 - `reference_det::Determinant` - Reference determinant
@@ -169,9 +164,9 @@ For a system with 23 orbitals:
 - `mod_core_h_b::Matrix{Scalar}` - Modified core Hamiltonian for beta spin
 - `heval_data::HEvalData` - Precomputed arrays for diagonal and Fock elements
 """
-mutable struct HCIContext{OPattern}
+mutable struct CIPHIContext{OPattern}
   fcidump::QFDump
-  options::HCIOptions
+  options::CIPHIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
   reference_det::Determinant{OPattern}
@@ -184,7 +179,7 @@ mutable struct HCIContext{OPattern}
   int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
   int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
 
-  function HCIContext{OPattern}(fcidump::QFDump, options::HCIOptions = HCIOptions(); occa=nothing, occb=nothing) where OPattern
+  function CIPHIContext{OPattern}(fcidump::QFDump, options::CIPHIOptions = CIPHIOptions(); occa=nothing, occb=nothing) where OPattern
     n_orb = headvar(fcidump, "NORB", Int)
     n_elec = headvar(fcidump, "NELEC", Int)
     ms2 = headvar(fcidump, "MS2", Int)
@@ -261,6 +256,6 @@ mutable struct HCIContext{OPattern}
 end
 
 # Convenience constructor that defaults to UInt128
-HCIContext(fcidump::QFDump, options::HCIOptions = HCIOptions(); kwargs...) = HCIContext{UInt128}(fcidump, options; kwargs...)
+CIPHIContext(fcidump::QFDump, options::CIPHIOptions = CIPHIOptions(); kwargs...) = CIPHIContext{UInt128}(fcidump, options; kwargs...)
 
-is_hermitian(ctx::Union{HCIContext, FCIContext}) = !is_similarity_transformed(ctx.fcidump)
+is_hermitian(ctx::Union{CIPHIContext, FCIContext}) = !is_similarity_transformed(ctx.fcidump)

@@ -28,11 +28,11 @@ let
   @opt wf charge=1 ms2=1
   @opt scf direct=true
   EUHF = @dfuhf 
-  fcidump = "DF_UHF_TEST.FCIDUMP"
-  @opt int fcidump=fcidump
-  @dfints 
-  energies = @cc uccsd fcidump=fcidump
-  rm(fcidump)
+  fdump = "DF_UHF_TEST.FCIDUMP"
+  @opt int fcidump=fdump
+  @dfints
+  energies = @cc uccsd fcidump=fdump
+  rm(fdump)
   @test abs(last_energy(EUHF)-EUHF1_test) < epsilon
   @test abs(last_energy(energies)-EUCCSD1_test) < epsilon
 end

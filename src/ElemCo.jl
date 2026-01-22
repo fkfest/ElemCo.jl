@@ -8,6 +8,7 @@ module ElemCo
 include("version.jl")
 include("../lib/TREXIO/src/TREXIO.jl")  # Include standalone TREXIO module
 include("infos/abstractEC.jl")
+include("tools/mtensoroperations.jl")
 include("tools/descdict.jl")
 include("tools/vecdict.jl")
 include("tools/outputs.jl")
@@ -22,10 +23,11 @@ include("system/msystems.jl")
 include("system/basisset.jl")
 include("system/integrals.jl")
 
+include("infos/ecinfos.jl")
+
 include("interfaces/trexio.jl")
 include("system/wavefunctions.jl")
 
-include("infos/ecinfos.jl")
 include("infos/ecmethods.jl")
 include("tools/tensortools.jl")
 include("solvers/diis.jl")
@@ -94,11 +96,12 @@ using .TrexioInterface
 
 
 export @mainname, @print_input
-export @loadfile, @savefile, @copyfile
+export @loadfile, @savefile, @copyfile, @deletefile
+export @loadwf, @savewf, @copywf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
-export @fci, @hci
+export @fci, @ciphi, @sci, @ciϕ
 export @import_matrix, @export_molden
 export @molpro_input, @molpro_output, @check_molproinfo
 # from Utils
@@ -182,7 +185,6 @@ end
   # Example
 ```julia
 fock = @loadfile("f_mm")
-orbs = @loadfile("C_Am")
 ```
 """
 macro loadfile(filename)
@@ -230,6 +232,105 @@ macro copyfile(from_file, to_file, kwargs...)
   end
 end
 
+"""
+    @deletefile(filename)
+
+  Delete file `filename` from `EC.scr` directory.
+"""
+macro deletefile(filename)
+  strfilename = clean_exprstring(filename)
+  return quote
+    strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
+    delete_file!($(esc(:EC)), strfilename)
+  end
+end
+
+"""
+    @loadwf(what...)
+
+  Load wavefunction data from the trexio dump file.
+
+  The arguments `what` can be a vector of strings, a string variable or a list of arguments 
+  specifying what to load.
+  Possible values are: 
+
+  - `orbital_energies`: molecular orbital energies
+  - `orbital_occupations`: molecular orbital occupations
+  - `amplitudes`: coupled cluster amplitudes
+
+  The loaded data are returned as a dictionary with keys corresponding to the requested data.
+  `basis`, `orbitals` and `orbital_type` are always included in the output.
+
+  # Examples
+```julia
+julia> wf = @loadwf orbital_energies orbital_occupations
+julia> wf["basis"]  # basis set information
+julia> wf = @loadwf ["orbital_energies", "orbital_occupations"]
+```
+"""
+macro loadwf(what...)
+  strwhat = String[clean_exprstring(w) for w in what]
+  if length(strwhat) == 1
+    return quote
+      $(esc(:@tryECinit))
+      strwhat = @var2string($(esc(what[1])), $(esc(strwhat)), AbstractArray)
+      load_wavefunction($(esc(:EC)), strwhat)
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      load_wavefunction($(esc(:EC)), $(esc(strwhat)))
+    end
+  end
+end
+
+"""
+    @savewf(wf::AbstractDict)
+
+  Save wavefunction data to the trexio dump file.
+
+  The argument `wf` is a dictionary with the data to be saved.
+  Possible keys are:
+  - `basis`: basis set information
+  - `orbitals`: molecular orbitals
+  - `orbital_type`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
+  - `orbital_energies`: molecular orbital energies
+  - `orbital_occupations`: molecular orbital occupations
+  - `amplitudes`: coupled cluster amplitudes
+
+  # Examples
+```julia
+julia> wf = @loadwf orbital_energies orbital_occupations
+julia> orbs = wf["orbitals"]
+[...]
+julia> wf1 = Dict("basis"=>wf["basis"], "orbitals"=>orbs, "orbital_type"=>"modified RHF") 
+julia> @savewf wf1
+```
+"""
+macro savewf(wf)
+  return quote
+    $(esc(:@tryECinit))
+    save_wavefunction($(esc(:EC)), $(esc(wf)))
+  end
+end
+
+"""
+    @copywf(to_file::AbstractString="")
+
+  Copy wavefunction data from the current trexio dump file to another dump file.
+
+  If `to_file` is not provided, the wavefunction is copied to [`EC.options.wf.store`](@ref ECInfos.WfOptions) file.
+  Note: This does not check the contents of the files.
+"""
+macro copywf(to_file="")
+  strto = clean_exprstring(to_file)
+  return quote
+    $(esc(:@tryECinit))
+    strto = @var2string($(esc(to_file)), $(esc(strto)))
+    copy_wavefunction($(esc(:EC)), strto)
+  end
+end
+
 """ 
     @ECinit()
 
@@ -263,19 +364,6 @@ macro ECinit()
   end
 end
 
-# """ 
-#     @checkEC()
-
-#   Check current molecular system and/or fcidump in `EC::ECInfo` vs the defined variables.
-#   If variables `geometry::String` and `basis::Dict{String,Any}`
-#   and/or `fcidump::String` have changed, update `EC`.
-# """
-# macro checkEC()
-#   return quote
-#     $(esc(:@setupEC))
-#   end
-# end
-
 """ 
     @setupEC()
 
@@ -284,17 +372,29 @@ end
 macro setupEC()
   return quote
     try
-      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
-      println("Geometry: ",$(esc(:geometry)))
-      println("Basis: ",$(esc(:basis)))
-      $(esc(:EC)).system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
+      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
+      @assert(typeof($(esc(:fcidump))) <: AbstractString, "fcidump must be a String")
+      if fd_origin($(esc(:EC)).fd) != $(esc(:fcidump))
+        println("FCIDump: ",$(esc(:fcidump)))
+        $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+      end
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
     try
-      !isnothing($(esc(:fcidump))) || throw(UndefVarError(:fcidump))
-      println("FCIDump: ",$(esc(:fcidump)))
-      $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+      (!isnothing($(esc(:geometry))) && !isnothing($(esc(:basis)))) || throw(UndefVarError(:geometry))
+      @assert(typeof($(esc(:geometry))) <: AbstractString, "geometry must be a String")
+      @assert(typeof($(esc(:basis))) <: Union{AbstractDict, AbstractString}, "basis must be a Dict or a String")
+      system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
+      if !isapprox(system, $(esc(:EC)).system) && !isempty($(esc(:EC)).fd)
+        println("Geometry or basis changed, the integrals will be regenerated.")
+        $(esc(:EC)).fd = TFDump()  # reset fcidump
+      end
+      if !issame(system, $(esc(:EC)).system)
+        println("Geometry: ",$(esc(:geometry)))
+        println("Basis: ",$(esc(:basis)))
+        $(esc(:EC)).system = system
+      end
     catch err
       isa(err, UndefVarError) || rethrow(err)
     end
@@ -316,6 +416,8 @@ macro tryECinit()
     end
     if runECinit[1]
       $(esc(:@ECinit))
+    else
+      $(esc(:@setupEC))
     end
   end
 end
@@ -382,6 +484,7 @@ var"@opt" = var"@set"
 macro reset(opt)
   stropt="$opt"
   return quote
+    $(esc(:@tryECinit))
     if hasproperty($(esc(:EC)).options, Symbol($(esc(stropt))))
       $(esc(:EC)).options.$opt = typeof($(esc(:EC)).options.$opt)()
     else
@@ -399,99 +502,115 @@ macro run(method, kwargs...)
   end
 end
 
-"""
-    clean_exprstring(expr)
+""" 
+    @dfhf(opts_block=nothing)
 
-  Return a clean string from an expression, i.e., without empty spaces and extra parentheses.
+  Run DF-HF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
 
   # Examples
 ```julia
-julia> clean_exprstring(:(SVD-CCSD))
-"SVD-CCSD"
-julia> clean_exprstring(:(eom-svd-df-ccsd(t)))
-"eom-svd-df-ccsd(t)"
-```
-"""
-function clean_exprstring(expr)
-  if !(expr isa Expr) || expr.head != :call || expr.args[1] ∉ [:-, :+, :*, :/]
-    return string(expr)
-  end
-  return join([clean_exprstring(a) for a in expr.args[2:end]], string(expr.args[1]))
+@dfhf
+# with local options:
+@dfhf begin
+  @set scf maxit=100 thr=1.e-12
+  @set wf charge=-1
 end
-
-"""
-    @var2string(var, strvar="")
-
-  Return string representation of `var`.
-
-  If `var` is a String variable, return the value of the variable.
-  Otherwise, return the string representation of `var` (or `strvar` if provided).
-
-  # Examples
-```julia
-julia> @var2string(CCSD)
-"CCSD"
-julia> CCSD = "UCCSD";
-julia> @var2string(CCSD)
-"UCCSD"
 ```
 """
-macro var2string(var, strvar="")
-  if strvar == ""
-    strvar = clean_exprstring(var)
-  end
-  valvar = :($(esc(var)))
-  return quote
-    isvar = [false]
-    try @assert(typeof($(esc(var))) <: AbstractString)
-      isvar[1] = true
-    catch
+macro dfhf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        if $(esc(:EC)).options.wf.npositron > 0
+          dfhf_positron($(esc(:EC)))
+        else
+          dfhf($(esc(:EC)))
+        end
+      end
     end
-    if isvar[1]
-      $valvar
-    else
-      $(esc(strvar))
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if $(esc(:EC)).options.wf.npositron > 0
+        dfhf_positron($(esc(:EC)))
+      else
+        dfhf($(esc(:EC)))
+      end
     end
   end
 end
 
 """ 
-    @dfhf()
+    @dfuhf(opts_block=nothing)
 
-  Run DF-HF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  Run DF-UHF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+@dfuhf
+# with local options:
+@dfuhf begin
+  @set scf maxit=100
+end
+```
 """
-macro dfhf()
-  return quote
-    $(esc(:@tryECinit))
-    if $(esc(:EC)).options.wf.npositron > 0
-      dfhf_positron($(esc(:EC)))
-    else
-      dfhf($(esc(:EC)))
+macro dfuhf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        dfuhf($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      dfuhf($(esc(:EC)))
     end
   end
 end
 
-""" 
-    @dfuhf()
-
-  Run DF-UHF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
 """
-macro dfuhf()
-  return quote
-    $(esc(:@tryECinit))
-    dfuhf($(esc(:EC)))
-  end
+    @dfmcscf(opts_block=nothing)
+
+  Run DF-MCSCF calculation. The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+@dfmcscf
+# with local options:
+@dfmcscf begin
+  @set scf maxit=100
+  @set wf active="(4,4)"
 end
-
+```
 """
-    @dfmcscf()
-
-  Run DF-MCSCF calculation. The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
-"""
-macro dfmcscf()
-  return quote
-    $(esc(:@tryECinit))
-    dfmcscf($(esc(:EC)))
+macro dfmcscf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        dfmcscf($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      dfmcscf($(esc(:EC)))
+    end
   end
 end
 
@@ -499,7 +618,7 @@ end
     @dfints()
 
   Generate 2 and 4-idx MO integrals using density fitting.
-  The MO coefficients are read from [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  The MO coefficients are read from [`WfOptions.dump`](@ref ECInfos.WfOptions).
 """
 macro dfints()
   return quote
@@ -509,13 +628,16 @@ macro dfints()
 end
 
 """ 
-    @cc(method, kwargs...)
+    @cc(method, args...)
 
   Run coupled cluster calculation.
 
   The type of the method is determined by the first argument (ccsd/ccsd(t)/dcsd etc).
   The method can be specified as a string or as a variable, e.g., 
   `@cc CCSD` or `@cc "CCSD"` or `ccmethod="CCSD";  @cc ccmethod`.
+  
+  Optionally, a `begin...end` block can be provided as the last argument to set 
+  local options for this call. The options are reset after the call completes.
   
   # Keyword arguments
   - `fcidump::String`: fcidump file (default: "", i.e., use integrals from `EC`).
@@ -535,37 +657,79 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 @dfhf
 @dfints
 @cc ccsd
+# with local options:
+@cc ccsd begin
+  @set wf charge=-1 ms2=1
+  @set cc maxit=30
+end
 ```
 """
-macro cc(method, kwargs...)
+macro cc(method, args...)
   strmethod = clean_exprstring(method)
+  # Check if last argument is an options block
+  local_opts_expr = nothing
+  if !isempty(args) && is_options_block(args[end])
+    local_opts_expr = parse_options_block(args[end])
+    kwargs = args[1:end-1]
+  else
+    kwargs = args
+  end
   ekwa = [esc(a) for a in kwargs]
-  if kwarg_provided_in_macro(kwargs, :fcidump)
-    return quote
-      $(esc(:@tryECinit))
-      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
-      ccdriver($(esc(:EC)), strmethod; $(ekwa...))
+  
+  if !isnothing(local_opts_expr)
+    # With local options
+    if kwarg_provided_in_macro(kwargs, :fcidump)
+      return quote
+        $(esc(:@tryECinit))
+        with_local_options($(esc(:EC)), $local_opts_expr) do
+          strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+          ccdriver($(esc(:EC)), strmethod; $(ekwa...))
+        end
+      end
+    else
+      return quote
+        $(esc(:@tryECinit))
+        with_local_options($(esc(:EC)), $local_opts_expr) do
+          if isempty($(esc(:EC)).fd)
+            dfdump($(esc(:EC)))
+          end
+          strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+          ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+        end
+      end
     end
   else
-    return quote
-      $(esc(:@tryECinit))
-      if !fd_exists($(esc(:EC)).fd)
-        $(esc(:@dfints))
+    # Without local options (original behavior)
+    if kwarg_provided_in_macro(kwargs, :fcidump)
+      return quote
+        $(esc(:@tryECinit))
+        strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+        ccdriver($(esc(:EC)), strmethod; $(ekwa...))
       end
-      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
-      ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+    else
+      return quote
+        $(esc(:@tryECinit))
+        if isempty($(esc(:EC)).fd)
+          $(esc(:@dfints))
+        end
+        strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+        ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
+      end
     end
   end
 end
 
 """
-    @dfcc(method="svd-dcsd")
+    @dfcc(method="svd-dcsd", opts_block=nothing)
 
   Run coupled cluster calculation using density fitted integrals.
 
   The type of the method is determined by the first argument.
   The method can be specified as a string or as a variable, e.g., 
   `@dfcc SVD-DCSD` or `@dfcc "SVD-DCSD"` or `ccmethod="SVD-DCSD";  @dfcc ccmethod`.
+  
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
   
   # Examples
 ```julia
@@ -576,36 +740,76 @@ H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 @dfhf
 @dfcc svd-dcsd
+# with local options:
+@dfcc svd-dcsd begin
+  @set cc maxit=30
+end
 ```
 """
-macro dfcc(method="svd-dcsd")
+macro dfcc(method="svd-dcsd", opts_block=nothing)
   strmethod = clean_exprstring(method)
-  return quote
-    $(esc(:@tryECinit))
-    strmethod = @var2string($(esc(method)), $(esc(strmethod)))
-    dfccdriver($(esc(:EC)), strmethod)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+        dfccdriver($(esc(:EC)), strmethod)
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      strmethod = @var2string($(esc(method)), $(esc(strmethod)))
+      dfccdriver($(esc(:EC)), strmethod)
+    end
   end
 end
 
 """ 
-    @dfmp2()
+    @dfmp2(opts_block=nothing)
 
   Run density-fitted MP2 calculation.
 
   If `save` is set in [`CcOptions.save`](@ref ECInfos.CcOptions), 
   the MP2 doubles amplitudes are saved to `save`*"_2" file.
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+@dfmp2
+# with local options:
+@dfmp2 begin
+  @set cc save="mp2_amplitudes"
+end
+```
 """
-macro dfmp2()
-  return quote
-    $(esc(:@tryECinit))
-    dfccdriver($(esc(:EC)), "MP2")
+macro dfmp2(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        dfccdriver($(esc(:EC)), "MP2")
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      dfccdriver($(esc(:EC)), "MP2")
+    end
   end
 end
 
 """ 
-    @fci(kwargs...)
+    @fci(args...)
 
   Run FCI calculation.
+
+  Optionally, a `begin...end` block can be provided as the last argument to set 
+  local options for this call. The options are reset after the call completes.
 
   # Keyword arguments
   - `occa::String`: occupied α orbitals (default: "-").
@@ -623,23 +827,51 @@ H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
 @dfhf
 @fci
+# with local options:
+@fci begin
+  @set wf charge=-1
+end
 ```
 """
-macro fci(kwargs...)
+macro fci(args...)
+  # Check if last argument is an options block
+  local_opts_expr = nothing
+  if !isempty(args) && is_options_block(args[end])
+    local_opts_expr = parse_options_block(args[end])
+    kwargs = args[1:end-1]
+  else
+    kwargs = args
+  end
   ekwa = [esc(a) for a in kwargs]
-  return quote
-    $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
-      $(esc(:@dfints))
+  
+  if !isnothing(local_opts_expr)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts_expr) do
+        if isempty($(esc(:EC)).fd)
+          dfdump($(esc(:EC)))
+        end
+        fcidriver($(esc(:EC)); $(ekwa...))
+      end
     end
-    fcidriver($(esc(:EC)); $(ekwa...))
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        $(esc(:@dfints))
+      end
+      fcidriver($(esc(:EC)); $(ekwa...))
+    end
   end
 end
 
 """ 
-    @hci(kwargs...)
+    @ciphi(args...)
 
-  Run Heat-bath CI calculation.
+  Run CIPHI (CIΦ - CI via Perturbative and Heat-Bath Iterative selection) calculation.
+
+  Optionally, a `begin...end` block can be provided as the last argument to set 
+  local options for this call. The options are reset after the call completes.
 
   # Keyword arguments
   - `occa::String`: occupied α orbitals (default: "-").
@@ -647,6 +879,8 @@ end
 
   The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
   Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+
+  `@sci` and `@ciϕ` are aliases for this macro.
 
   # Examples
 ```julia
@@ -656,91 +890,170 @@ H1     0.000000000    1.489124508    1.033245507
 H2     0.000000000   -1.489124508    1.033245507"
 basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
 @dfhf
-@hci
+@ciphi
+# with local options:
+@ciphi begin
+  @set ciphi epsilon=1.e-4
+end
 ```
 """
-macro hci(kwargs...)
+macro ciphi(args...)
+  # Check if last argument is an options block
+  local_opts_expr = nothing
+  if !isempty(args) && is_options_block(args[end])
+    local_opts_expr = parse_options_block(args[end])
+    kwargs = args[1:end-1]
+  else
+    kwargs = args
+  end
   ekwa = [esc(a) for a in kwargs]
-  return quote
-    $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
-      $(esc(:@dfints))
+  
+  if !isnothing(local_opts_expr)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts_expr) do
+        if isempty($(esc(:EC)).fd)
+          dfdump($(esc(:EC)))
+        end
+        fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
+      end
     end
-    fcidriver($(esc(:EC)); $(ekwa...), hci=true)
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        $(esc(:@dfints))
+      end
+      fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
+    end
   end
 end
 
+"""
+    @sci(args...)
+
+  Alias for [`@ciphi`](@ref).
+"""
+var"@sci" = var"@ciphi"
+
+"""
+    @ciϕ(args...)
+
+  Alias for [`@ciphi`](@ref).
+"""
+var"@ciϕ" = var"@ciphi"
+
 """ 
-    @bohf()
+    @bohf(opts_block=nothing)
 
   Run bi-orthogonal HF calculation using FCIDUMP integrals.
 
-  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  The orbital rotations are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
   For open-shell systems (or UHF FCIDUMPs), the BO-UHF energy is calculated.
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
 
   # Examples
 ```julia
 fcidump = "FCIDUMP"
 @bohf
+# with local options:
+@bohf begin
+  @set scf maxit=100
+end
 ```
 """
-macro bohf()
-  return quote
-    $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
-      error("No FCIDump found.")
+macro bohf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      with_local_options($(esc(:EC)), $local_opts) do
+        if is_closed_shell($(esc(:EC)))
+          bohf($(esc(:EC)))
+        else
+          bouhf($(esc(:EC)))
+        end
+      end
     end
-    if is_closed_shell($(esc(:EC)))
-      bohf($(esc(:EC)))
-    else
-      bouhf($(esc(:EC)))
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      if is_closed_shell($(esc(:EC)))
+        bohf($(esc(:EC)))
+      else
+        bouhf($(esc(:EC)))
+      end
     end
   end
 end
 
 """ 
-    @bouhf()
+    @bouhf(opts_block=nothing)
 
   Run bi-orthogonal UHF calculation using FCIDUMP integrals.
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Examples
+```julia
+fcidump = "FCIDUMP"
+@bouhf
+# with local options:
+@bouhf begin
+  @set scf maxit=100
+end
+```
 """
-macro bouhf()
-  return quote
-    $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
-      error("No FCIDump found.")
+macro bouhf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      with_local_options($(esc(:EC)), $local_opts) do
+        bouhf($(esc(:EC)))
+      end
     end
-    bouhf($(esc(:EC)))
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd)
+        error("No FCIDump found.")
+      end
+      bouhf($(esc(:EC)))
+    end
   end
 end
 
 """
-    @transform_ints(type="")
+    @transform_ints()
 
-  Rotate FCIDump integrals using [`WfOptions.orb`](@ref ECInfos.WfOptions) as transformation 
-  matrices.
+  Rotate FCIDump integrals using rotations from [`WfOptions.dump`](@ref ECInfos.WfOptions) 
+  as transformation matrices.
 
-  The orbitals are read from [`WfOptions.orb`](@ref ECInfos.WfOptions).
-  If type is one of [bo, BO, bi-orthogonal, Bi-orthogonal, biorth, biorthogonal, Biorthogonal], 
-  the bi-orthogonal orbitals are used and the left transformation matrix is
-  read from [`WfOptions.orb`](@ref ECInfos.WfOptions)*[`WfOptions.left`](@ref ECInfos.WfOptions).
+  The orbital rotations are read from [`WfOptions.dump`](@ref ECInfos.WfOptions).
+  If type of the rotations contains the word `biorthogonal`, 
+  the bi-orthogonal orbitals are used.
 """
-macro transform_ints(type="")
-  strtype = clean_exprstring(type)
+macro transform_ints()
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
-    CMOr = load($(esc(:EC)), $(esc(:EC)).options.wf.orb)
-    strtype = @var2string($(esc(type)), $(esc(strtype)))
-    if strtype ∈ ["bo", "BO", "bi-orthogonal", "Bi-orthogonal", "biorth", "biorthogonal", "Biorthogonal"]
-      CMOl = load($(esc(:EC)), $(esc(:EC)).options.wf.orb*$(esc(:EC)).options.wf.left)
-    elseif strtype == ""
-      CMOl = CMOr
-    else
-      error("Unknown type in @transform_ints: ", strtype)
-    end
-    transform_fcidump($(esc(:EC)).fd, CMOl, CMOr)
+    CMOl, CMOr = load_left_right_rotations($(esc(:EC)))
+    transform_fcidump!($(esc(:EC)).fd, CMOl, CMOr)
   end
 end
 
@@ -757,7 +1070,7 @@ macro write_ints(file="FCIDUMP", kwargs...)
   ekwa = [esc(a) for a in kwargs]
   return quote
     $(esc(:@tryECinit))
-    if !fd_exists($(esc(:EC)).fd)
+    if isempty($(esc(:EC)).fd)
       error("No FCIDump found.")
     end
     write_fcidump($(esc(:EC)).fd, $file; $(ekwa...))
@@ -815,10 +1128,10 @@ end
 """
     @rotate_orbs(orb1, orb2, angle, kwargs...)
 
-  Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  Rotate orbitals `orb1` and `orb2` from [`WfOptions.dump`](@ref ECInfos.WfOptions) 
   by `angle` (in degrees). For UHF, `spin` can be `:α` or `:β` (keyword argument).
   
-  The orbitals are stored to [`WfOptions.orb`](@ref ECInfos.WfOptions).
+  The orbitals are stored to [`WfOptions.store`](@ref ECInfos.WfOptions).
 
   # Keyword arguments
   - `spin::Symbol`: spin of the orbitals (default: `:α`).
@@ -881,6 +1194,7 @@ end
 macro export_molden(filename)
   strfilename = clean_exprstring(filename)
   return quote
+    $(esc(:@tryECinit))
     strfilename = @var2string($(esc(filename)), $(esc(strfilename)))
     export_molden_orbitals($(esc(:EC)), strfilename)
   end
@@ -912,12 +1226,12 @@ macro molpro_input(filename="elemcoil")
     if newbasis[1]
       $(esc(:basis)) = ao_basis
     end
-    $(esc(:@ECinit))
+    $(esc(:@ECinit)) # TODO replace with @tryECinit once the mo classes are properly handled
     MolproInterface.set_options_from_xml!($(esc(:EC)), mol_node)
     if haskey($(esc(:MI)), "ORBITALS")
       orbs = MolproInterface.import_orbitals($(esc(:EC)), $(esc(:MI))["ORBITALS"])
       if !isempty(orbs)
-        save!($(esc(:EC)), $(esc(:EC)).options.wf.orb, orbs)
+        dump_orbitals($(esc(:EC)), SpinMatrix(orbs))
         println("Orbitals imported from Molpro: ", size(orbs, 2), " orbitals.")
       end
     end

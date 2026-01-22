@@ -55,12 +55,12 @@ function build_pspace_hamiltonian_selected!(context::FCIContext)
 end
 
 """
-    get_reference_determinant(context::Union{FCIContext, HCIContext}) -> Determinant
+    get_reference_determinant(context::Union{FCIContext, CIPHIContext}) -> Determinant
 
 Return the reference determinant.
 This is used as the starting point for P-space determinant selection.
 """
-function get_reference_determinant(context::Union{FCIContext, HCIContext})::Determinant
+function get_reference_determinant(context::Union{FCIContext, CIPHIContext})::Determinant
   return context.reference_det
 end
 
@@ -339,26 +339,26 @@ function select_small_space_determinants(context::FCIContext{OPattern}, target_s
 end
 
 """
-    select_small_space_determinants(context::HCIContext, target_size::Int, nstates::Int=1) -> Vector{Determinant}
+    select_small_space_determinants(context::CIPHIContext, target_size::Int, nstates::Int=1) -> Vector{Determinant}
 
 Select determinants for small-space Hamiltonian diagonalization.
-For HCIContext, generates determinants by excitation level from reference,
+For CIPHIContext, generates determinants by excitation level from reference,
 then calculates diagonal energies only for the generated determinants.
 
 # Arguments
-- `context`: HCI context
+- `context`: CIPHI context
 - `target_size`: Target number of determinants (adaptive: max(100, sqrt(target_selection), 5*nstates))
 - `nstates`: Number of states to compute (used for sizing)
 
 # Returns
 - Vector of selected determinants
 """
-function select_small_space_determinants(context::HCIContext{OPattern}, target_size, nstates=1) where OPattern
+function select_small_space_determinants(context::CIPHIContext{OPattern}, target_size, nstates=1) where OPattern
   # Build HF reference determinant
   hf_ref = get_reference_determinant(context)
   
   if context.options.print_level >= 2
-    println("  Small-space selection (excitation-based for HCI):")
+    println("  Small-space selection (excitation-based for CIPHI):")
     println("    Target size: $target_size determinants")
   end
   
@@ -471,19 +471,19 @@ function select_small_space_determinants(context::HCIContext{OPattern}, target_s
 end
 
 """
-    build_small_space_hamiltonian(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant}) -> Matrix{Scalar}
+    build_small_space_hamiltonian(context::Union{FCIContext, CIPHIContext}, determinants::Vector{Determinant}) -> Matrix{Scalar}
 
 Build Hamiltonian matrix for small space of determinants.
 Uses Selected CI framework for efficient matrix element computation.
 
 # Arguments
-- `context`: FCI or HCIcontext
+- `context`: FCI or CIPHIContext
 - `determinants`: Vector of determinants spanning the small space
 
 # Returns
 - Hamiltonian matrix H[i,j] = ⟨det_i|H|det_j⟩
 """
-function build_small_space_hamiltonian(context::Union{FCIContext,HCIContext}, determinants)::Matrix{Scalar}
+function build_small_space_hamiltonian(context::Union{FCIContext,CIPHIContext}, determinants)::Matrix{Scalar}
   n_small = length(determinants)
   
   if context.options.print_level >= 2
@@ -513,26 +513,26 @@ struct SmallSpaceResult{OPattern}
 end
 
 """
-    initialize_multistate_from_small_space(context::Union{FCIContext, HCIContext}, target_selection::Int, nstates::Int) -> SmallSpaceResult
+    initialize_multistate_from_small_space(context::Union{FCIContext, CIPHIContext}, target_selection::Int, nstates::Int) -> SmallSpaceResult
 
-Initialize multi-state HCI using small-space Hamiltonian diagonalization.
+Initialize multi-state CIPHI using small-space Hamiltonian diagonalization.
 This provides better initial guesses for all states, preventing missed excited states.
 
 # Algorithm
 1. Select small space: max(100, sqrt(target_selection), 5*nstates) determinants
 2. Build Hamiltonian in small space
 3. Diagonalize to get nstates lowest eigenstates
-4. Return determinants and eigenvectors as initial guess for HCI
+4. Return determinants and eigenvectors as initial guess for CIPHI
 
 # Arguments
-- `context`: FCI or HCI context
-- `target_selection`: Target HCI variational space size (for adaptive sizing)
+- `context`: FCI or CIPHI context
+- `target_selection`: Target CIPHI variational space size (for adaptive sizing)
 - `nstates`: Number of states to compute
 
 # Returns
 - `SmallSpaceResult` containing determinants, eigenvalues, and eigenvectors
 """
-function initialize_multistate_from_small_space(context::Union{FCIContext, HCIContext{OPattern}},
+function initialize_multistate_from_small_space(context::Union{FCIContext, CIPHIContext{OPattern}},
                                 target_selection::Int, nstates::Int)::SmallSpaceResult{OPattern} where OPattern
   
   if context.options.print_level >= 1
@@ -592,13 +592,14 @@ Supports two modes:
 
 # Arguments
 - `context`: FCI context
-- `n_states`: Number of states to compute in subsequent Davidson (for HBCI multi-state P-space)
+- `n_states`: Number of states to compute in subsequent Davidson (for CIPHI multi-state P-space)
 """
 function setup_pspace!(context::FCIContext, n_states::Int=1)
   if context.options.print_level >= 1
     println("Setting up P-space for enhanced initial guess")
-    if n_states > 1 && context.options.pspace_selection_method == :hci
-      println("  Multi-state P-space: computing $n_states roots in HBCI")
+    if n_states > 1 && (context.options.pspace_selection_method == :ciphi || 
+                        context.options.pspace_selection_method == :sci)
+      println("  Multi-state P-space: computing $n_states roots in CIPHI")
     end
   end
 
@@ -607,11 +608,11 @@ function setup_pspace!(context::FCIContext, n_states::Int=1)
     error("Diagonal Hamiltonian not initialized. Call init_hamiltonian_terms! first.")
   end
 
-  # Check if HBCI-based P-space selection is enabled
-  if context.options.pspace_selection_method == :hci
-    # Use Heat-Bath CI for P-space selection
-    # Pass n_states so HCI computes the same number of roots
-    setup_pspace_hci!(context, n_states)
+  # Check if CIPHI-based P-space selection is enabled
+  if context.options.pspace_selection_method == :ciphi || context.options.pspace_selection_method == :sci
+    # Use CIPHI for P-space selection
+    # Pass n_states so CIPHI computes the same number of roots
+    setup_pspace_ciphi!(context, n_states)
   else
     # Traditional P-space selection (single-state only for now)
     select_pspace_determinants!(context)
@@ -636,61 +637,61 @@ function setup_pspace!(context::FCIContext, n_states::Int=1)
 end
 
 """
-    setup_pspace_hci!(context::FCIContext, n_states::Int=1)
+    setup_pspace_ciphi!(context::FCIContext, n_states::Int=1)
 
-Use Heat-Bath CI to select P-space determinants.
+Use CIPHI to select P-space determinants.
 This provides a more efficient and targeted selection compared to traditional methods.
 
-The selected determinants from HCI variational space become the P-space for
+The selected determinants from CIPHI variational space become the P-space for
 subsequent full FCI Davidson iterations.
 
 # Arguments
 - `context`: FCI context
-- `n_states`: Number of states to compute (HCI will compute the same number of roots)
+- `n_states`: Number of states to compute (CIPHI will compute the same number of roots)
 """
-function setup_pspace_hci!(context::FCIContext, n_states::Int=1)
+function setup_pspace_ciphi!(context::FCIContext, n_states::Int=1)
   opts = context.options
   
   if context.options.print_level >= 1
-    println("  Using Heat-Bath CI for P-space selection")
+    println("  Using CIPHI for P-space selection")
     println("  Target size: $(opts.max_pspace_size)")
-    println("  HCI ε₁: $(opts.pspace_hci_epsilon)")
+    println("  CIPHI ε₁: $(opts.pspace_ciphi_epsilon)")
     if n_states > 1
-      println("  HCI nstates: $n_states (matching FCI)")
+      println("  CIPHI nstates: $n_states (matching FCI)")
     end
   end
   
-  # Configure HCI options for P-space generation
+  # Configure CIPHI options for P-space generation
   # CRITICAL: Use same nstates as the final FCI calculation for multi-state
-  hci_options = HCIOptions(
+  ciphi_options = CIPHIOptions(
     target_selection = opts.max_pspace_size,
-    epsilon = opts.pspace_hci_epsilon,
-    tol = 1e-6,  # Convergence threshold for HCI iterations
+    epsilon = opts.pspace_ciphi_epsilon,
+    tol = 1e-6,  # Convergence threshold for CIPHI iterations
     max_iter = 10,
     shift = opts.shift,
     compute_pt2 = false,  # Don't need PT2 for P-space
-    verbose = false,  # Keep HCI output minimal
+    verbose = false,  # Keep CIPHI output minimal
     nstates = n_states  # Match the number of states in the final FCI calculation
   )
 
-  # Run HCI to get selected determinants
+  # Run CIPHI to get selected determinants
   # Returns: E_vec (Vector{Float64}), coeffs_matrix (Matrix{Float64}), dets, pt2_result
-  E_hci_vec, coeffs_hci_matrix, dets_hci, _ = run_heatbath_ci!(context, hci_options)
+  E_ciphi_vec, coeffs_ciphi_matrix, dets_ciphi, _ = run_ciphi!(context, ciphi_options)
   
   if context.options.print_level >= 1
-    println("  HBCI selected $(length(dets_hci)) determinants")
+    println("  CIPHI selected $(length(dets_ciphi)) determinants")
     if n_states == 1
-      println("  HBCI energy: $(E_hci_vec[1]) Hartree")
+      println("  CIPHI energy: $(E_ciphi_vec[1]) Hartree")
     else
-      println("  HBCI energies:")
-      for (i, E) in enumerate(E_hci_vec)
+      println("  CIPHI energies:")
+      for (i, E) in enumerate(E_ciphi_vec)
         println("    State $i: $E Hartree")
       end
     end
   end
   
-  # Convert HBCI determinants to P-space indices
-  n_selected = length(dets_hci)
+  # Convert CIPHI determinants to P-space indices
+  n_selected = length(dets_ciphi)
   
   # Limit to requested max_pspace_size if HBCI selected more
   if n_selected > opts.max_pspace_size
@@ -704,7 +705,7 @@ function setup_pspace_hci!(context::FCIContext, n_states::Int=1)
   
   # Store selected determinants and their addresses
   for i in 1:n_selected
-    det = dets_hci[i]
+    det = dets_ciphi[i]
     addr = address_from_determinant(context, det)
     context.pspace_data.determinants[i] = det
     context.pspace_data.indices[i] = addr
@@ -713,15 +714,15 @@ function setup_pspace_hci!(context::FCIContext, n_states::Int=1)
   context.pspace_data.n_pspace = n_selected
   
   # Resize eigenvalue/eigenvector storage (will be filled by diagonalize_pspace_hamiltonian!)
-  # For now, pre-populate with HBCI results
+  # For now, pre-populate with CIPHI results
   context.pspace_data.eigenvalues = zeros(Scalar, n_selected)
   context.pspace_data.eigenvectors = zeros(Scalar, n_selected, n_selected)
   
-  # Store HBCI eigenvector coefficients for ground state as first eigenvector (good initial guess)
-  # coeffs_hbci_matrix is (n_dets × nstates), extract ground state coefficients
-  if size(coeffs_hci_matrix, 1) == n_selected
-    context.pspace_data.eigenvalues[1] = E_hci_vec[1] - context.fcidump.int0  # Electronic energy
-    context.pspace_data.eigenvectors[:, 1] = coeffs_hci_matrix[:, 1]  # Ground state coefficients
+  # Store CIPHI eigenvector coefficients for ground state as first eigenvector (good initial guess)
+  # coeffs_ciphi_matrix is (n_dets × nstates), extract ground state coefficients
+  if size(coeffs_ciphi_matrix, 1) == n_selected
+    context.pspace_data.eigenvalues[1] = E_ciphi_vec[1] - context.fcidump.int0  # Electronic energy
+    context.pspace_data.eigenvectors[:, 1] = coeffs_ciphi_matrix[:, 1]  # Ground state coefficients
   end
   
   return nothing
