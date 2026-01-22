@@ -267,6 +267,7 @@ end
 # Keyword Arguments
 - `start::Bool=false`: If true, read from `wf.start` file instead of `wf.dump`
 - `state::Int=1`: State number for determinants (1 = ground state)
+- `OPattern::Type=UInt64`: Orbital pattern type for determinants (use `UInt128` for >64 orbitals)
 
 # Examples
 ```julia
