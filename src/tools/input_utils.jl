@@ -20,6 +20,40 @@ function clean_exprstring(expr)
 end
 
 """
+    separate_kwargs(args)
+
+  Separate keyword arguments from positional arguments in macro input.
+
+  Returns `(positional_args, kwargs)` where:
+  - `positional_args`: Vector of non-keyword arguments
+  - `kwargs`: Vector of `Expr(:kw, key, esc(value))` for keyword arguments
+
+  Keyword arguments are expressions with head `:(=)`.
+
+# Example
+```julia
+# In a macro definition:
+macro mymacro(args...)
+  positional, kwargs = separate_kwargs(args)
+  # positional contains non-keyword args
+  # kwargs can be splatted: some_function(x; \$(kwargs...))
+end
+```
+"""
+function separate_kwargs(args)
+  kwargs = Expr[]
+  positional = []
+  for arg in args
+    if arg isa Expr && arg.head == :(=)
+      push!(kwargs, Expr(:kw, arg.args[1], esc(arg.args[2])))
+    else
+      push!(positional, arg)
+    end
+  end
+  return positional, kwargs
+end
+
+"""
     is_options_block(arg)
 
 Check if `arg` is a `begin...end` block for local options.

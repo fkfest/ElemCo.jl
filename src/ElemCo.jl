@@ -246,7 +246,7 @@ macro deletefile(filename)
 end
 
 """
-    @loadwf(what...)
+    @loadwf(what...; start=false, state=1)
 
   Load wavefunction data from the trexio dump file.
 
@@ -254,80 +254,146 @@ end
   specifying what to load.
   Possible values are: 
 
+  - `all`: load everything available (overrides other options)
   - `orbital_energies`: molecular orbital energies
   - `orbital_occupations`: molecular orbital occupations
-  - `amplitudes`: coupled cluster amplitudes
+  - `amplitudes`: restricted CC amplitudes (T1, T2)
+  - `unrestricted_amplitudes`: unrestricted CC amplitudes (T1a, T1b, T2a, T2b, T2ab)
+  - `determinants`: selected CI determinants and coefficients
 
   The loaded data are returned as a dictionary with keys corresponding to the requested data.
   `basis`, `orbitals` and `orbital_type` are always included in the output.
 
-  # Examples
+# Keyword Arguments
+- `start::Bool=false`: If true, read from `wf.start` file instead of `wf.dump`
+- `state::Int=1`: State number for determinants (1 = ground state)
+
+# Examples
 ```julia
 julia> wf = @loadwf orbital_energies orbital_occupations
 julia> wf["basis"]  # basis set information
 julia> wf = @loadwf ["orbital_energies", "orbital_occupations"]
+julia> wf = @loadwf amplitudes  # load CC amplitudes
+julia> wf = @loadwf determinants state=2  # load determinants for excited state
+julia> wf = @loadwf all start=true  # load everything from start file
 ```
 """
-macro loadwf(what...)
+macro loadwf(args...)
+  what, kwargs = separate_kwargs(args)
   strwhat = String[clean_exprstring(w) for w in what]
   if length(strwhat) == 1
     return quote
       $(esc(:@tryECinit))
       strwhat = @var2string($(esc(what[1])), $(esc(strwhat)), AbstractArray)
-      load_wavefunction($(esc(:EC)), strwhat)
+      load_wavefunction($(esc(:EC)), strwhat; $(kwargs...))
     end
   else
     return quote
       $(esc(:@tryECinit))
-      load_wavefunction($(esc(:EC)), $(esc(strwhat)))
+      load_wavefunction($(esc(:EC)), $(esc(strwhat)); $(kwargs...))
     end
   end
 end
 
 """
-    @savewf(wf::AbstractDict)
+    @savewf(wf::AbstractDict; state=1)
 
   Save wavefunction data to the trexio dump file.
 
   The argument `wf` is a dictionary with the data to be saved.
   Possible keys are:
-  - `basis`: basis set information
-  - `orbitals`: molecular orbitals
-  - `orbital_type`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
-  - `orbital_energies`: molecular orbital energies
-  - `orbital_occupations`: molecular orbital occupations
-  - `amplitudes`: coupled cluster amplitudes
 
-  # Examples
+**Orbital data:**
+- `"basis"`: basis set information
+- `"orbitals"`: molecular orbitals
+- `"rotations"`: orbital rotations (alternative to `"orbitals"`)
+- `"orbital_type"`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
+- `"orbital_energies"`: molecular orbital energies
+- `"orbital_occupations"`: molecular orbital occupations
+
+**Restricted CC amplitudes:**
+- `"T1"`: singles amplitudes (nvirt × nocc)
+- `"T2"`: doubles amplitudes (nvirt × nvirt × nocc × nocc)
+
+**Unrestricted CC amplitudes:**
+- `"T1a"`, `"T1b"`: α and β singles amplitudes
+- `"T2a"`, `"T2b"`, `"T2ab"`: αα, ββ, and αβ doubles amplitudes
+
+**Selected CI (CIPHI) data:**
+- `"determinants"`: vector of determinants
+- `"ci_coefficients"`: CI coefficients (vector for single state, matrix for multi-state)
+
+# Keyword Arguments
+- `state::Int=1`: State number for determinants (used when `ci_coefficients` is a vector)
+
+# Examples
 ```julia
 julia> wf = @loadwf orbital_energies orbital_occupations
 julia> orbs = wf["orbitals"]
 [...]
 julia> wf1 = Dict("basis"=>wf["basis"], "orbitals"=>orbs, "orbital_type"=>"modified RHF") 
 julia> @savewf wf1
+
+julia> # Save amplitudes
+julia> @savewf Dict("T1"=>T1, "T2"=>T2)
+
+julia> # Save determinants for excited state
+julia> @savewf Dict("determinants"=>dets, "ci_coefficients"=>coeffs) state=2
 ```
 """
-macro savewf(wf)
+macro savewf(args...)
+  positional, kwargs = separate_kwargs(args)
+  
+  if isempty(positional)
+    error("@savewf requires a dictionary argument")
+  end
+  wf = positional[1]
+  
   return quote
     $(esc(:@tryECinit))
-    save_wavefunction($(esc(:EC)), $(esc(wf)))
+    save_wavefunction($(esc(:EC)), $(esc(wf)); $(kwargs...))
   end
 end
 
 """
-    @copywf(to_file::AbstractString="")
+    @copywf(to_file::AbstractString=""; start=false, state=0)
 
   Copy wavefunction data from the current trexio dump file to another dump file.
 
   If `to_file` is not provided, the wavefunction is copied to [`EC.options.wf.store`](@ref ECInfos.WfOptions) file.
   Note: This does not check the contents of the files.
+
+# Keyword Arguments
+- `start::Bool=false`: If true, copy from `wf.start` file instead of `wf.dump`.
+- `state::Int=0`: State number for determinant files. If 0, copies the main dump file.
+                   If >0, copies the state-specific determinant file (e.g., `file_state2.h5`).
+
+# Examples
+```julia
+julia> @copywf  # copy dump to store
+julia> @copywf "backup.h5"  # copy dump to backup file
+julia> @copywf start=true  # copy start file to store
+julia> @copywf "backup.h5" start=true  # copy start file to backup
+julia> @copywf state=2  # copy state 2 determinant file to store
+julia> @copywf "state2_backup.h5" state=2  # copy state 2 to specific file
+```
 """
-macro copywf(to_file="")
-  strto = clean_exprstring(to_file)
-  return quote
-    $(esc(:@tryECinit))
-    strto = @var2string($(esc(to_file)), $(esc(strto)))
-    copy_wavefunction($(esc(:EC)), strto)
+macro copywf(args...)
+  positional, kwargs = separate_kwargs(args)
+  
+  if isempty(positional)
+    return quote
+      $(esc(:@tryECinit))
+      copy_wavefunction($(esc(:EC)), ""; $(kwargs...))
+    end
+  else
+    to_file_expr = positional[1]
+    to_file = clean_exprstring(to_file_expr)
+    return quote
+      $(esc(:@tryECinit))
+      strto = @var2string($(esc(to_file_expr)), $(esc(to_file)))
+      copy_wavefunction($(esc(:EC)), strto; $(kwargs...))
+    end
   end
 end
 

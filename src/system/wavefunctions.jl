@@ -471,23 +471,56 @@ function fetch_rotations(io::TrexioFile, EC::ECInfo, MO="mo")
 end
 
 """
-    load_wavefunction(EC::ECInfo, what::Vector{String})
+    load_wavefunction(EC::ECInfo, what::Vector{String}; start=false, state=1, OPattern=UInt64)
 
   Load parts of the wavefunction from file [`WfOptions.dump`](@ref ECInfos.WfOptions).
 
   `what` can contain any of the following strings:
-  - `"all"`: load everything (overrides other options)
-  - `"orbitals"`: load orbitals (always loaded)
+  - `"all"`: load everything available (overrides other options)
+  - `"orbitals"`: load orbitals (always loaded by default)
   - `"orbital_energies"`: load orbital energies
   - `"orbital_occupations"`: load orbital occupations
+  - `"amplitudes"`: load CC amplitudes (restricted)
+  - `"unrestricted_amplitudes"`: load CC amplitudes (unrestricted)
+  - `"determinants"`: load selected CI determinants and coefficients
 
-  Returns a `Dict{String,Any}` with the requested parts of the wavefunction.
+# Arguments
+- `what::Vector{String}`: List of wavefunction parts to load
+- `start::Bool=false`: If true, read from `wf.start` file instead of `wf.dump`
+- `state::Int=1`: State number for determinants (1 = ground state)
+- `OPattern::Type=UInt64`: Orbital pattern type for determinants (use UInt128 for >64 orbitals)
+
+# Returns
+A `Dict{String,Any}` with the requested parts of the wavefunction:
+- `"orbitals"`: `SpinMatrix` of molecular orbitals
+- `"orbital_type"`: Type string (e.g., "RHF", "UHF")
+- `"basis"`: `BasisSet` (empty if rotation)
+- `"orbital_energies"`: Tuple of (alpha, beta) energies
+- `"orbital_occupations"`: Tuple of (alpha, beta) occupations
+- `"T1"`, `"T2"`: Restricted amplitudes
+- `"T1a"`, `"T1b"`, `"T2a"`, `"T2b"`, `"T2ab"`: Unrestricted amplitudes
+- `"determinants"`: Vector of determinants
+- `"ci_coefficients"`: Vector of CI coefficients
+
+# Example
+```julia
+# Load orbitals and amplitudes
+wf = load_wavefunction(EC, ["orbitals", "amplitudes"])
+
+# Load everything
+wf = load_wavefunction(EC, ["all"])
+
+# Load determinants for excited state
+wf = load_wavefunction(EC, ["determinants"]; state=2)
+```
 """
-function load_wavefunction(EC::ECInfo, what::Vector{String})
+function load_wavefunction(EC::ECInfo, what::Vector{String}; 
+                           start::Bool=false, state::Int=1, OPattern::Type=UInt64)
   wf = Dict{String,Any}()
-  println("what = ", what)
   all = "all" in what
-  open_dump(EC, "r") do io
+  
+  # Load orbitals (always loaded)
+  open_dump(EC, "r"; start=start) do io
     wf["orbitals"], wf["orbital_type"], wf["basis"] = fetch_orbitals(io, EC)
     if all || "orbital_energies" in what
       wf["orbital_energies"] = fetch_orbital_energies(io, EC)
@@ -495,62 +528,237 @@ function load_wavefunction(EC::ECInfo, what::Vector{String})
     if all || "orbital_occupations" in what
       wf["orbital_occupations"] = fetch_orbital_occupations(io, EC)
     end
+    # Load amplitudes
+    if all || "amplitudes" in what
+      if has_amplitudes(io, EC; unrestricted=false)
+        T1, T2 = fetch_restricted_amplitudes(io, EC)
+        if !isempty(T1)
+          wf["T1"] = T1
+        end
+        if !isempty(T2)
+          wf["T2"] = T2
+        end
+      end
+    end
+    if all || "unrestricted_amplitudes" in what
+      if has_amplitudes(io, EC; unrestricted=true)
+        T1a, T1b, T2a, T2b, T2ab = fetch_unrestricted_amplitudes(io, EC)
+        if !isempty(T1a)
+          wf["T1a"] = T1a
+        end
+        if !isempty(T1b)
+          wf["T1b"] = T1b
+        end
+        if !isempty(T2a)
+          wf["T2a"] = T2a
+        end
+        if !isempty(T2b)
+          wf["T2b"] = T2b
+        end
+        if !isempty(T2ab)
+          wf["T2ab"] = T2ab
+        end
+      end
+    end
   end
+  
+  # Load determinants (stored in separate state-specific files)
+  if all || "determinants" in what
+    dets, coeffs = fetch_determinants(EC; start=start, OPattern=OPattern, state=state)
+    if !isempty(dets)
+      wf["determinants"] = dets
+      wf["ci_coefficients"] = coeffs
+    end
+  end
+  
   return wf
 end
 
 """
-    save_wavefunction(EC::ECInfo, wf::AbstractDict)
+    save_wavefunction(EC::ECInfo, wf::AbstractDict; state=1)
 
   Save parts of the wavefunction to file [`WfOptions.store`](@ref ECInfos.WfOptions) or 
   [`WfOptions.dump`](@ref ECInfos.WfOptions) (if `store` is empty).
 
   `wf` can contain any of the following keys:
-  - `basis`: basis set information
-  - `orbitals`: molecular orbitals
-  - `orbital_type`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
-  - `orbital_energies`: molecular orbital energies
-  - `orbital_occupations`: molecular orbital occupations
-  - `amplitudes`: coupled cluster amplitudes
+
+**Orbital data:**
+- `"basis"`: basis set information
+- `"orbitals"`: molecular orbitals (`SpinMatrix`)
+- `"rotations"`: orbital rotations (`SpinMatrix`) - alternative to `"orbitals"`
+- `"orbital_type"`: type of the orbitals (e.g., "RHF", "UHF", "ROHF", "MCSCF")
+- `"orbital_energies"`: molecular orbital energies
+- `"orbital_occupations"`: molecular orbital occupations
+
+**Restricted CC amplitudes:**
+- `"T1"`: singles amplitudes (nvirt × nocc)
+- `"T2"`: doubles amplitudes (nvirt × nvirt × nocc × nocc)
+
+**Unrestricted CC amplitudes:**
+- `"T1a"`, `"T1b"`: α and β singles amplitudes
+- `"T2a"`, `"T2b"`, `"T2ab"`: αα, ββ, and αβ doubles amplitudes
+
+**Selected CI (CIPHI) data:**
+- `"determinants"`: vector of determinants
+- `"ci_coefficients"`: CI coefficients (vector for single state, matrix for multi-state)
+
+# Arguments
+- `wf::AbstractDict`: Dictionary containing wavefunction data
+- `state::Int=1`: State number for determinants (used when `ci_coefficients` is a vector)
+
+# Example
+```julia
+# Save orbitals and amplitudes
+save_wavefunction(EC, Dict(
+    "orbitals" => cMO,
+    "orbital_type" => "RHF",
+    "T1" => T1,
+    "T2" => T2
+))
+
+# Save determinants for ground state
+save_wavefunction(EC, Dict(
+    "determinants" => dets,
+    "ci_coefficients" => coeffs
+); state=1)
+
+# Save multi-state determinants (each column is a state)
+save_wavefunction(EC, Dict(
+    "determinants" => dets,
+    "ci_coefficients" => coeffs_matrix  # n_dets × n_states
+))
+```
 """
-function save_wavefunction(EC::ECInfo, wf::AbstractDict)
-  open_dump(EC, "w") do io
-    if haskey(wf, "orbitals") 
-      if haskey(wf, "basis") && !isempty(wf["basis"])
-        dump_orbitals(io, EC, wf["orbitals"]; 
-                      basis=wf["basis"], type=get(wf, "orbital_type", "USER"), 
-                      energies=get(wf, "orbital_energies", nothing), 
-                      occupations=get(wf, "orbital_occupations", nothing))
-      else
-        dump_rotations(io, EC, wf["orbitals"]; 
+function save_wavefunction(EC::ECInfo, wf::AbstractDict; state::Int=1)
+  # Save orbitals/rotations and amplitudes to the main dump file
+  has_orbitals = haskey(wf, "orbitals") || haskey(wf, "rotations")
+  has_amplitudes = haskey(wf, "T1") || haskey(wf, "T2") || 
+                   haskey(wf, "T1a") || haskey(wf, "T1b") ||
+                   haskey(wf, "T2a") || haskey(wf, "T2b") || haskey(wf, "T2ab")
+  
+  if has_orbitals
+    open_dump(EC, "w") do io
+      if haskey(wf, "orbitals") 
+        if haskey(wf, "basis") && !isempty(wf["basis"])
+          dump_orbitals(io, EC, wf["orbitals"]; 
+                        basis=wf["basis"], type=get(wf, "orbital_type", "USER"), 
+                        energies=get(wf, "orbital_energies", nothing), 
+                        occupations=get(wf, "orbital_occupations", nothing))
+        else
+          dump_rotations(io, EC, wf["orbitals"]; 
+                         type=get(wf, "orbital_type", "USER"), 
+                         energies=get(wf, "orbital_energies", nothing), 
+                         occupations=get(wf, "orbital_occupations", nothing),
+                         biorthogonal=is_biorthogonal(get(wf, "orbital_type", "")))
+        end
+      elseif haskey(wf, "rotations") 
+        dump_rotations(io, EC, wf["rotations"]; 
                        type=get(wf, "orbital_type", "USER"), 
                        energies=get(wf, "orbital_energies", nothing), 
                        occupations=get(wf, "orbital_occupations", nothing),
                        biorthogonal=is_biorthogonal(get(wf, "orbital_type", "")))
       end
-    elseif haskey(wf, "rotations") 
-      dump_rotations(io, EC, wf["rotations"]; 
-                     type=get(wf, "orbital_type", "USER"), 
-                     energies=get(wf, "orbital_energies", nothing), 
-                     occupations=get(wf, "orbital_occupations", nothing),
-                     biorthogonal=is_biorthogonal(get(wf, "orbital_type", "")))
     end
-    # if haskey(wf, "amplitudes")
-    #   dump_amplitudes(io, EC, wf["amplitudes"]; type="CCSD")
-    # end
   end
+  
+  # Save amplitudes (requires update mode if orbitals were written)
+  if has_amplitudes
+    mode = has_orbitals ? "u" : "w"
+    open_dump(EC, mode) do io
+      # Transfer orbitals if we didn't write them above but need them for amplitudes
+      if !has_orbitals
+        orbital_data = fetch_orbital_data(EC)
+        transfer_orbitals_to_store!(io, EC, orbital_data)
+      end
+      
+      # Restricted amplitudes
+      if haskey(wf, "T1") || haskey(wf, "T2")
+        T1 = get(wf, "T1", zeros(0, 0))
+        T2 = get(wf, "T2", zeros(0, 0, 0, 0))
+        dump_amplitudes(io, EC, T1, T2)
+      end
+      
+      # Unrestricted amplitudes
+      if haskey(wf, "T1a") || haskey(wf, "T1b") || 
+         haskey(wf, "T2a") || haskey(wf, "T2b") || haskey(wf, "T2ab")
+        T1a = get(wf, "T1a", zeros(0, 0))
+        T1b = get(wf, "T1b", zeros(0, 0))
+        T2a = get(wf, "T2a", zeros(0, 0, 0, 0))
+        T2b = get(wf, "T2b", zeros(0, 0, 0, 0))
+        T2ab = get(wf, "T2ab", zeros(0, 0, 0, 0))
+        dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
+      end
+    end
+  end
+  
+  # Save determinants (stored in separate state-specific files)
+  if haskey(wf, "determinants") && haskey(wf, "ci_coefficients")
+    dets = wf["determinants"]
+    coeffs = wf["ci_coefficients"]
+    
+    if coeffs isa AbstractMatrix
+      # Multi-state: each column is a state
+      dump_determinants_multistate(EC, dets, coeffs)
+    else
+      # Single state
+      dump_determinants(EC, dets, coeffs; state=state)
+    end
+  end
+  
   return
 end
 
 """
-    copy_wavefunction(EC::ECInfo, tofile::AbstractString="")
+    copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start=false, state=0)
 
   Copy the wavefunction dump file to `tofile`. If `tofile` is not given, copy to the current dump file for writing.
 
+# Arguments
+- `tofile::AbstractString=""`: Destination file path. If empty, copies to `wf.store`.
+- `start::Bool=false`: If true, copy from `wf.start` file instead of `wf.dump`.
+- `state::Int=0`: State number for determinant files. If 0, copies the main dump file.
+                   If >0, copies the state-specific determinant file (e.g., `file_state2.h5`).
+
   Note: This does not check the contents of the files.
+
+# Examples
+```julia
+# Copy current dump to store
+copy_wavefunction(EC)
+
+# Copy start file to a backup
+copy_wavefunction(EC, "backup.h5"; start=true)
+
+# Copy determinant file for state 2
+copy_wavefunction(EC, "state2_backup.h5"; state=2)
+```
 """
-function copy_wavefunction(EC::ECInfo, tofile::AbstractString="")
-  cp(dumpfile(EC, "r")[2], tofile == "" ? dumpfile(EC, "w")[2] : tofile; force=true)
+function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=false, state::Int=0)
+  if state > 0
+    # Copy state-specific determinant file
+    base_filename, _ = dumpfile(EC, "r"; start=start)
+    from_filename = state_filename(base_filename, state)
+    from_fullpath = joinpath(EC.scr, from_filename)
+    
+    if !isfile(from_fullpath)
+      @warn "State file $from_filename not found, nothing to copy."
+      return
+    end
+    
+    if tofile == ""
+      # Default: copy to store location with state suffix
+      base_store, _ = dumpfile(EC, "w")
+      to_fullpath = joinpath(EC.scr, state_filename(base_store, state))
+    else
+      to_fullpath = tofile
+    end
+  else
+    # Copy main dump file
+    from_fullpath = dumpfile(EC, "r"; start=start)[2]
+    to_fullpath = tofile == "" ? dumpfile(EC, "w")[2] : tofile
+  end
+  
+  cp(from_fullpath, to_fullpath; force=true)
   return
 end
 
