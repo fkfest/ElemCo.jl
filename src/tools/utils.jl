@@ -32,7 +32,7 @@ export PairDict
 export VecDict, getvalue, setvalue!, values, resize!, push!
 export setat!, getat, setkeyat!, getkeyat, setvalueat!, getvalueat
 # from input_utils
-export clean_exprstring, is_options_block, parse_options_block
+export clean_exprstring, is_options_block, parse_options_block, separate_kwargs
 export @var2string
 
 export @pib # alias for Base.@propagate_inbounds
