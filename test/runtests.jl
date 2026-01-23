@@ -29,7 +29,7 @@ TESTS = [
 ("DF", ["df_hf", "basis", "df_uhf", "df_mcscf", "levenshtein"]),
 ("System", ["dummy"]),
 ("POS", ["pos_df_hf"]),
-("SVD", ["svd_dc"]),
+("SVD", ["svd_dc","svd_dc_ccsdt"]),
 ("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase"]),
 ("Unit-tests", ["unit_tests", "bufvec"]),
 ]
@@ -38,7 +38,7 @@ TESTS = [
 LONGTESTS = [
 ("Props", ["h2o_udcsd_prop"]),
 ("DMRG", ["h2o_dmrg"]),
-("High-order CC", ["uccsdt", "ccsdt","svd_dc_ccsdt"]),
+("High-order CC", ["uccsdt", "ccsdt"]),
 ]
 
 for (testset, tests) in TESTS
