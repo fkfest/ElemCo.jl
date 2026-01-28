@@ -18,6 +18,7 @@
 * Functions for `H` and `He` are copied from [aug]-cc-pVXZ basis sets to [aug]-p[w]CVXZ basis sets. Functions for Li and Be are copied from [aug]-cc-pCVXZ basis sets to [aug]-pwCVXZ basis sets.
 * `CCDriver` module is renamed to `Drivers`. 
 * Function `transform_fcidump` has been renamed to `transform_fcidump!`.
+* (T) methods automatically use pseudo-canonical transformation if the Fock matrix is not diagonal in the occupied and virtual subspaces.
 
 ### Added
 

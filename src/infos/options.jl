@@ -155,6 +155,8 @@ end
   calc_d_vovv::Bool = false
   """`⟨false⟩` calculate dressed <vv|oo>. """
   calc_d_vvoo::Bool = false
+  """`⟨1.e-6⟩` threshold for checking Fock matrix diagonality in (T). If negative, no check is performed. """
+  fock_diag_thr::Float64 = 1.e-6
   """`⟨true⟩` use density fitting in SVD-DC-CCSDT instead of the integral decomposition. """
   usedf::Bool = true
   """`⟨true⟩` use Cholesky decomposition in SVD-DC-CCSDT instead of SVD in the integral decomposition. """
