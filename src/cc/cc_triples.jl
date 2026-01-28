@@ -174,7 +174,7 @@ function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, th
 end
 
 """
-    pseudo_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String; 
+    pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String; 
                       conjugate::Bool=false)
 
 Transform an array to the pseudo-canonical basis in-place using the transformation matrices.
@@ -194,16 +194,16 @@ Supported array dimensions: 2 and 4.
 # Example
 ```julia
 # Transform T2 amplitudes stored as T^{ab}_{ij} in [a,b,i,j] order
-pseudo_transform!(pct, T2, "vvoo")
+pseudocan_transform!(pct, T2, "vvoo")
 
 # Transform U2 Lagrange multipliers (use conjugate)
-pseudo_transform!(pct, U2, "vvoo"; conjugate=true)
+pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
 
 # Transform mixed-spin integrals v_{aB}^{iJ}
-pseudo_transform!(pct, int_aB_iJ, "vVoO")
+pseudocan_transform!(pct, int_aB_iJ, "vVoO")
 ```
 """
-function pseudo_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String;
+function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String;
                            conjugate::Bool=false)
   if !pct.need_transform
     return arr
@@ -336,24 +336,24 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   
   # Load and  (if needed) transform amplitudes
   T1 = load2idx(EC,"T_vo")
-  pseudo_transform!(pct, T1, "vo")
+  pseudocan_transform!(pct, T1, "vo")
   T2 = load4idx(EC,"T_vvoo")
-  pseudo_transform!(pct, T2, "vvoo")
+  pseudocan_transform!(pct, T2, "vvoo")
 
   # Load and (if needed) transform integrals
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
-  pseudo_transform!(pct, vv_oo, "vvoo"; conjugate=true)
+  pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC,"vvvo")
-  pseudo_transform!(pct, vvvo, "vvvo")
+  pseudocan_transform!(pct, vvvo, "vvvo")
   # ``v_{ia}^{jk}``
   ovoo = ints2(EC,"ovoo")
-  pseudo_transform!(pct, ovoo, "ovoo")
+  pseudocan_transform!(pct, ovoo, "ovoo")
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"
   fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
-  pseudo_transform!(pct, fov, "ov")
+  pseudocan_transform!(pct, fov, "ov")
 
   nocc = n_occ_orbs(EC)
   nvir = n_virt_orbs(EC)
@@ -480,39 +480,39 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
   
   # Load and  (if needed) transform amplitudes
   T1 = load2idx(EC, "T_vo")
-  pseudo_transform!(pct, T1, "vo")
+  pseudocan_transform!(pct, T1, "vo")
   T2 = load4idx(EC, "T_vvoo")
-  pseudo_transform!(pct, T2, "vvoo")
+  pseudocan_transform!(pct, T2, "vvoo")
   
   # U1, U2: Lagrange multipliers use conjugate transformation
   U1 = load2idx(EC, "U_vo")
-  pseudo_transform!(pct, U1, "vo"; conjugate=true)
+  pseudocan_transform!(pct, U1, "vo"; conjugate=true)
   U2 = contra2covariant(load4idx(EC, "U_vvoo"))
-  pseudo_transform!(pct, U2, "vvoo"; conjugate=true)
+  pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
   
   # Load and (if needed) transform integrals
   # v^{ab}_{ij} stored as [a,b,i,j] → "vvoo"
   vv_oo = permutedims(ints2(EC, "oovv"), [3,4,1,2])
-  pseudo_transform!(pct, vv_oo, "vvoo"; conjugate=true)
+  pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # v_{ab}^{ck} as [a,b,c,k] → "vvvo"
   vvvo = ints2(EC, "vvvo")
-  pseudo_transform!(pct, vvvo, "vvvo")
+  pseudocan_transform!(pct, vvvo, "vvvo")
   # v_{ia}^{jk} as [i,a,j,k] → "ovoo"
   ovoo = ints2(EC, "ovoo")
-  pseudo_transform!(pct, ovoo, "ovoo")
+  pseudocan_transform!(pct, ovoo, "ovoo")
   
   # Load and transform integrals for U contractions (conjugate transformation)
   # v^{ab}_{ck} as [a,b,c,k] → "vvvo"
   vv_vo = permutedims(ints2(EC, "vovv"), [3,4,1,2])
-  pseudo_transform!(pct, vv_vo, "vvvo"; conjugate=true)
+  pseudocan_transform!(pct, vv_vo, "vvvo"; conjugate=true)
   # v^{ia}_{jk} as [i,a,j,k] → "ovoo"
   # v_{jk}^{ia}, reordered to v^{ia}_{jk}
   ov_oo = permutedims(ints2(EC, "ooov"), [3,4,1,2])
-  pseudo_transform!(pct, ov_oo, "ovoo"; conjugate=true)
+  pseudocan_transform!(pct, ov_oo, "ovoo"; conjugate=true)
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"
   fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
-  pseudo_transform!(pct, fov, "ov")
+  pseudocan_transform!(pct, fov, "ov")
   
   Enb3 = 0.0
   IntX = zeros(nvir, nocc)
@@ -641,24 +641,24 @@ function calc_pertT_unrestricted(EC::ECInfo)
   end
 
   T1a = load2idx(EC,"T_vo")
-  pseudo_transform!(pct, T1a, "vo")
+  pseudocan_transform!(pct, T1a, "vo")
   T2 = load4idx(EC,"T_vvoo")
-  pseudo_transform!(pct, T2, "vvoo")
+  pseudocan_transform!(pct, T2, "vvoo")
   En3a, Enb3a = values(calc_pertT_samespin(EC, T1a, T2, pct, :α))
 
   T1b = load2idx(EC,"T_VO")
-  pseudo_transform!(pct, T1b, "VO")
+  pseudocan_transform!(pct, T1b, "VO")
   T2ba = permutedims(load4idx(EC,"T_vVoO"), [2,1,4,3])
-  pseudo_transform!(pct, T2ba, "VvOo")
+  pseudocan_transform!(pct, T2ba, "VvOo")
   En3ab, Enb3ab = values(calc_pertT_mixedspin(EC, T1a, T2, T1b, T2ba, pct, :α))
   T2ba = nothing
 
   T2 = load4idx(EC,"T_VVOO")
-  pseudo_transform!(pct, T2, "VVOO")
+  pseudocan_transform!(pct, T2, "VVOO")
   En3b, Enb3b = values(calc_pertT_samespin(EC, T1b, T2, pct, :β))
 
   T2ab = load4idx(EC,"T_vVoO")
-  pseudo_transform!(pct, T2ab, "vVoO")
+  pseudocan_transform!(pct, T2ab, "vVoO")
   En3ba, Enb3ba = values(calc_pertT_mixedspin(EC, T1b, T2, T1a, T2ab, pct, :β))
 
   En3 = En3a + En3b + En3ab + En3ba 
@@ -681,33 +681,33 @@ function calc_ΛpertT_unrestricted(EC::ECInfo)
   end
   
   U1a = load2idx(EC,"U_vo")
-  pseudo_transform!(pct, U1a, "vo"; conjugate=true)
+  pseudocan_transform!(pct, U1a, "vo"; conjugate=true)
   U1b = load2idx(EC,"U_VO")
-  pseudo_transform!(pct, U1b, "VO"; conjugate=true)
+  pseudocan_transform!(pct, U1b, "VO"; conjugate=true)
   T2 = load4idx(EC,"T_vvoo")
-  pseudo_transform!(pct, T2, "vvoo")
+  pseudocan_transform!(pct, T2, "vvoo")
   U2 = load4idx(EC,"U_vvoo")
-  pseudo_transform!(pct, U2, "vvoo"; conjugate=true)
+  pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
   En3a, Enb3a = values(calc_ΛpertT_samespin(EC, T2, U1a, U2, pct, :α))
 
   T2ba = permutedims(load4idx(EC,"T_vVoO"), [2,1,4,3])
-  pseudo_transform!(pct, T2ba, "VvOo")
+  pseudocan_transform!(pct, T2ba, "VvOo")
   U2ba = permutedims(load4idx(EC,"U_vVoO"), [2,1,4,3])
-  pseudo_transform!(pct, U2ba, "VvOo"; conjugate=true)
+  pseudocan_transform!(pct, U2ba, "VvOo"; conjugate=true)
   En3ab, Enb3ab = values(calc_ΛpertT_mixedspin(EC, T2, T2ba, U1a, U2, U1b, U2ba, pct, :α))
   T2ba = nothing
   U2ba = nothing
 
   T2 = load4idx(EC,"T_VVOO")
-  pseudo_transform!(pct, T2, "VVOO")
+  pseudocan_transform!(pct, T2, "VVOO")
   U2 = load4idx(EC,"U_VVOO")
-  pseudo_transform!(pct, U2, "VVOO"; conjugate=true)
+  pseudocan_transform!(pct, U2, "VVOO"; conjugate=true)
   En3b, Enb3b = values(calc_ΛpertT_samespin(EC, T2, U1b, U2, pct, :β))
 
   T2ab = load4idx(EC,"T_vVoO")
-  pseudo_transform!(pct, T2ab, "vVoO")
+  pseudocan_transform!(pct, T2ab, "vVoO")
   U2ab = load4idx(EC,"U_vVoO")
-  pseudo_transform!(pct, U2ab, "vVoO"; conjugate=true)
+  pseudocan_transform!(pct, U2ab, "vVoO"; conjugate=true)
   En3ba, Enb3ba = values(calc_ΛpertT_mixedspin(EC, T2, T2ab, U1b, U2, U1a, U2ab, pct, :β))
 
   En3 = En3a + En3b + En3ab + En3ba 
@@ -730,17 +730,17 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
   v = space4spin('v', spin==:α)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
-  pseudo_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
-  pseudo_transform!(pct, vvvo, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
   vooo = 0.5*ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudo_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o)
   m = space4spin('m', spin==:α)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
-  pseudo_transform!(pct, fov, o*v)
+  pseudocan_transform!(pct, fov, o*v)
   nocc = length(SP[o])
   nvir = length(SP[v])
   ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
@@ -835,53 +835,53 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
   V = space4spin('v', !isα)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
-  pseudo_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
-  pseudo_transform!(pct, vvvo, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``v_{ai}^{kj} - v_{ai}^{jk}``
   vooo = ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudo_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o)
   if isα
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, o*O*v*V),[3,4,1,2])
-    pseudo_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = ints2(EC, v*V*v*O)
-    pseudo_transform!(pct, vVvO, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = permutedims(ints2(EC, v*V*o*V),[2,1,4,3])
-    pseudo_transform!(pct, VvVo, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = ints2(EC, v*O*o*O)
-    pseudo_transform!(pct, vOoO, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = permutedims(ints2(EC, o*V*o*O),[2,1,4,3])
-    pseudo_transform!(pct, VoOo, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
   else
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, O*o*V*v),[4,3,2,1])
-    pseudo_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = permutedims(ints2(EC, V*v*O*v),[2,1,4,3])
-    pseudo_transform!(pct, vVvO, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = ints2(EC, V*v*V*o)
-    pseudo_transform!(pct, VvVo, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = permutedims(ints2(EC, O*v*O*o),[2,1,4,3])
-    pseudo_transform!(pct, vOoO, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = ints2(EC, V*o*O*o)
-    pseudo_transform!(pct, VoOo, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
   end
   m = space4spin('m', isα)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
-  pseudo_transform!(pct, fov, o*v)
+  pseudocan_transform!(pct, fov, o*v)
   M = space4spin('m', !isα)
   fOV = load2idx(EC,"f_"*M*M)[SP[O],SP[V]]
-  pseudo_transform!(pct, fOV, O*V)
+  pseudocan_transform!(pct, fOV, O*V)
 
   nocc = length(SP[o])
   nOcc = length(SP[O])
@@ -989,24 +989,24 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
   v = space4spin('v', spin==:α)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
-  pseudo_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
-  pseudo_transform!(pct, vvvo, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
   vooo = 0.5*ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudo_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o)
   # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
   vv_vo = permutedims(ints2(EC, v*o*v*v), [3,4,1,2])
-  pseudo_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
+  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
   # ``0.5(v_{kj}^{ai} - v_{jk}^{ai})``, reordered to ``\bar v^{ai}_{kj}``
   vo_oo = 0.5*permutedims(ints2(EC, o*o*v*o), [3,4,1,2])
   vo_oo -= permutedims(vo_oo,[1,2,4,3])
-  pseudo_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
+  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
   m = space4spin('m', spin==:α)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
-  pseudo_transform!(pct, fov, o*v)
+  pseudocan_transform!(pct, fov, o*v)
   nocc = length(SP[o])
   nvir = length(SP[v])
   ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
@@ -1129,84 +1129,84 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct,
   V = space4spin('v', !isα)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
-  pseudo_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
-  pseudo_transform!(pct, vvvo, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``v_{ai}^{kj} - v_{ai}^{jk}``
   vooo = ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudo_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o)
   # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
   vv_vo = permutedims(ints2(EC, v*o*v*v), [3,4,1,2])
-  pseudo_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
+  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
   # ``v_{kj}^{ai} - v_{jk}^{ai}``, reordered to ``\bar v^{ai}_{kj}``
   vo_oo = permutedims(ints2(EC, o*o*v*o), [3,4,1,2])
   vo_oo -= permutedims(vo_oo,[1,2,4,3])
-  pseudo_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
+  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
   if isα
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, o*O*v*V),[3,4,1,2])
-    pseudo_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = ints2(EC, v*V*v*O)
-    pseudo_transform!(pct, vVvO, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = permutedims(ints2(EC, v*V*o*V),[2,1,4,3])
-    pseudo_transform!(pct, VvVo, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = ints2(EC, v*O*o*O)
-    pseudo_transform!(pct, vOoO, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = permutedims(ints2(EC, o*V*o*O),[2,1,4,3])
-    pseudo_transform!(pct, VoOo, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
     # ``v_{cK}^{aB}``, reordered to ``v^{aB}_{cK}``
     vV_vO = permutedims(ints2(EC, v*O*v*V), [3,4,1,2])
-    pseudo_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
+    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
     # ``v_{Ck}^{Ab}``, reordered to ``v^{Ab}_{Ck}``
     Vv_Vo = permutedims(ints2(EC, o*V*v*V),[4,3,2,1])
-    pseudo_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
+    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
     # ``v_{kJ}^{aI}``, reordered to ``v^{aI}_{kJ}``
     vO_oO = permutedims(ints2(EC, o*O*v*O), [3,4,1,2])
-    pseudo_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
+    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
     # ``v_{Kj}^{Ai}``, reordered to ``v^{Ai}_{Kj}``
     Vo_Oo = permutedims(ints2(EC, o*O*o*V),[4,3,2,1])
-    pseudo_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
+    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
   else
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, O*o*V*v),[4,3,2,1])
-    pseudo_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = permutedims(ints2(EC, V*v*O*v),[2,1,4,3])
-    pseudo_transform!(pct, vVvO, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = ints2(EC, V*v*V*o)
-    pseudo_transform!(pct, VvVo, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = permutedims(ints2(EC, O*v*O*o),[2,1,4,3])
-    pseudo_transform!(pct, vOoO, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = ints2(EC, V*o*O*o)
-    pseudo_transform!(pct, VoOo, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
     # ``v_{cK}^{aB}``, reordered to ``v^{aB}_{cK}``
     vV_vO = permutedims(ints2(EC, O*v*V*v),[4,3,2,1])
-    pseudo_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
+    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
     # ``v_{Ck}^{Ab}``, reordered to ``v^{Ab}_{Ck}``
     Vv_Vo = permutedims(ints2(EC, V*o*V*v),[3,4,1,2])
-    pseudo_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
+    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
     # ``v_{kJ}^{aI}``, reordered to ``v^{aI}_{kJ}``
     vO_oO = permutedims(ints2(EC, O*o*O*v),[4,3,2,1])
-    pseudo_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
+    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
     # ``v_{Kj}^{Ai}``, reordered to ``v^{Ai}_{Kj}``
     Vo_Oo = permutedims(ints2(EC, O*o*V*o),[3,4,1,2])
-    pseudo_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
+    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
   end
   m = space4spin('m', isα)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
-  pseudo_transform!(pct, fov, o*v)
+  pseudocan_transform!(pct, fov, o*v)
   M = space4spin('m', !isα)
   fOV = load2idx(EC,"f_"*M*M)[SP[O],SP[V]]
-  pseudo_transform!(pct, fOV, O*V)
+  pseudocan_transform!(pct, fOV, O*V)
 
   nocc = length(SP[o])
   nOcc = length(SP[O])
