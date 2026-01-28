@@ -492,6 +492,10 @@ end
 """
 function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
   ecmethod0 = ECMethod("CCSD(T)")
+  if EC.options.cc.skip_pert_t
+    @assert !EC.options.cc.calc_t3_for_decomposition "`cc.calc_t3_for_decomposition` must be false when skipping perturbative (T) calculation!"
+    ecmethod0 = ECMethod("CCSD")
+  end
   if is_unrestricted(ecmethod) || has_prefix(ecmethod, "R")
     error("SVD-Triples only implemented for closed-shell methods!")
   end
@@ -507,14 +511,17 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
   output_E_method(ECC["E"]+EHF, main_name, "total energy:      ")
   if haskey(ECC, "SVD-CCSD(T)")
     output_E_method(ECC["E"] - ECC["SVD-CCSD(T)"], "SVD-DC-CCSDT - SVD-CCSD(T):")
-    output_E_method(ECC["SVD-CCSD(T)"] - energies["CCSD(T)c"], "SVD-CCSD(T) - CCSD(T):")
-    ecorr = ECC["E"] - ECC["SVD-CCSD(T)"] + energies["CCSD(T)c"]
-    output_E_method(ecorr, "(T)-corrected SVD-DC-CCSDT", "correlation energy:")
-    output_E_method(ecorr + EHF, "(T)-corrected SVD-DC-CCSDT", "total energy:      ")
     energies = merge(energies, "SVD-CCSD(T)c"=>(ECC["SVD-CCSD(T)"], "SVD-CCSD(T) correlation energy"),
-                    "SVD-CCSD(T)"=>(ECC["SVD-CCSD(T)"]+EHF, "SVD-CCSD(T) total energy"),
+                    "SVD-CCSD(T)"=>(ECC["SVD-CCSD(T)"]+EHF, "SVD-CCSD(T) total energy"))
+    if haskey(energies, "CCSD(T)c")
+      output_E_method(ECC["SVD-CCSD(T)"] - energies["CCSD(T)c"], "SVD-CCSD(T) - CCSD(T):")
+      ecorr = ECC["E"] - ECC["SVD-CCSD(T)"] + energies["CCSD(T)c"]
+      output_E_method(ecorr, "(T)-corrected SVD-DC-CCSDT", "correlation energy:")
+      output_E_method(ecorr + EHF, "(T)-corrected SVD-DC-CCSDT", "total energy:      ")
+      energies = merge(energies, 
                     main_name*"+c"=>(ecorr, "$main_name correlation energy with SVD-CCSD(T) correction"),
                     main_name*"+"=>(ecorr+EHF, "$main_name total energy with SVD-CCSD(T) correction"))
+    end
   end
   t1 = print_time(EC, t1,"SVD-T",1)
   println()

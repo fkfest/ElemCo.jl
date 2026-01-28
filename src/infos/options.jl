@@ -163,6 +163,8 @@ end
   usecholesky::Bool = true
   """`⟨false⟩` calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
+  """`⟨false⟩` skip (T) calculation in SVD-DC-CCSDT. """
+  skip_pert_t::Bool = false
   """`⟨true⟩` project out the T^iii contribution from the density matrix in decomposition in SVD-DC-CCSDT. """
   project_t3iii::Bool = true
   """`⟨false⟩` calculated ``V_{aX}^{iL}`` in SVD-DC-CCSDT using a projection to the X space as
