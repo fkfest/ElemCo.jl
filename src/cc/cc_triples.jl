@@ -1,5 +1,294 @@
 # triples routines
 
+
+"""
+    PseudoCanonicalTransform
+
+Holds transformation matrices for pseudo-canonicalization of amplitudes and integrals.
+
+For biorthogonal systems, the Fock matrix is non-Hermitian and requires separate
+left (L) and right (R) eigenvector matrices: F = R * Diagonal(ϵ) * L^†.
+
+The transformation convention is:
+- Lower indices (first half of index string) → transformed using Left eigenvectors
+- Upper indices (second half of index string) → transformed using Right eigenvectors
+"""
+struct PseudoCanonicalTransform
+  "Whether any transformation is needed"
+  need_transform::Bool
+  "Right eigenvectors for occupied orbitals (SpinMatrix with α and β)"
+  Ro::SpinMatrix{Float64}
+  "Left eigenvectors for occupied orbitals (SpinMatrix with α and β)"
+  Lo::SpinMatrix{Float64}
+  "Right eigenvectors for virtual orbitals (SpinMatrix with α and β)"
+  Rv::SpinMatrix{Float64}
+  "Left eigenvectors for virtual orbitals (SpinMatrix with α and β)"
+  Lv::SpinMatrix{Float64}
+  "Pseudo-canonical occupied orbital energies (α and β)"
+  ϵo::SpinVector{Float64}
+  "Pseudo-canonical virtual orbital energies (α and β)"
+  ϵv::SpinVector{Float64}
+end
+
+"""
+    PseudoCanonicalTransform(EC::ECInfo; restricted::Bool=true)
+
+Construct a PseudoCanonicalTransform by checking and diagonalizing Fock matrix blocks.
+
+If the Fock matrix is already diagonal (within threshold), returns identity transforms.
+For non-diagonal blocks, computes the eigenvectors for pseudo-canonicalization.
+"""
+function PseudoCanonicalTransform(EC::ECInfo; restricted::Bool=true)
+  thr = EC.options.cc.fock_diag_thr
+  hermitian = !is_similarity_transformed(EC.fd) 
+  if restricted
+    is_diag_oo, is_diag_vv, F_oo, F_vv = check_fock_diagonal_blocks(EC)
+    # Check occupied block
+    ϵo, Ro, Lo, rotate_oo = compute_pseudocanonical_transform(F_oo; skip=is_diag_oo, thr, hermitian)
+    # Check virtual block
+    ϵv, Rv, Lv, rotate_vv = compute_pseudocanonical_transform(F_vv; skip=is_diag_vv, thr, hermitian)
+    
+    return PseudoCanonicalTransform(
+      rotate_oo || rotate_vv,
+      SpinMatrix(Ro), SpinMatrix(Lo),
+      SpinMatrix(Rv), SpinMatrix(Lv),
+      SpinVector(ϵo), SpinVector(ϵv)
+    )
+  else
+    # Unrestricted case
+    is_diag_oo_a, is_diag_vv_a, F_oo_a, F_vv_a = check_fock_diagonal_blocks(EC, :α)
+    is_diag_oo_b, is_diag_vv_b, F_oo_b, F_vv_b = check_fock_diagonal_blocks(EC, :β)
+    
+    # Alpha occupied
+    ϵo_α, Ro_α, Lo_α, rotate_oo_a = compute_pseudocanonical_transform(F_oo_a; skip=is_diag_oo_a, thr, hermitian)
+    # Alpha virtual
+    ϵv_α, Rv_α, Lv_α, rotate_vv_a = compute_pseudocanonical_transform(F_vv_a; skip=is_diag_vv_a, thr, hermitian)
+    # Beta occupied
+    ϵo_β, Ro_β, Lo_β, rotate_oo_b = compute_pseudocanonical_transform(F_oo_b; skip=is_diag_oo_b, thr, hermitian)
+    # Beta virtual
+    ϵv_β, Rv_β, Lv_β, rotate_vv_b = compute_pseudocanonical_transform(F_vv_b; skip=is_diag_vv_b, thr, hermitian)
+    
+    return PseudoCanonicalTransform(
+      rotate_oo_a || rotate_vv_a || rotate_oo_b || rotate_vv_b,
+      SpinMatrix(Ro_α, Ro_β), SpinMatrix(Lo_α, Lo_β),
+      SpinMatrix(Rv_α, Rv_β), SpinMatrix(Lv_α, Lv_β),
+      SpinVector(ϵo_α, ϵo_β), SpinVector(ϵv_α, ϵv_β)
+    )
+  end
+end
+
+"""
+    check_fock_diagonal_blocks(EC::ECInfo, spin::Symbol=:α)
+
+Check if the Fock matrix occ-occ and virt-virt blocks are diagonal.
+Returns `(is_diagonal_oo, is_diagonal_vv, F_oo, F_vv)`.
+"""
+function check_fock_diagonal_blocks(EC::ECInfo, spin::Symbol=:α)
+  thr = EC.options.cc.fock_diag_thr
+  SP = EC.space
+  if spin == :α
+    fock = load2idx(EC, "f_mm")
+    o_space = SP['o']
+    v_space = SP['v']
+  else
+    fock = load2idx(EC, "f_MM")
+    o_space = SP['O']
+    v_space = SP['V']
+  end
+  
+  F_oo = fock[o_space, o_space]
+  F_vv = fock[v_space, v_space]
+  
+  # Check off-diagonal elements
+  max_offdiag_oo = maximum(abs.(F_oo - Diagonal(diag(F_oo))); init=0.0)
+  max_offdiag_vv = maximum(abs.(F_vv - Diagonal(diag(F_vv))); init=0.0)
+  is_diagonal_oo = max_offdiag_oo < thr
+  is_diagonal_vv = max_offdiag_vv < thr
+  if thr < 0.0
+    # No check requested
+    println("Skipping Fock matrix diagonality check (fock_diag_thr < 0)")
+    is_diagonal_oo = true
+    is_diagonal_vv = true
+  end 
+  if !is_diagonal_oo
+    println("Max off-diagonal in Fock $spin occ-occ: $max_offdiag_oo (thr=$thr)")
+  end
+  if !is_diagonal_vv
+    println("Max off-diagonal in Fock $spin virt-virt: $max_offdiag_vv (thr=$thr)")
+  end
+  
+  return is_diagonal_oo, is_diagonal_vv, F_oo, F_vv
+end
+
+"""
+    compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, thr::Float64=1e-6, hermitian::Bool=true)
+
+Diagonalize a potentially non-Hermitian Fock block.
+Returns `(ϵ, Cr, Cl, is_beneficial)`: eigenvalues, right/left eigenvector matrices,
+and a flag indicating whether the transformation is beneficial.
+
+If `skip=true`, skips the diagonalization and returns identity transforms.
+If `hermitian=true`, assumes the Fock block is Hermitian and uses `eigen(Hermitian(...))`.
+The transformation is considered beneficial if the transformed Fock block is significantly 
+different from the original. 
+
+Uses `rotate_eigenvectors_to_real` for complex pairs.
+"""
+function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, thr::Float64=1e-6, hermitian::Bool=true)
+  if skip
+    ϵ = diag(F_block)
+    Ctr = Matrix{Float64}(I, size(F_block))
+    return ϵ, Ctr, Ctr, false
+  end
+  if hermitian
+    eigvals, eigvecs = eigen(Hermitian(F_block))
+    eigvecs_left = eigvecs_right = eigvecs
+    ϵ = eigvals
+  else
+    # Diagonalize (general eigenvalue problem for non-Hermitian)
+    eigvals, eigvecs_right = eigen(F_block)
+  
+    # Handle complex eigenvalues - rotate complex conjugate pairs to real
+    eigvecs_right, ϵ = rotate_eigenvectors_to_real(eigvecs_right, eigvals)
+  
+    # Compute left eigenvectors: L = (R^{-1})^T
+    eigvecs_left = (inv(eigvecs_right))'
+  
+    # Balance norms of left and right eigenvectors
+    eigvecs_right, eigvecs_left = balance_norms!(eigvecs_right, eigvecs_left)
+  end
+  
+  # Check if transformation is beneficial
+  # Compute transformed Fock: L' * F * R
+  F_transformed = eigvecs_left' * F_block * eigvecs_right
+  max_diff = maximum(abs.(F_block - F_transformed); init=0.0)
+  
+  # Transformation is beneficial if the resulting Fock is significantly different
+  is_beneficial = max_diff > thr
+  if !is_beneficial 
+    # Transformation not beneficial, use identity
+    ϵ = diag(F_block)
+    eigvecs_left = eigvecs_right = Matrix{Float64}(I, size(F_block))
+  end
+  return ϵ, eigvecs_right, eigvecs_left, is_beneficial
+end
+
+"""
+    pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String; 
+                      conjugate::Bool=false)
+
+Transform an array to the pseudo-canonical basis in-place using the transformation matrices.
+
+The `indices` string specifies the index type for each dimension:
+- `'o'`/`'O'`: occupied α/β
+- `'v'`/`'V'`: virtual α/β
+
+The transformation convention (canonical order):
+- First half of indices = lower indices (subscript/bra) → Left eigenvectors
+- Second half of indices = upper indices (superscript/ket) → Right eigenvectors
+
+For `conjugate=true`, the L/R roles are swapped (used for Lagrange multipliers).
+
+Supported array dimensions: 2 and 4.
+
+# Example
+```julia
+# Transform T2 amplitudes stored as T_{ab}^{ij} in [a,b,i,j] order
+pseudocan_transform!(pct, T2, "vvoo")
+
+# Transform U2 Lagrange multipliers (use conjugate)
+pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
+
+# Transform mixed-spin integrals v_{aB}^{iJ}
+pseudocan_transform!(pct, int_aB_iJ, "vVoO")
+```
+"""
+function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String;
+                           conjugate::Bool=false)
+  if !pct.need_transform
+    return arr
+  end
+  
+  ndim = ndims(arr)
+  @assert length(indices) == ndim "indices string length must match array dimensions"
+  @assert ndim ∈ (2, 4) "only 2-index and 4-index arrays are supported"
+  
+  half = ndim ÷ 2
+  
+  # Build list of transformation matrices for each index
+  # First half: lower indices → L (or R if conjugate)
+  # Second half: upper indices → R (or L if conjugate)
+  transforms = Vector{Matrix{Float64}}(undef, ndim)
+  
+  for (i, idx) in enumerate(indices)
+    is_first_half = i <= half
+    # For first half (lower): use L, for second half (upper): use R
+    # If conjugate, swap L↔R
+    use_right = !is_first_half ⊻ conjugate  # XOR to swap if conjugate
+    
+    if idx == 'o'
+      transforms[i] = use_right ? pct.Ro.α : pct.Lo.α
+    elseif idx == 'O'
+      transforms[i] = use_right ? pct.Ro.β : pct.Lo.β
+    elseif idx == 'v'
+      transforms[i] = use_right ? pct.Rv.α : pct.Lv.α
+    elseif idx == 'V'
+      transforms[i] = use_right ? pct.Rv.β : pct.Lv.β
+    else
+      error("Unknown index type '$idx'. Use 'o', 'O', 'v', or 'V'.")
+    end
+  end
+  
+  if ndim == 2
+    transform_2idx!(arr, transforms[1], transforms[2])
+  else  # ndim == 4
+    transform_4idx!(arr, transforms[1], transforms[2], transforms[3], transforms[4])
+  end
+  
+  return arr
+end
+
+"""
+    transform_2idx!(arr::AbstractMatrix, U1::Matrix, U2::Matrix)
+
+Transform a 2-index array in-place using @mtensor.
+Implements: arr[p',q'] = U1[p,p'] * U2[q,q'] * arr[p,q]
+"""
+function transform_2idx!(arr::AbstractMatrix, U1::Matrix, U2::Matrix)
+  @mtensor tmp[p, q] := U1[r, p] * arr[r, q]
+  @mtensor arr[p, q] = tmp[p, r] * U2[r, q]
+  return arr
+end
+
+"""
+    transform_4idx!(arr::AbstractArray{T,4}, U1::Matrix, U2::Matrix, U3::Matrix, U4::Matrix) where T
+
+Transform a 4-index array in-place using @mtensor.
+Implements: arr[p',q',r',s'] = U1[p,p'] * U2[q,q'] * U3[r,r'] * U4[s,s'] * arr[p,q,r,s]
+"""
+function transform_4idx!(arr::AbstractArray{T,4}, U1::Matrix, U2::Matrix, 
+                         U3::Matrix, U4::Matrix) where T
+  @mtensor tmp[a, b, c, d] := U1[p, a] * arr[p, b, c, d]
+  @mtensor arr[a, b, c, d] = tmp[a, p, c, d] * U2[p, b]
+  @mtensor tmp[a, b, c, d] = arr[a, b, p, d] * U3[p, c]
+  @mtensor arr[a, b, c, d] = tmp[a, b, c, p] * U4[p, d]
+  return arr
+end
+
+"""
+    get_pseudo_orbital_energies(pct::PseudoCanonicalTransform, spin::Symbol=:α)
+
+Get pseudo-canonical orbital energies from the transform object.
+Returns `(ϵo, ϵv)` for the specified spin.
+"""
+function get_pseudo_orbital_energies(pct::PseudoCanonicalTransform, spin::Symbol=:α)
+  if spin == :α
+    return pct.ϵo.α, pct.ϵv.α
+  else
+    return pct.ϵo.β, pct.ϵv.β
+  end
+end
+
 """
     calc_pertT(EC::ECInfo, method::ECMethod; save_t3=false)
 
@@ -33,28 +322,49 @@ end
     calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
 
   Calculate (T) correction for closed-shell CCSD.
+  If the Fock matrix is not diagonal in the occ-occ and virt-virt blocks,
+  performs pseudo-canonicalization before the (T) calculation.
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
 function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
+  # Build pseudo-canonical transformation
+  pct = PseudoCanonicalTransform(EC; restricted=true)
+  if pct.need_transform
+    println("Fock matrix not diagonal - performing pseudo-canonicalization for CCSD(T)")
+  end
+  
+  # Load and  (if needed) transform amplitudes
   T1 = load2idx(EC,"T_vo")
+  pseudocan_transform!(pct, T1, "vo")
   T2 = load4idx(EC,"T_vvoo")
+  pseudocan_transform!(pct, T2, "vvoo")
+
+  # Load and (if needed) transform integrals
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
+  pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC,"vvvo")
+  pseudocan_transform!(pct, vvvo, "vvvo")
   # ``v_{ia}^{jk}``
   ovoo = ints2(EC,"ovoo")
+  pseudocan_transform!(pct, ovoo, "ovoo")
+
+  # Transform Fock ov block: f_{ia} as [i,a] → "ov"
+  fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
+  pseudocan_transform!(pct, fov, "ov")
+
   nocc = n_occ_orbs(EC)
   nvir = n_virt_orbs(EC)
-  ϵo, ϵv = orbital_energies(EC)
+  ϵo, ϵv = get_pseudo_orbital_energies(pct)
 
-  X = zeros(nvir,nvir,nvir)
-  Kijk = zeros(nvir,nvir,nvir)
+  X = zeros(nvir, nvir, nvir)
+  Kijk = zeros(nvir, nvir, nvir)
 
   Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
+  IntX = zeros(nvir, nocc)
+  IntY = zeros(nvir, nocc)
   if save_t3
     t3file, T3 = newmmap(EC,"T_vvvooo",(nvir,nvir,nvir,uppertriangular_index(nocc,nocc,nocc)))
   end
@@ -141,7 +451,6 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   # singles contribution
   @mtensor En3 = T1[a,i] * IntX[a,i]
   # fock contribution
-  fov = load2idx(EC,"f_mm")[EC.space['o'],EC.space['v']]
   @mtensor En3 += fov[i,a] * IntY[a,i]
   En3 += Enb3
   return OutDict("ET3"=>En3, "ET3b"=>Enb3)
@@ -154,29 +463,60 @@ end
 
   The amplitudes are stored in `T_vvoo` file, 
   and the Lagrangian multipliers are stored in `U_vvoo` file.
+  If the Fock matrix is not diagonal in the occ-occ and virt-virt blocks,
+  performs pseudo-canonicalization before the (T) calculation.
   Return ( `"ET3"`=(T) energy, `"ET3b"`=[T] energy) `OutDict`.
 """
 function calc_ΛpertT_closed_shell(EC::ECInfo)
-  T1 = load2idx(EC,"T_vo")
-  T2 = load4idx(EC,"T_vvoo")
-  U1 = load2idx(EC,"U_vo")
-  U2 = contra2covariant(load4idx(EC,"U_vvoo"))
-  # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
-  # ``v_{ab}^{ck}``
-  vvvo = ints2(EC,"vvvo")
-  # ``v_{ia}^{jk}``
-  ovoo = ints2(EC,"ovoo")
-  # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
-  vv_vo = permutedims(ints2(EC,"vovv"),[3,4,1,2])
-  # ``v_{jk}^{ia}``, reordered to ``v^{ia}_{jk}``
-  ov_oo = permutedims(ints2(EC,"ooov"),[3,4,1,2])
+  # Build pseudo-canonical transformation
+  pct = PseudoCanonicalTransform(EC; restricted=true)
+  if pct.need_transform
+    println("Fock matrix not diagonal - performing pseudo-canonicalization for ΛCCSD(T)")
+  end
+  
   nocc = n_occ_orbs(EC)
   nvir = n_virt_orbs(EC)
-  ϵo, ϵv = orbital_energies(EC)
+  ϵo, ϵv = get_pseudo_orbital_energies(pct)
+  
+  # Load and  (if needed) transform amplitudes
+  T1 = load2idx(EC, "T_vo")
+  pseudocan_transform!(pct, T1, "vo")
+  T2 = load4idx(EC, "T_vvoo")
+  pseudocan_transform!(pct, T2, "vvoo")
+  
+  # U1, U2: Lagrange multipliers use conjugate transformation
+  U1 = load2idx(EC, "U_vo")
+  pseudocan_transform!(pct, U1, "vo"; conjugate=true)
+  U2 = contra2covariant(load4idx(EC, "U_vvoo"))
+  pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
+  
+  # Load and (if needed) transform integrals
+  # v^{ab}_{ij} stored as [a,b,i,j] → "vvoo"
+  vv_oo = permutedims(ints2(EC, "oovv"), [3,4,1,2])
+  pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
+  # v_{ab}^{ck} as [a,b,c,k] → "vvvo"
+  vvvo = ints2(EC, "vvvo")
+  pseudocan_transform!(pct, vvvo, "vvvo")
+  # v_{ia}^{jk} as [i,a,j,k] → "ovoo"
+  ovoo = ints2(EC, "ovoo")
+  pseudocan_transform!(pct, ovoo, "ovoo")
+  
+  # Load and transform integrals for U contractions (conjugate transformation)
+  # v^{ab}_{ck} as [a,b,c,k] → "vvvo"
+  vv_vo = permutedims(ints2(EC, "vovv"), [3,4,1,2])
+  pseudocan_transform!(pct, vv_vo, "vvvo"; conjugate=true)
+  # v^{ia}_{jk} as [i,a,j,k] → "ovoo"
+  # v_{jk}^{ia}, reordered to v^{ia}_{jk}
+  ov_oo = permutedims(ints2(EC, "ooov"), [3,4,1,2])
+  pseudocan_transform!(pct, ov_oo, "ovoo"; conjugate=true)
+
+  # Transform Fock ov block: f_{ia} as [i,a] → "ov"
+  fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
+  pseudocan_transform!(pct, fov, "ov")
+  
   Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
+  IntX = zeros(nvir, nocc)
+  IntY = zeros(nvir, nocc)
   for k = 1:nocc 
     for j = 1:k
       prefac = (j == k) ? 1.0 : 2.0
@@ -281,7 +621,6 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
   # singles contribution
   @mtensor En3 = 0.5 * (U1[a,i] * IntX[a,i])
   # fock contribution
-  fov = load2idx(EC,"f_mm")[EC.space['o'],EC.space['v']]
   @mtensor En3 += fov[i,a] * IntY[a,i]
   En3 += Enb3
   return OutDict("ET3"=>En3, "ET3b"=>Enb3)
@@ -295,20 +634,32 @@ end
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
 function calc_pertT_unrestricted(EC::ECInfo)
+  # Build pseudo-canonical transformation
+  pct = PseudoCanonicalTransform(EC; restricted=false)
+  if pct.need_transform
+    println("Fock matrix not diagonal - performing pseudo-canonicalization for UCCSD(T)")
+  end
+
   T1a = load2idx(EC,"T_vo")
+  pseudocan_transform!(pct, T1a, "vo")
   T2 = load4idx(EC,"T_vvoo")
-  En3a, Enb3a = values(calc_pertT_samespin(EC, T1a, T2, :α))
+  pseudocan_transform!(pct, T2, "vvoo")
+  En3a, Enb3a = values(calc_pertT_samespin(EC, T1a, T2, pct, :α))
 
   T1b = load2idx(EC,"T_VO")
+  pseudocan_transform!(pct, T1b, "VO")
   T2ba = permutedims(load4idx(EC,"T_vVoO"), [2,1,4,3])
-  En3ab, Enb3ab = values(calc_pertT_mixedspin(EC, T1a, T2, T1b, T2ba, :α))
+  pseudocan_transform!(pct, T2ba, "VvOo")
+  En3ab, Enb3ab = values(calc_pertT_mixedspin(EC, T1a, T2, T1b, T2ba, pct, :α))
   T2ba = nothing
 
   T2 = load4idx(EC,"T_VVOO")
-  En3b, Enb3b = values(calc_pertT_samespin(EC, T1b, T2, :β))
+  pseudocan_transform!(pct, T2, "VVOO")
+  En3b, Enb3b = values(calc_pertT_samespin(EC, T1b, T2, pct, :β))
 
   T2ab = load4idx(EC,"T_vVoO")
-  En3ba, Enb3ba = values(calc_pertT_mixedspin(EC, T1b, T2, T1a, T2ab, :β))
+  pseudocan_transform!(pct, T2ab, "vVoO")
+  En3ba, Enb3ba = values(calc_pertT_mixedspin(EC, T1b, T2, T1a, T2ab, pct, :β))
 
   En3 = En3a + En3b + En3ab + En3ba 
   Enb3 = Enb3a + Enb3b + Enb3ab + Enb3ba
@@ -323,25 +674,41 @@ end
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
 function calc_ΛpertT_unrestricted(EC::ECInfo)
+  # Build pseudo-canonical transformation
+  pct = PseudoCanonicalTransform(EC; restricted=false)
+  if pct.need_transform
+    println("Fock matrix not diagonal - performing pseudo-canonicalization for ΛUCCSD(T)")
+  end
+  
   U1a = load2idx(EC,"U_vo")
+  pseudocan_transform!(pct, U1a, "vo"; conjugate=true)
   U1b = load2idx(EC,"U_VO")
+  pseudocan_transform!(pct, U1b, "VO"; conjugate=true)
   T2 = load4idx(EC,"T_vvoo")
+  pseudocan_transform!(pct, T2, "vvoo")
   U2 = load4idx(EC,"U_vvoo")
-  En3a, Enb3a = values(calc_ΛpertT_samespin(EC, T2, U1a, U2, :α))
+  pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
+  En3a, Enb3a = values(calc_ΛpertT_samespin(EC, T2, U1a, U2, pct, :α))
 
   T2ba = permutedims(load4idx(EC,"T_vVoO"), [2,1,4,3])
+  pseudocan_transform!(pct, T2ba, "VvOo")
   U2ba = permutedims(load4idx(EC,"U_vVoO"), [2,1,4,3])
-  En3ab, Enb3ab = values(calc_ΛpertT_mixedspin(EC, T2, T2ba, U1a, U2, U1b, U2ba, :α))
+  pseudocan_transform!(pct, U2ba, "VvOo"; conjugate=true)
+  En3ab, Enb3ab = values(calc_ΛpertT_mixedspin(EC, T2, T2ba, U1a, U2, U1b, U2ba, pct, :α))
   T2ba = nothing
   U2ba = nothing
 
   T2 = load4idx(EC,"T_VVOO")
+  pseudocan_transform!(pct, T2, "VVOO")
   U2 = load4idx(EC,"U_VVOO")
-  En3b, Enb3b = values(calc_ΛpertT_samespin(EC, T2, U1b, U2, :β))
+  pseudocan_transform!(pct, U2, "VVOO"; conjugate=true)
+  En3b, Enb3b = values(calc_ΛpertT_samespin(EC, T2, U1b, U2, pct, :β))
 
   T2ab = load4idx(EC,"T_vVoO")
+  pseudocan_transform!(pct, T2ab, "vVoO")
   U2ab = load4idx(EC,"U_vVoO")
-  En3ba, Enb3ba = values(calc_ΛpertT_mixedspin(EC, T2, T2ab, U1b, U2, U1a, U2ab, :β))
+  pseudocan_transform!(pct, U2ab, "vVoO"; conjugate=true)
+  En3ba, Enb3ba = values(calc_ΛpertT_mixedspin(EC, T2, T2ab, U1b, U2, U1a, U2ab, pct, :β))
 
   En3 = En3a + En3b + En3ab + En3ba 
   Enb3 = Enb3a + Enb3b + Enb3ab + Enb3ba
@@ -349,35 +716,41 @@ function calc_ΛpertT_unrestricted(EC::ECInfo)
 end
 
 """
-    calc_pertT_samespin(EC::ECInfo, T1, T2, spin::Symbol)
+    calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
 
   Calculate same-spin (T) correction for UCCSD(T) (i.e., ααα or βββ).
   `spin` ∈ (:α,:β)
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_samespin(EC::ECInfo, T1, T2, spin::Symbol)
+function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   o = space4spin('o', spin==:α)
   v = space4spin('v', spin==:α)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
   vooo = 0.5*ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
+  pseudocan_transform!(pct, vooo, v*o*o*o)
+  m = space4spin('m', spin==:α)
+  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
+  pseudocan_transform!(pct, fov, o*v)
   nocc = length(SP[o])
   nvir = length(SP[v])
-  ϵo, ϵv = orbital_energies(EC, spin)
+  ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
 
-  T = zeros(nvir,nvir,nvir)
-  Kijk = zeros(nvir,nvir,nvir)
+  T = zeros(nvir, nvir, nvir)
+  Kijk = zeros(nvir, nvir, nvir)
 
   Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
+  IntX = zeros(nvir, nocc)
+  IntY = zeros(nvir, nocc)
   for k = 3:nocc 
     for j = 1:k-1
       for i = 1:j-1
@@ -436,15 +809,13 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, spin::Symbol)
   # singles contribution
   @mtensor En3 = T1[a,i] * IntX[a,i]
   # fock contribution
-  m = space4spin('m', spin==:α)
-  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
   @mtensor En3 += 0.5 * (fov[i,a] * IntY[a,i])
   En3 += Enb3
   return OutDict("ET3"=>En3, "ET3b"=>Enb3)
 end
 
 """
-    calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, spin::Symbol)
+    calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol)
 
   Calculate mixed-spin (T) correction for UCCSD(T) (i.e., ααβ or ββα).
 
@@ -454,7 +825,7 @@ end
   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, spin::Symbol)
+function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   isα = (spin == :α)
@@ -464,50 +835,70 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, spin::Symbol)
   V = space4spin('v', !isα)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``v_{ai}^{kj} - v_{ai}^{jk}``
   vooo = ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
+  pseudocan_transform!(pct, vooo, v*o*o*o)
   if isα
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, o*O*v*V),[3,4,1,2])
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = ints2(EC, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = permutedims(ints2(EC, v*V*o*V),[2,1,4,3])
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = ints2(EC, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = permutedims(ints2(EC, o*V*o*O),[2,1,4,3])
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
   else
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, O*o*V*v),[4,3,2,1])
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = permutedims(ints2(EC, V*v*O*v),[2,1,4,3])
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = ints2(EC, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = permutedims(ints2(EC, O*v*O*o),[2,1,4,3])
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = ints2(EC, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
   end
+  m = space4spin('m', isα)
+  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
+  pseudocan_transform!(pct, fov, o*v)
+  M = space4spin('m', !isα)
+  fOV = load2idx(EC,"f_"*M*M)[SP[O],SP[V]]
+  pseudocan_transform!(pct, fOV, O*V)
+
   nocc = length(SP[o])
   nOcc = length(SP[O])
   nvir = length(SP[v])
   nVir = length(SP[V])
-  ϵo, ϵv = orbital_energies(EC, spin)
+  ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
   opspin = isα ? :β : :α
-  ϵO, ϵV = orbital_energies(EC, opspin)
+  ϵO, ϵV = get_pseudo_orbital_energies(pct, opspin)
 
-  T = zeros(nvir,nvir,nVir)
-  Kijk = zeros(nvir,nvir,nVir)
+  T = zeros(nvir, nvir, nVir)
+  Kijk = zeros(nvir, nvir, nVir)
 
   Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
-  IntXos = zeros(nVir,nOcc)
-  IntYos = zeros(nVir,nOcc)
+  IntX = zeros(nvir, nocc)
+  IntY = zeros(nvir, nocc)
+  IntXos = zeros(nVir, nOcc)
+  IntYos = zeros(nVir, nOcc)
   for K = 1:nOcc 
     T2K = T2mix[:,:,K,:]
     for j = 2:nocc
@@ -577,51 +968,55 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, spin::Symbol)
   @mtensor En3 = T1[a,i] * IntX[a,i]
   @mtensor En3 += T1os[A,I] * IntXos[A,I]
   # fock contribution
-  m = space4spin('m', isα)
-  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
   @mtensor En3 += fov[i,a] * IntY[a,i]
-  M = space4spin('m', !isα)
-  fOV = load2idx(EC,"f_"*M*M)[SP[O],SP[V]]
   @mtensor En3 += 0.5 * (fOV[I,A] * IntYos[A,I])
   En3 += Enb3
   return OutDict("ET3"=>En3, "ET3b"=>Enb3)
 end
 
 """
-    calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, spin::Symbol)
+    calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
 
   Calculate same-spin (T) correction for ΛUCCSD(T) (i.e., ααα or βββ).
   `spin` ∈ (:α,:β)
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, spin::Symbol)
+function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   o = space4spin('o', spin==:α)
   v = space4spin('v', spin==:α)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
   vooo = 0.5*ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
+  pseudocan_transform!(pct, vooo, v*o*o*o)
   # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
   vv_vo = permutedims(ints2(EC, v*o*v*v), [3,4,1,2])
+  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
   # ``0.5(v_{kj}^{ai} - v_{jk}^{ai})``, reordered to ``\bar v^{ai}_{kj}``
   vo_oo = 0.5*permutedims(ints2(EC, o*o*v*o), [3,4,1,2])
   vo_oo -= permutedims(vo_oo,[1,2,4,3])
+  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
+  m = space4spin('m', spin==:α)
+  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
+  pseudocan_transform!(pct, fov, o*v)
   nocc = length(SP[o])
   nvir = length(SP[v])
-  ϵo, ϵv = orbital_energies(EC, spin)
+  ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
 
-  T = zeros(nvir,nvir,nvir)
-  Kijk = zeros(nvir,nvir,nvir)
+  T = zeros(nvir, nvir, nvir)
+  Kijk = zeros(nvir, nvir, nvir)
 
   Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
+  IntX = zeros(nvir, nocc)
+  IntY = zeros(nvir, nocc)
   for k = 3:nocc 
     for j = 1:k-1
       for i = 1:j-1
@@ -706,15 +1101,13 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, spin::Symbol)
   # singles contribution
   @mtensor En3 = U1[a,i] * IntX[a,i]
   # fock contribution
-  m = space4spin('m', spin==:α)
-  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
   @mtensor En3 += 0.5 * (fov[i,a] * IntY[a,i])
   En3 += Enb3
   return OutDict("ET3"=>En3, "ET3b"=>Enb3)
 end
 
 """
-    calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin::Symbol)
+    calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct, spin::Symbol)
 
   Calculate mixed-spin (T) correction for ΛUCCSD(T) (i.e., ααβ or ββα).
 
@@ -726,7 +1119,7 @@ end
   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin::Symbol)
+function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct, spin::Symbol)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   isα = (spin == :α)
@@ -736,71 +1129,101 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin
   V = space4spin('v', !isα)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
   vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
   vvvo = ints2(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``v_{ai}^{kj} - v_{ai}^{jk}``
   vooo = ints2(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
+  pseudocan_transform!(pct, vooo, v*o*o*o)
   # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
   vv_vo = permutedims(ints2(EC, v*o*v*v), [3,4,1,2])
+  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
   # ``v_{kj}^{ai} - v_{jk}^{ai}``, reordered to ``\bar v^{ai}_{kj}``
   vo_oo = permutedims(ints2(EC, o*o*v*o), [3,4,1,2])
   vo_oo -= permutedims(vo_oo,[1,2,4,3])
+  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
   if isα
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, o*O*v*V),[3,4,1,2])
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = ints2(EC, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = permutedims(ints2(EC, v*V*o*V),[2,1,4,3])
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = ints2(EC, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = permutedims(ints2(EC, o*V*o*O),[2,1,4,3])
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
     # ``v_{cK}^{aB}``, reordered to ``v^{aB}_{cK}``
     vV_vO = permutedims(ints2(EC, v*O*v*V), [3,4,1,2])
+    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
     # ``v_{Ck}^{Ab}``, reordered to ``v^{Ab}_{Ck}``
     Vv_Vo = permutedims(ints2(EC, o*V*v*V),[4,3,2,1])
+    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
     # ``v_{kJ}^{aI}``, reordered to ``v^{aI}_{kJ}``
     vO_oO = permutedims(ints2(EC, o*O*v*O), [3,4,1,2])
+    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
     # ``v_{Kj}^{Ai}``, reordered to ``v^{Ai}_{Kj}``
     Vo_Oo = permutedims(ints2(EC, o*O*o*V),[4,3,2,1])
+    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
   else
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
     vV_oO = permutedims(ints2(EC, O*o*V*v),[4,3,2,1])
+    pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
     vVvO = permutedims(ints2(EC, V*v*O*v),[2,1,4,3])
+    pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
     VvVo = ints2(EC, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
     vOoO = permutedims(ints2(EC, O*v*O*o),[2,1,4,3])
+    pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
     VoOo = ints2(EC, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o)
     # ``v_{cK}^{aB}``, reordered to ``v^{aB}_{cK}``
     vV_vO = permutedims(ints2(EC, O*v*V*v),[4,3,2,1])
+    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
     # ``v_{Ck}^{Ab}``, reordered to ``v^{Ab}_{Ck}``
     Vv_Vo = permutedims(ints2(EC, V*o*V*v),[3,4,1,2])
+    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
     # ``v_{kJ}^{aI}``, reordered to ``v^{aI}_{kJ}``
     vO_oO = permutedims(ints2(EC, O*o*O*v),[4,3,2,1])
+    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
     # ``v_{Kj}^{Ai}``, reordered to ``v^{Ai}_{Kj}``
     Vo_Oo = permutedims(ints2(EC, O*o*V*o),[3,4,1,2])
+    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
   end
+  m = space4spin('m', isα)
+  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
+  pseudocan_transform!(pct, fov, o*v)
+  M = space4spin('m', !isα)
+  fOV = load2idx(EC,"f_"*M*M)[SP[O],SP[V]]
+  pseudocan_transform!(pct, fOV, O*V)
+
   nocc = length(SP[o])
   nOcc = length(SP[O])
   nvir = length(SP[v])
   nVir = length(SP[V])
-  ϵo, ϵv = orbital_energies(EC, spin)
+  ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
   opspin = isα ? :β : :α
-  ϵO, ϵV = orbital_energies(EC, opspin)
+  ϵO, ϵV = get_pseudo_orbital_energies(pct, opspin)
 
-  T = zeros(nvir,nvir,nVir)
-  Kijk = zeros(nvir,nvir,nVir)
+  T = zeros(nvir, nvir, nVir)
+  Kijk = zeros(nvir, nvir, nVir)
 
   Enb3 = 0.0
-  IntX = zeros(nvir,nocc)
-  IntY = zeros(nvir,nocc)
-  IntXos = zeros(nVir,nOcc)
-  IntYos = zeros(nVir,nOcc)
+  IntX = zeros(nvir, nocc)
+  IntY = zeros(nvir, nocc)
+  IntXos = zeros(nVir, nOcc)
+  IntYos = zeros(nVir, nOcc)
   for K = 1:nOcc 
     T2K = T2mix[:,:,K,:]
     U2K = U2mix[:,:,K,:]
@@ -906,11 +1329,7 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, spin
   @mtensor En3 = U1[a,i] * IntX[a,i]
   @mtensor En3 += U1os[A,I] * IntXos[A,I]
   # fock contribution
-  m = space4spin('m', isα)
-  fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
   @mtensor En3 += fov[i,a] * IntY[a,i]
-  M = space4spin('m', !isα)
-  fOV = load2idx(EC,"f_"*M*M)[SP[O],SP[V]]
   @mtensor En3 += 0.5 * (fOV[I,A] * IntYos[A,I])
   En3 += Enb3
   return OutDict("ET3"=>En3, "ET3b"=>Enb3)
