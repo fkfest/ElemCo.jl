@@ -168,7 +168,7 @@ function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, th
   if !is_beneficial 
     # Transformation not beneficial, use identity
     ϵ = diag(F_block)
-    eigvecs_left = eigvecs_right= Matrix{Float64}(I, size(F_block))
+    eigvecs_left = eigvecs_right = Matrix{Float64}(I, size(F_block))
   end
   return ϵ, eigvecs_right, eigvecs_left, is_beneficial
 end
@@ -193,7 +193,7 @@ Supported array dimensions: 2 and 4.
 
 # Example
 ```julia
-# Transform T2 amplitudes stored as T^{ab}_{ij} in [a,b,i,j] order
+# Transform T2 amplitudes stored as T_{ab}^{ij} in [a,b,i,j] order
 pseudocan_transform!(pct, T2, "vvoo")
 
 # Transform U2 Lagrange multipliers (use conjugate)
