@@ -19,6 +19,9 @@ for (ime,method) in enumerate(ccmethods)
   @test abs(last_energy(energies)-EHF_test-ECC_test[ime]) < epsilon
 end
 
+energies = @cc λuccsd(t)
+@test abs(last_energy(energies)-EHF_test-ECCSD_T_test) < epsilon
+
 #EC.fd = read_fcidump(fcidump)
 @set scf pseudo=true
 EBOHF = @bouhf
@@ -26,8 +29,6 @@ EBOHF = @bouhf
 @test abs(EBOHF["E"]-EHF_test) < epsilon
 energies = @cc udcsd
 @test abs(last_energy(energies)-EHF_test-ECC_test[2]) < epsilon
-energies = @cc λuccsd(t)
-@test abs(last_energy(energies)-EHF_test-ECCSD_T_test) < epsilon
 
 @freeze_orbs [1]
 energies = @cc udcsd
