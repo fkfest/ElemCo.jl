@@ -39,17 +39,16 @@ If the Fock matrix is already diagonal (within threshold), returns identity tran
 For non-diagonal blocks, computes the eigenvectors for pseudo-canonicalization.
 """
 function PseudoCanonicalTransform(EC::ECInfo; restricted::Bool=true)
-  thr = EC.options.cc.fock_diag_thr
   hermitian = !is_similarity_transformed(EC.fd) 
   if restricted
     is_diag_oo, is_diag_vv, F_oo, F_vv = check_fock_diagonal_blocks(EC)
     # Check occupied block
-    ϵo, Ro, Lo, rotate_oo = compute_pseudocanonical_transform(F_oo; skip=is_diag_oo, thr, hermitian)
+    ϵo, Ro, Lo = compute_pseudocanonical_transform(F_oo; skip=is_diag_oo, hermitian)
     # Check virtual block
-    ϵv, Rv, Lv, rotate_vv = compute_pseudocanonical_transform(F_vv; skip=is_diag_vv, thr, hermitian)
+    ϵv, Rv, Lv = compute_pseudocanonical_transform(F_vv; skip=is_diag_vv, hermitian)
     
     return PseudoCanonicalTransform(
-      rotate_oo || rotate_vv,
+      !is_diag_oo || !is_diag_vv,
       SpinMatrix(Ro), SpinMatrix(Lo),
       SpinMatrix(Rv), SpinMatrix(Lv),
       SpinVector(ϵo), SpinVector(ϵv)
@@ -60,16 +59,16 @@ function PseudoCanonicalTransform(EC::ECInfo; restricted::Bool=true)
     is_diag_oo_b, is_diag_vv_b, F_oo_b, F_vv_b = check_fock_diagonal_blocks(EC, :β)
     
     # Alpha occupied
-    ϵo_α, Ro_α, Lo_α, rotate_oo_a = compute_pseudocanonical_transform(F_oo_a; skip=is_diag_oo_a, thr, hermitian)
+    ϵo_α, Ro_α, Lo_α = compute_pseudocanonical_transform(F_oo_a; skip=is_diag_oo_a, hermitian)
     # Alpha virtual
-    ϵv_α, Rv_α, Lv_α, rotate_vv_a = compute_pseudocanonical_transform(F_vv_a; skip=is_diag_vv_a, thr, hermitian)
+    ϵv_α, Rv_α, Lv_α = compute_pseudocanonical_transform(F_vv_a; skip=is_diag_vv_a, hermitian)
     # Beta occupied
-    ϵo_β, Ro_β, Lo_β, rotate_oo_b = compute_pseudocanonical_transform(F_oo_b; skip=is_diag_oo_b, thr, hermitian)
+    ϵo_β, Ro_β, Lo_β = compute_pseudocanonical_transform(F_oo_b; skip=is_diag_oo_b, hermitian)
     # Beta virtual
-    ϵv_β, Rv_β, Lv_β, rotate_vv_b = compute_pseudocanonical_transform(F_vv_b; skip=is_diag_vv_b, thr, hermitian)
+    ϵv_β, Rv_β, Lv_β = compute_pseudocanonical_transform(F_vv_b; skip=is_diag_vv_b, hermitian)
     
     return PseudoCanonicalTransform(
-      rotate_oo_a || rotate_vv_a || rotate_oo_b || rotate_vv_b,
+      !is_diag_oo_a || !is_diag_vv_a || !is_diag_oo_b || !is_diag_vv_b,
       SpinMatrix(Ro_α, Ro_β), SpinMatrix(Lo_α, Lo_β),
       SpinMatrix(Rv_α, Rv_β), SpinMatrix(Lv_α, Lv_β),
       SpinVector(ϵo_α, ϵo_β), SpinVector(ϵv_α, ϵv_β)
@@ -81,6 +80,9 @@ end
     check_fock_diagonal_blocks(EC::ECInfo, spin::Symbol=:α)
 
 Check if the Fock matrix occ-occ and virt-virt blocks are diagonal.
+
+For the check the Fock matrix block is symmetrized (to account for non-Hermitian cases with 
+already diagonalized blocks).
 Returns `(is_diagonal_oo, is_diagonal_vv, F_oo, F_vv)`.
 """
 function check_fock_diagonal_blocks(EC::ECInfo, spin::Symbol=:α)
@@ -99,17 +101,19 @@ function check_fock_diagonal_blocks(EC::ECInfo, spin::Symbol=:α)
   F_oo = fock[o_space, o_space]
   F_vv = fock[v_space, v_space]
   
-  # Check off-diagonal elements
-  max_offdiag_oo = maximum(abs.(F_oo - Diagonal(diag(F_oo))); init=0.0)
-  max_offdiag_vv = maximum(abs.(F_vv - Diagonal(diag(F_vv))); init=0.0)
-  is_diagonal_oo = max_offdiag_oo < thr
-  is_diagonal_vv = max_offdiag_vv < thr
   if thr < 0.0
     # No check requested
     println("Skipping Fock matrix diagonality check (fock_diag_thr < 0)")
-    is_diagonal_oo = true
-    is_diagonal_vv = true
-  end 
+    return true, true, F_oo, F_vv
+  end
+  # Check off-diagonal elements
+  F_oo_sym = 0.5 * (F_oo + F_oo')
+  F_vv_sym = 0.5 * (F_vv + F_vv')
+  max_offdiag_oo = maximum(abs.(F_oo_sym - Diagonal(diag(F_oo_sym))); init=0.0)
+  max_offdiag_vv = maximum(abs.(F_vv_sym - Diagonal(diag(F_vv_sym))); init=0.0)
+  is_diagonal_oo = max_offdiag_oo < thr
+  is_diagonal_vv = max_offdiag_vv < thr
+
   if !is_diagonal_oo
     println("Max off-diagonal in Fock $spin occ-occ: $max_offdiag_oo (thr=$thr)")
   end
@@ -121,24 +125,21 @@ function check_fock_diagonal_blocks(EC::ECInfo, spin::Symbol=:α)
 end
 
 """
-    compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, thr::Float64=1e-6, hermitian::Bool=true)
+    compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, hermitian::Bool=true)
 
 Diagonalize a potentially non-Hermitian Fock block.
-Returns `(ϵ, Cr, Cl, is_beneficial)`: eigenvalues, right/left eigenvector matrices,
-and a flag indicating whether the transformation is beneficial.
+Returns `(ϵ, Cr, Cl)`: eigenvalues, right/left eigenvector matrices.
 
 If `skip=true`, skips the diagonalization and returns identity transforms.
 If `hermitian=true`, assumes the Fock block is Hermitian and uses `eigen(Hermitian(...))`.
-The transformation is considered beneficial if the transformed Fock block is significantly 
-different from the original. 
 
 Uses `rotate_eigenvectors_to_real` for complex pairs.
 """
-function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, thr::Float64=1e-6, hermitian::Bool=true)
+function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, hermitian::Bool=true)
   if skip
     ϵ = diag(F_block)
     Ctr = Matrix{Float64}(I, size(F_block))
-    return ϵ, Ctr, Ctr, false
+    return ϵ, Ctr, Ctr
   end
   if hermitian
     eigvals, eigvecs = eigen(Hermitian(F_block))
@@ -158,19 +159,7 @@ function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, th
     eigvecs_right, eigvecs_left = balance_norms!(eigvecs_right, eigvecs_left)
   end
   
-  # Check if transformation is beneficial
-  # Compute transformed Fock: L' * F * R
-  F_transformed = eigvecs_left' * F_block * eigvecs_right
-  max_diff = maximum(abs.(F_block - F_transformed); init=0.0)
-  
-  # Transformation is beneficial if the resulting Fock is significantly different
-  is_beneficial = max_diff > thr
-  if !is_beneficial 
-    # Transformation not beneficial, use identity
-    ϵ = diag(F_block)
-    eigvecs_left = eigvecs_right = Matrix{Float64}(I, size(F_block))
-  end
-  return ϵ, eigvecs_right, eigvecs_left, is_beneficial
+  return ϵ, eigvecs_right, eigvecs_left
 end
 
 """
