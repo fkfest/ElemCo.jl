@@ -2089,11 +2089,13 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       @mtensor begin
         x_adil[a,d,i,l] += oOvV[l,K,d,C] * T2ab[a,C,i,K]
         R2ab[a,B,i,J] += x_adil[a,d,i,l] * T2ab[d,B,l,J]
-        rR2a[a,b,i,j] := x_adil[a,d,i,l] *  T2a[b,d,j,l]
-        R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
       end
-      x_adil, rR2a = nothing, nothing
-      t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{al}^{id} T_{db}^{lj}``",2)
+    end
+    @mtensor rR2a[a,b,i,j] := x_adil[a,d,i,l] *  T2a[b,d,j,l]
+    @mtensor R2a[a,b,i,j] += rR2a[a,b,i,j] + rR2a[b,a,j,i] - rR2a[a,b,j,i] - rR2a[b,a,i,j]
+    x_adil, rR2a = nothing, nothing
+    t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{al}^{id} T_{db}^{lj}``",2)
+    if n_occb_orbs(EC) > 0
       @mtensor begin
         x_ADIL[A,D,I,L] += oOvV[k,L,c,D] * T2ab[c,A,k,I]
         rR2b[A,B,I,J] := x_ADIL[A,D,I,L] * T2b[B,D,J,L]
