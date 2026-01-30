@@ -42,6 +42,7 @@
 * Fix normalization of biorthogonal orbitals to a balanced normalization (i.e., the norms of left and right orbitals are equal).
 * Integral transformation now should use much less memory and be faster.
 * Fix incompatibility with julia 1.13 (replace call of an internal Base function with a simple custom implementation).
+* Fix UCCSD and UDCSD for the case of no beta electrons ([#272]).
 
 ## Version [v0.14.1] - 2025.07.03
 
