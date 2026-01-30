@@ -4,9 +4,9 @@ using ElemCo
 epsilon    =  1.e-6
 EHF_test   =      -0.424464539648
 EMP2_test  =      -0.002487553782 + EHF_test
-EDCSD_test =      -0.003327831586 + EHF_test
-EΛUCCSD_T0_test = -0.003324996250 + EHF_test
-EΛUCCSD_T_test = -0.003324996250 + EHF_test
+EDCSD_test =      -0.003330670857 + EHF_test
+EΛUCCSD_T0_test = -0.003330856956 + EHF_test
+EΛUCCSD_T_test =  -0.003330856956 + EHF_test
 
 geometry="bohr
      H1 0.0 0.0 0.0 
