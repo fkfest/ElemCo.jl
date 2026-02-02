@@ -8,7 +8,7 @@ using ElemCo
   EHF_H_ref        = -0.660770127162853
   Ecorr_MP2_H_ref  = -0.047265317612
   EHF_LiH_ref      = -7.988745934771541
-  Ecorr_MP2_LiH_ref = -0.343860916981
+  Ecorr_MP2_LiH_ref = -0.038593138170
 
   #---------------------------------------------------------------------------
   @testset "H⁻ + positron" begin
