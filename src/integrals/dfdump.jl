@@ -154,8 +154,8 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, cPO::Matrix,
   nL = size(M,2)
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  # FIXME: The buffer size is twice the RHF case; no analytic justification.
-  @buffer buf(2*(max(nao, norbs)^2*maxL+norbs*nao*maxL)) begin
+  # Buffer size needs space for: Lmm, Lmm_p, AAL, mAL, mAL_p
+  @buffer buf(2*maxL*norbs^2 + nao^2*maxL + 2*norbs*nao*maxL) begin
   first = true
   for L in LBlks
     lenL = length(L)
@@ -163,13 +163,14 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, cPO::Matrix,
     Lmm = alloc!(buf, lenL, norbs, norbs)
     Lmm_p = alloc!(buf, lenL, norbs, norbs)
     AAL = alloc!(buf, nao, nao, lenL)
-    mAL = mAL_p = alloc!(buf, norbs, nao, lenL)
+    mAL = alloc!(buf, norbs, nao, lenL)
+    mAL_p = alloc!(buf, norbs, nao, lenL)
     @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
     @mtensor mAL[p,ν,L] = cMOval[μ,p] * AAL[μ,ν,L]
     @mtensor Lmm[L,p,q] = mAL[p,ν,L] * cMOval[ν,q]
     @mtensor mAL_p[p,ν,L] = cPOval[μ,p] * AAL[μ,ν,L]
     @mtensor Lmm_p[L,p,q] = mAL_p[p,ν,L] * cPOval[ν,q]
-    drop!(buf, AAL,mAL)
+    drop!(buf, AAL, mAL, mAL_p)
     # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
     if first
       for s = 1:norbs
