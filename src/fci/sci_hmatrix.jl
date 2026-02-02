@@ -3,7 +3,7 @@
 # ===========================================
 
 @pib function compute_matrix_element_beta_excitations(det_i::Determinant, det_j::Determinant, 
-                      n_beta_diff, context::Union{FCIContext, HCIContext},
+                      n_beta_diff, context::Union{FCIContext, CIPHIContext},
                       occa=nothing, occb=nothing)::Scalar
   if n_beta_diff == 2
     # Single beta excitation
@@ -20,7 +20,7 @@
 end
 
 @pib function compute_matrix_element_alpha_excitations(det_i::Determinant, det_j::Determinant,
-                      n_alpha_diff, context::Union{FCIContext, HCIContext},
+                      n_alpha_diff, context::Union{FCIContext, CIPHIContext},
                       occa=nothing, occb=nothing)::Scalar
   if n_alpha_diff == 2
     # Single alpha excitation
@@ -37,7 +37,7 @@ end
 end
 
 @pib function compute_matrix_element_mixed_excitations(det_i::Determinant, det_j::Determinant,
-                      context::Union{FCIContext, HCIContext})::Scalar
+                      context::Union{FCIContext, CIPHIContext})::Scalar
   # Mixed single excitations in alpha and beta
   orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
   orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
@@ -52,12 +52,12 @@ end
                                  context, occa=nothing, occb=nothing) -> Scalar
 
 Compute ⟨det_j|Ĥ|det_i⟩ directly using orbital excitation analysis.
-Works with both FCIContext and HCIContext.
+Works with both FCIContext and CIPHIContext.
 
 occa/occb are either Nothing or lists of occupied orbitals (makes the calculation more efficient).
 """
 @pib function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
-                                            context::Union{FCIContext, HCIContext}, 
+                                            context::Union{FCIContext, CIPHIContext}, 
                                             occa=nothing, occb=nothing)::Scalar
   # Find differences in alpha and beta strings
   alpha_diff = det_i.alpha ⊻ det_j.alpha  # XOR to find differing bits
@@ -91,7 +91,7 @@ end
     diagonal_matrix_element(det::Determinant, context) -> Scalar
 
 Compute diagonal matrix element ⟨det|Ĥ|det⟩.
-For FCIContext uses precomputed diagonal, for HCIContext computes on-the-fly.
+For FCIContext uses precomputed diagonal, for CIPHIContext computes on-the-fly.
 """
 @pib function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
   # Get the address and use existing diagonal computation
@@ -99,14 +99,14 @@ For FCIContext uses precomputed diagonal, for HCIContext computes on-the-fly.
   return context.diag_h.data[addr]
 end
 
-@pib function diagonal_matrix_element(det::Determinant, context::HCIContext)::Scalar
-  # For HCI, compute diagonal element on-the-fly
+@pib function diagonal_matrix_element(det::Determinant, context::CIPHIContext)::Scalar
+  # For CIPHI, compute diagonal element on-the-fly
   return compute_diagonal_element(det, context)
 end
 
 @pib function diagonal_matrix_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
-                                      context::Union{HCIContext,FCIContext})::Scalar
-  # For HCI, compute diagonal element on-the-fly
+                                      context::Union{CIPHIContext,FCIContext})::Scalar
+  # For CIPHI, compute diagonal element on-the-fly
   return compute_diagonal_element(occa, occb, context)
 end
 
@@ -117,7 +117,7 @@ end
 Compute matrix element for single alpha excitation.
 """
 @pib function single_alpha_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int,
-                                                     context::Union{FCIContext, HCIContext}, 
+                                                     context::Union{FCIContext, CIPHIContext}, 
                                                      occa=nothing, occb=nothing)
   int1 = context.int1a
   h1e2_same = context.heval_data.h1e2_aa
@@ -136,7 +136,7 @@ end
 Compute matrix element for single beta excitation.
 """
 @pib function single_beta_excitation_matrix_element(det_i::Determinant, orb_i::Int, orb_a::Int,
-                                                    context::Union{FCIContext, HCIContext}, 
+                                                    context::Union{FCIContext, CIPHIContext}, 
                                                     occa=nothing, occb=nothing)
   int1 = context.int1b
   h1e2_same = context.heval_data.h1e2_bb
@@ -153,7 +153,7 @@ end
 
 Compute matrix element for double alpha excitation.
 """
-@pib function double_alpha_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_alpha_excitation_matrix_element(context::Union{FCIContext, CIPHIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   int2aa = context.int2aa
   return int2aa[orb_a, orb_b, orb_i, orb_j] - int2aa[orb_a, orb_b, orb_j, orb_i]
@@ -164,7 +164,7 @@ end
 
 Compute matrix element for double beta excitation.
 """
-@pib function double_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_beta_excitation_matrix_element(context::Union{FCIContext, CIPHIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   int2bb = context.int2bb
   return int2bb[orb_a, orb_b, orb_i, orb_j] - int2bb[orb_a, orb_b, orb_j, orb_i]
@@ -175,7 +175,7 @@ end
 
 Compute matrix element for double alpha beta excitation.
 """
-@pib function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, HCIContext}, 
+@pib function double_alpha_beta_excitation_matrix_element(context::Union{FCIContext, CIPHIContext}, 
                                                 orb_i::Int, orb_j::Int, orb_a::Int, orb_b::Int)
   int2ab = context.int2ab
   return int2ab[orb_a, orb_b, orb_i, orb_j]
@@ -292,9 +292,9 @@ end
     compute_diagonal_element(det::Determinant, ctx) -> Scalar
 
 Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
-Works with both FCIContext and HCIContext.
+Works with both FCIContext and CIPHIContext.
 """
-@pib function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, HCIContext})::Scalar
+@pib function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, CIPHIContext})::Scalar
   spaces = ctx.heval_data.spaces_buf
   set_occupied_orbspaces!(spaces, det)
   return calc_diagonalH(ctx.heval_data, spaces.occa, spaces.occb)
@@ -304,9 +304,9 @@ end
     compute_diagonal_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, ctx) -> Scalar
 
 Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
-Works with both FCIContext and HCIContext.
+Works with both FCIContext and CIPHIContext.
 """
 @pib function compute_diagonal_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
-                                       ctx::Union{FCIContext, HCIContext})::Scalar
+                                       ctx::Union{FCIContext, CIPHIContext})::Scalar
   return calc_diagonalH(ctx.heval_data, occa, occb)
 end

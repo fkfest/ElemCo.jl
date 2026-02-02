@@ -28,8 +28,6 @@ ints2
 ## Tensor manipulation
 
 ```@docs
-@mtensor
-@mview
 sqrtinvchol
 invchol
 rotate_eigenvectors_to_real
@@ -45,6 +43,7 @@ Filter = t -> t ∉ [ElemCo.save!, ElemCo.load, ElemCo.mmap, ElemCo.newmmap, Ele
 ```
 
 ## Internal functions
+
 ```@autodocs
 Modules = [TensorTools]
 Public = false

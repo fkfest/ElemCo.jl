@@ -5,24 +5,24 @@
 """
     heatbath_selection(selected_ctx::SelectedCIContext,
                        variational_coeffs::AbstractVector{Scalar},
-                       options::HCIOptions,
+                       options::CIPHIOptions,
                        E_current::Float64,
-                       setup_data::HCISetupData,
+                       setup_data::CIPHISetupData,
                        detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true) 
                        -> (VecDict{Determinant, Scalar}, (Float64, Float64))
 
 Select determinants using Heat-Bath preselection + perturbative selection.
 Uses efficient excitation generation with threshold-based filtering.
-Works with both FCIContext and HCIContext.
+Works with both FCIContext and CIPHIContext.
 
 Returns selected determinants together with the weights and PT2 energy correction.
 If `store_dets` is false, only the PT2 energy is returned (with empty determinant list).
 """
 function heatbath_selection(selected_ctx::SelectedCIContext,
                             variational_coeffs::AbstractVector{Scalar},
-                            options::HCIOptions,
+                            options::CIPHIOptions,
                             E_current::Float64,
-                            setup_data::HCISetupData,
+                            setup_data::CIPHISetupData,
                             coeffs_dg::Union{Nothing, AbstractVector{Scalar}}=nothing,
                             detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true;
                             pt2_correct::Bool=false)
@@ -148,7 +148,7 @@ end
                           det::Determinant, coef::Scalar, 
                           coef_dg::Union{Scalar, Nothing}, ecorr::Scalar,
                           ctx::FCIContext,
-                          setup_data::HCISetupData, spaces::OrbSpaces, fockd::FockDiagonal,
+                          setup_data::CIPHISetupData, spaces::OrbSpaces, fockd::FockDiagonal,
                           epsilon::Float64, shift) -> Int
 
 Generate only excitations with |H| > epsilon using pre-computed data.
@@ -159,7 +159,7 @@ This is the efficient excitation generation from Holmes et al. (2016):
 
 Additionally, `H*coef/denom` and `coef*H` is computed and stored during generation for efficiency.
 
-Works with both FCIContext and HCIContext.
+Works with both FCIContext and CIPHIContext.
 
 `spaces` is an OrbSpaces object used for temporary storage of occupied and virtual orbitals.
 `fockd` is the Fock diagonal object used to store Fock matrix diagonals for the determinant.
@@ -169,8 +169,8 @@ function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}
                                newexcitations::VecDict{Determinant{OPattern}, ExcVals},
                                det::Determinant{OPattern}, coef, 
                                coef_dg::Union{Scalar, Nothing}, ecorr,
-                               ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}},
-                               setup_data::HCISetupData,
+                               ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}},
+                               setup_data::CIPHISetupData,
                                spaces::OrbSpaces, fockd::FockDiagonal,
                                epsilon::Float64, epsilon_c::Float64, shift) where OPattern
   n_orb = ctx.n_orb

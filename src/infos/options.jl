@@ -13,18 +13,16 @@
   nelec::Int = -1
   """`⟨0⟩` charge of the system (relative to nelec/FCIDump/neutral system!). """
   charge::Int = 0
-  """`⟨"C_Am"⟩` filename of MO coefficients. 
-  Used by all programs to read and write orbitals from/to file. """
-  orb::String = "C_Am"
+  """`⟨"wf.h5"⟩` filename for wavefunction dump (stored in TREXIO format). """
+  dump::String = "wf.h5"
+  """`⟨""⟩` filename to store the output wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
+  store::String = ""
+  """`⟨""⟩` filename to read starting amplitudes from (TREXIO format). 
+  If empty, amplitudes are read from `dump`. If provided, amplitudes (and MOs/basis) 
+  are read from this file and projected to the current MO basis. """
+  start::String = ""
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
-  """`⟨"e_m_pos"⟩` filename of the positron orbital energies. """
-  eps_pos::String = "e_m_pos"
-  """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 
-  Used by all programs to read and write positron orbitals from/to file. """
-  orb_pos::String = "C_Am_pos"
-  """`⟨"-left"⟩` addition to the filename for left orbitals (for biorthogonal calculations). """
-  left::String = "-left"
   """`⟨:large⟩` core type for frozen-core approximation: 
   - `:none` no frozen-core approximation, 
   - `:small` semi-core orbitals correlated, 
@@ -75,7 +73,7 @@ end
   - `:HCORE` from core Hamiltonian
   - `:SAD` from atomic densities
   - `:GWH` not implemented yet
-  - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
+  - `:ORB` from previous orbitals stored in dump file [`WfOptions.dump`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
   """`⟨:HCORE⟩` positron orbital guess. Only `:HCORE` is implemented. """
@@ -159,12 +157,16 @@ end
   calc_d_vovv::Bool = false
   """`⟨false⟩` calculate dressed <vv|oo>. """
   calc_d_vvoo::Bool = false
+  """`⟨1.e-6⟩` threshold for checking Fock matrix diagonality in (T). If negative, no check is performed. """
+  fock_diag_thr::Float64 = 1.e-6
   """`⟨true⟩` use density fitting in SVD-DC-CCSDT instead of the integral decomposition. """
   usedf::Bool = true
   """`⟨true⟩` use Cholesky decomposition in SVD-DC-CCSDT instead of SVD in the integral decomposition. """
   usecholesky::Bool = true
   """`⟨false⟩` calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
+  """`⟨false⟩` skip (T) calculation in SVD-DC-CCSDT. """
+  skip_pert_t::Bool = false
   """`⟨true⟩` project out the T^iii contribution from the density matrix in decomposition in SVD-DC-CCSDT. """
   project_t3iii::Bool = true
   """`⟨false⟩` calculated ``V_{aX}^{iL}`` in SVD-DC-CCSDT using a projection to the X space as
@@ -256,14 +258,14 @@ end
   jacobi_davidson::Bool = true
   """`⟨1000⟩` Maximum P-space size (typically 100-1000) """
   max_pspace_size::Int = 1000
-  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :hci) """
+  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :ciphi) """
   pspace_selection_method::Symbol = :hybrid
   """`⟨4⟩` Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
   max_pspace_excitation::Int = 4
   """`⟨5.0⟩` Energy cutoff for determinant inclusion """
   pspace_energy_threshold::Float64 = 5.0
-  """`⟨1e-3⟩` HCI selection threshold (epsilon_h) for P-space generation """
-  pspace_hci_epsilon::Float64 = 1e-3
+  """`⟨1e-3⟩` CIPHI selection threshold (epsilon_h) for P-space generation """
+  pspace_ciphi_epsilon::Float64 = 1e-3
   """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
   print_level::Int = 1
   """`⟨1e-12⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
@@ -271,16 +273,16 @@ end
 end
 
 """
-  Option for HCI calculations.
+  Option for CIΦ (CIPHI) calculations - Selected CI via Perturbation, Heat-Bath and Iterations.
 
   $(TYPEDFIELDS)
 """
-@kwdef mutable struct HCIOptions
+@kwdef mutable struct CIPHIOptions
   """`⟨1_000_000⟩` Target (i.e., maximum) number of determinants to select """
   target_selection::Int = 1_000_000
   """`⟨3e-4⟩` Selection threshold """
   epsilon::Float64 = 3e-4
-  """`⟨epsilon/10⟩` HCI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
+  """`⟨epsilon/10⟩` CIPHI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
   epsilon_h::Float64 = -1.0
   """`⟨epsilon_h⟩` instantaneous PT selection threshold. """
   epsilon_c::Float64 = -1.0
@@ -290,7 +292,7 @@ end
   tol::Float64 = 1e-6
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
-  """`⟨50⟩` Maximum HCI iterations """
+  """`⟨50⟩` Maximum CIPHI iterations """
   max_iter::Int = 50
   """`⟨0.1⟩` Level shift to improve convergence """
   shift::Float64 = 0.1
@@ -312,7 +314,7 @@ end
   renorm_pt2::Bool = false
   """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
   nstates::Int = 1
-  """`⟨2⟩` Number of steps in the iterative HCI selection (if > 1, the selection process is repeated after convergence)"""
+  """`⟨2⟩` Number of steps in the iterative CIPHI selection (if > 1, the selection process is repeated after convergence)"""
   nsteps::Int = 2
   """`⟨true⟩` Use small-space Hamiltonian for initial guess """
   use_small_space_guess::Bool = true
@@ -322,6 +324,8 @@ end
   small_space_method::Symbol = :hybrid
   """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
   print_level::Int = 1
+  """`⟨false⟩` Skip variational CIPHI iterations and only compute PT2 correction (use with restart) """
+  pt2_only::Bool = false
   """`⟨1e-10⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
   thr_negligible::Float64 = 1e-10
 end
@@ -474,8 +478,8 @@ end
   eom::EomOptions = EomOptions()
   """ FCI options ([`FCIOptions`](@ref)). """
   fci::FCIOptions = FCIOptions()
-  """ HCI options ([`HCIOptions`](@ref)). """
-  hci::HCIOptions = HCIOptions()
+  """ CIPHI options ([`CIPHIOptions`](@ref)). """
+  ciphi::CIPHIOptions = CIPHIOptions()
   """ DMRG options ([`DmrgOptions`](@ref)). """
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """

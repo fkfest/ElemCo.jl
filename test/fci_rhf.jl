@@ -27,18 +27,19 @@ using ElemCo
   println("FCI Energy (H2O, RHF): $E_fci")
   @test abs(E_fci - E_FCI_test) < epsilon
 
-  @set fci nstates=3
-  energies = @fci
+  energies = @fci begin
+    @set fci nstates=3
+  end
 
   @test abs(energies["FCI"] - E_FCI_test) < epsilon
   @test abs(energies["ω1"] - omega1_test) < epsilon
   @test abs(energies["ω2"] - omega2_test) < epsilon
       
-  @set fci nstates=1  # Reset to single root 
-  @set fci conv_tol=1.e-8 max_iter=100
-  @set fci compute_2rdm=true
-  @set fci pspace_selection_method=:hci
-  energies = @fci
+  energies = @fci begin
+    @set fci conv_tol=1.e-8 max_iter=100
+    @set fci compute_2rdm=true
+    @set fci pspace_selection_method=:ciphi
+  end
       
   @test abs(energies["FCI"] - E_FCI_test) < epsilon
       

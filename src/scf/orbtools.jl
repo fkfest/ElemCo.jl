@@ -15,9 +15,12 @@ using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions
 
-export guess_orb, guess_pos_orb, load_orbitals, orbital_energies, load_positron_orbitals, load_epsilon, load_positron_epsilon, load_occupations, load_positron_occupations
+export guess_orb, guess_pos_orb, load_orbitals, load_rotations, load_left_right_rotations
+export orbital_energies, load_positron_orbitals 
 export show_orbitals
 export rotate_orbs, rotate_orbs!, normalize_phase!
+export try_load_starting_orbitals
+export left_from_right_rotations, project_onto_basis
 
 """
     guess_hcore(EC::ECInfo)
@@ -96,8 +99,7 @@ function guess_orb(EC::ECInfo, guess::Symbol)
   elseif guess == :GWH || guess == :gwh
     return guess_gwh(EC)
   elseif guess == :ORB || guess == :orb
-    orbs = load_all(EC, EC.options.wf.orb, Val(2))
-    return SpinMatrix(orbs...)
+    return load_orbitals(EC)
   else
     error("unknown guess type")
     return SpinMatrix()
@@ -113,10 +115,11 @@ end
   See [`ScfOptions.guess`](@ref ECInfos.ScfOptions) for possible values.
 
 """
-
 function guess_pos_orb(EC::ECInfo, guess::Symbol)
   if guess == :HCORE || guess == :hcore
     return guess_pos_hcore(EC)
+  elseif guess == :ORB || guess == :orb
+    return load_positron_orbitals(EC)
   else
     error("unknown guess type")
     return SpinMatrix()
@@ -124,69 +127,108 @@ function guess_pos_orb(EC::ECInfo, guess::Symbol)
 end
 
 """
-    load_orbitals(EC::ECInfo, orbsfile::String="")
+    load_orbitals(EC::ECInfo; start::Bool=false)
 
-  Load (last) orbitals.
-  
-  - from file `orbsfile` if not empty
-  - from file [`WfOptions.orb`](@ref ECInfos.WfOptions) if not empty
-  - error if all files are empty
+  Load (last) orbitals from file [`WfOptions.dump`](@ref ECInfos.WfOptions). 
 
+  If `start=true`, load from `wf.start` instead.
+  If the basis has changed, the orbitals will be projected onto the new basis.
   Returns `::SpinMatrix`. 
 """
-function load_orbitals(EC::ECInfo, orbsfile::String="")
-  if !isempty(strip(orbsfile))
-    # orbsfile will be used
-  elseif !isempty(strip(EC.options.wf.orb))
-    orbsfile = EC.options.wf.orb
-  else
-    error("no orbitals found")
-  end
-  return SpinMatrix(load_all(EC, orbsfile, Val(2))...)
+function load_orbitals(EC::ECInfo; start::Bool=false)
+  cMO, type, basis = fetch_orbitals(EC; start=start)
+  current_basis = generate_basis(EC, "ao")
+  return project_onto_basis(cMO, basis, current_basis; check=true)
 end
 
 """
-    load_positron_orbitals(EC::ECInfo, orbsfile::String="")
+    try_load_starting_orbitals(EC::ECInfo) -> (SpinMatrix, Bool)
 
-  Load (last) positron orbitals.
+  Try to load starting orbitals from `wf.start` file.
+
+  If `wf.start` is set, load and project orbitals from that file.
   
-  - from file `orbsfile` if not empty
-  - from file [`WfOptions.orb_pos`](@ref ECInfos.WfOptions) if not empty
-  - error if all files are empty
-
-  Returns `::SpinMatrix`. 
+  Returns `(cMO, loaded)` where `loaded` indicates if orbitals were successfully loaded.
+  If no orbitals are available, returns `(SpinMatrix{Float64}(), false)`.
 """
-function load_positron_orbitals(EC::ECInfo, orbsfile::String="")
-  if !isempty(strip(orbsfile))
-    # orbsfile will be used
-  elseif !isempty(strip(EC.options.wf.orb))
-    orbsfile = EC.options.wf.orb_pos
-  else
-    error("no orbitals found")
+function try_load_starting_orbitals(EC::ECInfo)
+  if EC.options.wf.start == "" 
+    return SpinMatrix{Float64}(), false
   end
-  return load_all(EC, orbsfile, Val(2))
+  if has_dumpfile(EC; start=true)
+    println("Loading starting orbitals from ", EC.options.wf.start, " ...")
+    cMO = load_orbitals(EC; start=true)
+    return cMO, true
+  end
+  println("Warning: Start file ", EC.options.wf.start, " not found.")
+  return SpinMatrix{Float64}(), false
 end
 
 """
-    load_positron_epsilon(EC::ECInfo, epsfile::String="")
+    left_from_right_rotations(cMOr::SpinMatrix)
 
-  Load (last) positron orbital energies.
-  
-  - from file `epsfile` if not empty
-  - from file [`WfOptions.ϵ_pos`](@ref ECInfos.WfOptions) if not empty
-  - error if all files are empty
+  Calculate left biorthogonal rotation coefficients from right BO coefficients.
+"""
+function left_from_right_rotations(cMOr::SpinMatrix{T}) where {T}
+  if is_restricted(cMOr)
+    cMOl = SpinMatrix((inv(cMOr[1]))')
+    restrict!(cMOl)
+  else
+    cMOl = SpinMatrix{T}()
+    for ispin = 1:2
+      cMOl[ispin] = (inv(cMOr[ispin]))'
+    end
+  end
+  return cMOl
+end
+
+"""
+    load_rotations(EC::ECInfo)
+
+  Load (last) orbital rotations from file [`WfOptions.dump`](@ref ECInfos.WfOptions).
 
   Returns `::SpinMatrix`. 
 """
-function load_positron_epsilon(EC::ECInfo, epsfile::String="")
-  if !isempty(strip(epsfile))
-    # epsfile will be used
-  elseif !isempty(strip(EC.options.wf.eps_pos))
-    epsfile = EC.options.wf.eps_pos
-  else
-    error("no orbitals found")
+function load_rotations(EC::ECInfo)
+  cRot, type = fetch_rotations(EC)
+  if !is_rotation(type)
+    error("Dump file does not contain orbital rotations")
   end
-  return load(EC, epsfile)
+  return cRot
+end
+
+"""
+    load_left_right_rotations(EC::ECInfo) -> (left::SpinMatrix, right::SpinMatrix)
+
+  Load (last) left and right orbital rotations from file [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  If the type of the rotations does not contain the word `biorthogonal`, 
+  the same rotation is returned for left and right (can be checked with `===`).
+"""
+function load_left_right_rotations(EC::ECInfo)
+  cRot, type = fetch_rotations(EC)
+  if !is_rotation(type)
+    error("Dump file does not contain orbital rotations")
+  end
+  if is_biorthogonal(type)
+    cRotL = left_from_right_rotations(cRot)
+    return cRotL, cRot
+  else
+    return cRot, cRot
+  end
+end
+
+"""
+    load_positron_orbitals(EC::ECInfo)
+
+  Load (last) positron orbitals from file [`WfOptions.dump`](@ref ECInfos.WfOptions).
+  
+  Returns `::SpinMatrix`. 
+"""
+function load_positron_orbitals(EC::ECInfo)
+  cMO, type, basis = fetch_orbitals(EC; MO="po")
+  current_basis = generate_basis(EC, "ao")
+  return project_onto_basis(cMO, basis, current_basis; check=true)
 end
 
 """
@@ -216,12 +258,15 @@ end
 """
     rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
 
-  Rotate orbitals `orb1` and `orb2` from [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  Rotate orbitals `orb1` and `orb2` from [`WfOptions.dump`](@ref ECInfos.WfOptions) 
   by `angle` degrees. For unrestricted orbitals, `spin` can be `:α` or `:β`.
 """
 function rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
-  cMO = load_orbitals(EC)
-  descr = file_description(EC, EC.options.wf.orb)
+  cMO, descr = fetch_rotations(EC)
+  basis = BasisSet()
+  if !is_rotation(descr)
+    cMO, descr, basis = fetch_orbitals(EC)
+  end
   if is_restricted(cMO)
     cMOrot = cMO[1]
   else
@@ -229,10 +274,10 @@ function rotate_orbs(EC::ECInfo, orb1, orb2, angle=90; spin::Symbol=:α)
   end
   rotate_orbs!(cMOrot, orb1, orb2, angle)
   descr *= " rot$(orb1)&$(orb2)by$(angle)"
-  if is_restricted(cMO)
-    save!(EC, EC.options.wf.orb, cMO[1], description=descr)
+  if isempty(basis)
+    dump_rotations(EC, cMO; type=descr)
   else
-    save!(EC, EC.options.wf.orb, cMO..., description=descr)
+    dump_orbitals(EC, cMO; basis=basis, type=descr)
   end
 end
 
@@ -256,15 +301,13 @@ end
 """
     show_orbitals(EC::ECInfo, range=nothing)
 
-  Print the MO coefficients in [`WfOptions.orb`](@ref ECInfos.WfOptions) 
+  Print the MO coefficients in [`WfOptions.dump`](@ref ECInfos.WfOptions) 
   with respect to the atomic orbitals.
   
   `range` is a range of molecular orbitals to be printed.
 """
 function show_orbitals(EC::ECInfo, range=nothing)
-  basis = generate_basis(EC, "ao")
-  cMO = load_orbitals(EC)
-  descr = file_description(EC, EC.options.wf.orb)
+  cMO, descr, basis = fetch_orbitals(EC)
   if isnothing(range)
     range = 1:size(cMO, 2)
   end
@@ -325,6 +368,30 @@ function normalize_phase!(cMO)
     if cMO[maxao,imo] < 0
       cMO[:,imo] .= -cMO[:,imo]
     end
+  end
+end
+
+"""
+    project_onto_basis(cMO::SpinMatrix, old_basis::BasisSet, new_basis::BasisSet; check=false)
+
+  Project the MO coefficients onto a new basis.
+
+If `check` is true, the function will check whether the projection is needed and return the same
+array `cMO` if it is not (i.e., it can be checked with `===`).
+"""
+function project_onto_basis(cMO::SpinMatrix, old_basis::BasisSet, new_basis::BasisSet; check=false)
+  SAO = overlap(new_basis)
+  proj = inv(SAO) * overlap(new_basis, old_basis)
+  if check && SAO*proj ≈ SAO
+    return cMO
+  end
+  if is_restricted(cMO)
+    cMO_new = proj * cMO[1]
+    return SpinMatrix(cMO_new)
+  else
+    cMO_newα = proj * cMO[1]
+    cMO_newβ = proj * cMO[2]
+    return SpinMatrix(cMO_newα, cMO_newβ)
   end
 end
 

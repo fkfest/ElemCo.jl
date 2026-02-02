@@ -13,7 +13,7 @@ export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6
 export warnerror
 export mainname, print_time, print_memory, free_memory
 export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
-export subspace_in_space, argmaxN
+export subspace_in_space, get_spaceblocks, argmaxN
 export @istoplevel
 export @assert_devel
 export substr, setdiff4dict!, modifyvalueswith!
@@ -31,8 +31,13 @@ export PairDict
 # from VecDicts
 export VecDict, getvalue, setvalue!, values, resize!, push!
 export setat!, getat, setkeyat!, getkeyat, setvalueat!, getvalueat
+# from input_utils
+export clean_exprstring, is_options_block, parse_options_block, separate_kwargs
+export @var2string
 
 export @pib # alias for Base.@propagate_inbounds
+
+include("input_utils.jl")
 
 """
     @pib
@@ -264,6 +269,62 @@ function subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
   return start:stop
 end
 
+""" 
+    get_spaceblocks(space, maxblocksize=128, strict=false)
+
+  Generate ranges for block indices for space (for loop over blocks).
+
+  `space` is a range or an array of indices. 
+  Even if `space` is non-contiguous, the blocks will be contiguous. 
+  If `strict` is true, the blocks will be of size `maxblocksize` (except for the last block and non-contiguous index-ranges).
+  Otherwise the actual block size will be as close as possible to `blocksize` such that
+  the resulting blocks are of similar size.
+"""
+function get_spaceblocks(space, maxblocksize=128, strict=false)
+  if length(space) == 0
+    return UnitRange{Int}[]
+  end
+  if last(space) - first(space) + 1 == length(space)
+    # contiguous
+    cblks = UnitRange{Int}[ first(space):last(space) ]
+  else
+    # create an array of contiguous ranges
+    cblks = UnitRange{Int}[]
+    begr = first(space)
+    endr = begr - 1
+    for idx in space
+      if idx == endr + 1
+        endr = idx
+      else
+        push!(cblks, begr:endr)
+        endr = begr = idx
+      end 
+    end
+    push!(cblks, begr:endr)
+  end  
+
+  allblks = UnitRange{Int}[]
+  for range in cblks
+    nblks::Int = length(range) ÷ maxblocksize
+    if nblks*maxblocksize < length(range)
+      nblks += 1
+    end
+    if strict 
+      blks = UnitRange{Int}[ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
+    else
+      blocksize = length(range) ÷ nblks
+      n_largeblks = mod(length(range), nblks)
+      blks = UnitRange{Int}[ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
+      start = n_largeblks*(blocksize+1)+first(range)
+      for i = n_largeblks+1:nblks
+        push!(blks, start:start+blocksize-1)
+        start += blocksize
+      end
+    end
+    append!(allblks, blks)
+  end
+  return allblks
+end
 
 """
     substr(string::AbstractString, start::Int, len::Int=-1)

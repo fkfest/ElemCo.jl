@@ -155,8 +155,19 @@ function _get_or_create_group(trexio::TrexioFile, group_name)
     return target_group, TREXIO_SUCCESS
 end
 
-# Helper function to check if attribute exists
-function _has_attribute(trexio::TrexioFile, group_name, attr_name)
+# Helper function to check if an HDF5 attribute exists on a group
+function _has_hdf5_attribute(group::HDF5.Group, attr_name::AbstractString)
+    return haskey(HDF5.attributes(group), String(attr_name))
+end
+
+# Helper function to check if a dataset exists in a group
+function _has_hdf5_dataset(group::HDF5.Group, dset_name::AbstractString)
+    return haskey(group, String(dset_name))
+end
+
+# Helper function to check if attribute/dataset exists (for scalar: attribute, for array: dataset)
+# For sparse arrays, checks for the _values dataset
+function _has_attribute(trexio::TrexioFile, group_name, attr_name; is_scalar=false, is_sparse=false)
     if !isopen(trexio.file)
         return false
     end
@@ -166,7 +177,16 @@ function _has_attribute(trexio::TrexioFile, group_name, attr_name)
     end
     
     target_group = trexio.file[group_name]
-    return haskey(target_group, attr_name)
+    if is_scalar
+        # Scalar values are stored as HDF5 attributes
+        return _has_hdf5_attribute(target_group, attr_name)
+    elseif is_sparse
+        # Sparse arrays have _values suffix
+        return _has_hdf5_dataset(target_group, attr_name * "_values")
+    else
+        # Array data stored as HDF5 datasets
+        return _has_hdf5_dataset(target_group, attr_name)
+    end
 end
 
 # Helper function to write basic metadata for new TREXIO files
@@ -179,7 +199,111 @@ function _write_basic_metadata(trexio_file::HDF5.File)
     end
     
     # Write unsafe flag in metadata following TREXIO specification
-    metadata_group["unsafe"] = 1
+    # TREXIO stores scalar numerical values as HDF5 attributes, not datasets
+    if _has_hdf5_attribute(metadata_group, "unsafe")
+        delete_attribute(metadata_group, "unsafe")
+    end
+    HDF5.write_attribute(metadata_group, "unsafe", Int64(1))
+end
+
+# ============================================================================
+# Sparse Array Support (TREXIO format uses _indices/_values datasets)
+# ============================================================================
+
+"""
+    _write_sparse_array(group, name, indices, values; compress_indices=false, size_max=0)
+
+Write sparse array data in TREXIO format with separate _indices and _values datasets.
+Values are stored as Float64.
+
+If `compress_indices=true` and `size_max > 0`, indices are stored using the smallest
+integer type that fits (matching official TREXIO behavior):
+- size_max < 255: UInt8
+- size_max < 65535: UInt16  
+- otherwise: Int32
+
+By default, indices are stored as Int32 for simplicity.
+"""
+function _write_sparse_array(group::HDF5.Group, name::String, indices::AbstractArray{<:Integer}, values::AbstractVector{Float64};
+                             compress_indices::Bool=false, size_max::Int=0)
+    indices_name = name * "_indices"
+    values_name = name * "_values"
+    
+    # Delete existing if present
+    if haskey(group, indices_name)
+        delete_object(group, indices_name)
+    end
+    if haskey(group, values_name)
+        delete_object(group, values_name)
+    end
+    
+    # Convert indices - optionally compress based on size_max (official TREXIO behavior)
+    if compress_indices && size_max > 0
+        if size_max < 255
+            indices_typed = convert(Array{UInt8}, indices)
+        elseif size_max < 65535
+            indices_typed = convert(Array{UInt16}, indices)
+        else
+            indices_typed = convert(Array{Int32}, indices)
+        end
+    else
+        # Default: store as Int32 (always works, simpler)
+        indices_typed = convert(Array{Int32}, indices)
+    end
+    
+    # Flatten indices for storage
+    indices_flat = vec(indices_typed)
+    
+    # Write as datasets
+    group[indices_name] = indices_flat
+    group[values_name] = values
+end
+
+"""
+    _read_sparse_array(group, name, rank) -> (indices, values)
+
+Read sparse array data from TREXIO format with _indices and _values datasets.
+Returns indices as Int32 array and values as Float64 vector.
+
+Note: Official TREXIO may compress indices as UInt8 or UInt16 depending on
+the maximum index value. This function handles all cases and converts to Int32.
+"""
+function _read_sparse_array(group::HDF5.Group, name::String, rank::Int)
+    indices_name = name * "_indices"
+    values_name = name * "_values"
+    
+    if !haskey(group, values_name)
+        return zeros(Int32, rank, 0), zeros(Float64, 0)
+    end
+    
+    values = read(group[values_name])::Vector{Float64}
+    
+    # Read indices - official TREXIO may use UInt8, UInt16, or Int32 compression
+    # We read as the stored type and convert to Int32
+    indices_dset = group[indices_name]
+    indices_raw = read(indices_dset)
+    
+    # Convert to Int32 regardless of storage type (handles UInt8, UInt16, Int32)
+    indices_flat = convert(Vector{Int32}, vec(indices_raw))
+    
+    # Reshape indices: stored as flat array, reshape to (rank, n_elements)
+    n_elements = length(values)
+    if n_elements > 0
+        indices = reshape(indices_flat, (rank, n_elements))
+    else
+        indices = zeros(Int32, rank, 0)
+    end
+    
+    return indices, values
+end
+
+"""
+    _has_sparse_array(group, name) -> Bool
+
+Check if sparse array exists (checks for _values dataset).
+"""
+function _has_sparse_array(group::HDF5.Group, name::String)
+    return haskey(group, name * "_values")
 end
 
 # ============================================================================
@@ -393,6 +517,20 @@ const TREXIO_MO_FIELDS = [
     TrexioField("mo", "k_point", Int, ["mo.num"], "for periodic calculations, the k point to which each MO belongs"),
 ]
 
+## 4.2a Positron orbitals (po group) - non-standard, violator
+const TREXIO_PO_FIELDS = [
+    TrexioField("po", "type", String, SCALAR, "free text to identify the set of POs (HF, Natural, Local, CASSCF, etc)", violator=true),
+    TrexioField("po", "num", Int, SCALAR, "number of POs", violator=true),
+    TrexioField("po", "coefficient", Float64, ["ao.num", "po.num"], "PO coefficients", violator=true),
+    TrexioField("po", "coefficient_im", Float64, ["ao.num", "po.num"], "PO coefficients (imaginary part)", violator=true),
+    TrexioField("po", "class", String, ["po.num"], "choose among: Core, Inactive, Active, Virtual, Deleted", violator=true),
+    TrexioField("po", "symmetry", String, ["po.num"], "symmetry in the point group", violator=true),
+    TrexioField("po", "occupation", Float64, ["po.num"], "occupation number", violator=true),
+    TrexioField("po", "energy", Float64, ["po.num"], "for canonical POs, corresponding eigenvalue", violator=true),
+    TrexioField("po", "spin", Int, ["po.num"], "for UHF wave functions, 0 is ↑ and 1 is ↓", violator=true),
+    TrexioField("po", "k_point", Int, ["po.num"], "for periodic calculations, the k point to which each PO belongs", violator=true),
+]
+
 ## 4.2.1 One-electron integrals (mo_1e_int group)
 const TREXIO_MO_1E_INT_FIELDS = [
     TrexioField("mo_1e_int", "overlap", Float64, ["mo.num", "mo.num"], "overlap integrals ⟨p|q⟩"),
@@ -429,6 +567,10 @@ const TREXIO_DETERMINANT_FIELDS = [
     TrexioField("determinant", "num", Int, SCALAR, "number of determinants"),
     TrexioField("determinant", "list", Int, ["determinant.num"], "list of determinants as integer bit fields"),
     TrexioField("determinant", "coefficient", Float64, ["determinant.num"], "coefficients of the determinants from the CI expansion"),
+    # Extended fields for separate alpha/beta storage with flexible n_int
+    TrexioField("determinant", "n_int", Int, SCALAR, "number of 64-bit integers per spin pattern (ceil(mo.num/64))", violator=true),
+    TrexioField("determinant", "alpha", Int, ["determinant.n_int", "determinant.num"], "alpha spin orbital patterns as 64-bit integer bit fields", violator=true),
+    TrexioField("determinant", "beta", Int, ["determinant.n_int", "determinant.num"], "beta spin orbital patterns as 64-bit integer bit fields", violator=true),
 ]
 
 ## 5.2 Configuration state functions (csf group)
@@ -511,7 +653,9 @@ const ALL_TREXIO_FIELDS = vcat(
     TREXIO_AO_FIELDS, TREXIO_AO_1E_INT_FIELDS, TREXIO_AO_2E_INT_FIELDS,
     TREXIO_MO_FIELDS, TREXIO_MO_1E_INT_FIELDS, TREXIO_MO_2E_INT_FIELDS,
     TREXIO_DETERMINANT_FIELDS, TREXIO_CSF_FIELDS, TREXIO_AMPLITUDE_FIELDS,
-    TREXIO_RDM_FIELDS, TREXIO_JASTROW_FIELDS, TREXIO_QMC_FIELDS
+    TREXIO_RDM_FIELDS, TREXIO_JASTROW_FIELDS, TREXIO_QMC_FIELDS,
+    # non-standard fields
+    TREXIO_PO_FIELDS,
 )
 
 # Generate exports dynamically for all TREXIO fields
@@ -532,8 +676,8 @@ function generate_write_docstring(field::TrexioField)
     ndim = length(field.dimensions)
     # Determine the data type and format
     if ndim == 0
-        # All scalar fields stored as HDF5 datasets (not attributes)
-        data_format = "stored as HDF5 dataset"
+        # Scalar fields stored as HDF5 attributes (TREXIO standard)
+        data_format = "stored as HDF5 attribute"
         type_str = "$(field.type)"
     elseif ndim == 1
         data_format = "as vector of $(field.type) values ($(field.dimensions[1]))"
@@ -543,7 +687,7 @@ function generate_write_docstring(field::TrexioField)
         type_str = "Array{$(field.type), $(ndim)}"
     end
     if field.sparse
-        data_format *= " (sparse)"
+        data_format *= " (sparse: indices/values format)"
     end
     # Add a warning if the function violates the TREXIO standard
     warning = ""
@@ -640,13 +784,15 @@ end
 
 """
 Generate the function body for write functions.
-All fields are stored as HDF5 datasets, not attributes.
+Scalar fields are stored as HDF5 attributes (TREXIO standard).
+Array fields are stored as HDF5 datasets.
+Sparse fields use _indices/_values format.
 Includes type and size validation.
 """
 function generate_write_function(field::TrexioField)
     ndim = length(field.dimensions)
     if ndim == 0
-        # Scalar values - validate type
+        # Scalar values - stored as HDF5 attributes (TREXIO standard)
         return quote
             # Type validation for scalar values
             if !(value isa $(field.type))
@@ -663,10 +809,12 @@ function generate_write_function(field::TrexioField)
             end
              
             try
-                if haskey(group, $(field.attribute))
-                    delete_object(group, $(field.attribute))
+                # Delete existing attribute if present (for unsafe mode updates)
+                if _has_hdf5_attribute(group, $(field.attribute))
+                    delete_attribute(group, $(field.attribute))
                 end
-                group[$(field.attribute)] = value
+                # Write as HDF5 attribute (TREXIO standard for scalars)
+                HDF5.write_attribute(group, $(field.attribute), value)
                 return TREXIO_SUCCESS
             catch e
                 @warn "$e"
@@ -697,73 +845,111 @@ function generate_write_function(field::TrexioField)
             end
         end
         
-        return quote
-            # sparse arrays not implemented
-            @assert !$(field.sparse) "Sparse arrays are not supported in TREXIO.jl write functions yet. Use the dense versions instead."
-            # Type validation
-            if !(value isa AbstractArray{$(field.type), $ndim})
-                return TREXIO_INVALID_ARG_2
-            end
-            
-            # Fixed size validation
-            $(if !isempty(fixed_size_checks)
-                quote
-                    if !($(Expr(:&&, fixed_size_checks...)))
-                        return TREXIO_INVALID_ARG_2
-                    end
+        if field.sparse
+            # Sparse arrays: expect (indices, values) tuple or named tuple
+            return quote
+                # Sparse arrays: value should be a tuple (indices, values) or NamedTuple
+                # indices: Array{Int32, 2} of shape (rank, n_elements)
+                # values: Vector{Float64} of length n_elements
+                local indices, values
+                if value isa Tuple && length(value) == 2
+                    indices, values = value
+                elseif value isa NamedTuple && haskey(value, :indices) && haskey(value, :values)
+                    indices, values = value.indices, value.values
+                else
+                    return TREXIO_INVALID_ARG_2
                 end
-            else
-                quote end
-            end)
-            
-            # Runtime size validation for fields referencing other fields
-            $(if !isempty(runtime_size_checks)
-                quote
-                    $(map(runtime_size_checks) do (dim_idx, ref_group, ref_attr)
-                        quote
-                            # Read the referenced field to get expected size
-                            # In TREXIO, size fields must be written before dependent arrays
-                            if !_has_attribute(trexio, $ref_group, $ref_attr)
-                                # Referenced field doesn't exist - this is an error
-                                return TREXIO_INVALID_ARG_2
-                            end
-                            
-                            ref_group_obj, ref_status = _get_or_create_group(trexio, $ref_group)
-                            if isnothing(ref_group_obj) || ref_status != TREXIO_SUCCESS
-                                return ref_status
-                            end
-                            
-                            try
-                                ref_value = read(ref_group_obj[$ref_attr])
-                                expected_size = isa(ref_value, Array) ? first(ref_value) : ref_value
-                                if size(value, $dim_idx) != expected_size
+                
+                # Validate types
+                if !(values isa AbstractVector{Float64})
+                    return TREXIO_INVALID_ARG_2
+                end
+                if !(indices isa AbstractArray{<:Integer})
+                    return TREXIO_INVALID_ARG_2
+                end
+                
+                group, status = _get_or_create_group(trexio, $(field.group))
+                if isnothing(group) || status != TREXIO_SUCCESS
+                    return status
+                end
+                
+                try
+                    _write_sparse_array(group, $(field.attribute), indices, Vector{Float64}(values))
+                    return TREXIO_SUCCESS
+                catch e
+                    @warn "$e"
+                    return TREXIO_FAILURE
+                end
+            end
+        else
+            # Dense arrays
+            return quote
+                # Type validation
+                if !(value isa AbstractArray{$(field.type), $ndim})
+                    return TREXIO_INVALID_ARG_2
+                end
+                
+                # Fixed size validation
+                $(if !isempty(fixed_size_checks)
+                    quote
+                        if !($(Expr(:&&, fixed_size_checks...)))
+                            return TREXIO_INVALID_ARG_2
+                        end
+                    end
+                else
+                    quote end
+                end)
+                
+                # Runtime size validation for fields referencing other fields
+                $(if !isempty(runtime_size_checks)
+                    quote
+                        $(map(runtime_size_checks) do (dim_idx, ref_group, ref_attr)
+                            quote
+                                # Read the referenced field to get expected size
+                                # In TREXIO, size fields must be written before dependent arrays
+                                if !_has_attribute(trexio, $ref_group, $ref_attr, is_scalar=true)
+                                    # Referenced field doesn't exist - this is an error
                                     return TREXIO_INVALID_ARG_2
                                 end
-                            catch e
-                                # Error reading the reference field
-                                return TREXIO_FAILURE
+                                
+                                ref_group_obj, ref_status = _get_or_create_group(trexio, $ref_group)
+                                if isnothing(ref_group_obj) || ref_status != TREXIO_SUCCESS
+                                    return ref_status
+                                end
+                                
+                                try
+                                    # Read from HDF5 attribute (scalar dimension values)
+                                    ref_value = HDF5.read_attribute(ref_group_obj, $ref_attr)
+                                    expected_size = isa(ref_value, Array) ? first(ref_value) : ref_value
+                                    if size(value, $dim_idx) != expected_size
+                                        return TREXIO_INVALID_ARG_2
+                                    end
+                                catch e
+                                    # Error reading the reference field
+                                    return TREXIO_FAILURE
+                                end
                             end
-                        end
-                    end...)
+                        end...)
+                    end
+                else
+                    quote end
+                end)
+                
+                group, status = _get_or_create_group(trexio, $(field.group))
+                if isnothing(group) || status != TREXIO_SUCCESS
+                    return status
                 end
-            else
-                quote end
-            end)
-            
-            group, status = _get_or_create_group(trexio, $(field.group))
-            if isnothing(group) || status != TREXIO_SUCCESS
-                return status
-            end
-            
-            try
-                if haskey(group, $(field.attribute))
-                    delete_object(group, $(field.attribute))
+                
+                try
+                    if haskey(group, $(field.attribute))
+                        delete_object(group, $(field.attribute))
+                    end
+                    group[$(field.attribute)] = value
+                    return TREXIO_SUCCESS
+                catch e
+                    @warn "$e"
+                    return TREXIO_FAILURE
                 end
-                group[$(field.attribute)] = value
-                return TREXIO_SUCCESS
-            catch e
-                @warn "$e"
-                return TREXIO_FAILURE
             end
         end
     end
@@ -771,12 +957,14 @@ end
 
 """
 Generate the function body for read functions with type-stable returns.
-All fields are read from HDF5 datasets, not attributes.
+Scalar fields are read from HDF5 attributes (TREXIO standard).
+Array fields are read from HDF5 datasets.
+Sparse fields use _indices/_values format.
 """
 function generate_read_function(field::TrexioField)
     ndim = length(field.dimensions)
     if ndim == 0
-        # Scalar values stored as 1-element datasets
+        # Scalar values stored as HDF5 attributes (TREXIO standard)
         # Handle all numeric types explicitly for type stability
         if field.type == Int || field.type == Int64
             default_val = 0
@@ -789,7 +977,7 @@ function generate_read_function(field::TrexioField)
         end
         
         return quote
-            if !_has_attribute(trexio, $(field.group), $(field.attribute))
+            if !_has_attribute(trexio, $(field.group), $(field.attribute), is_scalar=true)
                 return $(default_val), TREXIO_HAS_NOT
             end
             
@@ -799,7 +987,8 @@ function generate_read_function(field::TrexioField)
             end
             
             try
-                value = read(group[$(field.attribute)])
+                # Read from HDF5 attribute (TREXIO standard for scalars)
+                value = HDF5.read_attribute(group, $(field.attribute))
                 return convert($(field.type), value), TREXIO_SUCCESS
             catch e
                 return $(default_val), TREXIO_FAILURE
@@ -807,31 +996,49 @@ function generate_read_function(field::TrexioField)
         end
     else
         # Array data
-        # (1D, 2D, 3D, 4D, 6D, 8D)
-        # Create appropriate empty array based on dimensionality
-        if field.type == String
-            default_val = fill("", ntuple(d->0, ndim))
+        if field.sparse
+            # Sparse arrays: return (indices, values) tuple
+            return quote
+                if !_has_attribute(trexio, $(field.group), $(field.attribute), is_sparse=true)
+                    return (zeros(Int32, $(ndim), 0), zeros(Float64, 0)), TREXIO_HAS_NOT
+                end
+                
+                group, status = _get_or_create_group(trexio, $(field.group))
+                if isnothing(group) || status != TREXIO_SUCCESS
+                    return (zeros(Int32, $(ndim), 0), zeros(Float64, 0)), status
+                end
+                
+                try
+                    indices, values = _read_sparse_array(group, $(field.attribute), $(ndim))
+                    return (indices, values), TREXIO_SUCCESS
+                catch e
+                    return (zeros(Int32, $(ndim), 0), zeros(Float64, 0)), TREXIO_FAILURE
+                end
+            end
         else
-            default_val = zeros(field.type, ntuple(d->0, ndim))
-        end
-        return quote
-            # sparse arrays not implemented
-            @assert !$(field.sparse) "Sparse arrays are not supported in TREXIO.jl read functions yet. Use the dense versions instead."
-            
-            if !_has_attribute(trexio, $(field.group), $(field.attribute))
-                return $(default_val), TREXIO_HAS_NOT
+            # Dense arrays (1D, 2D, 3D, 4D, 6D, 8D)
+            # Create appropriate empty array based on dimensionality
+            if field.type == String
+                default_val = fill("", ntuple(d->0, ndim))
+            else
+                default_val = zeros(field.type, ntuple(d->0, ndim))
             end
-            
-            group, status = _get_or_create_group(trexio, $(field.group))
-            if isnothing(group) || status != TREXIO_SUCCESS
-                return $(default_val), status
-            end
-            
-            try
-                data = read(group[$(field.attribute)])::Array{$(field.type), $(ndim)}
-                return data, TREXIO_SUCCESS
-            catch e
-                return $(default_val), TREXIO_FAILURE
+            return quote
+                if !_has_attribute(trexio, $(field.group), $(field.attribute))
+                    return $(default_val), TREXIO_HAS_NOT
+                end
+                
+                group, status = _get_or_create_group(trexio, $(field.group))
+                if isnothing(group) || status != TREXIO_SUCCESS
+                    return $(default_val), status
+                end
+                
+                try
+                    data = read(group[$(field.attribute)])::Array{$(field.type), $(ndim)}
+                    return data, TREXIO_SUCCESS
+                catch e
+                    return $(default_val), TREXIO_FAILURE
+                end
             end
         end
     end
@@ -841,8 +1048,11 @@ end
 Generate the function body for has functions.
 """
 function generate_has_function(field::TrexioField)
+    ndim = length(field.dimensions)
+    is_scalar = ndim == 0
+    is_sparse = field.sparse
     return quote
-        _has_attribute(trexio, $(field.group), $(field.attribute))
+        _has_attribute(trexio, $(field.group), $(field.attribute), is_scalar=$(is_scalar), is_sparse=$(is_sparse))
     end
 end
 

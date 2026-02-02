@@ -18,23 +18,16 @@ basis = Dict("ao"=>"sto-3g",
              "jkfit"=>"cc-pvdz-jkfit",
              "mpfit"=>"cc-pvdz-mpfit")
 
-@ECinit            
 @dfhf
 energies = @cc qv-ccd
 @test abs(energies["QV-CCD"]-EQV_CCD_test) < epsilon
 
-@ECinit            
-@dfhf
 energies = @cc oqv-ccd
 @test abs(energies["OQV-CCD"]-EOQV_CCD_test) < epsilon
 
-@ECinit
-@dfhf
 energies = @cc qv-dcd
 @test abs(energies["QV-DCD"]-EQV_DCD) < epsilon
 
-@ECinit
-@dfhf
 energies = @cc oqv-dcd
 @test abs(energies["OQV-DCD"]-EOQV_DCD_test) < epsilon
 

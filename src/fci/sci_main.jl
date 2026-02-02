@@ -24,11 +24,11 @@ include("sci_hb_selection.jl")
 # ===========================================
 
 """
-    setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants::Vector{Determinant}, hamiltonian=SelectedHamiltonianMatrix()) -> SelectedCIContext
+    setup_selected_ci_from_determinants!(context::Union{FCIContext, CIPHIContext}, determinants::Vector{Determinant}, hamiltonian=SelectedHamiltonianMatrix()) -> SelectedCIContext
 
 Create SelectedCIContext from list of determinants.
 """
-function setup_selected_ci_from_determinants!(context::Union{FCIContext, HCIContext}, determinants, 
+function setup_selected_ci_from_determinants!(context::Union{FCIContext, CIPHIContext}, determinants, 
                                               hamiltonian::Union{Nothing,SelectedHamiltonianMatrix}=nothing)
   if isnothing(hamiltonian) 
     hamiltonian = SelectedHamiltonianMatrix(is_hermitian(context))
@@ -80,18 +80,23 @@ end
 
 
 # ===========================================
-# Main HCI Iteration Loop
+# Main CIPHI Iteration Loop
 # ===========================================
 
 """
-    run_heatbath_ci!(ctx::Union{FCIContext, HCIContext}, options::HCIOptions) 
+    run_ciphi!(ctx::Union{FCIContext, CIPHIContext}, options::CIPHIOptions; 
+                     initial_dets=nothing, initial_coeffs=nothing) 
       -> (Vector{Float64}, Matrix{Float64}, Vector{Determinant}, Vector{(Float64, Float64)})
 
-Run Heat-Bath CI calculation with support for multiple states.
+Run CIPHI (CIΦ - Selected CI via Perturbation, Heat-Bath and Iterations) calculation with support for multiple states.
 
 # Arguments
 - `ctx`: FCI context
-- `options`: Heat-Bath CI options (including nstates for multi-state)
+- `options`: CIPHI options (including nstates for multi-state)
+
+# Keyword Arguments
+- `initial_dets::Union{Nothing, Vector{<:AbstractDeterminant}}`: Starting determinants from previous calculation
+- `initial_coeffs::Union{Nothing, AbstractVecOrMat{Float64}}`: Starting CI coefficients (optional, for warm start)
 
 # Returns
 - `energies`: Vector of length nstates with total energies (electronic + nuclear)
@@ -102,11 +107,14 @@ Run Heat-Bath CI calculation with support for multiple states.
 # Notes
 - For nstates=1 (default), uses single-state selection strategy
 - For nstates>1, uses multi-state selection with state-maximum probability
+- If `initial_dets` is provided, these determinants are used as the starting variational space
 """
-function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}, options::HCIOptions) where OPattern
+function run_ciphi!(ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}}, options::CIPHIOptions;
+                          initial_dets::Union{Nothing, Vector{<:AbstractDeterminant}}=nothing,
+                          initial_coeffs::Union{Nothing, AbstractVecOrMat{Float64}}=nothing) where OPattern
   if options.verbose
     println("\n" * "="^70)
-    println("Heat-Bath Configuration Interaction (HCI)")
+    println("CIPHI - Selected CI via Perturbation, Heat-Bath and Iterations")
     println("="^70)
     println("Target selection: $(options.target_selection)")
     println("Selection threshold (ε): $(options.epsilon)")
@@ -135,7 +143,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
     println("  Computing and sorting |H(rs ← pq)| for all orbital pairs...")
   end
   
-  setup_data = setup_hci!(ctx)
+  setup_data = setup_ciphi!(ctx)
   
   if options.verbose
     n_pairs = length(setup_data.double_excitations_aa)
@@ -148,7 +156,43 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
   variational_dets = Determinant{OPattern}[]
   E_init_vec = Float64[]
 
-  if options.use_small_space_guess && options.nstates > 1
+  if !isnothing(initial_dets) && length(initial_dets) > 0
+    # Start from provided determinants (restart from previous calculation)
+    if options.verbose
+      println("\nInitialization (Restart from stored determinants)")
+      println("  Loading $(length(initial_dets)) determinants from previous calculation")
+    end
+    
+    # Convert to native Determinant type if needed
+    for det in initial_dets
+      push!(variational_dets, Determinant{OPattern}(det.alpha, det.beta))
+    end
+    
+    # Get initial energies from diagonalization
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix(is_hermitian(ctx)))
+    
+    # Use provided coefficients as warm start if available
+    prev_coeffs = nothing
+    if !isnothing(initial_coeffs) && length(initial_coeffs) > 0
+      # Convert to matrix if vector
+      prev_coeffs = initial_coeffs isa AbstractMatrix ? initial_coeffs : reshape(initial_coeffs, :, 1)
+      if options.verbose
+        println("  Using stored CI coefficients as warm start")
+      end
+    end
+    
+    E_electronic_vec, coeffs_init = diagonalize_selected_space(selected_ctx, 
+                                                               nstates=options.nstates,
+                                                               previous_vectors=prev_coeffs)
+    E_init_vec = E_electronic_vec .+ ctx.fcidump.int0
+    
+    if options.verbose
+      println("  Initial energies from restart:")
+      for (i, E) in enumerate(E_init_vec)
+        println("    State $i: $E Hartree")
+      end
+    end
+  elseif options.use_small_space_guess && options.nstates > 1
     # Use small-space Hamiltonian diagonalization for better initial guess
     if options.verbose
       println("\nInitialization (Small-Space Method)")
@@ -205,6 +249,25 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
       end
     end
   end
+  # Initialize previous_eigenvectors with stored coefficients if available (for warm start)
+  previous_eigenvectors = nothing
+  if !isnothing(initial_coeffs) && length(initial_coeffs) > 0
+    prev_coeffs = initial_coeffs isa AbstractMatrix ? initial_coeffs : reshape(initial_coeffs, :, 1)
+    previous_eigenvectors = prev_coeffs
+  end
+  
+  # Skip iterative selection if pt2_only mode (just compute PT2 on loaded determinants)
+  if options.pt2_only
+    if isnothing(initial_dets) || length(initial_dets) == 0
+      error("pt2_only mode requires starting determinants (use with restart)")
+    end
+    if options.verbose
+      println("\nPT2-only mode: Skipping variational CIPHI iterations")
+    end
+    # Use stored coefficients as previous eigenvectors for final diagonalization
+    # Go directly to final diagonalization and PT2
+    @goto final_diagonalization
+  end
   
   if options.verbose
     println("\nIterative perturbative selection")
@@ -212,12 +275,11 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
   nsteps = max(options.nsteps, 1)
 
   E_prev_vec = zero(E_init_vec)
-  previous_eigenvectors = nothing  # Track previous eigenvectors for warm start
   converged = false
   res_tol = options.res_tol * 100  # Looser tolerance for main loop diagonalization
   for iter in 1:options.max_iter
     if options.verbose
-      println("\nHCI Iteration $iter:")
+      println("\nCIPHI Iteration $iter:")
       println("  Current space size: $(n_selected(selected_ctx)) determinants")
     end
     
@@ -339,9 +401,10 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
   end
   
   if !converged
-    @warn "HCI did not converge in $(options.max_iter) iterations"
+    @warn "CIPHI did not converge in $(options.max_iter) iterations"
   end
   
+  @label final_diagonalization
   # Final diagonalization
   if options.verbose
     println("\nFinal diagonalization with $(n_selected(selected_ctx)) determinants...")
@@ -357,7 +420,7 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
   
   if options.verbose
     println("="^70)
-    println("HCI Complete!")
+    println("CIPHI Complete!")
     if options.nstates == 1
       println("Electronic energy: $(E_electronic_vec[1]) Hartree")
       println("Nuclear repulsion: $(ctx.fcidump.int0) Hartree")
@@ -404,20 +467,27 @@ function run_heatbath_ci!(ctx::Union{FCIContext{OPattern}, HCIContext{OPattern}}
 end
 
 """
-    run_heatbath_ci!(ctx::HCIContext) -> (energies, coeffs, determinants, pt2_result)
+    run_ciphi!(ctx::CIPHIContext; initial_dets=nothing, initial_coeffs=nothing) 
+      -> (energies, coeffs, determinants, pt2_result)
 
-Convenience method for HCIContext that uses bundled options.
+Convenience method for CIPHIContext that uses bundled options.
 
 This lightweight interface avoids FCIContext initialization overhead:
 - No full-space address tables computed upfront
 - No full-space diagonal H computed upfront  
 - Initialization time proportional to N_orbitals, not N_determinants
 
+# Keyword Arguments
+- `initial_dets`: Starting determinants from previous calculation (for restart)
+- `initial_coeffs`: Starting CI coefficients (optional, for warm start)
+
 # Returns
-Same as run_heatbath_ci!(ctx, options): (energies, coeffs, determinants, pt2_result)
+Same as run_ciphi!(ctx, options): (energies, coeffs, determinants, pt2_result)
 """
-function run_heatbath_ci!(ctx::HCIContext{OPattern}) where OPattern
-  return run_heatbath_ci!(ctx, ctx.options)
+function run_ciphi!(ctx::CIPHIContext{OPattern}; 
+                          initial_dets::Union{Nothing, Vector{<:AbstractDeterminant}}=nothing,
+                          initial_coeffs::Union{Nothing, AbstractVecOrMat{Float64}}=nothing) where OPattern
+  return run_ciphi!(ctx, ctx.options; initial_dets=initial_dets, initial_coeffs=initial_coeffs)
 end
 
 """
@@ -435,7 +505,7 @@ Returns PT2 energies as a vector.
 """
 function compute_pt2_correction!(selected_ctx::SelectedCIContext,
                                  coefficients::Matrix{Float64}, E_variational::Vector{Float64},
-                                 setup_data::HCISetupData, options::HCIOptions)
+                                 setup_data::CIPHISetupData, options::CIPHIOptions)
   
   if !options.compute_pt2
     return Float64[]

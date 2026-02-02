@@ -1,21 +1,21 @@
 using Test
 using ElemCo
 
-@testset "Heat-Bath CI - UHF Systems" begin
-  println("\n=== Testing Heat-Bath CI with UHF ===")
+@testset "CIPHI - UHF Systems" begin
+  println("\n=== Testing CIPHI with UHF ===")
     
   epsilon = 1.e-6
-  E_HCIa_test = -75.940790606682
-  E_HCIa_PT2_test = -75.941009904381
-  E_HCIc_test = -75.688047789381
-  E_HCIt_test = -75.852590484068
+  E_CIPHIa_test = -75.940790606682
+  E_CIPHIa_PT2_test = -75.941009904381
+  E_CIPHIc_test = -75.688047789381
+  E_CIPHIt_test = -75.852590484068
 
-  E_HCIa_tight_test = -75.941001448353
+  E_CIPHIa_tight_test = -75.941001448353
 
-  E_HCIa_ms_test = -75.939226562784
+  E_CIPHIa_ms_test = -75.939226562784
   omega1_test = 0.08963377462914934
     
-  @testset "HCI Basic - H2O Anion" begin
+  @testset "CIPHI Basic - H2O Anion" begin
         
     geometry = "
                O      0.000000000    0.000000000   -0.130186067
@@ -24,19 +24,19 @@ using ElemCo
     basis = Dict("ao"=>"6-31g", "jkfit"=>"vtz-jkfit", "mpfit"=>"vtz-mpfit")
     
     @set wf charge=-1
-    @set hci epsilon=1.e-4
+    @set ciphi epsilon=1.e-4
     
     @dfuhf
-    energies = @hci
+    energies = @ciphi
     
-    @test haskey(energies, "HCI")
-    E_hci = energies["HCI"]
+    @test haskey(energies, "CIPHI")
+    E_ciphi = energies["CIPHI"]
     
-    println("HCI Energy (H2O anion, UHF): $E_hci")
-    @test abs(E_hci - E_HCIa_test) < epsilon
+    println("CIPHI Energy (H2O anion, UHF): $E_ciphi")
+    @test abs(E_ciphi - E_CIPHIa_test) < epsilon
   end
     
-  @testset "HCI - H2O Cation" begin
+  @testset "CIPHI - H2O Cation" begin
     
     geometry = "
                O      0.000000000    0.000000000   -0.130186067
@@ -47,15 +47,15 @@ using ElemCo
     @set wf charge=1
 
     @dfuhf
-    energies = @hci
+    energies = @ciphi
     
-    E_hci = energies["HCI"]
+    E_ciphi = energies["CIPHI"]
     
-    println("HCI Energy (H2O cation, UHF): $E_hci")
-    @test abs(E_hci - E_HCIc_test) < epsilon
+    println("CIPHI Energy (H2O cation, UHF): $E_ciphi")
+    @test abs(E_ciphi - E_CIPHIc_test) < epsilon
   end
     
-  @testset "HCI - H2O Triplet" begin
+  @testset "CIPHI - H2O Triplet" begin
     geometry = "
                O      0.000000000    0.000000000   -0.130186067
                H1     0.000000000    1.489124508    1.033245507
@@ -65,15 +65,15 @@ using ElemCo
     @set wf ms2=2
     
     @dfuhf
-    energies = @hci
+    energies = @ciphi
     
-    E_hci = energies["HCI"]
+    E_ciphi = energies["CIPHI"]
     
-    println("HCI Energy (H2O triplet, UHF): $E_hci")
-    @test abs(E_hci - E_HCIt_test) < epsilon
+    println("CIPHI Energy (H2O triplet, UHF): $E_ciphi")
+    @test abs(E_ciphi - E_CIPHIt_test) < epsilon
   end
     
-  @testset "HCI UHF Selection Thresholds" begin
+  @testset "CIPHI UHF Selection Thresholds" begin
         
     geometry = "
                O      0.000000000    0.000000000   -0.130186067
@@ -82,18 +82,18 @@ using ElemCo
     basis = Dict("ao"=>"6-31g", "jkfit"=>"vtz-jkfit", "mpfit"=>"vtz-mpfit")
     
     @set wf charge=-1
-    @set hci epsilon=1.e-5
+    @set ciphi epsilon=1.e-5
     
     @dfuhf
-    energies = @hci
+    energies = @ciphi
     
-    E_hci = energies["HCI"]
+    E_ciphi = energies["CIPHI"]
     
-    println("HCI Energy (UHF, tight selection): $E_hci")
-    @test abs(E_hci - E_HCIa_tight_test) < epsilon
+    println("CIPHI Energy (UHF, tight selection): $E_ciphi")
+    @test abs(E_ciphi - E_CIPHIa_tight_test) < epsilon
   end
     
-  @testset "HCI UHF Multi-root" begin
+  @testset "CIPHI UHF Multi-root" begin
     geometry = "
                O      0.000000000    0.000000000   -0.130186067
                H1     0.000000000    1.489124508    1.033245507
@@ -101,16 +101,16 @@ using ElemCo
     basis = Dict("ao"=>"6-31g", "jkfit"=>"vtz-jkfit", "mpfit"=>"vtz-mpfit")
     
     @set wf charge=-1
-    @set hci nstates=2 epsilon=5.e-4
+    @set ciphi nstates=2 epsilon=5.e-4
     
     @dfuhf
-    energies = @hci
+    energies = @ciphi
     
-    println("HCI Multi-root energies (UHF): ", energies["HCI"])
+    println("CIPHI Multi-root energies (UHF): ", energies["CIPHI"])
     
-    @test abs(energies["HCI"] - E_HCIa_ms_test) < epsilon
+    @test abs(energies["CIPHI"] - E_CIPHIa_ms_test) < epsilon
     @test abs(energies["ω1"] - omega1_test) < epsilon
   end
 
-  println("\n=== Heat-Bath CI UHF Tests Passed ===\n")
+  println("\n=== CIPHI UHF Tests Passed ===\n")
 end

@@ -3,12 +3,10 @@
 """
 module TensorTools
 using LinearAlgebra
-using TensorOperations
-# using ElemCoTensorOperations
-using StridedViews
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
+using ..ElemCo.MTensorOperations
 
 export save!, load, load_all, load!, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
@@ -17,116 +15,11 @@ export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
 export ints2!, detri_int2!
 export sqrtinvchol, invchol, rotate_eigenvectors_to_real, balance_norms!, svd_thr
-export get_spaceblocks
 export print_nonzeros
+# reexport MTensorOperations
 export @mtensor, @mtensoropt
-export @tensor, @tensoropt # reexport @tensor, @tensoropt
+export @tensor, @tensoropt 
 export @mview, mview
-
-save_tensorcalls() = false
-
-if save_tensorcalls()
-  include("tensoranalyzer.jl")
-  write_header4tensorcalls()
-end
-
-"""
-    mtensor(ex)
-
-Macro for tensor operations with manual allocator.
-"""
-macro mtensor(ex)
-  if save_tensorcalls()
-    print_tensor4tensorcalls(Symbol("@tensor"), ex)
-  end
-  return esc(:(@tensor $ex))
-  # TODO: activate manual allocator
-  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
-end
-
-macro mtensoropt(args::Vararg{Expr})
-  if save_tensorcalls()
-    print_tensor4tensorcalls(Symbol("@tensoropt"), args...)
-  end
-  return esc(:(@tensoropt $(args...)))
-  # TODO: activate manual allocator
-  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
-end
-
-"""
-    replace_ref_begin_end!(ex::Expr)
-
-  Replace `begin` and `end` in reference expression `ex` with `firstindex` and `lastindex`.
-
-  This is needed for macros that generate code with `begin` and `end` in references,
-  because those macros are expanded before the actual indices are known.
-"""
-function replace_ref_begin_end!(ex::Expr)
-  Meta.isexpr(ex, :ref) || return ex
-  arr = ex.args[1]
-  for (dim, arg) in enumerate(@view ex.args[2:end])
-    ex.args[dim + 1] = _replace_begin_end(arg, arr, dim)
-  end
-  return ex
-end
-
-function _replace_begin_end(arg, arr, dim)
-  if arg === :begin
-    return :(firstindex($arr, $dim))
-  elseif arg === :end
-    return :(lastindex($arr, $dim))
-  elseif arg isa Expr
-    return Expr(arg.head, (_replace_begin_end(a, arr, dim) for a in arg.args)...)
-  else
-    return arg
-  end
-end
-
-"""
-    @mview(ex)
-
-  StridedView based version of `@view`.
-"""
-macro mview(ex)
-  # NOTE it's largely based on the @view macro from Base.
-  Meta.isexpr(ex, :ref) || throw(ArgumentError(
-      "Invalid use of @mview macro: argument must be a reference expression A[...]."))
-  ex = replace_ref_begin_end!(ex)
-  # NOTE We embed `view` as a function object itself directly into the AST.
-  #      By doing this, we prevent the creation of function definitions like
-  #      `view(A, idx) = xxx` in cases such as `@view(A[idx]) = xxx.`
-  if Meta.isexpr(ex, :ref)
-      ex = Expr(:call, mview, ex.args...)
-  elseif Meta.isexpr(ex, :let) && (arg2 = ex.args[2]; Meta.isexpr(arg2, :ref))
-      # ex replaced by let ...; foo[...]; end
-      ex.args[2] = Expr(:call, mview, arg2.args...)
-  else
-      error("invalid expression")
-  end
-  return esc(ex)
-end
-
-"""
-    mview(arr, args...)
-
-  `StridedView` based version of `view`.
-
-  The data array is enforced to be a vector, such that the view is always a `StridedView{..., Vector{...},...}`.
-"""
-function mview(arr, args...)
-  return sview(reshape(view(vec(arr),:), size(arr)), args...)
-end
-
-"""
-    mview(arr::StridedView, args...)
-
-  StridedView based version of `view`, for `StridedView` input.
-
-  Simply calls `StridedViews.sview`.
-"""
-function mview(arr::StridedView, args...)
-  return sview(arr, args...)
-end
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
@@ -543,63 +436,6 @@ function balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
     leftvecs[:,i] ./= scale
   end
   return evecs, leftvecs
-end
-
-""" 
-    get_spaceblocks(space, maxblocksize=128, strict=false)
-
-  Generate ranges for block indices for space (for loop over blocks).
-
-  `space` is a range or an array of indices. 
-  Even if `space` is non-contiguous, the blocks will be contiguous. 
-  If `strict` is true, the blocks will be of size `maxblocksize` (except for the last block and non-contiguous index-ranges).
-  Otherwise the actual block size will be as close as possible to `blocksize` such that
-  the resulting blocks are of similar size.
-"""
-function get_spaceblocks(space, maxblocksize=128, strict=false)
-  if length(space) == 0
-    return UnitRange{Int}[]
-  end
-  if last(space) - first(space) + 1 == length(space)
-    # contiguous
-    cblks = UnitRange{Int}[ first(space):last(space) ]
-  else
-    # create an array of contiguous ranges
-    cblks = UnitRange{Int}[]
-    begr = first(space)
-    endr = begr - 1
-    for idx in space
-      if idx == endr + 1
-        endr = idx
-      else
-        push!(cblks, begr:endr)
-        endr = begr = idx
-      end 
-    end
-    push!(cblks, begr:endr)
-  end  
-
-  allblks = UnitRange{Int}[]
-  for range in cblks
-    nblks::Int = length(range) ÷ maxblocksize
-    if nblks*maxblocksize < length(range)
-      nblks += 1
-    end
-    if strict 
-      blks = UnitRange{Int}[ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
-    else
-      blocksize = length(range) ÷ nblks
-      n_largeblks = mod(length(range), nblks)
-      blks = UnitRange{Int}[ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
-      start = n_largeblks*(blocksize+1)+first(range)
-      for i = n_largeblks+1:nblks
-        push!(blks, start:start+blocksize-1)
-        start += blocksize
-      end
-    end
-    append!(allblks, blks)
-  end
-  return allblks
 end
 
 """ 

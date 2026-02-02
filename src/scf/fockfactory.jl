@@ -8,6 +8,7 @@ end
 using LinearAlgebra
 #BLAS.set_num_threads(1)
 using Buffers
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
