@@ -9,11 +9,13 @@ ECInfos
 ```
 
 ## Main structure
+
 ```@docs
 ECInfo
 ```
 
 ## Exported functions
+
 ```@autodocs
 Modules = [ECInfos]
 Private = false
@@ -22,6 +24,7 @@ Filter = t -> t ∉ [ElemCo.file_exists, ElemCo.add_file!, ElemCo.copy_file!, El
 ```
 
 ## File management
+
 ```@docs
 file_exists
 add_file!
@@ -32,6 +35,7 @@ delete_temporary_files!
 ```
 
 ## Internal functions
+
 ```@autodocs
 Modules = [ECInfos]
 Public = false
@@ -39,10 +43,17 @@ Order = [:function]
 ```
 
 ## Abstract types
+
 ```@meta
 CurrentModule = ElemCo.AbstractEC
 ```
+
 ```@docs
 AbstractEC
 ```
 
+```@autodocs
+Modules = [AbstractEC]
+Private = false
+Order = [:type]
+```

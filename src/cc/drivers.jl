@@ -157,7 +157,7 @@ function dfccdriver(EC::ECInfo, method)
   return energies
 end
 
-function fcidriver(EC::ECInfo; occa="-", occb="-", hci=false)
+function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
   setup_space_fd!(EC)
@@ -167,8 +167,8 @@ function fcidriver(EC::ECInfo; occa="-", occb="-", hci=false)
   energies = eval_hf_energy(EC, energies, closed_shell)
   # t1 = print_time(EC, t1, "HF energy", 1)
 
-  E_FCI = eval_fci(EC, energies["HF"]; hci=hci)
-  method = hci ? "HCI" : "FCI"
+  E_FCI = eval_fci(EC, energies["HF"]; ciphi=ciphi)
+  method = ciphi ? "CIPHI" : "FCI"
   energies = output_energy(EC, E_FCI, energies, method)
   t1 = print_time(EC, t1, method, 1)
 
@@ -496,6 +496,10 @@ end
 """
 function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
   ecmethod0 = ECMethod("CCSD(T)")
+  if EC.options.cc.skip_pert_t
+    @assert !EC.options.cc.calc_t3_for_decomposition "`cc.calc_t3_for_decomposition` must be false when skipping perturbative (T) calculation!"
+    ecmethod0 = ECMethod("CCSD")
+  end
   if is_unrestricted(ecmethod) || has_prefix(ecmethod, "R")
     error("SVD-Triples only implemented for closed-shell methods!")
   end
@@ -511,14 +515,17 @@ function eval_svd_dc_ccsdt(EC::ECInfo, ecmethod::ECMethod, energies::OutDict)
   output_E_method(ECC["E"]+EHF, main_name, "total energy:      ")
   if haskey(ECC, "SVD-CCSD(T)")
     output_E_method(ECC["E"] - ECC["SVD-CCSD(T)"], "SVD-DC-CCSDT - SVD-CCSD(T):")
-    output_E_method(ECC["SVD-CCSD(T)"] - energies["CCSD(T)c"], "SVD-CCSD(T) - CCSD(T):")
-    ecorr = ECC["E"] - ECC["SVD-CCSD(T)"] + energies["CCSD(T)c"]
-    output_E_method(ecorr, "(T)-corrected SVD-DC-CCSDT", "correlation energy:")
-    output_E_method(ecorr + EHF, "(T)-corrected SVD-DC-CCSDT", "total energy:      ")
     energies = merge(energies, "SVD-CCSD(T)c"=>(ECC["SVD-CCSD(T)"], "SVD-CCSD(T) correlation energy"),
-                    "SVD-CCSD(T)"=>(ECC["SVD-CCSD(T)"]+EHF, "SVD-CCSD(T) total energy"),
+                    "SVD-CCSD(T)"=>(ECC["SVD-CCSD(T)"]+EHF, "SVD-CCSD(T) total energy"))
+    if haskey(energies, "CCSD(T)c")
+      output_E_method(ECC["SVD-CCSD(T)"] - energies["CCSD(T)c"], "SVD-CCSD(T) - CCSD(T):")
+      ecorr = ECC["E"] - ECC["SVD-CCSD(T)"] + energies["CCSD(T)c"]
+      output_E_method(ecorr, "(T)-corrected SVD-DC-CCSDT", "correlation energy:")
+      output_E_method(ecorr + EHF, "(T)-corrected SVD-DC-CCSDT", "total energy:      ")
+      energies = merge(energies, 
                     main_name*"+c"=>(ecorr, "$main_name correlation energy with SVD-CCSD(T) correction"),
                     main_name*"+"=>(ecorr+EHF, "$main_name total energy with SVD-CCSD(T) correction"))
+    end
   end
   t1 = print_time(EC, t1,"SVD-T",1)
   println()
@@ -538,7 +545,7 @@ end
 """
 function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   t1 = time_ns()
-  cMO = load_orbitals(EC, EC.options.wf.orb)
+  cMO = load_orbitals(EC)
   unrestricted = !is_restricted(cMO)
   ERef = generate_DF_integrals(EC, cMO; save3idx)
   t1 = print_time(EC, t1, "generate DF integrals", 2)
@@ -548,7 +555,7 @@ function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
 end
 
-function eval_fci(EC::ECInfo, ref_energy; hci=false)
+function eval_fci(EC::ECInfo, ref_energy; ciphi=false)
   t1 = time_ns()
   # Create basic FCI setup
   norb = length(EC.space[':'])
@@ -573,32 +580,45 @@ function eval_fci(EC::ECInfo, ref_energy; hci=false)
     # fdump.int2 = permutedims(ints2(EC, "mmmm"), (3,4,1,2))
   end
   
-  # Branch: Use lightweight HCIContext for HCI, full FCIContext for FCI
-  if hci
-    println("Setting up HCI (lightweight context)..."); flush(stdout)
+  # Branch: Use lightweight CIPHIContext for CIPHI, full FCIContext for FCI
+  if ciphi
+    println("Setting up CIPHI (lightweight context)..."); flush(stdout)
+    
+    # Check for starting determinants from previous calculation
+    nstates = EC.options.ciphi.nstates
+    
     if norb < 64
-      hci_ctx = HCIContext{UInt64}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
-      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+      ciphi_ctx = CIPHIContext{UInt64}(fdump, EC.options.ciphi; occa=EC.space['o'], occb=EC.space['O'])
+      start_dets, start_coeffs, has_start = try_fetch_starting_determinants(EC; OPattern=UInt64, nstates=nstates)
+      initial_dets = has_start ? start_dets : nothing
+      initial_coeffs = has_start ? start_coeffs : nothing
+      E_CIPHI, coefs, dets, pt2 = run_ciphi!(ciphi_ctx; initial_dets=initial_dets, initial_coeffs=initial_coeffs)
     elseif norb < 128
-      hci_ctx = HCIContext{UInt128}(fdump, EC.options.hci; occa=EC.space['o'], occb=EC.space['O'])
-      E_HCI, coefs, dets, pt2 = run_heatbath_ci!(hci_ctx)
+      ciphi_ctx = CIPHIContext{UInt128}(fdump, EC.options.ciphi; occa=EC.space['o'], occb=EC.space['O'])
+      start_dets, start_coeffs, has_start = try_fetch_starting_determinants(EC; OPattern=UInt128, nstates=nstates)
+      initial_dets = has_start ? start_dets : nothing
+      initial_coeffs = has_start ? start_coeffs : nothing
+      E_CIPHI, coefs, dets, pt2 = run_ciphi!(ciphi_ctx; initial_dets=initial_dets, initial_coeffs=initial_coeffs)
     else
-      error("HCIContext only implemented for norb < 128 at this point!")
+      error("CIPHIContext only implemented for norb < 128 at this point!")
     end
-    t1 = print_time(EC, t1, "HCI", 1)
-    Egs = E_HCI[1]
+    t1 = print_time(EC, t1, "CIPHI", 1)
+    Egs = E_CIPHI[1]
     energies = OutDict()
-    for i = 1:length(E_HCI)-1
-      energies["ω$i"] = E_HCI[i+1] - Egs
-      if EC.options.hci.compute_pt2
-        energies["ω$i+pt2"] = E_HCI[i+1] + pt2[i+1][1] - Egs - pt2[1][1]
+    for i = 1:length(E_CIPHI)-1
+      energies["ω$i"] = E_CIPHI[i+1] - Egs
+      if EC.options.ciphi.compute_pt2
+        energies["ω$i+pt2"] = E_CIPHI[i+1] + pt2[i+1][1] - Egs - pt2[1][1]
         energies["ω$(i)δpt2"] = pt2[i+1][2]
       end
     end
-    if EC.options.hci.compute_pt2
+    if EC.options.ciphi.compute_pt2
       push!(energies, "E-correction" => pt2[1][1])
       push!(energies, "E-correction δ" => pt2[1][2])
     end
+    # Store determinants if wf.store is set
+    nstates = length(E_CIPHI)
+    dump_wavefunction_with_determinants!(EC, dets, coefs; nstates=nstates)
     return merge(energies, "E" => Egs - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)

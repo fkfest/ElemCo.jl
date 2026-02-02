@@ -386,11 +386,11 @@ function init_hamiltonian_terms!(context::FCIContext)
 end
 
 """
-    init_hamiltonian_terms!(context::HCIContext)
+    init_hamiltonian_terms!(context::CIPHIContext)
 
-Initialize Hamiltonian terms for the HCI calculation and precompute intermediate data.
+Initialize Hamiltonian terms for the CIPHI calculation and precompute intermediate data.
 """
-function init_hamiltonian_terms!(context::HCIContext)
+function init_hamiltonian_terms!(context::CIPHIContext)
   if context.fcidump.uhf
     # UHF case: Handle all three spin-separated integral tensors properly
     # Precompute heval_data for UHF

@@ -9,7 +9,7 @@ ESVDDCSD_test =   -0.220653574525 + EHF_test
 ESVDDCSD_ft_test =-0.220276032112 + EHF_test
 EUHF_test  =      -75.79199546193901
 
-orbital_printout_test = "4:5 orbitals from DFHF orbitals\n4:  0.788(O[1]1p{z})  0.353(H1[2]1s)  0.353(H2[3]1s) -0.290(O[1]2s) -0.170(O[1]3s) \n5:  0.922(O[1]1p{x}) \n"
+orbital_printout_test = "Opening dump file wf.h5 for reading ...\nFetching orbitals ...\nRead DF-HF molecular orbitals from TREXIO file\n4:5 orbitals from DF-HF\n4:  0.788(O[1]1p{z})  0.353(H1[2]1s)  0.353(H2[3]1s) -0.290(O[1]2s) -0.170(O[1]3s) \n5:  0.922(O[1]1p{x}) \n"
 
 xyz="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -39,16 +39,16 @@ println(orbital_printout)
 energies = @dfmp2
 @test abs(energies["MP2"]-EMP2_test) < epsilon
 
-fcidump = "DF_HF_TEST.FCIDUMP"
-@set int fcidump=fcidump
+fdump = "DF_HF_TEST.FCIDUMP"
+@set int fcidump=fdump
 @dfints
 
-energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
+energies = ElemCo.ccdriver(EC, "dcsd"; fcidump=fdump)
 @test abs(energies["HF"]-EHF_test) < epsilon
 @test abs(energies["MP2"]-EMP2_test) < epsilon
 @test abs(energies["DCSD"]-EDCSD_test) < epsilon
 
-rm(fcidump)
+rm(fdump)
 
 energies = @dfcc svd-dcsd
 @test abs(energies["SVD-DCSD"]-ESVDDCSD_test) < epsilon

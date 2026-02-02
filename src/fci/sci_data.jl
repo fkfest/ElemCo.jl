@@ -276,7 +276,7 @@ Extend the SelectedHamiltonianMatrix to include new determinants.
 Uses fast lookup index to find connected determinants in O(N×N_connections) instead of O(N²).
 """
 function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, 
-                 context::Union{FCIContext, HCIContext})
+                 context::Union{FCIContext, CIPHIContext})
   t0 = time_ns()
   ndet_old = length(sel_ham.rows)
   ndet = n_selected(dets)
@@ -350,7 +350,7 @@ end
 
 Context for Selected CI calculations using direct H*c operations.
 """
-struct SelectedCIContext{OPattern, ContextType <:Union{FCIContext{OPattern}, HCIContext{OPattern}}}
+struct SelectedCIContext{OPattern, ContextType <:Union{FCIContext{OPattern}, CIPHIContext{OPattern}}}
   base_context::ContextType                   # Context for integrals and (optionally) addressing
   selected_dets::SelectedCIDeterminants{OPattern}       # Selected determinants and addresses
   hamiltonian::SelectedHamiltonianMatrix      # Hamiltonian matrix for selected determinants
@@ -366,14 +366,14 @@ struct SelectedCIContext{OPattern, ContextType <:Union{FCIContext{OPattern}, HCI
     new{OPattern, FCIContext{OPattern}}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 
-  # Constructor for HCIContext (on-demand addressing)
-  function SelectedCIContext(base_context::HCIContext{OPattern}, determinants::Vector{Determinant{OPattern}}, 
+  # Constructor for CIPHIContext (on-demand addressing)
+  function SelectedCIContext(base_context::CIPHIContext{OPattern}, determinants::Vector{Determinant{OPattern}}, 
                              hamiltonian::SelectedHamiltonianMatrix) where OPattern
-    # For HCI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
+    # For CIPHI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
     addresses = Address.(1:length(determinants))
     selected_dets = SelectedCIDeterminants{OPattern}(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
-    new{OPattern, HCIContext{OPattern}}(base_context, selected_dets, hamiltonian, Ref(0))
+    new{OPattern, CIPHIContext{OPattern}}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 end
 
@@ -423,7 +423,7 @@ function extend!(selected_ctx::SelectedCIContext, new_dets)
   if selected_ctx.base_context isa FCIContext
     new_addresses = [address_from_determinant(selected_ctx.base_context, det) for det in new_dets]
   else
-    # For HCIContext, addresses are just indices
+    # For CIPHIContext, addresses are just indices
     start_index = Address(n_selected(selected_ctx)) + 1
     new_addresses = collect(start_index:(start_index + length(new_dets) - 1))
   end

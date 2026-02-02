@@ -17,13 +17,13 @@ function FockDiagonal(n_orb::Int)
 end
 
 """
-    calc_fock_diagonal4det!(fock::FockDiagonal, ctx::Union{FCIContext, HCIContext}, occa, occb)
+    calc_fock_diagonal4det!(fock::FockDiagonal, ctx::Union{FCIContext, CIPHIContext}, occa, occb)
 
 Compute diagonal of the Fock matrix for a given determinant defined by occupied orbitals `occa` and `occb`.
 
 `fock` is modified in-place and returned.
 """
-function calc_fock_diagonal4det!(fock::FockDiagonal, ctx::Union{FCIContext, HCIContext}, occa, occb)
+function calc_fock_diagonal4det!(fock::FockDiagonal, ctx::Union{FCIContext, CIPHIContext}, occa, occb)
   for m in eachindex(fock.alpha)
     fock.alpha[m] = compute_fock_element(ctx.int1a, ctx.heval_data.h1e2_aa, ctx.heval_data.h1e2_ab, occa, occb, m, m)
     fock.beta[m] = compute_fock_element(ctx.int1b, ctx.heval_data.h1e2_bb, ctx.heval_data.h1e2_ba, occb, occa, m, m)

@@ -79,13 +79,15 @@ function fmt_det(pat_a::OPattern, pat_b::OPattern, n_max_orb::Integer)::String w
   return fmt_pat(pat_a, n_max_orb) * "|" * fmt_pat(pat_b, n_max_orb)
 end
 
+using ..ElemCo.AbstractEC: AbstractDeterminant
+
 """
     Determinant
 
 Represents a single determinant with alpha and beta orbital occupation patterns.
 Used for selected space determinant storage and manipulation.
 """
-struct Determinant{OPattern}
+struct Determinant{OPattern} <: AbstractDeterminant
   alpha::OPattern    # Alpha electron orbital pattern
   beta::OPattern     # Beta electron orbital pattern
 end

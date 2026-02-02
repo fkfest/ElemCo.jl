@@ -32,8 +32,10 @@ energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
 energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
 @test abs(last_energy(energies)-EDC_CCSDT_test) < epsilon
 
-@set cc calc_t3_for_decomposition = true
-energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
+energies = @cc svd-dc-ccsdt begin
+  @set cc calc_t3_for_decomposition = true
+end
+# energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
 @test abs(last_energy(energies)-EDC_CCSDT_useT3_test) < epsilon
 
 end

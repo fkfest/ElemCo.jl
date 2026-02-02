@@ -21,7 +21,7 @@ for dir in readdir()
       fcidump="FCIDUMP"
       @cc dcsd
       EBOHF = @bohf
-      @transform_ints biorth
+      @transform_ints
       @cc dcsd
     end
   end

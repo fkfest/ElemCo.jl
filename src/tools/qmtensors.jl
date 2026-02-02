@@ -6,6 +6,7 @@ This module provides definitions for useful quantum-mechanical tensors.
 module QMTensors
 # from spinmatrix
 export SpinMatrix, FSpinMatrix, CSpinMatrix, is_restricted, unrestrict!, restrict!
+export SpinVector
 # uppertriangular functions from utensors
 export lentri_from_norb, norb_from_lentri
 export strict_lentri_from_norb, norb_from_strict_lentri

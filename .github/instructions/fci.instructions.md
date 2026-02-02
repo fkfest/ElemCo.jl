@@ -3,7 +3,7 @@ applyTo: 'src/fci/*.jl'
 ---
 # FCI Implementation Instructions
 
-Julia implementation of Full Configuration Interaction (FCI) with Selected CI and Heat-Bath CI extensions.
+Julia implementation of Full Configuration Interaction (FCI) with Selected CI and CIPHI (CIΦ - CI via Perturbative and Heat-Bath Iterative selection) extensions.
 
 ## Type Stability
 
@@ -12,18 +12,18 @@ Julia implementation of Full Configuration Interaction (FCI) with Selected CI an
 **Testing:** Run `julia --project=.. jet_fci.jl` from `profile/` directory to verify type stability.
 
 
-## HCIContext Implementation
+## CIPHIContext Implementation
 
 **Status:** ✅ Completed and working correctly
 
 **Key Points:**
-- HCIContext is a lightweight alternative to FCIContext for Heat-Bath CI
+- CIPHIContext is a lightweight alternative to FCIContext for CIPHI
 - Computes diagonal elements ONLY for selected determinants (not full space)
 - Uses `compute_diagonal_element()` that replicates DiagonalHEvalData formula
 - Handles absorbed integrals correctly (loops over ALL orbitals with occupation factors)
 
 **Files:**
-- `src/fci/fci_hci_context.jl` - HCIContext struct definition
+- `src/fci/fci_ciphi_context.jl` - CIPHIContext struct definition
 - `src/fci/fci_selected_ci.jl` - compute_diagonal_element implementation
 - `src/infos/options.jl` - FCI options (moved from fci_options.jl)
 
@@ -37,8 +37,8 @@ FCI options are stored in the main `Options` structure (`src/infos/options.jl`) 
 @set fci nstates=3           # Number of states to compute
 @set fci max_iter=100        # Maximum Davidson iterations  
 @set fci threshold=1.e-6     # Energy convergence threshold
-@set hci epsilon_h=1.e-4     # Heat-Bath CI selection threshold
-@set fci use_hci=true        # Use lightweight HCIContext
+@set ciphi epsilon_h=1.e-4   # CIPHI selection threshold
+@set fci pspace_selection_method=:ciphi      # Use lightweight CIPHIContext
 ```
 
 **Integral Storage:**
@@ -60,14 +60,14 @@ basis = "6-31g"
 @fci
 ```
 
-**Heat-Bath CI with options:**
+**CIPHI with options:**
 ```julia
 using ElemCo
 @print_input
-@set fci hbci_eps=1.e-4
-@set fci nstates=2
+@set ciphi epsilon=1.e-4
+@set ciphi nstates=2
 fcidump = "path/to/file.FCIDUMP"
-@hci
+@ciphi
 ```
 
 
@@ -81,7 +81,7 @@ fcidump = "path/to/file.FCIDUMP"
 
 ## Algorithm Notes
 
-**Heat-Bath CI:**
+**CIPHI:**
 - Setup phase: Pre-computes sorted excitation lists for fast threshold-based selection
 - Selection: Skips small matrix elements without computing them
 - Performance: 574x speedup (RHF), 20-26x speedup (UHF) vs naive

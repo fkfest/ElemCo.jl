@@ -13,7 +13,7 @@ function calc_df_lt_sos_mp2(EC::ECInfo)
   t1 = time_ns()
   print_info("DF-LT-SOS-MP2")
   SP = EC.space
-  cMO = load_orbitals(EC, EC.options.wf.orb)
+  cMO = load_orbitals(EC)
   if !is_restricted(cMO) || SP['o'] != SP['O']
     error("Unrestricted orbitals not supported in DF-LT-SOS-MP2.")
   end

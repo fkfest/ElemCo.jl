@@ -60,7 +60,7 @@ end
 function calc_df_integrals(EC::ECInfo)
   space_save = save_space(EC)
   setup_space_system!(EC; verbose=false)
-  cMO = load_orbitals(EC, EC.options.wf.orb)
+  cMO = load_orbitals(EC)
   freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=false)
   freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=false)
   # correlated MOs
