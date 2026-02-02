@@ -353,7 +353,7 @@ end
 """
 function integ2_ss(fd::FDump, spincase::Symbol=:α)
   if spincase == :p
-    @assert fd.epdump "^Only for positron fcidump"
+    @assert fd.epdump "Spincase :p only for positron fcidump"
     return fd.int2ep
   end
   if !fd.uhf
@@ -1414,9 +1414,16 @@ end
     int1_npy_filename(fd::FDump, spincase::Symbol=:α)
 
   Return filename for 1-e integrals in npy format.
-  `spincase` can be `:α` or `:β` for UHF fcidump.
+  `spincase` can be `:α`, `:β`, or `:p` for UHF fcidump.
 """
 function int1_npy_filename(fd::FDump, spincase::Symbol=:α)
+  if spincase == :p
+    file = headvar(fd, "NPY1P", String)
+    if isnothing(file)
+      file = "int1p.npy"
+    end
+    return file::String
+  end
   if !fd.uhf
     file = headvar(fd, "NPY1", String)
     if isnothing(file)
@@ -1445,9 +1452,16 @@ end
     int2_npy_filename(fd::FDump, spincase::Symbol=:α)
 
   Return filename for 2-e integrals in npy format. 
-  `spincase` can be `:α`, `:β` or `:αβ` for UHF fcidump.
+  `spincase` can be `:α`, `:β`, `:αβ`, or `:ep` for UHF fcidump.
 """
 function int2_npy_filename(fd::FDump, spincase::Symbol=:α)
+  if spincase == :ep
+    file = headvar(fd, "NPY2EP", String)
+    if isnothing(file)
+      file = "int2ep.npy"
+    end
+    return file::String
+  end
   if !fd.uhf
     file = headvar(fd, "NPY2", String)
     if isnothing(file)
