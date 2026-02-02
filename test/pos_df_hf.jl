@@ -10,36 +10,19 @@ using ElemCo
   EHF_LiH_ref      = -7.988745934771541
   Ecorr_MP2_LiH_ref = -0.343860916981
 
-  # Geometries
-  xyz_H = """
-    bohr
-    H 0.0 0.0 0.0
-  """
-
-  xyz_LiH = """
-    bohr
-    Li 0.0  0.0  0.0
-    H  0.0  0.0  3.0196
-    H2 0.0 -1.0  4.0196
-    H2 0.0  1.0  4.0196
-  """
-
-  # Basis sets
-  basis_H = Dict(
-    "ao"    => "aug-cc-pVDZ",
-    "jkfit" => "def2-universal-jkfit",
-    "mpfit" => "cc-pvtz-rifit"
-  )
-
-  basis_LiH = Dict(
-    "ao"    => "aug-cc-pVDZ",
-    "jkfit" => "def2-universal-jkfit",
-    "mpfit" => "cc-pvtz-rifit"
-  )
-
   #---------------------------------------------------------------------------
   @testset "H⁻ + positron" begin
-    EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_H, basis_H))
+    geometry = """
+      bohr
+      H 0.0 0.0 0.0
+    """
+    basis = Dict(
+      "ao"    => "aug-cc-pVDZ",
+      "jkfit" => "def2-universal-jkfit",
+      "mpfit" => "cc-pvtz-rifit"
+    )
+
+    @ECinit
     @set wf charge = -1
     @set wf npositron = 1
     @set wf freeze_nocc = 0
@@ -54,7 +37,20 @@ using ElemCo
 
   #---------------------------------------------------------------------------
   @testset "LiH + positron" begin
-    EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_LiH, basis_LiH))
+    geometry = """
+      bohr
+      Li 0.0  0.0  0.0
+      H  0.0  0.0  3.0196
+      H2 0.0 -1.0  4.0196
+      H2 0.0  1.0  4.0196
+    """
+    basis = Dict(
+      "ao"    => "aug-cc-pVDZ",
+      "jkfit" => "def2-universal-jkfit",
+      "mpfit" => "cc-pvtz-rifit"
+    )
+
+    @ECinit
     @set wf charge = 0
     @set wf npositron = 1
     @set wf freeze_nocc = 0
@@ -70,7 +66,20 @@ using ElemCo
 
   #---------------------------------------------------------------------------
   @testset "LiH + positron (direct SCF)" begin
-    EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz_LiH, basis_LiH))
+    geometry = """
+      bohr
+      Li 0.0  0.0  0.0
+      H  0.0  0.0  3.0196
+      H2 0.0 -1.0  4.0196
+      H2 0.0  1.0  4.0196
+    """
+    basis = Dict(
+      "ao"    => "aug-cc-pVDZ",
+      "jkfit" => "def2-universal-jkfit",
+      "mpfit" => "cc-pvtz-rifit"
+    )
+
+    @ECinit
     @set wf charge = 0
     @set wf npositron = 1
     @set wf freeze_nocc = 0
