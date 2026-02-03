@@ -2824,6 +2824,8 @@ function calc_cc(EC::ECInfo, method::ECMethod)
     else
       if method.exclevel[1] == :full || orbopt
         T1 = read_starting_guess4amplitudes(EC, Val(1))
+      else
+        T1 = zeros(0,0)
       end
       if method.exclevel[2] != :full
         error("No doubles is not implemented")

@@ -59,7 +59,6 @@ function parse_diffuse_steep(basis_name::AbstractString)
       diff = match(r"\+(\d+)diffuse$", basis_name)
       @assert !isnothing(diff) "Error parsing basis name"
       add_diffuse += parse(Int, diff.captures[1])
-      
       # remove +<N>diffuse from the basis name
       basis_name = replace(basis_name, r"\+\d+diffuse$" => "")
     elseif occursin(r"\+diffuse$", basis_name)

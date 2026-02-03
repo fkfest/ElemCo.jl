@@ -32,7 +32,7 @@ end
 """
     calc_dmrg() -> OutDict
 
-  Performm DMRG calculation.
+  Perform DMRG calculation.
   Requires ITensors.jl and ITensorMPS.jl packages to be loaded.
 """
 function calc_dmrg()

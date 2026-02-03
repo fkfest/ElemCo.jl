@@ -429,7 +429,7 @@ end
 """
 function read_trexio_rotations(trexio::TrexioFile; verbose=true, MO="mo")
   nao, status = trexio_read_ao_num(trexio)
-   trexio_check_read_status(status, "ao_num")
+  trexio_check_read_status(status, "ao_num")
   return _read_trexio_orbital_transformations(trexio, collect(1:nao), verbose, MO)
 end
 

@@ -189,8 +189,12 @@ function parseheader(s::AbstractString, ::Type{Array{T,N}}) where {T,N}
     if s != ""
         error("malformed header")
     end
-    @assert Tnpy <: T "Missmatch between header type $(String(Tnpy)) and requested type $(String(T))"
-    @assert N == Any || shape isa NTuple{N,Int} "Shape should be a tuple of $(String(N)) integers"
+    if !(Tnpy <: T)
+      error("Missmatch between header type $Tnpy and requested type $T")
+    end
+    if N != Any && !(shape isa NTuple{N,Int})
+      error("Shape should be a tuple of $N integers")
+    end
     Header{T,N}(shape)
 end
 
