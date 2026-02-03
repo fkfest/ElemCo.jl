@@ -1043,7 +1043,7 @@ end
   Transform integrals to new basis using Tl and Tr transformation matrices. 
   If Tl and Tr are unrestricted, then the function transforms rhf fcidump to uhf fcidump.
 """
-function transform_fcidump!(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
+function transform_fcidump!(fd::FDump{N}, Tl::SpinMatrix, Tr::SpinMatrix) where N
   println("Transform integrals...")
   if !is_restricted(Tl) || !is_restricted(Tr)
     genuhfdump = true
@@ -1064,7 +1064,7 @@ function transform_fcidump!(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
     fd.int2ab = transform_int2_Q(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2])
     fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
     fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
-    fd.int2 = zeros(fill(0,ndims(fd.int2))...)
+    fd.int2 = zeros(ntuple(i->0, Val(N)))
     fd.int1 = zeros(0,0)
     fd.head["IUHF"] = [1]
     fd.uhf = true

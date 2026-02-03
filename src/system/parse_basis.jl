@@ -56,7 +56,10 @@ function parse_diffuse_steep(basis_name::AbstractString)
   add_steep = 0
   while occursin(r"\+\d*(diffuse|steep)$", basis_name)
     if occursin(r"\+\d+diffuse$", basis_name)
-      add_diffuse += parse(Int, match(basis_name, r"\+(\d+)diffuse$").captures[1])
+      diff = match(r"\+(\d+)diffuse$", basis_name)
+      @assert !isnothing(diff) "Error parsing basis name"
+      add_diffuse += parse(Int, diff.captures[1])
+      
       # remove +<N>diffuse from the basis name
       basis_name = replace(basis_name, r"\+\d+diffuse$" => "")
     elseif occursin(r"\+diffuse$", basis_name)
@@ -64,7 +67,9 @@ function parse_diffuse_steep(basis_name::AbstractString)
       # remove +diffuse from the basis name
       basis_name = replace(basis_name, r"\+diffuse$" => "")
     elseif occursin(r"\+\d+steep$", basis_name)
-      add_steep += parse(Int, match(basis_name, r"\+(\d+)steep$").captures[1])
+      steep = match(r"\+(\d+)steep$", basis_name)
+      @assert !isnothing(steep) "Error parsing basis name"
+      add_steep += parse(Int, steep.captures[1])
       # remove +<N>steep from the basis name
       basis_name = replace(basis_name, r"\+\d+steep$" => "")
     elseif occursin(r"\+steep$", basis_name)
@@ -177,20 +182,21 @@ function read_basis_block(basisfile::AbstractString, atom::ACentre; fallback="")
   # search for `! $elem  ....`
   reg_start = Regex("^!\\s$elem\\s*")
   reg_end = Regex("^\\s*[!}]\\s*")
-  basisblock::String = ""
-  open(basisfile) do f
+  basisblock = open(basisfile) do f
     elemfound = false
+    bblock = ""
     for line::String in eachline(f)
       if elemfound
         if occursin(reg_end, line)
           break
         else
-          basisblock *= line * "\n"
+          bblock *= line * "\n"
         end
       else
         elemfound = occursin(reg_start, line)
       end
     end
+    return bblock
   end
   if isempty(basisblock)
     if fallback != ""

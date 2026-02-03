@@ -77,10 +77,36 @@ using Dates
     TREXIO_INVALID_ARG_13	    = 43	# Invalid argument 13
     TREXIO_INVALID_ARG_14	    = 44	# Invalid argument 14
     TREXIO_CORRUPTION_ATTEMPT	= 45 	# File offset is wrong, corruption risk
+    TREXIO_GROUP_ERROR          = 46    # Error creating or accessing group
 end
 
 export TrexioFile, TrexioExitCode
 export trexio_open, trexio_close
+export trexio_check_read_status, trexio_check_write_status
+
+"""
+    trexio_check_read_status(status::TrexioExitCode, what::String="")
+
+Check TREXIO read status and throw error if not successful.
+`what` is an optional description of the data being read.
+"""
+function trexio_check_read_status(status::TrexioExitCode, what::String="")
+  if status != TREXIO_SUCCESS
+    error("TREXIO error: Failed to read $what from TREXIO with status $(string(status))")
+  end
+end
+
+"""
+    trexio_check_write_status(status::TrexioExitCode, what::String="")
+
+Check TREXIO write status and throw error if not successful.
+`what` is an optional description of the data being written.
+"""
+function trexio_check_write_status(status::TrexioExitCode, what::String="")
+  if status != TREXIO_SUCCESS
+    error("TREXIO error: Failed to write $what to TREXIO with status $(string(status))")
+  end
+end
 
 """
     TrexioFile
@@ -989,7 +1015,8 @@ function generate_read_function(field::TrexioField)
             try
                 # Read from HDF5 attribute (TREXIO standard for scalars)
                 value = HDF5.read_attribute(group, $(field.attribute))
-                return convert($(field.type), value), TREXIO_SUCCESS
+                val = convert($(field.type), value)::$(field.type)
+                return val, TREXIO_SUCCESS
             catch e
                 return $(default_val), TREXIO_FAILURE
             end

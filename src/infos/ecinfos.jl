@@ -698,9 +698,10 @@ end
 function symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
   if occursin(".",symorb)
     orb, sym = filter(!isempty, split(symorb,'.'))
-    @assert(parse(Int,sym) <= length(symoffset),"Symmetry label $sym larger than maximum of orbsym vector.")
+    isym = parse(Int,sym)
+    @assert(isym <= length(symoffset),"Symmetry label larger than maximum of orbsym vector.")
     orb = parse(Int,orb)
-    orb += symoffset[parse(Int,sym)]
+    orb += symoffset[isym]
     return orb
   else
     return parse(Int,symorb)

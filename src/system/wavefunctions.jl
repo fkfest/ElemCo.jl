@@ -82,15 +82,18 @@ function open_dump(EC::ECInfo, intent; start::Bool=false)
 end
 
 """
-    open_dump(f::Function, EC::ECInfo, intent; start=false)
+    open_dump(f, EC::ECInfo, intent; start=false)
 
   Open the dump file for wavefunction, execute function `f` with the opened `TrexioFile`, and close the file.
 
 To be used as `open_dump(EC, intent) do io ... end`.
 `intent` can be "r", "w", or "u" (read, write, or update).
 If `start=true`, opens the start file (`wf.start`) instead.
+
+Note: `f` is typed as a type parameter rather than `::Function` to enable
+type inference of the return value through the closure.
 """
-function open_dump(f::Function, EC::ECInfo, intent; start::Bool=false)
+function open_dump(f::F, EC::ECInfo, intent; start::Bool=false) where {F}
   trexio = open_dump(EC, intent; start=start)
   try
     f(trexio)
@@ -308,7 +311,7 @@ end
   Container for orbital data fetched from a dump file.
 """
 struct OrbitalData
-  cMO::SpinMatrix
+  cMO::SpinMatrix{Float64}
   mo_type::String
   basis::BasisSet
   energies::NTuple{2,Vector{Float64}}

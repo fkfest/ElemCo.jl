@@ -644,12 +644,7 @@ end
 """
 function eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
   t1 = time_ns()
-  ext = Base.get_extension(@__MODULE__, :DmrgExt)
-  if isnothing(ext)
-    ECC = calc_dmrg()
-  else
-    ECC = ext.calc_dmrg(EC)
-  end
+  ECC = calc_dmrg_dispatch(EC)
   energies = output_energy(EC, ECC, energies, "DMRG")
   t1 = print_time(EC, t1,"DMRG",1)
   return energies

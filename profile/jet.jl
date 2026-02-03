@@ -13,10 +13,10 @@ basis=Dict("ao"=>"6-31g", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvtz-mpfit")
 @dfints
 
 println("\n" * "="^80)
-println("RUNNING JET TYPE STABILITY ANALYSIS ON FCI CODE")
+println("RUNNING JET TYPE STABILITY ANALYSIS")
 println("="^80 * "\n")
 
-@report_opt target_modules=(@__MODULE__,
+@report_opt ignored_modules=(Base, ElemCo.Outputs, ElemCo.DMRG, ElemCo.TREXIO, ElemCo.DIIS) target_modules=(@__MODULE__,
                             ElemCo,
                             ElemCo.BOHF,
                             ElemCo.Drivers,
@@ -30,7 +30,7 @@ println("="^80 * "\n")
                             ElemCo.DFHF,
                             ElemCo.DFMCSCF,
                             ElemCo.DFTools,
-                            ElemCo.DIIS,
+                            #ElemCo.DIIS,
                             #ElemCo.DMRG,
                             ElemCo.DumpTools,
                             ElemCo.ECInfos,
@@ -51,15 +51,15 @@ println("="^80 * "\n")
                             ElemCo.Libcint,
                             ElemCo.MoldenInterface,
                             ElemCo.MolproInterface,
-                            ElemCo.MSystem,
+                            ElemCo.MSystems,
                             ElemCo.FCI,
                             #) ElemCo.DfDump.dfdump(EC)
                             #) ElemCo.DFHF.dfhf(EC)
                             #) ElemCo.Drivers.dfccdriver(EC,"MP2")
-                            #) ElemCo.Drivers.ccdriver(EC,"λCCSD")
+                            ) ElemCo.Drivers.ccdriver(EC,"λCCSD")
                             # ) ElemCo.Drivers.ccdriver(EC,"SVD-DC-CCSDT")
                             #) ElemCo.Drivers.dfccdriver(EC,"SVD-DCSD")
-                             ) ElemCo.Drivers.fcidriver(EC,ciphi=true)
+                            #  ) ElemCo.Drivers.fcidriver(EC,ciphi=true)
                             
 
 end
