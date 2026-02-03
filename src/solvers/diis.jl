@@ -188,7 +188,7 @@ function custom_dot(diis::Diis, customdots, tens, vecs)
   return dot
 end
 
-dispatch(f::Function, t, v) = f(t, reshape(v, size(t)))::Float64
+dispatch(f::F, t, v) where {F} = f(t, reshape(v, size(t)))::Float64
 
 @doc raw"""
     update_Bmat(diis::Diis, nDim, Res, ithis, customdots=())

@@ -97,7 +97,7 @@ function open_trexio(filename::String, mode::String="r")
   return trexio
 end
 
-function open_trexio(f::Function, filename::String, mode::String="r")
+function open_trexio(f::F, filename::String, mode::String="r") where {F}
   trexio = open_trexio(filename, mode)
   try
     f(trexio)
@@ -227,32 +227,32 @@ function write_trexio_basis(trexio::TrexioFile, basis::BasisSet)
     end
   end
   status = trexio_write_basis_prim_num(trexio, length(exponent))
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write prim_num to TREXIO with status $status"
+  trexio_check_write_status(status, "prim_num")
   status = trexio_write_basis_shell_num(trexio, nsh)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_num to TREXIO with status $status"
+  trexio_check_write_status(status, "shell_num")
   status = trexio_write_basis_nucleus_index(trexio, nucleus_index)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write nucleus_index to TREXIO with status $status"
+  trexio_check_write_status(status, "nucleus_index")
   status = trexio_write_basis_shell_ang_mom(trexio, shell_ang_mom)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_ang_mom to TREXIO with status $status"
+  trexio_check_write_status(status, "shell_ang_mom")
   status = trexio_write_basis_shell_factor(trexio, fill(1.0, nsh))  # no normalization
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_factor to TREXIO with status $status"
+  trexio_check_write_status(status, "shell_factor")
   status = trexio_write_basis_shell_index(trexio, shell_index)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write shell_index to TREXIO with status $status"
+  trexio_check_write_status(status, "shell_index")
   status = trexio_write_basis_exponent(trexio, exponent)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write exponent to TREXIO with status $status"
+  trexio_check_write_status(status, "exponent")
   status = trexio_write_basis_coefficient(trexio, coefficient)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write coefficient to TREXIO with status $status"
+  trexio_check_write_status(status, "coefficient")
   status = trexio_write_basis_prim_factor(trexio, prim_factor)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write prim_factor to TREXIO with status $status"
+  trexio_check_write_status(status, "prim_factor")
   status = trexio_write_basis_name(trexio, basisname)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write basisname to TREXIO with status $status"
+  trexio_check_write_status(status, "basisname")
   
   # write AO information
   aolist = ao_list(basis)
   status = trexio_write_ao_cartesian(trexio, basis.cartesian ? 1 : 0)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_cartesian to TREXIO with status $status"
+  trexio_check_write_status(status, "ao_cartesian")
   status = trexio_write_ao_num(trexio, length(aolist))
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_num to TREXIO with status $status"
+  trexio_check_write_status(status, "ao_num")
   shell = Int[]
   ishell = -1
   iash = issh = 0
@@ -265,9 +265,9 @@ function write_trexio_basis(trexio::TrexioFile, basis::BasisSet)
     push!(shell, ishell)
   end
   status = trexio_write_ao_shell(trexio, shell)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_shell to TREXIO with status $status"
+  trexio_check_write_status(status, "ao_shell")
   status = trexio_write_ao_normalization(trexio, fill(1.0, length(aolist)))
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_normalization to TREXIO with status $status"
+  trexio_check_write_status(status, "ao_normalization")
 end
 
 """
@@ -292,23 +292,23 @@ function read_trexio_basis(trexio::TrexioFile)
   end
 
   prim_num, status = trexio_read_basis_prim_num(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read prim_num from TREXIO with status $status"
+  trexio_check_read_status(status, "prim_num")
   shell_num, status = trexio_read_basis_shell_num(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_num from TREXIO with status $status"
+  trexio_check_read_status(status, "shell_num")
   nucleus_index, status = trexio_read_basis_nucleus_index(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read nucleus_index from TREXIO with status $status"
+  trexio_check_read_status(status, "nucleus_index")
   shell_ang_mom, status = trexio_read_basis_shell_ang_mom(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_ang_mom from TREXIO with status $status"
+  trexio_check_read_status(status, "shell_ang_mom")
   shell_factor, status = trexio_read_basis_shell_factor(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_factor from TREXIO with status $status"
+  trexio_check_read_status(status, "shell_factor")
   shell_index, status = trexio_read_basis_shell_index(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read shell_index from TREXIO with status $status"
+  trexio_check_read_status(status, "shell_index")
   exponent, status = trexio_read_basis_exponent(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read exponent from TREXIO with status $status"
+  trexio_check_read_status(status, "exponent")
   coefficient, status = trexio_read_basis_coefficient(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read coefficient from TREXIO with status $status"
+  trexio_check_read_status(status, "coefficient")
   prim_factor, status = trexio_read_basis_prim_factor(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read prim_factor from TREXIO with status $status"
+  trexio_check_read_status(status, "prim_factor")
   basisname, status = trexio_read_basis_name(trexio)
   if status != TREXIO.TREXIO_SUCCESS
     basisname = "Unknown"
@@ -374,7 +374,9 @@ function write_trexio_orbitals(trexio::TrexioFile, orbitals::SpinMatrix, basis::
   write_trexio_basis(trexio, basis)
   nbasis, nmo = size(orbitals)
   nao = n_ao(basis)
-  @assert nao == nbasis "Basis size mismatch: basis has $nao, orbitals have $nbasis"
+  if nao != nbasis
+    error("Basis size mismatch: basis has $nao, orbitals have $nbasis")
+  end
   order = ao_order2internal(basis, order4l(basis), true)
   _write_trexio_orbital_transformation_data(trexio, orbitals, order, type, classes, energies, occupations, MO)
 end
@@ -414,7 +416,7 @@ function write_trexio_rotations(trexio::TrexioFile, rotations::SpinMatrix;
                                energies=(Float64[], Float64[]), occupations=(Float64[], Float64[]), MO="mo")
   nbasis, nmo = size(rotations)
   status = trexio_write_ao_num(trexio, nbasis)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write ao_num to TREXIO with status $status"
+  trexio_check_write_status(status, "ao_num")
   _write_trexio_orbital_transformation_data(trexio, rotations, collect(1:nbasis), type, classes, energies, occupations, MO)
 end
 
@@ -427,23 +429,28 @@ end
 """
 function read_trexio_rotations(trexio::TrexioFile; verbose=true, MO="mo")
   nao, status = trexio_read_ao_num(trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read ao_num from TREXIO with status $status"
+  trexio_check_read_status(status, "ao_num")
   return _read_trexio_orbital_transformations(trexio, collect(1:nao), verbose, MO)
 end
 
 # Generate wrapper functions for mo and po variants of TREXIO orbital functions
+# Uses type-stable dispatch via Val{Symbol} instead of runtime string comparison
 for action in ("has", "write", "read")
   for field in ("num", "type", "spin", "coefficient", "class", "energy", "occupation")
     fname = Symbol("trexio_" * action * "_MO_" * field)
     fmoname = Symbol("trexio_" * action * "_mo_" * field)
     fponame = Symbol("trexio_" * action * "_po_" * field)
     @eval begin
+      # Type-stable dispatch on Val{Symbol}
+      function ($fname)(::Val{:mo}, trexio::TrexioFile, args...)
+        return $fmoname(trexio, args...)
+      end
+      function ($fname)(::Val{:po}, trexio::TrexioFile, args...)
+        return $fponame(trexio, args...)
+      end
+      # String wrapper converts to Val for type-stable dispatch
       function ($fname)(MO::AbstractString, trexio::TrexioFile, args...)
-        if MO == "po"
-          return $fponame(trexio, args...)
-        else
-          return $fmoname(trexio, args...)
-        end
+        return ($fname)(Val(Symbol(MO)), trexio, args...)
       end
     end
   end
@@ -460,44 +467,46 @@ end
 function _write_trexio_orbital_transformation_data(trexio::TrexioFile, coefficients::SpinMatrix, 
                                                    order, type, classes, energies, occupations, MO="mo")
   nbasis, nmo = size(coefficients)
-  @assert length(order) == nbasis "Basis size mismatch: basis has $nbasis, order has $(length(order))"
+  if length(order) != nbasis
+    error("Basis size mismatch: basis has $nbasis, order has $(length(order))")
+  end
   status = trexio_write_MO_type(MO, trexio, type)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_type to TREXIO with status $status"
+  trexio_check_write_status(status, "$(MO)_type")
   if is_restricted(coefficients)
     status = trexio_write_MO_num(MO, trexio, nmo)
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_num to TREXIO with status $status"
+    trexio_check_write_status(status, "$(MO)_num")
     status = trexio_write_MO_coefficient(MO, trexio, coefficients[1][order, :])
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_coefficient to TREXIO with status $status"
+    trexio_check_write_status(status, "$(MO)_coefficient")
     if length(classes[1]) > 0
       status = trexio_write_MO_class(MO, trexio, classes[1])
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_class to TREXIO with status $status"
+      trexio_check_write_status(status, "$(MO)_class")
     end
     if length(energies[1]) > 0
       status = trexio_write_MO_energy(MO, trexio, energies[1])
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_energy to TREXIO with status $status"
+      trexio_check_write_status(status, "$(MO)_energy")
     end
     if length(occupations[1]) > 0
       status = trexio_write_MO_occupation(MO, trexio, occupations[1])
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_occupation to TREXIO with status $status"
+      trexio_check_write_status(status, "$(MO)_occupation")
     end
   else
     status = trexio_write_MO_num(MO, trexio, 2*nmo) # For unrestricted, double the number of coefficients
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_num to TREXIO with status $status"
+    trexio_check_write_status(status, "$(MO)_num")
     status = trexio_write_MO_coefficient(MO, trexio, hcat(coefficients...)[order, :])
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_coefficient to TREXIO with status $status"
+    trexio_check_write_status(status, "$(MO)_coefficient")
     status = trexio_write_MO_spin(MO, trexio, vcat(fill(0, nmo), fill(1, nmo)))  # α=0, β=1
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_spin to TREXIO with status $status"
+    trexio_check_write_status(status, "$(MO)_spin")
     if length(classes[1]) > 0
       status = trexio_write_MO_class(MO, trexio, vcat(classes...))
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_class to TREXIO with status $status"
+      trexio_check_write_status(status, "$(MO)_class")
     end
     if length(energies[1]) > 0
       status = trexio_write_MO_energy(MO, trexio, vcat(energies...))
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_energy to TREXIO with status $status"
+      trexio_check_write_status(status, "$(MO)_energy")
     end
     if length(occupations[1]) > 0
       status = trexio_write_MO_occupation(MO, trexio, vcat(occupations...))
-      @assert status == TREXIO.TREXIO_SUCCESS "Failed to write $(MO)_occupation to TREXIO with status $status"
+      trexio_check_write_status(status, "$(MO)_occupation")
     end
   end
   return
@@ -514,15 +523,17 @@ function _read_trexio_orbital_transformations(trexio::TrexioFile, order, verbose
   nao = length(order)
   # Read MO data using standalone TREXIO module
   type, status = trexio_read_MO_type(MO, trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_type from TREXIO with status $status"
+  trexio_check_read_status(status, "$(MO)_type")
   if verbose
     println("Read $type molecular orbitals from TREXIO file")
   end
   nmo, status = trexio_read_MO_num(MO, trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  trexio_check_read_status(status, "$(MO)_num")
   coefficients, status = trexio_read_MO_coefficient(MO, trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_coefficient from TREXIO with status $status"
-  @assert size(coefficients, 1) == nao "Basis size mismatch: basis has $nao, orbitals have $(size(coefficients, 1))"
+  trexio_check_read_status(status, "$(MO)_coefficient")
+  if size(coefficients, 1) != nao
+    error("Basis size mismatch: basis has $nao, orbitals have $(size(coefficients, 1))")
+  end
   alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
   if length(beta_iorbs) == 0
     coeffs = SpinMatrix(coefficients[order,:])
@@ -572,13 +583,15 @@ If no orbital classes are found, empty vectors are returned.
 function read_trexio_orbital_classes(trexio::TrexioFile, MO="mo")
   # Read MO data using standalone TREXIO module
   nmo, status = trexio_read_MO_num(MO, trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  trexio_check_read_status(status, "$(MO)_num")
   classes, status = trexio_read_MO_class(MO, trexio)
   if status != TREXIO.TREXIO_SUCCESS
-    println("Failed to read $(MO)_class from TREXIO with status $status")
+    # println("Failed to read $(MO)_class from TREXIO with status $(string(status))")
     return (String[], String[])
   end
-  @assert length(classes) == nmo "Inconsistent number of orbital classes: expected $nmo, got $(length(classes))"
+  if length(classes) != nmo
+    error("Inconsistent number of orbital classes: expected $nmo, got $(length(classes))")
+  end
   alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
   if length(beta_iorbs) == 0
     return (classes, String[])
@@ -600,13 +613,15 @@ If no orbital energies are found, empty vectors are returned.
 function read_trexio_orbital_energies(trexio::TrexioFile, MO="mo")
   # Read MO data using standalone TREXIO module
   nmo, status = trexio_read_MO_num(MO, trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  trexio_check_read_status(status, "$(MO)_num")
   energies, status = trexio_read_MO_energy(MO, trexio)
   if status != TREXIO.TREXIO_SUCCESS
-    println("Failed to read $(MO)_energy from TREXIO with status $status")
+    # println("Failed to read $(MO)_energy from TREXIO with status $(string(status))")
     return (Float64[], Float64[])
   end
-  @assert length(energies) == nmo "Inconsistent number of orbital energies: expected $nmo, got $(length(energies))"
+  if length(energies) != nmo
+    error("Inconsistent number of orbital energies: expected $nmo, got $(length(energies))")
+  end
   alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
   if length(beta_iorbs) == 0
     return (energies, Float64[])
@@ -628,13 +643,15 @@ If no orbital occupations are found, empty vectors are returned.
 function read_trexio_orbital_occupations(trexio::TrexioFile, MO="mo")
   # Read MO data using standalone TREXIO module
   nmo, status = trexio_read_MO_num(MO, trexio)
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read $(MO)_num from TREXIO with status $status"
+  trexio_check_read_status(status, "$(MO)_num")
   occupations, status = trexio_read_MO_occupation(MO, trexio)
   if status != TREXIO.TREXIO_SUCCESS
-    println("Failed to read $(MO)_occupation from TREXIO with status $status")
+    # println("Failed to read $(MO)_occupation from TREXIO with status $(string(status))")
     return (Float64[], Float64[])
   end
-  @assert length(occupations) == nmo "Inconsistent number of orbital occupations: expected $nmo, got $(length(occupations))"
+  if length(occupations) != nmo
+    error("Inconsistent number of orbital occupations: expected $nmo, got $(length(occupations))")
+  end
   alpha_iorbs, beta_iorbs = alphabeta_orbital_indices(trexio, nmo, MO)
   if length(beta_iorbs) == 0
     return (occupations, Float64[])
@@ -652,13 +669,13 @@ This is a custom extension for storing amplitude data.
 function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2}, T2::AbstractArray{Float64,4})
   if length(T1) > 0
     status = TREXIO.trexio_write_amplitude_single_dense(trexio, T1)
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T1 amplitudes to TREXIO with status $status"
+    trexio_check_write_status(status, "T1 amplitudes")
   end
   if length(T2) > 0
     a,b,i,j = size(T2)
     @assert a == b && i == j "T2 amplitudes must be in vvoo order with equal dimensions"
     status = TREXIO.trexio_write_amplitude_double_dense(trexio, T2[:,:,uppertriangular_cut(i)])
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2 amplitudes to TREXIO with status $status"
+    trexio_check_write_status(status, "T2 amplitudes")
   end
 end
 
@@ -666,27 +683,27 @@ function write_trexio_amplitudes(trexio::TrexioFile, T1a::AbstractArray{Float64,
                                  T2a::AbstractArray{Float64,4}, T2b::AbstractArray{Float64,4}, T2ab::AbstractArray{Float64,4})
   if length(T1a) > 0
     status = TREXIO.trexio_write_amplitude_single_up_dense(trexio, T1a)
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T1a amplitudes to TREXIO with status $status"
+    trexio_check_write_status(status, "T1a amplitudes")
   end
   if length(T1b) > 0
     status = TREXIO.trexio_write_amplitude_single_dn_dense(trexio, T1b)
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T1b amplitudes to TREXIO with status $status"
+    trexio_check_write_status(status, "T1b amplitudes")
   end
   if length(T2a) > 0
     a,b,i,j = size(T2a)
     @assert a == b && i == j "T2a amplitudes must be in vvoo order with equal dimensions"
     status = TREXIO.trexio_write_amplitude_double_upup_dense(trexio, T2a[strict_uppertriangular_cut(a),strict_uppertriangular_cut(i)])
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2a amplitudes to TREXIO with status $status"
+    trexio_check_write_status(status, "T2a amplitudes")
   end
   if length(T2b) > 0
     a,b,i,j = size(T2b)
     @assert a == b && i == j "T2b amplitudes must be in VVOO order with equal dimensions"
     status = TREXIO.trexio_write_amplitude_double_dndn_dense(trexio, T2b[strict_uppertriangular_cut(a),strict_uppertriangular_cut(i)])
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2b amplitudes to TREXIO with status $status"
+    trexio_check_write_status(status, "T2b amplitudes")
   end
   if length(T2ab) > 0
     status = TREXIO.trexio_write_amplitude_double_updn_dense(trexio, T2ab)
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write T2ab amplitudes to TREXIO with status $status"
+    trexio_check_write_status(status, "T2ab amplitudes")
   end
 end
 
@@ -700,7 +717,7 @@ function read_trexio_singles(trexio::TrexioFile)
   if status == TREXIO.TREXIO_HAS_NOT
     return zeros(0, 0)  # No T1 amplitudes found
   end
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T1 amplitudes from TREXIO with status $status"
+  trexio_check_read_status(status, "T1 amplitudes")
   return T1
 end
 
@@ -714,7 +731,7 @@ function read_trexio_doubles(trexio::TrexioFile)
   if status == TREXIO.TREXIO_HAS_NOT
     return zeros(0, 0, 0, 0)  # No T2 amplitudes found
   end
-  @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2 amplitudes from TREXIO with status $status"
+  trexio_check_read_status(status, "T2 amplitudes")
   return detri_doubles(T2)
 end
 
@@ -728,13 +745,13 @@ function read_trexio_unrestricted_singles(trexio::TrexioFile)
   if status == TREXIO.TREXIO_HAS_NOT
     T1a = zeros(0, 0)
   else
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T1a amplitudes from TREXIO with status $status"
+    trexio_check_read_status(status, "T1a amplitudes")
   end
   T1b, status = TREXIO.trexio_read_amplitude_single_dn_dense(trexio)
   if status == TREXIO.TREXIO_HAS_NOT
     T1b = zeros(0, 0)
   else
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T1b amplitudes from TREXIO with status $status"
+    trexio_check_read_status(status, "T1b amplitudes")
   end
   return (T1a, T1b)
 end
@@ -749,21 +766,21 @@ function read_trexio_unrestricted_doubles(trexio::TrexioFile)
   if status == TREXIO.TREXIO_HAS_NOT
     T2a_full = zeros(0, 0, 0, 0)
   else
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2a amplitudes from TREXIO with status $status"
+    trexio_check_read_status(status, "T2a amplitudes")
     T2a_full = detri_samespin_doubles(T2a)
   end
   T2b, status = TREXIO.trexio_read_amplitude_double_dndn_dense(trexio)
   if status == TREXIO.TREXIO_HAS_NOT
     T2b_full = zeros(0, 0, 0, 0)
   else
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2b amplitudes from TREXIO with status $status"
+    trexio_check_read_status(status, "T2b amplitudes")
     T2b_full = detri_samespin_doubles(T2b)
   end
   T2ab, status = TREXIO.trexio_read_amplitude_double_updn_dense(trexio)
   if status == TREXIO.TREXIO_HAS_NOT
     T2ab = zeros(0, 0, 0, 0)
   else
-    @assert status == TREXIO.TREXIO_SUCCESS "Failed to read T2ab amplitudes from TREXIO with status $status"
+    trexio_check_read_status(status, "T2ab amplitudes")
   end
   return (T2a_full, T2b_full, T2ab)
 end

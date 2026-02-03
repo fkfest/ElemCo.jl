@@ -189,6 +189,62 @@ end
 - Memory management is crucial for large tensor operations
 - Use `load4idx()` (`load3idx`, `load2idx`, etc) and `save4idx()` (`save3idx()`, `save2idx()`, etc) for tensor disk I/O
 
+### Type Stability Checking with JET
+
+Use **JET.jl** for comprehensive type stability analysis. The analysis script is in `profile/jet.jl`.
+
+**Running JET Analysis:**
+```bash
+julia --project=. profile/jet.jl
+```
+
+**How it works:**
+- Uses `@report_opt` to analyze optimization issues and runtime dispatches
+- Targets all ElemCo modules to catch type instabilities across the codebase
+- Reports "possible errors" which are typically runtime dispatches due to type instability
+
+**Fixing Type Instabilities - Key Principles:**
+
+1. **Minimize type annotations**: Do NOT add return type annotations as a first solution
+2. **Find and fix the root cause**: Trace the instability back to its origin
+3. **Common root causes:**
+   - Functions returning abstract types (e.g., `Matrix{T} where T` instead of `Matrix{Float64}`)
+   - Closures with `f::Function` abstract type preventing inference
+   - Type-unstable data flowing through multiple function calls
+   - Reading data from files/interfaces without concrete type conversion
+
+4. **Fixing strategies (in order of preference):**
+   - Fix the source function to return concrete types
+   - Add explicit type conversion at data boundaries (e.g., `Matrix{Float64}(data)`)
+   - Use concrete types in struct fields
+   - Only as last resort: add return type annotations
+
+5. **Known acceptable instabilities:**
+   - `kwcall` runtime dispatch (inherent Julia limitation with keyword arguments)
+   - Dynamic dispatch in initialization code (not performance-critical)
+
+**Example - Fixing at the source:**
+```julia
+# BAD: Adding annotation to hide the problem
+function process_data(data)::Matrix{Float64}
+    return compute(data)  # compute() returns abstract type
+end
+
+# GOOD: Fix compute() to return concrete type
+function compute(data)
+    result = some_operation(data)
+    return Matrix{Float64}(result)  # Convert at the source
+end
+
+function process_data(data)
+    return compute(data)  # Now type-stable without annotation
+end
+```
+
+**After making changes:**
+- Re-run `profile/jet.jl` to verify improvements
+- Run test suite to ensure correctness: `julia --project=. test/runtests.jl`
+
 ## Quantum Chemistry Specifics
 
 ### Mathematical Notation

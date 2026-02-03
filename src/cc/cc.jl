@@ -2769,6 +2769,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   if highest_full_exc > 3
     error("only implemented upto triples")
   end
+  orbopt = has_prefix(method, "O")
   if is_unrestricted(method) || has_prefix(method, "R")
     # Try to restart from dump file first
     T1a_start, T1b_start, T2a_start, T2b_start, T2ab_start, from_dump = try_fetch_unrestricted_starting_amplitudes(EC)
@@ -2821,7 +2822,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       T1 = T1_start
       T2 = T2_start
     else
-      if method.exclevel[1] == :full
+      if method.exclevel[1] == :full || orbopt
         T1 = read_starting_guess4amplitudes(EC, Val(1))
       else
         T1 = zeros(0,0)
@@ -2832,7 +2833,7 @@ function calc_cc(EC::ECInfo, method::ECMethod)
       T2 = read_starting_guess4amplitudes(EC, Val(2))
     end
     # Handle no-singles case
-    if method.exclevel[1] != :full
+    if method.exclevel[1] != :full && !orbopt
       T1 = zeros(0,0)
     end
     # custom functions for dot products in diis
@@ -2868,9 +2869,6 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
     @assert (length(Amps1) == 1) && (length(Amps2) == 1) && (length(Amps3) == 1 || length(Amps3) == 0)
-  end
-  if orbopt && qv
-    Amps1 = (zeros(eltype(Amps2[1]), n_virt_orbs(EC), n_occ_orbs(EC)),)
   end
   Amps = (Amps1..., Amps2..., Amps3...) 
   T2αβ = last(Amps2)

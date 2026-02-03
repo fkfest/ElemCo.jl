@@ -452,10 +452,15 @@ end
 ```julia
 julia> buf = zeros(1000)
 julia> reshaped_buf = reshape_buf(buf, 10, 10)
+```
 """
 @pib function reshape_buf(buf::AbstractVector, dims...; offset=0)
   len = prod(dims) + offset
-  @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
+  @boundscheck begin
+    if length(buf) < len 
+      error("Buffer is too small to reshape to $dims.")
+    end
+  end
   return reshape(@view(buf[1+offset:len]), dims...)
 end
 
@@ -473,6 +478,7 @@ end
 julia> src = rand(3, 4)
 julia> dest = zeros(10, 10)
 julia> allocfree_permutedims!(@view(dest[1:4,2:4]), src, (2, 1))
+```
 """
 function allocfree_permutedims!(dest::AbstractArray{T1,2}, src::AbstractArray{T2,2}, perm::NTuple{2,Int}) where {T1,T2}
   @inbounds for I in CartesianIndices(src)
