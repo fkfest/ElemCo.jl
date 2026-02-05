@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased Version
+## Version [v0.15.0] - 2026.02.05
 
 ### Breaking
 
