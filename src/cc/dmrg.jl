@@ -17,15 +17,27 @@ fcidump = "h2o.fcidump"
 """
 module DMRG
 using ..ElemCo.Utils
-export calc_dmrg
+using ..ElemCo.ECInfos
+export calc_dmrg, calc_dmrg_dispatch
+
+function calc_dmrg_dispatch(EC)
+  ext = Base.get_extension(@__MODULE__, :DmrgExt)
+  if isnothing(ext)
+    return calc_dmrg()
+  else
+    return ext.calc_dmrg(EC)::OutDict
+  end
+end
 
 """
-    calc_dmrg
+    calc_dmrg() -> OutDict
 
-  Perform DMRG calculation
+  Perform DMRG calculation.
+  Requires ITensors.jl and ITensorMPS.jl packages to be loaded.
 """
 function calc_dmrg()
-  warn("For DMRG calculations, please load ITensors.jl and ITensorMPS.jl packages.", true)
+  warnerror("For DMRG calculations, please load ITensors.jl and ITensorMPS.jl packages.", true)
+  return OutDict()
 end
 
 end # module DMRG

@@ -31,6 +31,9 @@ Now the command `jlm` can be used to start the calculations,
 jlm input.jl
 ```
 
+It is recommended to [activate the precompilation](https://quantumkithub.github.io/TensorOperations.jl/stable/man/precompilation) in the `TensorOperations` module to reduce
+the precompilation time of `ElemCo.jl`.
+
 ## Usage
 
 ### Input file

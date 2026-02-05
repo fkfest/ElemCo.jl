@@ -5,13 +5,16 @@ Individual arrays of integrals can also be in *.npy format
 module FciDumps
 
 using DocStringExtensions
-using TensorOperations
 using Printf
+using NPZ
+using Buffers
+using ..ElemCo.Utils
 using ..ElemCo.MNPY
+using ..ElemCo.MTensorOperations
 using ..ElemCo.QMTensors
 
 export FDump, TFDump, QFDump 
-export fd_exists, read_fcidump, write_fcidump, transform_fcidump
+export fd_origin, fd_ismodified, read_fcidump, write_fcidump, transform_fcidump!
 export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
@@ -123,6 +126,10 @@ end
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
   head::FDumpHeader = FDumpHeader()
+  """ path of the original fcidump file, empty if created from scratch. """
+  origin::String = ""
+  """`⟨false⟩` has the integrals been modified after reading? """
+  modified::Bool = false
   """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
   uhf::Bool = false
 end
@@ -149,7 +156,7 @@ FDump(int2::Array{Float64,N}, int1::Matrix{Float64}, int0::Float64, head::FDumpH
 
   Spin-polarized fcidump
 """
-FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2aa, int2bb, int2ab, int1a, int1b, int0, head)
+FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2aa, int2bb, int2ab, int1a, int1b, int0, head, uhf=true)
 
 """
     FDump{N}(norb, nelec; ms2=0, isym=1, orbsym=[], uhf=false, simtra=false)
@@ -195,13 +202,26 @@ function modify_header!(fd::FDump, norb::Int, nelec::Int; ms2::Int=-1, isym::Int
   end
 end
 
-"""
-    fd_exists(fd::FDump)
+function Base.isempty(fd::FDump)
+  return isempty(fd.head)
+end
 
-  Return true if the object is a non-empty FDump
 """
-function fd_exists(fd::FDump)
-  return !isempty(fd.head)
+    fd_ismodified(fd::FDump)
+
+  Return true if the object has been modified after reading
+"""
+function fd_ismodified(fd::FDump)
+  return fd.modified
+end
+
+"""
+    fd_origin(fd::FDump)
+
+  Return the path of the original fcidump file, empty if created from scratch.
+"""
+function fd_origin(fd::FDump)
+  return fd.origin
 end
 
 """
@@ -327,6 +347,7 @@ function read_fcidump(fcidump::String, ::Val{N}) where N
   fdf = open(fcidump)
   fd = FDump{N}()
   fd.head = read_header(fdf)
+  fd.origin = fcidump
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
   simtra = (headvar(fd, "ST", Int) > 0)
   if simtra
@@ -745,32 +766,68 @@ function mmap_integrals(fd::FDump, dir::AbstractString, key::AbstractString, ::A
 end
 
 """
-    write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
+    write_fcidump(fd::FDump, fcidump::String; tol=-1.0, format=:ascii)
 
   Write fcidump file.
+
+  If `tol` >= 0.0, integrals with absolute value smaller than `tol` are omitted.
+  If `format` is `:npy`, integrals are written to npy files in the same directory,
+  otherwise if `format` is `:ascii`, integrals are written to ascii fcidump file.
 """
-function write_fcidump(fd::FDump, fcidump::String, tol=1e-12)
+function write_fcidump(fd::FDump, fcidump::String; tol=-1.0, format=:ascii)
   println("Write fcidump $fcidump"...)
   fdf = open(fcidump, "w")
-  write_header(fd, fdf)
-  write_integrals(fd, fdf, tol)
+  write_header(fd, fdf; npy=(format == :npy))
+  if format == :ascii
+    write_integrals(fd, fdf, tol)
+  elseif format == :npy
+    # copy integrals to npy files
+    copy2npy(fd, dirname(fcidump))
+  else
+    error("Unknown format: "*string(format))
+  end
   close(fdf)
 end
 
 """
-    write_header(fd::FDump, fdf)
+    write_header(fd::FDump, fdf; npy=false)
 
   Write header of fcidump file.
+
+  If `npy` is true, write NPY file names for integrals.
 """
-function write_header(fd::FDump, fdf)
+function write_header(fd::FDump, fdf; npy=false)
   println(fdf, "&FCI")
+  head = fd.head
+  if npy
+    if !fd.uhf
+      head["NPY2"] = ["int2.npy"]
+      head["NPY1"] = ["int1.npy"]
+    else
+      head["NPY2AA"] = ["int2aa.npy"]
+      head["NPY2BB"] = ["int2bb.npy"]
+      head["NPY2AB"] = ["int2ab.npy"]
+      head["NPY1A"] = ["int1a.npy"]
+      head["NPY1B"] = ["int1b.npy"]
+    end
+    head["ENUC"] = [fd.int0]
+  else
+    delete!(head.shead, "NPY2")
+    delete!(head.shead, "NPY1")
+    delete!(head.shead, "NPY2AA")
+    delete!(head.shead, "NPY2BB")
+    delete!(head.shead, "NPY2AB")
+    delete!(head.shead, "NPY1A")
+    delete!(head.shead, "NPY1B")
+    delete!(head.fhead, "ENUC")
+  end
   for key in FDUMP_KEYS
     val = headvar(fd, key)
     if !isnothing(val)
       println(fdf, " ", key, "=", join(val, ","), ",")
     end
   end
-  for (key,val) in fd.head
+  for (key,val) in head
     if key in FDUMP_KEYS
       continue
     end
@@ -831,14 +888,14 @@ end
 """
 function write_integrals2(int2::Array{Float64,3}, fdf, tol, simtra)
   write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
-  inds = (p,q,r,s) -> CartesianIndex(p,q,uppertriangular_index(r,s))
-  indslow = (p,q,r,s) -> CartesianIndex(q,p,uppertriangular_index(s,r))
+  inds(p,q,r,s) = CartesianIndex(p,q,uppertriangular_index(r,s))
+  indslow(p,q,r,s) = CartesianIndex(q,p,uppertriangular_index(s,r))
   write_integrals2_(int2, inds, indslow, fdf, tol)
 end
 
 function write_integrals2(int2::Array{Float64,4}, fdf, tol, simtra)
   write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
-  inds = (p,q,r,s) -> CartesianIndex(p,q,r,s)
+  inds(p,q,r,s) = CartesianIndex(p,q,r,s)
   write_integrals2_(int2, inds, inds, fdf, tol)
 end
 
@@ -958,16 +1015,37 @@ function write_integrals1(int1, fdf, tol, simtra)
   end
 end
 
+"""
+    copy2npy(fd::FDump, dir::AbstractString)
+
+  Copy integrals to npy files in `dir`.
+"""
+function copy2npy(fd::FDump, dir::AbstractString)
+  println("Copy integrals to npy files in $dir")
+  if !isdir(dir)
+    mkpath(dir)
+  end
+  if !fd.uhf
+    npzwrite(joinpath(dir,"int2.npy"), fd.int2)
+    npzwrite(joinpath(dir,"int1.npy"), fd.int1)
+  else
+    npzwrite(joinpath(dir,"int2aa.npy"), fd.int2aa)
+    npzwrite(joinpath(dir,"int2bb.npy"), fd.int2bb)
+    npzwrite(joinpath(dir,"int2ab.npy"), fd.int2ab)
+    npzwrite(joinpath(dir,"int1a.npy"), fd.int1a)
+    npzwrite(joinpath(dir,"int1b.npy"), fd.int1b)
+  end
+end
+
 """ 
-    transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
+    transform_fcidump!(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
 
   Transform integrals to new basis using Tl and Tr transformation matrices. 
-  For UHF fcidump, Tl and Tr are arrays of matrices for α and β spin.
-  If Tl and Tr are arrays of arrays, then the function transforms rhf fcidump to uhf fcidump.
+  If Tl and Tr are unrestricted, then the function transforms rhf fcidump to uhf fcidump.
 """
-function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray) 
+function transform_fcidump!(fd::FDump{N}, Tl::SpinMatrix, Tr::SpinMatrix) where N
   println("Transform integrals...")
-  if length(Tl) == 2 && typeof(Tl[1]) <: AbstractArray
+  if !is_restricted(Tl) || !is_restricted(Tr)
     genuhfdump = true
   else
     genuhfdump = false
@@ -986,14 +1064,15 @@ function transform_fcidump(fd::FDump, Tl::AbstractArray, Tr::AbstractArray)
     fd.int2ab = transform_int2_Q(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2])
     fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
     fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
-    fd.int2 = zeros(fill(0,ndims(fd.int2))...)
+    fd.int2 = zeros(ntuple(i->0, Val(N)))
     fd.int1 = zeros(0,0)
     fd.head["IUHF"] = [1]
     fd.uhf = true
   else
-    fd.int2 = transform_int2(fd.int2, Tl, Tl, Tr, Tr)
-    fd.int1 = transform_int1(fd.int1, Tl, Tr)
+    fd.int2 = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1])
+    fd.int1 = transform_int1(fd.int1, Tl[1], Tr[1])
   end
+  fd.modified = true
 end
 
 """
@@ -1011,23 +1090,44 @@ function transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::Abstract
   norb = size(int2,1)
   int2t = zeros(norb,norb,norb*(norb+1)÷2)
   int_3i = zeros(norb,norb,norb)
+  @buffer buf(2*norb*norb*norb) begin
   for s = 1:norb
     rs = strict_uppertriangular_range(s)
     rrange = 1:s-1
-    if length(rs) > 0
-      @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
+    lenrs = length(rs)
+    if lenrs > 0
+      v!int2 = @mview int2[:,:,rs]
+      v!Tr = @mview Tr[rrange,:]
+      intb1 = alloc!(buf, norb, norb, lenrs)
+      intb2 = alloc!(buf, norb, norb, lenrs)
+      @mtensor intb1[p,q',r'] = v!int2[p',q',r'] * Tl[p',p]
+      @mtensor intb2[p,q,r'] = intb1[p,q',r'] * Tl2[q',q]
+      @mtensor int_3i[p,q,r] = intb2[p,q,r'] * v!Tr[r',r]
+      reset!(buf)
     end
     # contribution from the diagonal <p'q'|s's'> 
     ss = uppertriangular_index(s, s)
-    @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
+    v!int2 = @mview int2[:,:,ss]
+    intb1 = alloc!(buf, norb, norb)
+    intb2 = alloc!(buf, norb, norb)
+    @mtensor intb1[p,q'] = 0.5 * v!int2[p',q'] * Tl[p',p]
+    @mtensor intb2[p,q] = intb1[p,q'] * Tl2[q',q]
+    @mtensor int_3i[p,q,r] += intb2[p,q] * Tr[s,:][r]
+    reset!(buf)
+    Tr2s = Tr2[s,:]
     for s1 = 1:norb
       rs1 = uppertriangular_range(s1)
       rrange = 1:s1
-      Tr2ss1 = Tr2[s,s1]
-      @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,rrange][p,q,r] * Tr2ss1
-      @tensoropt int2t[:,:,rs1][p,q,r] += int_3i[:,:,s1][q,p] * Tr2[s,rrange][r]
+      Tr2ss1 = Tr2s[s1]
+      v!Tr2s = @mview Tr2s[rrange]
+      v!int2t = @mview int2t[:,:,rs1]
+      v!int_3i_r = @mview int_3i[:,:,rrange]
+      v!int_3i_s1 = @mview int_3i[:,:,s1]
+      @mtensor v!int2t[p,q,r] += v!int_3i_r[p,q,r] * Tr2ss1
+      @mtensor v!int2t[p,q,r] += v!int_3i_s1[q,p] * v!Tr2s[r]
     end
   end
+  end #buffer
   return int2t
 end
 function transform_int2(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
@@ -1050,26 +1150,72 @@ function transform_int2_Q(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::Abstra
   int2t = zeros(norb,norb,norb,norb)
   int_3i = zeros(norb,norb,norb)
   int_3i2 = zeros(norb,norb,norb)
+  @buffer buf(2*norb*norb*norb) begin
   for s = 1:norb
     rs = strict_uppertriangular_range(s)
     rrange = 1:s-1
-    if length(rs) > 0
-      @tensoropt int_3i[p,q,r] = int2[:,:,rs][p',q',r'] * Tl[p',p] * Tl2[q',q] * Tr[rrange,:][r',r]
-      @tensoropt int_3i2[p,q,r] = int2[:,:,rs][p',q',r'] * Tl2[p',p] * Tl[q',q] * Tr2[rrange,:][r',r]
+    lenrs = length(rs)
+    if lenrs > 0
+      v!int2 = @mview int2[:,:,rs]
+      v!Tr = @mview Tr[rrange,:]
+      v!Tr2 = @mview Tr2[rrange,:]
+      intb1 = alloc!(buf, norb, norb, lenrs)
+      intb2 = alloc!(buf, norb, norb, lenrs)
+      @mtensor intb1[p,q',r'] = v!int2[p',q',r'] * Tl[p',p]
+      @mtensor intb2[p,q,r'] = intb1[p,q',r'] * Tl2[q',q]
+      @mtensor int_3i[p,q,r] = intb2[p,q,r'] * v!Tr[r',r]
+      @mtensor intb1[p,q',r'] = v!int2[p',q',r'] * Tl2[p',p]
+      @mtensor intb2[p,q,r'] = intb1[p,q',r'] * Tl[q',q]
+      @mtensor int_3i2[p,q,r] = intb2[p,q,r'] * v!Tr2[r',r]
+      reset!(buf)
     end
+    Tr_s = Tr[s,:]
+    Tr2_s = Tr2[s,:]
     # contribution from the diagonal <p'q'|s's'> 
     ss = uppertriangular_index(s, s)
-    @tensoropt int_3i[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl[p',p] * Tl2[q',q] * Tr[s,:][r]
-    @tensoropt int_3i2[p,q,r] += 0.5*int2[:,:,ss][p',q'] * Tl2[p',p] * Tl[q',q] * Tr2[s,:][r]
+    v!int2 = @mview int2[:,:,ss]
+    intb1 = alloc!(buf, norb, norb)
+    intb2 = alloc!(buf, norb, norb)
+    @mtensor intb1[p,q'] = 0.5 * v!int2[p',q'] * Tl[p',p]
+    @mtensor intb2[p,q] = intb1[p,q'] * Tl2[q',q]
+    @mtensor int_3i[p,q,r] += intb2[p,q] * Tr_s[r]
+    @mtensor intb1[p,q'] = 0.5 * v!int2[p',q'] * Tl2[p',p]
+    @mtensor intb2[p,q] = intb1[p,q'] * Tl[q',q]
+    @mtensor int_3i2[p,q,r] += intb2[p,q] * Tr2_s[r]
+    reset!(buf)
 
-    @tensoropt int2t[p,q,r,s'] += int_3i[p,q,r] * Tr2[s,:][s']
-    @tensoropt int2t[p,q,r,s'] += int_3i2[q,p,s'] * Tr[s,:][r]
+    @mtensor int2t[p,q,r,s'] += int_3i[p,q,r] * Tr2_s[s']
+    @mtensor int2t[p,q,r,s'] += int_3i2[q,p,s'] * Tr_s[r]
   end
+  end #buffer
   return int2t
 end
 function transform_int2_Q(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
                         Tr::AbstractArray, Tr2::AbstractArray)
-  @tensoropt int2t[p,q,r,s] := int2[p',q',r',s']*Tl[p',p]*Tl2[q',q]*Tr[r',r]*Tr2[s',s]
+  norb = size(int2,1)
+  sBlks = get_spaceblocks(1:norb)
+  maxs = maximum(length, sBlks)
+  int2t = Array{Float64,4}(undef, norb, norb, norb, norb)
+  @buffer buf(2*norb*norb*norb*maxs) begin
+  first = true
+  for s = sBlks
+    lens = length(s)
+    intb1 = alloc!(buf, norb, norb, norb, lens)
+    v!int2 = @mview int2[:,:,:,s]
+    v!Tr2 = @mview Tr2[s,:]
+    @mtensor intb1[p,q',r',s'] = v!int2[p',q',r',s'] * Tl[p',p]
+    intb2 = alloc!(buf, norb, norb, norb, lens)
+    @mtensor intb2[p,q,r',s'] = intb1[p,q',r',s'] * Tl2[q',q]
+    @mtensor intb1[p,q,r,s'] = intb2[p,q,r',s'] * Tr[r',r]
+    if first
+      @mtensor int2t[p,q,r,s] = intb1[p,q,r,s'] * v!Tr2[s',s]
+      first = false
+    else
+      @mtensor int2t[p,q,r,s] += intb1[p,q,r,s'] * v!Tr2[s',s]
+    end
+    reset!(buf)
+  end
+  end #buffer
   return int2t
 end
 
@@ -1079,7 +1225,7 @@ end
   Transform 1-e integrals to new basis using `Tl` and `Tr` transformation matrices.
 """
 function transform_int1(int1::AbstractArray, Tl::AbstractArray,  Tr::AbstractArray)
-  @tensoropt int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
+  @mtensor int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
   return int1t
 end
 
@@ -1113,9 +1259,9 @@ function reorder_orbs_int2(int2::AbstractArray, orbs)
         ro = orbs[r]
         so = orbs[s]
         if ro <= so
-          int2t[:,:,uppertriangular_index(r,s)] = int2[orbs,orbs,uppertriangular_index(ro, so)]
+          @views int2t[:,:,uppertriangular_index(r,s)] = int2[orbs,orbs,uppertriangular_index(ro, so)]
         else
-          int2t[:,:,uppertriangular_index(r,s)] = permutedims(int2[orbs,orbs,uppertriangular_index(so, ro)], [2,1])
+          @views permutedims!(int2t[:,:,uppertriangular_index(r,s)], int2[orbs,orbs,uppertriangular_index(so, ro)], (2,1))
         end
       end
     end

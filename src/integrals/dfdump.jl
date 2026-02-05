@@ -68,7 +68,8 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
         Iq = uppertriangular_range(s)
         v!Lmm_q = @mview Lmm[:,:,q]
         v!Lmm_s = @mview Lmm[:,:,s]
-        @mtensor int2[:,:,Iq][p,r,q] = v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
+        v!int2 = @mview int2[:,:,Iq]
+        @mtensor v!int2[p,r,q] = v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
       end
     else
       for s = 1:norbs
@@ -76,7 +77,8 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
         Iq = uppertriangular_range(s)
         v!Lmm_q = @mview Lmm[:,:,q]
         v!Lmm_s = @mview Lmm[:,:,s]
-        @mtensor int2[:,:,Iq][p,r,q] += v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
+        v!int2 = @mview int2[:,:,Iq]
+        @mtensor v!int2[p,r,q] += v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
       end
     end
     drop!(buf, Lmm, mAL)
@@ -174,29 +176,35 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
     if first
       for s = 1:norbs
         q = 1:s # only upper triangle
-        LMM_s = @view LMM[:,:,s]
-        LMM_q = @view LMM[:,:,q]
-        Lmm_s = @view Lmm[:,:,s]
-        Lmm_q = @view Lmm[:,:,q]
+        v!LMM_s = @mview LMM[:,:,s]
+        v!LMM_q = @mview LMM[:,:,q]
+        v!Lmm_s = @mview Lmm[:,:,s]
+        v!Lmm_q = @mview Lmm[:,:,q]
         Iq = uppertriangular_range(s)
+        v!int2ab = @mview int2ab[:,:,:,s]
+        v!int2aa = @mview int2aa[:,:,Iq]
+        v!int2bb = @mview int2bb[:,:,Iq]
         @mtensor begin
-          int2ab[:,:,:,s][p,r,q] = Lmm[L,p,q] * LMM_s[L,r]
-          int2aa[:,:,Iq][p,r,q] = Lmm_q[L,p,q] * Lmm_s[L,r]
-          int2bb[:,:,Iq][p,r,q] = LMM_q[L,p,q] * LMM_s[L,r]
+          v!int2ab[p,r,q] = Lmm[L,p,q] * v!LMM_s[L,r]
+          v!int2aa[p,r,q] = v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
+          v!int2bb[p,r,q] = v!LMM_q[L,p,q] * v!LMM_s[L,r]
         end
       end
     else
       for s = 1:norbs
         q = 1:s # only upper triangle
-        LMM_s = @view LMM[:,:,s]
-        LMM_q = @view LMM[:,:,q]
-        Lmm_s = @view Lmm[:,:,s]
-        Lmm_q = @view Lmm[:,:,q]
+        v!LMM_s = @mview LMM[:,:,s]
+        v!LMM_q = @mview LMM[:,:,q]
+        v!Lmm_s = @mview Lmm[:,:,s]
+        v!Lmm_q = @mview Lmm[:,:,q]
         Iq = uppertriangular_range(s)
+        v!int2ab = @mview int2ab[:,:,:,s]
+        v!int2aa = @mview int2aa[:,:,Iq]
+        v!int2bb = @mview int2bb[:,:,Iq]
         @mtensor begin
-          int2ab[:,:,:,s][p,r,q] += Lmm[L,p,q] * LMM_s[L,r]
-          int2aa[:,:,Iq][p,r,q] += Lmm_q[L,p,q] * Lmm_s[L,r]
-          int2bb[:,:,Iq][p,r,q] += LMM_q[L,p,q] * LMM_s[L,r]
+          v!int2ab[p,r,q] += Lmm[L,p,q] * v!LMM_s[L,r]
+          v!int2aa[p,r,q] += v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
+          v!int2bb[p,r,q] += v!LMM_q[L,p,q] * v!LMM_s[L,r]
         end
       end
     end
@@ -290,7 +298,7 @@ function dfdump(EC::ECInfo)
   restore_space!(EC, space_save)
   if length(dumpfile) > 0
     println("writing fcidump $dumpfile")
-    write_fcidump(fdump, dumpfile, -1.0)  
+    write_fcidump(fdump, dumpfile; tol=-1.0)  
   else
     EC.fd = fdump
   end

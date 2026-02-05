@@ -139,13 +139,7 @@ const MOLPRO2LIBCINT_PERMUTATION = [        # Molpro order:
 function ao_permutation(EC::ECInfo)
   basisset = generate_basis(EC, "ao")
   @assert !is_cartesian(basisset) "Only spherical basis sets are supported in import."
-  order = Int[]
-  for ash in basisset
-    for ish = 1:n_subshells(ash)
-      append!(order, MOLPRO2LIBCINT_PERMUTATION[ash.l+1] .+ length(order))
-    end
-  end
-  return order
+  return ao_order2internal(basisset, MOLPRO2LIBCINT_PERMUTATION)
 end
 
 """

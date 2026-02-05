@@ -6,18 +6,20 @@ geometry="O      0.000000000    0.000000000   -0.130186067
             H1     0.000000000    1.489124508    1.033245507
             H2     0.000000000   -1.489124508    1.033245507"
 
-basis="vdz"
+basis=Dict("ao"=>"6-31g", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvtz-mpfit")
 
 @time @ECinit
 @time @dfhf
-#@time @dfcc mp2
-@time @cc dcsd
-#@time @dfcc svd-dcsd
+@dfints
 
-@report_opt target_modules=(@__MODULE__,
+println("\n" * "="^80)
+println("RUNNING JET TYPE STABILITY ANALYSIS")
+println("="^80 * "\n")
+
+@report_opt ignored_modules=(Base, ElemCo.Outputs, ElemCo.DMRG, ElemCo.TREXIO, ElemCo.DIIS) target_modules=(@__MODULE__,
                             ElemCo,
                             ElemCo.BOHF,
-                            ElemCo.CCDriver,
+                            ElemCo.Drivers,
                             ElemCo.CCTools,
                             ElemCo.Constants,
                             ElemCo.CoupledCluster,
@@ -28,7 +30,7 @@ basis="vdz"
                             ElemCo.DFHF,
                             ElemCo.DFMCSCF,
                             ElemCo.DFTools,
-                            ElemCo.DIIS,
+                            #ElemCo.DIIS,
                             #ElemCo.DMRG,
                             ElemCo.DumpTools,
                             ElemCo.ECInfos,
@@ -46,16 +48,19 @@ basis="vdz"
                             ElemCo.Elements,
                             ElemCo.Integrals,
                             ElemCo.Interfaces,
-                            ElemCo.Libcint5,
+                            ElemCo.Libcint,
                             ElemCo.MoldenInterface,
                             ElemCo.MolproInterface,
-                            ElemCo.MSystem
+                            ElemCo.MSystems,
+                            ElemCo.FCI,
                             #) ElemCo.DfDump.dfdump(EC)
                             #) ElemCo.DFHF.dfhf(EC)
-                            #) ElemCo.CCDriver.dfccdriver(EC,"MP2")
-                            #) ElemCo.CCDriver.ccdriver(EC,"λCCSD")
-                            ) ElemCo.CCDriver.ccdriver(EC,"SVD-DC-CCSDT")
-                            #) ElemCo.CCDriver.dfccdriver(EC,"SVD-DCSD")
+                            #) ElemCo.Drivers.dfccdriver(EC,"MP2")
+                            ) ElemCo.Drivers.ccdriver(EC,"λCCSD")
+                            # ) ElemCo.Drivers.ccdriver(EC,"SVD-DC-CCSDT")
+                            #) ElemCo.Drivers.dfccdriver(EC,"SVD-DCSD")
+                            #  ) ElemCo.Drivers.fcidriver(EC,ciphi=true)
                             
+
 end
 @time main()

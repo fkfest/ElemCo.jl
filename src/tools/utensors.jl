@@ -33,6 +33,37 @@ function norb_from_lentri(triN, N)
   return n
 end
 
+"""
+    strict_lentri_from_norb(n)
+
+  Return the length of the strict upper triangular part of a tensor of dimension n×n.
+"""
+strict_lentri_from_norb(n) = n*(n-1)÷2
+
+"""
+    strict_lentri_from_norb(n, N)
+
+  Return the length of the strict upper triangular part of a tensor of dimension n^N.
+"""
+strict_lentri_from_norb(n, N) = prod(n-N+1:n)÷factorial(N)
+
+"""
+    norb_from_strict_lentri(tri2)
+
+  Return the number of orbitals from the length of strict triangular index `tri2` (for dimension n×n).
+"""
+norb_from_strict_lentri(tri2) = Int(sqrt(8*tri2+1)+1)÷2
+
+"""
+    norb_from_strict_lentri(triN, N)
+
+  Return the number of orbitals from the length of strict triangular index of size `triN`.
+"""
+function norb_from_strict_lentri(triN, N)
+  n = trunc(Int, (triN * factorial(N))^(1/N)) + (N+1)÷2
+  @assert strict_lentri_from_norb(n, N) == triN "The dimension $triN is not strict triangular of $n^$N."
+  return n
+end
 
 """
     uppertriangular_index(i1, i2)
@@ -110,4 +141,89 @@ function strict_uppertriangular_range(inds::Vararg{Int, N}) where N
   start = uppertriangular_index(1, inds...)
   stop = start + inds[1] - 2
   return start:stop
+end
+
+"""
+    uppertriangular_cut(norb)
+
+  Return all indices for original dimension `norb×norb` corresponding to the upper triangular part.
+"""
+uppertriangular_cut(norb) = [CartesianIndex(i,j) for j in 1:norb for i in 1:j]
+
+"""
+    swapped_uppertriangular_cut(norb)
+
+  Return all indices for original dimension `norb×norb` corresponding to the upper triangular part,
+  but with the two indices swapped, i.e., (j,i) instead of (i,j).
+"""
+swapped_uppertriangular_cut(norb) = [CartesianIndex(j,i) for j in 1:norb for i in 1:j]
+
+"""
+    uppertriangular_cut3(norb)
+
+  Return all indices for original dimension `norb×norb×norb` corresponding to the upper triangular part.
+"""
+uppertriangular_cut3(norb) = [CartesianIndex(i,j,k) for k in 1:norb for j in 1:k for i in 1:j]
+
+"""
+    strict_uppertriangular_cut(norb)
+
+  Return all indices for original dimension `norb×norb` corresponding to the strict upper triangular part.
+"""
+strict_uppertriangular_cut(norb) = [CartesianIndex(i,j) for j in 2:norb for i in 1:j-1]
+
+"""
+    swapped_strict_uppertriangular_cut(norb)
+
+  Return all indices for original dimension `norb×norb` corresponding to the strict upper triangular part,
+  but with the two indices swapped, i.e., (j,i) instead of (i,j).
+"""
+swapped_strict_uppertriangular_cut(norb) = [CartesianIndex(j,i) for j in 2:norb for i in 1:j-1]
+
+"""
+    strict_uppertriangular_cut3(norb)
+
+  Return all indices for original dimension `norb×norb×norb` corresponding to the strict upper triangular part.
+"""
+strict_uppertriangular_cut3(norb) = [CartesianIndex(i,j,k) for k in 3:norb for j in 2:k-1 for i in 1:j-1]
+
+"""
+    detri_doubles(T2)
+
+  Convert a doubles amplitude tensor T2 in the form (a,b,ij) to the full form (a,b,i,j).
+  Here, `ij` is the upper triangular index for occupied orbitals `i <= j`.
+"""
+function detri_doubles(T2)
+  a,b,ij = size(T2)
+  nocc = norb_from_lentri(ij)
+  T2full = Array{eltype(T2)}(undef, a, b, nocc, nocc)
+  tripp = uppertriangular_cut(nocc)
+  T2full[:,:,tripp] = T2
+  swtripp = swapped_uppertriangular_cut(nocc)
+  permutedims!(@view(T2full[:,:,swtripp]), T2, (2, 1, 3))
+  return T2full
+end
+
+"""
+    detri_samespin_doubles(T2)
+
+  Convert a doubles amplitude tensor T2 in the form (ab,ij) to the full form (a,b,i,j)
+  using the permutational symmetry ``T^{ij}_{ab} = T^{ji}_{ba} = -T^{ij}_{ba} = -T^{ji}_{ab}``.
+
+Here, `ab` and `ij` are the strict upper triangular indices for virtual and occupied orbitals `a < b`, `i < j`.
+"""
+function detri_samespin_doubles(T2)
+  ab,ij = size(T2)
+  nvir = norb_from_strict_lentri(ab)
+  nocc = norb_from_strict_lentri(ij)
+  T2full = zeros(nvir, nvir, nocc, nocc)
+  trioo = strict_uppertriangular_cut(nocc)
+  trivv = strict_uppertriangular_cut(nvir)
+  swtrioo = swapped_strict_uppertriangular_cut(nocc)
+  swtrivv = swapped_strict_uppertriangular_cut(nvir)
+  T2full[trivv,trioo] = T2
+  T2full[swtrivv,trioo] = -T2
+  T2full[trivv,swtrioo] = -T2
+  T2full[swtrivv,swtrioo] = T2
+  return T2full
 end

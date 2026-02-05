@@ -67,25 +67,20 @@ function write_molden_orbitals(EC::ECInfo, filename::String)
   basisset = generate_basis(EC, "ao")
   order = ao_permutation(EC, true)
   orbs = load_orbitals(EC)
-  SP = EC.space
   if is_restricted(orbs)
-    occ = [2*ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
-    ϵo, ϵv = orbital_energies(EC)
-    eps = [ϵo; ϵv]
+    eps, epsb = fetch_orbital_energies(EC)
+    occ, occb = fetch_orbital_occupations(EC)
+    @assert isempty(epsb) "Restricted orbitals should have a single set of orbital energies."
   else
-    occa = [ones(Int, length(SP['o'])); zeros(Int, length(SP['v']))]
-    occb = [ones(Int, length(SP['O'])); zeros(Int, length(SP['V']))]
-    ϵoa, ϵva = orbital_energies(EC, :α)
-    ϵob, ϵvb = orbital_energies(EC, :β)
-    epsa = [ϵoa; ϵva]
-    epsb = [ϵob; ϵvb]
+    epsa, epsb = fetch_orbital_energies(EC)
+    occa, occb = fetch_orbital_occupations(EC)
   end
   has_positron = EC.options.wf.npositron > 0
   if has_positron
     orbs_pos = load_positron_orbitals(EC)
-    eps_pos = load_positron_epsilon(EC)
-    occ_pos = zeros(Int, length(SP['m']))
-    occ_pos[1] = 1
+    eps_pos, eps_posb = fetch_orbital_energies(EC, "po")
+    occ_pos, occ_posb = fetch_orbital_occupations(EC, "po")
+    @assert isempty(eps_posb) "Positron orbitals should have a single set of orbital energies."
   end
   open(filename, "w") do f
     println(f, "[Molden Format]")
@@ -195,14 +190,7 @@ end
 """
 function ao_permutation(EC::ECInfo, back=false)
   basisset = generate_basis(EC, "ao")
-  permutation = is_cartesian(basisset) ? MOLDEN2LIBCINT_PERMUTATION_CART : MOLDEN2LIBCINT_PERMUTATION
-  action = back ? invperm : identity
-  order = Int[]
-  for ash in basisset
-    for ish = 1:n_subshells(ash)
-      append!(order, action(permutation[ash.l+1]) .+ length(order))
-    end
-  end
-  return order
+  order4l = is_cartesian(basisset) ? MOLDEN2LIBCINT_PERMUTATION_CART : MOLDEN2LIBCINT_PERMUTATION
+  return ao_order2internal(basisset, order4l, back)
 end
 end # module
