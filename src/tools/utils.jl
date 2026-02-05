@@ -5,15 +5,18 @@ using XML
 using Printf
 using ..ElemCo.AbstractEC
 using ..ElemCo.DescDict
+using ..ElemCo.VecDicts
 using ..ElemCo.Outputs
+using ..ElemCo.VersionInfo
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
-export warn
+export warnerror
 export mainname, print_time, print_memory, free_memory
 export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
-export subspace_in_space, argmaxN
+export subspace_in_space, get_spaceblocks, argmaxN
 export @istoplevel
-export substr
+export @assert_devel
+export substr, setdiff4dict!, modifyvalueswith!
 export allocfree_permutedims!
 export reshape_buf
 export amdmkl
@@ -21,8 +24,31 @@ export xpath
 # from DescDict
 export ODDict, getdescription, setdescription!, descriptions
 export OutDict, last_energy
+# from bufvec
+export BufVec, capacity, is_full
+# from pairdict
+export PairDict
+# from VecDicts
+export VecDict, getvalue, setvalue!, values, resize!, push!
+export setat!, getat, setkeyat!, getkeyat, setvalueat!, getvalueat
+# from input_utils
+export clean_exprstring, is_options_block, parse_options_block, separate_kwargs
+export @var2string
+
+export @pib # alias for Base.@propagate_inbounds
+
+include("input_utils.jl")
+
+"""
+    @pib
+
+Alias for Base.@propagate_inbounds
+"""
+var"@pib" = Base.var"@propagate_inbounds"
 
 include("xmltools.jl")
+include("bufvec.jl")
+include("pairdict.jl")
 
 """
     mainname(file::String)
@@ -55,8 +81,12 @@ end
   Print time with message `info` if verbosity `verb` is smaller than `PrintOptions.time`.
 """
 function print_time(EC::AbstractECInfo, t1, info::AbstractString, verb::Int)
+  return print_time(EC.options.print.time, t1, info, verb)
+end
+
+function print_time(print_time_verbosity::Int, t1, info::AbstractString, verb::Int)
   t2 = time_ns()
-  if verb < EC.options.print.time
+  if verb < print_time_verbosity
     output_time(t2 - t1, info)
   end
   return t2
@@ -86,17 +116,17 @@ function print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)
 end
 
 """
-    warn(msg::AbstractString, err=false)
+    warnerror(msg::AbstractString, err=false)
 
   Print a warning message. If `err` is `true`, the message is printed as an error message.
 
   The message is printed with a scull emoji.
   # Example
 ```julia
-julia> warn("This is a warning message.")
+julia> warnerror("This is a warning message.")
 ```
 """
-function warn(msg::AbstractString, err=false)
+function warnerror(msg::AbstractString, err=false)
   if err
     error(msg)
   end
@@ -239,6 +269,62 @@ function subspace_in_space(subspace::UnitRange{Int}, space::UnitRange{Int})
   return start:stop
 end
 
+""" 
+    get_spaceblocks(space, maxblocksize=128, strict=false)
+
+  Generate ranges for block indices for space (for loop over blocks).
+
+  `space` is a range or an array of indices. 
+  Even if `space` is non-contiguous, the blocks will be contiguous. 
+  If `strict` is true, the blocks will be of size `maxblocksize` (except for the last block and non-contiguous index-ranges).
+  Otherwise the actual block size will be as close as possible to `blocksize` such that
+  the resulting blocks are of similar size.
+"""
+function get_spaceblocks(space, maxblocksize=128, strict=false)
+  if length(space) == 0
+    return UnitRange{Int}[]
+  end
+  if last(space) - first(space) + 1 == length(space)
+    # contiguous
+    cblks = UnitRange{Int}[ first(space):last(space) ]
+  else
+    # create an array of contiguous ranges
+    cblks = UnitRange{Int}[]
+    begr = first(space)
+    endr = begr - 1
+    for idx in space
+      if idx == endr + 1
+        endr = idx
+      else
+        push!(cblks, begr:endr)
+        endr = begr = idx
+      end 
+    end
+    push!(cblks, begr:endr)
+  end  
+
+  allblks = UnitRange{Int}[]
+  for range in cblks
+    nblks::Int = length(range) ÷ maxblocksize
+    if nblks*maxblocksize < length(range)
+      nblks += 1
+    end
+    if strict 
+      blks = UnitRange{Int}[ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
+    else
+      blocksize = length(range) ÷ nblks
+      n_largeblks = mod(length(range), nblks)
+      blks = UnitRange{Int}[ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
+      start = n_largeblks*(blocksize+1)+first(range)
+      for i = n_largeblks+1:nblks
+        push!(blks, start:start+blocksize-1)
+        start += blocksize
+      end
+    end
+    append!(allblks, blks)
+  end
+  return allblks
+end
 
 """
     substr(string::AbstractString, start::Int, len::Int=-1)
@@ -274,6 +360,38 @@ julia> substr("λabδcd", 2:4)
 """
 function substr(string::AbstractString, range::UnitRange{Int})
   return substr(string, range.start, range.stop-range.start+1)
+end
+
+"""
+    setdiff4dict!(dict::AbstractDict, keys)
+
+  Delete all `keys` from `dict`.
+
+  The same behavior as `setdiff!` for sets.
+"""
+@pib function setdiff4dict!(dict::AbstractDict, keys)
+  for key in keys
+    delete!(dict, key)
+  end
+end
+
+"""
+    modifyvalueswith!(combine, dict::AbstractDict, other::AbstractDict)
+
+  Modify the values in `dict` using the values from `other` and the function `combine`.
+
+  For each key in `other`, if the key exists in `dict`, the value in `dict` is updated
+  to `combine(v1, v2)`, where `v1` is the value in `dict` and `v2` is the value in `other`.
+
+  Similar to `mergewith!`, but only merges existing keys in `dict`.
+"""
+@pib function modifyvalueswith!(combine, dict::AbstractDict, other::AbstractDict)
+  for (key, val) in other
+    v1 = get(dict, key, nothing)
+    if !isnothing(v1)
+      @inbounds dict[key] = combine(v1, val)
+    end
+  end
 end
 
 """
@@ -324,20 +442,26 @@ function argmaxN(vals, N; by::Function=identity)
 end
 
 """
-    reshape_buf(buf::AbstractVector, dims...)
+    reshape_buf(buf::AbstractVector, dims...; offset=0)
 
-  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`.
+  Reshape a buffer `buf` of type `AbstractVector` to the given dimensions `dims...`, 
+  starting from `offset`.
   The buffer is expected to be large enough to fit the reshaped data.
 
   # Example
 ```julia
 julia> buf = zeros(1000)
 julia> reshaped_buf = reshape_buf(buf, 10, 10)
+```
 """
-Base.@propagate_inbounds function reshape_buf(buf::AbstractVector, dims...)
-  len = prod(dims)
-  @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
-  return reshape(@view(buf[1:len]), dims...)
+@pib function reshape_buf(buf::AbstractVector, dims...; offset=0)
+  len = prod(dims) + offset
+  @boundscheck begin
+    if length(buf) < len 
+      error("Buffer is too small to reshape to $dims.")
+    end
+  end
+  return reshape(@view(buf[1+offset:len]), dims...)
 end
 
 
@@ -354,6 +478,7 @@ end
 julia> src = rand(3, 4)
 julia> dest = zeros(10, 10)
 julia> allocfree_permutedims!(@view(dest[1:4,2:4]), src, (2, 1))
+```
 """
 function allocfree_permutedims!(dest::AbstractArray{T1,2}, src::AbstractArray{T2,2}, perm::NTuple{2,Int}) where {T1,T2}
   @inbounds for I in CartesianIndices(src)
@@ -383,6 +508,25 @@ macro istoplevel()
     $(esc(canary)) = true
     Base.isdefined($__module__, $(QuoteNode(canary)))
   end
+end
+
+"""
+    @assert_devel(cond, text=nothing)
+
+  Assert `cond` only in development mode.
+
+  If `text` is given, it is used as the assertion message.
+  Development mode is determined by `VersionInfo.devel()`.
+
+  Copied from `ToggleableAsserts.jl`.
+"""
+macro assert_devel(cond, text=nothing)
+  if isnothing(text)
+    assert_stmt = esc(:(@assert $cond))
+  else
+    assert_stmt = esc(:(@assert $cond $text))
+  end
+  :(VersionInfo.devel() ? $assert_stmt  : nothing)
 end
 
 """

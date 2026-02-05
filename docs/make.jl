@@ -13,25 +13,38 @@ Changelog.generate(
     repo = "fkfest/ElemCo.jl",
 )
 
+mathengine = MathJax3(Dict(
+    :loader => Dict("load" => ["[tex]/physics"]),
+    :tex => Dict(
+        "inlineMath" => [["\$","\$"], ["\\(","\\)"]],
+        "tags" => "ams",
+        "packages" => ["base", "ams", "autoload", "physics"],
+    ),
+))
+
 makedocs(
   modules = [ElemCo],
   format = Documenter.HTML(
     # Use clean URLs, unless built as a "local" build
     prettyurls = !("local" in ARGS),
     assets = ["assets/favicon.ico"],
+     # Do no check for large pages.
+    size_threshold_ignore = [
+      "trexio_format.md",
+    ],
   ),
   sitename="ElemCo.jl documentation",
   pages = [
     "Home" => "index.md",
     "Manual" => [
       "Running calculations" => "elemco.md",
-      "Options" => "options.md" 
+      "Options" => "options.md"
       ],
     "Internals" => [
       "basisset.md",
       "bohf.md",
       "cc.md",
-      "ccdriver.md",
+      "drivers.md",
       "cctools.md",
       "constants.md",
       "decomptools.md",
@@ -48,20 +61,29 @@ makedocs(
       "elements.md",
       "ecinfos.md",
       "ecmethod.md",
+      "eom.md",
+      "fci.md",
       "fockfactory.md",
       "integrals.md",
+      "laplace.md",
       "mio.md",
       "mnpy.md",
       "msystems.md",
       "orbtools.md",
+      "outputs.md",
       "qmtensors.md",
+      "mtensoroperations.md",
       "tensortools.md",
       "descdict.md",
+      "vecdict.md",
       "utils.md",
+      "bufvec.md",
       "versioninfo.md",
+      "wavefunctions.md",
       "interfaces.md",
       "molpro.md",
-      "molden.md"
+      "molden.md",
+      "trexio_format.md"
     ],
     "release-notes.md", 
   ],

@@ -13,18 +13,16 @@
   nelec::Int = -1
   """`⟨0⟩` charge of the system (relative to nelec/FCIDump/neutral system!). """
   charge::Int = 0
-  """`⟨"C_Am"⟩` filename of MO coefficients. 
-  Used by all programs to read and write orbitals from/to file. """
-  orb::String = "C_Am"
+  """`⟨"wf.h5"⟩` filename for wavefunction dump (stored in TREXIO format). """
+  dump::String = "wf.h5"
+  """`⟨""⟩` filename to store the output wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
+  store::String = ""
+  """`⟨""⟩` filename to read starting amplitudes from (TREXIO format). 
+  If empty, amplitudes are read from `dump`. If provided, amplitudes (and MOs/basis) 
+  are read from this file and projected to the current MO basis. """
+  start::String = ""
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
-  """`⟨"e_m_pos"⟩` filename of the positron orbital energies. """
-  eps_pos::String = "e_m_pos"
-  """`⟨"C_Am_pos"⟩` filename of positron MO coefficients. 
-  Used by all programs to read and write positron orbitals from/to file. """
-  orb_pos::String = "C_Am_pos"
-  """`⟨"-left"⟩` addition to the filename for left orbitals (for biorthogonal calculations). """
-  left::String = "-left"
   """`⟨:large⟩` core type for frozen-core approximation: 
   - `:none` no frozen-core approximation, 
   - `:small` semi-core orbitals correlated, 
@@ -73,7 +71,7 @@ end
   - `:HCORE` from core Hamiltonian
   - `:SAD` from atomic densities
   - `:GWH` not implemented yet
-  - `:ORB` from previous orbitals stored in file [`WfOptions.orb`](@ref ECInfos.WfOptions)
+  - `:ORB` from previous orbitals stored in dump file [`WfOptions.dump`](@ref ECInfos.WfOptions)
   """
   guess::Symbol = :SAD
   """`⟨:HCORE⟩` positron orbital guess. Only `:HCORE` is implemented. """
@@ -157,12 +155,16 @@ end
   calc_d_vovv::Bool = false
   """`⟨false⟩` calculate dressed <vv|oo>. """
   calc_d_vvoo::Bool = false
+  """`⟨1.e-6⟩` threshold for checking Fock matrix diagonality in (T). If negative, no check is performed. """
+  fock_diag_thr::Float64 = 1.e-6
   """`⟨true⟩` use density fitting in SVD-DC-CCSDT instead of the integral decomposition. """
   usedf::Bool = true
   """`⟨true⟩` use Cholesky decomposition in SVD-DC-CCSDT instead of SVD in the integral decomposition. """
   usecholesky::Bool = true
   """`⟨false⟩` calculate (T) for decomposition. """
   calc_t3_for_decomposition::Bool = false
+  """`⟨false⟩` skip (T) calculation in SVD-DC-CCSDT. """
+  skip_pert_t::Bool = false
   """`⟨true⟩` project out the T^iii contribution from the density matrix in decomposition in SVD-DC-CCSDT. """
   project_t3iii::Bool = true
   """`⟨false⟩` calculated ``V_{aX}^{iL}`` in SVD-DC-CCSDT using a projection to the X space as
@@ -206,6 +208,8 @@ end
   mp2_osfac::Float64 = 1.2
   """`⟨0.0⟩` Factor for open-shell component in SCS-MP2. """
   mp2_ofac::Float64 = 0.0
+  """`⟨1.3⟩` Factor for opposite-spin component in SOS-MP2. """
+  mp2_sosfac::Float64 = 1.3
   """`⟨1.13⟩` Factor for same-spin component in SCS-CCSD. """
   ccsd_ssfac::Float64 = 1.13
   """`⟨1.27⟩` Factor for opposite-spin component in SCS-CCSD. """
@@ -220,6 +224,146 @@ end
   dcsd_ofac::Float64 = 0.15
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
+  """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
+  keepOQVorbitals::Bool = false
+end
+
+"""
+  Option for FCI calculations.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct FCIOptions
+  """`⟨50⟩` Maximum number of iterations """
+  max_iter::Int = 50
+  """`⟨0.1⟩` Level shift to improve convergence """
+  shift::Float64 = 0.1
+  """`⟨1e-8⟩` Convergence tolerance for energy """
+  conv_tol::Float64 = 1e-8
+  """`⟨1e-6⟩` Convergence tolerance for residual norm """
+  res_tol::Float64 = 1e-6
+  """`⟨1⟩` Number of states to compute """
+  nstates::Int = 1
+  """`⟨2⟩` Number of guess vectors to use """
+  n_guess::Int = 2
+  """`⟨10⟩` Maximum subspace size for Davidson diagonalization """
+  subspace_size::Int = 10
+  """`⟨true⟩` Compute 1-RDMs after convergence """
+  compute_rdms::Bool = true
+  """`⟨false⟩` Compute 2-RDM after convergence """
+  compute_2rdm::Bool = false
+  """`⟨true⟩` Use projected Jacobi-Davidson correction (prevents linear dependency) """
+  jacobi_davidson::Bool = true
+  """`⟨1000⟩` Maximum P-space size (typically 100-1000) """
+  max_pspace_size::Int = 1000
+  """`⟨:hybrid⟩` Selection method for P-space generation (:hybrid, :excitation, :energy, :ciphi) """
+  pspace_selection_method::Symbol = :hybrid
+  """`⟨4⟩` Maximum excitation level from HF reference (0=HF, 1=S, 2=SD, etc.) """
+  max_pspace_excitation::Int = 4
+  """`⟨5.0⟩` Energy cutoff for determinant inclusion """
+  pspace_energy_threshold::Float64 = 5.0
+  """`⟨1e-3⟩` CIPHI selection threshold (epsilon_h) for P-space generation """
+  pspace_ciphi_epsilon::Float64 = 1e-3
+  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
+  print_level::Int = 1
+  """`⟨1e-12⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
+  thr_negligible::Float64 = 1e-12
+end
+
+"""
+  Option for CIΦ (CIPHI) calculations - Selected CI via Perturbation, Heat-Bath and Iterations.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct CIPHIOptions
+  """`⟨1_000_000⟩` Target (i.e., maximum) number of determinants to select """
+  target_selection::Int = 1_000_000
+  """`⟨3e-4⟩` Selection threshold """
+  epsilon::Float64 = 3e-4
+  """`⟨epsilon/10⟩` CIPHI selection threshold. Note that a smaller value improves also the quality of the PT2 correction. """
+  epsilon_h::Float64 = -1.0
+  """`⟨epsilon_h⟩` instantaneous PT selection threshold. """
+  epsilon_c::Float64 = -1.0
+  """`⟨epsilon⟩` CIPSI selection threshold """
+  epsilon_p::Float64 = -1.0
+  """`⟨1e-6⟩` Energy convergence threshold """
+  tol::Float64 = 1e-6
+  """`⟨1e-6⟩` Convergence tolerance for residual norm """
+  res_tol::Float64 = 1e-6
+  """`⟨50⟩` Maximum CIPHI iterations """
+  max_iter::Int = 50
+  """`⟨0.1⟩` Level shift to improve convergence """
+  shift::Float64 = 0.1
+  """`⟨true⟩` Print iteration details """
+  verbose::Bool = true
+  """`⟨true⟩` Compute PT2 perturbative correction """
+  compute_pt2::Bool = true
+  """`⟨1e-6⟩` Threshold for PT2 contributions """
+  epsilon_pt2::Float64 = 1e-6
+  """`⟨epsilon_pt2/2⟩` Threshold for instantaneous PT2 contributions """
+  epsilon_pt2_c::Float64 = -1.0
+  """`⟨true⟩` Sort determinants by absolute value of coefficients before computing PT2 correction """
+  sort4pt2::Bool = true
+  """`⟨1e-10⟩` Small value added to denominators in PT2 to avoid divergences """
+  pt2_shift::Float64 = 1e-10
+  """`⟨false⟩` Use uncontracted MP2 instead of EN2 """
+  use_mp2::Bool = false
+  """`⟨false⟩` Use renormalized PT2 correction: `E_PT2 → E_PT2 / (1 + T2^2)` with `T2` being the PT2 amplitudes. """
+  renorm_pt2::Bool = false
+  """`⟨1⟩` Number of states to compute (default: 1 = ground state only) """
+  nstates::Int = 1
+  """`⟨2⟩` Number of steps in the iterative CIPHI selection (if > 1, the selection process is repeated after convergence)"""
+  nsteps::Int = 2
+  """`⟨true⟩` Use small-space Hamiltonian for initial guess """
+  use_small_space_guess::Bool = true
+  """`⟨0⟩` Size of small space (0 = auto: max(100, target÷10, 5*n_roots)) """
+  small_space_size::Int = 0
+  """`⟨:hybrid⟩` Selection method: :hybrid (energy + excitation) """
+  small_space_method::Symbol = :hybrid
+  """`⟨1⟩` Level of printed output (0=none, 1=some, 2=detailed) """
+  print_level::Int = 1
+  """`⟨false⟩` Skip variational CIPHI iterations and only compute PT2 correction (use with restart) """
+  pt2_only::Bool = false
+  """`⟨1e-10⟩` Threshold for neglecting small Hamiltonian (etc) elements"""
+  thr_negligible::Float64 = 1e-10
+end
+
+"""
+  Options for excited states calculation.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct EomOptions
+  """`⟨1.e-6⟩` convergence threshold. """
+  thr::Float64 = 1.e-6
+  """`⟨1⟩` number of states to calculate. """
+  nstates::Int = 1
+  """`⟨50⟩` maximum number of iterations. """
+  maxit::Int = 50
+  """`⟨0.0⟩` level shift for the Davidson algorithm. """
+  shift::Float64 = 0.0
+  """`⟨"eigenvectors"⟩` main part of filename for start eigenvectors. 
+      For example, the singles eigenvectors for state 2 are read from `start*"_1^2"`. """
+  start::String = "eigenvectors"
+  """`⟨"eigenvectors"⟩` main part of filename to save eigenvectors.
+      For example, the singles eigenvectors for state 2 are saved to `save*"_1^2"`. """
+  save::String = "eigenvectors"
+  """`⟨1.e-5⟩` amplitude decomposition threshold. """
+  ampsvdtol::Float64 = 1.e-5
+  """`⟨6⟩` Choice how excited state SVD basis is generated. Default is decomposition of full U2. """
+  svd_space_option::Int = 6
+end
+
+"""
+  Options for Laplace quadrature.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct LaplaceOptions
+  """`⟨8⟩` number of Laplace quadrature points. """
+  npoints::Int = 8
+  """`⟨:minimax⟩` algorithm for Laplace quadrature points. (`:minimax` or `:simplex`) """
+  algo::Symbol = :minimax
 end
 
 """ 
@@ -252,6 +396,12 @@ end
   cartesian::Bool = false
   """`⟨1000⟩` target batch length for the integral transformation. """
   target_batch_length::Int = 1000
+  """`⟨false⟩` use fallback basis sets (in case of missing basis sets). """
+  use_fallback_basis::Bool = false
+  """`⟨true⟩` sanity check of the fit basis (i.e., that it's not an AO basis)"""
+  check_fit_basis::Bool = true
+  """`⟨true⟩` split independent angular shells (important for efficiency). """
+  split_ashells::Bool = true
 end
 
 """ 
@@ -291,6 +441,8 @@ end
 @kwdef mutable struct DavidsonOptions
   """`⟨10⟩` maximum number of Davidson vectors per state. """
   maxdav::Int = 10
+  """`⟨true⟩` use overlap in hermitian Davidson. """
+  use_overlap::Bool = true
 end
 
 
@@ -320,10 +472,18 @@ end
   int::IntOptions = IntOptions()
   """ Coupled-Cluster options ([`CcOptions`](@ref)). """
   cc::CcOptions = CcOptions()
+  """ EOM options ([`EomOptions`](@ref)). """
+  eom::EomOptions = EomOptions()
+  """ FCI options ([`FCIOptions`](@ref)). """
+  fci::FCIOptions = FCIOptions()
+  """ CIPHI options ([`CIPHIOptions`](@ref)). """
+  ciphi::CIPHIOptions = CIPHIOptions()
   """ DMRG options ([`DmrgOptions`](@ref)). """
   dmrg::DmrgOptions = DmrgOptions()
   """ Cholesky options ([`CholeskyOptions`](@ref)). """
   cholesky::CholeskyOptions = CholeskyOptions()
+  """ Laplace options ([`LaplaceOptions`](@ref)). """
+  laplace::LaplaceOptions = LaplaceOptions()
   """ DIIS options ([`DiisOptions`](@ref)). """
   diis::DiisOptions = DiisOptions()
   """ Davidson options ([`DavidsonOptions`](@ref)). """

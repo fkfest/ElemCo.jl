@@ -5,6 +5,7 @@ Module for handling elements and their electron configurations.
 """
 module Elements
 using DocStringExtensions
+using ..ElemCo.Outputs
 
 export ELEMENTS, nuclear_charge_of_centre, element_fullname_from_label
 export SUBSHELLS_NAMES, SUBSHELL2L, ncoreorbs, electron_distribution4element
@@ -25,7 +26,7 @@ const ELEMENTS::Dict{String,Tuple{Int,Float64,String,String,String,String}} = Di
   "NE" => (10, 20.1797 , "Neon"       , "[HE]2s^2 2p^6"       , "[HE]"        , "[HE]"),
   "NA" => (11, 22.98977, "Sodium"     , "[NE]3s^1"            , "[NE]"        , "[NE]"),
   "MG" => (12, 24.304  , "Magnesium"  , "[NE]3s^2"            , "[NE]"        , "[NE]"),
-  "AL" => (13, 26.9815 , "Aluminum"   , "[NE]3s^2 3p^1"       , "[NE]"        , "[NE]"),
+  "AL" => (13, 26.9815 , "Aluminium"  , "[NE]3s^2 3p^1"       , "[NE]"        , "[NE]"),
   "SI" => (14, 28.0855 , "Silicon"    , "[NE]3s^2 3p^2"       , "[NE]"        , "[NE]"),
   "P"  => (15, 30.97376, "Phosphorus" , "[NE]3s^2 3p^3"       , "[NE]"        , "[NE]"),
   "S"  => (16, 32.065  , "Sulfur"     , "[NE]3s^2 3p^4"       , "[NE]"        , "[NE]"),
@@ -148,7 +149,11 @@ end
   Return the element full name
 """
 function element_fullname_from_label(elem::AbstractString)
-  return get(ELEMENTS, uppercase(elem), [0,0,"Unknown"])[3]
+  el = get(ELEMENTS, uppercase(elem), nothing)
+  if isnothing(el)
+    error("Element is not found in the ELEMENTS dictionary: "*elem)
+  end
+  return el[3]
 end
 
 """

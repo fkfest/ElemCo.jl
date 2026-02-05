@@ -5,6 +5,7 @@ epsilon    =  1.e-6
 EHF_test   =      -76.03518063983151
 EMP2_test  =      -76.25688653055902
 EDCSD_test =      -76.27021693741234
+EDFMP2_test  =      -76.25928176243784
 
 
 geometry="
@@ -28,5 +29,10 @@ energies = @cc dcsd
 @test abs(energies["HF"]-EHF_test) < epsilon
 @test abs(energies["MP2"]-EMP2_test) < epsilon
 @test abs(energies["DCSD"]-EDCSD_test) < epsilon
+
+basis = "vdz+diffuse"
+@dfhf
+energies = @dfmp2
+@test abs(energies["MP2"]-EDFMP2_test) < epsilon
 
 end

@@ -10,6 +10,63 @@ ElemCo
 
 The `ElemCo` module contains the main macros and functions for running electronic structure calculations. The methods are contained in various submodules and are described in the following sections.
 
+## Setting Options
+
+Options can be set using the [`@set`](@ref) macro. The preferred way to set options is to use **local options** within the calculation macro itself. This ensures that options are applied only to the specific calculation and are automatically restored afterwards.
+
+### Local Options (Recommended)
+
+All calculation macros accept an optional `begin...end` block as the last argument to set options locally:
+
+```julia
+@cc ccsd begin
+  @set wf charge=-1 ms2=1
+  @set cc maxit=100 thr=1.e-12
+end
+```
+
+This is equivalent to:
+
+```julia
+@cc ccsd begin
+  wf(charge=-1, ms2=1)
+  cc(maxit=100, thr=1.e-12)
+end
+```
+
+The options are **automatically restored** to their previous values after the calculation completes, even if an error occurs. This makes it safe and convenient to run multiple calculations with different settings:
+
+```julia
+# Run neutral molecule
+@dfhf
+@cc ccsd
+
+# Run anion with tighter convergence
+@dfhf begin
+  @set wf charge=-1
+end
+@cc ccsd begin
+  @set wf charge=-1
+  @set cc thr=1.e-12
+end
+
+# Options are now back to defaults
+```
+
+### Global Options
+
+Options can also be set globally using the [`@set`](@ref) macro outside of calculation blocks:
+
+```julia
+@set cc maxit=100
+@cc ccsd  # Uses maxit=100
+@cc dcsd  # Also uses maxit=100
+```
+
+Global options persist until explicitly changed or reset with [`@reset`](@ref).
+
+## Reserved Variables
+
 Various macros are defined and exported to simplify running calculations. The macros use several reserved variable names. The following table lists the reserved variable names and their meanings.
 
 ----------------------

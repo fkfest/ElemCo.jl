@@ -26,7 +26,6 @@ energies = @cc rdcsd
 @test abs(last_energy(energies)-ERDCSD_test) < epsilon
 
 fcidump = joinpath(@__DIR__,"files","H2OP_UHF.FCIDUMP")
-@ECinit
 energies = @cc uccsd
 @test abs(energies["HF"]-EUHF_test) < epsilon
 @test abs(last_energy(energies)-ECCSD_UHF_test) < epsilon

@@ -80,7 +80,7 @@ end
 """
     calc_dmrg(EC::ECInfo)
 
-  Perform DMRG calculation
+  Perform DMRG calculation (extension method).
 """
 function calc_dmrg(EC::ECInfo)
   print_info("DMRG")

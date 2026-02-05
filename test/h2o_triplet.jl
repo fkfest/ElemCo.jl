@@ -5,18 +5,25 @@ epsilon    =   1.e-6
 EHF_test   = -75.62407982361415
 EMP2_test  =  -0.22401008330020 + EHF_test
 EUCCSD_test = -0.276560985613 + EHF_test
-EUCCSD_T_test = -0.295388574918 + EHF_test
+EUCCSD_T0_test = -0.295388574918 + EHF_test
+EUCCSD_T_test = -0.295548619307 + EHF_test
 ERCCSD_test = -0.276149630440 + EHF_test
 ERDCSD_test = -0.289960838813 + EHF_test
-EΛUCCSD_T_test = -0.2903721324779 + EHF_test
+EΛUCCSD_T0_test = -0.2903721324779 + EHF_test
+EΛUCCSD_T_test = -0.290495749316 + EHF_test
 
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 @opt wf ms2=2
-energies = @cc uccsd(t)
+energies = @cc uccsd(t) begin
+  @set cc fock_diag_thr = -1.0
+end
 @test abs(energies["HF"]-EHF_test) < epsilon
 @test abs(energies["MP2"]-EMP2_test) < epsilon
 @test abs(energies["UCCSD"]-EUCCSD_test) < epsilon
+@test abs(energies["UCCSD(T)"]-EUCCSD_T0_test) < epsilon
+
+energies = @cc uccsd(t)
 @test abs(energies["UCCSD(T)"]-EUCCSD_T_test) < epsilon
 
 energies = @cc rccsd
@@ -24,6 +31,11 @@ energies = @cc rccsd
 
 energies = @cc rdcsd
 @test abs(energies["RDCSD"]-ERDCSD_test) < epsilon
+
+energies = @cc λuccsd(t) begin
+  @set cc fock_diag_thr = -1.0
+end
+@test abs(last_energy(energies)-EΛUCCSD_T0_test) < epsilon
 
 energies = @cc λuccsd(t)
 @test abs(last_energy(energies)-EΛUCCSD_T_test) < epsilon

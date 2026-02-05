@@ -10,7 +10,7 @@ geometry="bohr
 #basis="vdz"
 basis = Dict("ao"=>"aug-cc-pVQZ",
              "jkfit"=>"def2-universal-jkfit",
-             "mp2fit"=>"aug-cc-pvqz-rifit")
+             "mpfit"=>"aug-cc-pvqz-rifit")
 @set scf guess=:HCORE
 @set wf npositron=1
 

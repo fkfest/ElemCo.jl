@@ -2,7 +2,11 @@ using ElemCo
 
 @testset "QV-CCD Closed-Shell Test" begin
 epsilon    =  1.e-6
-EQV_CCD_test =     -75.01962475218
+EQV_CCD_test = -75.01962475218
+EOQV_CCD_test = -75.01992436712
+EQV_DCD = -75.02007638053
+EOQV_DCD_test = -75.02038234810
+
 
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -16,7 +20,15 @@ basis = Dict("ao"=>"sto-3g",
 
 @dfhf
 energies = @cc qv-ccd
-
 @test abs(energies["QV-CCD"]-EQV_CCD_test) < epsilon
+
+energies = @cc oqv-ccd
+@test abs(energies["OQV-CCD"]-EOQV_CCD_test) < epsilon
+
+energies = @cc qv-dcd
+@test abs(energies["QV-DCD"]-EQV_DCD) < epsilon
+
+energies = @cc oqv-dcd
+@test abs(energies["OQV-DCD"]-EOQV_DCD_test) < epsilon
 
 end
