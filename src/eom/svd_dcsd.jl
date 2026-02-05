@@ -1,0 +1,351 @@
+"""
+This file contains all relevant functions of EOM-SVD-DCSD
+"""
+
+"""
+    calc_svd_eom(EC::ECInfo, method::ECMethod)
+
+  Calculate decomposed closed-shell EOM-DCSD.
+
+  Currently only DC methods are supported.
+  DF integrals are used (have to be calculated before).
+"""
+function calc_svd_eom(EC::ECInfo, method::ECMethod)
+  t0 = time_ns()
+  nstates = EC.options.eom.nstates
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  ϵo, ϵv = orbital_energies(EC) 
+  dav = Davidson(EC, nstates; hermitian=false)
+  states = [1:nstates;]
+  
+  energies = calc_df_eom(EC,ECMethod("EOM-CCS"))
+  println("*******************************************************************************************")
+  display(energies)
+  #calc_eom(EC,ECMethod("EOM-CCS"))  
+
+  U1 = zeros(nvirt, nocc)
+  U2 = zeros(nvirt, nvirt, nocc, nocc)
+  Vecs = (U1, U2)
+  custom_dots = (calc_cs_singles_dot, calc_cs_doubles_dot)
+# load the CIS eigenvectors
+  excitation_level = 1
+  mainfilename, descr = save_or_start_file(EC, "X", excitation_level, false)
+  if mainfilename != ""
+    for st in 1:nstates
+      filename = mainfilename*"_$excitation_level"*"^$st"
+      if file_exists(EC, filename)
+        println("Reading $descr from file $filename")
+        load!(EC, filename, U1)
+        add_trial_vector!(dav, Vecs, st, custom_dots)
+        #display(U1)
+
+        w_laplace, t_laplace = get_laplace_quadrature(ϵo, ϵv, EC.options.laplace.npoints,
+                                                      algo=EC.options.laplace.algo,εexc_state=energies[st])
+        #println(w_laplace)
+        #println(t_laplace)
+        
+        ooLfile, dv_ooL = mmap3idx(EC, "d_ooL")
+        vvLfile, dv_vvL = mmap3idx(EC, "d_vvL") 
+        nL = size(dv_ooL, 3)
+         
+        @mtensor A[a,i,L] := dv_vvL[a,e,L] * U1[e,i]
+        @mtensor A[a,i,L] -= dv_ooL[m,i,L] * U1[a,m]
+    
+        close(ooLfile)
+        close(vvLfile) 
+ 
+        TA = zeros(nvirt, nocc, nL*length(t_laplace))
+        for q in eachindex(t_laplace)
+          tq = t_laplace[q]
+          wq = w_laplace[q]
+          for a in 1:nvirt, i in 1:nocc
+            fac = sqrt(abs(wq)) * exp(-tq * (ϵv[a] - ϵo[i]-(0.5*energies[st])))
+            for L in 1:nL
+               TA[a,i,L+((q-1)*nL)] = A[a,i,L] * fac
+            end
+          end
+        end
+        tol2 = sqrt(EC.options.eom.ampsvdtol)
+        First_UaiX = svd_decompose(reshape(TA, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
+
+        svd_space_option = EC.options.eom.svd_space_option 
+
+        if svd_space_option == 1
+         println("Option 1")
+          voLfile, dv_voL = mmap3idx(EC, "d_voL")
+          for q in eachindex(t_laplace)
+            tq = t_laplace[q]
+            wq = w_laplace[q]
+            for a in 1:nvirt, i in 1:nocc
+              fac = sqrt(abs(wq)) * exp(-tq * (ϵv[a] - ϵo[i]-(0.5*energies[st])))
+              for L in 1:nL
+                 TA[a,i,L+((q-1)*nL)] = dv_voL[a,i,L] * fac
+              end
+            end
+          end
+          close(voLfile)
+          @mtensor TAP[a,i,L] := TA[a,i,L] - First_UaiX[a,i,bX] * First_UaiX[b,j,bX] * TA[b,j,L]
+          Second_UaiX = svd_decompose(reshape(TAP, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
+          Combination_UaiX = cat(First_UaiX, Second_UaiX, dims=3)
+          println(size(First_UaiX)) 
+          println(size(Second_UaiX)) 
+          println(size(Combination_UaiX))         
+          UaiX = svd_decompose(reshape(Combination_UaiX, (nvirt*nocc,size(Combination_UaiX)[3])), nvirt, nocc, tol2) 
+        
+        elseif svd_space_option == 2
+          println("Option 2")
+          UaiX = First_UaiX
+        
+        elseif svd_space_option == 3 
+          println("Option 3")
+          R2 = calc_R2_df_cis_pert_d(EC, U1)
+          new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2        
+          ovLfile, dv_ovL = mmap3idx(EC, "d_ovL")
+          @mtensor A[a,i,L] := R2[a,b,i,j] * dv_ovL[j,b,L]
+          close(ovLfile) 
+          UaiX = svd_decompose(reshape(A, (nvirt*nocc,nL)), nvirt, nocc, tol2)
+        
+        elseif svd_space_option == 4
+          println("Option 4") 
+          R2 = calc_R2_df_cis_pert_d(EC, U1)
+          new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2
+          println(size(R2))          
+          println(size(First_UaiX))
+          @mtensor A[a,i,X] := R2[a,b,i,j] * First_UaiX[b,j,X]
+          println(size(First_UaiX)[3])
+          UaiX = svd_decompose(reshape(A, (nvirt*nocc,size(First_UaiX)[3])), nvirt, nocc, tol2)
+       
+        elseif svd_space_option == 5
+          println("Option 5")
+          voLfile, dv_voL = mmap3idx(EC, "d_voL")
+          for q in eachindex(t_laplace)
+            tq = t_laplace[q]
+            wq = w_laplace[q]
+            for a in 1:nvirt, i in 1:nocc
+              fac = sqrt(abs(wq)) * exp(-tq * (ϵv[a] - ϵo[i]-(0.5*energies[st])))
+              for L in 1:nL
+                 TA[a,i,L+((q-1)*nL)] = dv_voL[a,i,L] * fac
+              end
+            end
+          end
+          close(voLfile)
+          @mtensor TAP[a,i,L] := TA[a,i,L] - First_UaiX[a,i,bX] * First_UaiX[b,j,bX] * TA[b,j,L]
+          Second_UaiX = svd_decompose(reshape(TAP, (nvirt*nocc,nL*length(t_laplace))), nvirt, nocc, tol2)
+          Combination_UaiX = cat(First_UaiX, Second_UaiX, dims=3)
+          #println(size(First_UaiX))
+          #println(size(Second_UaiX))
+          #println(size(Combination_UaiX))
+          UaiX = svd_decompose(reshape(Combination_UaiX, (nvirt*nocc,size(Combination_UaiX)[3])), nvirt, nocc, tol2)
+          R2 = calc_R2_df_cis_pert_d(EC, U1)
+          new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2
+          println(size(R2))
+          println(size(First_UaiX))
+          @mtensor A[a,i,X] := R2[a,b,i,j] * UaiX[b,j,X]
+          println(size(First_UaiX)[3])
+          UaiX = svd_decompose(reshape(A, (nvirt*nocc,size(A)[3])), nvirt, nocc, tol2)
+
+        else
+          println("Option decomposition of full U2")
+          R2 = calc_R2_df_cis_pert_d(EC, U1)
+          new_doubles_trial!(R2, ϵo, ϵv, energies[st], 0) #replaces R2 with U2
+          UaiX = svd_decompose(reshape(permutedims(R2, (1,3,2,4)), (nvirt*nocc,nvirt*nocc)), nvirt, nocc, sqrt(EC.options.eom.ampsvdtol))
+        end
+
+        save!(EC, "C_voX^$st", UaiX)        
+
+      else
+        error("File $filename not found, cannot read CIS eigenvector")
+      end
+    end
+  else
+    error("No file found for CIS eigenvectors")
+  end
+
+  
+  for it in 1:EC.options.eom.maxit
+    t1 = time_ns()
+    for st in states
+      get_current_trial_vector!(dav, Vecs, st)
+      V1, V2 = calc_eom_svd_au(EC, Vecs..., st) 
+      add_product_vector!(dav, (V1,V2), st, custom_dots)
+    end
+    energies = perform!(dav)
+    if do_refresh(dav, length(states))
+      refresh!(dav, Vecs, custom_dots)
+      output_iteration(it, -1.0, time_ns() - t0, energies...)
+      states = [1:nstates;]
+      continue
+    end
+    states2do = Int[]
+    maxNormR = 0.0
+    for st in 1:nstates
+      get_residual!(dav, Vecs, st)
+      NormR1 = calc_singles_norm(Vecs[1])
+      NormR2 = calc_doubles_norm(Vecs[2])
+      NormR = NormR1 + NormR2
+      maxNormR = max(maxNormR, NormR)
+      converged = NormR < EC.options.eom.thr
+      output_state(st, NormR, energies[st]; converged=converged)
+      if !converged
+        new_trial_vector!(EC, Vecs, energies[st])
+        add_trial_vector!(dav, Vecs, st, custom_dots)
+        push!(states2do, st)
+      end
+    end
+    output_iteration(it, maxNormR, time_ns() - t0, energies...)
+    if isempty(states2do)
+      println("Converged")
+      break
+    end
+    states = states2do
+  end
+end
+
+
+"""
+    calc_eom_svd_au(EC::ECInfo, U1, U2, st)
+
+  Calculate singles and doubles AUs for SVD-EOM-DCSD.
+"""
+function calc_eom_svd_au(EC::ECInfo, U1, U2, st)
+  t1 = time_ns()
+  mem1 = free_memory()
+  U_voX = load3idx(EC, "C_voX")
+  @mtensor U_oXv[k,X,c] := U_voX[c,k,X]
+  bU_vobX = load3idx(EC, "C_voX^$st")
+  @mtensor bU_obXv[k,bX,c] := bU_vobX[c,k,bX]
+  #display(UvoX)
+  
+  T2 = load4idx(EC,"T_vvoo")
+  @mtensor U_bXbX[bX,bY] := U2[a,b,i,j] * bU_obXv[i,bX,a] * bU_obXv[j,bY,b]   
+ 
+  #decomposed amplitudes
+  @mtensor T_XX[X,Y] := T2[a,b,i,j] * U_voX[b,j,Y] * U_voX[a,i,X]
+  #display(T_XX)
+  
+  #load df coeff
+  ovLfile, v_ovL = mmap3idx(EC, "d_ovL") #should be same as non-dressed ovL
+  voLfile, dv_voL = mmap3idx(EC, "d_voL")
+  ooLfile, dv_ooL = mmap3idx(EC, "d_ooL")
+  vvLfile, dv_vvL = mmap3idx(EC, "d_vvL")
+
+  #load dressed fock matrices
+  SP = EC.space
+  dfock = load2idx(EC, "df_mm")
+  dfoo = dfock[SP['o'], SP['o']]
+  dfov = dfock[SP['o'], SP['v']] #only internally dressed
+  dfvo = dfock[SP['v'], SP['o']] 
+  dfvv = dfock[SP['v'], SP['v']]
+
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  nX = size(T_XX, 1)
+  nL = size(v_ovL, 3)
+
+  #@buffer buf(lenbuf) begin
+  @mtensor tT2[a,b,i,j] := 2 * T2[a,b,i,j] - T2[b,a,i,j]          
+  @mtensor Y_voL[b,j,L] := v_ovL[l,d,L] * tT2[d,b,l,j]  
+  
+  @mtensor tU2[a,b,i,j] := 2 * U2[a,b,i,j] - U2[b,a,i,j] 
+  @mtensor tY_voL[b,j,L] := v_ovL[l,d,L] * tU2[d,b,l,j] 
+  
+  @mtensor A[k,bX,c,L] := dv_vvL[a,c,L] * bU_obXv[k,bX,a]
+  @mtensor v_bXbXL[bX,bX',L] := A[k,bX,c,L] * bU_vobX[c,k,bX']
+  
+  @mtensor dv_bXbXL[bX,bX',L] := v_bXbXL[bX,bX',L] 
+  @mtensor A[i,bX,k,bX'] := bU_obXv[i,bX,c] * bU_vobX[c,k,bX']
+  @mtensor dv_bXbXL[bX,bX',L] -= dv_ooL[k,i,L] * A[i,bX,k,bX']
+ 
+  @mtensor bv_ooL[k,m,L] := v_ovL[k,e,L] * U1[e,m]
+ 
+  @mtensor A[i,bX,j,X'] := U_voX[a,j,X'] * bU_obXv[i,bX,a]
+  @mtensor bv_bXXL[bX,X',L] := bv_ooL[j,i,L] * A[i,bX,j,X']
+  
+  @mtensor A[m,i,X',L] := v_ovL[m,c,L] * U_voX[c,i,X']
+  @mtensor B[i,bX,m] := U1[a,m] * bU_obXv[i,bX,a]
+  @mtensor bv_bXXL[bX,X',L] += A[m,i,X',L] * B[i,bX,m]
+  
+  @mtensor A[j,bY,d,L] := dv_vvL[b,d,L] * bU_obXv[j,bY,b]
+  @mtensor dv_bXXL[bY,Y',L] := - A[j,bY,d,L] * U_voX[d,j,Y'] 
+  @mtensor A[j,bY,l,Y'] := U_voX[b,l,Y'] * bU_obXv[j,bY,b]
+  @mtensor dv_bXXL[bY,Y',L] += A[j,bY,l,Y'] * dv_ooL[l,j,L]
+  
+  @mtensor dx_vv[a,c] := dfvv[a,c] 
+  @mtensor dx_vv[a,c] -= 0.5 * Y_voL[a,k,L] * v_ovL[k,c,L]
+  
+  @mtensor dx_oo[k,i] := dfoo[k,i] 
+  @mtensor dx_oo[k,i] += 0.5 * Y_voL[c,i,L] * v_ovL[k,c,L]
+  
+  @mtensor bv_L[L] := v_ovL[m,e,L] * U1[e,m]
+  @mtensor bv_voL[a,m,L] := dv_vvL[a,e,L] * U1[e,m]
+
+  @mtensor bv_vv[a,d] := 2 * bv_L[L] * dv_vvL[a,d,L] 
+  @mtensor bv_vv[a,d] -= bv_voL[a,m,L] * v_ovL[m,d,L]
+
+  @mtensor bv_oo[k,i] := 2 * bv_L[L] * dv_ooL[k,i,L] 
+  @mtensor bv_oo[k,i] -= bv_ooL[k,m,L] * dv_ooL[m,i,L]
+
+  @mtensor bv_vo[a,i] := 2 * bv_L[L] * dv_voL[a,i,L] 
+  @mtensor bv_vo[a,i] -= bv_voL[a,m,L] * dv_ooL[m,i,L]
+
+  @mtensor bv_ov[k,b] := 2 * bv_L[L] * v_ovL[k,b,L] 
+  @mtensor bv_ov[k,b] -= bv_ooL[k,m,L] *  v_ovL[m,b,L]
+
+  @mtensor A[a,k,c,i] := dv_vvL[a,c,L] * dv_ooL[k,i,L]
+  @mtensor dv_vobX[a,i,bX] := A[a,k,c,i] * bU_vobX[c,k,bX]
+
+  @mtensor A[m,k,c,i] := v_ovL[m,c,L] * dv_ooL[k,i,L]
+  @mtensor B[m,i,X] := A[m,k,c,i] * U_voX[c,k,X]
+  @mtensor bv_voX[a,i,X] := B[m,i,X] * U1[a,m]
+  @mtensor A[a,k,c,i] := bv_ooL[k,i,L] * dv_vvL[a,c,L]
+  @mtensor bv_voX[a,i,X] -= A[a,k,c,i] * U_voX[c,k,X]
+
+
+
+  @mtensor AU1[a,i] := - dfoo[m,i] * U1[a,m]
+  @mtensor AU1[a,i] += dfvv[a,e] * U1[e,i]
+  @mtensor AU1[a,i] += bv_vo[a,i] 
+  @mtensor AU1[a,i] += bv_ov[j,b] * tT2[a,b,i,j]
+  @mtensor A[m,i]  := Y_voL[b,i,L] * v_ovL[m,b,L] 
+  @mtensor AU1[a,i] -= A[m,i] * U1[a,m]
+  @mtensor AU1[a,i] -= Y_voL[a,j,L] * bv_ooL[j,i,L]
+  @mtensor AU1[a,i] += dfov[m,e] * tU2[a,e,i,m] 
+  @mtensor AU1[a,i] += dv_vvL[a,f,L] * tY_voL[f,i,L] 
+  @mtensor AU1[a,i] -= dv_ooL[n,i,L] * tY_voL[a,n,L] 
+  
+  @mtensor A[a,i,L] := dv_vvL[a,e,L] * U1[e,i]
+  @mtensor A[a,i,L] -= dv_ooL[m,i,L] * U1[a,m]
+  @mtensor A[a,i,L] += tY_voL[a,i,L]
+  @mtensor B[b,j,L] := dv_voL[b,j,L] + Y_voL[b,j,L]
+  @mtensor Q[a,b,i,j] := A[a,i,L] * B[b,j,L] 
+  @mtensor A[bX,Y',L] := bv_bXXL[bX,X',L] * T_XX[X',Y']
+  @mtensor B[bX,bY] := A[bX,Y',L] * dv_bXXL[bY,Y',L]
+  @mtensor A[bX,bY',L] := 0.5 * dv_bXbXL[bX,bX',L] * U_bXbX[bX',bY']
+  @mtensor B[bX,bY] += A[bX,bY',L] * dv_bXbXL[bY,bY',L]
+  @mtensor C[bX,b,j] := B[bX,bY] * bU_vobX[b,j,bY]
+  @mtensor Q[a,b,i,j] += C[bX,b,j] * bU_vobX[a,i,bX]
+  @mtensor A[a,d] := - dfov[m,d] * U1[a,m]  
+  @mtensor A[a,d] += bv_vv[a,d]
+  @mtensor A[a,d] -= 0.5 * tY_voL[a,k,L] * v_ovL[k,d,L]
+  @mtensor Q[a,b,i,j] += A[a,d] * T2[d,b,i,j]
+  @mtensor A[k,i] := - dfov[k,e] * U1[e,i]
+  @mtensor A[k,i] -= bv_oo[k,i]
+  @mtensor A[k,i] -= 0.5 * tY_voL[e,i,L] * v_ovL[k,e,L]
+  @mtensor Q[a,b,i,j] += A[k,i] * T2[a,b,k,j]
+  @mtensor Q[a,b,i,j] += dx_vv[a,e] * U2[e,b,i,j]
+  @mtensor Q[a,b,i,j] -= dx_oo[m,i]* U2[a,b,m,j]
+  @mtensor A[bX,b,j]  := bU_obXv[m,bX,e] * U2[e,b,m,j]
+  @mtensor Q[a,b,i,j] -= dv_vobX[a,i,bX] * A[bX,b,j]
+  @mtensor A[X,b,j] := U_oXv[k,X,c] * T2[c,b,k,j]
+  @mtensor Q[a,b,i,j] += bv_voX[a,i,X] * A[X,b,j]
+
+  @mtensor AU2[a,b,i,j] := Q[a,b,i,j] + Q[b,a,j,i]
+  #end
+  
+  close(voLfile)
+  close(ovLfile)
+  close(ooLfile)
+  close(vvLfile)
+  return AU1, AU2
+end

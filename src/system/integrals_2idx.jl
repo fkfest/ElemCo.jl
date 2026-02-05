@@ -118,12 +118,13 @@ function calc_1e!(out, callback::Function, bs::BasisSet)
   # Offset list for each shell, used to map shell index to AO index
   ao_offset = cumsum(vcat(0, nao4sh)) 
 
-  @threadsbuffer tbufs(Cdouble, nao_max^2) begin
+  lenb = nao_max^2
+  @threadsbuffer tbufs(Cdouble, lenb) begin
 
   @sync for (j, lenj) in enumerate(nao4sh)
     Threads.@spawn begin
       @inbounds begin
-        buf = reshape_buf!(tbufs, length(tbufs))
+        buf = reshape_buf!(tbufs, lenb)
         joff = ao_offset[j]
         for i in 1:j
           leni = nao4sh[i]

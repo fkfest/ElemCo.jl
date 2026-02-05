@@ -1,30 +1,84 @@
 const BASIS_LIB = joinpath(@__DIR__, "..", "..", "lib", "basis_sets")
 
 """
-    parse_basis(basis_name::String, atom::ACentre; fallback=false) 
+    parse_basis(basis_name::String, atom::ACentre; fallback="", split_ashells=true) 
 
   Search and parse the basis set for a given atom.
-  If fallback is `true`, use `def2-universal-jkfit` as a fallback basis set.
+  If `fallback` is non-empty, use as a fallback basis set.
+  If `split_ashells` is true, split independent angular shells (important for efficiency).
 
   Return a list of angular shells [`AngularShell`](@ref).
 """
-function parse_basis(basis_name::String, atom::ACentre; fallback=false)
+function parse_basis(basis_name::String, atom::ACentre; fallback="", split_ashells=true)
+  # parse diffuse and steep components
+  basis_name, add_diffuse, add_steep = parse_diffuse_steep(basis_name)
   if startswith(basis_name, "{")
     # the basis block is given explicitly, parse basis set from string
-    return parse_basis_block(strip(basis_name, ['{','}'] ) , atom)
+    return parse_basis_block(strip(basis_name, ['{','}'] ) , atom; add_diffuse, add_steep, split_ashells)
   else
-    basisfile = basis_file(basis_name) 
+    basisfile = basis_file(basis_name)
     if basisfile == ""
-      if fallback
-        println(atomic_centre_label(atom),": Basis set $basis_name not found, using def2-universal-jkfit as a fallback.")
-        basisfile = basis_file("def2-universal-jkfit")
+      if fallback != ""
+        println(atomic_centre_label(atom),": Basis set $basis_name not found, using $fallback as a fallback.")
+        basisfile = basis_file(fallback)
       else
-        error("Basis set $basis_name not found!")
+        suggestions = suggest_basis_sets(basis_name)
+        if !isempty(suggestions)
+          suggestion_str = join(suggestions, ", ")
+          error("Basis set $basis_name not found! Did you mean: $suggestion_str?")
+        else
+          error("Basis set $basis_name not found!")
+        end
       end
     end
-    basisblock = read_basis_block(basisfile, atom)
+    basisblock = read_basis_block(basisfile, atom; fallback)
   end
-  return parse_basis_block(basisblock, atom)
+  return parse_basis_block(basisblock, atom; add_diffuse, add_steep, split_ashells)
+end
+
+"""
+    parse_diffuse_steep(basis_name::AbstractString)
+
+  Parse the diffuse and steep components from the basis name in the format 
+  `+<N>diffuse` or `+diffuse` or `+<N>steep` or `+steep`.
+
+  Returns the modified basis name and the number of diffuse and steep functions to add.
+"""
+function parse_diffuse_steep(basis_name::AbstractString)
+  # remove possible -jkfit/-mpfit/-rifit suffixes (will be added back later)
+  if occursin(r"-(jkfit|mpfit|rifit)$", basis_name)
+    suffix = "-$(match(r"-(jkfit|mpfit|rifit)$", basis_name).captures[1])"
+    basis_name = replace(basis_name, r"-(jkfit|mpfit|rifit)$" => "")
+  else
+    suffix = ""
+  end
+  add_diffuse = 0
+  add_steep = 0
+  while occursin(r"\+\d*(diffuse|steep)$", basis_name)
+    if occursin(r"\+\d+diffuse$", basis_name)
+      diff = match(r"\+(\d+)diffuse$", basis_name)
+      @assert !isnothing(diff) "Error parsing basis name"
+      add_diffuse += parse(Int, diff.captures[1])
+      # remove +<N>diffuse from the basis name
+      basis_name = replace(basis_name, r"\+\d+diffuse$" => "")
+    elseif occursin(r"\+diffuse$", basis_name)
+      add_diffuse += 1
+      # remove +diffuse from the basis name
+      basis_name = replace(basis_name, r"\+diffuse$" => "")
+    elseif occursin(r"\+\d+steep$", basis_name)
+      steep = match(r"\+(\d+)steep$", basis_name)
+      @assert !isnothing(steep) "Error parsing basis name"
+      add_steep += parse(Int, steep.captures[1])
+      # remove +<N>steep from the basis name
+      basis_name = replace(basis_name, r"\+\d+steep$" => "")
+    elseif occursin(r"\+steep$", basis_name)
+      add_steep += 1
+      # remove +steep from the basis name
+      basis_name = replace(basis_name, r"\+steep$" => "")
+    end
+  end
+  # add removed jkfit/mpfit/rifit suffixes back and return
+  return basis_name*suffix, add_diffuse, add_steep
 end
 
 """
@@ -52,7 +106,13 @@ function basis_file(basis_name::AbstractString)
   end
   filename = "$mainname.$version.mpro"
   if !isfile(filename)
-    error("Basis set $basis_name version $version not found!")
+    suggestions = suggest_basis_sets(basis_name)
+    if !isempty(suggestions)
+      suggestion_str = join(suggestions, ", ")
+      error("Basis set $basis_name version $version not found! Did you mean: $suggestion_str?")
+    else
+      error("Basis set $basis_name version $version not found!")
+    end
   end
   return filename
 end
@@ -90,7 +150,7 @@ function full_basis_name(basis_name::AbstractString)
 end
 
 """
-    read_basis_block(basisfile::AbstractString, atom::ACentre) 
+    read_basis_block(basisfile::AbstractString, atom::ACentre; fallback="") 
 
   Read the basis block for a given atom.
 
@@ -113,35 +173,47 @@ p, H , 0.7270000
 c, 1.1, 1.0000000
 !
 ```
+
+  If the basis block is not found, the function will attempt to read the fallback basis file.
 """
-function read_basis_block(basisfile::AbstractString, atom::ACentre)
+function read_basis_block(basisfile::AbstractString, atom::ACentre; fallback="")
   elem = lowercase(element_fullname(atom))
   # search for `! $elem  ....`
-  reg_start = Regex("^!\\s$elem\\s+")
+  reg_start = Regex("^!\\s$elem\\s*")
   reg_end = Regex("^\\s*[!}]\\s*")
-  basisblock::String = ""
-  open(basisfile) do f
+  basisblock = open(basisfile) do f
     elemfound = false
+    bblock = ""
     for line::String in eachline(f)
       if elemfound
         if occursin(reg_end, line)
           break
         else
-          basisblock *= line * "\n"
+          bblock *= line * "\n"
         end
       else
         elemfound = occursin(reg_start, line)
       end
     end
+    return bblock
   end
   if isempty(basisblock)
-    error("Basis block for $elem not found in $(basisfile)!")
+    if fallback != ""
+      println("Basis block for $elem not found in $(basisfile). Using fallback basis set $fallback.")
+      basisfile = basis_file(fallback)
+      if basisfile == ""
+        error("Fallback basis set $fallback not found!")
+      end
+      return read_basis_block(basisfile, atom; fallback="")
+    else
+      error("Basis block for $elem not found in $(basisfile)!")
+    end
   end
   return basisblock
 end
 
 """
-    parse_basis_block(basis_block::AbstractString, atom::ACentre) 
+    parse_basis_block(basis_block::AbstractString, atom::ACentre; add_diffuse=0, add_steep=0, split=true) 
 
   Parse the basis block for a given atom.
 
@@ -172,13 +244,16 @@ c, 4.4, 1.0000000
 p, H , 0.8000000
 c, 1.1, 1.0000000
 ```
+
+`add_diffuse` and `add_steep` are the number of diffuse and steep even-tempered functions to add.
+If `split_ashells` is true, independent angular shells will be split (important for efficiency).
 """
-function parse_basis_block(basis_block::AbstractString, atom::ACentre)
+function parse_basis_block(basis_block::AbstractString, atom::ACentre; add_diffuse=0, add_steep=0, split_ashells=true)
   basisblock = lowercase(basis_block)
   elem = lowercase(element_LABEL(atom))
   # search for ` s, $elem , 13...`
-  reg_exp = Regex("^\\s*[$SUBSHELLS_NAMES]\\s*,\\s*$elem\\s*,")
-  reg_con = Regex("^\\s*c,\\s*")
+  reg_exp = Regex("^\\s*[$SUBSHELLS_NAMES]\\s*[, ]\\s*$elem\\s*[, ]")
+  reg_con = Regex("^\\s*c[, ]\\s*")
   ashells = AngularShell[]
   for line in split(basisblock, "\n")
     #remove comments ` abc !...` -> `abc`
@@ -190,7 +265,7 @@ function parse_basis_block(basis_block::AbstractString, atom::ACentre)
     expline = occursin(reg_exp, line)
     if expline
       # parse exponents
-      push!(ashells, generate_angularshell(elem, parse_exponents(line)...))
+      push!(ashells, generate_angularshell(elem, parse_exponents(line; add_diffuse, add_steep)...))
     else
       conline = occursin(reg_con, line)
       if conline
@@ -209,16 +284,21 @@ function parse_basis_block(basis_block::AbstractString, atom::ACentre)
       end
     end
   end
-  # split angular shells if necessary
+  # add uncontracted exponents as uncontracted subshells and split angular shells if necessary
   ashells_split = AngularShell[]
   for ashell in ashells
-    append!(ashells_split, split_angular_shell(ashell))
+    add_uncontracted!(ashell)
+    if split_ashells
+      append!(ashells_split, split_angular_shell(ashell))
+    else
+      push!(ashells_split, ashell)
+    end
   end
   return ashells_split
 end
 
 """
-    parse_exponents(expline::AbstractString)
+    parse_exponents(expline::AbstractString; add_diffuse=0, add_steep=0)
 
   Parse exponents from a line in the basis block.
 
@@ -227,14 +307,72 @@ end
   `s, H , 13.0100000, 1.9620000, 0.4446000, 0.1220000`
   where `s` is the angular momentum, `H` is the element symbol,
   and the rest are the exponents.
+
+  The `add_diffuse` and `add_steep` arguments can be used to add diffuse and steep functions.
 """
-function parse_exponents(expline::AbstractString)
+function parse_exponents(expline::AbstractString; add_diffuse=0, add_steep=0)
   # parse exponents
-  exponents = strip.(split(expline, ","))
+  exponents = strip.(split(expline, [',',' '], keepempty=false))
   lval = SUBSHELL2L[exponents[1][1]]
   # remove angular momentum and element symbol and convert to Float64
   exponents = parse.(Float64, exponents[3:end])
+  add_steep_exponent!(exponents, add_steep)
+  add_diffuse_exponent!(exponents, add_diffuse)
   return lval, exponents
+end
+
+"""
+    add_steep_exponent!(exponents, nexp)
+
+  Add `nexp` steep even-tempered exponents to the list of exponents.
+
+  Each new exponent is generated as `e = e1^2/e2`, where `e1` is the steepest and `e2` the second
+  steepest exponent (the list of exponents is not necessarily ordered). 
+  If only one exponent is in the list, the new exponent is set to `e1*2.5`.
+  The new exponents are added to the end of the list.
+"""
+function add_steep_exponent!(exponents, nexp)
+  for iexp in 1:nexp
+    if length(exponents) == 1
+      # if only one exponent, add steep exponent as e1*2.5
+      push!(exponents, exponents[1] * 2.5)
+    else
+      # find the steepest and second steepest exponents
+      i1, i2 = argmaxN(exponents, 2)
+      e1 = exponents[i1]
+      e2 = exponents[i2]
+      # add new steep exponent as e1^2/e2
+      push!(exponents, e1^2 / e2)
+    end
+  end
+  return exponents
+end
+
+"""
+    add_diffuse_exponent!(exponents, nexp)
+
+  Add `nexp` diffuse even-tempered exponents to the list of exponents.
+
+  Each new exponent is generated as `e = e1^2/e2`, where `e1` is the most diffuse and `e2` the second
+  most diffuse exponent (the list of exponents is not necessarily ordered). 
+  If only one exponent is in the list, the new exponent is set to `e1/2.5`.
+  The new exponents are added to the end of the list.
+"""
+function add_diffuse_exponent!(exponents, nexp)
+  for iexp in 1:nexp
+    if length(exponents) == 1
+      # if only one exponent, add diffuse exponent as e1/2.5
+      push!(exponents, exponents[1] / 2.5)
+    else
+      # find the most diffuse and second most diffuse exponents
+      i1, i2 = argmaxN(exponents, 2; by=(x -> -x))
+      e1 = exponents[i1]
+      e2 = exponents[i2]
+      # add new diffuse exponent as e1^2/e2
+      push!(exponents, e1^2 / e2)
+    end
+  end
+  return exponents
 end
 
 """
@@ -250,7 +388,7 @@ end
 """
 function parse_contraction(conline::AbstractString)
   # parse contraction coefficients
-  contraction = strip.(split(conline, ","))
+  contraction = strip.(split(conline, [',',' '], keepempty=false))
   # parse exponent range
   start, stop = parse.(Int, split(contraction[2], "."))
   exprange = start:stop
@@ -261,6 +399,25 @@ function parse_contraction(conline::AbstractString)
     error("Number of contraction coefficients does not match the number of exponents in the range!")
   end
   return exprange, contraction
+end
+
+"""
+    add_uncontracted!(ashell::AngularShell)
+
+  Exponents not covered by contractions are added as uncontracted subshells.
+"""
+function add_uncontracted!(ashell::AngularShell)
+  # find uncontracted exponents
+  used_exps = zeros(Bool, length(ashell.exponents))
+  for sh in ashell.subshells
+    used_exps[sh.exprange] .= true
+  end
+  # add uncontracted subshells
+  for (i, contracted) in enumerate(used_exps)
+    if !contracted
+      add_subshell!(ashell, i:i, [1.0])
+    end
+  end
 end
 
 """
@@ -295,4 +452,26 @@ function split_angular_shell(ashell::AngularShell)
     end
   end
   return ashells
+end
+
+"""
+    get_available_elements4basis(basisname)
+
+  Return a list of available elements for the specified basis set.
+"""
+function get_available_elements4basis(basisname)
+  basisname, add_diffuse, add_steep = parse_diffuse_steep(basisname)
+  basisfile = basis_file(basisname)
+  @assert basisfile != "" "Basis set $basisname not found!"
+  elements = String[]
+  # search for ` s, $elem , 13...`
+  reg_exp = Regex("^\\s*s\\s*,\\s*([^,]+)\\s*,")
+  open(basisfile) do io
+    for line in eachline(io)
+      if occursin(reg_exp, line)
+        push!(elements, strip(match(reg_exp, line).captures[1]))
+      end
+    end
+  end
+  return elements
 end

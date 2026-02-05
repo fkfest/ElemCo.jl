@@ -3,12 +3,10 @@
 """
 module TensorTools
 using LinearAlgebra
-using TensorOperations
-# using ElemCoTensorOperations
-using StridedViews
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
+using ..ElemCo.MTensorOperations
 
 export save!, load, load_all, load!, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
@@ -16,88 +14,12 @@ export load1idx_all, load2idx_all, load3idx_all, load4idx_all, load5idx_all, loa
 export mmap1idx, mmap2idx, mmap3idx, mmap4idx, mmap5idx, mmap6idx
 export ints1, ints2, detri_int2
 export ints2!, detri_int2!
-export sqrtinvchol, invchol, rotate_eigenvectors_to_real, svd_thr
-export get_spaceblocks
+export sqrtinvchol, invchol, rotate_eigenvectors_to_real, balance_norms!, svd_thr
 export print_nonzeros
+# reexport MTensorOperations
 export @mtensor, @mtensoropt
-export @tensor, @tensoropt # reexport @tensor, @tensoropt
+export @tensor, @tensoropt 
 export @mview, mview
-
-save_tensorcalls() = false
-
-if save_tensorcalls()
-  include("tensoranalyzer.jl")
-  write_header4tensorcalls()
-end
-
-"""
-    mtensor(ex)
-
-Macro for tensor operations with manual allocator.
-"""
-macro mtensor(ex)
-  if save_tensorcalls()
-    print_tensor4tensorcalls(Symbol("@tensor"), ex)
-  end
-  return esc(:(@tensor $ex))
-  # TODO: activate manual allocator
-  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
-end
-
-macro mtensoropt(args::Vararg{Expr})
-  if save_tensorcalls()
-    print_tensor4tensorcalls(Symbol("@tensoropt"), args...)
-  end
-  return esc(:(@tensoropt $(args...)))
-  # TODO: activate manual allocator
-  # return esc(:(@mtensor allocator = TensorOperations.ManualAllocator() $ex))
-end
-
-"""
-    @mview(ex)
-
-  StridedView based version of `@view`.
-"""
-macro mview(ex)
-  # NOTE it's largely based on the @view macro from Base.
-  Meta.isexpr(ex, :ref) || throw(ArgumentError(
-      "Invalid use of @mview macro: argument must be a reference expression A[...]."))
-  ex = Base.replace_ref_begin_end!(ex)
-  # NOTE We embed `view` as a function object itself directly into the AST.
-  #      By doing this, we prevent the creation of function definitions like
-  #      `view(A, idx) = xxx` in cases such as `@view(A[idx]) = xxx.`
-  if Meta.isexpr(ex, :ref)
-      ex = Expr(:call, mview, ex.args...)
-  elseif Meta.isexpr(ex, :let) && (arg2 = ex.args[2]; Meta.isexpr(arg2, :ref))
-      # ex replaced by let ...; foo[...]; end
-      ex.args[2] = Expr(:call, mview, arg2.args...)
-  else
-      error("invalid expression")
-  end
-  return esc(ex)
-end
-
-"""
-    mview(arr, args...)
-
-  `StridedView` based version of `view`.
-
-  The data array is enforced to be a vector, such that the view is always a `StridedView{..., Vector{...},...}`.
-"""
-function mview(arr, args...)
-  return sview(reshape(view(vec(arr),:), size(arr)), args...)
-end
-
-"""
-    mview(arr::StridedView, args...)
-
-  StridedView based version of `view`, for `StridedView` input.
-
-  Simply calls `StridedViews.sview`.
-"""
-function mview(arr::StridedView, args...)
-  return sview(arr, args...)
-end
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
@@ -106,6 +28,17 @@ end
   Add file to `EC.files` with `description`.
 """
 function save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
+  miosave(fullfilename(EC, fname), a...)
+  add_file!(EC, fname, description; overwrite)
+end
+
+"""
+    save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
+
+  Save tuple of arrays `a` to file `fname` in EC.scr directory.
+  Add file to `EC.files` with `description`.
+"""
+function save!(EC::ECInfo, fname::String, a::Tuple; description="tmp", overwrite=true)
   miosave(fullfilename(EC, fname), a...)
   add_file!(EC, fname, description; overwrite)
 end
@@ -284,29 +217,40 @@ function spincase_from_4spaces(spaces::String)
 end
 
 """ 
-    ints2(EC::ECInfo, spaces::String, spincase = nothing)
+    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
 
-  Return subset of 2e⁻ integrals according to spaces. 
-  
-  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
-  from upper/lower case of spaces specification.
+  Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
+
+  The `sp1`, `sp2`, `sp3`, `sp4` are arrays or ranges of indices.
+  The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given. 
   If the last two indices are stored as triangular - make them full.
+  The result is stored in `out`.
 """
-function ints2(EC::ECInfo, spaces::String, spincase = nothing)
-  if isnothing(spincase)
-    sc = spincase_from_4spaces(spaces)
-  else 
-    sc::Symbol = spincase
+function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+  if EC.fd.uhf && spincase == :αβ
+    @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
+    out .= @view integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
+    return out
   end
-  SP = EC.space
-  if EC.fd.uhf && sc == :αβ 
-    return integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
-  end
-  allint = integ2_ss(EC.fd, sc)
+  allint = integ2_ss(EC.fd, spincase)
   @assert ndims(allint) == 3
   norb = length(EC.space[':'])
   # last two indices as a triangular index, desymmetrize
-  return detri_int2(allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+  return detri_int2!(out, allint, norb, sp1, sp2, sp3, sp4)
+end
+
+""" 
+    ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+
+  Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
+
+  The `sp1`, `sp2`, `sp3`, `sp4` are arrays or ranges of indices.
+  The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given.
+  If the last two indices are stored as triangular - make them full.
+"""
+function ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+  return ints2!(out, EC, sp1, sp2, sp3, sp4, spincase)  
 end
 
 """ 
@@ -314,7 +258,7 @@ end
 
   Return subset of 2e⁻ integrals according to spaces. 
   
-  The `spincase`∈{`:α`,`:β`} can explicitly be given, or will be deduced 
+  The `spincase`∈{`:α`,`:β`,`:αβ`} can explicitly be given, or will be deduced 
   from upper/lower case of spaces specification.
   If the last two indices are stored as triangular - make them full.
   The result is stored in `out`.
@@ -326,16 +270,26 @@ function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spinc
     sc::Symbol = spincase
   end
   SP = EC.space
-  if EC.fd.uhf && sc == :αβ
-    @assert size(out) == (length(SP[spaces[1]]),length(SP[spaces[2]]),length(SP[spaces[3]]),length(SP[spaces[4]]))
-    out .= @view integ2_os(EC.fd)[SP[spaces[1]],SP[spaces[2]],SP[spaces[3]],SP[spaces[4]]]
-    return out
+  return ints2!(out, EC, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]], sc)
+end
+
+""" 
+    ints2(EC::ECInfo, spaces::String, spincase = nothing)
+
+  Return subset of 2e⁻ integrals according to spaces. 
+  
+  The `spincase`∈{`:α`,`:β`,`:αβ`} can explicitly be given, or will be deduced 
+  from upper/lower case of spaces specification.
+  If the last two indices are stored as triangular - make them full.
+"""
+function ints2(EC::ECInfo, spaces::String, spincase = nothing)
+  if isnothing(spincase)
+    sc = spincase_from_4spaces(spaces)
+  else 
+    sc::Symbol = spincase
   end
-  allint = integ2_ss(EC.fd, sc)
-  @assert ndims(allint) == 3
-  norb = length(EC.space[':'])
-  # last two indices as a triangular index, desymmetrize
-  return detri_int2!(out, allint, norb, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]])
+  SP = EC.space
+  return ints2(EC, SP[spaces[1]], SP[spaces[2]], SP[spaces[3]], SP[spaces[4]], sc)
 end
 
 """ 
@@ -442,9 +396,9 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
     end
     inext = idx[iicc]
     idx[iicc] = -inext
-    evecs_real[:,inext] = imag.(evecs[:,inext])
-    normalize!(evecs_real[:,i])
-    normalize!(evecs_real[:,inext])
+    evecs_real[:,inext] = imag.(@view(evecs[:,inext]))
+    normalize!(@view(evecs_real[:,i]))
+    normalize!(@view(evecs_real[:,inext]))
     evals_real[inext] = real(evals[inext])
     npairs += 1
   end
@@ -458,60 +412,24 @@ function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float
 end
 
 """ 
-    get_spaceblocks(space, maxblocksize=128, strict=false)
+    balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
 
-  Generate ranges for block indices for space (for loop over blocks).
+  Balance the norms of left and right eigenvectors.
 
-  `space` is a range or an array of indices. 
-  Even if `space` is non-contiguous, the blocks will be contiguous. 
-  If `strict` is true, the blocks will be of size `maxblocksize` (except for the last block and non-contiguous index-ranges).
-  Otherwise the actual block size will be as close as possible to `blocksize` such that
-  the resulting blocks are of similar size.
+  Make each pair of left and right eigenvectors have the same norm.
 """
-function get_spaceblocks(space, maxblocksize=128, strict=false)
-  if length(space) == 0
-    return UnitRange{Int}[]
+function balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
+  if isnothing(leftvecs)
+    leftvecs = (inv(evecs))'
   end
-  if last(space) - first(space) + 1 == length(space)
-    # contiguous
-    cblks = UnitRange{Int}[ first(space):last(space) ]
-  else
-    # create an array of contiguous ranges
-    cblks = UnitRange{Int}[]
-    begr = first(space)
-    endr = begr - 1
-    for idx in space
-      if idx == endr + 1
-        endr = idx
-      else
-        push!(cblks, begr:endr)
-        endr = begr = idx
-      end 
-    end
-    push!(cblks, begr:endr)
-  end  
-
-  allblks = UnitRange{Int}[]
-  for range in cblks
-    nblks::Int = length(range) ÷ maxblocksize
-    if nblks*maxblocksize < length(range)
-      nblks += 1
-    end
-    if strict 
-      blks = UnitRange{Int}[ (i-1)*maxblocksize+first(range) : ((i == nblks) ? last(range) : i*maxblocksize+first(range)-1) for i in 1:nblks ]
-    else
-      blocksize = length(range) ÷ nblks
-      n_largeblks = mod(length(range), nblks)
-      blks = UnitRange{Int}[ (i-1)*(blocksize+1)+first(range) : i*(blocksize+1)+first(range)-1 for i in 1:n_largeblks ]
-      start = n_largeblks*(blocksize+1)+first(range)
-      for i = n_largeblks+1:nblks
-        push!(blks, start:start+blocksize-1)
-        start += blocksize
-      end
-    end
-    append!(allblks, blks)
+  for i in axes(evecs,2)
+    nrm = norm(evecs[:,i])
+    nrm_left = norm(leftvecs[:,i])
+    scale = sqrt(nrm_left / nrm)
+    evecs[:,i] .*= scale
+    leftvecs[:,i] ./= scale
   end
-  return allblks
+  return evecs, leftvecs
 end
 
 """ 

@@ -300,7 +300,9 @@ function miommap(fname::String, ::Val{N}, T::Type=Float64) where {N}
   end
   ndim = read(io, Int)
   dims = Int[]
-  @assert N == ndim "Inconsistency in reading dimensions of data! Expected $N, got $ndim."
+  if ndim != N
+    error("Inconsistency in reading dimensions of data! Expected $N, got $ndim.")
+  end
   for idim in 1:ndim
     append!(dims, read(io, Int))
   end

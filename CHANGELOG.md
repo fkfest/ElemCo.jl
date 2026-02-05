@@ -1,5 +1,49 @@
 # Release notes
 
+## Version [v0.15.0] - 2026.02.05
+
+### Breaking
+
+* The fallback basis sets are not used by default anymore. Set `@set int use_fallback_basis=true`
+  to enable them.
+* In `@write_ints`, the `tol` argument is a keyword argument now (default is `-1.0`). 
+* `wf.orb` and `wf.left` options are deprecated. The orbitals are now always written to and read from the trexio dump file `wf.dump`. Use `@loadwf` to load the orbitals from the dump file.
+* The `@transform_ints` macro now automatically uses biorthogonal transformations for BO orbitals.
+* The `@mtensor`, `@mview` macros are moved from `TensorTools` to a new `MTensorOperations` module (still reexported by `TensorTools`).
+* The function `get_spaceblocks` has been moved from `TensorTools` to `Utils` module.
+
+### Changed
+
+* The fallback basis sets are now defined for `ao` (`def2-tzvppd`), `jkfit` (`aug-def2-universal-jkfit`), and `mpfit` (`def2-tzvppd-mpfit`) basis sets.
+* Functions for `H` and `He` are copied from [aug]-cc-pVXZ basis sets to [aug]-p[w]CVXZ basis sets. Functions for Li and Be are copied from [aug]-cc-pCVXZ basis sets to [aug]-pwCVXZ basis sets.
+* `CCDriver` module is renamed to `Drivers`. 
+* Function `transform_fcidump` has been renamed to `transform_fcidump!`.
+* (T) methods automatically use pseudo-canonical transformation if the Fock matrix is not diagonal in the occupied and virtual subspaces.
+
+### Added
+
+* FCI and CIPHI (selected CI) methods.
+* Local options for macros: All calculation macros (`@cc`, `@dfcc`, `@dfhf`, `@dfuhf`, `@dfmcscf`, `@dfmp2`, `@fci`, `@ciphi`, `@bohf`, `@bouhf`) now accept an optional `begin...end` block to set options locally for that specific call. Options are automatically restored after the call completes. This is the recommended way to set options for individual calculations.
+* Automatic augmentation of basis sets by additional diffuse or steep functions.
+* Functions to get all elements available in a given basis set (`get_available_elements4basis`) and to output the basis set for a given list of elements in the molpro format (`output_basis`).
+* Augmented basis sets for jkfit vXz-jkfit and def2-universal-jkfit basis sets.
+* A keyword argument `format` in `@write_ints` macro to write integrals to npy files (if `format=:npy`) or to ascii file (if `format=:ascii`).
+* DF-HF and DF-UF orbitals are stored in trexio dump file.
+* A check for changes of the molecular geometry/basis/fcidump is performed in every macro-command call. If a change is detected, the integrals are set to be recalculated or reloaded from the fcidump file. With this, the user doesn't need to worry about calling `@ECinit` after changing the geometry/basis/fcidump.
+* A test for dummy atoms is added. At the moment, if dummy atoms are detected, the integrals are recalculated. In the future, once we have AO-FDump support, the integrals can be reused.
+* Macros `@loadwf` and `@savewf` to load and save orbitals (etc) from/to trexio dump files. `@copywf` to copy trexio dump files (e.g., to make a local backup).
+* Wavefunction store/start functionality for coupled cluster and selected CI methods. Use `@set wf store="filename.h5"` to store the wavefunction (amplitudes for CC, determinants/coefficients for CIPHI) to a TREXIO file. Use `@set wf start="filename.h5"` to restart a calculation from a previously stored wavefunction. Multi-state CIPHI calculations store each state in separate files (e.g., `filename_state2.h5`).
+* `pt2_only` option for CIPHI calculations (`@set ciphi pt2_only=true`) to skip variational iterations and compute only the PT2 correction using stored determinants.
+
+### Fixed
+
+* A simple sanity check of the fitting basis sets is performed (by checking whether it's 
+  an AO basis set). The error message can be turned to a warning by setting `@set int check_fit_basis=false`.
+* Fix normalization of biorthogonal orbitals to a balanced normalization (i.e., the norms of left and right orbitals are equal).
+* Integral transformation now should use much less memory and be faster.
+* Fix incompatibility with julia 1.13 (replace call of an internal Base function with a simple custom implementation).
+* Fix UCCSD and UDCSD for the case of no beta electrons ([#272]).
+
 ## Version [v0.14.1] - 2025.07.03
 
 ### Changed

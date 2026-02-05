@@ -17,19 +17,20 @@ EDC_CCSDTp_voXL_test = Dict(:combined => -75.97558419740024,
                         :symcombined  => -75.97558355886652,
                         :triples      => -75.97559061683168,
                         :full         => -75.97558355886655)
-
+geometry = basis = nothing
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 energies = @cc svd-dc-ccsdt 
 @test abs(last_energy(energies)-EDC_CCSDT_test) < epsilon
 @test abs(energies["SVD-DC-CCSDT+"]-EDC_CCSDTp_test) < epsilon
 
-@set cc calc_t3_for_decomposition=true
-energies = @cc svd-dc-ccsdt 
+energies = @cc svd-dc-ccsdt begin 
+  @set cc calc_t3_for_decomposition=true
+end
 @test abs(last_energy(energies)-EDC_CCSDT_useT3_test) < epsilon
 
-@set cc calc_t3_for_decomposition=false project_voXL=true
-energies = @cc svd-dc-ccsdt 
+@set cc project_voXL=true
+energies = @cc svd-dc-ccsdt
 @test abs(last_energy(energies)-EDC_CCSDT_voXL_test[:combined]) < epsilon
 @test abs(energies["SVD-DC-CCSDT+"]-EDC_CCSDTp_voXL_test[:combined]) < epsilon
 

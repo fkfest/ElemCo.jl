@@ -164,3 +164,22 @@ function restrict!(mat::SpinMatrix)
   mat.β = mat.α
   return mat
 end
+
+"""
+    SpinVector
+
+A simple container for spin-dependent vectors (α and β).
+Fields α and β store the alpha and beta spin components respectively.
+
+# Constructors
+- `SpinVector(v, w)`: Create with separate α and β vectors
+- `SpinVector(v)`: Create restricted vector (β === α)
+"""
+struct SpinVector{T<:Number}
+  α::Vector{T}
+  β::Vector{T}
+  SpinVector{T}(v::Vector{T}, w::Vector{T}) where {T<:Number} = new{T}(v, w)
+  SpinVector{T}(v::Vector{T}) where {T<:Number} = new{T}(v, v)
+end
+SpinVector(v::Vector{T}, w::Vector{T}) where {T<:Number} = SpinVector{T}(v, w)
+SpinVector(v::Vector{T}) where {T<:Number} = SpinVector{T}(v, v)

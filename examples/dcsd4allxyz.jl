@@ -23,7 +23,7 @@ for file in readdir()
     geometry = file
     basis = Dict("ao"=>"cc-pVDZ",
             "jkfit"=>"cc-pvtz-jkfit",
-            "mp2fit"=>"cc-pvtz-rifit")
+            "mpfit"=>"cc-pvtz-mpfit")
     @dfhf
     @cc dcsd
   end
