@@ -13,6 +13,7 @@ export ECInfo, setup!, set_options!, parse_orbstring, get_occvirt
 export setup_space_fd!, setup_space_system!, setup_space!, reset_wf_info!
 export is_closed_shell
 export freeze_core!, freeze_nocc!, freeze_nvirt!, save_space, restore_space!
+export restore_system_space!, restore_fd_space!, restore_full_space!
 export n_occ_orbs, n_occb_orbs, n_orbs, n_virt_orbs, n_virtb_orbs, len_spaces
 export fullfilename, file_exists, add_file!, copy_file!
 export delete_file!, delete_files!, delete_temporary_files!
@@ -408,6 +409,67 @@ end
 """
 function restore_space!(EC::ECInfo, space)
   EC.space = deepcopy(space)
+end
+
+"""
+    restore_system_space!(EC::ECInfo; verbose=false)
+
+  Restore the system space (i.e., the space set up by `setup_space_system!`).
+  
+  Returns the current space, which can be used to restore the current space afterwards using `restore_space!`
+  and the space before freezing orbitals, which can be used to determine the core/deleted orbitals.
+
+  This is useful to restore the original space after freezing orbitals. 
+  The subspaces `'o'` , `'O'`, `'v'`, `'V'`, `'a'`, etc., correspond to the full system space.
+"""
+function restore_system_space!(EC::ECInfo; verbose=false)
+  space_save = save_space(EC)
+  setup_space_system!(EC; verbose=verbose)
+  space_b4freeze = save_space(EC)
+  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=verbose)
+  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=verbose)
+  return space_save, space_b4freeze
+end
+
+"""
+    restore_fd_space!(EC::ECInfo; verbose=false)
+  
+  Restore the space from fcidump.
+    
+  Returns the current space, which can be used to restore the current space afterwards using `restore_space!`
+  and the space before freezing orbitals, which can be used to determine the core/deleted orbitals.
+  
+  This is useful to restore the original space after freezing orbitals. 
+  The subspaces `'o'` , `'O'`, `'v'`, `'V'`, `'a'`, etc., correspond to the full system space.
+"""
+function restore_fd_space!(EC::ECInfo; verbose=false)
+  space_save = save_space(EC)
+  setup_space_fd!(EC; verbose=verbose)
+  space_b4freeze = save_space(EC)
+  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=verbose)
+  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=verbose)
+  return space_save, space_b4freeze
+end
+
+"""
+     restore_full_space!(EC::ECInfo; verbose=false)
+
+  Restore the full space from either system or fcidump, depending on which is set up.
+
+  Returns the current space, which can be used to restore the current space afterwards using `restore_space!`
+  and the space before freezing orbitals, which can be used to determine the core/deleted orbitals.
+  
+  This is useful to restore the original space after freezing orbitals. 
+  The subspaces `'o'` , `'O'`, `'v'`, `'V'`, `'a'`, etc., correspond to the full system space.
+"""
+function restore_full_space!(EC::ECInfo; verbose=false)
+  if !isempty(EC.system)
+    return restore_system_space!(EC; verbose=verbose)
+  elseif !isempty(EC.fd)
+    return restore_fd_space!(EC; verbose=verbose)
+  else
+    error("Cannot restore full space: neither EC.system nor EC.fd is set up.")
+  end
 end
 
 """ 

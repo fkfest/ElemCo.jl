@@ -58,11 +58,8 @@ end
   The routine is intended to be used in a combination with FDump integrals.
 """
 function calc_df_integrals(EC::ECInfo)
-  space_save = save_space(EC)
-  setup_space_system!(EC; verbose=false)
+  space_save, _ = restore_system_space!(EC)
   cMO = load_orbitals(EC)
-  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=false)
-  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=false)
   # correlated MOs
   SP = EC.space
   if is_restricted(cMO) && SP['o'] == SP['O']

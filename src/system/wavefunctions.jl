@@ -17,7 +17,7 @@ export fetch_orbital_energies, fetch_orbital_occupations
 export load_wavefunction, save_wavefunction, copy_wavefunction
 export dump_amplitudes, has_amplitudes, has_dumpfile
 export fetch_restricted_amplitudes, fetch_unrestricted_amplitudes
-export transfer_orbitals_to_store!, OrbitalData, fetch_orbital_data
+export transfer_orbitals_to_store!, OrbitalData, rotate_orbitaldata!, fetch_orbital_data
 # Determinant I/O for CIPHI
 export dump_determinants, fetch_determinants, has_determinants
 export dump_determinants_multistate, state_filename
@@ -177,22 +177,15 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
 end
 
 function prepare_orb_classes(EC::ECInfo, restricted)
-  if !haskey(EC.space, 'm')
-    setup_space_system!(EC)
-  end
-  
-  # Save current space, apply freezing to determine core/deleted, then restore
-  space_save = save_space(EC)
-  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=false)
-  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=false)
+  space_save, space_b4freeze = restore_full_space!(EC)
   
   # Now EC.space has the frozen configuration
   classa = fill("Deleted", length(EC.space['m']))
   classa[EC.space['o']] .= "Inactive"
   classa[EC.space['v']] .= "Virtual"
   classa[EC.space['a']] .= "Active"
-  # Mark frozen core: compare with saved space to find removed occupied orbitals
-  frozen_occ = setdiff(space_save['o'], EC.space['o'])
+  # Mark frozen core: compare with space before freezing to find removed occupied orbitals
+  frozen_occ = setdiff(space_b4freeze['o'], EC.space['o'])
   classa[frozen_occ] .= "Core"
     
   if restricted
@@ -202,8 +195,8 @@ function prepare_orb_classes(EC::ECInfo, restricted)
     classb[EC.space['O']] .= "Inactive"
     classb[EC.space['V']] .= "Virtual"
     classb[EC.space['a']] .= "Active"
-    # Mark frozen core: compare with saved space to find removed occupied orbitals
-    frozen_occ = setdiff(space_save['O'], EC.space['O'])
+    # Mark frozen core: compare with space before freezing to find removed occupied orbitals
+    frozen_occ = setdiff(space_b4freeze['O'], EC.space['O'])
     classb[frozen_occ] .= "Core"
   end
     
@@ -318,6 +311,38 @@ struct OrbitalData
   occupations::NTuple{2,Vector{Float64}}
 end
 
+OrbitalData(cMO::SpinMatrix{Float64}) = OrbitalData(cMO, "Rotation", BasisSet(), (Float64[], Float64[]), (Float64[], Float64[]))
+
+"""
+    rotate_orbitaldata!(orbital_data::OrbitalData, Rpq_a::Matrix{Float64}, Rpq_b::Union{Matrix{Float64}, Nothing}=nothing) -> OrbitalData
+  
+  Rotate the orbitals in `orbital_data` using the provided rotation matrices `Rpq_a` and `Rpq_b`.
+
+- If `Rpq_b` is `nothing` and the orbitals are restricted, only the alpha orbitals will be rotated, and the beta orbitals will follow the same rotation.
+- If `Rpq_b` is `nothing` but the orbitals are unrestricted, the same rotation will be applied to both alpha and beta orbitals.
+- If `Rpq_b` is provided and the orbitals are restricted, the beta orbitals will be rotated with `Rpq_b` if it is different from `Rpq_a`, effectively making the orbitals unrestricted.
+- If `Rpq_b` is provided and the orbitals are already unrestricted, the beta orbitals will be rotated with `Rpq_b`.
+"""
+function rotate_orbitaldata!(orbital_data::OrbitalData, Rpq_a::Matrix{Float64}, Rpq_b::Union{Matrix{Float64}, Nothing}=nothing)
+  if isnothing(Rpq_b) && is_restricted(orbital_data.cMO)
+    # beta orbitals will be rotated automatically with the same rotation as alpha
+  elseif isnothing(Rpq_b)
+    # If we have unrestricted orbitals but only one rotation, apply the same rotation to beta
+    orbital_data.cMO.β .= orbital_data.cMO.β * Rpq_a
+  elseif is_restricted(orbital_data.cMO)
+    # Make orbitals unrestricted if different rotations are provided
+    if Rpq_a !== Rpq_b
+      orbital_data.cMO.β = orbital_data.cMO.β * Rpq_b
+    end
+  else
+    # Unrestricted orbitals with separate rotations
+    orbital_data.cMO.β .= orbital_data.cMO.β * Rpq_b
+  end
+
+  orbital_data.cMO.α .= orbital_data.cMO.α * Rpq_a
+  return orbital_data
+end
+
 """
     fetch_orbital_data(EC::ECInfo; MO="mo") -> Union{OrbitalData, Nothing}
 
@@ -342,9 +367,7 @@ end
 
   Transfer orbitals from the dump file to an already opened store file.
 
-  If `orbital_data` is provided, uses it directly. Otherwise fetches from dump file.
-  
-  **Important**: When dump and store files are the same, `orbital_data` must be
+  **Important**: `orbital_data` must be
   pre-fetched before opening the store file to avoid reading from a truncated file.
   
   This properly handles cases where frozen orbitals or geometry differ
@@ -356,34 +379,11 @@ end
 # Arguments
 - `io_store`: An already opened TrexioFile for writing
 - `EC`: Electronic structure information object
-- `orbital_data`: Pre-fetched orbital data, or `nothing` to fetch from dump
+- `orbital_data`: Pre-fetched orbital data, or `nothing` to store unity rotation
 - `MO`: "mo" for molecular orbitals or "po" for positron orbitals
 """
 function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, 
-                                     orbital_data::Union{OrbitalData,Nothing}=nothing; MO="mo")
-  # If no orbital data was pre-fetched, this is a FCIDUMP-only case.
-  # Create a unity rotation for amplitude storage.
-  if isnothing(orbital_data)
-    println("No dump file found - storing unity rotation for FCIDUMP-only calculation ...")
-    norb = n_orbs(EC)
-    restricted = is_closed_shell(EC)
-    
-    # Create unity rotation matrix
-    unity = Matrix{Float64}(I, norb, norb)
-    if restricted
-      cRot = SpinMatrix(unity)
-    else
-      cRot = SpinMatrix(unity, copy(unity))
-    end
-    
-    # No classes for FCIDUMP-only
-    classes = (String[], String[])
-    
-    # Write unity rotation to store file
-    write_trexio_rotations(io_store, cRot; type="Rotation", classes=classes, MO=MO)
-    return
-  end
-  
+                                     orbital_data::OrbitalData; MO="mo")
   cMO = orbital_data.cMO
   mo_type = orbital_data.mo_type
   basis = orbital_data.basis
@@ -402,11 +402,7 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo,
   # Generate orbital classes from the system (not from dump file, 
   # because core orbital count may have changed)
   if !isempty(EC.system)
-    # Save current space, setup from system, generate classes, then restore
-    space_save = save_space(EC)
-    setup_space_system!(EC; verbose=false)
     classes = prepare_orb_classes(EC, is_restricted(cMO))
-    restore_space!(EC, space_save)
     # Use current basis for output (projection is done when retrieving amplitudes)
     basis = generate_basis(EC, "ao")
   else
@@ -419,6 +415,31 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo,
   write_trexio_system(io_store, EC.system)
   write_trexio_orbitals(io_store, cMO, basis; type=mo_type, classes=classes,
                         energies=energies, occupations=occupations, MO=MO)
+  return
+end
+
+function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, 
+                                     orbital_data::Nothing=nothing; MO="mo")
+  # If no orbital data was pre-fetched, this is a FCIDUMP-only case.
+  # Create a unity rotation for amplitude storage.
+  println("No dump file found - storing unity rotation for FCIDUMP-only calculation ...")
+  norb = n_orbs(EC)
+  restricted = is_closed_shell(EC)
+  
+  # Create unity rotation matrix
+  unity = Matrix{Float64}(I, norb, norb)
+  if restricted
+    cRot = SpinMatrix(unity)
+  else
+    cRot = SpinMatrix(unity, copy(unity))
+  end
+  
+  # No classes for FCIDUMP-only
+  classes = (String[], String[])
+  
+  # Write unity rotation to store file
+  write_trexio_rotations(io_store, cRot; type="Rotation", classes=classes, MO=MO)
+  return
 end
 
 """ 

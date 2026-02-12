@@ -25,7 +25,7 @@ export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_sing
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles
 export transform_amplitudes2lagrange_multipliers!
 export save_or_start_file, try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
-export contra2covariant
+export contra2covariant, rotation_matrix
 export spin_project!, spin_project_amplitudes
 export clean_cs_triples!
 export calc_cs_singles_dot, calc_u_singles_dot
@@ -995,6 +995,32 @@ function contra2covariant(T2)
 end
 
 """
+    rotation_matrix(EC::ECInfo, T1; full=false, beta=false)
+  
+  Make the integrals rotation matrix with T1.
+
+  If `full` is true, the rotation matrix will be made with core and deleted orbitals included.
+"""
+function rotation_matrix(EC::ECInfo, T1; full=false, beta=false)
+  if full
+    space_save, _ = restore_full_space!(EC)
+  end
+  norb = n_orbs(EC)
+  SP = EC.space
+  occ = beta ? SP['O'] : SP['o']
+  virt = beta ? SP['V'] : SP['v']
+  Rpq = zeros(norb, norb)
+  @assert size(T1) == (length(virt), length(occ)) "size of T1 does not match space dimensions"
+  Rpq[virt,occ] = T1
+  Rpq[occ,virt] = -T1'
+  Rpq = exp(Rpq)
+  if full
+    restore_space!(EC, space_save)
+  end
+  return Rpq
+end
+
+"""
     triples_4ext!(EC::ECInfo, R3, T3)
 
   Calculate 4-external contraction with triples amplitudes
@@ -1366,15 +1392,19 @@ function project_amplitudes(EC::ECInfo,
 end
 
 """
-    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1, T2)
+    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1, T2; orbopt=false)
 
   Dump orbitals and CC amplitudes to the TREXIO file specified in `wf.store`.
 
-  Does nothing if `EC.options.wf.store` is empty or if no orbitals are available
-  (e.g., when running from FCIDUMP without a dump file).
+  Does nothing if `EC.options.wf.store` is empty.
   For closed-shell case with singles `T1` and doubles `T2`.
+
+  If `orbopt=true`, the orbitals are rotated using the T1 amplitudes
+  via [`rotation_matrix`](@ref) and stored instead of the original orbitals.
+  T1 amplitudes are not stored in that case.
 """
-function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4};
+                                            orbopt::Bool=false)
   if EC.options.wf.store == ""
     return
   end
@@ -1382,6 +1412,18 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::
   # Pre-fetch orbital data BEFORE opening store file for writing
   # This is crucial when dump and store are the same file
   orbital_data = fetch_orbital_data(EC)
+  if orbopt
+    # Rotation matrix from T1 amplitudes
+    Rpq = rotation_matrix(EC, T1; full=true)
+    if !isnothing(orbital_data)
+      # Rotate orbitals using T1 and store rotated orbitals instead
+      rotate_orbitaldata!(orbital_data, Rpq)
+    else
+      # store rotation matrix as orbital data if no orbital data is available (e.g. from FCIDUMP)
+      orbital_data = OrbitalData(SpinMatrix(Rpq))
+    end
+    T1 = zeros(0, 0) # Don't store T1 for orbopt methods
+  end
   open_dump(EC, "w") do io
     transfer_orbitals_to_store!(io, EC, orbital_data)
     dump_amplitudes(io, EC, T1, T2)
@@ -1390,17 +1432,21 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::
 end
 
 """
-    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
+    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; orbopt=false)
 
   Dump orbitals and unrestricted CC amplitudes to the TREXIO file.
 
-  Does nothing if `EC.options.wf.store` is empty or if no orbitals are available
-  (e.g., when running from FCIDUMP without a dump file).
+  Does nothing if `EC.options.wf.store` is empty.
+
+  If `orbopt=true`, the orbitals are rotated using the T1 amplitudes
+  via [`rotation_matrix`](@ref) and stored instead of the original orbitals.
+  T1 amplitudes are not stored in that case.
 """
 function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
                                             T1a::AbstractMatrix, T1b::AbstractMatrix,
                                             T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4},
-                                            T2ab::AbstractArray{<:Real,4})
+                                            T2ab::AbstractArray{<:Real,4};
+                                            orbopt::Bool=false)
   if EC.options.wf.store == ""
     return
   end
@@ -1408,6 +1454,21 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
   # Pre-fetch orbital data BEFORE opening store file for writing
   # This is crucial when dump and store are the same file
   orbital_data = fetch_orbital_data(EC)
+  if orbopt 
+    # Rotation matrices from T1 amplitudes
+    Rpq_a = rotation_matrix(EC, T1a; full=true)
+    Rpq_b = rotation_matrix(EC, T1b; full=true, beta=true)
+    if !isnothing(orbital_data)
+    # Rotate orbitals and store rotated orbitals instead
+      rotate_orbitaldata!(orbital_data, Rpq_a, Rpq_b)
+    else
+      # store rotation matrices as orbital data if no orbital data is available (e.g. from FCIDUMP)
+      orbital_data = OrbitalData(SpinMatrix(Rpq_a, Rpq_b))
+    end
+    # Don't store T1 for orbopt methods
+    T1a = zeros(0, 0)
+    T1b = zeros(0, 0)
+  end
   open_dump(EC, "w") do io
     transfer_orbitals_to_store!(io, EC, orbital_data)
     dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
@@ -1416,13 +1477,15 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
 end
 
 # Convenience wrappers for tuple arguments
-function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::Tuple{<:AbstractMatrix}, T2::Tuple{<:AbstractArray{<:Real,4}})
-  dump_wavefunction_with_amplitudes!(EC, T1[1], T2[1])
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::Tuple{<:AbstractMatrix}, T2::Tuple{<:AbstractArray{<:Real,4}};
+                                            orbopt::Bool=false)
+  dump_wavefunction_with_amplitudes!(EC, T1[1], T2[1]; orbopt)
 end
 function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
                                             T1::Tuple{<:AbstractMatrix,<:AbstractMatrix}, 
-                                            T2::Tuple{<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4}})
-  dump_wavefunction_with_amplitudes!(EC, T1[1], T1[2], T2[1], T2[2], T2[3])
+                                            T2::Tuple{<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4}};
+                                            orbopt::Bool=false)
+  dump_wavefunction_with_amplitudes!(EC, T1[1], T1[2], T2[1], T2[2], T2[3]; orbopt)
 end
 
 # ============================================================================
@@ -1546,7 +1609,7 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
   
   # Get target orbitals and classes from dump file (or same file if not using start)
   use_projection = false
-  if use_start
+  if use_start && EC.options.wf.dump != EC.options.wf.start
     if has_dumpfile(EC)
       cMO_new, type_new, current_basis = fetch_orbitals(EC)
       classes_new = fetch_orbital_classes(EC)

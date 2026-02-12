@@ -1509,28 +1509,6 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 end
 
 """
-    rotation_matrix(EC::ECInfo, T1)
-  
-  Make the integrals rotation matrix with T1.
-"""
-function rotation_matrix(EC::ECInfo, T1)
-  norb = n_orbs(EC)
-  nocc = n_occ_orbs(EC)
-  nvirt = n_virt_orbs(EC)
-  SP = EC.space
-  Rpq = zeros(norb, norb)
-  for a in 1:nvirt
-    for i in 1:nocc
-      Rpq[SP['v'][a],SP['o'][i]] = T1[a,i]
-      Rpq[SP['o'][i],SP['v'][a]] = -T1[a,i]
-    end
-  end
-  Rpq = exp(Rpq)
-  return Rpq
-end
-
-
-"""
     calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false, orbopt=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
@@ -2991,7 +2969,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   end
   try2save_doubles!(EC, Amps2...)
   # Dump to TREXIO file if wf.store is set
-  dump_wavefunction_with_amplitudes!(EC, Amps1, Amps2)
+  dump_wavefunction_with_amplitudes!(EC, Amps1, Amps2; orbopt)
   println()
   if length(Amps3) > 0
     output_norms("T1"=>NormT1, "T2"=>NormT2, "T3"=>NormT3)
