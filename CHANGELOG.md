@@ -8,6 +8,8 @@
 
 ### Added
 
+* Add EOM-UCCSD and EOM-UDCSD methods.
+
 ### Fixed
 
 ## Version [v0.15.0] - 2026.02.05
