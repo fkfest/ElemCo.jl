@@ -8,6 +8,8 @@
 
 ### Added
 
+* Add EOM-UCCSD/EOM-UDCSD and EOM-RCCSD/EOM-RDCSD (restricted to singlet excitations).
+
 ### Fixed
 
 ## Version [v0.15.0] - 2026.02.05

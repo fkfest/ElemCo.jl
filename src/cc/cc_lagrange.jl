@@ -247,32 +247,33 @@ function calc_dU2(EC::ECInfo, T1, T12, U2, o1='o', v1='v', o2='o', v2='v')
 end
 
 """
-    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false)
+    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false, with_rhs=true)
 
-Calculate the vector times the Jacobian for the unresticted CCSD or DCSD
+Calculate the vector times the Jacobian for the unrestricted CCSD or DCSD
 equations.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return R1a, R1b, R2a, R2b, R2ab
 """
-function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false)
+function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false, with_rhs=true)
   t1 = time_ns()
  
   T2ab = load4idx(EC, "T_vVoO")
   # Calculate 1RDM intermediates
   T1 = load2idx(EC, "T_vo")
   T2 = load4idx(EC, "T_vvoo")
-  D1α, dD1α = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1, T2, T2ab, :α)
+  D1α, dD1α = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1, T2, T2ab, :α; jacobian=!with_rhs)
   T1 = load2idx(EC, "T_VO")
   T2 = load4idx(EC, "T_VVOO")
-  D1β, dD1β = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1, T2, T2ab, :β)
+  D1β, dD1β = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1, T2, T2ab, :β; jacobian=!with_rhs)
   T1 = T2 = T2ab = nothing
   t1 = print_time(EC, t1, "calculate 1RDM",2)
 
-  R1a, R2a = calc_ccsd_vector_times_Jacobian4spin(EC, U1a, U2a, U2ab, D1α, dD1α, dD1β, :α; dc)
+  R1a, R2a = calc_ccsd_vector_times_Jacobian4spin(EC, U1a, U2a, U2ab, D1α, dD1α, dD1β, :α; dc, with_rhs)
   t1 = print_time(EC, t1, "calculate R1a, R2a",2)
-  R1b, R2b = calc_ccsd_vector_times_Jacobian4spin(EC, U1b, U2b, U2ab, D1β, dD1β, dD1α, :β; dc)
+  R1b, R2b = calc_ccsd_vector_times_Jacobian4spin(EC, U1b, U2b, U2ab, D1β, dD1β, dD1α, :β; dc, with_rhs)
   t1 = print_time(EC, t1, "calculate R1b, R2b",2)
-  ΔR1a, ΔR1b, R2ab = calc_ccsd_vector_times_Jacobian4ab(EC, U1a, U1b, U2a, U2b, U2ab, D1α, D1β; dc)
+  ΔR1a, ΔR1b, R2ab = calc_ccsd_vector_times_Jacobian4ab(EC, U1a, U1b, U2a, U2b, U2ab, D1α, D1β; dc, with_rhs)
   R1a += ΔR1a
   R1b += ΔR1b
   t1 = print_time(EC, t1, "calculate ΔR1a, ΔR1b, R2ab",2)
@@ -280,16 +281,17 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; d
 end
 
 """
-    calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1, dD1, dD1os, spin; dc=false)
+    calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1, dD1, dD1os, spin; dc=false, with_rhs=true)
 
 Calculate the vector times the CCSD/DCSD Jacobian for the given `spin`
 (same-spin residual for doubles). The singles residual is missing some terms
 which are added in `calc_ccsd_vector_times_Jacobian4ab`.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return R1 and R2 
 """
 function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab, 
-            D1, dD1, dD1os, spin; dc=false)
+            D1, dD1, dD1os, spin; dc=false, with_rhs=true)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   t1 = time_ns()
 
@@ -311,7 +313,11 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   fov = fock[SP[o4s],SP[v4s]]
   dfov = dfock[SP[o4s],SP[v4s]] 
   if length(U1) > 0
-    @mtensor R1[e,m] := fov[m,e]
+    if with_rhs
+      @mtensor R1[e,m] := fov[m,e]
+    else
+      R1 = zero(U1)
+    end
     # ``R^e_m += \hat D_p^q (v_{mq}^{ep} - v_{mq}^{pe})``
     int2 = ints2(EC,m4s*o4s*m4s*m4s)
     @mtensor R1[e,m] += dD1[p,q] * (int2[:,:,:,SP[v4s]][q,m,p,e] - int2[:,:,SP[v4s],:][q,m,e,p])
@@ -334,7 +340,11 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   T1 = load2idx(EC, "T_"*v4s*o4s)
   T2 = load4idx(EC, "T_"*v4s*v4s*o4s*o4s)
   oovv = ints2(EC,o4s*o4s*v4s*v4s)
-  @mtensor R2[e,f,m,n] := oovv[m,n,e,f] - oovv[n,m,e,f]
+  if with_rhs
+    @mtensor R2[e,f,m,n] := oovv[m,n,e,f] - oovv[n,m,e,f]
+  else
+    R2 = zero(U2)
+  end
   int2 = load4idx(EC, "d_"*o4s*o4s*o4s*o4s)
   if !dc
     @mtensor int2[m,n,i,j] += 0.5 * (oovv[m,n,c,d] * T2[c,d,i,j])
@@ -510,15 +520,16 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
 end
 
 """
-    calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1a, D1b; dc=false)
+    calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1a, D1b; dc=false, with_rhs=true)
 
 Calculate the left vector times the CCSD/DCSD Jacobian for αβ component. 
 Additionally, remaining contributions to the singles residual are calculated.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return ΔR1a, ΔR1b, R2ab
 """
 function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1b::Matrix{Float64}, 
-          U2a::Array{Float64,4}, U2b::Array{Float64}, U2ab::Array{Float64}, D1a, D1b; dc=false) 
+          U2a::Array{Float64,4}, U2b::Array{Float64,4}, U2ab::Array{Float64,4}, D1a, D1b; dc=false, with_rhs=true) 
   t1 = time_ns()
 
   SP = EC.space
@@ -599,7 +610,9 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1
   end
 
   oOvV = ints2(EC,"oOvV")
-  @mtensor R2[e,F,m,N] += oOvV[m,N,e,F]
+  if with_rhs
+    @mtensor R2[e,F,m,N] += oOvV[m,N,e,F]
+  end
   T2ab = load4idx(EC, "T_vVoO")
   int2 = load4idx(EC, "d_oOoO")
   if !dc

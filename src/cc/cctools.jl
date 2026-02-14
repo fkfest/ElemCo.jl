@@ -4,7 +4,8 @@
 A collection of tools for working with coupled cluster theory.
 """
 module CCTools
-using LinearAlgebra, Printf
+using LinearAlgebra
+using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
@@ -37,6 +38,7 @@ export project_amplitudes, check_projection_rank
 export dump_wavefunction_with_amplitudes!
 export dump_wavefunction_with_determinants!, try_fetch_starting_determinants
 export try_fetch_restricted_starting_amplitudes, try_fetch_unrestricted_starting_amplitudes
+export print_main_singles
 
 """ 
     calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
@@ -155,6 +157,30 @@ function spin_project!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
   @mtensor T2a[:,:,doa,soa][a,b,i,j] = T2a[:,:,soa,doa][b,a,j,i]
   @mtensor T2b[dvb,:,:,:][a,b,i,j] = T2ab[:,:,doa,:][a,b,i,j] - T2ab[:,:,doa,:][a,b,j,i]
   @mtensor T2b[svb,dvb,:,:][a,b,i,j] = T2b[dvb,svb,:,:][b,a,j,i]
+end
+
+"""
+    spin_project!(EC::ECInfo, T1a, T1b)
+  
+  Spin-project singles amplitudes/residuals.
+  
+  Only possible for high-spin states.
+"""
+function spin_project!(EC::ECInfo, T1a, T1b)
+  SP = EC.space
+  @assert length(SP['S']) == 0 " Spin-projection only possible for high-spin states!"
+  soa = subspace_in_space(SP['s'], SP['o'])
+  svb = subspace_in_space(SP['s'], SP['V'])
+  @assert length(soa) == length(svb)
+  doa = setdiff(1:length(SP['o']), soa)
+  @assert length(doa) == length(SP['O'])
+  dvb =setdiff(1:length(SP['V']), svb)
+  @assert length(dvb) == length(SP['v'])
+  if length(T1b) > 0
+    T1 = 0.5 * (T1a[:,doa] + T1b[dvb,:])
+    T1a[:,doa] .= T1
+    T1b[dvb,:] .= T1
+  end
 end
 
 """
@@ -1741,4 +1767,24 @@ function empty_unrestricted_amplitudes(EC::ECInfo)
           zeros(nvirt_a, nvirt_b, nocc_a, nocc_b), false)
 end
 
+"""
+    print_main_singles(U1, nelem; info="", thr=1e-4)
+
+  Utility function to print the main `nelem` singles.
+"""
+function print_main_singles(U1::AbstractMatrix, nelem; info="", thr=1e-4)
+  println(info * " main singles:")
+  nvir, nocc = size(U1)
+  n = min(nelem, nvir * nocc)
+  Uvec = vec(U1)
+  idx = argmaxN(Uvec, n, by=abs)
+  for i in idx
+    i_occ = (i - 1) ÷ nvir + 1
+    i_virt = (i - 1) % nvir + 1
+    if abs(Uvec[i]) > thr
+      output_single_excitation(Uvec[i], i_occ, i_virt)
+    end
+  end
+  println()
+end
 end # module

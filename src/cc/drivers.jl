@@ -72,7 +72,8 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   end
 
   if has_prefix(ecmethod, "EOM")
-    calc_eom(EC, ecmethod)
+    exc_energies = calc_eom(EC, ecmethod)
+    energies = merge(energies, exc_energies)
     t1 = print_time(EC, t1, "EOM", 1)
   end
 
