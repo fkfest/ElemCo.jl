@@ -456,6 +456,8 @@ end
   time::Int = 2
   """`⟨2⟩` verbosity level for printing memory usage. """
   memory::Int = 2
+  """`⟨10⟩` maximum number of coefficients to print. """
+  ncoeff::Int = 10
 end
 
 """ 

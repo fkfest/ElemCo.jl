@@ -8,7 +8,7 @@
 
 ### Added
 
-* Add EOM-UCCSD and EOM-UDCSD methods.
+* Add EOM-UCCSD/EOM-UDCSD and EOM-RCCSD/EOM-RDCSD (restricted to singlet excitations).
 
 ### Fixed
 

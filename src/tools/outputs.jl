@@ -10,6 +10,7 @@ using Printf
 export output_time, output_memory, flush_output
 export output_iteration
 export output_E_var, output_E_method, output_norms, output_state
+export output_single_excitation
 
 """
     output_time(Δtime, info::AbstractString)
@@ -118,6 +119,15 @@ function output_norms(norms::Pair{String,Float64}...)
   end
   println()
   flush(stdout)
+end
+
+"""
+    output_single_excitation(coef, i, a)
+
+  Output the single excitation with coefficient `coef`, occupied index `i`, and virtual index `a`.
+"""
+function output_single_excitation(coef, i, a)
+  @printf "  %3i -> %4i: %8.4f \n" i a coef
 end
 
 end #module

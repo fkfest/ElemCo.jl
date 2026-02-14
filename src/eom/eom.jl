@@ -29,7 +29,7 @@ include("svd_dcsd.jl")
 
 function calc_eom(EC::ECInfo, method::ECMethod)
   t0 = time_ns()
-  print_info(method_name(method))
+  print_info(method_name(method; main=false))
 
   highest_full_exc = max_full_exc(method)
   if highest_full_exc > 2
@@ -38,20 +38,33 @@ function calc_eom(EC::ECInfo, method::ECMethod)
   unrestricted = is_unrestricted(method) || has_prefix(method, "R")
   if unrestricted
     if highest_full_exc == 2
-      energies = eom_u_iterations(EC, ECMethod("EOM-UCCS"))
-      energies = eom_u_iterations2(EC, method)
+      cis_method = has_prefix(method, "R") ? ECMethod("EOM-RCCS") : ECMethod("EOM-UCCS")
+      print_info2(method_name(cis_method; main=false))
+      energs = eom_u_iterations(EC, cis_method)
+      print_info2(method_name(method; main=false))
+      energs = eom_u_iterations2(EC, method)
     else
-      energies = eom_u_iterations(EC, method)
+      print_info2(method_name(method; main=false))
+      energs = eom_u_iterations(EC, method)
     end
   else
     if highest_full_exc == 2
-      energies = eom_iterations(EC, ECMethod("EOM-CCS"))
-      energies = eom_iterations2(EC, method)
+      print_info2("EOM-CCS")
+      energs = eom_iterations(EC, ECMethod("EOM-CCS"))
+      print_info2(method_name(method; main=false))
+      energs = eom_iterations2(EC, method)
     else
-      energies = eom_iterations(EC, method)
+      print_info2(method_name(method; main=false))
+      energs = eom_iterations(EC, method)
     end
   end
-
+  energies = OutDict()
+  mname = method_name(method; main=false)
+  for (st, en) in enumerate(energs)
+    println("State $st: Excitation energy = $en")
+    energies["ω$st"] = (en, "$mname excitation energy for state $st")
+  end
+  return energies
 end
 
 function eom_iterations(EC::ECInfo, method::ECMethod)
@@ -70,7 +83,6 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
   custom_dots = (calc_cs_singles_dot,)
   # HOMO-LUMO guess
   en_guess, vec_guess = cis_homo_lumo_guess(EC, nstates)
-  println("HOMO-LUMO guess energies: ", en_guess)
   nv_guess = size(vec_guess, 1)
   no_guess = size(vec_guess, 2)
   for st in states
@@ -123,6 +135,7 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
       filename = mainfilename*"_$excitation_level"*"^$st"
       println("Saving $descr for state $st to $filename")
       get_eigenvector!(dav, (U1,), st)
+      print_main_singles(U1, EC.options.print.ncoeff; info="State $st")
       save!(EC, filename, U1, description=descr)
     end
   end
@@ -206,6 +219,7 @@ function eom_iterations2(EC::ECInfo, method::ECMethod)
   if mainfilename != ""
     for st in 1:nstates
       get_eigenvector!(dav, Vecs, st)
+      print_main_singles(Vecs[1], EC.options.print.ncoeff; info="State $st")
       for excitation_level in 1:2
         mainfilename, descr = save_or_start_file(EC, "X", excitation_level)
         filename = mainfilename*"_$excitation_level"*"^$st"
@@ -224,6 +238,7 @@ end
 """
 function eom_u_iterations(EC::ECInfo, method::ECMethod)
   t0 = time_ns()
+  restrict = has_prefix(method, "R")
   nstates = EC.options.eom.nstates
   shift = EC.options.eom.shift
   dav = Davidson(EC, nstates; hermitian=true)
@@ -241,18 +256,34 @@ function eom_u_iterations(EC::ECInfo, method::ECMethod)
   Vecs = (U1a, U1b)
   custom_dots = (calc_u_singles_dot, calc_u_singles_dot)
   # HOMO-LUMO guess
-  en_guess, veca_guess, vecb_guess = ucis_homo_lumo_guess(EC, nstates)
-  println("HOMO-LUMO guess energies: ", en_guess)
+  # for restricted: request more states and filter to singlet excitations
+  nstates_guess = restrict ? 10*nstates : nstates
+  en_guess, veca_guess, vecb_guess = ucis_homo_lumo_guess(EC, nstates_guess)
   nva_guess = size(veca_guess, 1)
   noa_guess = size(veca_guess, 2)
   nvb_guess = size(vecb_guess, 1)
   nob_guess = size(vecb_guess, 2)
-  for st in states
+  nst = 0
+  for iguess in axes(veca_guess, 3)
     U1a .= 0.0
     U1b .= 0.0
-    U1a[1:nva_guess,end-noa_guess+1:end] = veca_guess[:,:,st]
-    U1b[1:nvb_guess,end-nob_guess+1:end] = vecb_guess[:,:,st]
-    add_trial_vector!(dav, (U1a, U1b), st, custom_dots)
+    U1a[1:nva_guess,end-noa_guess+1:end] = veca_guess[:,:,iguess]
+    U1b[1:nvb_guess,end-nob_guess+1:end] = vecb_guess[:,:,iguess]
+    if restrict
+      spin_project!(EC, U1a, U1b)
+      vnorm = sqrt(calc_singles_norm(U1a, U1b))
+      if vnorm < 1.e-6
+        continue  # skip triplet/spin-flip state
+      end
+      U1a ./= vnorm
+      U1b ./= vnorm
+    end
+    nst += 1
+    add_trial_vector!(dav, (U1a, U1b), nst, custom_dots)
+    nst >= nstates && break
+  end
+  if restrict && nst < nstates
+    @warn "Only found $nst singlet CIS guess states out of $nstates requested"
   end
   println("Iter    Energy    Res       Time")
   for it in 1:EC.options.eom.maxit
@@ -261,6 +292,9 @@ function eom_u_iterations(EC::ECInfo, method::ECMethod)
       get_current_trial_vector!(dav, (U1a, U1b), st)
       V1a .= ucis_HU1(EC, U1a, U1b, :α)
       V1b .= ucis_HU1(EC, U1b, U1a, :β)
+      if restrict
+        spin_project!(EC, V1a, V1b)
+      end
       add_product_vector!(dav, (V1a, V1b), st, custom_dots)
     end
     energies = perform!(dav)
@@ -274,12 +308,18 @@ function eom_u_iterations(EC::ECInfo, method::ECMethod)
     maxNormR = 0.0
     for st in 1:nstates
       get_residual!(dav, (V1a, V1b), st)
+      if restrict
+        spin_project!(EC, V1a, V1b)
+      end
       NormR = calc_singles_norm(V1a, V1b)
       maxNormR = max(maxNormR, NormR)
       converged = NormR < EC.options.eom.thr
       output_state(st, NormR, energies[st]; converged=converged)
       if !converged
         new_singles_trial!(EC, U1a, U1b, V1a, V1b, energies[st], shift)
+        if restrict
+          spin_project!(EC, U1a, U1b)
+        end
         add_trial_vector!(dav, (U1a, U1b), st, custom_dots)
         push!(states2do, st)
       end
@@ -299,6 +339,11 @@ function eom_u_iterations(EC::ECInfo, method::ECMethod)
       filename = mainfilename*"_$excitation_level"*"^$st"
       println("Saving $descr for state $st to $filename")
       get_eigenvector!(dav, (U1a, U1b), st)
+      if restrict
+        spin_project!(EC, U1a, U1b)
+      end
+      print_main_singles(U1a, EC.options.print.ncoeff; info="State $st α")
+      print_main_singles(U1b, EC.options.print.ncoeff; info="State $st β")
       save!(EC, filename, U1a, U1b, description=descr)
     end
   end
@@ -313,6 +358,7 @@ end
 function eom_u_iterations2(EC::ECInfo, method::ECMethod)
   t0 = time_ns()
   dc = (method.theory[1:2] == "DC")
+  restrict = has_prefix(method, "R")
   calc_intermediates4Jacobian(EC, method)
   nstates = EC.options.eom.nstates
   dav = Davidson(EC, nstates; hermitian=false)
@@ -354,6 +400,9 @@ function eom_u_iterations2(EC::ECInfo, method::ECMethod)
     for st in states
       get_current_trial_vector!(dav, Vecs, st)
       V1a, V1b, V2a, V2b, V2ab = calc_ccsd_vector_times_Jacobian(EC, Vecs...; dc=dc, with_rhs=false)
+      if restrict
+        spin_project!(EC, V1a, V1b, V2a, V2b, V2ab)
+      end
       add_product_vector!(dav, (V1a, V1b, V2a, V2b, V2ab), st, custom_dots)
     end
     energies = perform!(dav)
@@ -367,6 +416,9 @@ function eom_u_iterations2(EC::ECInfo, method::ECMethod)
     maxNormR = 0.0
     for st in 1:nstates
       get_residual!(dav, Vecs, st)
+      if restrict
+        spin_project!(EC, Vecs...)
+      end
       NormR1 = calc_singles_norm(Vecs[1], Vecs[2])
       NormR2 = calc_doubles_norm(Vecs[3], Vecs[4], Vecs[5])
       NormR = NormR1 + NormR2
@@ -375,6 +427,9 @@ function eom_u_iterations2(EC::ECInfo, method::ECMethod)
       output_state(st, NormR, energies[st]; converged=converged)
       if !converged
         new_u_trial_vector!(EC, Vecs, energies[st])
+        if restrict
+          spin_project!(EC, Vecs...)
+        end
         add_trial_vector!(dav, Vecs, st, custom_dots)
         push!(states2do, st)
       end
@@ -392,6 +447,11 @@ function eom_u_iterations2(EC::ECInfo, method::ECMethod)
   if mainfilename != ""
     for st in 1:nstates
       get_eigenvector!(dav, Vecs, st)
+      if restrict
+        spin_project!(EC, Vecs...)
+      end
+      print_main_singles(Vecs[1], EC.options.print.ncoeff; info="State $st α")
+      print_main_singles(Vecs[2], EC.options.print.ncoeff; info="State $st β")
       for excitation_level in 1:2
         mainfilename, descr = save_or_start_file(EC, "X", excitation_level)
         filename = mainfilename*"_$excitation_level"*"^$st"
@@ -451,11 +511,14 @@ end
   by preparing a CIS matrix around the HOMO-LUMO and diagonalizing it.
 """
 function ucis_homo_lumo_guess(EC, nstates)
-  noa = min(nstates, n_occ_orbs(EC))
-  nob = min(nstates, n_occb_orbs(EC)) 
-  nva = min(max(nstates, EC.options.davidson.maxdav ÷ 2), n_virt_orbs(EC))
-  nvb = min(max(nstates, EC.options.davidson.maxdav ÷ 2), n_virtb_orbs(EC))
   SP = EC.space
+  # number of open-shell orbitals in alpha and in beta
+  nsa = length(SP['s'])
+  nsb = length(SP['S'])
+  noa = min(max(nstates + nsa, 5), n_occ_orbs(EC))
+  nob = min(max(nstates + nsb, 5), n_occb_orbs(EC)) 
+  nva = min(max(nstates + nsb, EC.options.davidson.maxdav), n_virt_orbs(EC))
+  nvb = min(max(nstates + nsa, EC.options.davidson.maxdav), n_virtb_orbs(EC))
   spoa = SP['o'][end-noa+1:end]
   spva = SP['v'][1:nva]
   spob = SP['O'][end-nob+1:end]
@@ -502,8 +565,6 @@ function ucis_homo_lumo_guess(EC, nstates)
   HHba = permutedims(int2, (2,4,3,1))
   HH[dim_a+1:dim, 1:dim_a] = reshape(HHba, (dim_b, dim_a))
   vals, vecs = eigen(Hermitian(HH))
-  println("CIS guess energies: ", vals)
-  display(vecs)
   vec_a = reshape(vecs[1:dim_a, 1:nstates], (nva, noa, nstates))
   vec_b = reshape(vecs[dim_a+1:dim, 1:nstates], (nvb, nob, nstates))
   return vals[1:nstates], vec_a, vec_b
@@ -593,8 +654,8 @@ end
   by preparing a CIS matrix around the HOMO-LUMO and diagonalizing it
 """
 function cis_homo_lumo_guess(EC, nstates)
-  noa = nstates
-  nva = max(nstates, EC.options.davidson.maxdav ÷ 2)
+  noa = max(nstates, 5)
+  nva = max(nstates, EC.options.davidson.maxdav)
   SP = EC.space
   noa = min(noa, length(SP['o']))
   nva = min(nva, length(SP['v']))
@@ -614,8 +675,6 @@ function cis_homo_lumo_guess(EC, nstates)
   int2 = ints2(EC, spv, spo, spv, spo, :α) 
   HH .-= permutedims(int2, (1,4,3,2))
   vals, vecs = eigen(Hermitian(reshape(HH, (nva*noa, nva*noa))))
-  println("CIS guess energies: ", vals)
-  display(vecs)
   return vals[1:nstates], reshape(vecs[:,1:nstates], (nva, noa, nstates))
 end
 
@@ -792,7 +851,7 @@ end
   by preparing a CIS matrix around the HOMO-LUMO and diagonalizing it
 """
 function df_cis_homo_lumo_guess(EC, nstates)
-  noa = nstates
+  noa = max(nstates, 5)
   nva = max(nstates, EC.options.davidson.maxdav)
   SP = EC.space
   noa = min(noa, length(SP['o']))

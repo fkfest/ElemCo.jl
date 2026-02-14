@@ -12,7 +12,8 @@ using ..ElemCo.VersionInfo
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export warnerror
 export mainname, print_time, print_memory, free_memory
-export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+export draw_line, draw_wiggly_line, print_info, print_info2, draw_endline
+export kwarg_provided_in_macro
 export subspace_in_space, get_spaceblocks, argmaxN
 export @istoplevel
 export @assert_devel
@@ -185,6 +186,25 @@ function print_info(info::AbstractString, additional_info::AbstractString="")
   draw_line()
   println(info)
   draw_line()
+  if additional_info != ""
+    println(additional_info)
+    draw_thin_line()
+  end
+  flush_output()
+end
+
+"""
+    print_info2(info::AbstractString, additional_info::AbstractString="")
+
+  Print secondary `info` between two thin lines.
+
+  If `additional` not empty: additional info after main.
+"""
+function print_info2(info::AbstractString, additional_info::AbstractString="")
+  println()
+  draw_thin_line()
+  println(info)
+  draw_thin_line()
   if additional_info != ""
     println(additional_info)
     draw_thin_line()
