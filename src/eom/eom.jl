@@ -40,27 +40,27 @@ function calc_eom(EC::ECInfo, method::ECMethod)
     if highest_full_exc == 2
       cis_method = has_prefix(method, "R") ? ECMethod("EOM-RCCS") : ECMethod("EOM-UCCS")
       print_info2(method_name(cis_method; main=false))
-      energs = eom_u_iterations(EC, cis_method)
+      omegas = eom_u_iterations(EC, cis_method)
       print_info2(method_name(method; main=false))
-      energs = eom_u_iterations2(EC, method)
+      omegas = eom_u_iterations2(EC, method)
     else
       print_info2(method_name(method; main=false))
-      energs = eom_u_iterations(EC, method)
+      omegas = eom_u_iterations(EC, method)
     end
   else
     if highest_full_exc == 2
       print_info2("EOM-CCS")
-      energs = eom_iterations(EC, ECMethod("EOM-CCS"))
+      omegas = eom_iterations(EC, ECMethod("EOM-CCS"))
       print_info2(method_name(method; main=false))
-      energs = eom_iterations2(EC, method)
+      omegas = eom_iterations2(EC, method)
     else
       print_info2(method_name(method; main=false))
-      energs = eom_iterations(EC, method)
+      omegas = eom_iterations(EC, method)
     end
   end
   energies = OutDict()
   mname = method_name(method; main=false)
-  for (st, en) in enumerate(energs)
+  for (st, en) in enumerate(omegas)
     println("State $st: Excitation energy = $en")
     energies["ω$st"] = (en, "$mname excitation energy for state $st")
   end

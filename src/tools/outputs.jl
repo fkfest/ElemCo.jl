@@ -128,6 +128,7 @@ end
 """
 function output_single_excitation(coef, i, a)
   @printf "  %3i -> %4i: %8.4f \n" i a coef
+  flush(stdout)
 end
 
 end #module

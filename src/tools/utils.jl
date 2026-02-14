@@ -179,7 +179,7 @@ end
 
   Print `info` between two lines.
 
-  If `additional` not empty: additional info after main.
+  If `additional_info` not empty: additional info after main.
 """
 function print_info(info::AbstractString, additional_info::AbstractString="")
   println()
@@ -198,7 +198,7 @@ end
 
   Print secondary `info` between two thin lines.
 
-  If `additional` not empty: additional info after main.
+  If `additional_info` not empty: additional info after main.
 """
 function print_info2(info::AbstractString, additional_info::AbstractString="")
   println()

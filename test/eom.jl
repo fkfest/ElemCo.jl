@@ -18,6 +18,8 @@ epsilon    =   1.e-6
 ω_UCCS_2_test  =  -0.0230285991986571
 ω_RCCS_1_test  =  -0.0328163739213931
 
+geometry = nothing
+basis = nothing
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
 energies = @cc eom-ccsd begin

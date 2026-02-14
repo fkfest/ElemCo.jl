@@ -249,7 +249,7 @@ end
 """
     calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false, with_rhs=true)
 
-Calculate the vector times the Jacobian for the unresticted CCSD or DCSD
+Calculate the vector times the Jacobian for the unrestricted CCSD or DCSD
 equations.
 
 if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
@@ -529,7 +529,7 @@ if `with_rhs` is true, the right-hand side of the Lambda equations is also added
 Return ΔR1a, ΔR1b, R2ab
 """
 function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1b::Matrix{Float64}, 
-          U2a::Array{Float64,4}, U2b::Array{Float64}, U2ab::Array{Float64}, D1a, D1b; dc=false, with_rhs=true) 
+          U2a::Array{Float64,4}, U2b::Array{Float64,4}, U2ab::Array{Float64,4}, D1a, D1b; dc=false, with_rhs=true) 
   t1 = time_ns()
 
   SP = EC.space
