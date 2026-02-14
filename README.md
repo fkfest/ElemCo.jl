@@ -12,7 +12,7 @@ The integrals are obtained from a FCIDUMP file or calculated using an interface 
 | Coupled Cluster | CCSD, RCCSD, UCCSD, DCSD, RDCSD, UDCSD, CCSD(T), RCCSD(T), UCCSD(T), ΛCCSD(T), ΛUCCSD(T), FR-CCSD, FR-DCSD, 2D-CCSD, 2D-DCSD, CCSDT, UCCSDT, DC-CCSDT, UDC-CCSDT, FR-CCSDT, FR-DC-CCSDT, SVD-DF-DCSD, SVD-DC-CCSDT          |
 | CI              | FCI, CIPHI                            |
 | DMRG            | `ITensors.jl` interface               |
-| Excited states  | EOM-CCSD, EOM-DCSD, FCI, CIPHI        |
+| Excited states  | EOM-CCSD, EOM-DCSD, EOM-UCCSD, EOM-RCCSD, EOM-UDCSD, EOM-RDCSD, FCI, CIPHI  |
 
 ## Getting started
 
