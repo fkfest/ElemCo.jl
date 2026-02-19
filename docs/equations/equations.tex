@@ -1,5 +1,6 @@
 \documentclass[a4paper,12pt,oneside]{book}
 \usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{amsfonts}
@@ -181,6 +182,7 @@ integrals with the non-symmetric square root of the inverse,
 and the density-fitted 4-index integrals can be calculated by
 \begin{equation}
   v_{pq}^{rs} \approx \sum_L v_{p}^{rL} v_{q}^{sL}.
+  \label{eq:df_eri}
 \end{equation}
 
 If all integrals are calculated using the density-fitting approximation using \textit{mp2fit}
@@ -1745,6 +1747,385 @@ IAS contribution to the energy,
 \begin{equation}
 \brown{\Delta E_{\mathrm{IAS}}} = \brown{-W^{\spa{t}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{t}}}.
 \end{equation}
+
+\chapter{Tensor Decomposed Coupled Cluster (SVD-CC)}
+\label{ch:svdcc}
+
+In this chapter we describe the tensor decomposed coupled cluster methods 
+implemented in \elemcoil, following the SVD-DC-CCSDT approach of 
+Ref.~\cite{rickert_svd_dc_ccsdt}.
+
+\section{SVD-DC-CCSDT method}
+\subsection{Overview}
+The SVD-DC-CCSDT method combines two key ideas:
+\begin{enumerate}
+\item The distinguishable cluster (DC) approximation applied to the CCSDT triples residual equations,
+which removes the expensive exchange terms while improving accuracy.
+\item A singular value decomposition (SVD) of the triples amplitudes and residuals, which together 
+with the density fitting (or Cholesky) factorization of the electron repulsion integrals 
+reduces the scaling of the method from $\mathcal{O}(N^8)$ to $\mathcal{O}(N^6)$.
+\end{enumerate}
+
+The singles contributions to the triples residuals are implemented using the similarity-transformed Hamiltonian,
+\begin{equation}
+\tilde{H}_N = e^{-\op T_1} \op H_N e^{\op T_1},
+\end{equation}
+which implies dressing of the Fock matrices and the ERI factorization tensors $v_{p}^{qL}$ 
+with the singles amplitudes. The dressed quantities are denoted with a hat.
+
+\subsection{Triples amplitudes decomposition}
+\label{sec:svd_trip_decomp}
+
+The triples amplitudes $T^{ijk}_{abc}$ are decomposed as
+\begin{equation}
+  T^{ijk}_{abc} = T_{XYZ} \, U^{iX}_a U^{jY}_b U^{kZ}_c,
+  \label{eq:trip_decomp}
+\end{equation}
+where $T_{XYZ}$ is a symmetric three-index quantity in the SVD basis and 
+$U^{iX}_a$ are the transformation (compression) matrices connecting the SVD basis ($X,Y,Z$) 
+with pairs of orbital indices (one occupied, one virtual).
+The amplitudes are symmetric with respect to the 
+interchange of SVD indices, i.e., $T_{XYZ} = T_{YXZ} = T_{XZY} = \ldots$
+
+In the SVD-DC-CCSDT method the triples amplitudes are varied directly in the SVD basis, 
+such that the residual $R_{XYZ}$ in the SVD basis goes to zero.
+The $U$-transformation can be applied independently to each SVD index, 
+so that in each diagram only the indices contracted with the Hamiltonian 
+need to be transformed to the orbital basis, while the others remain in the SVD basis. 
+The transformation matrices satisfy $U^{\dagger a}_{iX} U^{iY}_a = \delta_X^Y$.
+
+The factorization of the electron repulsion integrals 
+(cf.\ \eq{eq:df_eri}) is also employed:
+\begin{equation}
+  v_{pq}^{rs} \approx v_{p}^{rL} v_{q}^{sL}.
+  \label{eq:ERIs_fact_svd}
+\end{equation}
+
+\subsection{DC-CCSDT approximation for triples}
+
+The DC approximation to CCSDT modifies the triples residual equations by removing 
+or rescaling certain exchange terms.
+
+\begin{figure}[h]
+  \centering
+  %\captionsetup{width=1.0\linewidth}
+  \includegraphics[width=6cm]{T2T3Diagrams.jpeg}
+  %\rule[0.5em]{23.5em}{0.5pt}
+  \caption{Spin-summed diagrams of $\op T_2\op T_3$ contributions to the triples residuals in CCSDT.}
+\label{fig:T2T3_diagrams}
+\end{figure}
+Classifying the spin-summed $\op T_2\op T_3$ diagrams contributing to the triples residuals 
+into groups A, B, C, and D:
+\begin{itemize}
+\item Diagrams \textbf{A1--A4}: kept unchanged,
+\item Diagrams \textbf{B1--B6}: fully removed,
+\item Diagrams \textbf{C1--C6} and \textbf{D1--D4}: multiplied by $\half$.
+\end{itemize}
+This approximation preserves size-extensivity, particle-hole symmetry, 
+exactness for three-electron (or three-hole) systems, and invariance 
+to rotations within the occupied and virtual spaces.
+
+
+\subsection{Residual equations in the SVD basis}
+\label{sec:svd_residuals}
+
+The bra-projection for the singles and doubles residual equations uses 
+the contravariant CSFs. For the triples, the contravariant CSF is
+\begin{equation}
+  \widetilde{\Phi}_{abc}^{ijk} = \Phi_{abc}^{ijk} - \Phi_{cab}^{ijk}.
+\end{equation}
+Due to the overlap properties of this choice the full triples residual has the structure
+\begin{equation}
+  \bar{R}^{ijk}_{abc} = R^{ijk}_{abc} - R^{ijk}_{cab} = \mathcal{A}(abc,cab)\, R^{ijk}_{abc},
+\end{equation}
+where $\mathcal{A}(abc,cab)F(a,b,c) = F(a,b,c) - F(c,a,b)$.
+Since $R^{ijk}_{abc} = 0$ implies $R^{ijk}_{cab} = 0$, it is sufficient to solve 
+$R^{ijk}_{abc} = 0$ with only half the terms.
+
+\subsubsection{Triples contributions to the singles residual}
+
+The triples contributions to the singles residual read:
+\begin{equation}
+\begin{aligned}
+R_a^i &\leftarrow U_a^{iX} \left[T_{XYZ} \left(2A^{YL} A^{ZL} - B^{YZ}\right)\right]
+- U_a^{jY} \Big[2 {B}_{j}^{iXL} V_{XY}^{L}- G_{jY}^{i}\Big],
+\end{aligned}
+\end{equation}
+with intermediates
+\begin{equation}
+\begin{aligned}
+A^{XL}&={B}_{i}^{iXL}, &{B}_{i}^{jXL} &= v_i^{aL} U_a^{jX},\\
+B^{XY}&={B}_{i}^{jXL} {B}_{j}^{iYL}, 
+&w_k^{dX} &= v_l^{dL} {B}_k^{lXL},\\
+V_{XY}^{L} &= T_{XYZ} A^{ZL}, &G_{jY}^{i} &= T_{dYZ}^{i} w_j^{dZ},\\
+T_{aYZ}^{i} &= T_{XYZ} U_a^{iX}. &
+\end{aligned}
+\end{equation}
+
+\subsubsection{Triples contributions to the doubles residual}
+
+\begin{equation}
+\begin{aligned}
+R_{ab}^{ij} &\leftarrow \sop{ij,ab} \Big\{ 
+- \left(\bar B_a^{iLZ} - B_a^{iLZ}\right) V_{bZ}^{jL}
++U_b^{jZ} \Big[2\left(\bar B_a^{iLY} - B_a^{iLY}\right) V_{YZ}^{L} \\
+& + T_{aYZ}^{i} \left(\hat{f}_k^c U_c^{kY}\right)
+  - T_{XYZ} \left(U_c^{iY}\left(\bar B_a^{kLX} v_k^{cL}\right) 
+- U_a^{kY} \left(B_c^{iLX} v_k^{cL} - \hat{f}_k^c U_c^{iX}\right)\right)\Big]
+ \Big\},
+\end{aligned}
+\end{equation}
+with intermediates
+\begin{equation}
+\begin{aligned}
+B_a^{iLX} &= \hat{v}_j^{iL} U_a^{jX},  &\bar B_a^{iLX} &= \hat{v}_a^{bL} U_b^{iX},\\
+V_{bZ}^{jL} &= {B}_k^{jYL} T_{bYZ}^{k}, &
+\end{aligned}
+\end{equation}
+and the symmetrization operator $\sop{ij,ab}  X_{ab}^{ij} = X_{ab}^{ij} + X_{ba}^{ji}$.
+
+\subsubsection{Triples residual}
+
+The triples residual equations in the SVD basis read:
+\begin{equation}
+  R_{XYZ} = Q_{XYZ} + Q_{YXZ} + Q_{XZY} + Q_{ZYX} + Q_{ZXY} + Q_{YZX}
+   + q_{XYZ} + q_{YXZ} + q_{ZYX}
+\end{equation}
+with the main intermediates
+\begin{equation}
+\begin{aligned}
+  Q_{XYZ} &= U^{\dagger b}_{jY} \Big[T_{bX}^l X_{lZ}^j - X_{bZ}^d T_{dX}^j 
+  +T_{bY'Z}^{l} \left(U_d^{jY'}  \left(v_l^{dL} Y_X^L \right)\right)\Big]
+\end{aligned}
+\end{equation}
+and
+\begin{equation}
+\begin{aligned}
+  q_{XYZ} &= T_{X'YZ} \Big[U^{\dagger a}_{iX} \Big( \left(\hat{f}_l^i + \half v_l^{dL} V_d^{iL}\right)U_a^{lX'}
+  - \left(\hat{f}_a^d - \half v_l^{dL} V_{a}^{lL}\right) U_d^{iX'}\\
+ & + \left(\hat{v}_l^{iL} \hat{v}_a^{dL}\right) U_d^{lX'}\Big)
+ -2 Y_X^L A^{X'L}\Big]
+  - T_{XY'Z'} \left( W_Y^{Y'L} W_Z^{Z'L}\right).
+\end{aligned}
+\end{equation}
+The further intermediates used in these expressions are 
+\begin{equation}
+\begin{aligned}
+X_{bZ}^d &= \hat{v}_b^{dL} Y_Z^L - \hat{f}_l^d T_{bZ}^l 
+ - U^{lX}_{b} \left(v_l^{dL} \tilde V_{ZX}^{L}\right)
+ + \left(\hat v_{lk}^{di} T^{lk}_{ba} - \hat v_{la}^{dc} T^{li}_{bc}\right) U^{\dagger a}_{iZ}
+- \hat v_{lb}^{dc} T_{cZ}^l 
+ + \half T_{bYZ}^{k} w_k^{dY},
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+X_{lZ}^j&= \hat{v}_l^{jL} Y_Z^L
+ + U^{jX}_{d} \left(v_l^{dL} \tilde V_{ZX}^{L}\right) 
+ + \left(\hat v_{la}^{dc} T^{ji}_{dc} - \hat v_{lk}^{di} T^{jk}_{da}\right) U^{\dagger a}_{iZ}
+  - \hat v_{lk}^{dj} T^k_{dZ}
+  - \half G_{lZ}^{j},
+\end{aligned}
+\end{equation}
+and
+\begin{equation}
+\begin{aligned}
+  &V_a^{iL} = v_k^{cL}  \widetilde{T}_{ac}^{ik}, &
+  Y_X^L &= U^{\dagger a}_{iX} \left(\hat{v}_a^{iL} + V_a^{iL} \right),\\
+&T_{aX}^i = U^{\dagger b}_{jX}  T_{ab}^{ij}, &
+\widetilde{T}_{ab}^{ij} &= 2  T_{ab}^{ij} - T_{ba}^{ij},\\
+&\hat v_{la}^{dc} = v_l^{dL} \hat v_a^{cL}, &
+\hat v_{lk}^{di} &= v_l^{dL} \hat v_k^{iL},\\
+&W_{Y}^{Y'L} =  U^{\dagger b}_{jY}  \left(\bar B_b^{jLY'} - B_b^{jLY'}\right), &
+\tilde V_{ZX}^{L} &= V_{ZX}^{L} - \half V_{cX}^{kL} U^{\dagger c}_{kZ}.
+\end{aligned}
+\end{equation}
+
+None of the contractions above involve more than six different indices.
+This means that the tensor decompositions reduce the scaling of the DC-CCSDT method 
+from ${\cal O}(N^8)$ to ${\cal O}(N^6)$, provided the number of SVD basis functions 
+grows linearly with the system size.
+The most expensive terms in the SVD-DC-CCSDT residual equations scale as $N_o^2 N_v N_X^2 N_L$,
+where $N_o$ and $N_v$ are the numbers of occupied and virtual orbitals,
+and $N_X$ and $N_L$ are the numbers of SVD and density-fitting basis functions.
+
+\subsubsection{Projected intermediates}
+
+An additional approximation can be introduced by calculating the $V_{aX}^{iL}$ intermediate 
+in an SVD basis, which reduces the scaling of the most expensive terms to $N_o^2 N_v N_X^3$:
+\begin{equation}
+\begin{aligned}
+  V_{aX}^{iL} &\approx \bar V_{X\tilde Z}^{L} \tilde U^{i\tilde Z}_{a},\\
+  \bar V_{X\tilde Z}^{L} &= \left(\left(\tilde U^{\dagger b}_{j\tilde Z} U^{kY}_{b} \right) T^{j}_{cXY}\right) v_k^{cL}.
+\end{aligned}
+\end{equation}
+The $\tilde Z$ SVD space covers both the triples SVD space (for the $\tilde V_{XZ}^L$ intermediate)
+and the doubles space (for the $\tilde U^{i\tilde Z}_a$ projection in the doubles residual equations).
+It is constructed by expanding the triples SVD space by important orthogonal contributions 
+from the doubles SVD space.
+
+
+\subsection{Construction of the SVD basis}
+\label{sec:svd_basis}
+
+The construction of the singular vectors $U^{iX}_{a}$ must also scale as ${\cal O}(N^6)$.
+This is achieved using a two-step procedure.
+
+\subsubsection{Step 1: Doubles SVD basis}
+
+First, the relevant block of an approximate two-particle density matrix is obtained from 
+converged CCSD doubles amplitudes:
+\begin{equation}
+\mathcal{D}^{aj}_{ib} = T^{\dagger ac}_{ik} T^{jk}_{bc},
+\end{equation}
+and eigendecomposed:
+\begin{equation}
+\mathcal{D}^{aj}_{ib} \approx \bar{U}_{i\tilde{\bar X}}^{\dagger a} \bar{D}_{\tilde{\bar X}}
+\bar{U}^{j\tilde{\bar X}}_{b}.
+\end{equation}
+The SVD basis $\{\tilde{\bar X}\}$ is truncated by disregarding eigenvectors 
+with eigenvalues smaller than a threshold: $\bar{D}_{\tilde{\bar X}} \lt \varepsilon_{T2}$.
+
+The basis is canonicalized by diagonalizing the Fock matrix in the SVD basis:
+\begin{equation}
+f_{\tilde{\bar X}}^{\tilde{\bar Y}}=\bar{U}_{i\tilde{\bar X}}^{\dagger a}
+(\epsilon_a - \epsilon_i)\bar{U}^{i\tilde{\bar Y}}_{a}.
+\end{equation}
+In the basis of its eigenvectors $U_{\tilde{\bar X}}^{\bar{X}}$ the Fock matrix is diagonal, 
+$f^{{\bar X}}_{{\bar Y}}=\epsilon_{\bar X}\delta^{{\bar X}}_{{\bar Y}}$,
+and the complete transformation to the ${\bar X}$-basis is given by
+\begin{equation}
+\bar{U}^{i{\bar X}}_{a}=\bar{U}^{i\tilde{\bar X}}_{a}\bar{U}_{\tilde{\bar X}}^{\bar{X}}.
+\end{equation}
+
+\subsubsection{Step 2: Triples SVD basis via CC3-type density matrix}
+
+Having the transformation matrices to the doubles SVD basis, 
+a partially decomposed CC3-type triples residual is computed:
+\begin{equation}
+\begin{aligned}
+  R^i_{a\bar X\bar Y} &= \left( X_{b\bar X}^{jL} \bar{U}^{\dagger b}_{j \bar Y} \right) \hat{v}_a^{iL} 
+  + V_{a \bar X}^d T^i_{d \bar Y} - V^i_{l \bar X} T^l_{a \bar Y}
+  + E^d_{l \bar X \bar Y} T_{ad}^{il},
+\end{aligned}
+\end{equation}
+with intermediates
+\begin{equation}
+\begin{aligned}
+  X_{b\bar X}^{jL} &= T^j_{c\bar X} \hat v_{b}^{cL} - T^l_{b\bar X} \hat v_{l}^{jL}, &
+  T_{a \bar X}^i &= \bar{U}^{\dagger b}_{j \bar X} T^{ij}_{ab}, \\
+  E^d_{l \bar X \bar Y} &= V_{a \bar X}^d \bar{U}_{l \bar Y}^{\dagger a} - V_{l \bar X}^{i} \bar{U}_{i \bar Y}^{\dagger d}, &
+  W_{\bar X}^L &= \hat{v}_c^{kL} \bar{U}^{\dagger c}_{k \bar X}, \\
+  V^d_{a \bar X} &= \hat{v}_a^{dL} W^L_{\bar X}, &
+  V^j_{l \bar X} &= \hat{v}^{jL}_l W^L_{\bar X}.
+\end{aligned}
+\end{equation}
+The last term of the residual scales as $N^6$, while all other terms scale as $N^5$.
+Since the SVD basis is canonicalized, the partially transformed triples amplitudes 
+are readily available:
+\begin{equation}
+T^i_{a\bar X\bar Y} = - \frac{R^i_{a\bar X\bar Y} + R^i_{a\bar Y\bar X}}{\epsilon_{\bar X} + \epsilon_{\bar Y} + \epsilon_{a} - \epsilon_{i}}.
+\end{equation}
+The triples two-particle density matrix is then computed as
+\begin{equation}
+  D^{aj}_{ib} = T^{\dagger a \bar X\bar Y}_{i} T_{b \bar X\bar Y}^{j}
+\end{equation}
+at $N^6$ cost.
+
+The triples amplitudes in the SVD basis implicitly include nonphysical 
+components with triply repeated occupied orbital indices (e.g., $T_{abc}^{iii}$),
+which would cancel in case of a full SVD basis. 
+Their contributions to the density matrix can be explicitly isolated and removed:
+\begin{equation}
+\begin{aligned}
+  \Delta D^{aj}_{ib} &= (T^{\dagger a}_{i \bar X \bar Y} \mathcal{U}^{\bar X}_{i \bar X'} \mathcal{U}^{\bar Y}_{i\bar Y'}) T^{j \bar X' \bar Y'}_{b},\\
+  \mathcal{U}^{\bar X }_{i\bar X'} &= \bar U^{\dagger a}_{i \bar X'} \bar U^{i \bar X}_{a},\\
+  \widetilde{D}^{aj}_{ib} &= D^{aj}_{ib} - \left(1 - \half\delta^i_j \right) \sop{ij,ab} \Delta D^{aj}_{ib}.
+\end{aligned}
+\end{equation}
+
+Finally, the actual SVD basis for the triples in DC-CCSDT is obtained by 
+diagonalizing the corrected triples two-electron density matrix:
+\begin{equation}
+\widetilde{D}^{aj}_{ib} \approx U^{\dagger a}_{i \tilde{X}} D_{\tilde{X}}
+U^{j\tilde{X}}_{b}.
+\end{equation}
+Eigenvectors with eigenvalues smaller than $\varepsilon_{T3}$ are discarded.
+The SVD basis is again canonicalized by diagonalizing the Fock matrix,
+\begin{equation}
+f_{\tilde{X}}^{\tilde{Y}}=U_{i\tilde{X}}^{\dagger a}
+(\epsilon_a - \epsilon_i)U^{i\tilde{Y}}_{a},
+\end{equation}
+and the final SVD transformation matrices are
+\begin{equation}
+U^{iX}_{a}=U^{i\tilde{X}}_{a} U_{\tilde{X}}^{X}.
+\end{equation}
+
+\subsubsection{Additional SVD basis for the projection approximation}
+
+The additional SVD basis for the projection approximation 
+is constructed by half-transforming the contravariant doubles amplitudes 
+$\widetilde{T}^{ij}_{ab}$ to the SVD basis, projecting the part not covered 
+by the triples SVD space:
+\begin{equation}
+  \Delta \widetilde{T}^{ij}_{ab} = \widetilde{T}^{ij}_{ab} - U^{iX}_{a} U^{\dagger c}_{kX} \widetilde{T}^{kj}_{cb},
+\end{equation}
+computing SVD of $\Delta \widetilde{T}^{ij}_{ab}$, and selecting the most important left vectors 
+$\Delta U^{i\bar X}_a$, which are then added to the triples SVD basis.
+A symmetric orthogonalization of the combined space is performed at the end.
+
+\subsection{Amplitude update and convergence}
+
+The eigenvalues $\epsilon_{X}$ of the Fock matrix in the SVD basis are employed 
+in the amplitude update, carried out directly in the SVD basis:
+\begin{equation}
+\Delta T_{XYZ} = -\frac{R_{XYZ}}{\epsilon_X + \epsilon_Y + \epsilon_Z}.
+\end{equation}
+To accelerate convergence, DIIS is employed for singles, doubles, and triples amplitude vectors.
+
+\subsection{Truncation thresholds}
+
+The truncation of the SVD spaces is governed by two tolerances:
+$\varepsilon_{T3}$ for the triples and $\varepsilon_{T2}$ for the auxiliary 
+doubles SVD. 
+These are linked by a weight factor $w_{T2}$:
+\begin{equation}
+\varepsilon_{T2}=w_{T2}\,\varepsilon_{T3}.
+\end{equation}
+The choice of $\varepsilon_{T2}$ has very little effect on the results provided 
+it is not larger than $\varepsilon_{T3}$.
+
+A hybrid approach with an SVD-error correction at the CCSD(T) level can be used 
+to accelerate convergence with the SVD truncation threshold:
+\begin{equation}
+  E_{\textrm{DC-CCSDT}} \approx E_{\textrm{SVD-DC-CCSDT}}  + \delta_{\rm SVD},
+\end{equation}
+with
+\begin{equation}
+  \delta_{\rm SVD}=E_{\textrm{CCSD(T)}} - E_{\textrm{SVD-CCSD(T)}}.
+\end{equation}
+
+
+\subsection{Correlation energy}
+The correlation energy is calculated using the singles and doubles amplitudes:
+\begin{equation}
+E= \left(2 T_a^i T_b^j - T_b^i T_a^j\right) v_{ij}^{ab} + 2 T_a^i f^a_i
++ (2T_{ab}^{ij} - T_{ba}^{ij}) v_{ij}^{ab}.
+\end{equation}
+
+\subsection{Scaling summary}
+\begin{itemize}
+\item \textbf{Full DC-CCSDT}: $\mathcal{O}(N^8)$.
+\item \textbf{SVD-DC-CCSDT}: $\mathcal{O}(N^6)$, provided the number of SVD basis functions 
+grows linearly with system size (confirmed by tests on alkane chains).
+\item The most expensive terms in SVD-DC-CCSDT scale as $N_o^2 N_v N_X^2 N_L$.
+Assuming $N_v \approx N_X$, these terms are only a factor of $N_L/N_v$ more expensive than the 
+most expensive term in CCSD.
+\item The 4-external ladder diagram of the triples is reduced to $N^5$.
+\item The SVD-error and the size of the SVD bases scale linearly with system size, 
+  confirming size extensivity.
+\end{itemize}
 
 
 \chapter{Full Configuration Interaction and Selected CI Methods}
