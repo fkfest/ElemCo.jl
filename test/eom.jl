@@ -2,7 +2,7 @@ using ElemCo
 using ElemCo.ECInfos
 
 @testset "H2O EOM Test" begin
-epsilon    =   1.e-6
+epsilon    =   5.e-6
 ω_CCSD_1_test  =  0.05718164988543591
 ω_CCSD_2_test  =  0.08132557638663858
 ω_DCSD_1_test  =  0.051551633211952434
