@@ -412,7 +412,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   end
   t1 = print_time(EC, t1, "MP2 from 3idx", 2)
   flush_output()
-  if EC.options.cc.use_full_t2
+  if EC.options.cc.use_full_t2 || !EC.options.cc.decompose_using_mp2
     T2 = try2start_doubles(EC)
     if size(T2) != (nvirt,nvirt,nocc,nocc)
       T2 = calc_MP2_amplitudes_from_3idx(EC, voL, shifti)
@@ -447,17 +447,22 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   t1 = print_time(EC, t1, "SVD decomposition", 2)
   # UaiX = calc_3idx_svd_decomposition(EC, voL, tol2) 
   ϵX, UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  # calculate rhs: v_{aX}^{i} = v_a^{iL} 𝟙_{LL} v_b^{jL} (U_b^{jX})^† 
-  @mtensor voX[a,i,X] := voL[a,i,L] * (voL[b,j,L] * UaiX[b,j,X])
-  # calculate half-decomposed imaginary-shifted MP2 amplitudes 
-  # T^i_{aX} = -v_{aX}^{i} * (ϵ_a - ϵ_i + ϵ_X)/((ϵ_a - ϵ_i - ϵ_X)^2 + ω)
-  # TODO: use a better method than MP2
-  for I ∈ CartesianIndices(voX)
-    a,i,X = Tuple(I)
-    den = ϵX[X] + ϵv[a] - ϵo[i]
-    voX[I] *= -den/(den^2 + shifti)
+  if EC.options.cc.decompose_using_mp2
+    # calculate rhs: v_{aX}^{i} = v_a^{iL} 𝟙_{LL} v_b^{jL} (U_b^{jX})^† 
+    @mtensor voX[a,i,X] := voL[a,i,L] * (voL[b,j,L] * UaiX[b,j,X])
+    # calculate half-decomposed imaginary-shifted MP2 amplitudes 
+    # T^i_{aX} = -v_{aX}^{i} * (ϵ_a - ϵ_i + ϵ_X)/((ϵ_a - ϵ_i - ϵ_X)^2 + ω)
+    for I ∈ CartesianIndices(voX)
+      a,i,X = Tuple(I)
+      den = ϵX[X] + ϵv[a] - ϵo[i]
+      voX[I] *= -den/(den^2 + shifti)
+    end
+    t1 = print_time(EC, t1, "half-decomposed MP2", 2)
+  else
+    T2 = calc_SVD_DCD_doubles1(EC, UaiX, ϵX)
+    @mtensor voX[a,i,X] := T2[a,b,i,j] * UaiX[b,j,X]
+    t1 = print_time(EC, t1, "SVD-DCD(3) doubles", 2)
   end
-  t1 = print_time(EC, t1, "half-decomposed MP2", 2)
   naux = size(voX, 3)
   # decompose T^i_{aX}
   UaiX = svd_decompose(reshape(voX, (nvirt*nocc,naux)), nvirt, nocc, sqrt(EC.options.cc.ampsvdtol))
@@ -562,6 +567,44 @@ function calc_3idx_svd_decomposition(EC::ECInfo, voL::AbstractArray, tol2)
   return UaiX
 end
 
+"""
+    calc_SVD_DCD_doubles1(EC::ECInfo, UaiX, ϵX)
+
+Perform one SVD-DCD iteration for the doubles amplitudes in the MP2 SVD space.
+
+This routine is used in the second decomposition step of the SVD-DCD scheme. It
+takes the SVD space from MP2 doubles amplitudes ``U^{iX}_a`` and corresponding
+"orbital" energies ``ϵ_X``, constructs the necessary pseudo-dressed
+intermediates, and performs a single residual evaluation and amplitude update
+for the doubles amplitudes ``T^{ij}_{ab}``.
+
+As part of the iteration, the coupled-cluster options
+`EC.options.cc.project_vovo_t2` and `EC.options.cc.use_projx` are temporarily
+modified (to use the amplitude projection in the ``vovo`` block and to disable `projx`,
+respectively); their original values are restored before returning.
+
+# Returns
+- `T2`: Updated doubles amplitudes ``T^{ij}_{ab}`` after one SVD-DCD iteration.
+"""
+function calc_SVD_DCD_doubles1(EC::ECInfo, UaiX, ϵX)
+  println("Calculate SVD DCD doubles decomposition")
+  project_vovo_t2_save = EC.options.cc.project_vovo_t2
+  EC.options.cc.project_vovo_t2 = 1
+  use_projx_save = EC.options.cc.use_projx
+  EC.options.cc.use_projx = false
+  save!(EC, "C_voX", UaiX)
+  save!(EC, "e_X", ϵX)
+  T1 = zeros(0,0)
+  save_pseudodressed_3idx(EC)
+  save_pseudo_dress_df_fock(EC)
+  gen_vₓˣᴸ(EC)
+  T2 = load4idx(EC, "T_vvoo")
+  R1, R2 = calc_svd_dcsd_residual(EC, T1, T2)
+  T2 .+= update_deco_doubles(EC, R2)
+  EC.options.cc.project_vovo_t2 = project_vovo_t2_save
+  EC.options.cc.use_projx = use_projx_save 
+  return T2
+end
 
 """
     calc_MP2_from_3idx(EC::ECInfo, voL::AbstractArray, ishift)

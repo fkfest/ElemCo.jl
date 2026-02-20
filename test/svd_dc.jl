@@ -3,15 +3,15 @@ using ElemCo
 @testset "SVD-DCSD Closed-Shell Test" begin
 epsilon    =  1.e-6
 EHF_test   =      -76.02145513971418
-ESVDDCSD_test =   -0.220653574525 + EHF_test
-ESVDDCD_test =   -76.241081662927
+ESVDDCSD_test =  -0.220383025878 + EHF_test
+ESVDDCD_test =   -76.240828403337
 ESVDDCSD_px_test =-0.220822645383 + EHF_test
-ESVDDCSD_ft_test =-0.220276034932 + EHF_test
-ESVDDCSD_ft0_test =-0.220555023439 + EHF_test
-ESVDDCSD_ft1_test =-0.220407737253 + EHF_test
-ESVDDCSD_ft2_test =-0.220275956379 + EHF_test
-ESVDDCSD_ft3_test =-0.220276732942 + EHF_test
-ESVDDCSD_fd_test =-0.220141774414 + EHF_test
+ESVDDCSD_ft_test =-0.220499787560 + EHF_test
+ESVDDCSD_ft0_test =-0.220576955626 + EHF_test
+ESVDDCSD_ft1_test =-0.220583617317 + EHF_test
+ESVDDCSD_ft2_test =-0.220448606599 + EHF_test
+ESVDDCSD_ft3_test =-0.220504551848 + EHF_test
+ESVDDCSD_fd_test =-0.220041584386 + EHF_test
 
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -32,7 +32,7 @@ energies = @dfcc svd-dcd
 @test abs(energies["SVD-DCD"]-ESVDDCD_test) < epsilon
 
 energies = @dfcc svd-dcsd begin
-  @set cc use_projx=true
+  @set cc use_projx=true decompose_using_mp2=true
 end
 @test abs(energies["SVD-DCSD"]-ESVDDCSD_px_test) < epsilon
 

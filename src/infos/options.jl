@@ -186,6 +186,9 @@ end
   """`⟨2⟩` what to project in ``v_{ak}^{ci} T^{kj}_{cb}`` in SVD-DCSD:
   0: both, 1: amplitudes, 2: residual, 3: robust fit. """
   project_vovo_t2::Int = 2
+  """`⟨false⟩` use MP2 amplitudes for decomposition in SVD-DCSD. 
+  If `false`, one iteration of SVD-DCD is used for decomposition instead. """
+  decompose_using_mp2::Bool = false
   """`⟨false⟩` decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
   """`⟨"cc_amplitudes"⟩` main part of filename for start amplitudes. 
