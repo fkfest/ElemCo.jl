@@ -187,7 +187,7 @@ end
   0: both, 1: amplitudes, 2: residual, 3: robust fit. """
   project_vovo_t2::Int = 2
   """`⟨false⟩` use MP2 amplitudes for decomposition in SVD-DCSD. 
-  If `false`, the amplitudes from 1 step of SVD-DCD are used for decomposition. """
+  If `false`, one iteration of SVD-DCD is used for decomposition instead. """
   decompose_using_mp2::Bool = false
   """`⟨false⟩` decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
