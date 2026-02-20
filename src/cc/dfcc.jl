@@ -461,6 +461,7 @@ function calc_doubles_decomposition_without_doubles(EC::ECInfo)
   else
     T2 = calc_SVD_DCD_doubles1(EC, UaiX, ϵX)
     @mtensor voX[a,i,X] := T2[a,b,i,j] * UaiX[b,j,X]
+    t1 = print_time(EC, t1, "SVD-DCD(3) doubles", 2)
   end
   naux = size(voX, 3)
   # decompose T^i_{aX}
