@@ -570,12 +570,21 @@ end
 """
     calc_SVD_DCD_doubles1(EC::ECInfo, UaiX, ϵX)
 
-  Calculate one iteration of DCD. 
+Perform one SVD-DCD iteration for the doubles amplitudes in the MP2 SVD space.
 
-Required for the second decomposition step. A single SVD-DCD iteration is performed with 
-the decomposed doubles amplitudes (using MP2 SVD space).
+This routine is used in the second decomposition step of the SVD-DCD scheme. It
+takes the SVD space from MP2 doubles amplitudes ``U^{iX}_a`` and corresponding
+"orbital" energies ``ϵ_X``, constructs the necessary pseudo-dressed
+intermediates, and performs a single residual evaluation and amplitude update
+for the doubles amplitudes ``T^{ij}_{ab}``.
 
-Returns the updated doubles amplitudes ``T^{ij}_{ab}``.
+As part of the iteration, the coupled-cluster options
+`EC.options.cc.project_vovo_t2` and `EC.options.cc.use_projx` are temporarily
+modified (to use the amplitude projection in the ``vovo`` block and to disable `projx`,
+respectively); their original values are restored before returning.
+
+# Returns
+- `T2`: Updated doubles amplitudes ``T^{ij}_{ab}`` after one SVD-DCD iteration.
 """
 function calc_SVD_DCD_doubles1(EC::ECInfo, UaiX, ϵX)
   println("Calculate SVD DCD doubles decomposition")
