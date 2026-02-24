@@ -1,52 +1,8 @@
 function dcccsdt_triples!(EC::ECInfo, R3a, R3b, R3aab, R3abb, T2a, T2b, T2ab, T3a, T3b, T3aab, T3abb, fij, fab, fIJ, fAB, fai, fAI, fia, fIA)
-d_vvvv = load4idx(EC,"d_vvvv")
-@mtensoropt begin
-X[c,d,A,i,j,I] := d_vvvv[c,d,a,b] * T3aab[a,b,A,i,j,I]
-R3aab[c,d,A,i,j,I] += 0.5 * X[c,d,A,i,j,I]
-R3aab[c,d,A,i,j,I] -= 0.5 * X[d,c,A,i,j,I]
-end
-@mtensoropt begin
-X[c,d,e,i,j,k] := d_vvvv[c,d,a,b] * T3a[e,a,b,i,j,k]
-R3a[c,d,e,i,j,k] += 0.5 * X[c,d,e,i,j,k]
-R3a[c,e,d,i,j,k] -= 0.5 * X[c,d,e,i,j,k]
-R3a[c,d,e,i,j,k] -= 0.5 * X[d,c,e,i,j,k]
-R3a[e,c,d,i,j,k] += 0.5 * X[c,d,e,i,j,k]
-R3a[c,e,d,i,j,k] += 0.5 * X[d,c,e,i,j,k]
-R3a[e,c,d,i,j,k] -= 0.5 * X[d,c,e,i,j,k]
-end
-d_vvvv = nothing
-d_VVVV = load4idx(EC,"d_VVVV")
-@mtensoropt begin
-X[a,C,D,i,I,J] := d_VVVV[D,C,B,A] * T3abb[a,A,B,i,I,J]
-R3abb[a,C,D,i,I,J] += 0.5 * X[a,C,D,i,I,J]
-R3abb[a,C,D,i,I,J] -= 0.5 * X[a,D,C,i,I,J]
-end
-@mtensoropt begin
-X[C,D,E,I,J,K] := d_VVVV[D,C,B,A] * T3b[E,A,B,I,J,K]
-R3b[C,D,E,I,J,K] += 0.5 * X[C,D,E,I,J,K]
-R3b[C,E,D,I,J,K] -= 0.5 * X[C,D,E,I,J,K]
-R3b[C,D,E,I,J,K] -= 0.5 * X[D,C,E,I,J,K]
-R3b[E,C,D,I,J,K] += 0.5 * X[C,D,E,I,J,K]
-R3b[C,E,D,I,J,K] += 0.5 * X[D,C,E,I,J,K]
-R3b[E,C,D,I,J,K] -= 0.5 * X[D,C,E,I,J,K]
-end
-d_VVVV = nothing
-d_vVvV = load4idx(EC,"d_vVvV")
-@mtensoropt begin
-X[b,c,B,i,j,I] := d_vVvV[b,B,a,A] * T3aab[c,a,A,i,j,I]
-R3aab[b,c,B,i,j,I] -= 0.5 * X[b,c,B,i,j,I]
-R3aab[c,b,B,i,j,I] += 0.5 * X[b,c,B,i,j,I]
-R3aab[b,c,B,i,j,I] += 0.5 * X[b,c,B,j,i,I]
-R3aab[c,b,B,i,j,I] -= 0.5 * X[b,c,B,j,i,I]
-end
-@mtensoropt begin
-X[b,B,C,i,I,J] := d_vVvV[b,B,a,A] * T3abb[a,C,A,i,I,J]
-R3abb[b,B,C,i,I,J] -= 0.5 * X[b,B,C,i,I,J]
-R3abb[b,C,B,i,I,J] += 0.5 * X[b,B,C,i,I,J]
-R3abb[b,B,C,i,I,J] += 0.5 * X[b,B,C,i,J,I]
-R3abb[b,C,B,i,I,J] -= 0.5 * X[b,B,C,i,J,I]
-end
-d_vVvV = nothing
+triples_4ext_aa!(EC, R3a, R3aab, T3a, T3aab)
+triples_4ext_bb!(EC, R3b, R3abb, T3b, T3abb)
+triples_4ext_aab_ab!(EC, R3aab, T3aab)
+triples_4ext_abb_ab!(EC, R3abb, T3abb)
 d_vvvo = load4idx(EC,"d_vvvo")
 @mtensoropt begin
 X[b,c,A,i,j,I] := d_vvvo[c,b,a,i] * T2ab[a,A,j,I]

@@ -1616,6 +1616,48 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
 end
 
 """
+    cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
+
+  Calculate the 4-external (and some more) contribution to the CCSD residuals. 
+  
+  `R1` and `R2` are the singles and doubles residuals to be updated.
+  `T1` and `T2` are the singles and doubles amplitudes.
+  `Rot` is the rotation matrix for orbital optimization (if any).
+"""
+function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
+  SP = EC.space
+  norb = n_orbs(EC)
+  int2 = integ2_ss(EC.fd)
+  # last two indices of integrals are stored as upper triangular 
+  tripp = uppertriangular_cut(norb)
+  D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
+  # <pq|rs> D^ij_rs
+  @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
+  if length(Rot) > 0 
+    @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
+  end
+  D2 = nothing
+  # symmetrize K2
+  @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
+  rK2pq = nothing
+  @views R2 .+= K2pq[SP['v'],SP['v'],:,:]
+  if length(T1) > 0
+    @mtensor begin
+      R2[a,b,i,j] -= K2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
+      R2[a,b,i,j] -= K2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
+      R2[a,b,i,j] += (K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k]) * T1[b,l]
+      # singles residual contributions
+      R1[a,i] +=  2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
+      x1[k,i] := 2.0 * K2pq[SP['o'],SP['o'],:,:][k,l,i,l] - K2pq[SP['o'],SP['o'],:,:][k,l,l,i]
+      R1[a,i] -= x1[k,i] * T1[a,k]
+    end
+  end
+  x1 = nothing
+  K2pq = nothing
+end
+
+
+"""
     calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, qv=false, R=zeros(Float64,0,0))
 
   Calculate CCSD or DCSD closed-shell residual.
@@ -1684,33 +1726,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   @mtensor R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
   t1 = print_time(EC,t1,"I_klij T^kl_ab",2)
   if EC.options.cc.use_kext
-    int2 = integ2_ss(EC.fd)
-    # last two indices of integrals are stored as upper triangular 
-    tripp = uppertriangular_cut(norb)
-    D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
-    # <pq|rs> D^ij_rs
-    @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
-    if length(Rot) > 0 
-      @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
-    end
-    D2 = nothing
-    # symmetrize K2
-    @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
-    rK2pq = nothing
-    R2 += K2pq[SP['v'],SP['v'],:,:]
-    if length(T1) > 0
-      @mtensor begin
-        R2[a,b,i,j] -= K2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
-        R2[a,b,i,j] -= K2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
-        R2[a,b,i,j] += (K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k]) * T1[b,l]
-        # singles residual contributions
-        R1[a,i] +=  2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
-        x1[k,i] := 2.0 * K2pq[SP['o'],SP['o'],:,:][k,l,i,l] - K2pq[SP['o'],SP['o'],:,:][k,l,l,i]
-        R1[a,i] -= x1[k,i] * T1[a,k]
-      end
-    end
-    x1 = nothing
-    K2pq = nothing
+    cc_kext!(EC, R1, R2, T1, T2, Rot)
     t1 = print_time(EC,t1,"kext",2)
   else
     if !EC.options.cc.calc_d_vvvv

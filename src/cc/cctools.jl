@@ -34,6 +34,8 @@ export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
 export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
 export calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot
 export triples_4ext!
+export triples_4ext_aa!, triples_4ext_bb!
+export triples_4ext_aab_ab!, triples_4ext_abb_ab!
 export project_amplitudes, check_projection_rank
 export dump_wavefunction_with_amplitudes!
 export dump_wavefunction_with_determinants!, try_fetch_starting_determinants
@@ -1058,12 +1060,12 @@ function triples_4ext!(EC::ECInfo, R3, T3)
   d_vvvv = load4idx(EC,"d_vvvv")
   diagindx = [CartesianIndex(i,i) for i in 1:nvirt]
   d_vvvv[:,:,diagindx] *= 0.5
-  trivv = [CartesianIndex(i,j) for j in 1:nvirt for i in 1:j]
+  trivv = uppertriangular_cut(nvirt)
   d_vvvv = d_vvvv[:,:,trivv]
   X3 = Array{Float64}(undef, nvirt, nvirt, nvirt, nocc, nocc)
   T3k = Array{Float64}(undef, length(trivv), nvirt, nocc, nocc)
   for k = 1:nocc
-    T3k .= T3[trivv,:,:,:,k]
+    T3k .= @view T3[trivv,:,:,:,k]
     @mtensor X3[a,b,c,i,j] = d_vvvv[a,b,x] * T3k[x,c,i,j]
     vR3 = selectdim(R3, 6, k)
     @mtensor vR3[a,b,c,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
@@ -1073,6 +1075,201 @@ function triples_4ext!(EC::ECInfo, R3, T3)
     @mtensor vR3[c,a,b,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
   end
   return R3
+end
+
+"""
+    antisymmetrize_34!(d, trivv)
+
+  Antisymmetrize dims 3 and 4 of `d` in-place and compress to triangular.
+  Returns `d[:,:,trivv]` where `d[p,q,a,b] → d[p,q,a,b] - d[p,q,b,a]` for `a < b`.
+"""
+function antisymmetrize_34!(d, trivv)
+  nv = size(d, 3)
+  for b in 1:nv, a in 1:b-1
+    @views d[:,:,a,b] .-= d[:,:,b,a]
+  end
+  return d[:,:,trivv]
+end
+
+"""
+    triples_4ext_aa!(EC::ECInfo, R3a, R3aab, T3a, T3aab)
+
+  Calculate αα 4-external contractions with triples amplitudes
+  for the unrestricted case.
+  Uses antisymmetrized integrals ``\\langle cd||ab\\rangle`` compressed to ``a<b``.
+
+  ``R^{ijk}_{cde} += \\sum_{a<b} \\langle cd||ab\\rangle T^{ijk}_{eab}``
+  ``R^{ijK}_{cdA} += \\sum_{a<b} \\langle cd||ab\\rangle T^{ijK}_{abA}``
+"""
+function triples_4ext_aa!(EC::ECInfo, R3a, R3aab, T3a, T3aab)
+  nva = size(T3a, 1)
+  noa = size(T3a, 4)
+  nvb = size(T3aab, 3)
+  nob = size(T3aab, 6)
+  d_vvvv = load4idx(EC, "d_vvvv")
+  # d_vvvv[c,d,a,b]: antisymmetrize in (a,b) = dims (3,4) and compress to a<b
+  trivv = strict_uppertriangular_cut(nva)
+  ntri = length(trivv)
+  if ntri == 0
+    return
+  end
+  d_anti = antisymmetrize_34!(d_vvvv, trivv)
+  d_vvvv = nothing
+  # d_anti[c,d,x] is antisymmetric in (c,d) due to exchange symmetry.
+  # Original: X[c,d,e,...] = Σ_{a,b} d[c,d,a,b]*T3[e,a,b,...] = Σ_x d_anti[c,d,x]*T3_comp[e,x,...]
+  # R3 accumulation simplifies from 0.5*(X - X[d↔c]) to X (since X[d,c,...] = -X[c,d,...])
+
+  # --- T3a: loop over k ---
+  X3 = Array{Float64}(undef, nva, nva, nva, noa, noa)
+  T3k = Array{Float64}(undef, ntri, nva, noa, noa)
+  for k in 1:noa
+    T3k .= @view T3a[trivv,:,:,:,k]
+    @mtensor X3[c,d,e,i,j] = d_anti[c,d,x] * T3k[x,e,i,j]
+    vR3 = selectdim(R3a, 6, k)
+    @mtensor begin
+      vR3[c,d,e,i,j] += X3[c,d,e,i,j]
+      vR3[c,e,d,i,j] -= X3[c,d,e,i,j]
+      vR3[e,c,d,i,j] += X3[c,d,e,i,j]
+    end
+  end
+
+  # --- T3aab: loop over I ---
+  X3aab = Array{Float64}(undef, nva, nva, nvb, noa, noa)
+  T3I = Array{Float64}(undef, ntri, nvb, noa, noa)
+  for I in 1:nob
+    T3I .= @view T3aab[trivv,:,:,:,I]
+    @mtensor X3aab[c,d,A,i,j] = d_anti[c,d,x] * T3I[x,A,i,j]
+    vR3 = selectdim(R3aab, 6, I)
+    @mtensor vR3[c,d,A,i,j] += X3aab[c,d,A,i,j]
+  end
+  return
+end
+
+"""
+    triples_4ext_bb!(EC::ECInfo, R3b, R3abb, T3b, T3abb)
+
+  Calculate ββ 4-external contractions with triples amplitudes
+  for the unrestricted case.
+  Uses antisymmetrized integrals ``\\langle CD||AB\\rangle`` compressed to ``A<B``.
+
+  ``R^{IJK}_{CDE} += \\sum_{A<B} \\langle CD||AB\\rangle T^{IJK}_{EAB}``
+  ``R^{iIJ}_{aCB} += \\sum_{A<B} \\langle CD||AB\\rangle T^{iIJ}_{aAB}``
+"""
+function triples_4ext_bb!(EC::ECInfo, R3b, R3abb, T3b, T3abb)
+  nvb = size(T3b, 1)
+  nob = size(T3b, 4)
+  nva = size(T3abb, 1)
+  noa = size(T3abb, 4)
+  d_VVVV = load4idx(EC, "d_VVVV")
+  # d_VVVV[D,C,B,A]: permute to [C,D,A,B] so contracted pair (A,B) is at dims (3,4)
+  # and free pair (C,D) is at dims (1,2), matching the αα convention.
+  # Exchange symmetry: d[D,C,B,A] = d[C,D,A,B], so this is just a symmetry.
+  d_VVVV = permutedims(d_VVVV, (2,1,4,3))
+  # Now d_VVVV[C,D,A,B]: antisymmetrize in (A,B) = dims (3,4) and compress to A<B
+  trivv = strict_uppertriangular_cut(nvb)
+  ntri = length(trivv)
+  if ntri == 0
+    return
+  end
+  d_anti = antisymmetrize_34!(d_VVVV, trivv)
+  d_VVVV = nothing
+  # d_anti[C,D,x] with x = CI(A,B) for A<B. Antisymmetric in (C,D).
+  # Now the structure is identical to the αα case.
+
+  # --- T3b: loop over K ---
+  X3 = Array{Float64}(undef, nvb, nvb, nvb, nob, nob)
+  T3k = Array{Float64}(undef, ntri, nvb, nob, nob)
+  for K in 1:nob
+    T3k .= @view T3b[trivv,:,:,:,K]
+    @mtensor X3[C,D,E,I,J] = d_anti[C,D,x] * T3k[x,E,I,J]
+    vR3 = selectdim(R3b, 6, K)
+    @mtensor begin
+      vR3[C,D,E,I,J] += X3[C,D,E,I,J]
+      vR3[C,E,D,I,J] -= X3[C,D,E,I,J]
+      vR3[E,C,D,I,J] += X3[C,D,E,I,J]
+    end
+  end
+
+  # --- T3abb: loop over i ---
+  X3abb = Array{Float64}(undef, nvb, nvb, nva, nob, nob)
+  T3i = Array{Float64}(undef, ntri, nva, nob, nob)
+  for i in 1:noa
+    for (idx, ci) in enumerate(trivv)
+      T3i[idx, :, :, :] .= @view T3abb[:, ci[1], ci[2], i, :, :]
+    end
+    @mtensor X3abb[C,D,a,I,J] = d_anti[C,D,x] * T3i[x,a,I,J]
+    vR3 = selectdim(R3abb, 4, i)
+    @mtensor vR3[a,C,D,I,J] += X3abb[C,D,a,I,J]
+  end
+end
+
+"""
+    triples_4ext_aab_ab!(EC::ECInfo, R3aab, T3aab)
+
+  Calculate αβ 4-external contraction of ``d_{vVvV}`` with ``T^{ijK}_{abC}``
+  for the unrestricted case.
+  No integral compression (different-spin contracted indices), but loops over
+  one occupied index to reduce intermediate size.
+
+  ``R^{ijK}_{bcB} -= X_{bcB}^{ijK} - X_{cbB}^{ijK}``
+  where ``X_{bcB}^{ijK} = \\sum_{a,A} \\langle bB|aA\\rangle T^{ijK}_{caA}``
+"""
+function triples_4ext_aab_ab!(EC::ECInfo, R3aab, T3aab)
+  nva = size(T3aab, 1)
+  nvb = size(T3aab, 3)
+  noa = size(T3aab, 4)
+  nob = size(T3aab, 6)
+  d_vVvV = load4idx(EC, "d_vVvV")
+  # d_vVvV[b,B,a,A]: contracted (a,A) at dims (3,4), free (b,B) at dims (1,2)
+  # Loop over I (β occ) to reduce intermediate
+  X3 = Array{Float64}(undef, nva, nva, nvb, noa, noa)
+  for I in 1:nob
+    vT3 = @view T3aab[:,:,:,:,:,I]
+    @mtensor X3[b,c,B,i,j] = d_vVvV[b,B,a,A] * vT3[c,a,A,i,j]
+    vR3 = selectdim(R3aab, 6, I)
+    # Original: R3 -= 0.5*X[b,c,...] + 0.5*X[c,b,...] + 0.5*X[b,c,...,j,i] - 0.5*X[c,b,...,j,i]
+    # X[b,c,B,j,i] = -X[b,c,B,i,j] by T3aab antisymmetry in (i,j)
+    # Combined: R3[b,c,B,...] -= X, R3[c,b,B,...] += X
+    @mtensor begin
+      vR3[b,c,B,i,j] -= X3[b,c,B,i,j]
+      vR3[c,b,B,i,j] += X3[b,c,B,i,j]
+    end
+  end
+  d_vVvV = nothing
+end
+
+"""
+    triples_4ext_abb_ab!(EC::ECInfo, R3abb, T3abb)
+
+  Calculate αβ 4-external contraction of ``d_{vVvV}`` with ``T^{iIJ}_{aCB}``
+  for the unrestricted case.
+  No integral compression (different-spin contracted indices), but loops over
+  one occupied index to reduce intermediate size.
+
+  ``R^{iIJ}_{bBC} -= X_{bBC}^{iIJ} - X_{bCB}^{iIJ}``
+  where ``X_{bBC}^{iIJ} = \\sum_{a,A} \\langle bB|aA\\rangle T^{iIJ}_{aCA}``
+"""
+function triples_4ext_abb_ab!(EC::ECInfo, R3abb, T3abb)
+  nva = size(T3abb, 1)
+  nvb = size(T3abb, 2)
+  noa = size(T3abb, 4)
+  nob = size(T3abb, 5)
+  d_vVvV = load4idx(EC, "d_vVvV")
+  # Loop over i (α occ) to reduce intermediate
+  X3 = Array{Float64}(undef, nva, nvb, nvb, nob, nob)
+  for i in 1:noa
+    vT3 = @view T3abb[:,:,:,i,:,:]
+    @mtensor X3[b,B,C,I,J] = d_vVvV[b,B,a,A] * vT3[a,C,A,I,J]
+    vR3 = selectdim(R3abb, 4, i)
+    # Original: R3 -= 0.5*X[b,B,C,...] + 0.5*X[b,C,B,...] + 0.5*X[b,B,C,...,J,I] - 0.5*X[b,C,B,...,J,I]
+    # X[b,B,C,I,J] → X[b,B,C,J,I] = -X[b,B,C,I,J] by T3abb antisymmetry in (I,J)
+    # Combined: R3[b,B,C,...] -= X, R3[b,C,B,...] += X
+    @mtensor begin
+      vR3[b,B,C,I,J] -= X3[b,B,C,I,J]
+      vR3[b,C,B,I,J] += X3[b,B,C,I,J]
+    end
+  end
+  d_vVvV = nothing
 end
 
 """
