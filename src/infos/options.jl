@@ -147,6 +147,9 @@ end
   ampsvdfac::Float64 = 1.e-2
   """`⟨true⟩` use kext for doubles residual. """
   use_kext::Bool = true
+  """`⟨false⟩` use plus/minus factorization in kext. 
+  This kext has two times less FLOPs, but is less cache-friendly and can be slower for small systems. """
+  use_pm_kext::Bool = false
   """`⟨false⟩` calculate dressed <vv|vv>. """
   calc_d_vvvv::Bool = false
   """`⟨false⟩` calculate dressed <vv|vo>. """

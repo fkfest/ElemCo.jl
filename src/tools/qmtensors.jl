@@ -4,6 +4,7 @@ QMTensors module
 This module provides definitions for useful quantum-mechanical tensors. 
 """
 module QMTensors
+using Buffers
 # from spinmatrix
 export SpinMatrix, FSpinMatrix, CSpinMatrix, is_restricted, unrestrict!, restrict!
 export SpinVector
