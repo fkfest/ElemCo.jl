@@ -1625,21 +1625,75 @@ end
   `Rot` is the rotation matrix for orbital optimization (if any).
 """
 function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
+  t1 = time_ns()
   SP = EC.space
   norb = n_orbs(EC)
   int2 = integ2_ss(EC.fd)
   # last two indices of integrals are stored as upper triangular 
   tripp = uppertriangular_cut(norb)
-  D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
-  # <pq|rs> D^ij_rs
-  @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
-  if length(Rot) > 0 
-    @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
+  tripp_swap = swapped_uppertriangular_cut(norb)
+  @inbounds D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
+  nocc = size(D2, 2)
+  trioo = uppertriangular_cut(nocc)
+  trioo_swap = swapped_uppertriangular_cut(nocc)
+  t1 = print_time(EC, t1, "calc D2", 0)
+  # @views D2s = 0.5 * (D2[:,trioo] + D2[:,trioo_swap])
+  # @views D2a = 0.5 * (D2[:,trioo] - D2[:,trioo_swap])
+  @views D2s = permutedims(0.5 * (D2[:,trioo] + D2[:,trioo_swap]), (2, 1))
+  @views D2a = permutedims(0.5 * (D2[:,trioo] - D2[:,trioo_swap]), (2, 1))
+  t1 = print_time(EC, t1, "calc D2sa", 0)
+  ntri_pp = lentri_from_norb(norb)
+  nrs = size(int2, 3)
+  ntri_oo = length(trioo)
+  aK2pq = zeros(ntri_pp, ntri_oo)
+  sK2pq = zeros(ntri_pp, ntri_oo)
+  rsBlks = get_spaceblocks(1:nrs)
+  maxrs = maximum(length, rsBlks)
+  lenbuf = maxrs * ntri_pp * 2
+  @buffer buf(lenbuf) begin
+  for rs in rsBlks
+    lenrs = length(rs)
+    int2s = alloc!(buf, ntri_pp, lenrs)
+    int2a = alloc!(buf, ntri_pp, lenrs)
+    calc_tri_sym_antisym!(int2s, int2a, @view(int2[:, :, rs]), norb)
+    # <pq|rs> D^ij_rs
+    v!D2s = @mview D2s[:, rs]
+    @mtensor sK2pq[pq,ij] += int2s[pq,rs] * v!D2s[ij,rs]
+    v!D2a = @mview D2a[:, rs]
+    @mtensor aK2pq[pq,ij] += int2a[pq,rs] * v!D2a[ij,rs]
+    drop!(buf, int2a, int2s)
   end
-  D2 = nothing
-  # symmetrize K2
-  @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
-  rK2pq = nothing
+  end # buffer
+
+  # int2s = Matrix{eltype(int2)}(undef, ntri_pp, nrs)
+  # int2a = Matrix{eltype(int2)}(undef, ntri_pp, nrs)
+  # calc_tri_sym_antisym!(int2s, int2a, int2, norb)
+  # t1 = print_time(EC, t1, "calc int2s and int2a", 0)
+  # # <pq|rs> D^ij_rs
+  # @mtensor rK2pq[pq,ij] := int2s[pq,rs] * D2s[rs,ij]
+  # int2s = nothing
+  # t1 = print_time(EC, t1, "calc sym K2", 0)
+  K2pq = zeros(eltype(T2), norb, norb, nocc, nocc)
+  K2pq[tripp,trioo] = sK2pq
+  K2pq[tripp_swap,trioo_swap] = sK2pq
+  K2pq[tripp,trioo_swap] = sK2pq
+  K2pq[tripp_swap,trioo] = sK2pq
+
+  # # <pq|rs> D^ij_rs
+  # @mtensor rK2pq[pq,ij] = int2a[pq,rs] * D2a[rs,ij]
+  # int2a = nothing
+  # t1 = print_time(EC, t1, "calc antisym K2", 0)
+  K2pq[tripp,trioo] .+= aK2pq
+  K2pq[tripp_swap,trioo_swap] .+= aK2pq
+  K2pq[tripp,trioo_swap] .-= aK2pq
+  K2pq[tripp_swap,trioo] .-= aK2pq
+  t1 = print_time(EC, t1, "calc K2", 0)
+  # D2 = nothing
+  # rK2pq = nothing
+  if length(Rot) > 0 
+    @mtensor tmpK2pq[p,r,i,j] := K2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
+    K2pq = tmpK2pq
+  end
   @views R2 .+= K2pq[SP['v'],SP['v'],:,:]
   if length(T1) > 0
     @mtensor begin
@@ -1654,6 +1708,7 @@ function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
   end
   x1 = nothing
   K2pq = nothing
+  return
 end
 
 
