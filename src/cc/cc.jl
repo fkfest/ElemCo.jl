@@ -1631,12 +1631,12 @@ function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
   int2 = integ2_ss(EC.fd)
   # last two indices of integrals are stored as upper triangular 
   tripp = uppertriangular_cut(norb)
-  @inbounds D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
+  D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
   t1 = print_time(EC, t1, "calc D2", 2)
   if EC.options.cc.use_pm_kext
-    K2pq = calc_pm_K2!(EC, int2, D2, tripp)
+    K2pq = calc_pm_K2!(int2, D2, tripp)
   else
-    K2pq = calc_K2(EC, int2, D2, tripp)
+    K2pq = calc_K2(int2, D2, tripp)
   end
   D2 = nothing
   t1 = print_time(EC, t1, "calc K2", 2)
@@ -1661,16 +1661,124 @@ function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
   return
 end
 
+
 """
-    calc_pm_K2!(EC::ECInfo, int2, D2, tripp)
+    cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab, Rota, Rotb)
+
+  Calculate the 4-external (and some more) contribution to the UCCSD residuals. 
+  
+  `R1*` and `R2*` are the singles and doubles residuals to be updated.
+  `T1*` and `T2*` are the singles and doubles amplitudes.
+  `Rot*` are the rotation matrices for orbital optimization (if any).
+"""
+function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab, Rota, Rotb)
+  t1 = time_ns()
+  SP = EC.space
+  norb = n_orbs(EC)
+  # last two indices of integrals (apart from αβ) are stored as upper triangular 
+  tripp = uppertriangular_cut(norb)
+  # αα
+  int2a = integ2_ss(EC.fd, :α)
+  D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
+  t1 = print_time(EC, t1, "calc D2a", 2)
+  if EC.options.cc.use_pm_kext
+    K2pqa = calc_pm_K2!(int2a, D2a, tripp)
+  else
+    K2pqa = calc_K2(int2a, D2a, tripp)
+  end
+  D2a = nothing
+  int2a = nothing
+  t1 = print_time(EC, t1, "calc K2a", 2)
+  @views R2a .+= K2pqa[SP['v'],SP['v'],:,:]
+  if length(T1a) > 0
+    @mtensor begin
+      R2a[a,b,i,j] -= K2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
+      R2a[a,b,i,j] -= K2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
+      R2a[a,b,i,j] += K2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
+      # singles residual contributions
+      R1a[a,i] +=  K2pqa[SP['v'],SP['o'],:,:][a,k,i,k] 
+      x1a[k,i] :=  K2pqa[SP['o'],SP['o'],:,:][k,l,i,l]
+      R1a[a,i] -= x1a[k,i] * T1a[a,k]
+    end
+  end
+  K2pqa = nothing
+  if n_occb_orbs(EC) > 0
+    # ββ
+    int2b = integ2_ss(EC.fd, :β)
+    D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
+    t1 = print_time(EC, t1, "calc D2b", 2)
+    if EC.options.cc.use_pm_kext
+      K2pqb = calc_pm_K2!(int2b, D2b, tripp)
+    else
+      K2pqb = calc_K2(int2b, D2b, tripp)
+    end
+    D2b = nothing
+    int2b = nothing
+    t1 = print_time(EC, t1, "calc K2b", 2)
+    @views R2b .+= K2pqb[SP['V'],SP['V'],:,:]
+    if length(T1b) > 0
+      @mtensor begin
+        R2b[a,b,i,j] -= K2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
+        R2b[a,b,i,j] -= K2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+        R2b[a,b,i,j] += K2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
+        # singles residual contributions
+        R1b[a,i] += K2pqb[SP['V'],SP['O'],:,:][a,k,i,k]
+        x1b[k,i] := K2pqb[SP['O'],SP['O'],:,:][k,l,i,l]
+        R1b[a,i] -= x1b[k,i] * T1b[a,k]
+      end
+    end
+    K2pqb = nothing
+    # αβ
+    if EC.fd.uhf
+      int2ab = integ2_os(EC.fd)
+      D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
+      K2pqab = calc_K2ab(int2ab, D2ab)
+      D2ab = nothing
+      int2ab = nothing
+      @views R2ab .+= K2pqab[SP['v'],SP['V'],:,:]
+    else
+      int2 = integ2_ss(EC.fd)
+      D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true)
+      D2ab = D2ab_full[tripp,:,:]
+      K2pqab = calc_K2(int2, D2ab, tripp; symmetrize=false)
+      tripp_swap = swapped_uppertriangular_cut(norb)
+      @views D2ab .= D2ab_full[tripp_swap,:,:]
+      D2ab_full = nothing
+      K2pqabT = calc_K2(int2, D2ab, tripp_swap; symmetrize=false)
+      D2ab = nothing
+      @mtensor K2pqab[p,r,i,j] += K2pqabT[r,p,i,j]
+      K2pqabT = nothing
+      @views R2ab .+= K2pqab[SP['v'],SP['V'],:,:]
+    end
+  end
+  if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
+    @mtensor begin
+      R2ab[a,b,i,j] -= K2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
+      R2ab[a,b,i,j] -= K2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+      R2ab[a,b,i,j] += K2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
+      R1a[a,i] += K2pqab[SP['v'],SP['O'],:,:][a,k,i,k] 
+      x1a1[k,i] := K2pqab[SP['o'],SP['O'],:,:][k,l,i,l]
+      R1a[a,i] -= x1a1[k,i] * T1a[a,k]
+      R1b[a,i] += K2pqab[SP['o'],SP['V'],:,:][k,a,k,i] 
+      x1b1[k,i] := K2pqab[SP['o'],SP['O'],:,:][l,k,l,i]
+      R1b[a,i] -= x1b1[k,i] * T1b[a,k]
+    end
+  end
+  return
+end
+
+"""
+    calc_pm_K2!(int2, D2, tripp)
   
   Calculate the kext K2 contribution to the CCSD residuals 
   using the symmetric/antisymmetric (plus/minus) factorization. 
 
+  ``K^{ij}_{pq} = v_{pq}^{rs} D^ij_rs``
+
   Return K2pq::Array{4}.
 """
-function calc_pm_K2!(EC, int2, D2, tripp)
-  norb = n_orbs(EC)
+function calc_pm_K2!(int2, D2, tripp)
+  norb = size(int2, 1)
   nocc = size(D2, 2)
   trioo = uppertriangular_cut(nocc)
   trioo_swap = swapped_uppertriangular_cut(nocc)
@@ -1710,35 +1818,72 @@ function calc_pm_K2!(EC, int2, D2, tripp)
 end
 
 """
-    calc_K2(EC, int2, D2, tripp)
+    calc_K2(int2, D2, tripp; symmetrize=true)
 
   Calculate the kext K2 contribution to the CCSD residuals by directly contracting the integrals with D2.
 
+  ``K^{ij}_{pq} = v_{pq}^{rs} D^ij_rs``
+
   Return K2pq::Array{4}.
 """
-function calc_K2(EC, int2, D2, tripp)
-  norb = n_orbs(EC)
-  nocc = size(D2, 2)
+function calc_K2(int2, D2, tripp; symmetrize=true)
+  norb = size(int2, 1)
+  nocc1 = size(D2, 2)
+  nocc2 = size(D2, 3)
   ntri_pp = length(tripp)
   nrs = size(int2, 3)
   @assert ntri_pp == nrs # sanity check for the dimensions
-  rK2pq = zeros(norb, norb, nocc, nocc)
+  rK2pq = zeros(norb, norb, nocc1, nocc2)
   rsBlks = get_spaceblocks(1:nrs)
   maxrs = maximum(length, rsBlks)
-  lenbuf = maxrs * nocc * nocc
+  lenbuf = maxrs * nocc1 * nocc2
   @buffer buf(lenbuf) begin
   for rs in rsBlks
     lenrs = length(rs)
     v!int2 = @mview(int2[:, :, rs])
     # <pq|rs> D^ij_rs
-    aD2 = alloc!(buf, lenrs, nocc, nocc)
+    aD2 = alloc!(buf, lenrs, nocc1, nocc2)
     @views aD2 .= D2[rs, :, :]
     @mtensor rK2pq[p,q,i,j] += v!int2[p,q,rs] * aD2[rs,i,j]
     drop!(buf, aD2)
   end
   end # buffer
+  if !symmetrize
+    return rK2pq
+  end
   # symmetrize K2
   @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
+  return K2pq
+end
+
+"""
+    calc_K2ab(int2, D2)
+
+  Calculate the kext K2ab contribution to the CCSD residuals by directly contracting the integrals with D2.
+
+  ``K^{iJ}_{pQ} = v_{pQ}^{rS} D^iJ_rS``
+
+  Return K2pq::Array{4}.
+"""
+function calc_K2ab(int2, D2)
+  norb = size(int2, 1)
+  nocca = size(D2, 3)
+  noccb = size(D2, 4)
+  K2pq = zeros(eltype(D2), norb, norb, nocca, noccb)
+  sBlks = get_spaceblocks(1:norb, 8)
+  maxs = maximum(length, sBlks)
+  lenbuf = norb * maxs * nocca * noccb
+  @buffer buf(lenbuf) begin
+  for s in sBlks
+    lens = length(s)
+    v!int2 = @mview(int2[:, :, :, s])
+    # <pq|rs> D^ij_rs
+    aD2 = alloc!(buf, norb, lens, nocca, noccb)
+    @views aD2 .= D2[:, s, :, :]
+    @mtensor K2pq[p,q,i,j] += v!int2[p,q,r,s] * aD2[r,s,i,j]
+    drop!(buf, aD2)
+  end
+  end # buffer
   return K2pq
 end
 
@@ -1988,106 +2133,9 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   
   #ladder terms
   if EC.options.cc.use_kext
-    # last two indices of integrals (apart from αβ) are stored as upper triangular 
-    tripp = uppertriangular_cut(norb)
-    if EC.fd.uhf
-      # αα
-      int2a = integ2_ss(EC.fd, :α)
-      D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @mtensor rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
-      D2a = nothing
-      int2a = nothing
-      # symmetrize R
-      @mtensor K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
-      rK2pqa = nothing
-      R2a += K2pqa[SP['v'],SP['v'],:,:]
-      if n_occb_orbs(EC) > 0
-        # ββ
-        int2b = integ2_ss(EC.fd, :β)
-        D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @mtensor rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
-        D2b = nothing
-        int2b = nothing
-        # symmetrize R
-        @mtensor K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
-        rK2pqb = nothing
-        R2b += K2pqb[SP['V'],SP['V'],:,:]
-        # αβ
-        int2ab = integ2_os(EC.fd)
-        D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
-        @mtensor K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
-        D2ab = nothing
-        int2ab = nothing
-        R2ab += K2pqab[SP['v'],SP['V'],:,:]
-      end
-    else
-      int2 = integ2_ss(EC.fd)
-      # αα
-      D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @mtensor rK2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
-      D2a = nothing
-      # symmetrize R
-      @mtensor K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
-      rK2pqa = nothing
-      R2a += K2pqa[SP['v'],SP['v'],:,:]
-      if n_occb_orbs(EC) > 0
-        # ββ
-        D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @mtensor rK2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
-        D2b = nothing
-        # symmetrize R
-        @mtensor K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
-        rK2pqb = nothing
-        R2b += K2pqb[SP['V'],SP['V'],:,:]
-        # αβ
-        D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true)
-        D2ab = D2ab_full[tripp,:,:] 
-        D2abT = permutedims(D2ab_full,(2,1,4,3))[tripp,:,:]
-        D2ab_full = nothing
-        @mtensor K2pqab[p,r,i,j] := int2[p,r,x] * D2ab[x,i,j]
-        @mtensor K2pqab[p,r,i,j] += int2[r,p,x] * D2abT[x,j,i]
-        D2ab = nothing
-        D2abT = nothing
-        R2ab += K2pqab[SP['v'],SP['V'],:,:]
-      end
-    end
-    if length(T1a) > 0
-      @mtensor begin
-        R2a[a,b,i,j] -= K2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
-        R2a[a,b,i,j] -= K2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
-        R2a[a,b,i,j] += K2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
-        # singles residual contributions
-        R1a[a,i] +=  K2pqa[SP['v'],SP['o'],:,:][a,k,i,k] 
-        x1a[k,i] :=  K2pqa[SP['o'],SP['o'],:,:][k,l,i,l]
-        R1a[a,i] -= x1a[k,i] * T1a[a,k]
-      end
-    end
-    if length(T1b) > 0
-      @mtensor begin
-        R2b[a,b,i,j] -= K2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
-        R2b[a,b,i,j] -= K2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
-        R2b[a,b,i,j] += K2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
-        # singles residual contributions
-        R1b[a,i] += K2pqb[SP['V'],SP['O'],:,:][a,k,i,k]
-        x1b[k,i] := K2pqb[SP['O'],SP['O'],:,:][k,l,i,l]
-        R1b[a,i] -= x1b[k,i] * T1b[a,k]
-      end
-    end
-    if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
-      @mtensor begin
-        R2ab[a,b,i,j] -= K2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
-        R2ab[a,b,i,j] -= K2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
-        R2ab[a,b,i,j] += K2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
-        R1a[a,i] += K2pqab[SP['v'],SP['O'],:,:][a,k,i,k] 
-        x1a1[k,i] := K2pqab[SP['o'],SP['O'],:,:][k,l,i,l]
-        R1a[a,i] -= x1a1[k,i] * T1a[a,k]
-        R1b[a,i] += K2pqab[SP['o'],SP['V'],:,:][k,a,k,i] 
-        x1b1[k,i] := K2pqab[SP['o'],SP['O'],:,:][l,k,l,i]
-        R1b[a,i] -= x1b1[k,i] * T1b[a,k]
-      end
-    end
-    (K2pqa, K2pqb, K2pqab) = (nothing, nothing, nothing)
-    (x1a, x1b, x1ab) = (nothing, nothing, nothing)
+    Rota = zeros(Float64,0,0) # not implemented yet
+    Rotb = zeros(Float64,0,0)
+    cc_kext!(EC, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab, Rota, Rotb)
     t1 = print_time(EC,t1,"kext",2)
   else
     d_vvvv = load4idx(EC,"d_vvvv")
