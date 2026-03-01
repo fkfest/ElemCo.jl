@@ -12,7 +12,9 @@ ECCSD_UHF_test = -0.168407943239 + EUHF_test
 
 fcidump = joinpath(@__DIR__,"files","H2O_CATION.FCIDUMP")
 
-energies = @cc uccd
+energies = @cc uccd begin
+  @set cc use_pm_kext=true
+end
 @test abs(last_energy(energies)-ECCD_test) < epsilon
 energies = @cc uccsd
 @test abs(energies["HF"]-EHF_test) < epsilon
@@ -27,6 +29,12 @@ energies = @cc rdcsd
 
 fcidump = joinpath(@__DIR__,"files","H2OP_UHF.FCIDUMP")
 energies = @cc uccsd
+@test abs(energies["HF"]-EUHF_test) < epsilon
+@test abs(last_energy(energies)-ECCSD_UHF_test) < epsilon
+
+energies = @cc uccsd begin
+  @set cc use_pm_kext=true
+end
 @test abs(energies["HF"]-EUHF_test) < epsilon
 @test abs(last_energy(energies)-ECCSD_UHF_test) < epsilon
 

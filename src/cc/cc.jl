@@ -1777,7 +1777,7 @@ end
 
   Return K2pq::Array{4}.
 """
-function calc_pm_K2!(int2, D2, tripp)
+function calc_pm_K2!(int2::AbstractArray{<:Number,3}, D2::AbstractArray{<:Number,3}, tripp)
   norb = size(int2, 1)
   nocc = size(D2, 2)
   trioo = uppertriangular_cut(nocc)
@@ -1826,7 +1826,7 @@ end
 
   Return K2pq::Array{4}.
 """
-function calc_K2(int2, D2, tripp; symmetrize=true)
+function calc_K2(int2::AbstractArray{<:Number,3}, D2::AbstractArray{<:Number,3}, tripp; symmetrize=true)
   norb = size(int2, 1)
   nocc1 = size(D2, 2)
   nocc2 = size(D2, 3)

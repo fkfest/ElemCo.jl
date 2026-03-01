@@ -240,6 +240,7 @@ function cc_lagrange_kext!(EC, R1, R2, T1, U2, spin=:closed)
   v4s = space4spin('v', isα)
   # last two indices of integrals are stored as upper triangular 
   int2 = integ2_ss(EC.fd, spin)
+  @assert ndims(int2) == 3 # should be (norb,norb,uppertriangular)
   dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
   # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
   Kmmoo = calc_lagrange_K2(int2, dU2)
@@ -339,7 +340,7 @@ end
 """
     calc_lagrange_Koox(int2, D2)
 
-  Calculate 3-index itermediate in the kext in CCSD Lagrange residuals.
+  Calculate 3-index intermediate in the kext in CCSD Lagrange residuals.
 
 Return Koox::Array{3}, where ``Koox_{mn}^x = v^{x}_{pq} D_{mn}^{pq}``.
 """
