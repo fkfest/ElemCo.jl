@@ -6,9 +6,13 @@
 
 ### Changed
 
+* Batching of 4-index integrals is implemented in `kext` routines. This should substantially reduce the memory demand of closed-shell and open-shell CCSD/DCSD.
+* The `kext`-type contractions are implemented for unrestricted full-triples methods (UCCSDT and UDC-CCSDT).
+
 ### Added
 
-* Add EOM-UCCSD/EOM-UDCSD and EOM-RCCSD/EOM-RDCSD (restricted to singlet excitations).
+* EOM-UCCSD/EOM-UDCSD and EOM-RCCSD/EOM-RDCSD (restricted to singlet excitations) methods have been implemented.
+* A new factorization of `kext` contractions for closed-shell CCSD/DCSD using a symmetric/antisymmetric representation is implemented (can be activated by setting `@set cc use_pm_kext=true`). This algorithm has two times less FLOPs than the standard implementation, however, it can be less efficient because of cache-unfriendly access in the construction of the intermediates (which is parallelized using `Threads.@threads` and should scale well with the number of threads). The standard implementation is still used by default, but the new one can be activated for testing and benchmarking purposes.
 
 ### Fixed
 
