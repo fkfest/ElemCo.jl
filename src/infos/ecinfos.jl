@@ -21,6 +21,7 @@ export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 export get_options, with_local_options
 export FCIOptions, CIPHIOptions
+export DEFAULT_ELTYPE, set_default_eltype!, ec_eltype
 
 include("options.jl")
 
@@ -42,27 +43,51 @@ function get_options(opt)
   return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
 end
 
-# TODO: make the struct ECInfo parameterized by the type of the fcidump (e.g., ECInfo{T} for T number type) and make the field fd of type FDump{T,3} instead of TFDump.
 """
-    ECInfo
+    DEFAULT_ELTYPE
+
+  Global default element type for `ECInfo`. 
+  Can be changed via `set_default_eltype!(T)` or `@set_default_eltype T`.
+  Default is `Float64`.
+"""
+const DEFAULT_ELTYPE = Ref{DataType}(Float64)
+
+"""
+    set_default_eltype!(T::Type{<:Number})
+
+  Set the default element type for new `ECInfo` objects.
+
+  # Example
+```julia
+set_default_eltype!(ComplexF64)
+```
+"""
+function set_default_eltype!(T::Type{<:Number})
+  DEFAULT_ELTYPE[] = T
+end
+
+"""
+    ECInfo{T}
 
   Global information for `ElemCo`.
 
+  `T` is the element type for the fcidump integrals (default: `Float64`).
+
   $(TYPEDFIELDS)
 """
-@kwdef mutable struct ECInfo <: AbstractECInfo
+mutable struct ECInfo{T<:Number} <: AbstractECInfo
   """`⟨"system-tmpdir/elemcojlscr/jl_*"⟩` path to scratch directory. """
-  scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr")))
+  scr::String
   """`⟨".bin"⟩` extension of temporary files. """
-  ext::String = ".bin"
+  ext::String
   """`⟨2⟩` verbosity level. """
-  verbosity::Int = 2
+  verbosity::Int
   """ options. """
-  options::Options = Options()
+  options::Options
   """ molecular system. """
-  system::MSystem = MSystem()
+  system::MSystem
   """ fcidump. """
-  fd::FDump{<:Number,3} = TFDump()
+  fd::FDump{T,3}
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
@@ -99,10 +124,42 @@ end
   e.g., `d_XX` contains ``\\hat v_{XY}`` and `d_^XX` contains ``\\hat v^{XY}`` integrals.
   Subspaces with multiple characters are possible using `{}`, e.g., `C_vo{bX}` contains ``U_{a}^{i\\bar X}``.
   """
-  files::Dict{String,String} = Dict{String,String}()
+  files::Dict{String,String}
   """ subspaces: 'o'ccupied, 'v'irtual, 'O'ccupied-β, 'V'irtual-β, ':'/'m'/'M' full MO. """
-  space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}()
+  space::Dict{Char,Vector{Int}}
 end
+
+"""
+    ECInfo{T}(; kwargs...) where {T<:Number}
+
+  Construct an `ECInfo{T}` with keyword arguments.
+"""
+function ECInfo{T}(;
+    scr::String = mktempdir(mkpath(joinpath(tempdir(),"elemcojlscr"))),
+    ext::String = ".bin",
+    verbosity::Int = 2,
+    options::Options = Options(),
+    system::MSystem = MSystem(),
+    fd::FDump{T,3} = FDump{T,3}(),
+    files::Dict{String,String} = Dict{String,String}(),
+    space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}(),
+  ) where {T<:Number}
+  ECInfo{T}(scr, ext, verbosity, options, system, fd, files, space)
+end
+
+"""
+    ECInfo(; kwargs...)
+
+  Create an `ECInfo{T}` with `T = DEFAULT_ELTYPE[]` (default: `Float64`).
+"""
+ECInfo(; kwargs...) = ECInfo{DEFAULT_ELTYPE[]}(; kwargs...)
+
+"""
+    ec_eltype(EC::ECInfo)
+
+  Return the element type `T` of `ECInfo{T}`.
+"""
+ec_eltype(::ECInfo{T}) where {T} = T
 
 """
     reset_wf_info!(EC::ECInfo)

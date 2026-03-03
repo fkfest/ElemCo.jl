@@ -101,6 +101,9 @@ export @mainname, @print_input
 export @loadfile, @savefile, @copyfile, @deletefile
 export @loadwf, @savewf, @copywf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
+export @set_default_eltype
+# from ECInfos
+export ECInfo, ec_eltype, DEFAULT_ELTYPE, set_default_eltype!
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @fci, @ciphi, @sci, @ciϕ
@@ -401,11 +404,14 @@ macro copywf(args...)
 end
 
 """ 
-    @ECinit()
+    @ECinit(T=DEFAULT_ELTYPE[])
 
-  Initialize `EC::ECInfo` and add molecular system and/or fcidump 
+  Initialize `EC::ECInfo{T}` and add molecular system and/or fcidump 
   if variables `geometry::String` and `basis::Dict{String,Any}`
   and/or `fcidump::String` are defined.
+
+  `T` is the element type for the fcidump integrals (default: `DEFAULT_ELTYPE[]`, 
+  which is `Float64` unless changed via [`set_default_eltype!`](@ref) or [`@set_default_eltype`](@ref)).
 
   If `EC` is already initialized, it will be overwritten.
 
@@ -418,19 +424,42 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 Occupied orbitals:[1]
 
 ```
+```julia
+@ECinit ComplexF64  # use complex integrals
+```
 """
-macro ECinit()
+macro ECinit(T=nothing)
+  if isnothing(T)
+    ecexpr = :(ECInfo{DEFAULT_ELTYPE[]}())
+  else
+    ecexpr = :(ECInfo{$(esc(T))}())
+  end
   if @istoplevel
     return quote
-      const $(esc(:EC)) = ECInfo()
+      const $(esc(:EC)) = $ecexpr
       $(esc(:@setupEC))
     end
   else
     return quote
-      $(esc(:EC)) = ECInfo()
+      $(esc(:EC)) = $ecexpr
       $(esc(:@setupEC))
     end
   end
+end
+
+""" 
+    @set_default_eltype(T)
+
+  Set the default element type for new `ECInfo` objects.
+
+  # Examples
+```julia
+@set_default_eltype ComplexF64
+@ECinit  # will create ECInfo{ComplexF64}
+```
+"""
+macro set_default_eltype(T)
+  return :(set_default_eltype!($(esc(T))))
 end
 
 """ 
@@ -445,7 +474,7 @@ macro setupEC()
       @assert(typeof($(esc(:fcidump))) <: AbstractString, "fcidump must be a String")
       if fd_origin($(esc(:EC)).fd) != $(esc(:fcidump))
         println("FCIDump: ",$(esc(:fcidump)))
-        $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+        $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)), ec_eltype($(esc(:EC))))
       end
     catch err
       isa(err, UndefVarError) || rethrow(err)
@@ -457,7 +486,7 @@ macro setupEC()
       system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
       if !isapprox(system, $(esc(:EC)).system) && !isempty($(esc(:EC)).fd)
         println("Geometry or basis changed, the integrals will be regenerated.")
-        $(esc(:EC)).fd = TFDump()  # reset fcidump
+        $(esc(:EC)).fd = FDump{ec_eltype($(esc(:EC))),3}()  # reset fcidump
       end
       if !issame(system, $(esc(:EC)).system)
         println("Geometry: ",$(esc(:geometry)))

@@ -229,7 +229,7 @@ function check_fcidump(EC::ECInfo, fcidump)
   if fcidump != ""
     t1 = time_ns()
     # read fcidump intergrals
-    EC.fd = read_fcidump(fcidump)
+    EC.fd = read_fcidump(fcidump, ec_eltype(EC))
     t1 = print_time(EC,t1,"read fcidump",1)
   end
 end
@@ -561,7 +561,7 @@ function eval_fci(EC::ECInfo, ref_energy; ciphi=false)
   ms2 = nalpha - nbeta
   nelec = nalpha + nbeta
   simtra = is_similarity_transformed(EC.fd)
-  fdump = QFDump(norb, nelec, ms2=ms2, uhf=EC.fd.uhf, simtra=simtra)
+  fdump = FDump{ec_eltype(EC),4}(norb, nelec, ms2=ms2, uhf=EC.fd.uhf, simtra=simtra)
   fdump.int0 = EC.fd.int0
   if EC.fd.uhf
     fdump.int1a = EC.fd.int1a

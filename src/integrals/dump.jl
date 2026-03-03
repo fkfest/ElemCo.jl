@@ -21,7 +21,7 @@ export int1_npy_filename, int2_npy_filename
 export is_similarity_transformed
 
 # optional variables which won't be written if =0
-const FDUMP_OPTIONAL=["IUHF", "ST", "III"]
+const FDUMP_OPTIONAL=["IUHF", "ST", "III", "ICMPLX"]
 
 """prefered order of keys in fcidump header (optional keys are not included)"""
 const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
@@ -139,6 +139,32 @@ end
 const TFDump = FDump{Float64,3}
 const QFDump = FDump{Float64,4}
 
+"""
+    FDump{T2,N}(fd::FDump{T1,N})
+
+  Convert an `FDump{T1,N}` to `FDump{T2,N}` by converting all integral arrays.
+"""
+function FDump{T2,N}(fd::FDump{T1,N}) where {T1<:Number,T2<:Number,N}
+  T1 === T2 && return fd
+  FDump{T2,N}(
+    int2 = Array{T2,N}(fd.int2),
+    int2aa = Array{T2,N}(fd.int2aa),
+    int2bb = Array{T2,N}(fd.int2bb),
+    int2ab = Array{T2,4}(fd.int2ab),
+    int1 = Matrix{T2}(fd.int1),
+    int1a = Matrix{T2}(fd.int1a),
+    int1b = Matrix{T2}(fd.int1b),
+    int0 = fd.int0,
+    head = fd.head,
+    origin = fd.origin,
+    modified = fd.modified,
+    uhf = fd.uhf,
+  )
+end
+
+Base.convert(::Type{FDump{T,N}}, fd::FDump{T,N}) where {T<:Number,N} = fd
+Base.convert(::Type{FDump{T2,N}}, fd::FDump{T1,N}) where {T1<:Number,T2<:Number,N} = FDump{T2,N}(fd)
+
 """ 
   is_triang(fd::FDump)
   
@@ -179,6 +205,7 @@ function FDump{T,N}(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vect
   end
   fd.head["IUHF"] = uhf ? [1] : [0]
   fd.head["ST"] = simtra ? [1] : [0]
+  fd.head["ICMPLX"] = T <: Complex ? [1] : [0]
   fd.uhf = uhf
   return fd
 end
@@ -341,14 +368,18 @@ function integ2_os(fd::FDump)
 end
 
 """
-    read_fcidump(fcidump::String, ::Val{N})
+    read_fcidump(fcidump::String, ::Type{T}, ::Val{N}) where {T<:Number, N}
 
   Read ascii file (possibly with integrals in npy files).
 """ 
-function read_fcidump(fcidump::String, ::Val{N}) where N
+function read_fcidump(fcidump::String, ::Type{T}, ::Val{N}) where {T<:Number, N}
   fdf = open(fcidump)
-  fd = FDump{Float64,N}()
-  fd.head = read_header(fdf)
+  head = read_header(fdf)
+  # auto-detect complex integrals from ICMPLX flag
+  icmplx = headvar(head, "ICMPLX", Int)
+  @assert (icmplx > 0) == (T <: Complex) "ICMPLX flag in fcidump header does not match the provided element type"
+  fd = FDump{T,N}()
+  fd.head = head
   fd.origin = fcidump
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
   simtra = (headvar(fd, "ST", Int) > 0)
@@ -369,11 +400,12 @@ function read_fcidump(fcidump::String, ::Val{N}) where N
 end
 
 """
-    read_fcidump(fcidump::String)
+    read_fcidump(fcidump::String, ::Type{T}=Float64) where {T<:Number}
 
-  Read ascii file (possibly with integrals in npy files) to TFDump object.
+  Read ascii file (possibly with integrals in npy files).
+  The element type of the integrals is `T` (default: `Float64`).
 """
-read_fcidump(fcidump::String) = read_fcidump(fcidump, Val(3))
+read_fcidump(fcidump::String, ::Type{T}=Float64) where {T<:Number} = read_fcidump(fcidump, T, Val(3))
 
 """
     read_header(fdfile::IOStream)
@@ -385,6 +417,7 @@ function read_header(fdfile)
   head = FDumpHeader()
   head["IUHF"] = [0]
   head["ST"] = [0]
+  head["ICMPLX"] = [0]
   line_array = String[]
   for line in eachline(fdfile)
     #skip empty lines
@@ -485,14 +518,14 @@ function read_integrals!(fd::FDump, dir::AbstractString)
 end
 
 """
-    set_int2!(int2::Array{Float64,3}, i1, i2, i3, i4, integ, simtra, ab)
+    set_int2!(int2::Array{<:Number,3}, i1, i2, i3, i4, integ, simtra, ab)
 
   Set 2-e integral in `int2` array to `integ` considering permutational symmetries.
 
   For not `ab`: particle symmetry is assumed.
   Integrals are stored in physicists' notation.
 """
-function set_int2!(int2::Array{Float64,3}, i1, i2, i3, i4, integ, simtra, ab)
+function set_int2!(int2::Array{<:Number,3}, i1, i2, i3, i4, integ, simtra, ab)
   @assert !ab
   if i2 == i4
     i24 = uppertriangular_index(i2,i4)
@@ -535,14 +568,14 @@ function set_int2!(int2::Array{Float64,3}, i1, i2, i3, i4, integ, simtra, ab)
 end
 
 """
-    set_int2!(int2::Array{Float64,4}, i1, i2, i3, i4, integ, simtra, ab)
+    set_int2!(int2::Array{<:Number,4}, i1, i2, i3, i4, integ, simtra, ab)
 
   Set 2-e integral in `int2` array to `integ` considering permutational symmetries.
 
   For not `ab`: particle symmetry is assumed.
   Integrals are stored in physicists' notation.
 """
-function set_int2!(int2::Array{Float64,4}, i1, i2, i3, i4, integ, simtra, ab)
+function set_int2!(int2::Array{<:Number,4}, i1, i2, i3, i4, integ, simtra, ab)
   int2[i1,i3,i2,i4] = integ
   if !ab
     int2[i3,i1,i4,i2] = integ
@@ -593,21 +626,57 @@ function read_integrals!(fd::FDump{<:Number,N}, fdfile::IOStream) where N
   return true
 end
 
-function read_integrals!(int1, int2, norb, fdfile, simtra)
+"""
+    parse_integ_value(::Type{T}, linestr::AbstractString) where T
+
+  Parse integral value and indices from a fcidump line.
+
+  For complex integrals (`ICMPLX=1`), the format is `(real,imaginary) i1 i2 i3 i4`.
+  For real integrals, the format is `value i1 i2 i3 i4`.
+"""
+function parse_integ_value(::Type{T}, linestr::AbstractString) where T<:Real
+  line = split(linestr)
+  length(line) == 5 || return nothing
+  integ = T(parse(Float64, line[1]))
+  i1 = parse(Int, line[2])
+  i2 = parse(Int, line[3])
+  i3 = parse(Int, line[4])
+  i4 = parse(Int, line[5])
+  return integ, i1, i2, i3, i4
+end
+
+function parse_integ_value(::Type{T}, linestr::AbstractString) where T<:Complex
+  # format: (real,imaginary) i1 i2 i3 i4
+  m = match(r"^\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)", linestr)
+  if isnothing(m)
+    # fall back to real format (e.g., core energy or separator lines)
+    line = split(linestr)
+    length(line) == 5 || return nothing
+    re = parse(real(T), line[1])
+    integ = Complex{real(T)}(re, zero(real(T)))
+    i1 = parse(Int, line[2])
+    i2 = parse(Int, line[3])
+    i3 = parse(Int, line[4])
+    i4 = parse(Int, line[5])
+    return integ, i1, i2, i3, i4
+  end
+  re = parse(real(T), m.captures[1])
+  im = parse(real(T), m.captures[2])
+  integ = Complex{real(T)}(re, im)
+  i1 = parse(Int, m.captures[3])
+  i2 = parse(Int, m.captures[4])
+  i3 = parse(Int, m.captures[5])
+  i4 = parse(Int, m.captures[6])
+  return integ, i1, i2, i3, i4
+end
+
+function read_integrals!(int1::Matrix{T}, int2, norb, fdfile, simtra) where T
   int0 = 0.0
   readint0 = false
   for linestr in eachline(fdfile)
-    line = split(linestr)
-    if length(line) != 5
-      # println("Last line: ",linestr)
-      # skip lines (in the case there is something left from header)...
-      continue
-    end
-    integ = parse(Float64,line[1])
-    i1 = parse(Int,line[2])
-    i2 = parse(Int,line[3])
-    i3 = parse(Int,line[4])
-    i4 = parse(Int,line[5])
+    parsed = parse_integ_value(T, linestr)
+    isnothing(parsed) && continue
+    integ, i1, i2, i3, i4 = parsed
     if i1 > norb || i2 > norb || i3 > norb || i4 > norb
       error("Index larger than norb: "*linestr)
     end
@@ -616,7 +685,7 @@ function read_integrals!(int1, int2, norb, fdfile, simtra)
     elseif i2 > 0
       set_int1!(int1, i1, i2, integ, simtra)
     elseif i1 <= 0
-      int0 = integ
+      int0 = real(integ)
       readint0 = true
     end
   end
@@ -626,22 +695,14 @@ function read_integrals!(int1, int2, norb, fdfile, simtra)
   return int0
 end
 
-function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, simtra)
+function read_integrals!(int1a::Matrix{T}, int1b, int2aa, int2bb, int2ab, norb, fdfile, simtra) where T
   int0 = 0.0
   readint0 = false
   spincase = 0 # aa, bb, ab, a, b
   for linestr in eachline(fdfile)
-    line = split(linestr)
-    if length(line) != 5
-      # println("Last line: ",linestr)
-      # skip lines (in the case there is something left from header)...
-      continue
-    end
-    integ = parse(Float64,line[1])
-    i1 = parse(Int,line[2])
-    i2 = parse(Int,line[3])
-    i3 = parse(Int,line[4])
-    i4 = parse(Int,line[5])
+    parsed = parse_integ_value(T, linestr)
+    isnothing(parsed) && continue
+    integ, i1, i2, i3, i4 = parsed
     if i1 > norb || i2 > norb || i3 > norb || i4 > norb
       error("Index larger than norb: "*linestr)
     end
@@ -667,7 +728,7 @@ function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, sim
       if spincase < 5
         spincase += 1
       else
-        int0 = integ
+        int0 = real(integ)
         readint0 = true
       end
     end
@@ -798,9 +859,11 @@ end
 
   If `npy` is true, write NPY file names for integrals.
 """
-function write_header(fd::FDump, fdf; npy=false)
+function write_header(fd::FDump{T}, fdf; npy=false) where T
   println(fdf, "&FCI")
   head = fd.head
+  # set ICMPLX flag for complex integrals
+  head["ICMPLX"] = T <: Complex ? [1] : [0]
   if npy
     if !fd.uhf
       head["NPY2"] = ["int2.npy"]
@@ -849,9 +912,15 @@ end
     print_int_value(fdf, integ, i1, i2, i3, i4)
 
   Print integral value to fdf file.
+
+  For complex values, the format is `(real,imaginary) i1 i2 i3 i4`.
 """
-function print_int_value(fdf, integ, i1, i2, i3, i4)
+function print_int_value(fdf, integ::Real, i1, i2, i3, i4)
   @printf(fdf, "%23.15e %3i %3i %3i %3i\n", integ, i1, i2, i3, i4)
+end
+
+function print_int_value(fdf, integ::Complex, i1, i2, i3, i4)
+  @printf(fdf, "(%23.15e,%23.15e) %3i %3i %3i %3i\n", real(integ), imag(integ), i1, i2, i3, i4)
 end
 
 """
@@ -884,18 +953,18 @@ function write_integrals(fd::FDump, fdf, tol)
 end
 
 """
-    write_integrals2(int2::Array{Float64,3}, fdf, tol, simtra)
+    write_integrals2(int2::Array{<:Number,3}, fdf, tol, simtra)
 
   Write 2-e integrals to fdf file.
 """
-function write_integrals2(int2::Array{Float64,3}, fdf, tol, simtra)
+function write_integrals2(int2::Array{<:Number,3}, fdf, tol, simtra)
   write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
   inds(p,q,r,s) = CartesianIndex(p,q,uppertriangular_index(r,s))
   indslow(p,q,r,s) = CartesianIndex(q,p,uppertriangular_index(s,r))
   write_integrals2_(int2, inds, indslow, fdf, tol)
 end
 
-function write_integrals2(int2::Array{Float64,4}, fdf, tol, simtra)
+function write_integrals2(int2::Array{<:Number,4}, fdf, tol, simtra)
   write_integrals2_ = simtra ? write_integrals2_simtra : write_integrals2_normal
   inds(p,q,r,s) = CartesianIndex(p,q,r,s)
   write_integrals2_(int2, inds, inds, fdf, tol)
@@ -1078,8 +1147,8 @@ function transform_fcidump!(fd::FDump{T,N}, Tl::SpinMatrix, Tr::SpinMatrix) wher
 end
 
 """
-    transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
-                   Tr::AbstractArray, Tr2::AbstractArray)
+    transform_int2(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                   Tr::AbstractArray, Tr2::AbstractArray) where T
 
   Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
 
@@ -1087,12 +1156,12 @@ end
 
   The last two indices are stored as a single uppertriangular index.
 """
-function transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
-                        Tr::AbstractArray, Tr2::AbstractArray)
+function transform_int2(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray) where T
   norb = size(int2,1)
-  int2t = zeros(norb,norb,norb*(norb+1)÷2)
-  int_3i = zeros(norb,norb,norb)
-  @buffer buf(2*norb*norb*norb) begin
+  int2t = zeros(T, norb,norb,norb*(norb+1)÷2)
+  int_3i = zeros(T, norb,norb,norb)
+  @buffer buf(T, 2*norb*norb*norb) begin
   for s = 1:norb
     rs = strict_uppertriangular_range(s)
     rrange = 1:s-1
@@ -1132,13 +1201,13 @@ function transform_int2(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::Abstract
   end #buffer
   return int2t
 end
-function transform_int2(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
-                        Tr::AbstractArray, Tr2::AbstractArray)
+function transform_int2(int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray) where T
   return transform_int2_Q(int2, Tl, Tl2, Tr, Tr2)
 end
 """
-    transform_int2_Q(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
-                   Tr::AbstractArray, Tr2::AbstractArray)
+    transform_int2_Q(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                   Tr::AbstractArray, Tr2::AbstractArray) where T
 
   Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
 
@@ -1146,13 +1215,13 @@ end
 
   The result is a full 4-index tensor.
 """
-function transform_int2_Q(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::AbstractArray, 
-                        Tr::AbstractArray, Tr2::AbstractArray)
+function transform_int2_Q(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray) where T
   norb = size(int2,1)
-  int2t = zeros(norb,norb,norb,norb)
-  int_3i = zeros(norb,norb,norb)
-  int_3i2 = zeros(norb,norb,norb)
-  @buffer buf(2*norb*norb*norb) begin
+  int2t = zeros(T, norb,norb,norb,norb)
+  int_3i = zeros(T, norb,norb,norb)
+  int_3i2 = zeros(T, norb,norb,norb)
+  @buffer buf(T, 2*norb*norb*norb) begin
   for s = 1:norb
     rs = strict_uppertriangular_range(s)
     rrange = 1:s-1
@@ -1192,13 +1261,13 @@ function transform_int2_Q(int2::Array{Float64,3}, Tl::AbstractArray, Tl2::Abstra
   end #buffer
   return int2t
 end
-function transform_int2_Q(int2::Array{Float64,4}, Tl::AbstractArray, Tl2::AbstractArray, 
-                        Tr::AbstractArray, Tr2::AbstractArray)
+function transform_int2_Q(int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray, 
+                        Tr::AbstractArray, Tr2::AbstractArray) where T
   norb = size(int2,1)
   sBlks = get_spaceblocks(1:norb)
   maxs = maximum(length, sBlks)
-  int2t = Array{Float64,4}(undef, norb, norb, norb, norb)
-  @buffer buf(2*norb*norb*norb*maxs) begin
+  int2t = Array{T,4}(undef, norb, norb, norb, norb)
+  @buffer buf(T, 2*norb*norb*norb*maxs) begin
   first = true
   for s = sBlks
     lens = length(s)
@@ -1241,21 +1310,22 @@ end
 """
 function reorder_orbs_int2(int2::AbstractArray, orbs)
   norb = size(int2,1)
+  T = eltype(int2)
   norbnew = length(orbs)
   if orbs == 1:norb
     return int2
   end
   if norbnew == 0
     if ndims(int2) == 3
-      return zeros(0,0,0)
+      return zeros(T, 0,0,0)
     else
-      return zeros(0,0,0,0)
+      return zeros(T, 0,0,0,0)
     end
   end
   @assert maximum(orbs) <= norb && minimum(orbs) > 0 "Orbital index out of range"
   if ndims(int2) == 3
     # triangular
-    int2t = zeros(norbnew, norbnew, norbnew*(norbnew+1)÷2)
+    int2t = zeros(T, norbnew, norbnew, norbnew*(norbnew+1)÷2)
     for s = 1:norbnew
       for r = 1:s
         ro = orbs[r]

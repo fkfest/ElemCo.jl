@@ -55,7 +55,7 @@ using ElemCo.VaspInterface
 
   @testset "setup_vasp!" begin
     data = load_vasp(vasp_dir)
-    EC = ECInfo()
+    EC = ECInfo{eltype(data.coulomb_vertex)}()
     setup_vasp!(EC, data)
 
     @test headvar(EC.fd, "NORB", Int) == 96

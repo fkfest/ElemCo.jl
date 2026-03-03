@@ -11,7 +11,7 @@ abstract type HamiltonianTerm end
 Main FCI calculation context.
 """
 mutable struct FCIContext{OPattern}
-  fcidump::QFDump
+  fcidump::FDump{<:Number,4}
   options::FCIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
@@ -41,7 +41,7 @@ mutable struct FCIContext{OPattern}
   int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
   int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
 
-  function FCIContext{OPattern}(fcidump::QFDump, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing) where OPattern
+  function FCIContext{OPattern}(fcidump::FDump{<:Number,4}, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing) where OPattern
     n_elec = headvar(fcidump, "NELEC", Int) 
     n_orb = headvar(fcidump, "NORB", Int)
     ms2 = headvar(fcidump, "MS2", Int)
@@ -133,7 +133,7 @@ mutable struct FCIContext{OPattern}
 end
 
 # Convenience constructor that defaults to UInt64
-FCIContext(fcidump::QFDump, options::FCIOptions = FCIOptions(); kwargs...) = FCIContext{UInt64}(fcidump, options; kwargs...)
+FCIContext(fcidump::FDump{<:Number,4}, options::FCIOptions = FCIOptions(); kwargs...) = FCIContext{UInt64}(fcidump, options; kwargs...)
 
 
 """
@@ -165,7 +165,7 @@ determinants during CIPHI iterations. This provides:
 - `heval_data::HEvalData` - Precomputed arrays for diagonal and Fock elements
 """
 mutable struct CIPHIContext{OPattern}
-  fcidump::QFDump
+  fcidump::FDump{<:Number,4}
   options::CIPHIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
@@ -179,7 +179,7 @@ mutable struct CIPHIContext{OPattern}
   int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
   int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
 
-  function CIPHIContext{OPattern}(fcidump::QFDump, options::CIPHIOptions = CIPHIOptions(); occa=nothing, occb=nothing) where OPattern
+  function CIPHIContext{OPattern}(fcidump::FDump{<:Number,4}, options::CIPHIOptions = CIPHIOptions(); occa=nothing, occb=nothing) where OPattern
     n_orb = headvar(fcidump, "NORB", Int)
     n_elec = headvar(fcidump, "NELEC", Int)
     ms2 = headvar(fcidump, "MS2", Int)
@@ -256,6 +256,6 @@ mutable struct CIPHIContext{OPattern}
 end
 
 # Convenience constructor that defaults to UInt128
-CIPHIContext(fcidump::QFDump, options::CIPHIOptions = CIPHIOptions(); kwargs...) = CIPHIContext{UInt128}(fcidump, options; kwargs...)
+CIPHIContext(fcidump::FDump{<:Number,4}, options::CIPHIOptions = CIPHIOptions(); kwargs...) = CIPHIContext{UInt128}(fcidump, options; kwargs...)
 
 is_hermitian(ctx::Union{CIPHIContext, FCIContext}) = !is_similarity_transformed(ctx.fcidump)
