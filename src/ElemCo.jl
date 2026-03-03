@@ -55,6 +55,7 @@ include("scf/dfmcscf.jl")
 
 include("interfaces/molpro.jl")
 include("interfaces/molden.jl")
+include("interfaces/vasp.jl")
 include("interfaces/interfaces.jl")
 
 try
@@ -93,6 +94,7 @@ using .DMRG
 using .Interfaces
 using .TREXIO  # Use the standalone TREXIO module
 using .TrexioInterface
+using .VaspInterface
 
 
 export @mainname, @print_input

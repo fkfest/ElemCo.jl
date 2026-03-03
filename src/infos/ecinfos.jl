@@ -42,6 +42,7 @@ function get_options(opt)
   return NamedTuple(key =>getfield(opt, key) for key ∈ propertynames(opt))
 end
 
+# TODO: make the struct ECInfo parameterized by the type of the fcidump (e.g., ECInfo{T} for T number type) and make the field fd of type FDump{T,3} instead of TFDump.
 """
     ECInfo
 
@@ -61,7 +62,7 @@ end
   """ molecular system. """
   system::MSystem = MSystem()
   """ fcidump. """
-  fd::TFDump = TFDump()
+  fd::FDump{<:Number,3} = TFDump()
   """ information about (temporary) files. 
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:

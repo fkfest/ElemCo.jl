@@ -96,32 +96,34 @@ end
   
 
 """
-    FDump{N}
+    FDump{T,N}
 
   Molecular integrals 
 
   The 2-e integrals are stored in the physicists' notation: `int2[pqrs]` ``= <pq|rs>=v_{pq}^{rs}``
+
+  `T` denotes the element type of integrals (`Float64` or `ComplexF64`)
 
   `N` denotes the number of indices in the 2-e-integral tensors,
   for `N=3` (usual) the last two indices are stored as a single uppertriangular index (r <= s)
 
   $(TYPEDFIELDS)
 """
-@kwdef mutable struct FDump{N}
+@kwdef mutable struct FDump{T<:Number,N}
   """ 2-e⁻ integrals for restricted orbitals fcidump. """
-  int2::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
+  int2::Array{T,N} = zeros(T, ntuple(d->0,Val(N)))
   """ αα 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2aa::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
+  int2aa::Array{T,N} = zeros(T, ntuple(d->0,Val(N)))
   """ ββ 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2bb::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
+  int2bb::Array{T,N} = zeros(T, ntuple(d->0,Val(N)))
   """ αβ 2-e⁻ integrals for unrestricted orbitals fcidump. """
-  int2ab::Array{Float64,4} = zeros(0,0,0,0)
+  int2ab::Array{T,4} = zeros(T, 0,0,0,0)
   """ 1-e⁻ integrals for restricted orbitals fcidump. """
-  int1::Matrix{Float64} = zeros(0,0)
+  int1::Matrix{T} = zeros(T, 0,0)
   """ α 1-e⁻ integrals for unrestricted orbitals fcidump. """
-  int1a::Matrix{Float64} = zeros(0,0)
+  int1a::Matrix{T} = zeros(T, 0,0)
   """ β 1-e⁻ integrals for unrestricted orbitals fcidump. """
-  int1b::Matrix{Float64} = zeros(0,0)
+  int1b::Matrix{T} = zeros(T, 0,0)
   """ core energy """
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
@@ -134,38 +136,38 @@ end
   uhf::Bool = false
 end
 
-const TFDump = FDump{3}
-const QFDump = FDump{4}
+const TFDump = FDump{Float64,3}
+const QFDump = FDump{Float64,4}
 
 """ 
   is_triang(fd::FDump)
   
   If true: an uppertriangular index for last two indices of 2e⁻ integrals is used.
 """ 
-is_triang(fd::FDump{3}) = true
-is_triang(fd::FDump{4}) = false
+is_triang(fd::FDump{<:Number,3}) = true
+is_triang(fd::FDump{<:Number,4}) = false
 
 """
-    FDump(int2::Array{Float64,N}, int1::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N
+    FDump(int2::Array{T,N}, int1::Matrix{T}, int0::Float64, head::FDumpHeader) where {T,N}
 
   Spin-free fcidump
 """
-FDump(int2::Array{Float64,N}, int1::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2, int1, int0, head)
+FDump(int2::Array{T,N}, int1::Matrix{T}, int0::Float64, head::FDumpHeader) where {T<:Number,N} = FDump{T,N}(; int2, int1, int0, head)
 """
-    FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N
+    FDump(int2aa::Array{T,N}, int2bb::Array{T,N}, int2ab::Array{T,4}, int1a::Matrix{T}, int1b::Matrix{T}, int0::Float64, head::FDumpHeader) where {T,N}
 
   Spin-polarized fcidump
 """
-FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,4}, int1a::Matrix{Float64}, int1b::Matrix{Float64}, int0::Float64, head::FDumpHeader) where N = FDump(; int2aa, int2bb, int2ab, int1a, int1b, int0, head, uhf=true)
+FDump(int2aa::Array{T,N}, int2bb::Array{T,N}, int2ab::Array{T,4}, int1a::Matrix{T}, int1b::Matrix{T}, int0::Float64, head::FDumpHeader) where {T<:Number,N} = FDump{T,N}(; int2aa, int2bb, int2ab, int1a, int1b, int0, head, uhf=true)
 
 """
-    FDump{N}(norb, nelec; ms2=0, isym=1, orbsym=[], uhf=false, simtra=false)
+    FDump{T,N}(norb, nelec; ms2=0, isym=1, orbsym=[], uhf=false, simtra=false)
 
-  Create a new FDump object
+  Create a new FDump object with element type `T`.
 """
-function FDump{N}(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[], 
-               uhf=false, simtra=false) where N
-  fd = FDump{N}()
+function FDump{T,N}(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[], 
+               uhf=false, simtra=false) where {T<:Number,N}
+  fd = FDump{T,N}()
   fd.head["NORB"] = [norb]
   fd.head["NELEC"] = [nelec]
   fd.head["MS2"] = [ms2]
@@ -238,39 +240,39 @@ is_similarity_transformed(fd::FDump) = headvar(fd, "ST", Int) > 0
 
   If `norb` is not provided, the integrals are set to zero with the same dimensions as before.
 """
-function set_zero!(fd::FDump, norb::Int=0)
+function set_zero!(fd::FDump{T,N}, norb::Int=0) where {T,N}
   fd.int0 = 0.0
   if norb <= 0
     if fd.uhf
-      fill!(fd.int1a, 0.0)
-      fill!(fd.int1b, 0.0)
-      fill!(fd.int2aa, 0.0)
-      fill!(fd.int2bb, 0.0)
-      fill!(fd.int2ab, 0.0)
+      fill!(fd.int1a, zero(T))
+      fill!(fd.int1b, zero(T))
+      fill!(fd.int2aa, zero(T))
+      fill!(fd.int2bb, zero(T))
+      fill!(fd.int2ab, zero(T))
     else
-      fill!(fd.int1, 0.0)
-      fill!(fd.int2, 0.0)
+      fill!(fd.int1, zero(T))
+      fill!(fd.int2, zero(T))
     end
   else
     if fd.uhf
-      fd.int1a = zeros(norb,norb)
-      fd.int1b = zeros(norb,norb)
+      fd.int1a = zeros(T, norb,norb)
+      fd.int1b = zeros(T, norb,norb)
       fd.int2aa = get_int2_zeros(fd.int2aa, norb)
       fd.int2bb = get_int2_zeros(fd.int2bb, norb)
       fd.int2ab = get_int2_zeros(fd.int2ab, norb)
     else
-      fd.int1 = zeros(norb,norb)
+      fd.int1 = zeros(T, norb,norb)
       fd.int2 = get_int2_zeros(fd.int2, norb)
     end
   end
 end
 
-function get_int2_zeros(int2::Array{Float64,3}, norb)
-  return zeros(norb,norb,(norb+1)*norb÷2)
+function get_int2_zeros(int2::Array{T,3}, norb) where T
+  return zeros(T, norb,norb,(norb+1)*norb÷2)
 end
 
-function get_int2_zeros(int2::Array{Float64,4}, norb)
-  return zeros(norb,norb,norb,norb)
+function get_int2_zeros(int2::Array{T,4}, norb) where T
+  return zeros(T, norb,norb,norb,norb)
 end
 
 """
@@ -345,7 +347,7 @@ end
 """ 
 function read_fcidump(fcidump::String, ::Val{N}) where N
   fdf = open(fcidump)
-  fd = FDump{N}()
+  fd = FDump{Float64,N}()
   fd.head = read_header(fdf)
   fd.origin = fcidump
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
@@ -565,13 +567,13 @@ function set_int1!(int1, i1, i2, integ, simtra)
 end
 
 """
-    read_integrals!(fd::FDump{N}, fdfile::IOStream)
+    read_integrals!(fd::FDump{<:Number,N}, fdfile::IOStream)
 
   Read integrals from fcidump file
 
 Returns `true` if successful.
 """
-function read_integrals!(fd::FDump{N}, fdfile::IOStream) where N
+function read_integrals!(fd::FDump{<:Number,N}, fdfile::IOStream) where N
   norb = headvar(fd, "NORB", Int)
   if isnothing(norb)
     error("NORB option not found in fcidump")
@@ -1043,7 +1045,7 @@ end
   Transform integrals to new basis using Tl and Tr transformation matrices. 
   If Tl and Tr are unrestricted, then the function transforms rhf fcidump to uhf fcidump.
 """
-function transform_fcidump!(fd::FDump{N}, Tl::SpinMatrix, Tr::SpinMatrix) where N
+function transform_fcidump!(fd::FDump{T,N}, Tl::SpinMatrix, Tr::SpinMatrix) where {T<:Number,N}
   println("Transform integrals...")
   if !is_restricted(Tl) || !is_restricted(Tr)
     genuhfdump = true
@@ -1064,8 +1066,8 @@ function transform_fcidump!(fd::FDump{N}, Tl::SpinMatrix, Tr::SpinMatrix) where 
     fd.int2ab = transform_int2_Q(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2])
     fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
     fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
-    fd.int2 = zeros(ntuple(i->0, Val(N)))
-    fd.int1 = zeros(0,0)
+    fd.int2 = zeros(T, ntuple(i->0, Val(N)))
+    fd.int1 = zeros(T, 0,0)
     fd.head["IUHF"] = [1]
     fd.uhf = true
   else
