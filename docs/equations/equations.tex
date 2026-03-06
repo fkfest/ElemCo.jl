@@ -209,34 +209,6 @@ and other indices do not include the core orbitals.
 $\tilde L$ corresponds to the \textit{jkfit} density-fitting basis functions,
 and $L$ corresponds to the \textit{mp2fit} density-fitting basis functions.
 
-\section{Density fitting with positron}
-
-With positrons, the corrections to the one-body term of the electron Hamiltonian are given by
-\begin{equation}
-  \begin{aligned}
-    \tilde h_p^q &= \tilde f_p^q 
-    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL} - v_{p}^{qL} v_{\bar{i}}^{\bar{i}L}
-    \right)\\
-    \tilde{f}_p^q &= h_p^q + \sum_{\tilde{L}} \left(2v_{p}^{q\tilde L} v_{\tilde i}^{\tilde i\tilde L} 
-    - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L} - v_{p}^{q\tilde L} v_{\bar{i}}^{\bar{i}\tilde L} \right),\\
-  \end{aligned}
-\end{equation}
-where $\bar{i}=1$ denote the single occupied positron orbital.The positron one-body terms get corrections according to 
-\begin{equation}
-  \begin{aligned}
-    \tilde h_{\spb p}^{\spb q (\mathbf{+})} &= \tilde f_{\spb p}^{\spb q (\mathbf{+})} 
-    + \sum_L \left(2v_{i}^{iL}v_{\spb p}^{\spb qL}\right)\\
-    \tilde f_{\spb p }^{\spb q (\mathbf{+})} &= h_{\spb p}^{\spb q (\mathbf{+})} - \sum_L \left(2v_{ \tilde i}^{ \tilde i \tilde L}v_{\spb p}^{\spb q \tilde L}\right), 
-    \\
-  \end{aligned}
-\end{equation}
-and the energy is saved as
-\begin{equation}
-\tilde{E}_0 = E_0 + h_{i}^{i} + \tfrac12 h^{\spb i(\mathbf{+})}_{\spb i} - \left( \tilde h_{ i}^{ i} + \tfrac12 \tilde h^{\spb i(\mathbf{+})}_{\spb i}  \right).
-\end{equation}
-
-At the moment the positron integral evaluation does not support frozen-core approximation. 
-
 \section{Frozen-core approximation}
 \label{sec:frozen-core}
 The frozen-core approximation is used to reduce the number of orbitals in the correlated 
@@ -312,77 +284,6 @@ The residual of the Hartree-Fock equations, which can be used in DIIS, is given 
   \quad \mbox{ with } \quad D_{\mu}^{\nu} = C_{\mu}^i C_i^{\dagger\nu}.
 \end{aligned}
 \end{equation}
-
-\section{Positron Hartree--Fock}
-\label{sec:positron-hf}
-
-A closed--shell electron reference plus a single positron is formally
-analogous to an \textit{unrestricted} HF problem with two spin blocks:
-the $\alpha$ electrons and the positron ($e^+$). The key
-difference is that the positron block contains \emph{exactly one}
-occupied orbital, so there is no exchange term between two positrons.
-Also there is an attractive Coulomb interaction between the positron and the
-electrons instead of the repulsive one between $\alpha$ and $\beta$ electrons.  
-We keep the convention of barred indices $\spb{p},\spb{q},\ldots$ for
-positron spin--orbitals and ordinary Latin indices $p,q,\ldots$ for the
-electrons.
-
-\subsection{Density--fitted working equations}
-The coupled Roothaan equations
-\begin{equation}
-f_{\mu}^{\nu(e)} C_{\nu}^{p} = S_{\mu}^{\nu} C_{\nu}^{p} \epsilon_{p},\qquad
-f_{\mu}^{\nu(p)} C_{\nu}^{\bar{p}} = S_{\mu}^{\nu} C_{\nu}^{\bar{p}} \epsilon_{\bar{p}},
-\label{eq:poshf-roothaan}
-\end{equation}
-are solved self--consistently.
-
-With density fitting [cf.~\sect{sec:df}] we reuse the three--index
-intermediates $v_{\mu}^{\nu L}$ and the metric factors $C_{P}^{L}$. The
-AO density matrices are
-\begin{equation}
-D_{\mu}^{\nu} = 2 C_{\mu}^{i} C_{\nu}^{i},\qquad
-P_{\mu}^{\nu} = C_{\mu}^{\bar{i}} C_{\nu}^{\bar{i}}.
-\end{equation}
-
-\paragraph{Electron block.}  Including the attractive Coulomb term with
-the positron the electronic Fock matrix becomes
-\begin{equation}
-\begin{aligned}
-f_{\mu}^{\nu(e)} &= h_{\mu}^{\nu}
-+ 2 J_{\mu}^{\nu}[D] - K_{\mu}^{\nu}[D]
- -     J_{\mu}^{\nu}[P] \\
- J_{\mu}^{\nu}[D] &= \sum_{L} v_{\xi}^{\text{o}L} D_{\text{o}}^{\xi} v_{\mu}^{\nu L},
- \quad J_{\mu}^{\nu}[P] = \sum_{L} v_{\xi}^{\text{o}L} P_{\text{o}}^{\xi} v_{\mu}^{\nu L},\\
- \\
-K_{\mu}^{\nu}[D] &= v_{\mu}^{iL} v_{iL}^{\nu},\qquad 
-v_{\mu}^{iL} = v_{\mu}^{\rho L} C_{\rho}^{i}
-\label{eq:poshf-fock-e}
-\end{aligned}
-\end{equation}
-
-\paragraph{Positron block.}  Exchange vanishes for a single particle;
-the Fock matrix for the positron therefore contains only the one--body
-term and the \emph{attractive} Coulomb interaction with the electrons,
-\begin{equation}
-f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - 2 J_{\mu}^{\nu}[D],
-\label{eq:poshf-fock-p}
-\end{equation}
-where $h^{(p)}$ differs from the electronic one--electron matrix only by
-the sign of the nuclear attraction operator.
-
-
-\subsection{HF energy with a positron}
-The Hartree--Fock total energy is
-\begin{equation}
-E_{\text{HF}}^{e/e^+} = \tfrac12 D_{\mu}^{\nu} \bigl(h_{\nu}^{\mu} + f_{\nu}^{\mu(e)} + J_{\mu}^{\nu}[P]\bigr)
-+        P_{\mu}^{\nu}  f_{\nu}^{\mu(p)}
-+ E_0,
-\end{equation}
-which reduces to the ordinary closed--shell expression when
-$P\to0$.  In practice the Coulomb terms are accumulated on the fly
-from the three--index intermediates as described above.
-
-
 
 \section{(Bi-orthogonal) Hartree-Fock}
 The closed-shell Hartree-Fock on top of the FCIDUMP integrals (including the case of similarity-transformed 
@@ -794,6 +695,167 @@ E^{(2)}_{\mathrm{RHF}} &= \sum_{ijab} \langle ij|ab\rangle (2T_{ij}^{ab} - T_{ij
 \end{equation}
 
 
+\section{Unrestricted UHF--MP2}
+\label{sec:uhf-mp2}
+
+For UHF, $\alpha$ and $\beta$ electrons occupy \emph{different} spatial orbitals 
+with different orbital energies. We use lowercase $(i,j,a,b)$ for $\alpha$ 
+and uppercase $(I,J,A,B)$ for $\beta$.
+
+\subsection{Three Spin Contributions}
+\begin{equation}
+E^{(2)}_{\mathrm{UHF}} = E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} + E^{(2)}_{\alpha\beta}.
+\end{equation}
+
+\paragraph{Same-spin $\alpha\alpha$.}
+With antisymmetrized integrals and antisymmetric amplitudes:
+\begin{equation}
+E^{(2)}_{\alpha\alpha} = \frac{1}{4} \sum_{ijab}
+\frac{(\langle ij|ab\rangle - \langle ij|ba\rangle)^2}{\Delta_{ijab}^\alpha}
+= \frac{1}{2} \sum_{ijab} \langle ij|ab\rangle \, T_{ij}^{ab,\alpha\alpha}.
+\end{equation}
+The $\tfrac{1}{4} \to \tfrac{1}{2}$ follows from amplitude antisymmetry.
+
+\paragraph{Same-spin $\beta\beta$.}
+\begin{equation}
+E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{IJAB} \langle IJ|AB\rangle \, T_{IJ}^{AB,\beta\beta}.
+\end{equation}
+
+\paragraph{Opposite-spin $\alpha\beta$.}
+No exchange, no antisymmetry, no overcounting:
+\begin{equation}
+E^{(2)}_{\alpha\beta} = \sum_{iJaB} \frac{\langle iJ|aB\rangle^2}{\Delta_{iJaB}^{\alpha\beta}}
+= \sum_{iJaB} \langle iJ|aB\rangle \, T_{iJ}^{aB,\alpha\beta}.
+\end{equation}
+
+\subsection{Final UHF--MP2 Formula}
+\begin{equation}
+\label{eq:uhf-mp2}
+\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{ijab} \langle ij|ab\rangle \, T_{ij}^{ab,\alpha\alpha}
++ \frac{1}{2} \sum_{IJAB} \langle IJ|AB\rangle \, T_{IJ}^{AB,\beta\beta}
++ \sum_{iJaB} \langle iJ|aB\rangle \, T_{iJ}^{aB,\alpha\beta},}
+\end{equation}
+with amplitudes
+\begin{equation}
+\begin{aligned}
+T_{ij}^{ab,\alpha\alpha} &= \frac{\langle ij|ab\rangle - \langle ij|ba\rangle}
+{\varepsilon_i^\alpha + \varepsilon_j^\alpha - \varepsilon_a^\alpha - \varepsilon_b^\alpha}, \\[4pt]
+T_{IJ}^{AB,\beta\beta} &= \frac{\langle IJ|AB\rangle - \langle IJ|BA\rangle}
+{\varepsilon_I^\beta + \varepsilon_J^\beta - \varepsilon_A^\beta - \varepsilon_B^\beta}, \\[4pt]
+T_{iJ}^{aB,\alpha\beta} &= \frac{\langle iJ|aB\rangle}
+{\varepsilon_i^\alpha + \varepsilon_J^\beta - \varepsilon_a^\alpha - \varepsilon_B^\beta}.
+\end{aligned}
+\end{equation}
+
+\subsection{Key Differences from RHF}
+\begin{itemize}
+  \item No factor of 2 on SS terms ($\alpha$ and $\beta$ orbitals differ).
+  \item Separate integrals and orbital energies for each spin.
+  \item No exchange in the OS contribution.
+\end{itemize}
+
+
+\chapter{Positron}
+
+\section{Density fitting with positron}
+
+With positrons, the corrections to the one-body term of the electron Hamiltonian are given by
+\begin{equation}
+  \begin{aligned}
+    \tilde h_p^q &= \tilde f_p^q 
+    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL} - v_{p}^{qL} v_{\bar{i}}^{\bar{i}L}
+    \right)\\
+    \tilde{f}_p^q &= h_p^q + \sum_{\tilde{L}} \left(2v_{p}^{q\tilde L} v_{\tilde i}^{\tilde i\tilde L} 
+    - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L} - v_{p}^{q\tilde L} v_{\bar{i}}^{\bar{i}\tilde L} \right),\\
+  \end{aligned}
+\end{equation}
+where $\bar{i}=1$ denote the single occupied positron orbital.The positron one-body terms get corrections according to 
+\begin{equation}
+  \begin{aligned}
+    \tilde h_{\spb p}^{\spb q (\mathbf{+})} &= \tilde f_{\spb p}^{\spb q (\mathbf{+})} 
+    + \sum_L \left(2v_{i}^{iL}v_{\spb p}^{\spb qL}\right)\\
+    \tilde f_{\spb p }^{\spb q (\mathbf{+})} &= h_{\spb p}^{\spb q (\mathbf{+})} - \sum_L \left(2v_{ \tilde i}^{ \tilde i \tilde L}v_{\spb p}^{\spb q \tilde L}\right), 
+    \\
+  \end{aligned}
+\end{equation}
+and the energy is saved as
+\begin{equation}
+\tilde{E}_0 = E_0 + h_{i}^{i} + \tfrac12 h^{\spb i(\mathbf{+})}_{\spb i} - \left( \tilde h_{ i}^{ i} + \tfrac12 \tilde h^{\spb i(\mathbf{+})}_{\spb i}  \right).
+\end{equation}
+
+At the moment the positron integral evaluation does not support frozen-core approximation. 
+
+\section{Positron Hartree--Fock}
+\label{sec:positron-hf}
+
+A closed--shell electron reference plus a single positron is formally
+analogous to an \textit{unrestricted} HF problem with two spin blocks:
+the $\alpha$ electrons and the positron ($e^+$). The key
+difference is that the positron block contains \emph{exactly one}
+occupied orbital, so there is no exchange term between two positrons.
+Also there is an attractive Coulomb interaction between the positron and the
+electrons instead of the repulsive one between $\alpha$ and $\beta$ electrons.  
+We keep the convention of barred indices $\spb{p},\spb{q},\ldots$ for
+positron spin--orbitals and ordinary Latin indices $p,q,\ldots$ for the
+electrons.
+
+\subsection{Density--fitted working equations}
+The coupled Roothaan equations
+\begin{equation}
+f_{\mu}^{\nu(e)} C_{\nu}^{p} = S_{\mu}^{\nu} C_{\nu}^{p} \epsilon_{p},\qquad
+f_{\mu}^{\nu(p)} C_{\nu}^{\bar{p}} = S_{\mu}^{\nu} C_{\nu}^{\bar{p}} \epsilon_{\bar{p}},
+\label{eq:poshf-roothaan}
+\end{equation}
+are solved self--consistently.
+
+With density fitting [cf.~\sect{sec:df}] we reuse the three--index
+intermediates $v_{\mu}^{\nu L}$ and the metric factors $C_{P}^{L}$. The
+AO density matrices are
+\begin{equation}
+D_{\mu}^{\nu} = 2 C_{\mu}^{i} C_{\nu}^{i},\qquad
+P_{\mu}^{\nu} = C_{\mu}^{\bar{i}} C_{\nu}^{\bar{i}}.
+\end{equation}
+
+\paragraph{Electron block.}  Including the attractive Coulomb term with
+the positron the electronic Fock matrix becomes
+\begin{equation}
+\begin{aligned}
+f_{\mu}^{\nu(e)} &= h_{\mu}^{\nu}
++ 2 J_{\mu}^{\nu}[D] - K_{\mu}^{\nu}[D]
+ -     J_{\mu}^{\nu}[P] \\
+ J_{\mu}^{\nu}[D] &= \sum_{L} v_{\xi}^{\text{o}L} D_{\text{o}}^{\xi} v_{\mu}^{\nu L},
+ \quad J_{\mu}^{\nu}[P] = \sum_{L} v_{\xi}^{\text{o}L} P_{\text{o}}^{\xi} v_{\mu}^{\nu L},\\
+ \\
+K_{\mu}^{\nu}[D] &= v_{\mu}^{iL} v_{iL}^{\nu},\qquad 
+v_{\mu}^{iL} = v_{\mu}^{\rho L} C_{\rho}^{i}
+\label{eq:poshf-fock-e}
+\end{aligned}
+\end{equation}
+
+\paragraph{Positron block.}  Exchange vanishes for a single particle;
+the Fock matrix for the positron therefore contains only the one--body
+term and the \emph{attractive} Coulomb interaction with the electrons,
+\begin{equation}
+f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - 2 J_{\mu}^{\nu}[D],
+\label{eq:poshf-fock-p}
+\end{equation}
+where $h^{(p)}$ differs from the electronic one--electron matrix only by
+the sign of the nuclear attraction operator.
+
+
+\subsection{HF energy with a positron}
+The Hartree--Fock total energy is
+\begin{equation}
+E_{\text{HF}}^{e/e^+} = \tfrac12 D_{\mu}^{\nu} \bigl(h_{\nu}^{\mu} + f_{\nu}^{\mu(e)} + J_{\mu}^{\nu}[P]\bigr)
++        P_{\mu}^{\nu}  f_{\nu}^{\mu(p)}
++ E_0,
+\end{equation}
+which reduces to the ordinary closed--shell expression when
+$P\to0$.  In practice the Coulomb terms are accumulated on the fly
+from the three--index intermediates as described above.
+
+
+
 \section{RHF--MP2 with a Single Positron}
 \label{sec:rhf-positron-mp2}
 
@@ -857,65 +919,6 @@ the electron--positron correlation energy becomes:
 \boxed{E^{(2)}_{\mathrm{ep}} = 2 \sum_{ipaq} \langle ip|aq\rangle \, T_{ip}^{aq}.}
 \end{equation}
 
-
-\section{Unrestricted UHF--MP2}
-\label{sec:uhf-mp2}
-
-For UHF, $\alpha$ and $\beta$ electrons occupy \emph{different} spatial orbitals 
-with different orbital energies. We use lowercase $(i,j,a,b)$ for $\alpha$ 
-and uppercase $(I,J,A,B)$ for $\beta$.
-
-\subsection{Three Spin Contributions}
-\begin{equation}
-E^{(2)}_{\mathrm{UHF}} = E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} + E^{(2)}_{\alpha\beta}.
-\end{equation}
-
-\paragraph{Same-spin $\alpha\alpha$.}
-With antisymmetrized integrals and antisymmetric amplitudes:
-\begin{equation}
-E^{(2)}_{\alpha\alpha} = \frac{1}{4} \sum_{ijab}
-\frac{(\langle ij|ab\rangle - \langle ij|ba\rangle)^2}{\Delta_{ijab}^\alpha}
-= \frac{1}{2} \sum_{ijab} \langle ij|ab\rangle \, T_{ij}^{ab,\alpha\alpha}.
-\end{equation}
-The $\tfrac{1}{4} \to \tfrac{1}{2}$ follows from amplitude antisymmetry.
-
-\paragraph{Same-spin $\beta\beta$.}
-\begin{equation}
-E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{IJAB} \langle IJ|AB\rangle \, T_{IJ}^{AB,\beta\beta}.
-\end{equation}
-
-\paragraph{Opposite-spin $\alpha\beta$.}
-No exchange, no antisymmetry, no overcounting:
-\begin{equation}
-E^{(2)}_{\alpha\beta} = \sum_{iJaB} \frac{\langle iJ|aB\rangle^2}{\Delta_{iJaB}^{\alpha\beta}}
-= \sum_{iJaB} \langle iJ|aB\rangle \, T_{iJ}^{aB,\alpha\beta}.
-\end{equation}
-
-\subsection{Final UHF--MP2 Formula}
-\begin{equation}
-\label{eq:uhf-mp2}
-\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{ijab} \langle ij|ab\rangle \, T_{ij}^{ab,\alpha\alpha}
-+ \frac{1}{2} \sum_{IJAB} \langle IJ|AB\rangle \, T_{IJ}^{AB,\beta\beta}
-+ \sum_{iJaB} \langle iJ|aB\rangle \, T_{iJ}^{aB,\alpha\beta},}
-\end{equation}
-with amplitudes
-\begin{equation}
-\begin{aligned}
-T_{ij}^{ab,\alpha\alpha} &= \frac{\langle ij|ab\rangle - \langle ij|ba\rangle}
-{\varepsilon_i^\alpha + \varepsilon_j^\alpha - \varepsilon_a^\alpha - \varepsilon_b^\alpha}, \\[4pt]
-T_{IJ}^{AB,\beta\beta} &= \frac{\langle IJ|AB\rangle - \langle IJ|BA\rangle}
-{\varepsilon_I^\beta + \varepsilon_J^\beta - \varepsilon_A^\beta - \varepsilon_B^\beta}, \\[4pt]
-T_{iJ}^{aB,\alpha\beta} &= \frac{\langle iJ|aB\rangle}
-{\varepsilon_i^\alpha + \varepsilon_J^\beta - \varepsilon_a^\alpha - \varepsilon_B^\beta}.
-\end{aligned}
-\end{equation}
-
-\subsection{Key Differences from RHF}
-\begin{itemize}
-  \item No factor of 2 on SS terms ($\alpha$ and $\beta$ orbitals differ).
-  \item Separate integrals and orbital energies for each spin.
-  \item No exchange in the OS contribution.
-\end{itemize}
 
 
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
