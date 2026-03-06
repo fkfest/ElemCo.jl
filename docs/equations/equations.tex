@@ -708,39 +708,39 @@ E^{(2)}_{\mathrm{UHF}} = E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} + E^{(2)}
 With antisymmetrized integrals and antisymmetric amplitudes:
 \begin{equation}
 E^{(2)}_{\alpha\alpha} = \frac{1}{4} \sum_{ijab}
-\frac{(v_{ij}^{ab} - v_{ij}^{ba})^2}{\Delta_{ijab}^\alpha}
-= \frac{1}{2} \sum_{ijab} v_{ij}^{ab} \, T_{ij}^{ab,\alpha\alpha}.
+\frac{(v_{ij}^{ab} - v_{ij}^{ba})^2}{\Delta_{ijab}}
+= \frac{1}{2} \sum_{ijab} v_{ij}^{ab} \, T_{ij}^{ab}.
 \end{equation}
 The $\tfrac{1}{4} \to \tfrac{1}{2}$ follows from amplitude antisymmetry.
 
 \paragraph{Same-spin $\beta\beta$.}
 \begin{equation}
-E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T_{\spb{i}\spb{j}}^{\spb{a}\spb{b},\beta\beta}.
+E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T_{\spb{i}\spb{j}}^{\spb{a}\spb{b}}.
 \end{equation}
 
 \paragraph{Opposite-spin $\alpha\beta$.}
 No exchange, no antisymmetry, no overcounting:
 \begin{equation}
-E^{(2)}_{\alpha\beta} = \sum_{i\spb{j}a\spb{b}} \frac{(v_{i\spb{j}}^{a\spb{b}})^2}{\Delta_{i\spb{j}a\spb{b}}^{\alpha\beta}}
-= \sum_{i\spb{j}a\spb{b}} v_{i\spb{j}}^{a\spb{b}} \, T_{i\spb{j}}^{a\spb{b},\alpha\beta}.
+E^{(2)}_{\alpha\beta} = \sum_{i\spb{j}a\spb{b}} \frac{(v_{i\spb{j}}^{a\spb{b}})^2}{\Delta_{i\spb{j}a\spb{b}}}
+= \sum_{i\spb{j}a\spb{b}} v_{i\spb{j}}^{a\spb{b}} \, T_{i\spb{j}}^{a\spb{b}}.
 \end{equation}
 
 \subsection{Final UHF--MP2 Formula}
 \begin{equation}
 \label{eq:uhf-mp2}
-\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{ijab} v_{ij}^{ab} \, T_{ij}^{ab,\alpha\alpha}
-+ \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T_{\spb{i}\spb{j}}^{\spb{a}\spb{b},\beta\beta}
-+ \sum_{i\spb{j}a\spb{b}} v_{i\spb{j}}^{a\spb{b}} \, T_{i\spb{j}}^{a\spb{b},\alpha\beta},}
+\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{ijab} v_{ij}^{ab} \, T_{ij}^{ab}
++ \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T_{\spb{i}\spb{j}}^{\spb{a}\spb{b}}
++ \sum_{i\spb{j}a\spb{b}} v_{i\spb{j}}^{a\spb{b}} \, T_{i\spb{j}}^{a\spb{b}},}
 \end{equation}
 with amplitudes
 \begin{equation}
 \begin{aligned}
-T_{ij}^{ab,\alpha\alpha} &= \frac{v_{ij}^{ab} - v_{ij}^{ba}}
-{\varepsilon_i^\alpha + \varepsilon_j^\alpha - \varepsilon_a^\alpha - \varepsilon_b^\alpha}, \\[4pt]
-T_{\spb{i}\spb{j}}^{\spb{a}\spb{b},\beta\beta} &= \frac{v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} - v_{\spb{i}\spb{j}}^{\spb{b}\spb{a}}}
-{\varepsilon_{\spb{i}}^\beta + \varepsilon_{\spb{j}}^\beta - \varepsilon_{\spb{a}}^\beta - \varepsilon_{\spb{b}}^\beta}, \\[4pt]
-T_{i\spb{j}}^{a\spb{b},\alpha\beta} &= \frac{v_{i\spb{j}}^{a\spb{b}}}
-{\varepsilon_i^\alpha + \varepsilon_{\spb{j}}^\beta - \varepsilon_a^\alpha - \varepsilon_{\spb{b}}^\beta}.
+T_{ij}^{ab} &= \frac{v_{ij}^{ab} - v_{ij}^{ba}}
+{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b}, \\[4pt]
+T_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} &= \frac{v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} - v_{\spb{i}\spb{j}}^{\spb{b}\spb{a}}}
+{\varepsilon_{\spb{i}} + \varepsilon_{\spb{j}} - \varepsilon_{\spb{a}} - \varepsilon_{\spb{b}}}, \\[4pt]
+T_{i\spb{j}}^{a\spb{b}} &= \frac{v_{i\spb{j}}^{a\spb{b}}}
+{\varepsilon_i + \varepsilon_{\spb{j}} - \varepsilon_a - \varepsilon_{\spb{b}}}.
 \end{aligned}
 \end{equation}
 
