@@ -169,7 +169,7 @@ end
   Calculate density matrix for `temperature` according to Fermi-Dirac.
 """
 function density4temperature(EC::ECInfo, ϵ, cMOr, nocc, nelec, temperature)
-  cMOl = (inv(cMOr))'
+  cMOl = transpose(inv(cMOr))
   fermi = (ϵ[nocc] + ϵ[nocc+1])/2
   function occfun(eps) 
     if eps < fermi
@@ -273,7 +273,7 @@ end
 
   Perform BO-UHF using integrals from fcidump EC.fd.
 """
-function bouhf(EC::ECInfo)
+function bouhf(EC::ECInfo{T}) where T
   t1 = time_ns()
   pseudo = EC.options.scf.pseudo
   if pseudo
@@ -291,10 +291,10 @@ function bouhf(EC::ECInfo)
   # 1: alpha, 2: beta (cMOs can become complex(?))
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, true)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  ϵ= Vector{Float64}[zeros(norb), zeros(norb)]
-  hsmall = Matrix{Float64}[integ1(EC.fd,:α), integ1(EC.fd,:β)]
-  efhsmall::Vector{Float64} = [0.0, 0.0]
-  Δfock = Matrix{Float64}[zeros(norb,norb), zeros(norb,norb)]
+  ϵ = [zeros(norb), zeros(norb)]
+  hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
+  efhsmall = zeros(T, 2)
+  Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
   EHF = 0.0
   previousEHF = 0.0
   if pseudo

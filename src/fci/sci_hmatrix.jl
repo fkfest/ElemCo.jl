@@ -16,7 +16,7 @@
     phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
     return double_beta_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
   end
-  return 0.0  # Invalid excitation
+  return zero(Scalar)  # Invalid excitation
 end
 
 @pib function compute_matrix_element_alpha_excitations(det_i::Determinant, det_j::Determinant,
@@ -33,7 +33,7 @@ end
     phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
     return double_alpha_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
   end
-  return 0.0  # Invalid excitation
+  return zero(Scalar)  # Invalid excitation
 end
 
 @pib function compute_matrix_element_mixed_excitations(det_i::Determinant, det_j::Determinant,
@@ -84,7 +84,7 @@ occa/occb are either Nothing or lists of occupied orbitals (makes the calculatio
     # Mixed single excitations in alpha and beta
     return compute_matrix_element_mixed_excitations(det_i, det_j, context)
   end
-  return 0.0  # Invalid excitation
+  return zero(Scalar)  # Invalid excitation
 end
 
 """

@@ -459,7 +459,8 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   mixed = (o1 != o2)
   no1, no2, nv1, nv2 = len_spaces(EC,o1*o2*v1*v2)
   lenbuf1, lenbuf2 = auto_buf_length4calc_dressed_ints(no1, no2, nv1, nv2, calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo, mixed)
-  @buffer buf1(lenbuf1) buf2(lenbuf2) begin
+  T = ec_eltype(EC)
+  @buffer buf1(T, lenbuf1) buf2(T, lenbuf2) begin
   # @print_buffer_usage buf1 buf2 begin
   mem2 = print_memory(EC, mem1, "for buffers for dressed integrals", 2)
   # first make half-transformed integrals
@@ -1135,9 +1136,9 @@ function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
   end
   nocc = length(occ)
   if length(T1) > 0
-    D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
+    D2 = Array{eltype(T2)}(undef,norb,norb,nocc,nocc)
   else
-    D2 = zeros(norb,norb,nocc,nocc)
+    D2 = zeros(eltype(T2), norb,norb,nocc,nocc)
   end
   @mtensor begin
     D2[virt,virt,:,:][a,b,i,j] = T2[a,b,i,j] 
@@ -1167,9 +1168,9 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
   nocca = n_occ_orbs(EC)
   noccb = n_occb_orbs(EC)
   if length(T1a) > 0
-    D2ab = Array{Float64}(undef,norb,norb,nocca,noccb)
+    D2ab = Array{eltype(T2ab)}(undef,norb,norb,nocca,noccb)
   else
-    D2ab = zeros(norb,norb,nocca,noccb)
+    D2ab = zeros(eltype(T2ab), norb,norb,nocca,noccb)
   end
   @mtensor begin
     D2ab[SP['v'],SP['V'],:,:][a,B,i,J] = T2ab[a,B,i,J] 
@@ -1794,7 +1795,7 @@ function calc_pm_K2!(int2::AbstractArray{<:Number,3}, D2::AbstractArray{<:Number
   rsBlks = get_spaceblocks(1:nrs)
   maxrs = maximum(length, rsBlks)
   lenbuf = maxrs * ntri_pp * 2
-  @buffer buf(lenbuf) begin
+  @buffer buf(eltype(int2), lenbuf) begin
   for rs in rsBlks
     lenrs = length(rs)
     int2s = alloc!(buf, ntri_pp, lenrs)
@@ -1837,7 +1838,7 @@ function calc_K2(int2::AbstractArray{<:Number,3}, D2::AbstractArray{<:Number,3},
   rsBlks = get_spaceblocks(1:nrs)
   maxrs = maximum(length, rsBlks)
   lenbuf = maxrs * nocc1 * nocc2
-  @buffer buf(lenbuf) begin
+  @buffer buf(eltype(int2), lenbuf) begin
   for rs in rsBlks
     lenrs = length(rs)
     v!int2 = @mview(int2[:, :, rs])
@@ -1873,7 +1874,7 @@ function calc_K2ab(int2, D2)
   sBlks = get_spaceblocks(1:norb, 8)
   maxs = maximum(length, sBlks)
   lenbuf = norb * maxs * nocca * noccb
-  @buffer buf(lenbuf) begin
+  @buffer buf(eltype(int2), lenbuf) begin
   for s in sBlks
     lens = length(s)
     v!int2 = @mview(int2[:, :, :, s])
@@ -2509,7 +2510,7 @@ function calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
   internalT1a = T1a[norba,morba]
-  M1 = zeros(Float64,size(T1a))
+  M1 = zeros(eltype(T1a),size(T1a))
   T2_nVmN = T2ab[norba,virtualsb,morba,norbb]
   T1_VN = T1b[virtualsb,norbb]
   if !isempty(occcorea) && !isempty(occcoreb)
@@ -2536,7 +2537,7 @@ function calc_M1b(occcore, virtuals, T1a, T1b, T2a, T2ab, activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M1 = zeros(Float64,size(T1b))
+  M1 = zeros(eltype(T1b),size(T1b))
   internalT1b = T1b[morbb,norbb]
   T2_vMmN = T2ab[virtualsa,morbb,morba,norbb]
   T1_vm = T1a[virtualsa,morba]
@@ -2564,7 +2565,7 @@ function calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab,activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M2 = zeros(Float64,size(T2b))
+  M2 = zeros(eltype(T2b),size(T2b))
   T2_nMmO = T2ab[norba,morbb,morba,occcoreb]
   T2_nVmO = T2ab[norba,virtualsb,morba,occcoreb]
   T2_MVOO = T2b[morbb,virtualsb,occcoreb,occcoreb]
@@ -2662,7 +2663,7 @@ function calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab,activeorbs)
   occcoreb, occcorea = occcore
   virtualsb, virtualsa = virtuals
 #ENDNOTE
-  M2 = zeros(Float64,size(T2a))
+  M2 = zeros(eltype(T2a),size(T2a))
   T2_VVNO = T2a[virtualsb,virtualsb,norbb,occcoreb]
   T2_VnNm = T2ab[virtualsb,norba,norbb,morba]
   T2_VnOm = T2ab[virtualsb,norba,occcoreb,morba]
@@ -2760,7 +2761,7 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M2 = zeros(Float64,size(T2ab))
+  M2 = zeros(eltype(T2ab),size(T2ab))
   # @assert isapprox(T2a[norba,virtualsa,morba,occcorea],-T2a[virtualsa,norba,morba,occcorea];atol=1.e-8)
   # @assert isapprox(T2a[norba,virtualsa,morba,occcorea],-T2a[norba,virtualsa,occcorea,morba];atol=1.e-8)
   # @assert isapprox(T2b[morbb,virtualsb,norbb,occcoreb],-T2b[virtualsb,morbb,norbb,occcoreb];atol=1.e-8)
@@ -3001,9 +3002,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   diis = Diis(EC, weights)
 
   NormR1 = 0.0
-  NormT1::Float64 = 0.0
-  NormT2::Float64 = 0.0
-  NormT3::Float64 = 0.0
+  NormT1 = 0.0
+  NormT2 = 0.0
+  NormT3 = 0.0
   do_sing = (method.exclevel[1] == :full)
   Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
   En1 = 0.0
@@ -3205,7 +3206,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   NormT1 = 0.0
   NormT2 = 0.0
   NormT3 = 0.0
-  R1 = Float64[]
+  R1 = ec_eltype(EC)[]
   Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
 
   for it in 1:EC.options.cc.maxit
@@ -3869,7 +3870,7 @@ end
   
   It is a combination of spaces for triples and contravariant doubles. 
 """
-function calc_space4project_voXL(EC::ECInfo, T2)
+function calc_space4project_voXL(EC::ECInfo{T}, T2) where T
   nvirt = size(T2, 1)
   nocc = size(T2, 3)
   UvoX = load3idx(EC, "C_voX")
@@ -3880,7 +3881,7 @@ function calc_space4project_voXL(EC::ECInfo, T2)
   elseif EC.options.cc.space4voXL == :full
     println("Full space for project_voXL (not recommended, use project_voXL=false instead)")
     nbX = nvirt*nocc
-    UvobX = reshape(Matrix{Float64}(I, nbX, nbX), (nvirt, nocc, nbX))
+    UvobX = reshape(Matrix{T}(I, nbX, nbX), (nvirt, nocc, nbX))
   elseif EC.options.cc.space4voXL in [:combined, :symcombined]
     @mtensor tT2[a,i,b,j] := 2.0 * T2[a,b,i,j] - T2[a,b,j,i]
     println("Combined space for project_voXL (triples + contravariant doubles space)")
@@ -3899,13 +3900,13 @@ function calc_space4project_voXL(EC::ECInfo, T2)
     @mtensor S_XY[X,Y] := UvoX[a,i,X] * UvoY[a,i,Y]
     nX, nY = size(S_XY)
     # full overlap
-    S = Matrix{Float64}(I, nX+nY, nX+nY) 
+    S = Matrix{T}(I, nX+nY, nX+nY) 
     S[1:nX,nX+1:end] = S_XY
     S[nX+1:end,1:nX] = S_XY'
     TU_ZbX, Sigma = svd_decompose(S, tol2*tol2; description="Combined")
     # display(Sigma)
     TU_ZbX ./= sqrt.(Sigma')
-    UvoZ = Array{Float64}(undef, nvirt, nocc, nX+nY)
+    UvoZ = Array{T}(undef, nvirt, nocc, nX+nY)
     UvoZ[:,:,1:nX] = UvoX
     UvoZ[:,:,nX+1:end] = UvoY
     @mtensor UvobX[a,i,bX] := UvoZ[a,i,Z] * TU_ZbX[Z,bX]

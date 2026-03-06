@@ -136,8 +136,8 @@ end
   uhf::Bool = false
 end
 
-const TFDump = FDump{Float64,3}
-const QFDump = FDump{Float64,4}
+const TFDump{T<:Number} = FDump{T,3}
+const QFDump{T<:Number} = FDump{T,4}
 
 """
     FDump{T2,N}(fd::FDump{T1,N})

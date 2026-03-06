@@ -171,12 +171,12 @@ end
 """
 function left_from_right_rotations(cMOr::SpinMatrix{T}) where {T}
   if is_restricted(cMOr)
-    cMOl = SpinMatrix((inv(cMOr[1]))')
+    cMOl = SpinMatrix(transpose(inv(cMOr[1])))
     restrict!(cMOl)
   else
     cMOl = SpinMatrix{T}()
     for ispin = 1:2
-      cMOl[ispin] = (inv(cMOr[ispin]))'
+      cMOl[ispin] = transpose(inv(cMOr[ispin]))
     end
   end
   return cMOl
@@ -359,7 +359,12 @@ function normalize_phase!(cMO)
   nmo = size(cMO,2)
   for imo in 1:nmo
     maxao = argmaxN(cMO[:,imo], 1, by=x->round(abs(x),digits=4))[1]
-    if cMO[maxao,imo] < 0
+    c = cMO[maxao,imo]
+    if eltype(cMO) <: Complex
+      # rotate phase so that the largest coefficient is real and positive
+      phase = c / abs(c)
+      cMO[:,imo] ./= phase
+    elseif c < 0
       cMO[:,imo] .= -cMO[:,imo]
     end
   end

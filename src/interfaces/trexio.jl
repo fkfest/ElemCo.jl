@@ -661,12 +661,12 @@ function read_trexio_orbital_occupations(trexio::TrexioFile, MO="mo")
 end
 
 """
-    write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2}, T2::AbstractArray{Float64,4})
+    write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{<:Number,2}, T2::AbstractArray{<:Number,4})
 
 Write CC amplitudes to TREXIO format using the standalone TREXIO module.
 This is a custom extension for storing amplitude data.
 """
-function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2}, T2::AbstractArray{Float64,4})
+function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{<:Number,2}, T2::AbstractArray{<:Number,4})
   if length(T1) > 0
     status = TREXIO.trexio_write_amplitude_single_dense(trexio, T1)
     trexio_check_write_status(status, "T1 amplitudes")
@@ -679,8 +679,8 @@ function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2
   end
 end
 
-function write_trexio_amplitudes(trexio::TrexioFile, T1a::AbstractArray{Float64,2}, T1b::AbstractArray{Float64,2},
-                                 T2a::AbstractArray{Float64,4}, T2b::AbstractArray{Float64,4}, T2ab::AbstractArray{Float64,4})
+function write_trexio_amplitudes(trexio::TrexioFile, T1a::AbstractArray{<:Number,2}, T1b::AbstractArray{<:Number,2},
+                                 T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, T2ab::AbstractArray{<:Number,4})
   if length(T1a) > 0
     status = TREXIO.trexio_write_amplitude_single_up_dense(trexio, T1a)
     trexio_check_write_status(status, "T1a amplitudes")

@@ -11,7 +11,7 @@
   Returns:
     OutDict with keys "E", "ESS", "EOS", "EO" for MP2 correlation energy, SS, OS, and O contributions.
 """
-function calc_dfmp2(EC::ECInfo)
+function calc_dfmp2(EC::ECInfo{T}) where T
   t1 = time_ns()
   print_info("DF-MP2")
   savet2 = !isempty(EC.options.cc.save)
@@ -66,9 +66,9 @@ function calc_dfmp2(EC::ECInfo)
     T2file, T2 = newmmap(EC, t2filename, (nvir,nvir,nocc,nocc); description)
     println("Save doubles amplitudes to file $t2filename")
   end
-  EMP2d = 0.0
-  EMP2ex = 0.0
-  EMP2diag = 0.0
+  EMP2d = zero(T)
+  EMP2ex = zero(T)
+  EMP2diag = zero(T)
   for j = 1:nocc
     irange = 1:j
     leni = length(irange)
@@ -105,8 +105,8 @@ function calc_dfmp2(EC::ECInfo)
   t1 = print_time(EC, t1, "energy calculation", 1)
   # end # print_buffer_usage
   end # buf buffer
-  EMP2SS = 2*EMP2d - 2*EMP2ex
-  EMP2OS = 2*EMP2d + EMP2diag
+  EMP2SS = real(2*EMP2d - 2*EMP2ex)
+  EMP2OS = real(2*EMP2d + EMP2diag)
   EMP2 = EMP2SS + EMP2OS
   return OutDict("E"=>EMP2, "ESS"=>EMP2SS, "EOS"=>EMP2OS, "EO"=>0.0)
 end

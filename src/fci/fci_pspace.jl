@@ -236,7 +236,7 @@ function diagonalize_pspace_hamiltonian!(context::FCIContext)
   end
 
   # Full diagonalization 
-  eigenvals, eigenvecs = eigen(Symmetric(pspace.hamiltonian))
+  eigenvals, eigenvecs = eigen(Hermitian(pspace.hamiltonian))
 
   # Store results (eigenvalues are already sorted by eigen())
   pspace.eigenvalues = eigenvals

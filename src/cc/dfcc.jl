@@ -107,7 +107,7 @@ end
   Returns total energy, SS, OS and Openshell (0.0) contributions
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
-function calc_deco_hylleraas(EC::ECInfo, T1, T2::Array{Float64,4}, R1, R2::Array{Float64,4}) 
+function calc_deco_hylleraas(EC::ECInfo, T1, T2::AbstractArray{<:Number,4}, R1, R2::AbstractArray{<:Number,4}) 
   ovL = load3idx(EC, "d_ovL")
   @mtensor begin
     int2[a,b,i,j] := R2[a,b,i,j] + ovL[i,a,L] * ovL[j,b,L]
@@ -126,7 +126,7 @@ function calc_deco_hylleraas(EC::ECInfo, T1, T2::Array{Float64,4}, R1, R2::Array
   end
   return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
-function calc_deco_hylleraas(EC::ECInfo, T1, T2::Matrix{Float64}, R1, R2::Matrix{Float64})
+function calc_deco_hylleraas(EC::ECInfo, T1, T2::AbstractMatrix{<:Number}, R1, R2::AbstractMatrix{<:Number})
   ssvxx, osvxx = get_ssv_osvˣˣ(EC)
   @mtensor begin
     ET2OS = T2[X,Y] * (osvxx[X,Y] + R2[X,Y])
@@ -170,10 +170,10 @@ end
   Returns total energy, SS, OS and Openshell (0.0) contributions
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
-function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,4})
+function calc_deco_doubles_energy(EC::ECInfo, T2::AbstractArray{<:Number,4})
   return calc_df_doubles_energy(EC, T2)
 end
-function calc_deco_doubles_energy(EC::ECInfo, T2::Array{Float64,2})
+function calc_deco_doubles_energy(EC::ECInfo, T2::AbstractArray{<:Number,2})
   ssvxx, osvxx = get_ssv_osvˣˣ(EC)
   @mtensor begin
     ET2OS = T2[X,Y] * osvxx[X,Y] 
@@ -620,9 +620,9 @@ function calc_MP2_from_3idx(EC::ECInfo, voL::AbstractArray, ishift)
   ϵo, ϵv = orbital_energies(EC)
   nocc = length(ϵo)
   nvirt = length(ϵv)
-  ET2d = 0.0
-  ET2ex = 0.0
-  t_vvo = zeros(nvirt,nvirt,nocc)
+  ET2d = zero(eltype(voL))
+  ET2ex = zero(eltype(voL))
+  t_vvo = zeros(eltype(voL),nvirt,nvirt,nocc)
   for j = 1:nocc
     vvo = @view vvoo[:,:,:,j]
     if ishift ≈ 0.0
@@ -639,12 +639,12 @@ function calc_MP2_from_3idx(EC::ECInfo, voL::AbstractArray, ishift)
       end
     end
     @mtensor begin
-      ET2d += vvo[a,b,i] * t_vvo[a,b,i]
-      ET2ex += vvo[a,b,i] * t_vvo[b,a,i]
+      ET2d += conj(vvo[a,b,i]) * t_vvo[a,b,i]
+      ET2ex += conj(vvo[a,b,i]) * t_vvo[b,a,i]
     end
   end
-  ET2SS = ET2d - ET2ex
-  ET2OS = ET2d
+  ET2SS = real(ET2d - ET2ex)
+  ET2OS = real(ET2d)
   ET2 = ET2SS + ET2OS
   return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
@@ -1170,7 +1170,7 @@ function svd_dc_iterations!(T1, T2, EC::ECInfo, methodname)
   NormR1 = 0.0
   NormT1 = 0.0
   NormT2 = 0.0
-  R1 = zeros(size(T1))
+  R1 = zeros(eltype(T1), size(T1))
   Eh = OutDict()
   # calc starting guess energy 
   truncEMP2 = calc_deco_doubles_energy(EC, T2)

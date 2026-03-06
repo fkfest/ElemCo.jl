@@ -53,19 +53,19 @@ function load(EC::ECInfo, fname::String)
 end
 
 """
-    load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+    load(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
 
   Type-stable load array from file `fname` in EC.scr directory.
 
   The type `T` and number of dimensions `N` are given explicitly.
   If `skip_error` is true, return empty `Array{T,N}` if the dimension/type is wrong.
 """
-function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+function load(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
   return mioload(fullfilename(EC, fname), Val(N), T; skip_error)[1]
 end
 
 """
-    load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+    load_all(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
 
   Type-stable load arrays from file `fname` in EC.scr directory.
 
@@ -73,7 +73,7 @@ end
   Return an array of arrays.
   If `skip_error` is true, return empty `Array{T,N}[Array{T,N}()]` if the dimension/type is wrong.
 """
-function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+function load_all(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
   return mioload(fullfilename(EC, fname), Val(N), T; skip_error)
 end
 
@@ -81,10 +81,10 @@ for N in 1:6
   loadN = Symbol("load$(N)idx")
   loadNall = Symbol("load$(N)idx_all")
   @eval begin
-    function $loadN(EC::ECInfo, fname::String, T::Type=Float64; skip_error=false)
+    function $loadN(EC::ECInfo{Ty}, fname::String, T::Type=Ty; skip_error=false) where Ty
       return load(EC, fname, Val($N), T; skip_error)
     end
-    function $loadNall(EC::ECInfo, fname::String, T::Type=Float64; skip_error=false)
+    function $loadNall(EC::ECInfo{Ty}, fname::String, T::Type=Ty; skip_error=false) where Ty
       return load_all(EC, fname, Val($N), T; skip_error)
     end
   end
@@ -103,13 +103,13 @@ function load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_erro
 end
 
 """
-    newmmap(EC::ECInfo, fname::String, dims::Tuple{Vararg{Int}}, Type=Float64; description="tmp")
+    newmmap(EC::ECInfo{Ty}, fname::String, dims::Tuple{Vararg{Int}}, Type=Ty; description="tmp")
 
   Create a new memory-map file for writing (overwrites existing file).
   Add file to `EC.files` with `description`.
   Return a pointer to the file and the mmaped array.
 """
-function newmmap(EC::ECInfo, fname::String, dims::NTuple{N,Int}, Type=Float64; description="tmp") where {N}
+function newmmap(EC::ECInfo{Ty}, fname::String, dims::NTuple{N,Int}, Type=Ty; description="tmp") where {N, Ty}
   add_file!(EC, fname, description; overwrite=true)
   return mionewmmap(fullfilename(EC, fname), dims, Type)
 end
@@ -142,7 +142,7 @@ function mmap(EC::ECInfo, fname::String)
   return miommap(fullfilename(EC, fname))
 end
 
-function mmap(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
+function mmap(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty) where {N, Ty}
   return miommap(fullfilename(EC, fname), Val(N), T)
 end
 
@@ -150,10 +150,10 @@ for N in 1:6
   mmapN = Symbol("mmap$(N)idx")
   mmapNall = Symbol("mmap$(N)idx_all")
   @eval begin
-    function $mmapN(EC::ECInfo, fname::String, T::Type=Float64)
+    function $mmapN(EC::ECInfo{Ty}, fname::String, T::Type=Ty) where Ty
       return mmap(EC, fname, Val($N), T)
     end
-    function $mmapNall(EC::ECInfo, fname::String, T::Type=Float64)
+    function $mmapNall(EC::ECInfo{Ty}, fname::String, T::Type=Ty) where Ty
       return load_all(EC, fname, Val($N), T)
     end
   end
@@ -217,7 +217,7 @@ function spincase_from_4spaces(spaces::String)
 end
 
 """ 
-    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+    ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
 
   Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
 
@@ -226,7 +226,7 @@ end
   If the last two indices are stored as triangular - make them full.
   The result is stored in `out`.
 """
-function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+function ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
   if EC.fd.uhf && spincase == :αβ
     @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
     out .= @view integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
@@ -248,13 +248,13 @@ end
   The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given.
   If the last two indices are stored as triangular - make them full.
 """
-function ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
-  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+function ints2(EC::ECInfo{T}, sp1, sp2, sp3, sp4, spincase) where T
+  out = Array{T,4}(undef, length(sp1), length(sp2), length(sp3), length(sp4))
   return ints2!(out, EC, sp1, sp2, sp3, sp4, spincase)  
 end
 
 """ 
-    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+    ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, spaces::String, spincase = nothing)
 
   Return subset of 2e⁻ integrals according to spaces. 
   
@@ -263,7 +263,7 @@ end
   If the last two indices are stored as triangular - make them full.
   The result is stored in `out`.
 """
-function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+function ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, spaces::String, spincase = nothing)
   if isnothing(spincase)
     sc = spincase_from_4spaces(spaces)
   else 
@@ -297,8 +297,8 @@ end
 
   Return full 2e⁻ integrals <sp1 sp2 | sp3 sp4> from allint2 with last two indices as a triangular index.
 """
-function detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
-  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+function detri_int2(allint2::AbstractArray{T,3}, norb, sp1, sp2, sp3, sp4) where T
+  out = Array{T,4}(undef, length(sp1), length(sp2), length(sp3), length(sp4))
   return detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
 end
 
@@ -329,7 +329,7 @@ end
   Return `M`.
 """
 function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
-  CA = cholesky(Symmetric(A), RowMaximum(), check = false, tol = tol)
+  CA = cholesky(Hermitian(A), RowMaximum(), check = false, tol = tol)
   if CA.rank < size(A,1)
     if verbose
       redund = size(A,1) - CA.rank

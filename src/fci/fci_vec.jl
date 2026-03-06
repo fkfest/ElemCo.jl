@@ -146,7 +146,7 @@ end
 
 Access coefficient vec[i_a, i_b].
 """
-@inline function Base.getindex(vec::FCIVector{OPattern}, i_a::Integer, i_b::Integer)::Scalar where OPattern
+@inline function Base.getindex(vec::FCIVector{OPattern}, i_a::Integer, i_b::Integer) where OPattern
   @boundscheck checkbounds(vec.data, i_a, i_b)
   return vec.data[i_a, i_b]
 end
@@ -235,7 +235,7 @@ end
 
 Compute norm of FCI vector using LinearAlgebra.
 """
-function LinearAlgebra.norm(vec::FCIVector{OPattern})::Scalar where OPattern
+function LinearAlgebra.norm(vec::FCIVector{OPattern}) where OPattern
   return norm(vec.data)
 end
 
@@ -259,7 +259,7 @@ end
 
 Compute dot product using LinearAlgebra.
 """
-function LinearAlgebra.dot(a::FCIVector{OPattern}, b::FCIVector{OPattern})::Scalar where OPattern
+function LinearAlgebra.dot(a::FCIVector{OPattern}, b::FCIVector{OPattern}) where OPattern
   @assert compatible(a, b) "Vectors not compatible"
   return LinearAlgebra.dot(a.data, b.data)
 end

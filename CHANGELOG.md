@@ -11,10 +11,21 @@
 
 ### Added
 
+* **Complex-valued calculations**: Systematic support for `ComplexF64` integrals and amplitudes throughout the codebase. When a complex FCIDUMP is loaded, `ECInfo{ComplexF64}` propagates the element type through solvers, tensor tools, CC methods, EOM, and interfaces. Key changes:
+  - `TFDump`/`QFDump` type aliases are now parametric (`FDump{T,3}`/`FDump{T,4}`)
+  - DIIS and Davidson solvers are parametric (`Diis{T}`, `Davidson{T}`) with correct Hermitian symmetry
+  - Tensor load/save/mmap defaults use `ec_eltype(EC)` instead of `Float64`
+  - All CC methods (CCSD, DCSD, (T), Λ-CCSD(T), SVD-DC) propagate element type through amplitudes, residuals, and energy accumulators
+  - EOM-CCSD/EOM-DCSD trial vectors and Hamiltonian matrices use `ec_eltype(EC)`
+  - Biorthogonal HF (`left_from_right_rotations`) uses `transpose` instead of `adjoint` — a correctness fix for complex orbitals (i.e, the resulting left coefficients are *complex conjugate* of the actual left coefficients. This might change if it turns out to be too confusing.)
+  - FCI module: `Symmetric` → `Hermitian` in P-space diagonalization; removed restrictive `Float64` return annotations
+  - TREXIO interface: amplitude/determinant write functions accept `AbstractArray{<:Number}`
 * EOM-UCCSD/EOM-UDCSD and EOM-RCCSD/EOM-RDCSD (restricted to singlet excitations) methods have been implemented.
 * A new factorization of `kext` contractions for closed-shell CCSD/DCSD using a symmetric/antisymmetric representation is implemented (can be activated by setting `@set cc use_pm_kext=true`). This algorithm has two times less FLOPs than the standard implementation, however, it can be less efficient because of cache-unfriendly access in the construction of the intermediates (which is parallelized using `Threads.@threads` and should scale well with the number of threads). The standard implementation is still used by default, but the new one can be activated for testing and benchmarking purposes.
 
 ### Fixed
+
+* `diagonalize_pspace_hamiltonian!` in FCI: `Symmetric` → `Hermitian` (silently discarded imaginary parts)
 
 ## Version [v0.15.0] - 2026.02.05
 

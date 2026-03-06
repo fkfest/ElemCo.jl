@@ -62,11 +62,11 @@ struct VaspData{T<:Union{Float64, ComplexF64}}
   "Grid vectors G[3,nG] (optional)"
   grid_vectors::Matrix{Float64}
   "Coulomb vertex singular vectors U[nG,naux] (optional)"
-  coulomb_vertex_singular_vectors::Matrix{Float64}
+  coulomb_vertex_singular_vectors::Matrix{T}
   "Delta integrals HH Δ[i,j] (optional)"
-  delta_integrals_hh::Matrix{Float64}
+  delta_integrals_hh::Matrix{T}
   "Delta integrals PPHH Δ[a,b,i,j] (optional)"
-  delta_integrals_pphh::Array{Float64,4}
+  delta_integrals_pphh::Array{T,4}
   "MP2 pair energies ε[i,j] (optional)"
   mp2_pair_energies::Matrix{Float64}
 end
@@ -250,12 +250,13 @@ function load_vasp(dirpath::String)
   coulomb_vertex = cv_raw .* cv_meta.unit
 
   # --- Optional tensors ---
+  T = eltype(coulomb_vertex)
   coulomb_potential = load_optional_1d(dirpath, "CoulombPotential")
   grid_vectors = load_optional_2d(dirpath, "GridVectors")
-  cv_sv = load_optional_2d(dirpath, "CoulombVertexSingularVectors")
-  delta_hh = load_optional_2d(dirpath, "DeltaIntegralsHH")
-  delta_pphh = load_optional_4d(dirpath, "DeltaIntegralsPPHH")
-  mp2_pe = load_optional_2d(dirpath, "Mp2PairEnergies")
+  cv_sv = T.(load_optional_2d(dirpath, "CoulombVertexSingularVectors"))
+  delta_hh = T.(load_optional_2d(dirpath, "DeltaIntegralsHH"))
+  delta_pphh = T.(load_optional_4d(dirpath, "DeltaIntegralsPPHH"))
+  mp2_pe = Float64.(load_optional_2d(dirpath, "Mp2PairEnergies"))
 
   println("VASP data loaded from $dirpath")
   println("  Orbitals: $norb ($n_occupied occupied, $n_virtual virtual)")
@@ -407,24 +408,23 @@ end
 
 function load_optional_1d(dirpath::String, name::String)
   data = load_optional_tensor(dirpath, name)
-  return isnothing(data) ? Float64[] : vec(Float64.(data))
+  return isnothing(data) ? Float64[] : vec(data)
 end
 
 function load_optional_2d(dirpath::String, name::String)
   data = load_optional_tensor(dirpath, name)
   if isnothing(data)
-    return zeros(Float64, 0, 0)
+    return zeros(0, 0)
   end
-  d = Float64.(data)
-  return ndims(d) == 2 ? d : reshape(d, size(d, 1), :)
+  return ndims(data) == 2 ? data : reshape(data, size(data, 1), :)
 end
 
 function load_optional_4d(dirpath::String, name::String)
   data = load_optional_tensor(dirpath, name)
   if isnothing(data)
-    return zeros(Float64, 0, 0, 0, 0)
+    return zeros(0, 0, 0, 0)
   end
-  return Float64.(data)
+  return data
 end
 
 end # module VaspInterface

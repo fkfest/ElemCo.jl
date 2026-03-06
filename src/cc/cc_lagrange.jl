@@ -211,7 +211,7 @@ function calc_dU2(EC::ECInfo, T1, T12, U2, o1='o', v1='v', o2='o', v2='v')
   norb = n_orbs(EC)
   nocc1 = size(U2,3)
   nocc2 = size(U2,4)
-  dU2 = zeros(norb,norb,nocc1,nocc2)
+  dU2 = zeros(eltype(U2),norb,norb,nocc1,nocc2)
   dU2[SP[v1],SP[v2],:,:] = U2 
   if length(T1) > 0
     @mtensor dUovoo[i,b,m,n] := U2[a,b,m,n] * T1[a,i]
@@ -265,14 +265,14 @@ end
   Calculate the contribution of the 4-external integrals to the Λ αβ equations for CCSD/DCSD.
   
 """
-function cc_lagrange_kext4ab!(EC, R1a, R1b, R2, T1a, T1b, U2)
+function cc_lagrange_kext4ab!(EC::ECInfo{T}, R1a, R1b, R2, T1a, T1b, U2) where T
   t1 = time_ns()
   norb = n_orbs(EC)
   nocca = size(U2,3)
   noccb = size(U2,4)
   SP = EC.space
   dU2 = calc_dU2(EC, T1a, T1b, U2, 'o','v','O','V')
-  Kmmoo = Array{Float64,4}(undef,norb,norb,nocca,noccb) 
+  Kmmoo = Array{T,4}(undef, norb, norb, nocca, noccb) 
   if EC.fd.uhf
     int2 = integ2_os(EC.fd)
     # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``
@@ -425,8 +425,8 @@ which are added in `calc_ccsd_vector_times_Jacobian4ab`.
 if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return R1 and R2 
 """
-function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab, 
-            D1, dD1, dD1os, spin; dc=false, with_rhs=true)
+function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo{T}, U1, U2, U2ab, 
+            D1, dD1, dD1os, spin; dc=false, with_rhs=true) where T
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   t1 = time_ns()
 
@@ -546,7 +546,7 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
     @mtensor aR2[e,f,m,n] += U1[e,m] * dfov[n,f]
     t1 = print_time(EC, t1, "aR^{ef}_{mn} += U_{m}^{e} \\hat f_{n}^{f}",2)
   else
-    aR2 = zeros(size(R2))
+    aR2 = zeros(T, size(R2))
   end
   fac = dc ? 0.5 : 1.0
   # ``aR^{ef}_{mn} += 0.5(\hat x_c^e Λ_{mn}^{cf} - \hat x_m^k Λ_{kn}^{ef})``
@@ -632,8 +632,8 @@ Additionally, remaining contributions to the singles residual are calculated.
 if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return ΔR1a, ΔR1b, R2ab
 """
-function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1b::Matrix{Float64}, 
-          U2a::Array{Float64,4}, U2b::Array{Float64,4}, U2ab::Array{Float64,4}, D1a, D1b; dc=false, with_rhs=true) 
+function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::AbstractMatrix{<:Number}, U1b::AbstractMatrix{<:Number}, 
+          U2a::AbstractArray{<:Number,4}, U2b::AbstractArray{<:Number,4}, U2ab::AbstractArray{<:Number,4}, D1a, D1b; dc=false, with_rhs=true) 
   t1 = time_ns()
 
   SP = EC.space
@@ -894,8 +894,8 @@ function calc_1RDM(EC::ECInfo, U1, U2, T1, T2; jacobian=false)
       Dvo[a,i] := 2.0 * U1[c,k] * T2[a,c,i,k] - U1[c,k] * T2[a,c,k,i]
     end
   else
-    Dov = zeros(size(U2,3),size(U2,1))
-    Dvo = zeros(size(U2,1),size(U2,3))
+    Dov = zeros(eltype(U2),size(U2,3),size(U2,1))
+    Dvo = zeros(eltype(U2),size(U2,1),size(U2,3))
   end
   if length(T1) > 0
     # 1RDM (including all T1 terms)
@@ -918,12 +918,12 @@ function calc_1RDM(EC::ECInfo, U1, U2, T1, T2; jacobian=false)
   occ = SP['o']
   vir = SP['v']
   norb = n_orbs(EC)
-  D1 = zeros(norb,norb)
+  D1 = zeros(ec_eltype(EC),norb,norb)
   D1[occ,occ] = Doo
   D1[vir,vir] = Dvv
   D1[occ,vir] = Dov
   D1[vir,occ] = Dvo
-  dD1 = zeros(norb,norb)
+  dD1 = zeros(ec_eltype(EC),norb,norb)
   dD1[occ,occ] = dDoo
   dD1[vir,vir] = dDvv
   dD1[occ,vir] = dDov
@@ -946,7 +946,7 @@ and `dD1[p,q]`=``\\hat D_p^q``, the 1RDM with all T1 terms included.
 if `jacobian=true`, the T1 contributions to `dD1` are calculated without the + T1 term,
 to be used in the calculation of the CCSD Jacobian.
 """
-function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=false)
+function calc_1RDM(EC::ECInfo{T}, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=false) where T
   # 1RDM without T1 singles terms
   @mtensor begin 
     Doo[i,j] := -0.5 * (U2[c,d,i,k] * T2[c,d,j,k])
@@ -958,8 +958,8 @@ function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=
       Dvo[a,i] := U1[c,k] * T2[a,c,i,k] 
     end
   else
-    Dov = zeros(size(U2,3),size(U2,1))
-    Dvo = zeros(size(U2,1),size(U2,3))
+    Dov = zeros(T, size(U2,3), size(U2,1))
+    Dvo = zeros(T, size(U2,1), size(U2,3))
   end
   if spin == :α
     @mtensor begin 
@@ -1000,12 +1000,12 @@ function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=
   occ = SP[space4spin('o', spin == :α)]
   vir = SP[space4spin('v', spin == :α)]
   norb = n_orbs(EC)
-  D1 = zeros(norb,norb)
+  D1 = zeros(T, norb, norb)
   D1[occ,occ] = Doo
   D1[vir,vir] = Dvv
   D1[occ,vir] = Dov
   D1[vir,occ] = Dvo
-  dD1 = zeros(norb,norb)
+  dD1 = zeros(T, norb, norb)
   dD1[occ,occ] = dDoo
   dD1[vir,vir] = dDvv
   dD1[occ,vir] = dDov
@@ -1218,7 +1218,7 @@ end
 
   Exact specification of the method is given by `method`.
 """
-function calc_lm_cc(EC::ECInfo, method::ECMethod)
+function calc_lm_cc(EC::ECInfo{T}, method::ECMethod) where T
   print_info(method_name(method)*" Lagrange multipliers")
   highest_full_exc = max_full_exc(method)
   if highest_full_exc > 2
@@ -1229,8 +1229,8 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
       T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
       T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
     else
-      T1a = zeros(0,0)
-      T1b = zeros(0,0)
+      T1a = zeros(T, 0, 0)
+      T1b = zeros(T, 0, 0)
     end
     if method.exclevel[2] != :full
       error("No doubles is not implemented")
@@ -1243,7 +1243,7 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
     if method.exclevel[1] == :full
       T1 = read_starting_guess4amplitudes(EC, Val(1))
     else
-      T1 = zeros(0,0)
+      T1 = zeros(T, 0, 0)
     end
     if method.exclevel[2] != :full
       error("No doubles is not implemented")
@@ -1305,8 +1305,8 @@ function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   do_sing = (method.exclevel[1] == :full)
 
   NormR1 = 0.0
-  NormLM1::Float64 = 0.0
-  NormLM2::Float64 = 0.0
+  NormLM1 = 0.0
+  NormLM2 = 0.0
   ΛTNorm = 0.0
   converged = false
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven

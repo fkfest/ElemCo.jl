@@ -19,7 +19,7 @@ export SimpleDeterminant
 
 """
     write_trexio_determinants(trexio::TrexioFile, determinants::Vector{<:AbstractDeterminant}, 
-                              coefficients::AbstractVector{Float64})
+                              coefficients::AbstractVector{<:Number})
 
 Write determinants and CI coefficients to TREXIO file using extended format with 
 separate alpha/beta bit fields.
@@ -50,7 +50,7 @@ end
 """
 function write_trexio_determinants(trexio::TrexioFile, 
                                    determinants::Vector{D}, 
-                                   coefficients::AbstractVector{Float64}) where {D <: AbstractDeterminant}
+                                   coefficients::AbstractVector{<:Number}) where {D <: AbstractDeterminant}
   n_dets = length(determinants)
   @assert n_dets == length(coefficients) "Number of determinants ($n_dets) must match coefficients ($(length(coefficients)))"
   

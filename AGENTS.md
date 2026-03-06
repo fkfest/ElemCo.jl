@@ -50,3 +50,10 @@
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+
+## Human in the Loop
+
+- Use vscode askQuestions tool to interact with the user when you need clarification or confirmation
+- Always ask for clarification if requirements are ambiguous
+- The task is not complete before you get a direct confirmation from the user over askQuestions
+- If you have any questions, ask them using the askQuestions tool

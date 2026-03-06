@@ -205,18 +205,18 @@ function detri_doubles(T2)
 end
 
 """
-    detri_samespin_doubles(T2)
+    detri_samespin_doubles(T2::AbstractMatrix{T})
 
   Convert a doubles amplitude tensor T2 in the form (ab,ij) to the full form (a,b,i,j)
   using the permutational symmetry ``T^{ij}_{ab} = T^{ji}_{ba} = -T^{ij}_{ba} = -T^{ji}_{ab}``.
 
 Here, `ab` and `ij` are the strict upper triangular indices for virtual and occupied orbitals `a < b`, `i < j`.
 """
-function detri_samespin_doubles(T2)
+function detri_samespin_doubles(T2::AbstractMatrix{T}) where T
   ab,ij = size(T2)
   nvir = norb_from_strict_lentri(ab)
   nocc = norb_from_strict_lentri(ij)
-  T2full = zeros(nvir, nvir, nocc, nocc)
+  T2full = zeros(T, nvir, nvir, nocc, nocc)
   trioo = strict_uppertriangular_cut(nocc)
   trivv = strict_uppertriangular_cut(nvir)
   swtrioo = swapped_strict_uppertriangular_cut(nocc)
@@ -245,7 +245,7 @@ end
   Multi-threaded over `x`.
 """
 function calc_tri_sym_antisym!(out_s::AbstractMatrix, out_a::AbstractMatrix,
-                               A::AbstractArray{<:Real,3})
+                               A::AbstractArray{T,3}) where T
   norb = size(A, 1)
   nx = size(A, 3)
   @threadsbuffer tbuf(norb) begin

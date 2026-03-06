@@ -67,7 +67,7 @@ function calc_eom(EC::ECInfo, method::ECMethod)
   return energies
 end
 
-function eom_iterations(EC::ECInfo, method::ECMethod)
+function eom_iterations(EC::ECInfo{T}, method::ECMethod) where T
   t0 = time_ns()
   nstates = EC.options.eom.nstates
   shift = EC.options.eom.shift
@@ -76,9 +76,9 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   states = [1:nstates;]
-  energies = zeros(nstates)
-  U1 = zeros(nvirt, nocc)
-  V1 = zeros(nvirt, nocc)
+  energies = zeros(T, nstates)
+  U1 = zeros(T, nvirt, nocc)
+  V1 = zeros(T, nvirt, nocc)
   Vecs = (U1,)
   custom_dots = (calc_cs_singles_dot,)
   # HOMO-LUMO guess
@@ -142,7 +142,7 @@ function eom_iterations(EC::ECInfo, method::ECMethod)
   return energies
 end
 
-function eom_iterations2(EC::ECInfo, method::ECMethod)
+function eom_iterations2(EC::ECInfo{T}, method::ECMethod) where T
   t0 = time_ns()
   dc = (method.theory[1:2] == "DC")
   calc_intermediates4Jacobian(EC, method)
@@ -152,9 +152,9 @@ function eom_iterations2(EC::ECInfo, method::ECMethod)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   states = [1:nstates;]
-  energies = zeros(nstates)
-  U1 = zeros(nvirt, nocc)
-  U2 = zeros(nvirt, nvirt, nocc, nocc)
+  energies = zeros(T, nstates)
+  U1 = zeros(T, nvirt, nocc)
+  U2 = zeros(T, nvirt, nvirt, nocc, nocc)
   Vecs = (U1, U2)
   custom_dots = (calc_cs_singles_dot, calc_cs_doubles_dot)
   # custom_dots = (calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot)
@@ -236,7 +236,7 @@ end
 
   Perform unrestricted EOM-CIS iterations using the Davidson solver.
 """
-function eom_u_iterations(EC::ECInfo, method::ECMethod)
+function eom_u_iterations(EC::ECInfo{T}, method::ECMethod) where T
   t0 = time_ns()
   restrict = has_prefix(method, "R")
   nstates = EC.options.eom.nstates
@@ -248,11 +248,11 @@ function eom_u_iterations(EC::ECInfo, method::ECMethod)
   nvirta = n_virt_orbs(EC)
   nvirtb = n_virtb_orbs(EC)
   states = [1:nstates;]
-  energies = zeros(nstates)
-  U1a = zeros(nvirta, nocca)
-  U1b = zeros(nvirtb, noccb)
-  V1a = zeros(nvirta, nocca)
-  V1b = zeros(nvirtb, noccb)
+  energies = zeros(T, nstates)
+  U1a = zeros(T, nvirta, nocca)
+  U1b = zeros(T, nvirtb, noccb)
+  V1a = zeros(T, nvirta, nocca)
+  V1b = zeros(T, nvirtb, noccb)
   Vecs = (U1a, U1b)
   custom_dots = (calc_u_singles_dot, calc_u_singles_dot)
   # HOMO-LUMO guess
@@ -355,7 +355,7 @@ end
 
   Perform unrestricted EOM-CCSD/DCSD iterations using the Davidson solver.
 """
-function eom_u_iterations2(EC::ECInfo, method::ECMethod)
+function eom_u_iterations2(EC::ECInfo{T}, method::ECMethod) where T
   t0 = time_ns()
   dc = (method.theory[1:2] == "DC")
   restrict = has_prefix(method, "R")
@@ -368,12 +368,12 @@ function eom_u_iterations2(EC::ECInfo, method::ECMethod)
   nvirta = n_virt_orbs(EC)
   nvirtb = n_virtb_orbs(EC)
   states = [1:nstates;]
-  energies = zeros(nstates)
-  U1a = zeros(nvirta, nocca)
-  U1b = zeros(nvirtb, noccb)
-  U2a = zeros(nvirta, nvirta, nocca, nocca)
-  U2b = zeros(nvirtb, nvirtb, noccb, noccb)
-  U2ab = zeros(nvirta, nvirtb, nocca, noccb)
+  energies = zeros(T, nstates)
+  U1a = zeros(T, nvirta, nocca)
+  U1b = zeros(T, nvirtb, noccb)
+  U2a = zeros(T, nvirta, nvirta, nocca, nocca)
+  U2b = zeros(T, nvirtb, nvirtb, noccb, noccb)
+  U2ab = zeros(T, nvirta, nvirtb, nocca, noccb)
   Vecs = (U1a, U1b, U2a, U2b, U2ab)
   custom_dots = (calc_u_singles_dot, calc_u_singles_dot,
                  calc_samespin_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot)
@@ -510,7 +510,7 @@ end
   Generate an unrestricted CIS starting guess for `nstates` 
   by preparing a CIS matrix around the HOMO-LUMO and diagonalizing it.
 """
-function ucis_homo_lumo_guess(EC, nstates)
+function ucis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
   SP = EC.space
   # number of open-shell orbitals in alpha and in beta
   nsa = length(SP['s'])
@@ -526,12 +526,12 @@ function ucis_homo_lumo_guess(EC, nstates)
   dim_a = nva * noa
   dim_b = nvb * nob
   dim = dim_a + dim_b
-  HH = zeros(dim, dim)
+  HH = zeros(T, dim, dim)
   # α-α block
   f_mm = load2idx(EC, "f_mm")
   f_ooa = f_mm[spoa, spoa]
   f_vva = f_mm[spva, spva]
-  HHaa = zeros(nva, noa, nva, noa)
+  HHaa = zeros(T, nva, noa, nva, noa)
   for i = 1:noa
     for j = 1:noa
       HHaa[:,i,:,j] = f_vva .- f_ooa[i,j]
@@ -546,7 +546,7 @@ function ucis_homo_lumo_guess(EC, nstates)
   f_MM = load2idx(EC, "f_MM")
   f_oob = f_MM[spob, spob]
   f_vvb = f_MM[spvb, spvb]
-  HHbb = zeros(nvb, nob, nvb, nob)
+  HHbb = zeros(T, nvb, nob, nvb, nob)
   for i = 1:nob
     for j = 1:nob
       HHbb[:,i,:,j] = f_vvb .- f_oob[i,j]
@@ -653,7 +653,7 @@ end
   generate a CIS starting guess for nstates 
   by preparing a CIS matrix around the HOMO-LUMO and diagonalizing it
 """
-function cis_homo_lumo_guess(EC, nstates)
+function cis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
   noa = max(nstates, 5)
   nva = max(nstates, EC.options.davidson.maxdav)
   SP = EC.space
@@ -664,7 +664,7 @@ function cis_homo_lumo_guess(EC, nstates)
   f_mm = load2idx(EC, "f_mm")
   f_oo = f_mm[spo, spo]
   f_vv = f_mm[spv, spv]
-  HH = zeros(nva, noa, nva, noa)
+  HH = zeros(T, nva, noa, nva, noa)
   for i = 1:noa
     for j = 1:noa
       HH[:,i,:,j] = f_vv .- f_oo[i,j]
@@ -766,7 +766,7 @@ function calc_df_eom(EC::ECInfo, method::ECMethod)
 end
 
 
-function df_eom_iterations(EC::ECInfo, method::ECMethod)
+function df_eom_iterations(EC::ECInfo{T}, method::ECMethod) where T
   t0 = time_ns()
   nstates = EC.options.eom.nstates
   shift = EC.options.eom.shift
@@ -775,9 +775,9 @@ function df_eom_iterations(EC::ECInfo, method::ECMethod)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   states = [1:nstates;]
-  energies = zeros(nstates)
-  U1 = zeros(nvirt, nocc)
-  V1 = zeros(nvirt, nocc)
+  energies = zeros(T, nstates)
+  U1 = zeros(T, nvirt, nocc)
+  V1 = zeros(T, nvirt, nocc)
   Vecs = (U1,)
   custom_dots = (calc_cs_singles_dot,)
   # HOMO-LUMO guess
@@ -850,7 +850,7 @@ end
   generate a CIS starting guess for nstates 
   by preparing a CIS matrix around the HOMO-LUMO and diagonalizing it
 """
-function df_cis_homo_lumo_guess(EC, nstates)
+function df_cis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
   noa = max(nstates, 5)
   nva = max(nstates, EC.options.davidson.maxdav)
   SP = EC.space
@@ -861,7 +861,7 @@ function df_cis_homo_lumo_guess(EC, nstates)
   f_mm = load2idx(EC, "f_mm")
   f_oo = f_mm[spo, spo]
   f_vv = f_mm[spv, spv]
-  HH = zeros(nva, noa, nva, noa)
+  HH = zeros(T, nva, noa, nva, noa)
   for i = 1:noa
     for j = 1:noa
       HH[:,i,:,j] = f_vv .- f_oo[i,j]

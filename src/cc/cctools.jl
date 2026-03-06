@@ -510,9 +510,9 @@ end
 
   Calculate dot product of closed-shell singles amplitudes.
 """
-function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
+function calc_cs_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
   @mtensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
-  return DotT1::Float64
+  return DotT1::T
 end
 calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
 
@@ -521,9 +521,9 @@ calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ m
 
   Calculate dot product of contravariant closed-shell singles amplitudes.
 """
-function calc_contra_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
+function calc_contra_cs_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
   @mtensor DotT1 = 0.5*T1[a,i]*T1_[a,i]
-  return DotT1::Float64
+  return DotT1::T
 end
 calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot: T1 and T1_ must be matrices!")
 
@@ -532,11 +532,11 @@ calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot
 
   Calculate dot of unrestricted singles amplitudes.
 """
-function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
+function calc_u_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
   @mtensor begin
     DotT1 = T1[a,i]*T1_[a,i]
   end
-  return DotT1::Float64
+  return DotT1::T
 end
 calc_u_singles_dot(T1, T1_, state=0) = error("calc_u_singles_dot: T1 and T1_ must be matrices!")
 
@@ -579,9 +579,9 @@ end
 
   Calculate dot of closed-shell doubles amplitudes.
 """
-function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+function calc_cs_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
-  return DotT2::Float64
+  return DotT2::T
 end
 calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -590,9 +590,9 @@ calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ m
 
   Calculate dot of contravariant closed-shell doubles amplitudes.
 """
-function calc_contra_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+function calc_contra_cs_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor DotT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2_[a,b,i,j]
-  return (DotT2/3.0)::Float64
+  return DotT2/3.0::T
 end
 calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -601,11 +601,11 @@ calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot
 
   Calculate dot of unrestricted same-spin doubles amplitudes.
 """
-function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+function calc_samespin_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor begin
     DotT2 = 0.25*(T2[a,b,i,j]*T2_[a,b,i,j])
   end
-  return DotT2::Float64
+  return DotT2::T
 end
 calc_samespin_doubles_dot(T2, T2_, state=0) = error("calc_samespin_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -614,11 +614,11 @@ calc_samespin_doubles_dot(T2, T2_, state=0) = error("calc_samespin_doubles_dot: 
 
   Calculate dot of unrestricted αβ doubles amplitudes.
 """
-function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+function calc_ab_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor begin
     DotT2 = T2[a,b,i,j]*T2_[a,b,i,j]
   end
-  return DotT2::Float64
+  return DotT2::T
 end
 calc_ab_doubles_dot(T2, T2_, state=0) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -643,7 +643,7 @@ end
   Calculate squared norm of triples amplitudes.
 """
 function calc_triples_norm(T3)
-  NormT3 = 0.0
+  NormT3 = zero(eltype(T3))
   nocc = size(T3, 6)
   for k = 1:nocc 
     for j = 1:k
@@ -677,8 +677,8 @@ end
 
   Calculate dot of closed-shell triples amplitudes.
 """
-function calc_cs_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
-  DotT3 = 0.0
+function calc_cs_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
+  DotT3 = zero(T)
   nocc = size(T3, 6)
   for k = 1:nocc 
     for j = 1:k
@@ -705,7 +705,7 @@ function calc_cs_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
       end
     end
   end
-  return DotT3::Float64
+  return DotT3::T
 end
 calc_cs_triples_dot(T3, T3_) = error("calc_cs_triples_dot not implemented for this type of T3")
 
@@ -714,11 +714,11 @@ calc_cs_triples_dot(T3, T3_) = error("calc_cs_triples_dot not implemented for th
 
   Calculate dot of unrestricted same-spin triples amplitudes.
 """
-function calc_samespin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
+function calc_samespin_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
   @mtensor begin
     DotT3 = (1/36)*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
   end
-  return DotT3::Float64
+  return DotT3::T
 end
 calc_samespin_triples_dot(T3, T3_) = error("calc_samespin_triples_dot not implemented for this type of T3")
 
@@ -727,11 +727,11 @@ calc_samespin_triples_dot(T3, T3_) = error("calc_samespin_triples_dot not implem
 
   Calculate dot of unrestricted mixed-spin triples amplitudes.
 """
-function calc_mixedspin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
+function calc_mixedspin_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
   @mtensor begin
     DotT3 = 0.25*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
   end
-  return DotT3::Float64
+  return DotT3::T
 end
 calc_mixedspin_triples_dot(T3, T3_) = error("calc_mixedspin_triples_dot not implemented for this type of T3")
 
@@ -840,7 +840,7 @@ end
   Read amplitudes (type="T") or Lagrange multipliers (type="LM") 
   from file `EC.options.cc.start[_lm]*"_excitation_level"`.
 """
-function try2start_amps(EC::ECInfo, ::Val{excitation_level}; type="T") where excitation_level
+function try2start_amps(EC::ECInfo{T}, ::Val{excitation_level}; type="T") where {T, excitation_level}
   mainfilename, descr = save_or_start_file(EC, type, excitation_level, false)
   if mainfilename != ""
     filename = mainfilename*"_$excitation_level"
@@ -849,7 +849,7 @@ function try2start_amps(EC::ECInfo, ::Val{excitation_level}; type="T") where exc
       return load(EC, filename, Val(excitation_level*2), skip_error=true)
     end
   end
-  return Array{Float64,excitation_level*2}(undef, ntuple(i->0, Val(excitation_level*2)))
+  return Array{T,excitation_level*2}(undef, ntuple(i->0, Val(excitation_level*2)))
 end
 
 """
@@ -900,7 +900,7 @@ end
   The guess will be read from `T_vo`, `T_VO`, `T_vvoo` etc files.
   If the file does not exist, the guess will be a zeroed-vector.
 """
-function read_starting_guess4amplitudes(EC::ECInfo, ::Val{level}, spins...) where level
+function read_starting_guess4amplitudes(EC::ECInfo{T}, ::Val{level}, spins...) where {T,level}
   if length(spins) == 0
     spins = [:α for i in 1:level]
   end
@@ -918,7 +918,7 @@ function read_starting_guess4amplitudes(EC::ECInfo, ::Val{level}, spins...) wher
   if file_exists(EC, filename)
     return load(EC, filename, Val(level*2))
   else
-    return zeros(len_spaces(EC, spaces)...)::Array{Float64,level*2}
+    return zeros(T, len_spaces(EC, spaces)...)::Array{T,level*2}
   end
 end
 
@@ -1029,7 +1029,7 @@ end
 
   If `full` is true, the rotation matrix will be made with core and deleted orbitals included.
 """
-function rotation_matrix(EC::ECInfo, T1; full=false, beta=false)
+function rotation_matrix(EC::ECInfo{T}, T1; full=false, beta=false) where T
   if full
     space_save, _ = restore_full_space!(EC)
   end
@@ -1037,7 +1037,7 @@ function rotation_matrix(EC::ECInfo, T1; full=false, beta=false)
   SP = EC.space
   occ = beta ? SP['O'] : SP['o']
   virt = beta ? SP['V'] : SP['v']
-  Rpq = zeros(norb, norb)
+  Rpq = zeros(T, norb, norb)
   @assert size(T1) == (length(virt), length(occ)) "size of T1 does not match space dimensions"
   Rpq[virt,occ] = T1
   Rpq[occ,virt] = -T1'
@@ -1054,7 +1054,7 @@ end
   Calculate 4-external contraction with triples amplitudes
   and store the result in `R3`.
 """
-function triples_4ext!(EC::ECInfo, R3, T3)
+function triples_4ext!(EC::ECInfo{T}, R3, T3) where T
   nocc = size(T3, 6)
   nvirt = size(T3, 3)
   d_vvvv = load4idx(EC,"d_vvvv")
@@ -1062,8 +1062,8 @@ function triples_4ext!(EC::ECInfo, R3, T3)
   d_vvvv[:,:,diagindx] *= 0.5
   trivv = uppertriangular_cut(nvirt)
   d_vvvv = d_vvvv[:,:,trivv]
-  X3 = Array{Float64}(undef, nvirt, nvirt, nvirt, nocc, nocc)
-  T3k = Array{Float64}(undef, length(trivv), nvirt, nocc, nocc)
+  X3 = Array{T}(undef, nvirt, nvirt, nvirt, nocc, nocc)
+  T3k = Array{T}(undef, length(trivv), nvirt, nocc, nocc)
   for k = 1:nocc
     T3k .= @view T3[trivv,:,:,:,k]
     @mtensor X3[a,b,c,i,j] = d_vvvv[a,b,x] * T3k[x,c,i,j]
@@ -1101,7 +1101,7 @@ end
   ``R^{ijk}_{cde} += \\sum_{a<b} \\langle cd||ab\\rangle T^{ijk}_{eab}``
   ``R^{ijK}_{cdA} += \\sum_{a<b} \\langle cd||ab\\rangle T^{ijK}_{abA}``
 """
-function triples_4ext_aa!(EC::ECInfo, R3a, R3aab, T3a, T3aab)
+function triples_4ext_aa!(EC::ECInfo{T}, R3a, R3aab, T3a, T3aab) where T
   nva = size(T3a, 1)
   noa = size(T3a, 4)
   nvb = size(T3aab, 3)
@@ -1120,8 +1120,8 @@ function triples_4ext_aa!(EC::ECInfo, R3a, R3aab, T3a, T3aab)
   # R3 accumulation simplifies from 0.5*(X - X[d↔c]) to X (since X[d,c,...] = -X[c,d,...])
 
   # --- T3a: loop over k ---
-  X3 = Array{Float64}(undef, nva, nva, nva, noa, noa)
-  T3k = Array{Float64}(undef, ntri, nva, noa, noa)
+  X3 = Array{T}(undef, nva, nva, nva, noa, noa)
+  T3k = Array{T}(undef, ntri, nva, noa, noa)
   for k in 1:noa
     T3k .= @view T3a[trivv,:,:,:,k]
     @mtensor X3[c,d,e,i,j] = d_anti[c,d,x] * T3k[x,e,i,j]
@@ -1134,8 +1134,8 @@ function triples_4ext_aa!(EC::ECInfo, R3a, R3aab, T3a, T3aab)
   end
 
   # --- T3aab: loop over I ---
-  X3aab = Array{Float64}(undef, nva, nva, nvb, noa, noa)
-  T3I = Array{Float64}(undef, ntri, nvb, noa, noa)
+  X3aab = Array{T}(undef, nva, nva, nvb, noa, noa)
+  T3I = Array{T}(undef, ntri, nvb, noa, noa)
   for I in 1:nob
     T3I .= @view T3aab[trivv,:,:,:,I]
     @mtensor X3aab[c,d,A,i,j] = d_anti[c,d,x] * T3I[x,A,i,j]
@@ -1155,7 +1155,7 @@ end
   ``R^{IJK}_{CDE} += \\sum_{A<B} \\langle CD||AB\\rangle T^{IJK}_{EAB}``
   ``R^{iIJ}_{aCB} += \\sum_{A<B} \\langle CD||AB\\rangle T^{iIJ}_{aAB}``
 """
-function triples_4ext_bb!(EC::ECInfo, R3b, R3abb, T3b, T3abb)
+function triples_4ext_bb!(EC::ECInfo{T}, R3b, R3abb, T3b, T3abb) where T
   nvb = size(T3b, 1)
   nob = size(T3b, 4)
   nva = size(T3abb, 1)
@@ -1177,8 +1177,8 @@ function triples_4ext_bb!(EC::ECInfo, R3b, R3abb, T3b, T3abb)
   # Now the structure is identical to the αα case.
 
   # --- T3b: loop over K ---
-  X3 = Array{Float64}(undef, nvb, nvb, nvb, nob, nob)
-  T3k = Array{Float64}(undef, ntri, nvb, nob, nob)
+  X3 = Array{T}(undef, nvb, nvb, nvb, nob, nob)
+  T3k = Array{T}(undef, ntri, nvb, nob, nob)
   for K in 1:nob
     T3k .= @view T3b[trivv,:,:,:,K]
     @mtensor X3[C,D,E,I,J] = d_anti[C,D,x] * T3k[x,E,I,J]
@@ -1191,8 +1191,8 @@ function triples_4ext_bb!(EC::ECInfo, R3b, R3abb, T3b, T3abb)
   end
 
   # --- T3abb: loop over i ---
-  X3abb = Array{Float64}(undef, nvb, nvb, nva, nob, nob)
-  T3i = Array{Float64}(undef, ntri, nva, nob, nob)
+  X3abb = Array{T}(undef, nvb, nvb, nva, nob, nob)
+  T3i = Array{T}(undef, ntri, nva, nob, nob)
   for i in 1:noa
     for (idx, ci) in enumerate(trivv)
       T3i[idx, :, :, :] .= @view T3abb[:, ci[1], ci[2], i, :, :]
@@ -1249,14 +1249,14 @@ end
   ``R^{iIJ}_{bBC} -= X_{bBC}^{iIJ} - X_{bCB}^{iIJ}``
   where ``X_{bBC}^{iIJ} = \\sum_{a,A} \\langle bB|aA\\rangle T^{iIJ}_{aCA}``
 """
-function triples_4ext_abb_ab!(EC::ECInfo, R3abb, T3abb)
+function triples_4ext_abb_ab!(EC::ECInfo{T}, R3abb, T3abb) where T
   nva = size(T3abb, 1)
   nvb = size(T3abb, 2)
   noa = size(T3abb, 4)
   nob = size(T3abb, 5)
   d_vVvV = load4idx(EC, "d_vVvV")
   # Loop over i (α occ) to reduce intermediate
-  X3 = Array{Float64}(undef, nva, nvb, nvb, nob, nob)
+  X3 = Array{T}(undef, nva, nvb, nvb, nob, nob)
   for i in 1:noa
     vT3 = @view T3abb[:,:,:,i,:,:]
     @mtensor X3[b,B,C,I,J] = d_vVvV[b,B,a,A] * vT3[a,C,A,I,J]

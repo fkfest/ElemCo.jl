@@ -18,7 +18,7 @@ export refresh!, do_refresh
 """
   Davidson object
 """
-mutable struct Davidson
+mutable struct Davidson{T<:Number}
     """ maximum number of trial vectors """
   maxdav::Int
   """ number of states """
@@ -37,13 +37,13 @@ mutable struct Davidson
   """ number of added trial vectors (≥ `nDim`) """
   nDimTrial::Int
   """ effective matrix """
-  hmat::Matrix{Float64}
+  hmat::Matrix{T}
   """ overlap matrix (length=0 for davidson.use_overlap=false (always there for non-hermitian)) """
-  smat::Matrix{Float64}
+  smat::Matrix{T}
   """ eigenvalues """
   eigvals::Vector{Float64}
   """ eigenvectors in the trial space """
-  eigvecs::Matrix{Float64}
+  eigvecs::Matrix{T}
   """ hermitian flag """
   hermitian::Bool
   """
@@ -51,7 +51,7 @@ mutable struct Davidson
   
   Create Davidson object for `nstates` states.
   """
-  function Davidson(EC::ECInfo, nstates=1; maxdav::Int = -1, hermitian::Bool = true)
+  function Davidson(EC::ECInfo{T}, nstates=1; maxdav::Int = -1, hermitian::Bool = true) where T
     if maxdav < 0
       maxdav = EC.options.davidson.maxdav
     end
@@ -66,14 +66,14 @@ mutable struct Davidson
       add_file!(EC, "dav_eigvec"*string(i), "tmp", overwrite=true)
     end
     if hermitian && !EC.options.davidson.use_overlap
-      smat = zeros(0,0)
+      smat = zeros(T, 0, 0)
     else
-      smat = zeros(maxdav_tot,maxdav_tot)
+      smat = zeros(T, maxdav_tot, maxdav_tot)
     end
     eigvals = zeros(nstates)
-    eigvecs = zeros(maxdav_tot, nstates)
-    new(maxdav, nstates, states, tvecfiles, prodfiles, eigvecfiles, 0, 0, 
-        zeros(maxdav_tot,maxdav_tot), smat, eigvals, eigvecs, hermitian)
+    eigvecs = zeros(T, maxdav_tot, nstates)
+    new{T}(maxdav, nstates, states, tvecfiles, prodfiles, eigvecfiles, 0, 0, 
+        zeros(T, maxdav_tot, maxdav_tot), smat, eigvals, eigvecs, hermitian)
   end
 end
 
@@ -113,12 +113,12 @@ function saveeigvecs(dav::Davidson, vecs, state)
 end
 
 """
-    loadvecs(file)
+    loadvecs(dav::Davidson, file)
 
   Load vectors from file as `Vector{Vector{Float64}}`.
 """
-function loadvecs(file)
-  return mioload(file, Val(1))
+function loadvecs(dav::Davidson{T}, file) where T
+  return mioload(file, Val(1), T)
 end
 
 """
@@ -127,7 +127,7 @@ end
   Load trial vectors from file at position `ipos` as `Vector{Vector{Float64}}`.
 """
 function loadtvecs(dav::Davidson, ipos)
-  return loadvecs(dav.tvecfiles[ipos])
+  return loadvecs(dav, dav.tvecfiles[ipos])
 end
 
 """
@@ -136,7 +136,7 @@ end
   Load product vectors from file at position `ipos` as `Vector{Vector{Float64}}`.
 """
 function loadprods(dav::Davidson, ipos)
-  return loadvecs(dav.prodfiles[ipos])
+  return loadvecs(dav, dav.prodfiles[ipos])
 end
 
 """
@@ -145,12 +145,12 @@ end
   Combine vectors from files with coefficients.
 """
 function combine(dav::Davidson, vecfiles, coeffs)
-  outvecs = loadvecs(vecfiles[1])
+  outvecs = loadvecs(dav, vecfiles[1])
   for v in outvecs
     v .*= coeffs[1]
   end
   for i in 2:dav.nDim
-    vect = loadvecs(vecfiles[i])
+    vect = loadvecs(dav, vecfiles[i])
     coef = coeffs[i]
     for j in eachindex(vect)
       outvecs[j] .+= coef * vect[j]
@@ -174,7 +174,7 @@ function combine!(dav::Davidson, outvec, vecfiles, coeffs)
 end
 
 """
-    custom_dot(customdots, tens, vecs, state=0)
+    custom_dot(dav::Davidson, customdots, tens, vecs, state=0)
 
   Compute dot product of vectors
   using custom dot-product functions `customdots::Tuple`.
@@ -184,27 +184,31 @@ end
   If `customdots` is empty, the standard dot product is used.
   `vecs` are reshaped to the shape of tensors `tens`.
 """
-function custom_dot(customdots, tens, vecs, state=0)
+function custom_dot(dav::Davidson{T}, customdots, tens, vecs, state=0) where T
   if length(customdots) == 0
-    return vecs ⋅ tens
+    dot = zero(T)
+    for i in eachindex(tens)
+      dot += conj(vec(tens[i])) ⋅ vec(vecs[i])
+    end
+    return dot::T
   end
   @assert length(tens) == length(customdots)
   @assert length(tens) == length(vecs)
-  dot::Float64 = 0.0
+  dot = zero(T)
   for i in eachindex(tens)
     if state > 0
-      dot += dispatch(customdots[i], tens[i], vecs[i], state)
+      dot += dispatch(customdots[i], conj(tens[i]), vecs[i], state)
     else
-      dot += dispatch(customdots[i], tens[i], vecs[i])
+      dot += dispatch(customdots[i], conj(tens[i]), vecs[i])
     end
   end
-  return dot
+  return dot::T
 end
 
-dispatch(f::Function, v::Vector, t, state) = f(reshape(v, size(t)), t, state)::Float64
-dispatch(f::Function, v::Vector, t) = f(reshape(v, size(t)), t)::Float64
-dispatch(f::Function, t, v, state) = f(t, reshape(v, size(t)), state)::Float64
-dispatch(f::Function, t, v) = f(t, reshape(v, size(t)))::Float64
+dispatch(f::Function, v::Vector, t, state) = f(reshape(v, size(t)), t, state)
+dispatch(f::Function, v::Vector, t) = f(reshape(v, size(t)), t)
+dispatch(f::Function, t, v, state) = f(t, reshape(v, size(t)), state)
+dispatch(f::Function, t, v) = f(t, reshape(v, size(t)))
 
 """
     update_Heff!(dav::Davidson, prods, state, customdots=())
@@ -221,10 +225,10 @@ function update_Heff!(dav::Davidson, prods, state, customdots=())
   ipos = dav.nDim + 1
   for i in 1:dav.nDimTrial
     vec = loadtvecs(dav, i)
-    res = custom_dot(customdots, vec, prods, state)
+    res = custom_dot(dav, customdots, vec, prods, state)
     dav.hmat[i,ipos] = res
     if dav.hermitian
-      dav.hmat[ipos,i] = res
+      dav.hmat[ipos,i] = conj(res)
     end
   end
 end
@@ -245,7 +249,7 @@ function update_Heff_dagger!(dav::Davidson, tvecs, state, customdots=())
   ipos = dav.nDimTrial + 1
   for i in 1:dav.nDim
     prods = loadprods(dav, i)
-    res = custom_dot(customdots, tvecs, prods, state)
+    res = custom_dot(dav, customdots, tvecs, prods, state)
     dav.hmat[ipos,i] = res
   end
 end
@@ -264,11 +268,11 @@ function update_Seff!(dav::Davidson, tvecs, state, customdots=())
   ipos = dav.nDimTrial + 1
   for i in 1:dav.nDimTrial
     vec = loadtvecs(dav, i)
-    res = custom_dot(customdots, tvecs, vec, state)
-    dav.smat[i,ipos] = res
+    res = custom_dot(dav, customdots, tvecs, vec, state)
     dav.smat[ipos,i] = res
+    dav.smat[i,ipos] = conj(res)
   end
-  thisDot = custom_dot(customdots, tvecs, tvecs, state)
+  thisDot = custom_dot(dav, customdots, tvecs, tvecs, state)
   dav.smat[ipos,ipos] = thisDot 
   return thisDot
 end
@@ -286,7 +290,7 @@ end
 """
 function add_trial_vector!(dav::Davidson, tvecs, state=0, customdots=())
   @assert dav.nDimTrial < dav.maxdav*dav.nstates "Davidson: maximum number of trial vectors reached, but no restart done"
-  dav_normalize!(tvecs, state, customdots)
+  dav_normalize!(dav, tvecs, state, customdots)
   if use_overlap(dav)
     update_Seff!(dav, tvecs, state, customdots)
   else
@@ -409,7 +413,7 @@ end
   The eigenvector is loaded from the corresponding file.
 """
 function get_eigenvector(dav::Davidson, state)
-  eigvec = loadvecs(dav.eigvecfiles[state])
+  eigvec = loadvecs(dav, dav.eigvecfiles[state])
   return eigvec
 end
 
@@ -421,7 +425,7 @@ end
   The eigenvector is loaded from the corresponding file.
 """
 function get_eigenvector!(dav::Davidson, vecs, state)
-  eigvec = loadvecs(dav.eigvecfiles[state])
+  eigvec = loadvecs(dav, dav.eigvecfiles[state])
   @assert length(eigvec) == length(vecs) "Davidson: eigenvector size mismatch"
   for i in eachindex(vecs)
     vecs[i][:] = eigvec[i]
@@ -441,7 +445,7 @@ function get_residual!(dav::Davidson, vecs, state)
   # calculate residual
   combine!(dav, vecs, dav.prodfiles, dav.eigvecs[:,state])
   en = dav.eigvals[state]
-  eigvec = loadvecs(dav.eigvecfiles[state])
+  eigvec = loadvecs(dav, dav.eigvecfiles[state])
   @assert length(eigvec) == length(vecs) "Davidson: eigenvector size mismatch"
   for i in eachindex(vecs)
     vecs[i][:] .-= en * eigvec[i]
@@ -454,16 +458,18 @@ end
 
   Diagonalize effective Hamiltonian matrix.
 """
-function diagonalize(dav::Davidson)
+function diagonalize(dav::Davidson{T}) where T
   if use_overlap(dav)
     vals, vecs = eigen(dav.hmat[1:dav.nDim,1:dav.nDim], Hermitian(dav.smat[1:dav.nDim,1:dav.nDim]))
   else
     vals, vecs = eigen(Hermitian(dav.hmat[1:dav.nDim,1:dav.nDim]))
   end
-  # make sure the eigenvalues are real 
-  vecs, vals = rotate_eigenvectors_to_real(vecs[:, 1:dav.nstates], vals[1:dav.nstates])
-  dav.eigvals[1:dav.nstates] = vals
-  dav.eigvecs[1:dav.nDim,1:dav.nstates] = vecs
+  # rotate complex conjugate eigenpairs to real form (only for real Hamiltonians)
+  if T <: Real
+    vecs, vals = rotate_eigenvectors_to_real(vecs, vals)
+  end
+  dav.eigvals[1:dav.nstates] = real.(vals[1:dav.nstates])
+  dav.eigvecs[1:dav.nDim,1:dav.nstates] = vecs[:, 1:dav.nstates]
   return vals, vecs
 end
 
@@ -475,21 +481,21 @@ end
 function orthogonalize!(dav::Davidson, vecs, state, customdots=())
   for i in 1:dav.nDim
     vec = loadtvecs(dav, i)
-    overlap = custom_dot(customdots, vecs, vec, state)
+    overlap = custom_dot(dav, customdots, vecs, vec, state)
     for j in eachindex(vecs)
       vecs[j][:] .-= overlap * vec[j]
     end
   end
-  dav_normalize!(vecs, state, customdots)
+  dav_normalize!(dav, vecs, state, customdots)
 end
 
 """
-    dav_normalize!(vecs, state, customdots)
+    dav_normalize!(dav, vecs, state, customdots)
 
   Normalize vectors.
 """
-function dav_normalize!(vecs, state, customdots)
-  vnorm = sqrt(custom_dot(customdots, vecs, vecs, state))
+function dav_normalize!(dav::Davidson, vecs, state, customdots)
+  vnorm = sqrt(abs(custom_dot(dav, customdots, vecs, vecs, state)))
   for i in eachindex(vecs)
     vecs[i] ./= vnorm
   end

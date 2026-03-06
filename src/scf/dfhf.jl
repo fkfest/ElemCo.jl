@@ -189,7 +189,7 @@ end
   Perform DF-UHF calculation.
   Returns the energy as the `UHF` and `HF` keys in `OutDict`.
 """
-function dfuhf(EC::ECInfo)
+function dfuhf(EC::ECInfo{T}) where T
   t1 = time_ns()
   print_info("DF-UHF")
   setup_space_system!(EC)
@@ -231,8 +231,8 @@ function dfuhf(EC::ECInfo)
       fock = gen_dffock(EC, cMO)
     end
     t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
-    efhsmall = Float64[0.0, 0.0]
-    Δfock = Matrix{Float64}[zeros(norb,norb), zeros(norb,norb)]
+    efhsmall = [0.0, 0.0]
+    Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
     var = 0.0
     for (ispin, sp) = enumerate(['o', 'O'])
       den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])

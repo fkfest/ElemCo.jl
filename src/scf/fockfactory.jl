@@ -62,15 +62,16 @@ function gen_fock(EC::ECInfo, spincase::Symbol)
 end
 
 """ 
-    gen_density_matrix(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occvec)
+    gen_density_matrix(EC::ECInfo{T}, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occvec)
 
-  Generate ``D_{μν}=C^l_{μi} C^r_{νi}`` with ``i`` defined by `occvec`.
-  Only real part of ``D_{μν}`` is kept.
+  Generate ``D_{\\mu\\nu}=C^l_{\\mu i} C^r_{\\nu i}`` with ``i`` defined by `occvec`.
+  Only real part of ``D_{\\mu\\nu}`` is kept unless T is Complex.
 """ 
-function gen_density_matrix(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occvec)
+function gen_density_matrix(EC::ECInfo{T}, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occvec) where T
   CMOlo = CMOl[:,occvec]
   CMOro = CMOr[:,occvec]
   @mtensor den[r,s] := CMOlo[r,i]*CMOro[s,i]
+  T <: Complex && return den
   denr = real.(den)
   if sum(abs2,den) - sum(abs2,denr) > EC.options.scf.imagtol
     println("Large imaginary part in density matrix neglected!")
@@ -80,15 +81,16 @@ function gen_density_matrix(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatr
 end
 
 """ 
-    gen_frac_density_matrix(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occupation)
+    gen_frac_density_matrix(EC::ECInfo{T}, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occupation)
 
-  Generate ``D_{μν}=C^l_{μi} C^r_{νi} n_i`` with ``n_i`` provided in `occupation`.
-  Only real part of ``D_{μν}`` is kept.
+  Generate ``D_{\\mu\\nu}=C^l_{\\mu i} C^r_{\\nu i} n_i`` with ``n_i`` provided in `occupation`.
+  Only real part of ``D_{\\mu\\nu}`` is kept unless T is Complex.
 """ 
-function gen_frac_density_matrix(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occupation)
+function gen_frac_density_matrix(EC::ECInfo{T}, CMOl::AbstractMatrix, CMOr::AbstractMatrix, occupation) where T  
   @assert length(occupation) == size(CMOr,2) "Wrong occupation vector length!"
   CMOrn = CMOr .* occupation'
   @mtensor den[r,s] := CMOl[r,i]*CMOrn[s,i]
+  T <: Complex && return den
   denr = real.(den)
   if sum(abs2,den) - sum(abs2,denr) > EC.options.scf.imagtol
     println("Large imaginary part in density matrix neglected!")
@@ -200,7 +202,7 @@ end
 
   Compute closed-shell DF-HF Fock matrix (integral direct) in AO basis.
 """
-function gen_dffock(EC::ECInfo, cMO::AbstractMatrix, bao, bfit)
+function gen_dffock(EC::ECInfo{T}, cMO::AbstractMatrix, bao, bfit) where T
   PL = load2idx(EC, "C_PL")
   hsmall = load2idx(EC, "h_AA")
   @assert EC.space['o'] == EC.space['O'] "Closed-shell only!"
@@ -211,10 +213,10 @@ function gen_dffock(EC::ECInfo, cMO::AbstractMatrix, bao, bfit)
   nL = size(PL, 2)
   Pbatches = BasisBatcher(bao, bfit)
   maxP = max_batch_length(Pbatches)
-  LoA = zeros(nL, nocc, nA)
+  LoA = zeros(T, nL, nocc, nA)
   lenbuf = (nocc*nA + max(nA*nA, nL))*maxP
   lencbuf = buffer_size_3idx(Pbatches)
-  @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
+  @buffer buf(T, lenbuf) cbuf(Cdouble, lencbuf) begin
   for Pblk in Pbatches
     P = range(Pblk)
     lenP = length(P)
@@ -245,11 +247,11 @@ function gen_dffock(EC::ECInfo, cMO::AbstractMatrix, bao, bfit)
 end
 
 """ 
-    gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
+    gen_dffock(EC::ECInfo{T}, cMO::SpinMatrix, bao, bfit)
 
   Compute unrestricted DF-HF Fock matrices `SpinMatrix(Fα, Fβ)` in AO basis (integral direct).
 """
-function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
+function gen_dffock(EC::ECInfo{T}, cMO::SpinMatrix, bao, bfit) where T
   PL = load2idx(EC, "C_PL")
   hsmall = load2idx(EC, "h_AA")
   # println(size(Ppq))
@@ -264,11 +266,11 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
   nL = size(PL, 2)
   Pbatches = BasisBatcher(bao, bfit)
   maxP = max_batch_length(Pbatches)
-  LoA = zeros(nL, nocc, nA)
-  LOA = zeros(nL, nOcc, nA)
+  LoA = zeros(T, nL, nocc, nA)
+  LOA = zeros(T, nL, nOcc, nA)
   lenbuf = ((nocc+nOcc)*nA + max(nA*nA, nL))*maxP
   lencbuf = buffer_size_3idx(Pbatches)
-  @buffer buf(lenbuf) cbuf(Cdouble, lencbuf) begin
+  @buffer buf(T, lenbuf) cbuf(Cdouble, lencbuf) begin
   for Pblk in Pbatches
     P = range(Pblk)
     lenP = length(P)
@@ -294,7 +296,7 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix, bao, bfit)
   @mtensor fock[1][μ,ν] -= LoA[L,j,μ]*LoA[L,j,ν] 
   @mtensor fock[2][μ,ν] -= LOA[L,j,μ]*LOA[L,j,ν] 
   @mtensor cP[P] := cL[L] * PL[P,L]
-  coulfock = zeros(nA, nA)
+  coulfock = zeros(T, nA, nA)
   for Pblk in Pbatches
     P = range(Pblk)
     lenP = length(P)
@@ -387,7 +389,7 @@ end
   Compute unrestricted DF-HF Fock matrices [Fα, Fβ] in AO basis
   (using precalculated Cholesky-decomposed integrals).
 """
-function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
+function gen_dffock(EC::ECInfo{T}, cMO::SpinMatrix) where T
   occa = EC.space['o']
   occb = EC.space['O']
   CMOo = SpinMatrix(cMO[1][:,occa], cMO[2][:,occb])
@@ -402,8 +404,8 @@ function gen_dffock(EC::ECInfo, cMO::SpinMatrix)
   nL = size(AAL, 3)
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  @buffer buf((nocc+nOcc)*nA*maxL + maxL) begin
-  coulfock = zeros(nA, nA)
+  @buffer buf(T, (nocc+nOcc)*nA*maxL + maxL) begin
+  coulfock = zeros(T, nA, nA)
   for L in LBlks
     lenL = length(L)
     v!AAL = @mview AAL[:,:,L]
