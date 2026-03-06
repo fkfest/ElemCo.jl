@@ -890,38 +890,18 @@ from Eq.~\eqref{eq:rhf-mp2}, and $E^{(2)}_{\mathrm{ep}}$ is the electron--positr
 correlation. With only one positron, there is no positron--positron contribution.
 
 \subsection{Electron--Positron Correlation}
-The electron--positron integral $v_{i\pos{i}}^{a\pos{a}}$ describes 
-electron~1 in orbital~$i$ and positron~2 in orbital~$\pos{i}$ scattering to 
-virtual orbitals $a$ and $\pos{a}$. The attractive electron--positron interaction 
-has the opposite sign to electron--electron repulsion; in the code, the \textit{epep}-elements are saved with same sign as \textit{eeee}-elements, and the sign is taken into account in the algebra.
-
-Since electrons and positrons are distinguishable particles, there is 
+Since electrons and positrons are distinguishable particles, there is
 \emph{no exchange} between them---only the direct (Coulomb) term contributes.
-The spin-orbital expression is:
+For RHF electrons, the $\alpha$ and $\beta$ spatial orbitals are identical,
+and the single positron occupies one spatial orbital $\pos{i}$.
+Both electron spin channels ($\alpha$ and $\beta$) contribute equally,
+giving a factor of~2 after spin integration:
 \begin{equation}
-E^{(2)}_{\mathrm{ep}} = \sum_{i\pos{i}a\pos{a}} 
-\frac{(v_{i_\sigma \pos{i}_\tau}^{a_\sigma \pos{a}_\tau})^2}
-{\varepsilon_i + \varepsilon_{\pos{i}} - \varepsilon_a - \varepsilon_{\pos{a}}},
-\end{equation}
-where spin is conserved independently for each particle type 
-($\sigma_i = \sigma_a$ and $\tau_{\pos{i}} = \tau_{\pos{a}}$).
-
-\subsection{Spin Integration}
-For RHF electrons, the $\alpha$ and $\beta$ spatial orbitals are identical.
-The single positron occupies one spatial orbital $\pos{i}$ with a definite spin 
-(say $\alpha$). There are two contributing spin configurations:
-\begin{itemize}
-\item $\alpha$-electron with $\alpha$-positron: $i \pos{i}\to a \pos{a}$
-\item $\beta$-electron with $\alpha$-positron: $\spb{i} \pos{i} \to \spb{a} \pos{a}$
-\end{itemize}
-Both give the same spatial integral $v_{i\pos{i}}^{a\pos{a}}$. Summing over 
-electron spin:
-\begin{equation}
-E^{(2)}_{\mathrm{ep}} = 2 \sum_{i\pos{i}a\pos{a}} 
+E^{(2)}_{\mathrm{ep}} = 2 \sum_{i\pos{i}a\pos{a}}
 \frac{(v_{i\pos{i}}^{a\pos{a}})^2}{\Delta_{i\pos{i}a\pos{a}}},
 \end{equation}
 where $\Delta_{i\pos{i}a\pos{a}} = \varepsilon_i + \varepsilon_{\pos{i}} - \varepsilon_a - \varepsilon_{\pos{a}}$,
-with $i,a$ running over spatial electron orbitals and $\pos{i},\pos{a}$ over spatial 
+with $i,a$ running over spatial electron orbitals and $\pos{i},\pos{a}$ over spatial
 positron orbitals (one occupied, several virtual).
 
 \subsection{Amplitude Form}
