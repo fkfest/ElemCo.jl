@@ -71,6 +71,7 @@
 \newcommand{\elemcoil}{\textsf{ElemCo.jl}}
 \newcommand{\quantwo}{\textsf{Quantwo} }
 \newcommand{\cmd}[1]{\texttt{#1}}
+\newcommand{\cdk}[1]{{\color{blue}{DK: #1}}}
 % for presubscripts and presuperscripts (e.g., \pre{^x}U_a)
 \newcommand{\pre}[1]{\,#1\!}
 % Define \lt and \gt for `less than' and `greater than'
@@ -85,11 +86,11 @@
 \tableofcontents
 \chapter{Introduction}
 \section{General}
-In this document we collect the equations and derivations for methods implemented in the \elemcoil package.
+In this document we collect the equations and derivations for methods implemented in the \elemcoil\ package.
 The final goal is to have a document which can be used as a reference for the equations and derivations.
 The final equations should also be contained in the code as docstrings or copied to the corresponding Markdown files.
 
-\section{Notation}
+\section{Notation} \label{sec:notation}
 
 We use the following notation throughout the document.
 
@@ -140,7 +141,7 @@ Antisymmetrization operators:
 \chapter{Integrals}
 \section{Density fitting and Cholesky decomposition}
 \label{sec:df}
-The electron-repulsion integrals in \elemcoil are obtained either from an external program 
+The electron-repulsion integrals in \elemcoil\ are obtained either from an external program 
 through an FCIDUMP \cite{knowlesDeterminant1989} interface, 
 or are calculated using the density-fitting approximation using an
 interface to the \texttt{libcint}\cite{libcint} library.
@@ -173,8 +174,8 @@ with $\delta^{K}_{L}$ being the Kronecker delta.
 If $L^{P}_{L}$ is low-rank, the equation is solved using the QR decomposition,
 otherwise it can be solved by simple back-substitution.
 
-The transformed density-fitted integrals which are used throughout \elemcoil
-are then calculated by multiplying the density-fitted 3-index 
+The transformed density-fitted integrals which are used throughout \elemcoil\ are 
+then calculated by multiplying the density-fitted 3-index 
 integrals with the non-symmetric square root of the inverse,
 \begin{equation}
   v_{p}^{rL} = v_{p}^{rP} C_P^L,
@@ -185,7 +186,7 @@ and the density-fitted 4-index integrals can be calculated by
 \end{equation}
 
 If all integrals are calculated using the density-fitting approximation using \textit{mp2fit}
-fitting basis in \elemcoil,
+fitting basis in \elemcoil, 
 the correction terms are added using the \textit{jkfit} fitting basis
 to the one-body and zero-body terms of the Hamiltonian in order to ensure that the 
 reference energy and the Fock matrix from DF-HF is not changed by the density-fitting approximation,
@@ -206,13 +207,13 @@ where
 and $I$ denotes the core orbitals (cf. \sect{sec:frozen-core}), 
 $\tilde i$ denote all occupied orbitals (including core)
 and other indices do not include the core orbitals.
-$\tilde L$ corresponds to the \textit{jkfit} density-fitting basis functions,
-and $L$ corresponds to the \textit{mp2fit} density-fitting basis functions.
+$\tilde L$ corresponds to the \textit{JKFIT} density-fitting basis functions,
+and $L$ corresponds to the \textit{MPFIT} density-fitting basis functions.
 
 \section{Frozen-core approximation}
 \label{sec:frozen-core}
 The frozen-core approximation is used to reduce the number of orbitals in the correlated 
-calculation. The frozen-core approximation is implemented in \elemcoil by
+calculation. The frozen-core approximation is implemented in \elemcoil\ by
 setting the corresponding integrals to zero and adding their contribution to the
 one-particle and zero-particle part of the Hamiltonian,
 \begin{equation}
@@ -238,7 +239,7 @@ For the UHF Hamiltonian, the frozen-core approximation is implemented as
 \end{equation}
 
 If the frozen-core approximation is used in combination with the density-fitting approximation,
-\textit{jkfit} correction terms are added to the one-body and zero-body terms of the Hamiltonian in order to ensure that the
+\textit{JKFIT} correction terms are added to the one-body and zero-body terms of the Hamiltonian in order to ensure that the
 reference energy and the Fock matrix from DF-HF is not changed by the frozen-core approximation,
 cf. \sect{sec:df}.
 
@@ -261,7 +262,7 @@ f_\mu^\nu &= h_\mu^\nu + 2\sum_L\left(v_{\mu'}^{iL} C^{\dagger\mu'}_i\right) v_{
 v_{\mu}^{iL} &= v_{\mu}^{\nu L} C_{\nu}^i.
 \end{aligned}
 \end{equation}
-Note that our orbitals are real, and therefore $v^{\dagger\mu}_{iL} = v_{\mu}^{iL}$, 
+Note that if the orbitals are real, $v^{\dagger\mu}_{iL} = v_{\mu}^{iL}$, 
 and $C^{\dagger\mu}_i = C_{\mu}^i$.
 
 The unrestricted Hartree-Fock equations are given (for $\alpha$ spin) by
@@ -586,12 +587,12 @@ and the rest blocks of Hessian matrix remain the same.
 In the spin-orbital basis, the MP2 correlation energy is
 \begin{equation}
 \label{eq:spin-orbital-mp2}
-E^{(2)} = \frac{1}{4} \sum_{ijab} \frac{(v_{ij}^{ab} - v_{ij}^{ba})^2}
-{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b},
+E^{(2)} = \frac{1}{4} \sum_{IJAB} \frac{(v_{IJ}^{AB} - v_{IJ}^{BA})(v^{IJ}_{AB} - v^{IJ}_{BA})}
+{\varepsilon_I + \varepsilon_J - \varepsilon_A - \varepsilon_B},
 \end{equation}
-where $i,j,a,b$ denote \emph{spin-orbitals}.
+where $I,J,A,B$ denote \emph{spin-orbitals}.
 The factor $\tfrac{1}{4}$ compensates for unrestricted summation over equivalent 
-excitations $(ij \leftrightarrow ji, ab \leftrightarrow ba)$.
+excitations $(IJ \leftrightarrow JI, AB \leftrightarrow BA)$.
 
 
 \section{Closed-Shell RHF--MP2}
@@ -619,7 +620,7 @@ v_{i_\alpha j_\beta}^{a_\alpha b_\beta} = v_{ij}^{ab}.
 \end{equation}
 
 \subsection{Spin Summation}
-Denoting $\Delta_{ijab} = \varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b$
+Denoting $\Delta_{IJAB} = \varepsilon_I + \varepsilon_J - \varepsilon_A - \varepsilon_B$
 and converting to spatial orbitals, we must account for overcounting.
 
 \paragraph{Same-spin ($\alpha\alpha + \beta\beta$).}
@@ -628,7 +629,7 @@ Each spatial configuration $(i,j,a,b)$ appears 4 times in the spin-orbital sum
 spin cases and the $\tfrac{1}{4}$ factor:
 \begin{equation}
 E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} 
-= 2 \times \frac{1}{4} \sum_{ijab} \frac{(v_{ij}^{ab} - v_{ij}^{ba})^2}{\Delta_{ijab}}.
+= 2 \times \frac{1}{4} \sum_{ijab} \frac{(v_{ij}^{ab} - v_{ij}^{ba})(v_{ab}^{ij} - v_{ba}^{ij})}{\Delta_{ijab}}.
 \end{equation}
 
 \paragraph{Opposite-spin ($\alpha\beta + \beta\alpha$).}
@@ -636,32 +637,32 @@ Each spatial configuration appears twice (swapping both pairs simultaneously).
 With two identical spin cases:
 \begin{equation}
 E^{(2)}_{\alpha\beta} + E^{(2)}_{\beta\alpha} 
-= 2 \times \frac{1}{2} \sum_{ijab} \frac{(v_{ij}^{ab})^2}{\Delta_{ijab}}.
+= 2 \times \frac{1}{2} \sum_{ijab} \frac{v_{ij}^{ab}v_{ab}^{ij}}{\Delta_{ijab}}.
 \end{equation}
 
 \subsection{Expanding the Same-Spin Term}
 Expand the squared antisymmetric integral:
 \begin{equation}
-(v_{ij}^{ab} - v_{ij}^{ba})^2 
-= (v_{ij}^{ab})^2 - 2v_{ij}^{ab}v_{ij}^{ba} + (v_{ij}^{ba})^2.
+(v_{ij}^{ab} - v_{ij}^{ba})(v^{ij}_{ab} - v^{ij}_{ba}) 
+= v_{ij}^{ab}v^{ij}_{ab} - v_{ij}^{ab}v^{ij}_{ba} - v_{ij}^{ba}v^{ij}_{ab} + v_{ij}^{ba}v^{ij}_{ba}.
 \end{equation}
-Since $\sum_{ijab} (v_{ij}^{ba})^2 = \sum_{ijab} (v_{ij}^{ab})^2$ 
+Since $\sum_{ijab} v_{ij}^{ba}v^{ij}_{ba} = \sum_{ijab} v_{ij}^{ab}v^{ij}_{ab}$ 
 by relabeling $a \leftrightarrow b$:
 \begin{equation}
-\sum_{ijab} (v_{ij}^{ab} - v_{ij}^{ba})^2 
-= 2 \sum_{ijab} \bigl((v_{ij}^{ab})^2 - v_{ij}^{ab}v_{ij}^{ba}\bigr).
+\sum_{ijab} (v_{ij}^{ab} - v_{ij}^{ba})(v^{ij}_{ab} - v^{ij}_{ba}) 
+= 2 \sum_{ijab} \bigl(v_{ij}^{ab}v^{ij}_{ab}  - v_{ij}^{ab}v^{ij}_{ba}\bigr).
 \end{equation}
 
 \subsection{SS and OS Contributions}
 Substituting the expansion into the same-spin term:
 \begin{equation}
 E^{(2)}_{\mathrm{SS}} = \frac{1}{2} \cdot 2 \sum_{ijab} 
-  \frac{(v_{ij}^{ab})^2 - v_{ij}^{ab}v_{ij}^{ba}}{\Delta_{ijab}}
-= \sum_{ijab} \frac{v_{ij}^{ab}(v_{ij}^{ab} - v_{ij}^{ba})}{\Delta_{ijab}}.
+  \frac{v_{ij}^{ab}v^{ij}_{ab}  - v_{ij}^{ab}v^{ij}_{ba}}{\Delta_{ijab}}
+= \sum_{ijab} \frac{v_{ij}^{ab}(v_{ab}^{ij} - v_{ba}^{ij})}{\Delta_{ijab}}.
 \end{equation}
 The opposite-spin contribution simplifies to:
 \begin{equation}
-E^{(2)}_{\mathrm{OS}} = \sum_{ijab} \frac{(v_{ij}^{ab})^2}{\Delta_{ijab}}.
+E^{(2)}_{\mathrm{OS}} = \sum_{ijab} \frac{v_{ij}^{ab}v_{ab}^{ij}}{\Delta_{ijab}}.
 \end{equation}
 
 \subsection{Final RHF--MP2 Formula}
@@ -669,25 +670,24 @@ Adding SS and OS:
 \begin{equation}
 \begin{aligned}
 E^{(2)}_{\mathrm{RHF}} &= E^{(2)}_{\mathrm{SS}} + E^{(2)}_{\mathrm{OS}} \\[4pt]
-&= \sum_{ijab} \frac{(v_{ij}^{ab})^2 - v_{ij}^{ab}v_{ij}^{ba} 
-   + (v_{ij}^{ab})^2}{\Delta_{ijab}} \\[4pt]
-&= \sum_{ijab} \frac{2(v_{ij}^{ab})^2 - v_{ij}^{ab}v_{ij}^{ba}}{\Delta_{ijab}}.
+&= \sum_{ijab} \frac{v_{ij}^{ab}(v_{ab}^{ij} - v_{ba}^{ij}) 
+   + v_{ij}^{ab}v_{ab}^{ij}}{\Delta_{ijab}}.
 \end{aligned}
 \end{equation}
 Factoring:
 \begin{equation}
 \label{eq:rhf-mp2}
 \boxed{E^{(2)}_{\mathrm{RHF}} = \sum_{ijab} 
-\frac{v_{ij}^{ab} (2v_{ij}^{ab} - v_{ij}^{ba})}{\Delta_{ijab}}.}
+\frac{v_{ij}^{ab} (2v_{ab}^{ij} - v_{ba}^{ij})}{\Delta_{ijab}}.}
 \end{equation}
 
 \subsection{Amplitude Form}
-Using spatial-orbital amplitudes $T_{ij}^{ab} = v_{ij}^{ab} / \Delta_{ijab}$:
+Using spatial-orbital amplitudes $T^{ij}_{ab} = v_{ab}^{ij} / \Delta_{ijab}$:
 \begin{equation}
 \begin{aligned}
-E^{(2)}_{\mathrm{SS}} &= \sum_{ijab} v_{ij}^{ab} (T_{ij}^{ab} - T_{ij}^{ba}), \\
-E^{(2)}_{\mathrm{OS}} &= \sum_{ijab} v_{ij}^{ab} \, T_{ij}^{ab}, \\
-E^{(2)}_{\mathrm{RHF}} &= \sum_{ijab} v_{ij}^{ab} (2T_{ij}^{ab} - T_{ij}^{ba}).
+E^{(2)}_{\mathrm{SS}} &= \sum_{ijab} v_{ij}^{ab} (T^{ij}_{ab} - T^{ij}_{ba}), \\
+E^{(2)}_{\mathrm{OS}} &= \sum_{ijab} v_{ij}^{ab} \, T^{ij}_{ab}, \\
+E^{(2)}_{\mathrm{RHF}} &= \sum_{ijab} v_{ij}^{ab} (2T^{ij}_{ab} - T^{ij}_{ba}).
 \end{aligned}
 \end{equation}
 
@@ -696,7 +696,7 @@ E^{(2)}_{\mathrm{RHF}} &= \sum_{ijab} v_{ij}^{ab} (2T_{ij}^{ab} - T_{ij}^{ba}).
 \label{sec:uhf-mp2}
 
 For UHF, $\alpha$ and $\beta$ electrons occupy \emph{different} spatial orbitals 
-with different orbital energies. We use lowercase $(i,j,a,b)$ for $\alpha$ 
+with different orbital energies. We use $(\spa{i},\spa{j},\spa{a},\spa{b})$ for $\alpha$ 
 and $(\spb{i},\spb{j},\spb{a},\spb{b})$ for $\beta$.
 
 \subsection{Three Spin Contributions}
@@ -707,40 +707,40 @@ E^{(2)}_{\mathrm{UHF}} = E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} + E^{(2)}
 \paragraph{Same-spin $\alpha\alpha$.}
 With antisymmetrized integrals and antisymmetric amplitudes:
 \begin{equation}
-E^{(2)}_{\alpha\alpha} = \frac{1}{4} \sum_{ijab}
-\frac{(v_{ij}^{ab} - v_{ij}^{ba})^2}{\Delta_{ijab}}
-= \frac{1}{2} \sum_{ijab} v_{ij}^{ab} \, T_{ij}^{ab}.
+E^{(2)}_{\alpha\alpha} = \frac{1}{4} \sum_{\spa{i}\spa{j}\spa{a}\spa{b}}
+\frac{(v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} - v_{\spa{i}\spa{j}}^{\spa{b}\spa{a}})(v^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} - v^{\spa{i}\spa{j}}_{\spa{b}\spa{a}})}{\Delta_{\spa{i}\spa{j}\spa{a}\spa{b}}}
+= \frac{1}{2} \sum_{\spa{i}\spa{j}\spa{a}\spa{b}} v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \, T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}.
 \end{equation}
 The $\tfrac{1}{4} \to \tfrac{1}{2}$ follows from amplitude antisymmetry.
 
 \paragraph{Same-spin $\beta\beta$.}
 \begin{equation}
-E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T_{\spb{i}\spb{j}}^{\spb{a}\spb{b}}.
+E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}}.
 \end{equation}
 
 \paragraph{Opposite-spin $\alpha\beta$.}
 No exchange, no antisymmetry, no overcounting:
 \begin{equation}
-E^{(2)}_{\alpha\beta} = \sum_{i\spb{j}a\spb{b}} \frac{(v_{i\spb{j}}^{a\spb{b}})^2}{\Delta_{i\spb{j}a\spb{b}}}
-= \sum_{i\spb{j}a\spb{b}} v_{i\spb{j}}^{a\spb{b}} \, T_{i\spb{j}}^{a\spb{b}}.
+E^{(2)}_{\alpha\beta} = \sum_{\spa{i}\spb{j}\spa{a}\spb{b}} \frac{v_{\spa{i}\spb{j}}^{\spa{a}\spb{b}}v^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}}{\Delta_{\spa{i}\spb{j}\spa{a}\spb{b}}}
+= \sum_{\spa{i}\spb{j}\spa{a}\spb{b}} v_{\spa{i}\spb{j}}^{\spa{a}\spb{b}} \, T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}.
 \end{equation}
 
 \subsection{Final UHF--MP2 Formula}
 \begin{equation}
 \label{eq:uhf-mp2}
-\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{ijab} v_{ij}^{ab} \, T_{ij}^{ab}
-+ \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T_{\spb{i}\spb{j}}^{\spb{a}\spb{b}}
-+ \sum_{i\spb{j}a\spb{b}} v_{i\spb{j}}^{a\spb{b}} \, T_{i\spb{j}}^{a\spb{b}},}
+\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{\spa{i}\spa{j}\spa{a}\spa{b}} v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \, T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}
++ \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}}
++ \sum_{\spa{i}\spb{j}\spa{a}\spb{b}} v_{\spa{i}\spb{j}}^{\spa{a}\spb{b}} \, T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}},}
 \end{equation}
 with amplitudes
 \begin{equation}
 \begin{aligned}
-T_{ij}^{ab} &= \frac{v_{ij}^{ab} - v_{ij}^{ba}}
-{\varepsilon_i + \varepsilon_j - \varepsilon_a - \varepsilon_b}, \\[4pt]
-T_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} &= \frac{v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} - v_{\spb{i}\spb{j}}^{\spb{b}\spb{a}}}
+T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} &= \frac{v^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} - v^{\spa{i}\spa{j}}_{\spa{b}\spa{a}}}
+{\varepsilon_{\spa{i}} + \varepsilon_{\spa{j}} - \varepsilon_{\spa{a}} - \varepsilon_{\spa{b}}}, \\[4pt]
+T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}} &= \frac{v^{\spb{i}\spb{j}}_{\spb{a}\spb{b}} - v^{\spb{i}\spb{j}}_{\spb{b}\spb{a}}}
 {\varepsilon_{\spb{i}} + \varepsilon_{\spb{j}} - \varepsilon_{\spb{a}} - \varepsilon_{\spb{b}}}, \\[4pt]
-T_{i\spb{j}}^{a\spb{b}} &= \frac{v_{i\spb{j}}^{a\spb{b}}}
-{\varepsilon_i + \varepsilon_{\spb{j}} - \varepsilon_a - \varepsilon_{\spb{b}}}.
+T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} &= \frac{v^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}}
+{\varepsilon_{\spa{i}} + \varepsilon_{\spb{j}} - \varepsilon_{\spa{a}} - \varepsilon_{\spb{b}}}.
 \end{aligned}
 \end{equation}
 
@@ -759,7 +759,7 @@ Positron orbital indices are marked with a superscript plus:
 occupied positron orbitals $\pos{i},\pos{j},\pos{k},\ldots$,
 virtual positron orbitals $\pos{a},\pos{b},\pos{c},\ldots$,
 and general positron indices $\pos{p},\pos{q},\pos{r},\pos{s}$.
-Electron indices remain undecorated as defined in the Notation section.
+Electron indices remain undecorated as defined in \sect{sec:notation}.
 We use $\op b^\dagger, \op b$ for positron creation and annihilation operators
 to distinguish them from the electronic operators $\op a^\dagger, \op a$.
 
@@ -779,6 +779,8 @@ With a single positron, any positron--positron repulsion term vanishes.
 
 \section{Density fitting with positron}
 
+\cdk{I don't understand this. I guess, it's about the mean-field Fock operator. But what does tilde mean?}
+
 With positrons, the corrections to the one-body term of the electron Hamiltonian are given by
 \begin{equation}
   \begin{aligned}
@@ -789,7 +791,7 @@ With positrons, the corrections to the one-body term of the electron Hamiltonian
     - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L} - v_{p}^{q\tilde L} v_{\pos{i}}^{\pos{i}\tilde L} \right),\\
   \end{aligned}
 \end{equation}
-where $\pos{i}=1$ denote the single occupied positron orbital.The positron one-body terms get corrections according to 
+where $\pos{i}=1$ denote the single occupied positron orbital. The positron one-body terms get corrections according to 
 \begin{equation}
   \begin{aligned}
     \tilde h_{\pos{p}}^{\pos{q} (\mathbf{+})} &= \tilde f_{\pos{p}}^{\pos{q} (\mathbf{+})} 
@@ -829,8 +831,8 @@ With density fitting [cf.~\sect{sec:df}] we reuse the three--index
 intermediates $v_{\mu}^{\nu L}$ and the metric factors $C_{P}^{L}$. The
 AO density matrices are
 \begin{equation}
-D_{\mu}^{\nu} = 2 C_{\mu}^{i} C_{\nu}^{i},\qquad
-P_{\mu}^{\nu} = C_{\mu}^{\pos{i}} C_{\nu}^{\pos{i}}.
+D_{\mu}^{\nu} = 2 C_{\mu}^{i} C^{\dagger\nu}_{i},\qquad
+P_{\mu}^{\nu} = C_{\mu}^{\pos{i}} C^{\dagger\nu}_{\pos{i}}.
 \end{equation}
 
 \paragraph{Electron block.}  Including the attractive Coulomb term with
@@ -843,7 +845,7 @@ f_{\mu}^{\nu(e)} &= h_{\mu}^{\nu}
  J_{\mu}^{\nu}[D] &= \sum_{L} v_{\xi}^{\text{o}L} D_{\text{o}}^{\xi} v_{\mu}^{\nu L},
  \quad J_{\mu}^{\nu}[P] = \sum_{L} v_{\xi}^{\text{o}L} P_{\text{o}}^{\xi} v_{\mu}^{\nu L},\\
  \\
-K_{\mu}^{\nu}[D] &= v_{\mu}^{iL} v_{iL}^{\nu},\qquad 
+K_{\mu}^{\nu}[D] &= v_{\mu}^{iL} v_{i}^{\nu L},\qquad 
 v_{\mu}^{iL} = v_{\mu}^{\rho L} C_{\rho}^{i}
 \label{eq:poshf-fock-e}
 \end{aligned}
@@ -859,22 +861,23 @@ f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - 2 J_{\mu}^{\nu}[D],
 where $h^{(p)}$ differs from the electronic one--electron matrix only by
 the sign of the nuclear attraction operator.
 
+\cdk{In \eqs{eq:poshf-fock-e}{eq:poshf-fock-p} the $D$ already contains the factor of 2. Should it be removed from the equations?}
 
 \subsection{HF energy with a positron}
 The Hartree--Fock total energy is
 \begin{equation}
-E_{\text{HF}}^{e/e^+} = \tfrac12 D_{\mu}^{\nu} \bigl(h_{\nu}^{\mu} + f_{\nu}^{\mu(e)} + J_{\mu}^{\nu}[P]\bigr)
+E_{\text{HF}}^{e/e^+} = \tfrac12 D_{\mu}^{\nu} \bigl(h_{\nu}^{\mu} + f_{\nu}^{\mu(e)} + J_{\nu}^{\mu}[P]\bigr)
 +        P_{\mu}^{\nu}  f_{\nu}^{\mu(p)}
 + E_0,
 \end{equation}
 which reduces to the ordinary closed--shell expression when
-$P\to0$.  In practice the Coulomb terms are accumulated on the fly
+$P=0$.  In practice the Coulomb terms are accumulated on the fly
 from the three--index intermediates as described above.
 
 
 
 \section{RHF--MP2 with a Single Positron}
-\label{sec:rhf-positron-mp2}
+\label{sec:rhf_positron_mp2}
 
 Consider a closed-shell RHF system with an additional single positron.
 We use indices $i,j,a,b$ for electrons and $\pos{i},\pos{a},\pos{p},\pos{q}$ for positrons, where
@@ -890,7 +893,7 @@ from Eq.~\eqref{eq:rhf-mp2}, and $E^{(2)}_{\mathrm{ep}}$ is the electron--positr
 correlation. With only one positron, there is no positron--positron contribution.
 
 \subsection{Electron--Positron Correlation}
-Since electrons and positrons are distinguishable particles, there is
+Since electrons and positrons are mutually distinguishable, there is
 \emph{no exchange} between them---only the direct (Coulomb) term contributes.
 For RHF electrons, the $\alpha$ and $\beta$ spatial orbitals are identical,
 and the single positron occupies one spatial orbital $\pos{i}$.
@@ -898,7 +901,7 @@ Both electron spin channels ($\alpha$ and $\beta$) contribute equally,
 giving a factor of~2 after spin integration:
 \begin{equation}
 E^{(2)}_{\mathrm{ep}} = 2 \sum_{i\pos{i}a\pos{a}}
-\frac{(v_{i\pos{i}}^{a\pos{a}})^2}{\Delta_{i\pos{i}a\pos{a}}},
+\frac{v_{i\pos{i}}^{a\pos{a}}v_{a\pos{a}}^{i\pos{i}}}{\Delta_{i\pos{i}a\pos{a}}},
 \end{equation}
 where $\Delta_{i\pos{i}a\pos{a}} = \varepsilon_i + \varepsilon_{\pos{i}} - \varepsilon_a - \varepsilon_{\pos{a}}$,
 with $i,a$ running over spatial electron orbitals and $\pos{i},\pos{a}$ over spatial
@@ -907,12 +910,12 @@ positron orbitals (one occupied, several virtual).
 \subsection{Amplitude Form}
 Defining the electron--positron amplitude:
 \begin{equation}
-T_{i\pos{i}}^{a\pos{a}} = \frac{v_{i\pos{i}}^{a\pos{a}}}{\Delta_{i\pos{i}a\pos{a}}},
+T^{i\pos{i}}_{a\pos{a}} = \frac{v_{a\pos{a}}^{i\pos{i}}}{\Delta_{i\pos{i}a\pos{a}}},
 \end{equation}
 the electron--positron correlation energy becomes:
 \begin{equation}
 \label{eq:ep-mp2}
-\boxed{E^{(2)}_{\mathrm{ep}} = 2 \sum_{i\pos{i}a\pos{a}} v_{i\pos{i}}^{a\pos{a}} \, T_{i\pos{i}}^{a\pos{a}}.}
+\boxed{E^{(2)}_{\mathrm{ep}} = 2 \sum_{i\pos{i}a\pos{a}} v_{i\pos{i}}^{a\pos{a}} \, T^{i\pos{i}}_{a\pos{a}}.}
 \end{equation}
 
 
@@ -960,7 +963,7 @@ Note that only the \textbf{lower virtual} and \textbf{upper occupied} indices ar
 The amplitude equations can be obtained by taking the derivative of the Lagrangian with respect to the Lagrange multipliers $\Lambda$ 
 and setting the result to zero.
 
-The most efficient version of CCSD/DCSD in \elemcoil combines the dressed factorization from above with 
+The most efficient version of CCSD/DCSD in \elemcoil\ combines the dressed factorization from above with 
 the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} and is given by
 \begin{equation}
 \begin{aligned}
@@ -2200,8 +2203,8 @@ The residual vector for eigenstate $\st{n}$ is:
 \eeq
 where $\vect{x}^{\st{n}} = c_{i}^{\st{n}} \vect{u}^i$ is the approximate eigenvector.
 
-A correction vector $\vect{u}^{\st{n}} \rightarrow \vect{u}^{k+1}$ is computed and added to the subspace. In \elemcoil, 
-we use either the diagonal preconditioner,
+A correction vector $\vect{u}^{\st{n}} \rightarrow \vect{u}^{k+1}$ is computed and added to the subspace. 
+In \elemcoil, we use either the diagonal preconditioner,
 \beq
 u^\st{n}_{I} = \frac{r^\st{n}_{I}}{E^\st{n} - H_{I}^{I}},
 \label{eq:diag_precond}
@@ -2473,10 +2476,11 @@ Natural orbital occupations $n_i$ indicate importance of orbitals. Used for:
 
 
 \chapter{Automatically generated UCCSDT and UDC-CCSDT}
-Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} were generated with version 1.0.1 of the \quantwo program\cite{quantwo}.
-The \quantwo inputs are listed below.
+Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} 
+were generated with version 1.0.1 of the \quantwo\ program\cite{quantwo}.
+The \quantwo\ inputs are listed below.
 \begin{itemize}
-  \item UCCSDT \quantwo input file:
+  \item UCCSDT \quantwo\ input file:
 \lstset{language=[LaTeX]Tex, frame=shadowbox, rulesepcolor=\color{gray}, basicstyle=\ttfamily\scriptsize, columns=fullflexible, breaklines=true}
 \begin{lstlisting}
 prog,spinintegr=0,nobrafac=1,explspin=1,algo=2
@@ -2492,7 +2496,7 @@ output,level=1,maxlenline=70
 <\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \half \op T_2 \op T_2 + \op T_2 \op T_3) |0>_C
 \eeq
 \end{lstlisting}
-\item UDC-CCSDT \quantwo input file:
+\item UDC-CCSDT \quantwo\ input file:
 \begin{lstlisting}
 %singles and doubles amplitude equations from UCCSDT
 %we only modify the triples amplitude equation
@@ -2521,7 +2525,7 @@ output,level=1,maxlenline=70
 \end{lstlisting}
 \end{itemize}
 \noindent The program generates \textsf{TensorOperations} code.
-The generated code  used by \elemcoil is located in the \texttt{src/algo} directory. 
+The generated code  used by \elemcoil\ is located in the \texttt{src/algo} directory. 
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
 \bibliographystyle{naturemag}
