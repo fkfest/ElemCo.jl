@@ -188,7 +188,7 @@ function custom_dot(dav::Davidson{T}, customdots, tens, vecs, state=0) where T
   if length(customdots) == 0
     dot = zero(T)
     for i in eachindex(tens)
-      dot += conj(vec(tens[i])) ⋅ vec(vecs[i])
+      dot += vec(tens[i]) ⋅ vec(vecs[i])
     end
     return dot::T
   end
@@ -197,9 +197,9 @@ function custom_dot(dav::Davidson{T}, customdots, tens, vecs, state=0) where T
   dot = zero(T)
   for i in eachindex(tens)
     if state > 0
-      dot += dispatch(customdots[i], conj(tens[i]), vecs[i], state)
+      dot += dispatch(customdots[i], tens[i], vecs[i], state)
     else
-      dot += dispatch(customdots[i], conj(tens[i]), vecs[i])
+      dot += dispatch(customdots[i], tens[i], vecs[i])
     end
   end
   return dot::T

@@ -13,21 +13,21 @@ The transformation convention is:
 - Lower indices (first half of index string) → transformed using Left eigenvectors
 - Upper indices (second half of index string) → transformed using Right eigenvectors
 """
-struct PseudoCanonicalTransform
+struct PseudoCanonicalTransform{T<:Number}
   "Whether any transformation is needed"
   need_transform::Bool
   "Right eigenvectors for occupied orbitals (SpinMatrix with α and β)"
-  Ro::SpinMatrix{Float64}
+  Ro::SpinMatrix{T}
   "Left eigenvectors for occupied orbitals (SpinMatrix with α and β)"
-  Lo::SpinMatrix{Float64}
+  Lo::SpinMatrix{T}
   "Right eigenvectors for virtual orbitals (SpinMatrix with α and β)"
-  Rv::SpinMatrix{Float64}
+  Rv::SpinMatrix{T}
   "Left eigenvectors for virtual orbitals (SpinMatrix with α and β)"
-  Lv::SpinMatrix{Float64}
+  Lv::SpinMatrix{T}
   "Pseudo-canonical occupied orbital energies (α and β)"
-  ϵo::SpinVector{Float64}
+  ϵo::SpinVector{T}
   "Pseudo-canonical virtual orbital energies (α and β)"
-  ϵv::SpinVector{Float64}
+  ϵv::SpinVector{T}
 end
 
 """
@@ -135,22 +135,28 @@ If `hermitian=true`, assumes the Fock block is Hermitian and uses `eigen(Hermiti
 
 Uses `rotate_eigenvectors_to_real` for complex pairs.
 """
-function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, hermitian::Bool=true)
+function compute_pseudocanonical_transform(F_block::Matrix{T}; skip::Bool=false, hermitian::Bool=true) where T
   if skip
     ϵ = diag(F_block)
-    Ctr = Matrix{Float64}(I, size(F_block))
+    Ctr = Matrix{T}(I, size(F_block))
     return ϵ, Ctr, Ctr
   end
   if hermitian
     eigvals, eigvecs = eigen(Hermitian(F_block))
     eigvecs_left = eigvecs_right = eigvecs
-    ϵ = eigvals
+    # For complex Hermitian matrices, eigenvalues are real (Float64).
+    # Promote to F_block element type for type consistency.
+    ϵ = T.(eigvals)
   else
     # Diagonalize (general eigenvalue problem for non-Hermitian)
     eigvals, eigvecs_right = eigen(F_block)
-  
-    # Handle complex eigenvalues - rotate complex conjugate pairs to real
-    eigvecs_right, ϵ = rotate_eigenvectors_to_real(eigvecs_right, eigvals)
+    if T <: Real
+      # For real non-symmetric matrices, eigenvalues can be complex conjugate pairs.
+      # Rotate to make them real if they are close to real.
+      eigvecs_right, ϵ = rotate_eigenvectors_to_real(eigvecs_right, eigvals)
+    else
+      ϵ = eigvals
+    end
   
     # Compute left eigenvectors: L = (R^{-1})^T
     eigvecs_left = (inv(eigvecs_right))'
@@ -316,7 +322,7 @@ end
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
+function calc_pertT_closed_shell(EC::ECInfo{Ty}; save_t3=false) where Ty
   # Build pseudo-canonical transformation
   pct = PseudoCanonicalTransform(EC; restricted=true)
   if pct.need_transform
@@ -348,12 +354,12 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   nvir = n_virt_orbs(EC)
   ϵo, ϵv = get_pseudo_orbital_energies(pct)
 
-  X = zeros(nvir, nvir, nvir)
-  Kijk = zeros(nvir, nvir, nvir)
+  X = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   if save_t3
     t3file, T3 = newmmap(EC,"T_vvvooo",(nvir,nvir,nvir,uppertriangular_index(nocc,nocc,nocc)))
   end
@@ -414,7 +420,7 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
           X[abc] /= ϵoijk - ϵv[a] - ϵv[b] - ϵv[c]
         end
 
-        @mtensor Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
+        @mtensor Enb3 += fac * (conj(Kijk[a,b,c]) * X[a,b,c])
         
         v!vv_jk = @mview vv_oo[:,:,j,k]
         v!vv_ik = @mview vv_oo[:,:,i,k]
@@ -428,9 +434,9 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
         @mtensor v!IntX_i[a] += fac * (X[a,b,c] * v!vv_jk[b,c])
         @mtensor v!IntX_j[b] += fac * (X[a,b,c] * v!vv_ik[a,c])
         @mtensor v!IntX_k[c] += fac * (X[a,b,c] * v!vv_ij[a,b])
-        @mtensor v!IntY_i[a] += fac * (X[a,b,c] * v!T2jk[b,c])
-        @mtensor v!IntY_j[b] += fac * (X[a,b,c] * v!T2ik[a,c])
-        @mtensor v!IntY_k[c] += fac * (X[a,b,c] * v!T2ij[a,b])
+        @mtensor v!IntY_i[a] += fac * (X[a,b,c] * conj(v!T2jk[b,c]))
+        @mtensor v!IntY_j[b] += fac * (X[a,b,c] * conj(v!T2ik[a,c]))
+        @mtensor v!IntY_k[c] += fac * (X[a,b,c] * conj(v!T2ij[a,b]))
       end 
     end
   end
@@ -438,7 +444,7 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
     closemmap(EC,t3file,T3)
   end
   # singles contribution
-  @mtensor En3 = T1[a,i] * IntX[a,i]
+  @mtensor En3 = conj(T1[a,i]) * IntX[a,i]
   # fock contribution
   @mtensor En3 += fov[i,a] * IntY[a,i]
   En3 += Enb3
@@ -456,7 +462,7 @@ end
   performs pseudo-canonicalization before the (T) calculation.
   Return ( `"ET3"`=(T) energy, `"ET3b"`=[T] energy) `OutDict`.
 """
-function calc_ΛpertT_closed_shell(EC::ECInfo)
+function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
   # Build pseudo-canonical transformation
   pct = PseudoCanonicalTransform(EC; restricted=true)
   if pct.need_transform
@@ -503,9 +509,9 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
   fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
   pseudocan_transform!(pct, fov, "ov")
   
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   for k = 1:nocc 
     for j = 1:k
       prefac = (j == k) ? 1.0 : 2.0
@@ -572,7 +578,7 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
         v!ov_ij = @mview ov_oo[:,:,i,j]
         v!ov_ji = @mview ov_oo[:,:,j,i]
         @mtensor begin
-          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # K^{abc}_{ijk} = v^{bc}_{dk} Λ_{ij}^{ad} + ...
           Kijk[a,b,c] = v!U2ij[a,d] * v!vv_vk[b,c,d]
           Kijk[a,b,c] += v!U2ij[d,b] * v!vv_vk[a,c,d]
           Kijk[a,b,c] += v!U2ik[a,d] * v!vv_vj[c,b,d]
@@ -712,7 +718,7 @@ end
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
+function calc_pertT_samespin(EC::ECInfo{Ty}, T1, T2, pct, spin::Symbol) where Ty
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   o = space4spin('o', spin==:α)
@@ -734,12 +740,12 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
   nvir = length(SP[v])
   ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
 
-  T = zeros(nvir, nvir, nvir)
-  Kijk = zeros(nvir, nvir, nvir)
+  T = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   for k = 3:nocc 
     for j = 1:k-1
       for i = 1:j-1
@@ -775,7 +781,7 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
           T[abc] /= ϵoijk - ϵv[a] - ϵv[b] - ϵv[c]
         end
 
-        @mtensor Enb3 += 1/6*(Kijk[a,b,c] * T[a,b,c])
+        @mtensor Enb3 += 1/6*(conj(Kijk[a,b,c]) * T[a,b,c])
         
         v!vv_jk = @mview vv_oo[:,:,j,k]
         v!vv_ik = @mview vv_oo[:,:,i,k]
@@ -789,14 +795,14 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
         @mtensor v!IntX_i[a] += T[a,b,c] * v!vv_jk[b,c]
         @mtensor v!IntX_j[b] += T[a,b,c] * v!vv_ik[a,c]
         @mtensor v!IntX_k[c] += T[a,b,c] * v!vv_ij[a,b]
-        @mtensor v!IntY_i[a] += T[a,b,c] * v!T2jk[b,c]
-        @mtensor v!IntY_j[b] += T[a,b,c] * v!T2ik[a,c]
-        @mtensor v!IntY_k[c] += T[a,b,c] * v!T2ij[a,b]
+        @mtensor v!IntY_i[a] += T[a,b,c] * conj(v!T2jk[b,c])
+        @mtensor v!IntY_j[b] += T[a,b,c] * conj(v!T2ik[a,c])
+        @mtensor v!IntY_k[c] += T[a,b,c] * conj(v!T2ij[a,b])
       end 
     end
   end
   # singles contribution
-  @mtensor En3 = T1[a,i] * IntX[a,i]
+  @mtensor En3 = conj(T1[a,i]) * IntX[a,i]
   # fock contribution
   @mtensor En3 += 0.5 * (fov[i,a] * IntY[a,i])
   En3 += Enb3
@@ -814,7 +820,7 @@ end
   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol)
+function calc_pertT_mixedspin(EC::ECInfo{Ty}, T1, T2, T1os, T2mix, pct, spin::Symbol) where Ty
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   isα = (spin == :α)
@@ -880,14 +886,14 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
   opspin = isα ? :β : :α
   ϵO, ϵV = get_pseudo_orbital_energies(pct, opspin)
 
-  T = zeros(nvir, nvir, nVir)
-  Kijk = zeros(nvir, nvir, nVir)
+  T = zeros(Ty, nvir, nvir, nVir)
+  Kijk = zeros(Ty, nvir, nvir, nVir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
-  IntXos = zeros(nVir, nOcc)
-  IntYos = zeros(nVir, nOcc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
+  IntXos = zeros(Ty, nVir, nOcc)
+  IntYos = zeros(Ty, nVir, nOcc)
   for K = 1:nOcc 
     T2K = T2mix[:,:,K,:]
     for j = 2:nocc
@@ -933,7 +939,7 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
           T[abC] /= ϵoijK - ϵv[a] - ϵv[b] - ϵV[C]
         end
 
-        @mtensor Enb3 += 0.5 * (Kijk[a,b,C] * T[a,b,C])
+        @mtensor Enb3 += 0.5 * (conj(Kijk[a,b,C]) * T[a,b,C])
         
         v!vV_jK = @mview vV_oO[:,:,j,K]
         v!vV_iK = @mview vV_oO[:,:,i,K]
@@ -947,15 +953,15 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
         @mtensor v!IntX_i[a] += T[a,b,C] * v!vV_jK[b,C]
         @mtensor v!IntX_j[b] += T[a,b,C] * v!vV_iK[a,C]
         @mtensor v!IntXos_K[C] += T[a,b,C] * v!vv_ij[a,b]
-        @mtensor v!IntY_i[a] += T[a,b,C] * v!T2Kj[C,b]
-        @mtensor v!IntY_j[b] += T[a,b,C] * v!T2Ki[C,a]
-        @mtensor v!IntYos_K[C] += T[a,b,C] * v!T2ij[a,b]
+        @mtensor v!IntY_i[a] += T[a,b,C] * conj(v!T2Kj[C,b])
+        @mtensor v!IntY_j[b] += T[a,b,C] * conj(v!T2Ki[C,a])
+        @mtensor v!IntYos_K[C] += T[a,b,C] * conj(v!T2ij[a,b])
       end 
     end
   end
   # singles contribution
-  @mtensor En3 = T1[a,i] * IntX[a,i]
-  @mtensor En3 += T1os[A,I] * IntXos[A,I]
+  @mtensor En3 = conj(T1[a,i]) * IntX[a,i]
+  @mtensor En3 += conj(T1os[A,I]) * IntXos[A,I]
   # fock contribution
   @mtensor En3 += fov[i,a] * IntY[a,i]
   @mtensor En3 += 0.5 * (fOV[I,A] * IntYos[A,I])
@@ -971,7 +977,7 @@ end
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
+function calc_ΛpertT_samespin(EC::ECInfo{Ty}, T2, U1, U2, pct, spin::Symbol) where Ty
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   o = space4spin('o', spin==:α)
@@ -1000,12 +1006,12 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
   nvir = length(SP[v])
   ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
 
-  T = zeros(nvir, nvir, nvir)
-  Kijk = zeros(nvir, nvir, nvir)
+  T = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   for k = 3:nocc 
     for j = 1:k-1
       for i = 1:j-1
@@ -1108,7 +1114,7 @@ end
   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct, spin::Symbol)
+function calc_ΛpertT_mixedspin(EC::ECInfo{Ty}, T2, T2mix, U1, U2, U1os, U2mix, pct, spin::Symbol) where Ty
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   isα = (spin == :α)
@@ -1205,14 +1211,14 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct,
   opspin = isα ? :β : :α
   ϵO, ϵV = get_pseudo_orbital_energies(pct, opspin)
 
-  T = zeros(nvir, nvir, nVir)
-  Kijk = zeros(nvir, nvir, nVir)
+  T = zeros(Ty, nvir, nvir, nVir)
+  Kijk = zeros(Ty, nvir, nvir, nVir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
-  IntXos = zeros(nVir, nOcc)
-  IntYos = zeros(nVir, nOcc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
+  IntXos = zeros(Ty, nVir, nOcc)
+  IntYos = zeros(Ty, nVir, nOcc)
   for K = 1:nOcc 
     T2K = T2mix[:,:,K,:]
     U2K = U2mix[:,:,K,:]

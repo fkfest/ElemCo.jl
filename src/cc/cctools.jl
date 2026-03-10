@@ -468,8 +468,8 @@ end
   Calculate squared norm of closed-shell singles amplitudes.
 """
 function calc_singles_norm(T1)
-  @mtensor NormT1 = 2.0*T1[a,i]*T1[a,i]
-  return NormT1
+  @mtensor NormT1 = 2.0*conj(T1[a,i])*T1[a,i]
+  return real(NormT1)
 end
 
 """
@@ -478,8 +478,8 @@ end
   Calculate squared norm of closed-shell contravariant singles amplitudes.
 """
 function calc_contra_singles_norm(T1)
-  @mtensor NormT1 = 0.5*T1[a,i]*T1[a,i]
-  return NormT1
+  @mtensor NormT1 = 0.5*conj(T1[a,i])*T1[a,i]
+  return real(NormT1)
 end
 
 """
@@ -489,10 +489,10 @@ end
 """
 function calc_singles_norm(T1a, T1b)
   @mtensor begin
-    NormT1 = T1a[a,i]*T1a[a,i]
-    NormT1 += T1b[a,i]*T1b[a,i]
+    NormT1 = conj(T1a[a,i])*T1a[a,i]
+    NormT1 += conj(T1b[a,i])*T1b[a,i]
   end
-  return NormT1
+  return real(NormT1)
 end
 
 """
@@ -511,7 +511,7 @@ end
   Calculate dot product of closed-shell singles amplitudes.
 """
 function calc_cs_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
-  @mtensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
+  @mtensor DotT1 = 2.0*conj(T1[a,i])*T1_[a,i]
   return DotT1::T
 end
 calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
@@ -522,7 +522,7 @@ calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ m
   Calculate dot product of contravariant closed-shell singles amplitudes.
 """
 function calc_contra_cs_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
-  @mtensor DotT1 = 0.5*T1[a,i]*T1_[a,i]
+  @mtensor DotT1 = 0.5*conj(T1[a,i])*T1_[a,i]
   return DotT1::T
 end
 calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot: T1 and T1_ must be matrices!")
@@ -534,7 +534,7 @@ calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot
 """
 function calc_u_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
   @mtensor begin
-    DotT1 = T1[a,i]*T1_[a,i]
+    DotT1 = conj(T1[a,i])*T1_[a,i]
   end
   return DotT1::T
 end
@@ -546,8 +546,8 @@ calc_u_singles_dot(T1, T1_, state=0) = error("calc_u_singles_dot: T1 and T1_ mus
   Calculate squared norm of closed-shell doubles amplitudes.
 """
 function calc_doubles_norm(T2)
-  @mtensor NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j]
-  return NormT2
+  @mtensor NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*conj(T2[a,b,i,j])
+  return real(NormT2)
 end
 
 """
@@ -556,8 +556,8 @@ end
   Calculate squared norm of closed-shell contravariant doubles amplitudes.
 """
 function calc_contra_doubles_norm(T2)
-  @mtensor NormT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2[a,b,i,j]
-  return NormT2/3.0
+  @mtensor NormT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*conj(T2[a,b,i,j])
+  return real(NormT2)/3.0
 end
 
 """
@@ -567,11 +567,11 @@ end
 """
 function calc_doubles_norm(T2a, T2b, T2ab)
   @mtensor begin
-    NormT2 = 0.25*(T2a[a,b,i,j]*T2a[a,b,i,j])
-    NormT2 += 0.25*(T2b[a,b,i,j]*T2b[a,b,i,j])
-    NormT2 += T2ab[a,b,i,j]*T2ab[a,b,i,j]
+    NormT2 = 0.25*(conj(T2a[a,b,i,j])*T2a[a,b,i,j])
+    NormT2 += 0.25*(conj(T2b[a,b,i,j])*T2b[a,b,i,j])
+    NormT2 += conj(T2ab[a,b,i,j])*T2ab[a,b,i,j]
   end
-  return NormT2
+  return real(NormT2)
 end
 
 """
@@ -580,7 +580,7 @@ end
   Calculate dot of closed-shell doubles amplitudes.
 """
 function calc_cs_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
-  @mtensor DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
+  @mtensor DotT2 = conj(T2[a,b,i,j])*(2.0*T2_[a,b,i,j] - T2_[b,a,i,j])
   return DotT2::T
 end
 calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
@@ -591,7 +591,7 @@ calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ m
   Calculate dot of contravariant closed-shell doubles amplitudes.
 """
 function calc_contra_cs_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
-  @mtensor DotT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2_[a,b,i,j]
+  @mtensor DotT2 = conj(T2[a,b,i,j])*(2.0*T2_[a,b,i,j] + T2_[b,a,i,j])
   return DotT2/3.0::T
 end
 calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
@@ -603,7 +603,7 @@ calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot
 """
 function calc_samespin_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor begin
-    DotT2 = 0.25*(T2[a,b,i,j]*T2_[a,b,i,j])
+    DotT2 = 0.25*(conj(T2[a,b,i,j])*T2_[a,b,i,j])
   end
   return DotT2::T
 end
@@ -616,7 +616,7 @@ calc_samespin_doubles_dot(T2, T2_, state=0) = error("calc_samespin_doubles_dot: 
 """
 function calc_ab_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor begin
-    DotT2 = T2[a,b,i,j]*T2_[a,b,i,j]
+    DotT2 = conj(T2[a,b,i,j])*T2_[a,b,i,j]
   end
   return DotT2::T
 end
@@ -629,12 +629,12 @@ calc_ab_doubles_dot(T2, T2_, state=0) = error("calc_ab_doubles_dot: T2 and T2_ m
 """
 function calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
   @mtensor begin
-    NormT3 = (1/36)*(T3aaa[a,b,c,i,j,k]*T3aaa[a,b,c,i,j,k])
-    NormT3 += (1/36)*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
-    NormT3 += 0.25*(T3abb[a,b,c,i,j,k]*T3abb[a,b,c,i,j,k])
-    NormT3 += 0.25*(T3aab[a,b,c,i,j,k]*T3aab[a,b,c,i,j,k])
+    NormT3 = (1/36)*(conj(T3aaa[a,b,c,i,j,k])*T3aaa[a,b,c,i,j,k])
+    NormT3 += (1/36)*(conj(T3bbb[a,b,c,i,j,k])*T3bbb[a,b,c,i,j,k])
+    NormT3 += 0.25*(conj(T3abb[a,b,c,i,j,k])*T3abb[a,b,c,i,j,k])
+    NormT3 += 0.25*(conj(T3aab[a,b,c,i,j,k])*T3aab[a,b,c,i,j,k])
   end
-  return NormT3
+  return real(NormT3)
 end
 
 """
@@ -643,7 +643,7 @@ end
   Calculate squared norm of triples amplitudes.
 """
 function calc_triples_norm(T3)
-  NormT3 = zero(eltype(T3))
+  NormT3 = zero(real(eltype(T3)))
   nocc = size(T3, 6)
   for k = 1:nocc 
     for j = 1:k
@@ -658,14 +658,14 @@ function calc_triples_norm(T3)
         end
         T3_ijk = @view T3[:,:,:,i,j,k]
         @mtensor begin
-          NormT3_ = 4*(T3_ijk[a,b,c]*T3_ijk[a,b,c])
-          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[a,c,b])
-          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[c,b,a])
-          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[b,a,c])
-          NormT3_ += (T3_ijk[a,b,c]*T3_ijk[c,a,b])
-          NormT3_ += (T3_ijk[a,b,c]*T3_ijk[b,c,a])
+          NormT3_ = 4*(conj(T3_ijk[a,b,c])*T3_ijk[a,b,c])
+          NormT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk[a,c,b])
+          NormT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk[c,b,a])
+          NormT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk[b,a,c])
+          NormT3_ += (conj(T3_ijk[a,b,c])*T3_ijk[c,a,b])
+          NormT3_ += (conj(T3_ijk[a,b,c])*T3_ijk[b,c,a])
         end
-        NormT3 += fac*NormT3_
+        NormT3 += fac*real(NormT3_)
       end
     end
   end
@@ -694,12 +694,12 @@ function calc_cs_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) wh
         T3_ijk = @view T3[:,:,:,i,j,k]
         T3_ijk_ = @view T3_[:,:,:,i,j,k]
         @mtensor begin
-          DotT3_ = 4*(T3_ijk[a,b,c]*T3_ijk_[a,b,c])
-          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[a,c,b])
-          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[c,b,a])
-          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[b,a,c])
-          DotT3_ += (T3_ijk[a,b,c]*T3_ijk_[c,a,b])
-          DotT3_ += (T3_ijk[a,b,c]*T3_ijk_[b,c,a])
+          DotT3_ = 4*(conj(T3_ijk[a,b,c])*T3_ijk_[a,b,c])
+          DotT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk_[a,c,b])
+          DotT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk_[c,b,a])
+          DotT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk_[b,a,c])
+          DotT3_ += (conj(T3_ijk[a,b,c])*T3_ijk_[c,a,b])
+          DotT3_ += (conj(T3_ijk[a,b,c])*T3_ijk_[b,c,a])
         end
         DotT3 += fac*DotT3_
       end
@@ -716,7 +716,7 @@ calc_cs_triples_dot(T3, T3_) = error("calc_cs_triples_dot not implemented for th
 """
 function calc_samespin_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
   @mtensor begin
-    DotT3 = (1/36)*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
+    DotT3 = (1/36)*(conj(T3[a,b,c,i,j,k])*T3_[a,b,c,i,j,k])
   end
   return DotT3::T
 end
@@ -729,7 +729,7 @@ calc_samespin_triples_dot(T3, T3_) = error("calc_samespin_triples_dot not implem
 """
 function calc_mixedspin_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
   @mtensor begin
-    DotT3 = 0.25*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
+    DotT3 = 0.25*(conj(T3[a,b,c,i,j,k])*T3_[a,b,c,i,j,k])
   end
   return DotT3::T
 end
@@ -774,12 +774,12 @@ function calc_deco_doubles_norm(T2, tT2=Float64[])
     normT2 = calc_doubles_norm(T2)
   else
     if length(tT2) > 0
-      @mtensor normT2 = T2[X,Y] * tT2[X,Y]
+      @mtensor normT2 = conj(T2[X,Y]) * tT2[X,Y]
     else
-      @mtensor normT2 = T2[X,Y] * T2[X,Y]
+      @mtensor normT2 = conj(T2[X,Y]) * T2[X,Y]
     end
   end
-  return normT2
+  return real(normT2)
 end
 
 """
@@ -788,8 +788,8 @@ end
   Calculate a *simple* norm of triples (without contravariant!)
 """
 function calc_deco_triples_norm(T3)
-  @mtensor NormT3 = T3[X,Y,Z] * T3[X,Y,Z]
-  return NormT3
+  @mtensor NormT3 = conj(T3[X,Y,Z]) * T3[X,Y,Z]
+  return real(NormT3)
 end
 
 """
@@ -1626,7 +1626,7 @@ end
   via [`rotation_matrix`](@ref) and stored instead of the original orbitals.
   T1 amplitudes are not stored in that case.
 """
-function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4};
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4};
                                             orbopt::Bool=false)
   if EC.options.wf.store == ""
     return
@@ -1667,8 +1667,8 @@ end
 """
 function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
                                             T1a::AbstractMatrix, T1b::AbstractMatrix,
-                                            T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4},
-                                            T2ab::AbstractArray{<:Real,4};
+                                            T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4},
+                                            T2ab::AbstractArray{<:Number,4};
                                             orbopt::Bool=false)
   if EC.options.wf.store == ""
     return
@@ -1700,13 +1700,13 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
 end
 
 # Convenience wrappers for tuple arguments
-function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::Tuple{<:AbstractMatrix}, T2::Tuple{<:AbstractArray{<:Real,4}};
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::Tuple{<:AbstractMatrix}, T2::Tuple{<:AbstractArray{<:Number,4}};
                                             orbopt::Bool=false)
   dump_wavefunction_with_amplitudes!(EC, T1[1], T2[1]; orbopt)
 end
 function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
                                             T1::Tuple{<:AbstractMatrix,<:AbstractMatrix}, 
-                                            T2::Tuple{<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4}};
+                                            T2::Tuple{<:AbstractArray{<:Number,4},<:AbstractArray{<:Number,4},<:AbstractArray{<:Number,4}};
                                             orbopt::Bool=false)
   dump_wavefunction_with_amplitudes!(EC, T1[1], T1[2], T2[1], T2[2], T2[3]; orbopt)
 end

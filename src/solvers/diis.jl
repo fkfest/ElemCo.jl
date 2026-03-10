@@ -55,13 +55,12 @@ mutable struct Diis{T<:Number}
   
   Create DIIS object. `weights` is an array of square weights for DIIS residuals components.
   """
-  function Diis(EC::ECInfo, weights = Float64[]; 
+  function Diis(EC::ECInfo{T}, weights = Float64[]; 
                 maxdiis::Int = -1, resthr::Float64 = EC.options.diis.resthr,
-                cropdiis::Bool = EC.options.diis.crop)
+                cropdiis::Bool = EC.options.diis.crop) where T
     if maxdiis < 0
       maxdiis = cropdiis ? EC.options.diis.maxcrop : EC.options.diis.maxdiis
     end
-    T = ec_eltype(EC)
     ampfiles = [ fullfilename(EC, "amp"*string(i)) for i in 1:maxdiis ]
     resfiles = [ fullfilename(EC, "res"*string(i)) for i in 1:maxdiis ]
     for i in 1:maxdiis
@@ -91,30 +90,30 @@ function saveres(diis::Diis, vecs, ipos)
 end
 
 """
-    loadvecs(file)
+    loadvecs(file, T::Type=Float64)
 
-  Load vectors from file as `Vector{Vector{Float64}}`.
+  Load vectors from file as `Vector{Vector{T}}`.
 """
-function loadvecs(file)
-  return mioload(file, Val(1))
+function loadvecs(file, T::Type=Float64)
+  return mioload(file, Val(1), T)
 end
 
 """
-    loadamps(diis::Diis, ipos)
+    loadamps(diis::Diis{T}, ipos) where T
 
-  Load vectors from file at position `ipos` as `Vector{Vector{Float64}}`.
+  Load vectors from file at position `ipos` as `Vector{Vector{T}}`.
 """
-function loadamps(diis::Diis, ipos)
-  return loadvecs(diis.ampfiles[ipos])
+function loadamps(diis::Diis{T}, ipos) where T
+  return loadvecs(diis.ampfiles[ipos], T)
 end
 
 """
-    loadres(diis::Diis, ipos)
+    loadres(diis::Diis{T}, ipos) where T
 
-  Load residuals from file at position `ipos` as `Vector{Vector{Float64}}`.
+  Load residuals from file at position `ipos` as `Vector{Vector{T}}`.
 """
-function loadres(diis::Diis, ipos)
-  return loadvecs(diis.resfiles[ipos])
+function loadres(diis::Diis{T}, ipos) where T
+  return loadvecs(diis.resfiles[ipos], T)
 end
 
 """
@@ -133,13 +132,13 @@ end
 
   Combine vectors from files with coefficients.
 """
-function combine(diis::Diis, vecfiles, coeffs)
-  outvecs = loadvecs(vecfiles[1])
+function combine(diis::Diis{T}, vecfiles, coeffs) where T
+  outvecs = loadvecs(vecfiles[1], T)
   for v in outvecs
     v .*= coeffs[1]
   end
   for i in 2:diis.nDim
-    vect = loadvecs(vecfiles[i])
+    vect = loadvecs(vecfiles[i], T)
     coef = coeffs[i]
     for j in eachindex(vect)
       outvecs[j] .+= coef * vect[j]
@@ -157,14 +156,14 @@ function weighted_dot(diis::Diis{T}, vecs1, vecs2) where T
   if length(diis.weights) == 0
     dot = zero(T)
     for i in eachindex(vecs1)
-      dot += conj(vec(vecs1[i])) ⋅ vec(vecs2[i])
+      dot += vec(vecs1[i]) ⋅ vec(vecs2[i])
     end
     return dot::T
   end
   @assert length(vecs1) == length(diis.weights)
   dot = zero(T)
   for i in eachindex(vecs1)
-    dot += diis.weights[i] * (conj(vec(vecs1[i])) ⋅ vec(vecs2[i]))
+    dot += diis.weights[i] * (vec(vecs1[i]) ⋅ vec(vecs2[i]))
   end
   return dot::T
 end
@@ -188,7 +187,7 @@ function custom_dot(diis::Diis{T}, customdots, tens, vecs) where T
   dot = zero(T)
   for i in eachindex(tens)
     # f = customdots[i]
-    dot += weights[i] * dispatch(customdots[i], conj(tens[i]), vecs[i])
+    dot += weights[i] * dispatch(customdots[i], tens[i], vecs[i])
   end
   return dot::T
 end
@@ -267,7 +266,7 @@ function perform!(diis::Diis, Amps, Res, customdots=())
   # print("coeffs: ")
   # display(coeffs)
 
-  if nDim == 1 && diis.next == 1 && thisResDot > diis.resthr
+  if nDim == 1 && diis.next == 1 && abs(thisResDot) > diis.resthr
     # very bad residual, wait with diis...
     diis.nDim = 0
     return Amps

@@ -33,6 +33,7 @@ TESTS = [
 ("SVD", ["svd_dc","svd_dc_ccsdt"]),
 ("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase"]),
 ("Unit-tests", ["unit_tests", "bufvec"]),
+("Complex", ["complex_rotation"]),
 ]
 
 # long tests

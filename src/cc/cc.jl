@@ -209,8 +209,8 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   @mtensor begin
     pET2d = T2[a,b,i,j] * int2[i,j,a,b]
     pET2ex = T2[b,a,i,j] * int2[i,j,a,b]
-    rET2d = T2[a,b,i,j] * R2[a,b,i,j]
-    rET2ex = T2[b,a,i,j] * R2[a,b,i,j]
+    rET2d = conj(T2[a,b,i,j]) * R2[a,b,i,j]
+    rET2ex = conj(T2[b,a,i,j]) * R2[a,b,i,j]
   end
   ET2d = pET2d + rET2d
   ET2ex = pET2ex + rET2ex
@@ -224,7 +224,7 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
     fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
     @mtensor begin
       pET1 = 2.0*(fov[i,a] * T1[a,i])
-      rET1 = 2.0*(R1[a,i] * T1[a,i])
+      rET1 = 2.0*(R1[a,i] * conj(T1[a,i]))
     end
     ET1 += pET1 + rET1
   else
@@ -266,13 +266,14 @@ function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R
   end
   @mtensor begin
     pET2 = fac*(T2[a,b,i,j] * int2[i,j,a,b])
-    rET2 = fac*fac*(T2[a,b,i,j] * R2[a,b,i,j])
+    rET2 = fac*fac*(conj(T2[a,b,i,j]) * R2[a,b,i,j])
   end
   ET2 = pET2 + rET2
   pET1 = 0.0
   if length(R1) > 0
     @mtensor pET1 = fov[i,a] * T1[a,i]
-    @mtensor ET1 = (fov[i,a] + R1[a,i]) * T1[a,i]
+    @mtensor rET1 = conj(T1[a,i]) * R1[a,i]
+    ET1 = pET1 + rET1
   end
   return OutDict("pE2"=>pET2, "pE1"=>pET1, "pE1_2"=>ET1_2, "E2"=>ET2, "E1"=>ET1, "E1_2"=>ET1_2)
 end
@@ -451,15 +452,14 @@ end
   ``\\hat v_{ab}^{cd}``, ``\\hat v_{ab}^{ci}``, ``\\hat v_{ak}^{cd}`` and ``\\hat v_{ab}^{ij}`` are only 
   calculated if requested in `EC.options.cc` or using keyword-arguments.
 """
-function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
+function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
               calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
-              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo) where T
   t1 = time_ns()
   mem1 = free_memory()
   mixed = (o1 != o2)
   no1, no2, nv1, nv2 = len_spaces(EC,o1*o2*v1*v2)
   lenbuf1, lenbuf2 = auto_buf_length4calc_dressed_ints(no1, no2, nv1, nv2, calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo, mixed)
-  T = ec_eltype(EC)
   @buffer buf1(T, lenbuf1) buf2(T, lenbuf2) begin
   # @print_buffer_usage buf1 buf2 begin
   mem2 = print_memory(EC, mem1, "for buffers for dressed integrals", 2)
@@ -1084,15 +1084,15 @@ end
 
   If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation).
 """
-function calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
+function calc_D2(EC::ECInfo{T}, T1, T2, scalepp::Bool=false; Rot=zeros(Float64,0,0)) where T
   SP = EC.space
   norb = n_orbs(EC)
   nocc = n_occ_orbs(EC)
   if length(T1) > 0
-    D2 = Array{eltype(T2)}(undef,norb,norb,nocc,nocc)
+    D2 = Array{T}(undef,norb,norb,nocc,nocc)
     # D2 = zeros(norb,norb,nocc,nocc)
   else
-    D2 = zeros(eltype(T2), norb,norb,nocc,nocc)
+    D2 = zeros(T, norb,norb,nocc,nocc)
   end
   @mtensor begin
     D2[SP['v'],SP['v'],:,:][a,b,i,j] = T2[a,b,i,j] 
@@ -1124,7 +1124,7 @@ end
   with ``P_{ij} X_{ij} = X_{ij} - X_{ji}``.
   Return as `D[pqij]` 
 """
-function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
+function calc_D2(EC::ECInfo{T}, T1, T2, spin::Symbol) where T
   SP = EC.space
   norb = n_orbs(EC)
   if spin == :α
@@ -1136,9 +1136,9 @@ function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
   end
   nocc = length(occ)
   if length(T1) > 0
-    D2 = Array{eltype(T2)}(undef,norb,norb,nocc,nocc)
+    D2 = Array{T}(undef, norb, norb, nocc, nocc)
   else
-    D2 = zeros(eltype(T2), norb,norb,nocc,nocc)
+    D2 = zeros(T, norb, norb, nocc, nocc)
   end
   @mtensor begin
     D2[virt,virt,:,:][a,b,i,j] = T2[a,b,i,j] 
@@ -1162,15 +1162,15 @@ end
 
   If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation)
 """
-function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
+function calc_D2ab(EC::ECInfo{T}, T1a, T1b, T2ab, scalepp=false) where T
   SP = EC.space
   norb = n_orbs(EC)
   nocca = n_occ_orbs(EC)
   noccb = n_occb_orbs(EC)
   if length(T1a) > 0
-    D2ab = Array{eltype(T2ab)}(undef,norb,norb,nocca,noccb)
+    D2ab = Array{T}(undef, norb, norb, nocca, noccb)
   else
-    D2ab = zeros(eltype(T2ab), norb,norb,nocca,noccb)
+    D2ab = zeros(T, norb, norb, nocca, noccb)
   end
   @mtensor begin
     D2ab[SP['v'],SP['V'],:,:][a,B,i,J] = T2ab[a,B,i,J] 
@@ -1778,7 +1778,7 @@ end
 
   Return K2pq::Array{4}.
 """
-function calc_pm_K2!(int2::AbstractArray{<:Number,3}, D2::AbstractArray{<:Number,3}, tripp)
+function calc_pm_K2!(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp) where T <: Number
   norb = size(int2, 1)
   nocc = size(D2, 2)
   trioo = uppertriangular_cut(nocc)
@@ -1795,7 +1795,7 @@ function calc_pm_K2!(int2::AbstractArray{<:Number,3}, D2::AbstractArray{<:Number
   rsBlks = get_spaceblocks(1:nrs)
   maxrs = maximum(length, rsBlks)
   lenbuf = maxrs * ntri_pp * 2
-  @buffer buf(eltype(int2), lenbuf) begin
+  @buffer buf(T, lenbuf) begin
   for rs in rsBlks
     lenrs = length(rs)
     int2s = alloc!(buf, ntri_pp, lenrs)
@@ -1827,18 +1827,18 @@ end
 
   Return K2pq::Array{4}.
 """
-function calc_K2(int2::AbstractArray{<:Number,3}, D2::AbstractArray{<:Number,3}, tripp; symmetrize=true)
+function calc_K2(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp; symmetrize=true) where T <: Number
   norb = size(int2, 1)
   nocc1 = size(D2, 2)
   nocc2 = size(D2, 3)
   ntri_pp = length(tripp)
   nrs = size(int2, 3)
   @assert ntri_pp == nrs # sanity check for the dimensions
-  rK2pq = zeros(norb, norb, nocc1, nocc2)
+  rK2pq = zeros(T, norb, norb, nocc1, nocc2)
   rsBlks = get_spaceblocks(1:nrs)
   maxrs = maximum(length, rsBlks)
   lenbuf = maxrs * nocc1 * nocc2
-  @buffer buf(eltype(int2), lenbuf) begin
+  @buffer buf(T, lenbuf) begin
   for rs in rsBlks
     lenrs = length(rs)
     v!int2 = @mview(int2[:, :, rs])
@@ -1866,15 +1866,15 @@ end
 
   Return K2pq::Array{4}.
 """
-function calc_K2ab(int2, D2)
+function calc_K2ab(int2::AbstractArray{T,4}, D2::AbstractArray{T,4}) where T <: Number
   norb = size(int2, 1)
   nocca = size(D2, 3)
   noccb = size(D2, 4)
-  K2pq = zeros(eltype(D2), norb, norb, nocca, noccb)
+  K2pq = zeros(T, norb, norb, nocca, noccb)
   sBlks = get_spaceblocks(1:norb, 8)
   maxs = maximum(length, sBlks)
   lenbuf = norb * maxs * nocca * noccb
-  @buffer buf(eltype(int2), lenbuf) begin
+  @buffer buf(T, lenbuf) begin
   for s in sBlks
     lens = length(s)
     v!int2 = @mview(int2[:, :, :, s])
@@ -3137,7 +3137,7 @@ end
   If `useT3`: (T) amplitudes from a preceding calculations will be used as starting guess.
   If cc3: calculate CC3 amplitudes.
 """
-function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
+function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
   t0 = time_ns()
   pert_svd_T = true
   
@@ -3206,7 +3206,6 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   NormT1 = 0.0
   NormT2 = 0.0
   NormT3 = 0.0
-  R1 = ec_eltype(EC)[]
   Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
 
   for it in 1:EC.options.cc.maxit
@@ -3319,7 +3318,7 @@ end
 
   Calculate contributions from triples to singles and doubles residuals.
 """
-function SVD_triples_to_singles_and_doubles_residuals(EC)
+function SVD_triples_to_singles_and_doubles_residuals(EC::ECInfo{Ty}) where Ty
   t1 = time_ns()
   mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
@@ -3359,7 +3358,7 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
   maxbX = maximum(length, bXBlks)
   maxXBig = maximum(length, XBigBlks)
   lenbuf = auto_buf_length4SVD_triples_to_singles_and_doubles_residuals(EC, nvirt, nX, nbX, nocc, nL, maxL, maxXBig, maxbX)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in SVD triples to singles and doubles residuals", 2)
   # @print_buffer_usage buf begin
 
@@ -3517,7 +3516,7 @@ end
 
   Compute perturbative ``T^i_{aXY}`` and decompose ``D^{ij}_{ab} = (T^i_{aXY} T^j_{bXY})`` to get ``U^{iX}_a``.
 """
-function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
+function calc_triples_decomposition_without_triples(EC::ECInfo{Ty}, T2) where Ty
   println("T^ijk_abc-free-decomposition")
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
@@ -3536,7 +3535,7 @@ function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
   naux = length(ϵX)
   save!(EC,"C_voX",UaiX)
   # TODO: calc starting guess for T_XXX from T2 and UvoX
-  save!(EC,"T_XXX",zeros(naux, naux, naux))
+  save!(EC,"T_XXX",zeros(Ty, naux, naux, naux))
 end
 
 """
@@ -3544,12 +3543,12 @@ end
 
   Decompose ``T^{ijk}_{abc}`` as ``U^{iX}_a U^{jY}_b U^{kZ}_c T_{XYZ}``.
 """
-function calc_triples_decomposition(EC::ECInfo)
+function calc_triples_decomposition(EC::ECInfo{Ty}) where Ty
   println("T^ijk_abc-decomposition")
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
 
-  Triples_Amplitudes = zeros(nvirt, nocc, nvirt, nocc, nvirt, nocc)
+  Triples_Amplitudes = zeros(Ty, nvirt, nocc, nvirt, nocc, nvirt, nocc)
   t3file, T3 = mmap4idx(EC, "T_vvvooo")
   trippp = uppertriangular_cut3(nocc)
   for ijk in axes(T3,4)
@@ -3622,7 +3621,7 @@ end
   Calculate ``D^{ij}_{ab} = T^i_{aXY} T^j_{bXY}`` using half-decomposed imaginary-shifted perturbative triple amplitudes 
   ``T^i_{aXY}`` from `T2` (and `UvoX`)
 """
-function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
+function calc_4idx_T3T3_XY(EC::ECInfo{Ty}, T2, UvoX, ϵX) where Ty
   mem1 = free_memory()
   voLfile, voL = mmap3idx(EC, "d_voL")
   ooLfile, ooL = mmap3idx(EC, "d_ooL")
@@ -3635,12 +3634,12 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   maxL = maximum(length, LBlks)
 
   lenbuf = auto_buf_length4calc_4idx_T3T3_XY(EC, nvirt, nocc, nX, nL, maxL, nX)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in half-decomposed T3 calculation", 2)
   # @print_buffer_usage buf begin
   # ``T^i_{aX} = U^{†b}_{jX} T^{ij}_{ab}``
   T_voX = alloc!(buf, nvirt, nocc, nX)
-  @mtensor T_voX[a,i,X] = UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor T_voX[a,i,X] = conj(UvoX[b,j,X]) * T2[a,b,i,j]
   X_LXX = alloc!(buf, nL, nX, nX)
   V_vvX = alloc!(buf, nvirt, nvirt, nX)
   V_vvX .= 0.0
@@ -3657,18 +3656,18 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     @mtensor X_voXL[b,j,X,L] -= T_voX[b,l,X] * v!ooL[l,j,L]
     # ``UX_{XY}^L = X_{bX}^{jL} U^{†b}_{jY}``
     UX_LXX = alloc!(buf, lenL, nX, nX)
-    @mtensor UX_LXX[L,X,Y] = X_voXL[b,j,X,L] * UvoX[b,j,Y]
+    @mtensor UX_LXX[L,X,Y] = X_voXL[b,j,X,L] * conj(UvoX[b,j,Y])
     v!X_LXX = @mview X_LXX[L,:,:]
     @mtensor v!X_LXX[L,X,Y] = UX_LXX[L,X,Y] + UX_LXX[L,Y,X]
     drop!(buf, UX_LXX, X_voXL)
     # ``W_{X}^{L} = \hat v_c^{kL} U^{†c}_{kX}``
     W_XL = alloc!(buf, nX, lenL)
-    @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
+    @mtensor W_XL[X,L] = v!voL[c,k,L] * conj(UvoX[c,k,X])
     @mtensor V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
     @mtensor V_ooX[l,j,X] += v!ooL[l,j,L] * W_XL[X,L]
     drop!(buf, W_XL)
   end
-  D2 = zeros(nvirt, nocc, nvirt, nocc)
+  D2 = zeros(Ty, nvirt, nocc, nvirt, nocc)
   ϵo, ϵv = orbital_energies(EC)
   shifti = EC.options.cc.deco_ishiftt
   if EC.options.cc.project_t3iii 
@@ -3695,11 +3694,11 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     # ``E^d_{lXY} = V_{aX}^{d} U^{†a}_{lY} - V_{lX}^{i} U^{†d}_{iY}``
     E_voXY = alloc!(buf, nvirt, nocc, lenX)
     v!UvoY = @mview UvoX[:,:,Y]
-    @mtensor E_voXY[d,l,X] = v!V_vvX[a,d,X] * v!UvoY[a,l] 
-    @mtensor E_voXY[d,l,X] -= v!V_ooX[l,i,X] * v!UvoY[d,i]
+    @mtensor E_voXY[d,l,X] = v!V_vvX[a,d,X] * conj(v!UvoY[a,l]) 
+    @mtensor E_voXY[d,l,X] -= v!V_ooX[l,i,X] * conj(v!UvoY[d,i])
     v!UvoX = @mview UvoX[:,:,X]
-    @mtensor E_voXY[d,l,X] += v!V_vvY[a,d] * v!UvoX[a,l,X] 
-    @mtensor E_voXY[d,l,X] -= v!V_ooY[l,i] * v!UvoX[d,i,X]
+    @mtensor E_voXY[d,l,X] += v!V_vvY[a,d] * conj(v!UvoX[a,l,X]) 
+    @mtensor E_voXY[d,l,X] -= v!V_ooY[l,i] * conj(v!UvoX[d,i,X])
     # ``R^i_{aXY} += E^d_{lXY} T^il_{ad}``
     @mtensor R[a,i,X] += E_voXY[d,l,X] * T2[a,d,i,l]
     drop!(buf, E_voXY)
@@ -3719,11 +3718,11 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     end
     if Y > 1
       v!R = @mview R[:,:,1:(Y-1)]
-      @mtensor D2[a,i,b,j] += 2.0 * v!R[a,i,X] * v!R[b,j,X]
+      @mtensor D2[a,i,b,j] += 2.0 * conj(v!R[a,i,X]) * v!R[b,j,X]
     end
     # diagonal contribution X=Y
     v!RYY = @mview R[:,:,Y]
-    @mtensor D2[a,i,b,j] += v!RYY[a,i] * v!RYY[b,j]
+    @mtensor D2[a,i,b,j] += conj(v!RYY[a,i]) * v!RYY[b,j]
     if EC.options.cc.project_t3iii 
       permutedims!(@view(T3[X,Y,:,:]), R, (3,1,2))
       permutedims!(@view(T3[Y,X,:,:]), R, (3,1,2))
@@ -3740,7 +3739,7 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     for i = 1:nocc
       v!UvoX = @mview UvoX[:,i,:]
       v!UU = @mview UU[:,:,i]
-      @mtensor v!UU[X,Y] = v!UvoX[a,X] * v!UvoX[a,Y]
+      @mtensor v!UU[X,Y] = v!UvoX[a,X] * conj(v!UvoX[a,Y])
     end
     TUU4i = alloc!(buf, nX, nX, nvirt)
     TU = alloc!(buf, nX, nX, nvirt)
@@ -3752,12 +3751,12 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
       @mtensor TUU4i[X',Y',a] = TU[X',Y,a] * v!UUi[Y,Y']
       for j = 1:nocc
         v!T_j = @mview T3[:,:,:,j]
-        @mtensor ΔD2[a,b] = TUU4i[X,Y,a] * v!T_j[X,Y,b]
+        @mtensor ΔD2[a,b] = conj(TUU4i[X,Y,a]) * v!T_j[X,Y,b]
         v!D2 = @mview D2[:,i,:,j]
         @mtensor v!D2[a,b] -= ΔD2[a,b]
         if i != j
           v!D2 = @mview D2[:,j,:,i]
-          @mtensor v!D2[b,a] -= ΔD2[a,b]
+          @mtensor v!D2[b,a] -= conj(ΔD2[a,b])
         end
       end
     end
@@ -3797,7 +3796,7 @@ end
   Calculate SVD-CCSD(T).
 """
 
-function calc_SVD_pert_T(EC::ECInfo, T2)
+function calc_SVD_pert_T(EC::ECInfo{Ty}, T2) where Ty
   t1 = time_ns()
   mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
@@ -3817,7 +3816,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   maxX = maximum(length, XBlks)
 
   lenbuf = auto_buf_length4calc_SVD_pert_T(nvirt, nocc, nX, nL, maxL, maxX)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in SVD-CCSD(T) calculation", 2)
   # @print_buffer_usage buf begin
   V_vvX = alloc!(buf, nvirt, nvirt, nX)
@@ -3831,7 +3830,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
     v!vvL = @mview vvL[:,:,L]
     # ``W_{X}^{L} = v_c^{kL} U^{†c}_{kX}``
     W_XL = alloc!(buf, nX, lenL)
-    @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
+    @mtensor W_XL[X,L] = v!voL[c,k,L] * conj(UvoX[c,k,X])
     # ``V_{aX}^{d} = v_{a}^{dL} W_{X}^{L}``
     @mtensor V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
     # ``V_{lX}^{i} = v_{l}^{iL} W_{X}^{L}``
@@ -3842,7 +3841,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   close(voLfile)
   close(ooLfile)
   TvoX = alloc!(buf, nvirt, nocc, nX)
-  @mtensor TvoX[a,i,X] = UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor TvoX[a,i,X] = conj(UvoX[b,j,X]) * T2[a,b,i,j]
   
   RR = alloc!(buf, nX, nX, nX)
   for X in XBlks
@@ -3852,7 +3851,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
     RvoXX = alloc!(buf, nvirt, nocc, nX, lenX)
     @mtensor RvoXX[a,i,Y,X] = v!TvoX[a,k,X] * V_ooX[k,i,Y]
     @mtensor RvoXX[a,i,Y,X] -= v!TvoX[c,i,X] * V_vvX[a,c,Y]
-    @mtensor v!RR[Z,Y,X] = RvoXX[a,i,Y,X] * UvoX[a,i,Z]
+    @mtensor v!RR[Z,Y,X] = RvoXX[a,i,Y,X] * conj(UvoX[a,i,Z])
     drop!(buf, RvoXX)
   end
   R = alloc!(buf, nX, nX, nX)
@@ -3921,7 +3920,7 @@ end
 
   Calculate intermediates for decomposed triples independent of the amplitudes.
 """
-function calc_intermediates4triples(EC::ECInfo)
+function calc_intermediates4triples(EC::ECInfo{Ty}) where Ty
   UvoX = load3idx(EC, "C_voX")
   ovLfile, ovL = mmap3idx(EC, "d_ovL")
 
@@ -3932,9 +3931,9 @@ function calc_intermediates4triples(EC::ECInfo)
 
   LBlks = get_spaceblocks(1:nL)
 
-  A_XL = zeros(nX, nL)
-  B_XX = zeros(nX, nX)
-  w_ovX = zeros(nocc, nvirt, nX)
+  A_XL = zeros(Ty, nX, nL)
+  B_XX = zeros(Ty, nX, nX)
+  w_ovX = zeros(Ty, nocc, nvirt, nX)
   B_ooXLfile, B_ooXL = newmmap(EC, "B_ooXL", (nocc,nocc,nX,nL))
   for L in LBlks
     v!ovL = @mview ovL[:,:,L]	  
@@ -3963,11 +3962,11 @@ function calc_intermediates4triples(EC::ECInfo)
     for bX in bXBlks
       v!bUvoX = @mview bUvoX[:,:,bX]
       v!UU_oXobX = @mview UU_oXobX[:,:,:,bX]
-      @mtensor v!UU_oXobX[i,X,j,bX] = UvoX[a,i,X] * v!bUvoX[a,j,bX]
+      @mtensor v!UU_oXobX[i,X,j,bX] = UvoX[a,i,X] * conj(v!bUvoX[a,j,bX])
     end
     closemmap(EC, UU_oXobXfile, UU_oXobX)
     # trasformation matrix from \bar X to X space
-    @mtensor C_bXX[bX,X] := bUvoX[a,i,bX] * UvoX[a,i,X]
+    @mtensor C_bXX[bX,X] := conj(bUvoX[a,i,bX]) * UvoX[a,i,X]
     save!(EC, "C_{bX}X", C_bXX)
   end
 end
@@ -4091,7 +4090,7 @@ end
 
   Calculate decomposed triples DC-CCSDT residuals.
 """
-function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
+function calc_triples_residuals!(EC::ECInfo{Ty}, R1, R2, T2) where Ty
   t1 = time_ns()
   mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
@@ -4138,11 +4137,11 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   maxXBig = maximum(length, XBigBlks)
   maxa = maximum(length, virtBlks)
   lenbuf = auto_buf_length4calc_triples_residuals(EC, nvirt, nX, nbX, nocc, nL, maxL, maxXBig, maxX, maxX, nX, maxbX, maxa)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in SVD-DC-CCSDT triples residuals calculation", 2)
   # @print_buffer_usage buf begin
 
-  Y_XL = zeros(nX, nL)
+  Y_XL = zeros(Ty, nX, nL)
   x_oo = dfoo
   x_vv = dfvv
   # ``vY_{lX}^{d} = v_{l}^{dL} Y_{X}^{L}``
@@ -4164,7 +4163,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor x_vv[a,d] -= 0.5 * v!ovL[l,d,L] * V_voL[a,l,L]
     # ``Y_{X}^{L} = U^{†a}_{iX} (\hat v_{a}^{iL} + V_{a}^{iL})``
     @mtensor V_voL[a,i,L] += v!voL[a,i,L]
-    @mtensor v!Y_XL[X,L] = UvoX[a,i,X] * V_voL[a,i,L]
+    @mtensor v!Y_XL[X,L] = conj(UvoX[a,i,X]) * V_voL[a,i,L]
     drop!(buf, V_voL)
     # ``vY_{lX}^{d} = v_{l}^{dL} Y_{X}^{L}``
     @mtensor vY_ovX[l,d,X] += v!ovL[l,d,L] * v!Y_XL[X,L]
@@ -4178,10 +4177,10 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   drop!(buf, vY_ovX)
 
   # ``T_{aX}^i = U^{†b}_{jX} T^{ij}_{ab}``
-  @mtensor T_voX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor T_voX[a,i,X] := conj(UvoX[b,j,X]) * T2[a,b,i,j]
   # ``X_{bZ}^d = - \hat f_l^d T_{bZ}^{l} (+...)``
   @mtensor X_vvX[b,d,Z] := - dfov[l,d] * T_voX[b,l,Z]
-  X_ooX = zeros(nocc, nocc, nX)
+  X_ooX = zeros(Ty, nocc, nocc, nX)
   for L in LBlks
     v!vvL = @mview vvL[:,:,L]
     v!ooL = @mview ooL[:,:,L]
@@ -4192,7 +4191,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor X_ooX[l,j,Z] += v!ooL[l,j,L] * v!Y_XL[Z,L] 
   end
  
-  Q_XXX = zeros(nX, nX, nX)
+  Q_XXX = zeros(Ty, nX, nX, nX)
   # RR[aibj] = ``RR^{ij}_{ab}``
   RR_vovo = alloc!(buf, nvirt, nocc, nvirt, nocc)
   RR_vovo .= 0.0
@@ -4243,7 +4242,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       @mtensor TUvY_voXX[b,j,Y,X] = TvoXX[b,l,Z,X] * v!UvY_oXoX[l,Z,j,Y]
       # ``Q_{ZYX} = U^{\dagger b}_{jZ} TUvY^j_{bYX}``
       a!Q_XXX = alloc!(buf, nX, lenY, lenX)
-      @mtensor a!Q_XXX[Z,Y,X] = UvoX[b,j,Z] * TUvY_voXX[b,j,Y,X]
+      @mtensor a!Q_XXX[Z,Y,X] = conj(UvoX[b,j,Z]) * TUvY_voXX[b,j,Y,X]
       Q_XXX[:,Y,X] = a!Q_XXX
       drop!(buf, a!Q_XXX)
       drop!(buf, TUvY_voXX)
@@ -4287,7 +4286,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       drop!(buf, B_voXL)
       # ``W_{Y}^{XL} = (\bar B - B)_b^{jXL} U^{\dagger b}_{jY}
       a!W_XXL = alloc!(buf, nX, lenX, lenL)
-      @mtensor a!W_XXL[Y,X,L] = bB_voXL[b,j,X,L] * UvoX[b,j,Y]
+      @mtensor a!W_XXL[Y,X,L] = bB_voXL[b,j,X,L] * conj(UvoX[b,j,Y])
       W_XXL[:,X,L] = a!W_XXL
       drop!(buf, a!W_XXL)
 
@@ -4311,7 +4310,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
         V_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
         @mtensor V_voXL[a,j,X,L] = TvoXX[a,i,Y,X] * v!B_ooXL[i,j,Y,L]
         # ``\tilde V_{YX}^{L} -= 0.5 V_{aX}^{jL} U^{\dagger a}_{jY}``
-        @mtensor V_XXL[Y,X,L] -= 0.5 * V_voXL[a,j,X,L] * UvoX[a,j,Y]
+        @mtensor V_XXL[Y,X,L] -= 0.5 * V_voXL[a,j,X,L] * conj(UvoX[a,j,Y])
         # ``RR^{ij}_{ab} -= (\bar B - B)_a^{LiX} V_{bX}^{jL}``
         @mtensor RR_vovo[a,i,b,j] -= bB_voXL[a,i,X,L] * V_voXL[b,j,X,L]
         drop!(buf, V_voXL)
@@ -4413,14 +4412,14 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor vT_vooo[a,l,i,j] = vvov[a,c,l,d] * T2[c,d,i,j]
     @mtensor vT_vooo[a,l,i,j] -= oovo[l,k,d,i] * a!T2[d,a,j,k]
     # ``X_{lY}^j += vT_{al}^{ij} U^{\dagger a}_{iY}``
-    @mtensor X_ooX[l,j,Y] += vT_vooo[a,l,i,j] * a!UvoX[a,i,Y]
+    @mtensor X_ooX[l,j,Y] += vT_vooo[a,l,i,j] * conj(a!UvoX[a,i,Y])
     drop!(buf, vT_vooo)
     # vT[adbi] = ``vT_{ab}^{di} = \hat v_{lk}^{di} T_{ba}^{lk} - \hat v_{al}^{cd} T_{bc}^{li}``
     vT_vvvo = alloc!(buf, lena, nvirt, nvirt, nocc)
     @mtensor vT_vvvo[a,d,b,i] = oovo[l,k,d,i] * a!T2[b,a,l,k]
     @mtensor vT_vvvo[a,d,b,i] -= vvov[a,c,l,d] * T2[b,c,l,i]
     # ``X_{bY}^d += vT_{ab}^{di} U^{\dagger a}_{iY}``
-    @mtensor X_vvX[b,d,Y] += vT_vvvo[a,d,b,i] * a!UvoX[a,i,Y]
+    @mtensor X_vvX[b,d,Y] += vT_vvvo[a,d,b,i] * conj(a!UvoX[a,i,Y])
     drop!(buf, vT_vvvo)
     drop!(buf, a!T2, a!UvoX)
     # ``X_{aY}^d -= \hat v_{al}^{cd} T_{cY}^{l}``
@@ -4440,7 +4439,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     XT_voXX = alloc!(buf, nvirt, nocc, nX, lenZ)
     @mtensor XT_voXX[b,j,Y,Z] = X_ooX[l,j,Y] * v!T_voX[b,l,Z]
     @mtensor XT_voXX[b,j,Y,Z] -= X_vvX[b,d,Y] * v!T_voX[d,j,Z]
-    @mtensor v!Q_XXX[X,Y,Z] += UvoX[b,j,X] * XT_voXX[b,j,Y,Z]
+    @mtensor v!Q_XXX[X,Y,Z] += conj(UvoX[b,j,X]) * XT_voXX[b,j,Y,Z]
     drop!(buf, XT_voXX)
   end
   # ``R_{XYZ} += Q_{XYZ} + Q_{YXZ} + Q_{XZY} + Q_{ZXY} + Q_{ZYX} + Q_{YZX}``
@@ -4487,7 +4486,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   @mtensor q_voX[a,i,X] = vvoo[a,d,l,i] * UvoX[d,l,X]
   drop!(buf, vvoo)
   @mtensor q_voX[a,i,X] += x_oo[l,i] * UvoX[a,l,X] - x_vv[a,d] * UvoX[d,i,X]
-  @mtensor q_XX[X,X'] := q_voX[a,i,X'] * UvoX[a,i,X]
+  @mtensor q_XX[X,X'] := q_voX[a,i,X'] * conj(UvoX[a,i,X])
   drop!(buf, q_voX)
   A_XL = alloc!(buf, nX, nL)
   load!(EC, "A_XL", A_XL)
