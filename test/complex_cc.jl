@@ -5,7 +5,7 @@ using ElemCo.FciDumps: headvar
 using ElemCo.QMTensors
 using LinearAlgebra
 
-@testset "Complex Rotation Test" begin
+@testset "Complex CC Ground State" begin
 epsilon = 1.e-6
 
 # Reference energies for H2O/cc-pVDZ

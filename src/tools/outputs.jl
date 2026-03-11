@@ -127,7 +127,7 @@ end
   Output the single excitation with coefficient `coef`, occupied index `i`, and virtual index `a`.
 """
 function output_single_excitation(coef, i, a)
-  @printf "  %3i -> %4i: %8.4f \n" i a coef
+  @printf "  %3i -> %4i: %8.4f \n" i a real(coef)
   flush(stdout)
 end
 

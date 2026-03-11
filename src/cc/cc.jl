@@ -1790,8 +1790,8 @@ function calc_pm_K2!(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp) wh
   nrs = size(int2, 3)
   @assert ntri_pp == nrs # sanity check for the dimensions
   ntri_oo = length(trioo)
-  aK2pq = zeros(ntri_pp, ntri_oo)
-  sK2pq = zeros(ntri_pp, ntri_oo)
+  aK2pq = zeros(T, ntri_pp, ntri_oo)
+  sK2pq = zeros(T, ntri_pp, ntri_oo)
   rsBlks = get_spaceblocks(1:nrs)
   maxrs = maximum(length, rsBlks)
   lenbuf = maxrs * ntri_pp * 2
@@ -2028,7 +2028,7 @@ end
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo{T}, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false) where T <: Number
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -2117,9 +2117,9 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
 
   #driver terms
   if EC.options.cc.use_kext
-    R2a = zeros(nvirt, nvirt, nocc, nocc)
-    R2b = zeros(nvirtb, nvirtb, noccb, noccb)
-    R2ab = zeros(nvirt, nvirtb, nocc, noccb)
+    R2a = zeros(T, nvirt, nvirt, nocc, nocc)
+    R2b = zeros(T, nvirtb, nvirtb, noccb, noccb)
+    R2ab = zeros(T, nvirt, nvirtb, nocc, noccb)
   else
     d_vvoo = load4idx(EC,"d_vvoo")
     R2a = deepcopy(d_vvoo)
@@ -2134,8 +2134,8 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   
   #ladder terms
   if EC.options.cc.use_kext
-    Rota = zeros(Float64,0,0) # not implemented yet
-    Rotb = zeros(Float64,0,0)
+    Rota = zeros(T, 0, 0) # not implemented yet
+    Rotb = zeros(T, 0, 0)
     cc_kext!(EC, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab, Rota, Rotb)
     t1 = print_time(EC,t1,"kext",2)
   else

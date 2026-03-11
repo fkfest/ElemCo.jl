@@ -198,8 +198,8 @@ pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
 pseudocan_transform!(pct, int_aB_iJ, "vVoO")
 ```
 """
-function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String;
-                           conjugate::Bool=false)
+function pseudocan_transform!(pct::PseudoCanonicalTransform{T}, arr::AbstractArray, indices::String;
+                           conjugate::Bool=false) where T
   if !pct.need_transform
     return arr
   end
@@ -213,7 +213,7 @@ function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray,
   # Build list of transformation matrices for each index
   # First half: lower indices → L (or R if conjugate)
   # Second half: upper indices → R (or L if conjugate)
-  transforms = Vector{Matrix{Float64}}(undef, ndim)
+  transforms = Vector{Matrix{T}}(undef, ndim)
   
   for (i, idx) in enumerate(indices)
     is_first_half = i <= half

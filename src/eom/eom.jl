@@ -62,7 +62,7 @@ function calc_eom(EC::ECInfo, method::ECMethod)
   mname = method_name(method; main=false)
   for (st, en) in enumerate(omegas)
     println("State $st: Excitation energy = $en")
-    energies["ω$st"] = (en, "$mname excitation energy for state $st")
+    energies["ω$st"] = (real(en), "$mname excitation energy for state $st")
   end
   return energies
 end

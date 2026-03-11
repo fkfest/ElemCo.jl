@@ -248,7 +248,7 @@ function calc_tri_sym_antisym!(out_s::AbstractMatrix, out_a::AbstractMatrix,
                                A::AbstractArray{T,3}) where T
   norb = size(A, 1)
   nx = size(A, 3)
-  @threadsbuffer tbuf(norb) begin
+  @threadsbuffer tbuf(T, norb) begin
   Threads.@threads for x in 1:nx
     buf = alloc!(tbuf, norb)
     @inbounds for q in 1:norb

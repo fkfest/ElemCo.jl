@@ -25,8 +25,6 @@
 
 ### Fixed
 
-* `diagonalize_pspace_hamiltonian!` in FCI: `Symmetric` → `Hermitian` (silently discarded imaginary parts)
-
 ## Version [v0.15.0] - 2026.02.05
 
 ### Breaking
