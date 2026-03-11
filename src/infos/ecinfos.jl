@@ -370,10 +370,10 @@ end
 
   Freeze `nfreeze` virtual orbitals or orbitals on the `freeze_orbs` list.
 """
-function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=[]; verbose=true)
+function freeze_nvirt!(EC::ECInfo, nfreeze::Int, freeze_orbs=Int[]; verbose=true)
   if nfreeze > 0 
     if isempty(freeze_orbs)
-      freeze_orbs = 1:nfreeze
+      freeze_orbs = EC.space['v'][end-nfreeze+1:end]
     else
       error("Cannot specify both nfreeze and freeze_orbs in freeze_nvirt!.")
     end

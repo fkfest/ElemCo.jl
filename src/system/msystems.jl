@@ -80,7 +80,7 @@ end
 function Base.isapprox(at1::ACentre, at2::ACentre; kwargs...)
   return at1.label == at2.label && isapprox(at1.position, at2.position; kwargs...) && 
         at1.atomic_number == at2.atomic_number && isapprox(at1.charge, at2.charge; kwargs...) && 
-        at1.basis == at2.basis && at1.dummy == at2.dummy
+        at1.basis == at2.basis
 end
 
 """

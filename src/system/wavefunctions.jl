@@ -112,7 +112,7 @@ function close_dump(trexio::TrexioFile)
 end
 
 """ 
-    dump_orbitals([io::TrexioFile,] EC::ECInfo, cMO::SpinMatrix; basis=nothing, type="HF", 
+    dump_orbitals([io::TrexioFile,] EC::ECInfo, cMO; basis=nothing, type="HF", 
                   energies=nothing, occupations=nothing, MO="mo")
 
   Dump orbitals to TREXIO file. 
@@ -120,26 +120,37 @@ end
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
 function dump_orbitals end
-function dump_orbitals(EC::ECInfo, cMO::SpinMatrix; 
+function dump_orbitals(EC::ECInfo, cMO; 
                        basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
   open_dump(EC, "w") do io
     dump_orbitals(io, EC, cMO; basis=basis, type=type, energies=energies, occupations=occupations, MO=MO)
   end
   return
 end
-function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO::SpinMatrix; 
+function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO; 
                        basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
   println("Dumping orbitals ...")
-  oenergies = prepare_orb_vectors(energies, is_restricted(cMO))
-  ooccupations = prepare_orb_vectors(occupations, is_restricted(cMO))
-  classes = prepare_orb_classes(EC, is_restricted(cMO))
+  ocoefs = prepare_orb_coefficients(cMO)
+  oenergies = prepare_orb_vectors(energies, is_restricted(ocoefs))
+  ooccupations = prepare_orb_vectors(occupations, is_restricted(ocoefs))
+  classes = prepare_orb_classes(EC, is_restricted(ocoefs))
   write_trexio_system(io, EC.system)
   if isnothing(basis)
     basis = generate_basis(EC, "ao")
   end
-  write_trexio_orbitals(io, cMO, basis; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
+  write_trexio_orbitals(io, ocoefs, basis; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
   return
 end
+
+"""
+    prepare_orb_coefficients(cMO)
+
+  Prepare orbital coefficients for dumping.
+"""
+prepare_orb_coefficients(cMO::SpinMatrix) = cMO
+prepare_orb_coefficients(cMO::AbstractMatrix) = SpinMatrix(cMO)
+prepare_orb_coefficients(cMO::Tuple{AbstractMatrix,AbstractMatrix}) = SpinMatrix(cMO[1], cMO[2])
+prepare_orb_coefficients(cMO) = error("Unsupported type for orbital coefficients: $(typeof(cMO))")
 
 """
     prepare_orb_vectors(input, restricted)
@@ -176,9 +187,14 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
   end
 end
 
-function prepare_orb_classes(EC::ECInfo, restricted)
-  space_save, space_b4freeze = restore_full_space!(EC)
-  
+function prepare_orb_classes(EC::ECInfo, restricted; rotations=false)
+  if rotations
+    # we are storing rotations, so we should always use the fcidump full space
+    space_save, space_b4freeze = restore_fd_space!(EC)
+  else
+    space_save, space_b4freeze = restore_full_space!(EC)
+  end
+
   # Now EC.space has the frozen configuration
   classa = fill("Deleted", length(EC.space['m']))
   classa[EC.space['o']] .= "Inactive"
@@ -463,7 +479,7 @@ function dump_rotations(io::TrexioFile, EC::ECInfo, cRot::SpinMatrix;
   println("Dumping orbital rotations ...")
   oenergies = prepare_orb_vectors(energies, is_restricted(cRot))
   ooccupations = prepare_orb_vectors(occupations, is_restricted(cRot))
-  classes = prepare_orb_classes(EC, is_restricted(cRot))
+  classes = prepare_orb_classes(EC, is_restricted(cRot); rotations=true)
   if biorthogonal && !is_biorthogonal(type)
     type *= " biorthogonal"
   end
@@ -733,7 +749,7 @@ function save_wavefunction(EC::ECInfo, wf::AbstractDict; state::Int=1)
 end
 
 """
-    copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start=false, state=0)
+    copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start=false, state=0, reverse=false)
 
   Copy the wavefunction dump file to `tofile`. If `tofile` is not given, copy to the current dump file for writing.
 
@@ -742,6 +758,7 @@ end
 - `start::Bool=false`: If true, copy from `wf.start` file instead of `wf.dump`.
 - `state::Int=0`: State number for determinant files. If 0, copies the main dump file.
                    If >0, copies the state-specific determinant file (e.g., `file_state2.h5`).
+- `reverse::Bool=false`: If true, copy from `tofile` to the dump file instead of the other way around.
 
   Note: This does not check the contents of the files.
 
@@ -757,7 +774,7 @@ copy_wavefunction(EC, "backup.h5"; start=true)
 copy_wavefunction(EC, "state2_backup.h5"; state=2)
 ```
 """
-function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=false, state::Int=0)
+function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=false, state::Int=0, reverse::Bool=false)
   if state > 0
     # Copy state-specific determinant file
     base_filename, _ = dumpfile(EC, "r"; start=start)
@@ -781,7 +798,9 @@ function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=fa
     from_fullpath = dumpfile(EC, "r"; start=start)[2]
     to_fullpath = tofile == "" ? dumpfile(EC, "w")[2] : tofile
   end
-  
+  if reverse
+    from_fullpath, to_fullpath = to_fullpath, from_fullpath
+  end
   cp(from_fullpath, to_fullpath; force=true)
   return
 end
