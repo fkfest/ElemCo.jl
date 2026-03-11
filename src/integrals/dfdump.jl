@@ -283,7 +283,6 @@ function dfdump(EC::ECInfo)
   norbs = size(cMO,2)
   space_save = save_space(EC)
   ncore_orbs = freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
-  println("before freeze nvirt, norbs: ", norbs)
   nfrozvirt = freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
 
   nelec = guess_nelec(EC.system) - 2*ncore_orbs

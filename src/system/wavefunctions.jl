@@ -188,8 +188,8 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
 end
 
 function prepare_orb_classes(EC::ECInfo, restricted; rotations=false)
-  if rotations
-    # we are storing rotations, so we should always use the fcidump full space
+  if rotations && !isempty(EC.fd)
+    # we are storing rotations and have FCIDUMP, so use the fcidump full space
     space_save, space_b4freeze = restore_fd_space!(EC)
   else
     space_save, space_b4freeze = restore_full_space!(EC)
@@ -781,11 +781,6 @@ function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=fa
     from_filename = state_filename(base_filename, state)
     from_fullpath = joinpath(EC.scr, from_filename)
     
-    if !isfile(from_fullpath)
-      @warn "State file $from_filename not found, nothing to copy."
-      return
-    end
-    
     if tofile == ""
       # Default: copy to store location with state suffix
       base_store, _ = dumpfile(EC, "w")
@@ -800,6 +795,9 @@ function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=fa
   end
   if reverse
     from_fullpath, to_fullpath = to_fullpath, from_fullpath
+  end
+  if !isfile(from_fullpath)
+    error("Source wavefunction file $from_fullpath not found, nothing to copy.")
   end
   cp(from_fullpath, to_fullpath; force=true)
   return
