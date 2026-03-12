@@ -29,7 +29,7 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
           arch: ${{ matrix.julia-arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       #- name: Install dependencies
         #shell: julia --color=yes --project=docs {0}
         #run: |
