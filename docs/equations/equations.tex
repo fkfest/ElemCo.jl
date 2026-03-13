@@ -72,6 +72,7 @@
 \newcommand{\quantwo}{\textsf{Quantwo} }
 \newcommand{\cmd}[1]{\texttt{#1}}
 \newcommand{\cdk}[1]{{\color{blue}{DK: #1}}}
+\newcommand{\cks}[1]{{\color{green}{KS: #1}}}
 % for presubscripts and presuperscripts (e.g., \pre{^x}U_a)
 \newcommand{\pre}[1]{\,#1\!}
 % Define \lt and \gt for `less than' and `greater than'
@@ -192,6 +193,7 @@ to the one-body and zero-body terms of the Hamiltonian in order to ensure that t
 reference energy and the Fock matrix from DF-HF is not changed by the density-fitting approximation,
 \begin{equation}
   \begin{aligned}
+    \label{eq:df-correction}
     \tilde h_p^q &= \tilde f_p^q 
     - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL}\right)\\
     \tilde E_0 &= E_0 + h_i^i - \tilde h_i^i + \tilde f_I^I, 
@@ -200,6 +202,7 @@ reference energy and the Fock matrix from DF-HF is not changed by the density-fi
 where 
 \begin{equation}
   \begin{aligned}
+    \label{eq:df-correction-fock}
     \tilde f_p^q &= h_p^q + \sum_{\tilde L} \left(2v_{p}^{q\tilde L} v_{\tilde i}^{\tilde i\tilde L} 
     - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L}\right),
   \end{aligned} 
@@ -780,8 +783,11 @@ With a single positron, any positron--positron repulsion term vanishes.
 \section{Density fitting with positron}
 
 \cdk{I don't understand this. I guess, it's about the mean-field Fock operator. But what does tilde mean?}
+\cks{I changed the text below. I modified Eqs. (\ref{eq:df-correction}) and (\ref{eq:df-correction-fock}) to include the positron contributions. The tilde is used as in those equations}
 
-With positrons, the corrections to the one-body term of the electron Hamiltonian are given by
+
+
+With positrons, the density-fitted equations (\ref{eq:df-correction}) and (\ref{eq:df-correction-fock}) are modified to include the positron contributions:
 \begin{equation}
   \begin{aligned}
     \tilde h_p^q &= \tilde f_p^q 
@@ -840,7 +846,7 @@ the positron the electronic Fock matrix becomes
 \begin{equation}
 \begin{aligned}
 f_{\mu}^{\nu(e)} &= h_{\mu}^{\nu}
-+ 2 J_{\mu}^{\nu}[D] - K_{\mu}^{\nu}[D]
++ J_{\mu}^{\nu}[D] - K_{\mu}^{\nu}[D]
  -     J_{\mu}^{\nu}[P] \\
  J_{\mu}^{\nu}[D] &= \sum_{L} v_{\xi}^{\text{o}L} D_{\text{o}}^{\xi} v_{\mu}^{\nu L},
  \quad J_{\mu}^{\nu}[P] = \sum_{L} v_{\xi}^{\text{o}L} P_{\text{o}}^{\xi} v_{\mu}^{\nu L},\\
@@ -855,18 +861,19 @@ v_{\mu}^{iL} = v_{\mu}^{\rho L} C_{\rho}^{i}
 the Fock matrix for the positron therefore contains only the one--body
 term and the \emph{attractive} Coulomb interaction with the electrons,
 \begin{equation}
-f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - 2 J_{\mu}^{\nu}[D],
+f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - J_{\mu}^{\nu}[D],
 \label{eq:poshf-fock-p}
 \end{equation}
 where $h^{(p)}$ differs from the electronic one--electron matrix only by
 the sign of the nuclear attraction operator.
 
 \cdk{In \eqs{eq:poshf-fock-e}{eq:poshf-fock-p} the $D$ already contains the factor of 2. Should it be removed from the equations?}
+\cks{Thanks, Daniel, and well spot. I removed it from fock operator equations. I checked the code, and there was no extra factor of 2, and the code was like the equations above. Note that I also changed the HF energy of e-p system below, and now it corresponds to the code and is also correct, I would say.}
 
 \subsection{HF energy with a positron}
 The Hartree--Fock total energy is
 \begin{equation}
-E_{\text{HF}}^{e/e^+} = \tfrac12 D_{\mu}^{\nu} \bigl(h_{\nu}^{\mu} + f_{\nu}^{\mu(e)} + J_{\nu}^{\mu}[P]\bigr)
+E_{\text{HF}}^{e/e^+} = D_{\mu}^{\nu} h_{\nu}^{\mu} + \tfrac12 D_{\mu}^{\nu}\bigl(f_{\nu}^{\mu(e)} + J_{\nu}^{\mu}[P]\bigr)
 +        P_{\mu}^{\nu}  f_{\nu}^{\mu(p)}
 + E_0,
 \end{equation}
