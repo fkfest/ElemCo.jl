@@ -98,12 +98,12 @@ n_orb(table::OrbStringAdrTable{OPattern}) where OPattern = table.n_orb
 n_elec(table::OrbStringAdrTable{OPattern}) where OPattern = table.n_elec
 
 """
-    FCIVector{OPattern}
+    FCIVector{OPattern, T}
 
 FCI vector storing coefficients as matrix M[iAdrA, iAdrB] where iAdrA and iAdrB 
 are indices of orbital occupation strings for alpha/beta electrons.
 """
-mutable struct FCIVector{OPattern}
+mutable struct FCIVector{OPattern, T}
   n_elec_a::FCIUInt
   n_elec_b::FCIUInt
   n_orb::FCIUInt
@@ -112,9 +112,9 @@ mutable struct FCIVector{OPattern}
   adr_a::OrbStringAdrTable{OPattern}
   adr_b::OrbStringAdrTable{OPattern}
   is_spin_projected::Bool
-  data::Matrix{Scalar}
+  data::Matrix{T}
 
-  function FCIVector{OPattern}(n_elec::Integer, n_orb::Integer, n_spin::Integer, is_spin_projected::Bool = false) where OPattern
+  function FCIVector{OPattern, T}(n_elec::Integer, n_orb::Integer, n_spin::Integer, is_spin_projected::Bool = false) where {OPattern, T}
     n_elec_a = (n_elec + n_spin) ÷ 2
     n_elec_b = (n_elec - n_spin) ÷ 2
 
@@ -125,9 +125,9 @@ mutable struct FCIVector{OPattern}
     n_str_b = n_str(adr_b)
 
     # Store data in [alpha, beta] order 
-    data = zeros(Scalar, n_str_a, n_str_b)
+    data = zeros(T, n_str_a, n_str_b)
 
-    new{OPattern}(
+    new{OPattern, T}(
       FCIUInt(n_elec_a),
       FCIUInt(n_elec_b),
       FCIUInt(n_orb),
@@ -141,12 +141,15 @@ mutable struct FCIVector{OPattern}
   end
 end
 
+FCIVector{OPattern}(n_elec::Integer, n_orb::Integer, n_spin::Integer, is_spin_projected::Bool = false) where OPattern =
+  FCIVector{OPattern, Float64}(n_elec, n_orb, n_spin, is_spin_projected)
+
 """
     Base.getindex(vec::FCIVector{OPattern}, i_a::Integer, i_b::Integer) where OPattern -> Scalar
 
 Access coefficient vec[i_a, i_b].
 """
-@inline function Base.getindex(vec::FCIVector{OPattern}, i_a::Integer, i_b::Integer) where OPattern
+@inline function Base.getindex(vec::FCIVector, i_a::Integer, i_b::Integer)
   @boundscheck checkbounds(vec.data, i_a, i_b)
   return vec.data[i_a, i_b]
 end
@@ -156,7 +159,7 @@ end
 
 Set coefficient vec[i_a, i_b] = val.
 """
-@inline function Base.setindex!(vec::FCIVector{OPattern}, val, i_a::Integer, i_b::Integer) where OPattern
+@inline function Base.setindex!(vec::FCIVector, val, i_a::Integer, i_b::Integer)
   @boundscheck checkbounds(vec.data, i_a, i_b)
   vec.data[i_a, i_b] = val
 end
@@ -166,22 +169,22 @@ end
 
 Total number of data elements.
 """
-n_data(vec::FCIVector{OPattern}) where OPattern = Int(vec.n_str_a * vec.n_str_b)
+n_data(vec::FCIVector) = Int(vec.n_str_a * vec.n_str_b)
 
 """
     n_spin(vec::FCIVector{OPattern}) where OPattern -> FCIUInt
 
 Total spin quantum number.
 """
-n_spin(vec::FCIVector{OPattern}) where OPattern = vec.n_elec_a - vec.n_elec_b
+n_spin(vec::FCIVector) = vec.n_elec_a - vec.n_elec_b
 
 """
     clear!(vec::FCIVector{OPattern}) where OPattern
 
 Set all coefficients to zero.
 """
-function clear!(vec::FCIVector{OPattern}) where OPattern
-  fill!(vec.data, zero(Scalar))
+function clear!(vec::FCIVector{OPattern, T}) where {OPattern, T}
+  fill!(vec.data, zero(T))
 end
 
 """
@@ -189,8 +192,8 @@ end
 
 Create a deep copy of an FCIVector, including all data.
 """
-function Base.copy(vec::FCIVector{OPattern}) where OPattern
-  new_vec = FCIVector{OPattern}(
+function Base.copy(vec::FCIVector{OPattern, T}) where {OPattern, T}
+  new_vec = FCIVector{OPattern, T}(
     vec.n_elec_a + vec.n_elec_b,
     vec.n_orb,
     vec.n_elec_a - vec.n_elec_b,
@@ -205,14 +208,13 @@ end
 
 Create a zero FCIVector with the same dimensions.
 """
-function Base.zero(vec::FCIVector{OPattern}) where OPattern
-  new_vec = FCIVector{OPattern}(
+function Base.zero(vec::FCIVector{OPattern, T}) where {OPattern, T}
+  new_vec = FCIVector{OPattern, T}(
     vec.n_elec_a + vec.n_elec_b,
     vec.n_orb,
     vec.n_elec_a - vec.n_elec_b,
     vec.is_spin_projected,
   )
-  fill!(new_vec.data, zero(Scalar))
   return new_vec
 end
 
@@ -221,7 +223,7 @@ end
 
 Normalize the FCI vector.
 """
-function LinearAlgebra.normalize!(vec::FCIVector{OPattern}) where OPattern
+function LinearAlgebra.normalize!(vec::FCIVector)
   norm_val = norm(vec.data)
   if norm_val ≈ 0.0
     throw(ArgumentError("Attempted to normalize a non-normalizable vector"))
@@ -235,7 +237,7 @@ end
 
 Compute norm of FCI vector using LinearAlgebra.
 """
-function LinearAlgebra.norm(vec::FCIVector{OPattern}) where OPattern
+function LinearAlgebra.norm(vec::FCIVector)
   return norm(vec.data)
 end
 
@@ -244,7 +246,7 @@ end
 
 Check if two FCI vectors are compatible for operations.
 """
-@inline function compatible(a::FCIVector{OPattern}, b::FCIVector{OPattern})::Bool where OPattern
+@inline function compatible(a::FCIVector, b::FCIVector)::Bool
   return (
     a.n_elec_a == b.n_elec_a &&
     a.n_elec_b == b.n_elec_b &&
@@ -259,7 +261,7 @@ end
 
 Compute dot product using LinearAlgebra.
 """
-function LinearAlgebra.dot(a::FCIVector{OPattern}, b::FCIVector{OPattern}) where OPattern
+function LinearAlgebra.dot(a::FCIVector, b::FCIVector)
   @assert compatible(a, b) "Vectors not compatible"
   return LinearAlgebra.dot(a.data, b.data)
 end
@@ -269,7 +271,7 @@ end
 
 Compute r += f * x using LinearAlgebra.
 """
-function add!(r::FCIVector{OPattern}, x::FCIVector{OPattern}, f) where OPattern
+function add!(r::FCIVector, x::FCIVector, f)
   @assert compatible(r, x) "Vectors not compatible"
   axpy!(f, x.data, r.data)
 end
@@ -281,7 +283,7 @@ Remove component of v parallel to u: v = v - (u' * v) * u
 Assumes u is normalized. Modifies v in-place.
 This is the projection operator: (I - u*u^T) * v
 """
-function orthogonalize_against!(v::FCIVector{OPattern}, u::FCIVector{OPattern}) where OPattern
+function orthogonalize_against!(v::FCIVector, u::FCIVector)
   projection = dot(u, v)
   add!(v, u, -projection)  # v = v + (-projection) * u
   return nothing
@@ -294,7 +296,7 @@ Vector version for P-space operations.
 Remove component of v parallel to u: v = v - (u' * v) * u
 Assumes u is normalized. Modifies v in-place.
 """
-function orthogonalize_against!(v::Vector{Scalar}, u::Vector{Scalar})
+function orthogonalize_against!(v::AbstractVector, u::AbstractVector)
   projection = LinearAlgebra.dot(u, v)
   LinearAlgebra.axpy!(-projection, u, v)
   return nothing

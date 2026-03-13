@@ -1,5 +1,4 @@
-const Address = UInt64          # addressing patterns and vector elements  
-const Scalar = Float64          # scalar values for CI coefficients
+const Address = UInt64          # addressing patterns and vector elements
 
 const FCIUInt = UInt32
 
@@ -154,27 +153,29 @@ end
 Container for P-space determinants, Hamiltonian matrix, and eigenvectors.
 Contains all data needed for P-space enhanced initial guess generation.
 """
-mutable struct PSpaceData{OPattern}
+mutable struct PSpaceData{OPattern, T}
   determinants::Vector{Determinant{OPattern}}     # P-space determinants
   indices::Vector{Address}              # Indices of P-space dets in full space
-  hamiltonian::Matrix{Scalar}          # P-space Hamiltonian matrix H_ij
-  eigenvalues::Vector{Scalar}          # P-space eigenvalues
-  eigenvectors::Matrix{Scalar}         # P-space eigenvectors (columns)
+  hamiltonian::Matrix{T}          # P-space Hamiltonian matrix H_ij
+  eigenvalues::Vector{T}          # P-space eigenvalues
+  eigenvectors::Matrix{T}         # P-space eigenvectors (columns)
   n_pspace::Int                        # Actual P-space size
   reference_det::Determinant{OPattern}        # HF reference determinant
 
-  function PSpaceData{OPattern}() where OPattern
-    new{OPattern}(
+  function PSpaceData{OPattern, T}() where {OPattern, T}
+    new{OPattern, T}(
       Determinant{OPattern}[],
       Address[],
-      Matrix{Scalar}(undef, 0, 0),
-      Scalar[],
-      Matrix{Scalar}(undef, 0, 0),
+      Matrix{T}(undef, 0, 0),
+      T[],
+      Matrix{T}(undef, 0, 0),
       0,
       Determinant(OPattern(0), OPattern(0)),
     )
   end
 end
+
+PSpaceData{OPattern}() where OPattern = PSpaceData{OPattern, Float64}()
 
 """
     HEvalData
@@ -196,53 +197,55 @@ Precomputed data for evaluating diagonal Hamiltonian and single excitations elem
 
     These arrays enable efficient computation of single excitation matrix elements via `compute_fock_element`.
 """
-struct HEvalData
+struct HEvalData{T}
   # Precomputed data for evaluating diagonal Hamiltonian elements
-  jkaa::Matrix{Scalar}      # JKAA: 0.5[(ii|jj) - (ij|ji)]
-  jkbb::Matrix{Scalar}      # JKBB: 0.5[(ii|jj) - (ij|ji)] for beta
-  jab::Matrix{Scalar}      # JAB: (ii|jj) mixed
-  ha::Vector{Scalar}   # ⟨i|h|i⟩ for alpha
-  hb::Vector{Scalar}   # ⟨i|h|i⟩ for beta
+  jkaa::Matrix{T}      # JKAA: 0.5[(ii|jj) - (ij|ji)]
+  jkbb::Matrix{T}      # JKBB: 0.5[(ii|jj) - (ij|ji)] for beta
+  jab::Matrix{T}      # JAB: (ii|jj) mixed
+  ha::Vector{T}   # ⟨i|h|i⟩ for alpha
+  hb::Vector{T}   # ⟨i|h|i⟩ for beta
 
   # Precomputed h1e2 terms for efficient Fock element calculation.
-  h1e2_aa::Array{Scalar, 3}       # RHF and UHF: alpha-alpha
-  h1e2_bb::Array{Scalar, 3}       # UHF: beta-beta (for RHF: reference to h1e2_aa)
-  h1e2_ab::Array{Scalar, 3}       # UHF and RHF: alpha-beta (no exchange)
-  h1e2_ba::Array{Scalar, 3}       # UHF: beta-alpha (no exchange) (for RHF: reference to h1e2_ab)
+  h1e2_aa::Array{T, 3}       # RHF and UHF: alpha-alpha
+  h1e2_bb::Array{T, 3}       # UHF: beta-beta (for RHF: reference to h1e2_aa)
+  h1e2_ab::Array{T, 3}       # UHF and RHF: alpha-beta (no exchange)
+  h1e2_ba::Array{T, 3}       # UHF: beta-alpha (no exchange) (for RHF: reference to h1e2_ab)
 
   is_uhf::Bool
   n_orb::Int
   spaces_buf::OrbSpaces           # Buffer for indices for diagonal element calculations
 
-  function HEvalData()
-    mat = zeros(Scalar, 0, 0)
-    ten = zeros(Scalar, 0, 0, 0)
-    new(mat, mat, mat, Scalar[], Scalar[],
+  function HEvalData{T}() where T
+    mat = zeros(T, 0, 0)
+    ten = zeros(T, 0, 0, 0)
+    new{T}(mat, mat, mat, T[], T[],
         ten, ten, ten, ten, false, 0, OrbSpaces())
   end
   
   # RHF constructor
-  function HEvalData(jk::Matrix{Scalar}, jab::Matrix{Scalar}, ha::Vector{Scalar}, 
-                     h1e2::Array{Scalar, 3}, h1e2_ab::Array{Scalar, 3})
+  function HEvalData(jk::Matrix{T}, jab::Matrix{T}, ha::Vector{T}, 
+                     h1e2::Array{T, 3}, h1e2_ab::Array{T, 3}) where T
     n_orb = size(jk, 1)
-    new(jk, jk, jab, ha, ha,
+    new{T}(jk, jk, jab, ha, ha,
         h1e2, h1e2, h1e2_ab, h1e2_ab,
         false, n_orb, OrbSpaces(n_orb))
   end
   
   # UHF constructor
-  function HEvalData(jkaa::Matrix{Scalar}, jkbb::Matrix{Scalar}, jab::Matrix{Scalar},
-                     ha::Vector{Scalar}, hb::Vector{Scalar},
-                     h1e2_aa::Array{Scalar, 3}, h1e2_bb::Array{Scalar, 3},
-                     h1e2_ab::Array{Scalar, 3}, h1e2_ba::Array{Scalar, 3})
+  function HEvalData(jkaa::Matrix{T}, jkbb::Matrix{T}, jab::Matrix{T},
+                     ha::Vector{T}, hb::Vector{T},
+                     h1e2_aa::Array{T, 3}, h1e2_bb::Array{T, 3},
+                     h1e2_ab::Array{T, 3}, h1e2_ba::Array{T, 3}) where T
     n_orb = size(jkaa, 1)
-    new(jkaa, jkbb, jab, ha, hb, 
+    new{T}(jkaa, jkbb, jab, ha, hb, 
         h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba, 
         true, n_orb, OrbSpaces(n_orb))
   end
 end
 
-function HEvalData(int2e, core_h)
+HEvalData() = HEvalData{Float64}()
+
+function HEvalData(int2e::AbstractArray{T, 4}, core_h::AbstractArray{T, 2}) where T
   # RHF case
   n_orb = size(core_h, 1)
   
@@ -254,8 +257,8 @@ function HEvalData(int2e, core_h)
   ha = diag(core_h)
 
   # Precompute h1e2 arrays
-  h1e2 = zeros(Scalar, n_orb, n_orb, n_orb)
-  h1e2_ab = zeros(Scalar, n_orb, n_orb, n_orb)
+  h1e2 = zeros(T, n_orb, n_orb, n_orb)
+  h1e2_ab = zeros(T, n_orb, n_orb, n_orb)
   for i in 1:n_orb
     for p in 1:n_orb, q in 1:n_orb
       h_piqi = int2e[p,i,q,i]
@@ -266,7 +269,8 @@ function HEvalData(int2e, core_h)
   return HEvalData(jk, jab, ha, h1e2, h1e2_ab)
 end
 
-function HEvalData(int2e_aa, int2e_bb, int2e_ab, core_h_a, core_h_b)
+function HEvalData(int2e_aa::AbstractArray{T, 4}, int2e_bb::AbstractArray{T, 4}, int2e_ab::AbstractArray{T, 4}, 
+                   core_h_a::AbstractArray{T, 2}, core_h_b::AbstractArray{T, 2}) where T
   # UHF case
   n_orb = size(core_h_a, 1)
   
@@ -280,10 +284,10 @@ function HEvalData(int2e_aa, int2e_bb, int2e_ab, core_h_a, core_h_b)
   hb = diag(core_h_b)
   
   # Precompute h1e2 arrays
-  h1e2_aa = zeros(Scalar, n_orb, n_orb, n_orb)
-  h1e2_bb = zeros(Scalar, n_orb, n_orb, n_orb)
-  h1e2_ab = zeros(Scalar, n_orb, n_orb, n_orb)
-  h1e2_ba = zeros(Scalar, n_orb, n_orb, n_orb)
+  h1e2_aa = zeros(T, n_orb, n_orb, n_orb)
+  h1e2_bb = zeros(T, n_orb, n_orb, n_orb)
+  h1e2_ab = zeros(T, n_orb, n_orb, n_orb)
+  h1e2_ba = zeros(T, n_orb, n_orb, n_orb)
   for i in 1:n_orb
     for p in 1:n_orb, q in 1:n_orb
       # Alpha-alpha

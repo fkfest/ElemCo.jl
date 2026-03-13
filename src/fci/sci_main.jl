@@ -28,10 +28,10 @@ include("sci_hb_selection.jl")
 
 Create SelectedCIContext from list of determinants.
 """
-function setup_selected_ci_from_determinants!(context::Union{FCIContext, CIPHIContext}, determinants, 
-                                              hamiltonian::Union{Nothing,SelectedHamiltonianMatrix}=nothing)
+function setup_selected_ci_from_determinants!(context::Union{FCIContext{O, T}, CIPHIContext{O, T}}, determinants, 
+                                              hamiltonian::Union{Nothing,SelectedHamiltonianMatrix}=nothing) where {O, T}
   if isnothing(hamiltonian) 
-    hamiltonian = SelectedHamiltonianMatrix(is_hermitian(context))
+    hamiltonian = SelectedHamiltonianMatrix{T}(is_hermitian(context))
   end
   return SelectedCIContext(context, determinants, hamiltonian)
 end
@@ -41,20 +41,20 @@ end
 
 Create SelectedCIContext from list of addresses.
 """
-function setup_selected_ci_from_addresses!(context::FCIContext, addresses::Vector{Address})
+function setup_selected_ci_from_addresses!(context::FCIContext{O, T}, addresses::Vector{Address}) where {O, T}
   determinants = [determinant_from_address(context, addr) for addr in addresses]
-  return SelectedCIContext(context, determinants, SelectedHamiltonianMatrix(is_hermitian(context)))
+  return SelectedCIContext(context, determinants, SelectedHamiltonianMatrix{T}(is_hermitian(context)))
 end
 
 """
-    project_selected_to_full!(v_full::FCIVector, v_selected::Vector{Scalar}, 
+    project_selected_to_full!(v_full::FCIVector, v_selected::AbstractVector, 
                              selected_ctx::SelectedCIContext)
 
 Project selected CI vector onto full CI space.
 """
-function project_selected_to_full!(v_full::FCIVector, v_selected::Vector{Scalar},
-                                   selected_ctx::SelectedCIContext)
-  fill!(v_full.data, 0.0)
+function project_selected_to_full!(v_full::FCIVector, v_selected::AbstractVector{T},
+                                   selected_ctx::SelectedCIContext) where T
+  fill!(v_full.data, zero(T))
 
   for i in 1:n_selected(selected_ctx)
     addr = selected_ctx.selected_dets.addresses[i]
@@ -65,12 +65,12 @@ function project_selected_to_full!(v_full::FCIVector, v_selected::Vector{Scalar}
 end
 
 """
-    extract_full_to_selected!(v_selected::Vector{Scalar}, v_full::FCIVector, 
+    extract_full_to_selected!(v_selected::AbstractVector, v_full::FCIVector, 
                              selected_ctx::SelectedCIContext)
 
 Extract selected CI coefficients from full CI vector.
 """
-function extract_full_to_selected!(v_selected::Vector{Scalar}, v_full::FCIVector, selected_ctx::SelectedCIContext)
+function extract_full_to_selected!(v_selected::AbstractVector, v_full::FCIVector, selected_ctx::SelectedCIContext)
   for i in 1:n_selected(selected_ctx)
     addr = selected_ctx.selected_dets.addresses[i]
     v_selected[i] = v_full.data[addr]
@@ -109,9 +109,9 @@ Run CIPHI (CIΦ - Selected CI via Perturbation, Heat-Bath and Iterations) calcul
 - For nstates>1, uses multi-state selection with state-maximum probability
 - If `initial_dets` is provided, these determinants are used as the starting variational space
 """
-function run_ciphi!(ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}}, options::CIPHIOptions;
+function run_ciphi!(ctx::Union{FCIContext{OPattern, T}, CIPHIContext{OPattern, T}}, options::CIPHIOptions;
                           initial_dets::Union{Nothing, Vector{<:AbstractDeterminant}}=nothing,
-                          initial_coeffs::Union{Nothing, AbstractVecOrMat{Float64}}=nothing) where OPattern
+                          initial_coeffs::Union{Nothing, AbstractVecOrMat}=nothing) where {OPattern, T}
   if options.verbose
     println("\n" * "="^70)
     println("CIPHI - Selected CI via Perturbation, Heat-Bath and Iterations")
@@ -169,7 +169,7 @@ function run_ciphi!(ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}}, op
     end
     
     # Get initial energies from diagonalization
-    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix(is_hermitian(ctx)))
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix{T}(is_hermitian(ctx)))
     
     # Use provided coefficients as warm start if available
     prev_coeffs = nothing
@@ -211,7 +211,7 @@ function run_ciphi!(ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}}, op
     
     # Start with all small-space determinants
     variational_dets = copy(small_space_result.determinants)
-    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix(is_hermitian(ctx)))
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix{T}(is_hermitian(ctx)))
     
     # Initial energies from small-space diagonalization
     E_init_vec = small_space_result.eigenvalues .+ ctx.fcidump.int0
@@ -234,7 +234,7 @@ function run_ciphi!(ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}}, op
     push!(variational_dets, hf_det)
     
     # Get initial HF energy (all states)
-    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix(is_hermitian(ctx)))
+    selected_ctx = SelectedCIContext(ctx, variational_dets, SelectedHamiltonianMatrix{T}(is_hermitian(ctx)))
     E_electronic_hf_vec, _ = diagonalize_selected_space(selected_ctx, nstates=options.nstates)
     E_init_vec = E_electronic_hf_vec .+ ctx.fcidump.int0
     
@@ -343,11 +343,12 @@ function run_ciphi!(ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}}, op
     end
     
     # 3. Generate candidates and compute probabilities
-    new_dets_dict = Dict{Determinant{OPattern}, Scalar}()  # To hold selected new determinants
+    new_dets_dict = Dict{Determinant{OPattern}, Float64}()  # To hold selected new determinants
     pt2_corrections = Array{Tuple{Float64, Float64}}(undef, options.nstates)
     for state = 1:options.nstates
-      new_dets, pt2_corrections[state] = heatbath_selection(selected_ctx, @view(coeffs_matrix[:,state]), 
+      new_dets, (pt2_raw, negl_raw) = heatbath_selection(selected_ctx, @view(coeffs_matrix[:,state]), 
                                           options, E_electronic_vec[state], setup_data)
+      pt2_corrections[state] = (real(pt2_raw), real(negl_raw))
       # Merge new determinants from all states, taking maximum weight (for target_selection)
       mergewith!(max, new_dets_dict, new_dets)
     end
@@ -486,7 +487,7 @@ Same as run_ciphi!(ctx, options): (energies, coeffs, determinants, pt2_result)
 """
 function run_ciphi!(ctx::CIPHIContext{OPattern}; 
                           initial_dets::Union{Nothing, Vector{<:AbstractDeterminant}}=nothing,
-                          initial_coeffs::Union{Nothing, AbstractVecOrMat{Float64}}=nothing) where OPattern
+                          initial_coeffs::Union{Nothing, AbstractVecOrMat}=nothing) where OPattern
   return run_ciphi!(ctx, ctx.options; initial_dets=initial_dets, initial_coeffs=initial_coeffs)
 end
 
@@ -504,7 +505,7 @@ i runs over internal determinants (in variational space).
 Returns PT2 energies as a vector.
 """
 function compute_pt2_correction!(selected_ctx::SelectedCIContext,
-                                 coefficients::Matrix{Float64}, E_variational::Vector{Float64},
+                                 coefficients::AbstractMatrix, E_variational::Vector{Float64},
                                  setup_data::CIPHISetupData, options::CIPHIOptions)
   
   if !options.compute_pt2
@@ -540,15 +541,17 @@ function compute_pt2_correction!(selected_ctx::SelectedCIContext,
     sort_indices = sortperm(@view(coefficients[:, state_idx]), rev=true, by=abs)
     if is_hermitian(selected_ctx)
       # For Hermitian case, only need right coefficients
-      _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
+      _, (pt2_raw, negl_raw) = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
                                             options, E_variational[state_idx], setup_data,
                                             nothing, sort_indices, false; pt2_correct=true)
+      ΔE[state_idx] = (real(pt2_raw), real(negl_raw))
     else
       left_idx = state_idx + nstates
-      _, ΔE[state_idx] = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
+      _, (pt2_raw, negl_raw) = heatbath_selection(selected_ctx, @view(coefficients[:, state_idx]),
                                             options, E_variational[state_idx], setup_data,
                                             @view(coefficients[:, left_idx]), sort_indices, false; 
                                             pt2_correct=true)
+      ΔE[state_idx] = (real(pt2_raw), real(negl_raw))
     end
     if options.verbose
       println("  PT2 correction: $(ΔE[state_idx][1]) ± $(ΔE[state_idx][2]) Ha")
@@ -564,9 +567,9 @@ end
 """
     diagonalize_selected_space(selected_ctx::SelectedCIContext; 
                                nstates::Int=1,
-                               previous_vectors::Union{Nothing,Matrix{Float64}}=nothing,
+                               previous_vectors::Union{Nothing,AbstractMatrix}=nothing,
                                conv_tol::Float64=1e-6) 
-      -> (Vector{Float64}, Matrix{Float64})
+      -> (Vector{Float64}, Matrix{T})
 
 Diagonalize the Hamiltonian in the selected CI space.
 Returns eigenvalues and eigenvectors for nstates lowest states.
@@ -588,10 +591,10 @@ For large spaces (≥ 1000 determinants), uses Davidson iterative diagonalizatio
 - For non-Hermitian Hamiltonians (similarity-transformed integrals), both right and left
   eigenvectors are computed and returned in the same matrix (right vectors first, then left).
 """
-function diagonalize_selected_space(selected_ctx::SelectedCIContext; 
+function diagonalize_selected_space(selected_ctx::SelectedCIContext{OPattern, T}; 
                                    nstates::Int=1,
-                                   previous_vectors::Union{Nothing,Matrix{Float64}}=nothing,
-                                   conv_tol::Float64=1e-6)::Tuple{Vector{Scalar}, Matrix{Scalar}}
+                                   previous_vectors::Union{Nothing,AbstractMatrix}=nothing,
+                                   conv_tol::Float64=1e-6) where {OPattern, T}
   n_dets = n_selected(selected_ctx)
   dets = determinants(selected_ctx)
   nstates = min(nstates, n_dets)  # Can't compute more roots than determinants
@@ -604,11 +607,14 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     if is_hermitian(selected_ctx)
       # Use Hermitian eigenvalue solver
       eigenvalues, eigenvectors = eigen(Hermitian(H_matrix), 1:nval)
-      eigenvectors = real.(eigenvectors[:, 1:nstates])
+      eigenvectors = eigenvectors[:, 1:nstates]
     else
       eigenvalues, eigenvectors = eigen(H_matrix)
       left_eigenvectors = inv(eigenvectors')
-      eigenvectors = real.(hcat(eigenvectors[:, 1:nstates], left_eigenvectors[:, 1:nstates]))
+      eigenvectors = hcat(eigenvectors[:, 1:nstates], left_eigenvectors[:, 1:nstates])
+      if !(T <:Complex)
+        eigenvectors = real.(eigenvectors)
+      end
     end
     return real.(eigenvalues[1:nstates]), eigenvectors
   end
@@ -628,7 +634,7 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     # Assume first n_prev determinants are the same (newly added dets are at the end)
     # Pass all available previous eigenvectors for their respective roots
     n_use_prev = min(nstates, n_prev_roots)
-    initial_guesses = zeros(Scalar, n_dets, n_use_prev)
+    initial_guesses = zeros(T, n_dets, n_use_prev)
     
     for i in 1:n_use_prev
       # Copy previous eigenvector (zero-padded for new determinants)
@@ -644,14 +650,14 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
       convergence_threshold = conv_tol,
       verbose = false
     )
-    return real.(eigenvalues), real.(eigenvectors)
+    return real.(eigenvalues), eigenvectors
   end
   # No previous vectors: use determinant with lowest diagonal element
-  diagonal = [compute_diagonal_element(det, selected_ctx.base_context) 
+  diagonal = [real(compute_diagonal_element(det, selected_ctx.base_context)) 
               for det in dets]
   min_idx = argmin(diagonal)
-  initial_guess = zeros(Scalar, n_dets, 1)
-  initial_guess[min_idx, 1] = 1.0
+  initial_guess = zeros(T, n_dets, 1)
+  initial_guess[min_idx, 1] = one(T)
   
   # Call Davidson solver with single initial guess
   eigenvalues, eigenvectors = davidson_selected_ci!(
@@ -663,6 +669,6 @@ function diagonalize_selected_space(selected_ctx::SelectedCIContext;
     convergence_threshold = conv_tol,
     verbose = false
   )
-  return real.(eigenvalues), real.(eigenvectors)
+  return real.(eigenvalues), eigenvectors
   
 end

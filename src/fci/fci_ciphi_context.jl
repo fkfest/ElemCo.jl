@@ -10,47 +10,45 @@ abstract type HamiltonianTerm end
 
 Main FCI calculation context.
 """
-mutable struct FCIContext{OPattern}
-  fcidump::FDump{<:Number,4}
+mutable struct FCIContext{OPattern, T}
+  fcidump::FDump{T,4}
   options::FCIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
   adr_a::OrbStringAdrTable{OPattern}
   adr_b::OrbStringAdrTable{OPattern}
-  coeff::FCIVector{OPattern}
-  resid::FCIVector{OPattern}
-  diag_h::FCIVector{OPattern}
+  coeff::FCIVector{OPattern, T}
+  resid::FCIVector{OPattern, T}
+  diag_h::FCIVector{OPattern, T}
   absorb_1e::Bool
   hamiltonian_terms::Vector{HamiltonianTerm}
   reference_det::Determinant{OPattern}
-  mod_core_h_a::Matrix{Scalar}
-  mod_core_h_b::Matrix{Scalar}
-  basis_a::Matrix{Scalar}
-  basis_b::Matrix{Scalar}
-  rdm1_a::Matrix{Scalar}
-  rdm1_b::Matrix{Scalar}
-  rdm2::Union{Nothing, Array{Scalar, 4}}  # 2-RDM (optional)
-  energy_fci::Scalar
-  energy_ptrace::Scalar
+  mod_core_h_a::Matrix{T}
+  mod_core_h_b::Matrix{T}
+  basis_a::Matrix{T}
+  basis_b::Matrix{T}
+  rdm1_a::Matrix{T}
+  rdm1_b::Matrix{T}
+  rdm2::Union{Nothing, Array{T, 4}}  # 2-RDM (optional)
   method_name::String
-  pspace_data::PSpaceData{OPattern}  # P-space calculation data
-  heval_data::HEvalData              # Precomputed arrays for diagonal and Fock elements
-  int1a::Matrix{Scalar}              # Reference to one-electron integrals for alpha spin
-  int1b::Matrix{Scalar}              # Reference to one-electron integrals for beta spin
-  int2aa::Array{Scalar,4}            # Reference to two-electron integrals for alpha-alpha spin
-  int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
-  int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
+  pspace_data::PSpaceData{OPattern, T}  # P-space calculation data
+  heval_data::HEvalData{T}              # Precomputed arrays for diagonal and Fock elements
+  int1a::Matrix{T}              # Reference to one-electron integrals for alpha spin
+  int1b::Matrix{T}              # Reference to one-electron integrals for beta spin
+  int2aa::Array{T,4}            # Reference to two-electron integrals for alpha-alpha spin
+  int2bb::Array{T,4}            # Reference to two-electron integrals for beta-beta spin
+  int2ab::Array{T,4}            # Reference to two-electron integrals for alpha-beta spin
 
-  function FCIContext{OPattern}(fcidump::FDump{<:Number,4}, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing) where OPattern
+  function FCIContext{OPattern}(fcidump::FDump{T,4}, options::FCIOptions = FCIOptions(); occa=nothing, occb=nothing) where {OPattern, T}
     n_elec = headvar(fcidump, "NELEC", Int) 
     n_orb = headvar(fcidump, "NORB", Int)
     ms2 = headvar(fcidump, "MS2", Int)
     n_alpha = (n_elec + ms2) ÷ 2
     n_beta = (n_elec - ms2) ÷ 2
     # Initialize FCI vectors
-    coeff = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
-    resid = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
-    diag_h = FCIVector{OPattern}(n_elec, n_orb, ms2, false)
+    coeff = FCIVector{OPattern, T}(n_elec, n_orb, ms2, false)
+    resid = FCIVector{OPattern, T}(n_elec, n_orb, ms2, false)
+    diag_h = FCIVector{OPattern, T}(n_elec, n_orb, ms2, false)
 
     # Select integrals based on RHF vs UHF
     if fcidump.uhf
@@ -97,7 +95,7 @@ mutable struct FCIContext{OPattern}
       int2ab = fcidump.int2
     end
 
-    context = new{OPattern}(
+    context = new{OPattern, T}(
       fcidump,
       options,
       n_orb,
@@ -107,21 +105,19 @@ mutable struct FCIContext{OPattern}
       coeff,
       resid,
       diag_h,
-      true,
-      HamiltonianTerm[],  # Set absorb_1e = true by default
+      !(T <: Complex),  # Set absorb_1e = false for complex
+      HamiltonianTerm[],
       reference_det,
       mod_core_h_a,
       mod_core_h_b,
-      Matrix{Scalar}(I, n_orb, n_orb),
-      Matrix{Scalar}(I, n_orb, n_orb),
-      zeros(Scalar, n_orb, n_orb),
-      zeros(Scalar, n_orb, n_orb),
+      Matrix{T}(I, n_orb, n_orb),
+      Matrix{T}(I, n_orb, n_orb),
+      zeros(T, n_orb, n_orb),
+      zeros(T, n_orb, n_orb),
       nothing,  # rdm2 - not computed by default
-      0.0,
-      0.0,
       fcidump.uhf ? "UHF-FCI" : "FCI",
-      PSpaceData{OPattern}(),
-      HEvalData(),  # computed later if needed
+      PSpaceData{OPattern, T}(),
+      HEvalData{T}(),  # computed later if needed
       int1a, int1b, int2aa, int2bb, int2ab
     )
 
@@ -160,26 +156,26 @@ determinants during CIPHI iterations. This provides:
 - `n_orb::Int` - Number of spatial orbitals
 - `n_elec::Tuple{Int,Int}` - (n_alpha, n_beta) electron counts
 - `reference_det::Determinant` - Reference determinant
-- `mod_core_h_a::Matrix{Scalar}` - Modified core Hamiltonian for alpha spin
-- `mod_core_h_b::Matrix{Scalar}` - Modified core Hamiltonian for beta spin
-- `heval_data::HEvalData` - Precomputed arrays for diagonal and Fock elements
+- `mod_core_h_a::Matrix{T}` - Modified core Hamiltonian for alpha spin
+- `mod_core_h_b::Matrix{T}` - Modified core Hamiltonian for beta spin
+- `heval_data::HEvalData{T}` - Precomputed arrays for diagonal and Fock elements
 """
-mutable struct CIPHIContext{OPattern}
-  fcidump::FDump{<:Number,4}
+mutable struct CIPHIContext{OPattern, T}
+  fcidump::FDump{T,4}
   options::CIPHIOptions
   n_orb::Int
   n_elec::Tuple{Int,Int}
   reference_det::Determinant{OPattern}
-  mod_core_h_a::Matrix{Scalar}
-  mod_core_h_b::Matrix{Scalar}
-  heval_data::HEvalData              # Precomputed heval_data arrays for diagonal and Fock elements
-  int1a::Matrix{Scalar}              # Reference to one-electron integrals for alpha spin
-  int1b::Matrix{Scalar}              # Reference to one-electron integrals for beta spin
-  int2aa::Array{Scalar,4}            # Reference to two-electron integrals for alpha-alpha spin
-  int2bb::Array{Scalar,4}            # Reference to two-electron integrals for beta-beta spin
-  int2ab::Array{Scalar,4}            # Reference to two-electron integrals for alpha-beta spin
+  mod_core_h_a::Matrix{T}
+  mod_core_h_b::Matrix{T}
+  heval_data::HEvalData{T}              # Precomputed heval_data arrays for diagonal and Fock elements
+  int1a::Matrix{T}              # Reference to one-electron integrals for alpha spin
+  int1b::Matrix{T}              # Reference to one-electron integrals for beta spin
+  int2aa::Array{T,4}            # Reference to two-electron integrals for alpha-alpha spin
+  int2bb::Array{T,4}            # Reference to two-electron integrals for beta-beta spin
+  int2ab::Array{T,4}            # Reference to two-electron integrals for alpha-beta spin
 
-  function CIPHIContext{OPattern}(fcidump::FDump{<:Number,4}, options::CIPHIOptions = CIPHIOptions(); occa=nothing, occb=nothing) where OPattern
+  function CIPHIContext{OPattern}(fcidump::FDump{T,4}, options::CIPHIOptions = CIPHIOptions(); occa=nothing, occb=nothing) where {OPattern, T}
     n_orb = headvar(fcidump, "NORB", Int)
     n_elec = headvar(fcidump, "NELEC", Int)
     ms2 = headvar(fcidump, "MS2", Int)
@@ -246,8 +242,8 @@ mutable struct CIPHIContext{OPattern}
       int2ab = fcidump.int2
     end
 
-    context = new{OPattern}(fcidump, options, n_orb, (n_alpha, n_beta), reference_det,
-        mod_core_h_a, mod_core_h_b, HEvalData(), int1a, int1b, int2aa, int2bb, int2ab)
+    context = new{OPattern, T}(fcidump, options, n_orb, (n_alpha, n_beta), reference_det,
+        mod_core_h_a, mod_core_h_b, HEvalData{T}(), int1a, int1b, int2aa, int2bb, int2ab)
 
     # Initialize Hamiltonian terms
     init_hamiltonian_terms!(context)

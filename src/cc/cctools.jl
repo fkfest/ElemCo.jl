@@ -1729,11 +1729,11 @@ Does nothing if `EC.options.wf.store` is empty.
 
 # Arguments
 - `dets::Vector{<:AbstractDeterminant}`: Determinants 
-- `coeffs::AbstractVecOrMat{Float64}`: CI coefficients (vector for 1 state, matrix for multi-state)
+- `coeffs::AbstractVecOrMat{<:Number}`: CI coefficients (vector for 1 state, matrix for multi-state)
 - `nstates::Int=0`: Number of states (0 = infer from coeffs)
 """
 function dump_wavefunction_with_determinants!(EC::ECInfo, dets::Vector{D}, 
-                                              coeffs::AbstractVecOrMat{Float64};
+                                              coeffs::AbstractVecOrMat{<:Number};
                                               nstates::Int=0) where {D}
   if EC.options.wf.store == ""
     return

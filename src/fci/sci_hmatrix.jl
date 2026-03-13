@@ -3,8 +3,8 @@
 # ===========================================
 
 @pib function compute_matrix_element_beta_excitations(det_i::Determinant, det_j::Determinant, 
-                      n_beta_diff, context::Union{FCIContext, CIPHIContext},
-                      occa=nothing, occb=nothing)::Scalar
+                      n_beta_diff, context::Union{FCIContext{O,T}, CIPHIContext{O,T}}, 
+                      occa=nothing, occb=nothing) where {O, T}
   if n_beta_diff == 2
     # Single beta excitation
     orb_i, orb_a = find_excitation_orbitals(det_i.beta, det_j.beta)
@@ -16,12 +16,12 @@
     phase = calculate_double_excitation_phase(det_i.beta, orb_i, orb_j, orb_a, orb_b)
     return double_beta_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
   end
-  return zero(Scalar)  # Invalid excitation
+  return zero(T)  # Invalid excitation
 end
 
 @pib function compute_matrix_element_alpha_excitations(det_i::Determinant, det_j::Determinant,
-                      n_alpha_diff, context::Union{FCIContext, CIPHIContext},
-                      occa=nothing, occb=nothing)::Scalar
+                      n_alpha_diff, context::Union{FCIContext{O,T}, CIPHIContext{O,T}}, 
+                      occa=nothing, occb=nothing) where {O, T}
   if n_alpha_diff == 2
     # Single alpha excitation
     orb_i, orb_a = find_excitation_orbitals(det_i.alpha, det_j.alpha)
@@ -33,11 +33,11 @@ end
     phase = calculate_double_excitation_phase(det_i.alpha, orb_i, orb_j, orb_a, orb_b)
     return double_alpha_excitation_matrix_element(context, orb_i, orb_j, orb_a, orb_b) * phase
   end
-  return zero(Scalar)  # Invalid excitation
+  return zero(T)  # Invalid excitation
 end
 
 @pib function compute_matrix_element_mixed_excitations(det_i::Determinant, det_j::Determinant,
-                      context::Union{FCIContext, CIPHIContext})::Scalar
+                      context::Union{FCIContext{O,T}, CIPHIContext{O,T}}) where {O, T}
   # Mixed single excitations in alpha and beta
   orb_i_alpha, orb_a_alpha = find_excitation_orbitals(det_i.alpha, det_j.alpha)
   orb_i_beta, orb_a_beta = find_excitation_orbitals(det_i.beta, det_j.beta)
@@ -57,8 +57,8 @@ Works with both FCIContext and CIPHIContext.
 occa/occb are either Nothing or lists of occupied orbitals (makes the calculation more efficient).
 """
 @pib function compute_matrix_element_direct(det_i::Determinant, det_j::Determinant, 
-                                            context::Union{FCIContext, CIPHIContext}, 
-                                            occa=nothing, occb=nothing)::Scalar
+                                            context::Union{FCIContext{O,T}, CIPHIContext{O,T}}, 
+                                            occa=nothing, occb=nothing) where {O, T}
   # Find differences in alpha and beta strings
   alpha_diff = det_i.alpha ⊻ det_j.alpha  # XOR to find differing bits
   beta_diff = det_i.beta ⊻ det_j.beta
@@ -84,7 +84,7 @@ occa/occb are either Nothing or lists of occupied orbitals (makes the calculatio
     # Mixed single excitations in alpha and beta
     return compute_matrix_element_mixed_excitations(det_i, det_j, context)
   end
-  return zero(Scalar)  # Invalid excitation
+  return zero(T)  # Invalid excitation
 end
 
 """
@@ -93,19 +93,19 @@ end
 Compute diagonal matrix element ⟨det|Ĥ|det⟩.
 For FCIContext uses precomputed diagonal, for CIPHIContext computes on-the-fly.
 """
-@pib function diagonal_matrix_element(det::Determinant, context::FCIContext)::Scalar
+@pib function diagonal_matrix_element(det::Determinant, context::FCIContext{O,T}) where {O, T}
   # Get the address and use existing diagonal computation
   addr = address_from_determinant(context, det)
   return context.diag_h.data[addr]
 end
 
-@pib function diagonal_matrix_element(det::Determinant, context::CIPHIContext)::Scalar
+@pib function diagonal_matrix_element(det::Determinant, context::CIPHIContext{O,T}) where {O, T}
   # For CIPHI, compute diagonal element on-the-fly
   return compute_diagonal_element(det, context)
 end
 
 @pib function diagonal_matrix_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
-                                      context::Union{CIPHIContext,FCIContext})::Scalar
+                                      context::Union{CIPHIContext{O,T}, FCIContext{O,T}}) where {O, T}
   # For CIPHI, compute diagonal element on-the-fly
   return compute_diagonal_element(occa, occb, context)
 end
@@ -215,13 +215,13 @@ end
 
 Compute H*c matrix-vector product using precomputed Hamiltonian elements.
 """
-function contract_hamiltonian_selected!(result::Vector{Scalar}, input::Vector{Scalar},
+function contract_hamiltonian_selected!(result::AbstractVector, input::AbstractVector,
                                         selected_ctx::SelectedCIContext, prefactor)
   n_det = n_selected(selected_ctx)
   @assert length(result) == n_det "Result vector size mismatch"
   @assert length(input) == n_det "Input vector size mismatch"
 
-  fill!(result, 0.0)
+  fill!(result, zero(eltype(result)))
   if !isempty(selected_ctx.hamiltonian.rows)
     for i in 1:n_det
       row = selected_ctx.hamiltonian.rows[i]
@@ -259,8 +259,8 @@ end
 
 Interface to existing Davidson solver infrastructure for Selected CI.
 """
-function contract_hamiltonian!(selected_ctx::SelectedCIContext, result::Vector{Scalar},
-                               input::Vector{Scalar}, prefactor)
+function contract_hamiltonian!(selected_ctx::SelectedCIContext, result::AbstractVector,
+                               input::AbstractVector, prefactor)
   contract_hamiltonian_selected!(result, input, selected_ctx, prefactor)
 end
 
@@ -269,9 +269,9 @@ end
 
 Construct full Hamiltonian matrix for selected determinants.
 """
-function hamiltonian_matrix(selected_ctx::SelectedCIContext) 
+function hamiltonian_matrix(selected_ctx::SelectedCIContext{O,T}) where {O, T}
   n_det = n_selected(selected_ctx)
-  H_matrix = zeros(Scalar, n_det, n_det)
+  H_matrix = zeros(T, n_det, n_det)
   
   for i in 1:n_det
     row = selected_ctx.hamiltonian.rows[i]
@@ -289,12 +289,12 @@ end
 # ===========================================
 
 """
-    compute_diagonal_element(det::Determinant, ctx) -> Scalar
+    compute_diagonal_element(det::Determinant, ctx)
 
 Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using HEvalData.
 Works with both FCIContext and CIPHIContext.
 """
-@pib function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, CIPHIContext})::Scalar
+@pib function compute_diagonal_element(det::Determinant, ctx::Union{FCIContext, CIPHIContext})
   spaces = ctx.heval_data.spaces_buf
   set_occupied_orbspaces!(spaces, det)
   return calc_diagonalH(ctx.heval_data, spaces.occa, spaces.occb)
@@ -307,6 +307,6 @@ Compute diagonal matrix element ⟨det|H|det⟩ for a single determinant using H
 Works with both FCIContext and CIPHIContext.
 """
 @pib function compute_diagonal_element(occa::AbstractVector{Int}, occb::AbstractVector{Int}, 
-                                       ctx::Union{FCIContext, CIPHIContext})::Scalar
+                                       ctx::Union{FCIContext, CIPHIContext})
   return calc_diagonalH(ctx.heval_data, occa, occb)
 end
