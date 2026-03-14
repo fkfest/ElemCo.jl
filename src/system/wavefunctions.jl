@@ -816,13 +816,13 @@ is_biorthogonal(type::AbstractString) = "biorthogonal" ∈ split(lowercase(type)
   `T2` is the doubles amplitude tensor (nvirt × nvirt × nocc × nocc).
 """
 function dump_amplitudes end
-function dump_amplitudes(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_amplitudes(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4})
   open_dump(EC, "u") do io
     dump_amplitudes(io, EC, T1, T2)
   end
   return
 end
-function dump_amplitudes(io::TrexioFile, EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_amplitudes(io::TrexioFile, EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4})
   println("Dumping amplitudes ...")
   write_trexio_amplitudes(io, T1, T2)
   return
@@ -837,8 +837,8 @@ end
   `T2a`, `T2b`, `T2ab` are the αα, ββ, and αβ doubles amplitude tensors.
 """
 function dump_amplitudes(EC::ECInfo, T1a::AbstractMatrix, T1b::AbstractMatrix, 
-                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
-                         T2ab::AbstractArray{<:Real,4})
+                         T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, 
+                         T2ab::AbstractArray{<:Number,4})
   open_dump(EC, "u") do io
     dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
   end
@@ -846,8 +846,8 @@ function dump_amplitudes(EC::ECInfo, T1a::AbstractMatrix, T1b::AbstractMatrix,
 end
 function dump_amplitudes(io::TrexioFile, EC::ECInfo, 
                          T1a::AbstractMatrix, T1b::AbstractMatrix, 
-                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
-                         T2ab::AbstractArray{<:Real,4})
+                         T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, 
+                         T2ab::AbstractArray{<:Number,4})
   println("Dumping amplitudes ...")
   write_trexio_amplitudes(io, T1a, T1b, T2a, T2b, T2ab)
   return
