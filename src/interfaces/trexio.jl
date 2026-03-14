@@ -464,6 +464,17 @@ end
   
   `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """ 
+function _write_trexio_orbital_transformation_data(trexio::TrexioFile, coefficients::SpinMatrix{<:Complex}, 
+                                                   order, type, classes, energies, occupations, MO="mo")
+  @warn "TREXIO does not support complex MO coefficients. Writing real parts only."
+  real_coeffs = if is_restricted(coefficients)
+    SpinMatrix(real.(coefficients[1]))
+  else
+    SpinMatrix(real.(coefficients[1]), real.(coefficients[2]))
+  end
+  _write_trexio_orbital_transformation_data(trexio, real_coeffs, order, type, classes, energies, occupations, MO)
+end
+
 function _write_trexio_orbital_transformation_data(trexio::TrexioFile, coefficients::SpinMatrix, 
                                                    order, type, classes, energies, occupations, MO="mo")
   nbasis, nmo = size(coefficients)

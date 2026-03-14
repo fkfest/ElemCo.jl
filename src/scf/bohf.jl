@@ -56,8 +56,8 @@ end
 
   Guess BO-MO coefficients (right) from core Hamiltonian.
 """
-function guess_bo_hcore(EC::ECInfo, uhf)
-  cMOr_final = SpinMatrix{Float64}()
+function guess_bo_hcore(EC::ECInfo{T}, uhf) where T
+  cMOr_final = SpinMatrix{T}()
   if uhf
     spins = [:α, :β]
     if !EC.fd.uhf
@@ -84,12 +84,12 @@ end
 
   Guess BO-MO coefficients (right) from identity matrix.
 """
-function guess_bo_identity(EC::ECInfo, uhf)
+function guess_bo_identity(EC::ECInfo{T}, uhf) where T
   norb = length(EC.space[':'])
   if uhf
-    return SpinMatrix(Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb))
+    return SpinMatrix(Matrix{T}(I, norb, norb), Matrix{T}(I, norb, norb))
   else
-    return SpinMatrix(Matrix{Float64}(I, norb, norb))
+    return SpinMatrix(Matrix{T}(I, norb, norb))
   end
 end
 
@@ -141,12 +141,12 @@ end
 
   Heat up unrestricted BO-MO coefficients to `temperature` according to Fermi-Dirac.
 """
-function unrestricted_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
+function unrestricted_heatup(EC::ECInfo{T}, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature) where T
   SP = EC.space
   fock = gen_ufock(EC, cMOl, cMOr)
-  den4temp = FSpinMatrix()
-  cMOr_out = FSpinMatrix()
-  cMOl_out = FSpinMatrix()
+  den4temp = SpinMatrix{T}()
+  cMOr_out = SpinMatrix{T}()
+  cMOl_out = SpinMatrix{T}()
   for (ispin, sp) = enumerate(['o', 'O'])
     ϵ, cMOr_new = eigen(fock[ispin])
     cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
@@ -158,7 +158,7 @@ function unrestricted_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, tem
   for (ispin, sp) = enumerate(['o', 'O'])
     ϵ, cMOr_new = eigen(fock[ispin])
     cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
-    cMOl_out[ispin] = left_from_right_rotations(cMOr_out[ispin])
+    cMOl_out[ispin] = transpose(inv(cMOr_out[ispin]))
   end
   return cMOl_out, cMOr_out
 end
@@ -170,7 +170,8 @@ end
 """
 function density4temperature(EC::ECInfo, ϵ, cMOr, nocc, nelec, temperature)
   cMOl = transpose(inv(cMOr))
-  fermi = (ϵ[nocc] + ϵ[nocc+1])/2
+  ϵ_real = real.(ϵ)
+  fermi = (ϵ_real[nocc] + ϵ_real[nocc+1])/2
   function occfun(eps) 
     if eps < fermi
       return 1/(1+exp((eps-fermi)*Constants.HARTREE2K/temperature))
@@ -179,7 +180,7 @@ function density4temperature(EC::ECInfo, ϵ, cMOr, nocc, nelec, temperature)
       return ex/(1+ex) 
     end
   end
-  occupation = occfun.(ϵ)
+  occupation = occfun.(ϵ_real)
   occupation .*= nelec / sum(occupation)
   println("occupation: ", occupation[occupation .> 0.0])
   return gen_frac_density_matrix(EC, cMOl, cMOr, occupation)
@@ -191,7 +192,7 @@ end
 
   Perform BO-HF using integrals from fcidump EC.fd.
 """
-function bohf(EC::ECInfo)
+function bohf(EC::ECInfo{T}) where T
   t1 = time_ns()
   pseudo = EC.options.scf.pseudo
   if pseudo
@@ -208,7 +209,7 @@ function bohf(EC::ECInfo)
   Enuc = EC.fd.int0
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, false)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  ϵ = zeros(norb)
+  ϵ = zeros(T, norb)
   hsmall = integ1(EC.fd,:α)
   EHF = 0.0
   previousEHF = 0.0
@@ -220,6 +221,7 @@ function bohf(EC::ECInfo)
     maxit = EC.options.scf.maxit
   end
   flush(stdout)
+  CT = T <: Complex ? T : Complex{T}
   t0 = time_ns()
   for it=1:maxit
     fock = gen_fock(EC, cMOl[1], cMOr[1])
@@ -230,7 +232,7 @@ function bohf(EC::ECInfo)
     EHF = efhsmall + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
-    Δfock = den'*fock - fock*den'
+    Δfock = transpose(den)*fock - fock*transpose(den)
     var = sum(abs2, Δfock)
     if pseudo
       output_E_var(EHF, var, time_ns() - t0)
@@ -244,8 +246,8 @@ function bohf(EC::ECInfo)
     if pseudo
       occ = SP['o']
       vir = SP['v']
-      ϵ_new = zeros(Complex{Float64}, norb)
-      cMOr_new = zeros(Complex{Float64}, norb, norb)
+      ϵ_new = zeros(CT, norb)
+      cMOr_new = zeros(CT, norb, norb)
       ϵ_new[occ],cMOr_new[occ,occ] = eigen(fock[occ,occ])
       println("eigenvalues occupied: ", ϵ_new[occ])
       ϵ_new[vir],cMOr_new[vir,vir] = eigen(fock[vir,vir])
@@ -291,7 +293,7 @@ function bouhf(EC::ECInfo{T}) where T
   # 1: alpha, 2: beta (cMOs can become complex(?))
   cMOl, cMOr = guess_boorb(EC, EC.options.scf.guess, true)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  ϵ = [zeros(norb), zeros(norb)]
+  ϵ = [zeros(T, norb), zeros(T, norb)]
   hsmall = [integ1(EC.fd,:α), integ1(EC.fd,:β)]
   efhsmall = zeros(T, 2)
   Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
@@ -305,6 +307,7 @@ function bouhf(EC::ECInfo{T}) where T
     maxit = EC.options.scf.maxit
   end
   flush(stdout)
+  CT = T <: Complex ? T : Complex{T}
   t0 = time_ns()
   for it=1:maxit
     fock = gen_ufock(EC, cMOl, cMOr)
@@ -315,7 +318,7 @@ function bouhf(EC::ECInfo{T}) where T
       fhsmall = fock[ispin] + hsmall[ispin]
       @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
       efhsmall[ispin] = efh
-      Δfock[ispin] = den'*fock[ispin] - fock[ispin]*den'
+      Δfock[ispin] = transpose(den)*fock[ispin] - fock[ispin]*transpose(den)
       var += sum(abs2,Δfock[ispin])
     end
     EHF = efhsmall[1] + efhsmall[2] + Enuc
@@ -338,8 +341,8 @@ function bouhf(EC::ECInfo{T}) where T
       if pseudo
         occ = SP[ov[1]]
         vir = SP[ov[2]]
-        ϵ_new = zeros(ComplexF64, norb)
-        cMOr_new = zeros(ComplexF64, norb, norb)
+        ϵ_new = zeros(CT, norb)
+        cMOr_new = zeros(CT, norb, norb)
         ϵ_new[occ], cMOr_new[occ,occ] = eigen(fock[ispin][occ,occ])
         ϵ_new[vir], cMOr_new[vir,vir] = eigen(fock[ispin][vir,vir])
       else

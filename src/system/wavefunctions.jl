@@ -159,6 +159,9 @@ function prepare_orb_vectors(input::Vector{Float64}, restricted)
     error("For unrestricted orbitals, provide input as a tuple of two vectors.")
   end
 end
+function prepare_orb_vectors(input::Vector{ComplexF64}, restricted)
+  return prepare_orb_vectors(real.(input), restricted)
+end
 function prepare_orb_vectors(input::Tuple{Vector{Float64},Vector{Float64}}, restricted)
   if restricted
     return (input[1], Float64[])
@@ -174,6 +177,9 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
     @assert length(input) == 2 "For unrestricted orbitals, provide input as a vector of two vectors."
     return (input[1], input[2])
   end
+end
+function prepare_orb_vectors(input::Vector{Vector{ComplexF64}}, restricted)
+  return prepare_orb_vectors([real.(v) for v in input], restricted)
 end
 
 function prepare_orb_classes(EC::ECInfo, restricted)

@@ -92,7 +92,7 @@ end
   Output energy `En`, variance `var`, and time step `Δt`.
 """
 function output_E_var(En, var, Δt)
-  @printf "%12.8f %10.2e %8.2f \n" En var Δt/10^9
+  @printf "%12.8f %10.2e %8.2f \n" real(En) real(var) Δt/10^9
   flush(stdout)
 end
 

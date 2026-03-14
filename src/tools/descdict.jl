@@ -122,6 +122,19 @@ function ODDict{K, V}(pairs::Pair{K, Tuple{V, String}}...) where {K, V}
   return ODDict(keys, values, descriptions)
 end
 
+# Flexible constructor for ODDict{K, Float64} accepting tuples with any numeric value type
+function ODDict{K, Float64}(pair1::Pair{K, <:Tuple{<:Number, String}}, pairs::Pair{K, <:Tuple{<:Number, String}}...) where K
+  keys = K[]
+  values = Float64[]
+  descriptions = String[]
+  for (key, value_desc) in (pair1, pairs...)
+    push!(keys, key)
+    push!(values, Float64(real(value_desc[1])))
+    push!(descriptions, value_desc[2])
+  end
+  return ODDict(keys, values, descriptions)
+end
+
 ODDict(pairs::Pair{K, Tuple{V, String}}...) where {K, V} = ODDict{K, V}(pairs...)
 
 function Base.getindex(dict::ODDict{K, V}, key::K) where {K, V}
