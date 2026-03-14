@@ -411,11 +411,6 @@ function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float
   return evecs, evals
 end
 
-# For genuinely complex matrices, eigenvectors stay complex — no rotation to real.
-function rotate_eigenvectors_to_real(evecs::AbstractMatrix{T}, evals::AbstractVector) where {T <: Complex}
-  return evecs, evals
-end
-
 """ 
     balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
 

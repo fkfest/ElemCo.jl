@@ -10,7 +10,7 @@ using LinearAlgebra
 epsilon = 1.e-6
 
 fcidump = joinpath(@__DIR__, "files", "H2O.FCIDUMP")
-
+geometry = nothing
 # ============================================================
 # Reference real calculations
 # ============================================================

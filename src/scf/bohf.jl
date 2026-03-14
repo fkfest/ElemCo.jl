@@ -18,6 +18,11 @@ using ..ElemCo.Wavefunctions
 export bohf, bouhf
 export guess_boorb
 
+# Rotate eigenvectors to real only for real-valued calculations.
+# For genuinely complex integrals (T<:Complex), keep eigenvectors as-is.
+_maybe_rotate_real(::ECInfo{T}, evecs, evals) where T =
+  T <: Complex ? (evecs, evals) : rotate_eigenvectors_to_real(evecs, evals)
+
 """
     guess_boorb(EC::ECInfo, guess::Symbol, uhf=false)
 
@@ -70,7 +75,7 @@ function guess_bo_hcore(EC::ECInfo{T}, uhf) where T
   for spin in spins
     hsmall = integ1(EC.fd, spin)
     ϵ, cMOr = eigen(hsmall)
-    cMOr_final[isp], ϵ = rotate_eigenvectors_to_real(cMOr, ϵ)
+    cMOr_final[isp], ϵ = _maybe_rotate_real(EC, cMOr, ϵ)
     isp += 1
   end
   if !uhf
@@ -125,13 +130,13 @@ end
 function closed_shell_heatup(EC::ECInfo, cMOl::SpinMatrix, cMOr::SpinMatrix, temperature)
   fock = gen_fock(EC, cMOl[1], cMOr[1])
   ϵ, cMOr_new = eigen(fock)
-  cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
+  cMOr[1], ϵ = _maybe_rotate_real(EC, cMOr_new, ϵ)
   nocc = n_occ_orbs(EC)
   nelec = 2*nocc
   den4temp = density4temperature(EC, ϵ, cMOr[1], nocc, nelec, temperature)
   fock = gen_fock(EC, den4temp)
   ϵ, cMOr_new = eigen(fock)
-  cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
+  cMOr[1], ϵ = _maybe_rotate_real(EC, cMOr_new, ϵ)
   cMOl = left_from_right_rotations(cMOr)
   return cMOl, cMOr
 end
@@ -149,7 +154,7 @@ function unrestricted_heatup(EC::ECInfo{T}, cMOl::SpinMatrix, cMOr::SpinMatrix, 
   cMOl_out = SpinMatrix{T}()
   for (ispin, sp) = enumerate(['o', 'O'])
     ϵ, cMOr_new = eigen(fock[ispin])
-    cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
+    cMOr_out[ispin], ϵ = _maybe_rotate_real(EC, cMOr_new, ϵ)
     nocc = length(SP[sp])
     nelec = nocc
     den4temp[ispin] = density4temperature(EC, ϵ, cMOr_out[ispin], nocc, nelec, temperature)
@@ -157,7 +162,7 @@ function unrestricted_heatup(EC::ECInfo{T}, cMOl::SpinMatrix, cMOr::SpinMatrix, 
   fock = gen_ufock(EC, den4temp)
   for (ispin, sp) = enumerate(['o', 'O'])
     ϵ, cMOr_new = eigen(fock[ispin])
-    cMOr_out[ispin], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ)
+    cMOr_out[ispin], ϵ = _maybe_rotate_real(EC, cMOr_new, ϵ)
     cMOl_out[ispin] = transpose(inv(cMOr_out[ispin]))
   end
   return cMOl_out, cMOr_out
@@ -221,7 +226,6 @@ function bohf(EC::ECInfo{T}) where T
     maxit = EC.options.scf.maxit
   end
   flush(stdout)
-  CT = T <: Complex ? T : Complex{T}
   t0 = time_ns()
   for it=1:maxit
     fock = gen_fock(EC, cMOl[1], cMOr[1])
@@ -246,18 +250,24 @@ function bohf(EC::ECInfo{T}) where T
     if pseudo
       occ = SP['o']
       vir = SP['v']
-      ϵ_new = zeros(CT, norb)
-      cMOr_new = zeros(CT, norb, norb)
-      ϵ_new[occ],cMOr_new[occ,occ] = eigen(fock[occ,occ])
-      println("eigenvalues occupied: ", ϵ_new[occ])
-      ϵ_new[vir],cMOr_new[vir,vir] = eigen(fock[vir,vir])
+      ϵ_occ, cMOr_occ = eigen(fock[occ,occ])
+      cMOr_occ, ϵ_occ = _maybe_rotate_real(EC, cMOr_occ, ϵ_occ)
+      println("eigenvalues occupied: ", ϵ_occ)
+      ϵ_vir, cMOr_vir = eigen(fock[vir,vir])
+      cMOr_vir, ϵ_vir = _maybe_rotate_real(EC, cMOr_vir, ϵ_vir)
+      ϵ_new = zeros(T, norb)
+      cMOr_new = zeros(T, norb, norb)
+      ϵ_new[occ] .= ϵ_occ
+      ϵ_new[vir] .= ϵ_vir
+      cMOr_new[occ,occ] .= cMOr_occ
+      cMOr_new[vir,vir] .= cMOr_vir
     else
       perform!(diis, [fock], [Δfock])
       t1 = print_time(EC, t1, "DIIS", 2)
       ϵ_new, cMOr_new = eigen(fock)
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
-    cMOr[1], ϵ = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
+    cMOr[1], ϵ = _maybe_rotate_real(EC, cMOr_new, ϵ_new)
     cMOr[1], cMOl[1] = balance_norms!(cMOr[1])
     restrict!(cMOr)
     restrict!(cMOl)
@@ -307,7 +317,6 @@ function bouhf(EC::ECInfo{T}) where T
     maxit = EC.options.scf.maxit
   end
   flush(stdout)
-  CT = T <: Complex ? T : Complex{T}
   t0 = time_ns()
   for it=1:maxit
     fock = gen_ufock(EC, cMOl, cMOr)
@@ -341,14 +350,20 @@ function bouhf(EC::ECInfo{T}) where T
       if pseudo
         occ = SP[ov[1]]
         vir = SP[ov[2]]
-        ϵ_new = zeros(CT, norb)
-        cMOr_new = zeros(CT, norb, norb)
-        ϵ_new[occ], cMOr_new[occ,occ] = eigen(fock[ispin][occ,occ])
-        ϵ_new[vir], cMOr_new[vir,vir] = eigen(fock[ispin][vir,vir])
+        ϵ_occ, cMOr_occ = eigen(fock[ispin][occ,occ])
+        cMOr_occ, ϵ_occ = _maybe_rotate_real(EC, cMOr_occ, ϵ_occ)
+        ϵ_vir, cMOr_vir = eigen(fock[ispin][vir,vir])
+        cMOr_vir, ϵ_vir = _maybe_rotate_real(EC, cMOr_vir, ϵ_vir)
+        ϵ_new = zeros(T, norb)
+        cMOr_new = zeros(T, norb, norb)
+        ϵ_new[occ] .= ϵ_occ
+        ϵ_new[vir] .= ϵ_vir
+        cMOr_new[occ,occ] .= cMOr_occ
+        cMOr_new[vir,vir] .= cMOr_vir
       else
         ϵ_new, cMOr_new = eigen(fock[ispin])
       end
-      cMOr[ispin], ϵ[ispin] = rotate_eigenvectors_to_real(cMOr_new, ϵ_new)
+      cMOr[ispin], ϵ[ispin] = _maybe_rotate_real(EC, cMOr_new, ϵ_new)
       cMOr[ispin], cMOl[ispin] = balance_norms!(cMOr[ispin])
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
