@@ -2,6 +2,7 @@ using ElemCo
 using ElemCo.ECInfos
 using ElemCo.FciDumps: headvar
 using ElemCo.TensorTools: mmap3idx, closemmap
+using ElemCo.DFTools: contract_df_integrals!
 using ElemCo.VaspInterface
 
 @testset "VASP Interface Test" begin
@@ -76,5 +77,56 @@ using ElemCo.VaspInterface
     mmLfile, mmL = mmap3idx(EC, "mmL")
     @test size(mmL) == (96, 96, 712)
     closemmap(EC, mmLfile, mmL)
+
+    # Check df3idx flag is set
+    @test EC.fd.df3idx == true
+    # Check int2 is empty
+    @test length(EC.fd.int2) == 0
+  end
+
+  @testset "contract_df_integrals!" begin
+    data = load_vasp(vasp_dir)
+    EC = ECInfo{eltype(data.coulomb_vertex)}()
+    setup_vasp!(EC, data)
+
+    @test EC.fd.df3idx == true
+    @test length(EC.fd.int2) == 0
+
+    contract_df_integrals!(EC)
+
+    @test EC.fd.df3idx == false
+    norbs = 96
+    ntri = norbs * (norbs + 1) ÷ 2
+    @test size(EC.fd.int2) == (norbs, norbs, ntri)
+
+    # Verify int2 by comparing with direct contraction from mmL for a few elements
+    # Reload mmL
+    mmLfile, mmL = mmap3idx(EC, "mmL")
+    # Check (pq|rs) = Σ_L B[p,q,L] * B[r,s,L]  for p=1,q=1,r=1,s=1
+    ref_1111 = sum(mmL[1,1,:] .* mmL[1,1,:])
+    tri_11 = 1  # uppertriangular_index(1,1) = 1
+    @test EC.fd.int2[1,1,tri_11] ≈ ref_1111
+    # Check p=2,r=3,q=1,s=2: tri(1,2) = 2
+    ref_2312 = sum(mmL[2,1,:] .* mmL[3,2,:])
+    tri_12 = 2  # uppertriangular_index(1,2) = 2
+    @test EC.fd.int2[2,3,tri_12] ≈ ref_2312
+    closemmap(EC, mmLfile, mmL)
+  end
+
+  @testset "ccdriver with VASP integrals" begin
+    data = load_vasp(vasp_dir)
+    EC = ECInfo{eltype(data.coulomb_vertex)}()
+    setup_vasp!(EC, data)
+
+    # ccdriver should auto-contract df3idx integrals
+    energies = ElemCo.ccdriver(EC, "mp2"; fcidump="")
+    @test haskey(energies, "MP2")
+    # MP2 energy should be a finite negative number
+    E_MP2 = energies["MP2"]
+    E_MP2_val = E_MP2 isa Tuple ? E_MP2[1] : E_MP2
+    @test isfinite(real(E_MP2_val))
+    @test real(E_MP2_val) < 0.0
+    # df3idx should be cleared after contraction
+    @test EC.fd.df3idx == false
   end
 end

@@ -40,6 +40,9 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
   check_fcidump(EC, fcidump)
+  if EC.fd.df3idx
+    contract_df_integrals!(EC)
+  end
   setup_space_fd!(EC)
   closed_shell = is_closed_shell(EC)
 
@@ -161,6 +164,9 @@ end
 function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
+  if EC.fd.df3idx
+    contract_df_integrals!(EC)
+  end
   setup_space_fd!(EC)
   closed_shell = is_closed_shell(EC)
 

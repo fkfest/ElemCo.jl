@@ -12,9 +12,10 @@ using ..ElemCo.Integrals
 using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
+using ..ElemCo.FciDumps
 
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
-export generate_3idx_integrals
+export generate_3idx_integrals, contract_df_integrals!
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -214,6 +215,69 @@ function generate_DF_Fock(EC::ECInfo, cMO::SpinMatrix; check_diagonal=false)
   EHF /= nspin
   EHF += nuclear_repulsion(EC.system)
   return EHF
+end
+
+"""
+    contract_df_integrals!(EC::ECInfo)
+
+  Contract 3-index DF integrals from scratch file `mmL` into 4-index integrals
+  and store them in `EC.fd.int2`.
+
+  The 3-index integrals ``B_p^{qL}`` are stored in the scratch file `mmL` with
+  shape `(norb, norb, naux)`. The 4-index integrals are computed as:
+  ``v_{pr}^{qs} = \\sum_L B_p^{qL} B_r^{sL}``
+  and stored in upper-triangular format for the last two indices (q ≤ s).
+
+  After contraction, `EC.fd.df3idx` is set to `false`.
+"""
+function contract_df_integrals!(EC::ECInfo{T}) where T
+  @assert EC.fd.df3idx "df3idx flag must be set"
+  @assert !EC.fd.uhf "UHF contract_df_integrals! not implemented yet"
+  norbs = headvar(EC.fd, "NORB", Int)
+
+  println("Contracting 3-index DF integrals to 4-index...")
+
+  mmLfile, mmL = mmap3idx(EC, "mmL")
+  nL = size(mmL, 3)
+  @assert size(mmL, 1) == norbs && size(mmL, 2) == norbs "mmL shape mismatch"
+
+  ntri = norbs * (norbs + 1) ÷ 2
+  filename2 = int2_npy_filename(EC.fd)
+  int2_file, int2 = newmmap(EC, filename2, (norbs, norbs, ntri), description="int2")
+
+  LBlks = get_spaceblocks(1:nL, 512)
+  maxL = maximum(length, LBlks)
+  @buffer buf(T, norbs*norbs*maxL) begin
+  first = true
+  for L in LBlks
+    lenL = length(L)
+    Lmm = alloc!(buf, lenL, norbs, norbs)
+    v!mmL = @mview mmL[:,:,L]
+    @mtensor Lmm[L,p,q] = v!mmL[p,q,L]
+    # int2[p,r,tri(q,s)] = Σ_L mmL[p,q,L] * mmL[r,s,L]
+    for s = 1:norbs
+      v!Lmm_s = @mview Lmm[:,:,s]     # (L,norb)
+      for q = 1:s
+        v!Lmm_q = @mview Lmm[:,:,q]   # (L, norb)
+        qs = uppertriangular_index(q, s)
+        v!int2 = @mview int2[:,:,qs]    # (norb, norb)
+        if first
+          @mtensor v!int2[p,r] = v!Lmm_q[L,p] * v!Lmm_s[L,r]
+          first = false
+        else
+          @mtensor v!int2[p,r] += v!Lmm_q[L,p] * v!Lmm_s[L,r]
+        end
+      end
+    end
+    drop!(buf, Lmm)
+  end
+  end
+  flushmmap(EC, int2)
+  EC.fd.int2 = int2
+  close(mmLfile)
+
+  EC.fd.df3idx = false
+  println("  4-index integrals generated: ($norbs, $norbs, $ntri)")
 end
 
 end #module

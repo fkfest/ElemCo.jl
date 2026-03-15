@@ -134,6 +134,8 @@ end
   modified::Bool = false
   """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
   uhf::Bool = false
+  """`⟨false⟩` 3-index DF integrals are stored in scratch (`mmL`) and need contraction to 4-index. """
+  df3idx::Bool = false
 end
 
 const TFDump{T<:Number} = FDump{T,3}
@@ -159,6 +161,7 @@ function FDump{T2,N}(fd::FDump{T1,N}) where {T1<:Number,T2<:Number,N}
     origin = fd.origin,
     modified = fd.modified,
     uhf = fd.uhf,
+    df3idx = fd.df3idx,
   )
 end
 

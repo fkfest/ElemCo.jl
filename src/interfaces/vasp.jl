@@ -332,6 +332,9 @@ function setup_vasp!(EC::ECInfo, data::VaspData; ms2::Int=0)
   T = eltype(data.coulomb_vertex)
   EC.fd = FDump{T,3}(norb, nelec; ms2=ms2)
 
+  # Mark that 3-index DF integrals will be available in scratch (mmL)
+  EC.fd.df3idx = true
+
   # Nuclear repulsion / reference energy is zero for VASP periodic calculations
   EC.fd.int0 = 0.0
 
