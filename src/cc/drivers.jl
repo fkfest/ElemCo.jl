@@ -18,8 +18,10 @@ using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
+using ..ElemCo.FockFactory
 using ..ElemCo.FCI
 using ..ElemCo.EOM
+using LinearAlgebra: diag
 
 export ccdriver, dfccdriver, fcidriver, extrapolate
 
@@ -93,16 +95,26 @@ end
   Run electronic structure calculation for `EC::ECInfo` using `method::String`.
   
   The integrals are calculated using density fitting.
+  If `EC.fd.df3idx` is set, uses pre-existing 3-index integrals (mmL/MML) from fcidump.
 """
 function dfccdriver(EC::ECInfo, method)
-  setup_space_system!(EC)
-  closed_shell = (EC.space['o'] == EC.space['O'])
+  if EC.fd.df3idx
+    setup_space_fd!(EC)
+    closed_shell = is_closed_shell(EC)
+  else
+    setup_space_system!(EC)
+    closed_shell = (EC.space['o'] == EC.space['O'])
+  end
   ecmethod = ECMethod(method)
   
   energies = OutDict()
   root_name = method_name(ecmethod, root=true)
-  onthefly = root_name == "MP2" 
-  energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies; save3idx=!onthefly)
+  if EC.fd.df3idx
+    energies, unrestricted_orbs = eval_df3idx_mo_integrals(EC, energies, closed_shell)
+  else
+    onthefly = root_name == "MP2" 
+    energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies; save3idx=!onthefly)
+  end
   t1 = time_ns()
   space_save = save_space(EC)
   freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
@@ -556,6 +568,59 @@ function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   output_E_method(ERef, "Reference energy:")
   println()
   return merge(energies, "HF"=>(ERef,"Reference energy")), unrestricted
+end
+
+"""
+    eval_df3idx_mo_integrals(EC::ECInfo, energies::OutDict, closed_shell)
+
+  Build the Fock matrix and reference energy from pre-existing 3-index
+  MO integrals (mmL/MML) and fcidump one-electron integrals.
+
+  Return the reference energy as `HF` key in OutDict and 
+  `true` if the integrals use unrestricted orbitals.
+"""
+function eval_df3idx_mo_integrals(EC::ECInfo, energies::OutDict, closed_shell)
+  t1 = time_ns()
+  mmLfile, mmL = mmap3idx(EC, "mmL")
+  SP = EC.space
+  if closed_shell
+    fock = gen_df3idx_fock(EC, EC.fd.int1, mmL, collect(SP['o']))
+    save!(EC, "f_mm", fock)
+    save!(EC, "f_MM", fock)
+    eps = diag(fock)
+    println("Occupied orbital energies: ", real.(eps[SP['o']]))
+    save!(EC, "e_m", eps)
+    save!(EC, "e_M", eps)
+    ERef = real(sum(eps[SP['o']]) + sum(diag(EC.fd.int1)[SP['o']]) + EC.fd.int0)
+  else
+    h1a = EC.fd.uhf ? EC.fd.int1a : EC.fd.int1
+    h1b = EC.fd.uhf ? EC.fd.int1b : EC.fd.int1
+    has_MML = file_exists(EC, "MML")
+    if has_MML
+      MMLfile, MML = mmap3idx(EC, "MML")
+    else
+      MML = mmL
+    end
+    fock = gen_df3idx_fock(EC, h1a, h1b, mmL, MML, collect(SP['o']), collect(SP['O']))
+    save!(EC, "f_mm", fock.α)
+    save!(EC, "f_MM", fock.β)
+    epsa = diag(fock.α)
+    epsb = diag(fock.β)
+    println("Occupied α orbital energies: ", real.(epsa[SP['o']]))
+    println("Occupied β orbital energies: ", real.(epsb[SP['O']]))
+    save!(EC, "e_m", epsa)
+    save!(EC, "e_M", epsb)
+    ERef = real(0.5 * (sum(epsa[SP['o']]) + sum(diag(h1a)[SP['o']]) 
+                 + sum(epsb[SP['O']]) + sum(diag(h1b)[SP['O']])) + EC.fd.int0)
+    if has_MML
+      close(MMLfile)
+    end
+  end
+  close(mmLfile)
+  output_E_method(ERef, "Reference energy:")
+  println()
+  t1 = print_time(EC, t1, "Fock matrix and reference energy", 2)
+  return merge(energies, "HF"=>(ERef,"Reference energy")), EC.fd.uhf
 end
 
 function eval_fci(EC::ECInfo, ref_energy; ciphi=false)

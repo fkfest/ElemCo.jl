@@ -142,16 +142,16 @@ function mmap(EC::ECInfo, fname::String)
   return miommap(fullfilename(EC, fname))
 end
 
-function mmap(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty) where {N, Ty}
-  return miommap(fullfilename(EC, fname), Val(N), T)
+function mmap(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; writable::Bool=false) where {N, Ty}
+  return miommap(fullfilename(EC, fname), Val(N), T; writable)
 end
 
 for N in 1:6
   mmapN = Symbol("mmap$(N)idx")
   mmapNall = Symbol("mmap$(N)idx_all")
   @eval begin
-    function $mmapN(EC::ECInfo{Ty}, fname::String, T::Type=Ty) where Ty
-      return mmap(EC, fname, Val($N), T)
+    function $mmapN(EC::ECInfo{Ty}, fname::String, T::Type=Ty; writable::Bool=false) where Ty
+      return mmap(EC, fname, Val($N), T; writable)
     end
     function $mmapNall(EC::ECInfo{Ty}, fname::String, T::Type=Ty) where Ty
       return load_all(EC, fname, Val($N), T)

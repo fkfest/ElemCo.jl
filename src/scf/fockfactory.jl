@@ -17,7 +17,7 @@ using ..ElemCo.FciDumps
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
 
-export gen_fock, gen_ufock, gen_dffock
+export gen_fock, gen_ufock, gen_dffock, gen_df3idx_fock
 export gen_density_matrix, gen_frac_density_matrix
 
 """ 
@@ -428,6 +428,184 @@ function gen_dffock(EC::ECInfo{T}, cMO::SpinMatrix) where T
   fock[2] += coulfock
   end #buffer
   return fock
+end
+
+"""
+    gen_df3idx_fock(EC::ECInfo, h1::AbstractMatrix, mmL::AbstractArray{<:Number,3}, occ::AbstractVector{Int})
+
+  Compute closed-shell Fock matrix from 1e-integrals `h1` and MO-basis 3-index integrals `mmL`.
+  `occ` contains the indices of the occupied orbitals.
+
+  ``F_{pq} = h_{pq} + 2 J_{pq} - K_{pq}``
+  with ``J_{pq} = \\sum_L B_p^{qL} c_L``, ``c_L = \\sum_i B_i^{iL}``
+  and ``K_{pq} = \\sum_{iL} B_p^{iL} B_i^{qL}``.
+"""
+function gen_df3idx_fock(EC::ECInfo{T}, h1::AbstractMatrix, mmL::AbstractArray{<:Number,3}, 
+                         occ::AbstractVector{Int}) where T
+  norb = size(h1, 1)
+  nL = size(mmL, 3)
+  fock = copy(h1)
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  nocc = length(occ)
+  @buffer buf(T, (nocc*norb + 1)*maxL) begin
+  for L in LBlks
+    lenL = length(L)
+    v!mmL = @mview mmL[:,:,L]
+    # Coulomb: cL = Σ_i mmL[i,i,L]
+    cL = alloc!(buf, lenL)
+    v!ooL = @view mmL[occ,occ,L]
+    @mtensor cL[L] = v!ooL[i,i,L]
+    @mtensor fock[p,q] += 2.0 * cL[L] * v!mmL[p,q,L]
+    drop!(buf, cL)
+    # Exchange: K_pq = Σ_i Σ_L mmL[p,i,L]*conj(mmL[q,i,L])
+    piL = alloc!(buf, norb, nocc, lenL)
+    piL .= @view(mmL[:,occ,L])
+    @mtensor fock[p,q] -= piL[p,i,L] * conj(piL[q,i,L])
+    drop!(buf, piL)
+  end
+  end #buffer
+  return fock
+end
+
+"""
+    gen_df3idx_fock(EC::ECInfo, h1::AbstractMatrix, mmL::AbstractArray{<:Number,3}, cMO_occ::AbstractMatrix)
+
+  Compute closed-shell Fock matrix from 1e-integrals `h1` and MO-basis 3-index integrals `mmL`
+  using occupied MO coefficients `cMO_occ` (rotation from original to occupied MOs).
+"""
+function gen_df3idx_fock(EC::ECInfo{T}, h1::AbstractMatrix, mmL::AbstractArray{<:Number,3}, 
+                         cMO_occ::AbstractMatrix) where T
+  norb = size(h1, 1)
+  nL = size(mmL, 3)
+  nocc = size(cMO_occ, 2)
+  fock = copy(h1)
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  @buffer buf(T, (nocc*norb + 1)*maxL) begin
+  for L in LBlks
+    lenL = length(L)
+    v!mmL = @mview mmL[:,:,L]
+    # half-transform: oqL[j,q,L] = Σ_p mmL[p,q,L] * cMO_occ[p,j]
+    oqL = alloc!(buf, nocc, norb, lenL)
+    @mtensor oqL[j,q,L] = v!mmL[p,q,L] * cMO_occ[p,j]
+    # Coulomb: cL = Σ_{jq} oqL[j,q,L] * conj(cMO_occ[q,j])
+    cL = alloc!(buf, lenL)
+    @mtensor cL[L] = oqL[j,q,L] * conj(cMO_occ[q,j])
+    @mtensor fock[p,q] += 2.0 * cL[L] * v!mmL[p,q,L]
+    drop!(buf, cL)
+    # Exchange: K_pq = Σ_{jL} conj(oqL[j,p,L])*oqL[j,q,L]
+    @mtensor fock[p,q] -= conj(oqL[j,p,L]) * oqL[j,q,L]
+    drop!(buf, oqL)
+  end
+  end #buffer
+  return fock
+end
+
+"""
+    gen_df3idx_fock(EC::ECInfo, h1a, h1b, mmL, MML, occa, occb)
+
+  Compute UHF Fock matrices from 1e-integrals `h1a`/`h1b` and MO-basis 
+  3-index integrals `mmL` (α) and `MML` (β).
+
+  Returns `SpinMatrix(Fα, Fβ)`.
+"""
+function gen_df3idx_fock(EC::ECInfo{T}, h1a::AbstractMatrix, h1b::AbstractMatrix,
+                         mmL::AbstractArray{<:Number,3}, MML::AbstractArray{<:Number,3},
+                         occa::AbstractVector{Int}, occb::AbstractVector{Int}) where T
+  norb = size(h1a, 1)
+  nL = size(mmL, 3)
+  focka = copy(h1a)
+  fockb = copy(h1b)
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  nocca = length(occa)
+  noccb = length(occb)
+  @buffer buf(T, (max(nocca, noccb)*norb + 1)*maxL) begin
+  for L in LBlks
+    lenL = length(L)
+    v!mmL = @mview mmL[:,:,L]
+    v!MML = @mview MML[:,:,L]
+    # Total Coulomb: cL_total = Σ_iα mmL[i,i,L] + Σ_Iβ MML[I,I,L]
+    cL = alloc!(buf, lenL)
+    v!ooL = @view mmL[occa,occa,L]
+    v!OO_L = @view MML[occb,occb,L]
+    @mtensor cL[L] = v!ooL[i,i,L]
+    @mtensor cL[L] += v!OO_L[I,I,L]
+    @mtensor focka[p,q] += cL[L] * v!mmL[p,q,L]
+    @mtensor fockb[p,q] += cL[L] * v!MML[p,q,L]
+    drop!(buf, cL)
+    # α exchange
+    if nocca > 0
+      piL = alloc!(buf, norb, nocca, lenL)
+      piL .= @view(mmL[:,occa,L])
+      @mtensor focka[p,q] -= piL[p,i,L] * conj(piL[q,i,L])
+      drop!(buf, piL)
+    end
+    # β exchange
+    if noccb > 0
+      PIL = alloc!(buf, norb, noccb, lenL)
+      PIL .= @view(MML[:,occb,L])
+      @mtensor fockb[p,q] -= PIL[p,i,L] * conj(PIL[q,i,L])
+      drop!(buf, PIL)
+    end
+  end
+  end #buffer
+  return SpinMatrix(focka, fockb)
+end
+
+"""
+    gen_df3idx_fock(EC::ECInfo, h1a, h1b, mmL, MML, cMO_occa::AbstractMatrix, cMO_occb::AbstractMatrix)
+
+  Compute UHF Fock matrices from 1e-integrals and MO-basis 3-index integrals
+  using occupied MO coefficients (rotations from original to occupied MOs).
+
+  Returns `SpinMatrix(Fα, Fβ)`.
+"""
+function gen_df3idx_fock(EC::ECInfo{T}, h1a::AbstractMatrix, h1b::AbstractMatrix,
+                         mmL::AbstractArray{<:Number,3}, MML::AbstractArray{<:Number,3},
+                         cMO_occa::AbstractMatrix, cMO_occb::AbstractMatrix) where T
+  norb = size(h1a, 1)
+  nL = size(mmL, 3)
+  nocca = size(cMO_occa, 2)
+  noccb = size(cMO_occb, 2)
+  focka = copy(h1a)
+  fockb = copy(h1b)
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  @buffer buf(T, ((nocca + noccb)*norb + 1)*maxL) begin
+  for L in LBlks
+    lenL = length(L)
+    v!mmL = @mview mmL[:,:,L]
+    v!MML = @mview MML[:,:,L]
+    # half-transform α: oqL[j,q,L] = Σ_p mmL[p,q,L] * cMO_occa[p,j]
+    oqL = alloc!(buf, nocca, norb, lenL)
+    @mtensor oqL[j,q,L] = v!mmL[p,q,L] * cMO_occa[p,j]
+    # half-transform β: OqL[j,q,L] = Σ_p MML[p,q,L] * cMO_occb[p,j]
+    OqL = alloc!(buf, noccb, norb, lenL)
+    if noccb > 0
+      @mtensor OqL[j,q,L] = v!MML[p,q,L] * cMO_occb[p,j]
+    end
+    # Total Coulomb: cL = Σ_{jq} oqL[j,q,L]*conj(cMO_occa[q,j]) + Σ_{jq} OqL[j,q,L]*conj(cMO_occb[q,j])
+    cL = alloc!(buf, lenL)
+    @mtensor cL[L] = oqL[j,q,L] * conj(cMO_occa[q,j])
+    if noccb > 0
+      @mtensor cL[L] += OqL[j,q,L] * conj(cMO_occb[q,j])
+    end
+    @mtensor focka[p,q] += cL[L] * v!mmL[p,q,L]
+    @mtensor fockb[p,q] += cL[L] * v!MML[p,q,L]
+    drop!(buf, cL)
+    # β exchange (drop OqL before oqL for LIFO order)
+    if noccb > 0
+      @mtensor fockb[p,q] -= conj(OqL[j,p,L]) * OqL[j,q,L]
+    end
+    drop!(buf, OqL)
+    # α exchange
+    @mtensor focka[p,q] -= conj(oqL[j,p,L]) * oqL[j,q,L]
+    drop!(buf, oqL)
+  end
+  end #buffer
+  return SpinMatrix(focka, fockb)
 end
 
 end #module

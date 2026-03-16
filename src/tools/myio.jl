@@ -285,8 +285,8 @@ function miommap(fname::String)
   return io, mmap(io, Array{T,ndim}, dims)
 end
 
-function miommap(fname::String, ::Val{N}, T::Type=Float64) where {N}
-  io = open(fname)
+function miommap(fname::String, ::Val{N}, T::Type=Float64; writable::Bool=false) where {N}
+  io = open(fname, writable ? "r+" : "r")
   # type of numbers
   itype = read(io, Int)
   if itype > length(Types)

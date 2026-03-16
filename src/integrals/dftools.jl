@@ -15,7 +15,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.FciDumps
 
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
-export generate_3idx_integrals, contract_df_integrals!
+export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -271,13 +271,39 @@ function contract_df_integrals!(EC::ECInfo{T}) where T
     end
     drop!(buf, Lmm)
   end
-  end
+  end #buffer
   flushmmap(EC, int2)
   EC.fd.int2 = int2
   close(mmLfile)
 
   EC.fd.df3idx = false
   println("  4-index integrals generated: ($norbs, $norbs, $ntri)")
+end
+
+"""
+    transform_3idx!(EC::ECInfo, fname::String, U::AbstractMatrix)
+
+  Transform 3-index integrals in-place: ``B_{pq}^{L} \\leftarrow U^\\dagger B U``.
+  The integrals are memory-mapped from file `fname`.
+"""
+function transform_3idx!(EC::ECInfo{T}, fname::String, U::AbstractMatrix) where T
+  mmLfile, mmL = mmap3idx(EC, fname; writable=true)
+  nL = size(mmL, 3)
+  norb = size(mmL, 1)
+  LBlks = get_spaceblocks(1:nL)
+  maxL = maximum(length, LBlks)
+  @buffer buf(T, norb*norb*maxL) begin
+  for L in LBlks
+    lenL = length(L)
+    v!mmL = @mview mmL[:,:,L]
+    mtL = alloc!(buf, norb, norb, lenL)
+    @mtensor mtL[p,q',L] = v!mmL[p,q,L] * U[q,q']
+    @mtensor v!mmL[p',q',L] = mtL[p,q',L] * conj(U[p,p'])
+    drop!(buf, mtL)
+  end
+  end #buffer
+  flushmmap(EC, mmL)
+  close(mmLfile)
 end
 
 end #module
