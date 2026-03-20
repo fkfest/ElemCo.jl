@@ -186,32 +186,6 @@ and the density-fitted 4-index integrals can be calculated by
   v_{pq}^{rs} \approx \sum_L v_{p}^{rL} v_{q}^{sL}.
 \end{equation}
 
-If all integrals are calculated using the density-fitting approximation using \textit{mp2fit}
-fitting basis in \elemcoil, 
-the correction terms are added using the \textit{jkfit} fitting basis
-to the one-body and zero-body terms of the Hamiltonian in order to ensure that the 
-reference energy and the Fock matrix from DF-HF is not changed by the density-fitting approximation,
-\begin{equation}
-  \begin{aligned}
-    \label{eq:df-correction}
-    \tilde h_p^q &= \tilde f_p^q 
-    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL}\right)\\
-    \tilde E_0 &= E_0 + h_i^i - \tilde h_i^i + \tilde f_I^I, 
-  \end{aligned} 
-\end{equation}
-where 
-\begin{equation}
-  \begin{aligned}
-    \label{eq:df-correction-fock}
-    \tilde f_p^q &= h_p^q + \sum_{\tilde L} \left(2v_{p}^{q\tilde L} v_{\tilde i}^{\tilde i\tilde L} 
-    - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L}\right),
-  \end{aligned} 
-\end{equation}
-and $I$ denotes the core orbitals (cf. \sect{sec:frozen-core}), 
-$\tilde i$ denote all occupied orbitals (including core)
-and other indices do not include the core orbitals.
-$\tilde L$ corresponds to the \textit{JKFIT} density-fitting basis functions,
-and $L$ corresponds to the \textit{MPFIT} density-fitting basis functions.
 
 \section{Frozen-core approximation}
 \label{sec:frozen-core}
@@ -225,7 +199,8 @@ one-particle and zero-particle part of the Hamiltonian,
     \tilde E_0 &= E_0 + 2 h_I^I + 2 v_{IJ}^{IJ} - v_{IJ}^{JI},
   \end{aligned}
 \end{equation}
-where $I, J$ denote the core orbitals, and other indices do not include the core orbitals.
+where $\tilde h$ and $\tilde E_0$ denote the corrected one-body and zero-body terms, 
+$I, J$ denote the core orbitals, and other indices do not include the core orbitals.
 For the UHF Hamiltonian, the frozen-core approximation is implemented as
 \begin{equation}
   \begin{aligned}
@@ -244,7 +219,36 @@ For the UHF Hamiltonian, the frozen-core approximation is implemented as
 If the frozen-core approximation is used in combination with the density-fitting approximation,
 \textit{JKFIT} correction terms are added to the one-body and zero-body terms of the Hamiltonian in order to ensure that the
 reference energy and the Fock matrix from DF-HF is not changed by the frozen-core approximation,
-cf. \sect{sec:df}.
+cf. \sect{sec:dfcorrection}.
+
+\section{JKFIT/MPFIT correction} \label{sec:dfcorrection}
+If the integrals are calculated using the density-fitting approximation using \textit{MPFIT}
+fitting basis in \elemcoil, 
+the correction terms are added using the \textit{JKFIT} fitting basis
+to the one-body and zero-body terms of the Hamiltonian in order to ensure that the 
+reference energy and the Fock matrix calculated using \textit{MPFIT}-fitted integrals
+coincide with those from DF-HF (which employs the \textit{JKFIT} fitting basis), i.e.,
+\begin{equation}
+  \begin{aligned}
+    \label{eq:df-correction}
+    \tilde h_p^q &= \tilde f_p^q 
+    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL}\right)\\
+    \tilde E_0 &= E_0 + h_i^i - \tilde h_i^i + \tilde f_I^I, 
+  \end{aligned} 
+\end{equation}
+where $\tilde h$ and $\tilde E_0$ denote the corrected one-body and zero-body terms,
+\begin{equation}
+  \begin{aligned}
+    \label{eq:df-correction-fock}
+    \tilde f_p^q &= h_p^q + \sum_{\tilde L} \left(2v_{p}^{q\tilde L} v_{\hat i}^{\hat i\tilde L} 
+    - v_{p}^{\hat i\tilde L} v_{\hat i}^{q\tilde L}\right),
+  \end{aligned} 
+\end{equation}
+and $I$ denotes the core orbitals (cf. \sect{sec:frozen-core}), 
+$\hat i$ denote all occupied orbitals (including core)
+and other indices do not include the core orbitals.
+$\tilde L$ corresponds to the \textit{JKFIT} density-fitting basis functions,
+and $L$ corresponds to the \textit{MPFIT} density-fitting basis functions.
 
 \chapter{Hartree-Fock}
 \section{Density-fitted Hartree-Fock}
@@ -782,31 +786,29 @@ With a single positron, any positron--positron repulsion term vanishes.
 
 \section{Density fitting with positron}
 
-\cdk{I don't understand this. I guess, it's about the mean-field Fock operator. But what does tilde mean?}
-\cks{I changed the text below. I modified Eqs. (\ref{eq:df-correction}) and (\ref{eq:df-correction-fock}) to include the positron contributions. The tilde is used as in those equations}
-
-
-
-With positrons, the density-fitted equations (\ref{eq:df-correction}) and (\ref{eq:df-correction-fock}) are modified to include the positron contributions:
+With positrons, the density-fitted correction equations (\ref{eq:df-correction}) and (\ref{eq:df-correction-fock}) are modified to include the positron contributions:
 \begin{equation}
   \begin{aligned}
     \tilde h_p^q &= \tilde f_p^q 
     - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL} - v_{p}^{qL} v_{\pos{i}}^{\pos{i}L}
     \right)\\
-    \tilde{f}_p^q &= h_p^q + \sum_{\tilde{L}} \left(2v_{p}^{q\tilde L} v_{\tilde i}^{\tilde i\tilde L} 
-    - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L} - v_{p}^{q\tilde L} v_{\pos{i}}^{\pos{i}\tilde L} \right),\\
+    \tilde{f}_p^q &= h_p^q + \sum_{\tilde{L}} \left(2v_{p}^{q\tilde L} v_{\hat i}^{\hat i\tilde L} 
+    - v_{p}^{\hat i\tilde L} v_{\hat i}^{q\tilde L} - v_{p}^{q\tilde L} v_{\pos{i}}^{\pos{i}\tilde L} \right),\\
   \end{aligned}
 \end{equation}
-where $\pos{i}=1$ denote the single occupied positron orbital. The positron one-body terms get corrections according to 
+where $\pos{i}=1$ denote the single occupied positron orbital,
+$\hat i$ denote all occupied orbitals (including core), 
+and $\tilde L$ denote the auxiliary basis functions. 
+The positron one-body terms get corrections according to 
 \begin{equation}
   \begin{aligned}
     \tilde h_{\pos{p}}^{\pos{q} (\mathbf{+})} &= \tilde f_{\pos{p}}^{\pos{q} (\mathbf{+})} 
     + \sum_L \left(2v_{i}^{iL}v_{\pos{p}}^{\pos{q}L}\right)\\
-    \tilde f_{\pos{p} }^{\pos{q} (\mathbf{+})} &= h_{\pos{p}}^{\pos{q} (\mathbf{+})} - \sum_L \left(2v_{ \tilde i}^{ \tilde i \tilde L}v_{\pos{p}}^{\pos{q} \tilde L}\right), 
+    \tilde f_{\pos{p} }^{\pos{q} (\mathbf{+})} &= h_{\pos{p}}^{\pos{q} (\mathbf{+})} - \sum_L \left(2v_{ \hat i}^{ \hat i \tilde L}v_{\pos{p}}^{\pos{q} \tilde L}\right), 
     \\
   \end{aligned}
 \end{equation}
-and the energy is saved as
+and the core energy is saved as
 \begin{equation}
 \tilde{E}_0 = E_0 + h_{i}^{i} + \tfrac12 h^{\pos{i}(\mathbf{+})}_{\pos{i}} - \left( \tilde h_{ i}^{ i} + \tfrac12 \tilde h^{\pos{i}(\mathbf{+})}_{\pos{i}}  \right).
 \end{equation}
@@ -866,9 +868,6 @@ f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - J_{\mu}^{\nu}[D],
 \end{equation}
 where $h^{(p)}$ differs from the electronic one--electron matrix only by
 the sign of the nuclear attraction operator.
-
-\cdk{In \eqs{eq:poshf-fock-e}{eq:poshf-fock-p} the $D$ already contains the factor of 2. Should it be removed from the equations?}
-\cks{Thanks, Daniel, and well spot. I removed it from fock operator equations. I checked the code, and there was no extra factor of 2, and the code was like the equations above. Note that I also changed the HF energy of e-p system below, and now it corresponds to the code and is also correct, I would say.}
 
 \subsection{HF energy with a positron}
 The Hartree--Fock total energy is
