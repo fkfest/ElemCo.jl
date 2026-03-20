@@ -20,6 +20,7 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
+using ..ElemCo.DecompTools: symmetric_pivoted_cholesky
 
 export load_vasp, setup_vasp!
 
@@ -309,6 +310,289 @@ function determine_occupation(dirpath::String, norb::Int,
 end
 
 """
+    decompose_vasp_vertex(Gamma::Array{T,3}, tol::Float64; sigma::Float64=0.01, usesvd::Bool=false) where T → (B, naux_new)
+
+Two-step pivoted Cholesky decomposition of the VASP Coulomb vertex,
+following the algorithm of Folkestad et al. [JCP 150, 194112 (2019)].
+
+Given ``\\Gamma^L_{pq}`` (shape `(naux, norb, norb)`), the 4-index integrals in 
+chemist notation are:
+``(pq|rs) = \\sum_L \\overline{\\Gamma^L_{qp}} \\Gamma^L_{rs}``
+
+This function produces ``B^J_{pq}`` (shape `(norb, norb, naux_new)`) such that:
+``(pq|rs) = \\sum_J B^J_{pq} B^J_{rs}``
+
+**Step I** determines the pivot set ``\\mathcal{B}`` using span-factor batching
+with diagonal screening, without building full-length Cholesky vectors.
+
+**Step II** constructs the final Cholesky vectors via the inner-projection
+(RI) formula using BLAS-3 matrix operations:
+``L^J_{pq} = \\sum_{K \\in \\mathcal{B}} V_{(pq),K} (K^{-T})_{KJ}``
+where ``V_{(pq),K} = \\sum_L \\overline{\\Gamma^L_{qp}} \\Gamma^L_{r_K s_K}``
+and ``J = K K^T`` is the Coulomb matrix among pivots.
+
+# Arguments
+- `Gamma`: VASP Coulomb vertex, shape `(naux, norb, norb)`
+- `tol`: Cholesky decomposition threshold (absolute value of diagonal residual)
+- `sigma`: span factor for batch qualification (default: 0.01)
+- `usesvd`: if true, use SVD (real) / Takagi (complex) instead of Cholesky for J in step II (default: false)
+
+# Returns
+- `B`: decomposed 3-index integrals, shape `(norb, norb, naux_new)`
+- `naux_new`: number of Cholesky vectors
+
+# References
+- S.D. Folkestad, E.F. Kjønstad, H. Koch, JCP 150, 194112 (2019)
+"""
+function decompose_vasp_vertex(Gamma::Array{T,3}, tol::Float64; sigma::Float64=0.01, usesvd::Bool=false) where T
+  naux, norb, _ = size(Gamma)
+  n2 = norb * norb
+
+  # Precompute reshaped views for BLAS:
+  # Gtilde[L, I] = conj(Gamma[L, q, p]) where I = (q-1)*norb + p  (compound index for (p,q))
+  # G[L, I] = Gamma[L, p, q]             where I = (q-1)*norb + p  (compound index for (p,q))
+  # Note: G[L, I] with I=(q-1)*norb+p gives Gamma[L, p, q], which for the pivot column formula
+  # V[(p,q), (r,s)] = Σ_L Gtilde[L,(p,q)] * G[L,(r,s)] = Σ_L conj(Γ[L,q,p]) * Γ[L,r,s]
+  # is exactly (pq|rs) in chemist notation.
+  Gtilde = zeros(T, naux, n2)
+  for q in 1:norb, p in 1:norb
+    I = (q - 1) * norb + p
+    @inbounds for L in 1:naux
+      Gtilde[L, I] = conj(Gamma[L, q, p])
+    end
+  end
+  G = reshape(Gamma, naux, n2)
+
+  # ═══════════════════════════════════════════════════════════════
+  # STEP I: Determine pivot set B
+  # ═══════════════════════════════════════════════════════════════
+  # Compute initial diagonals: d[I] = V[I,I] = Σ_L Gtilde[L,I] * G[L,I]
+  d = zeros(real(T), n2)
+  for I in 1:n2
+    s = zero(T)
+    @inbounds for L in 1:naux
+      s += Gtilde[L, I] * G[L, I]
+    end
+    d[I] = real(s)  # diagonal of a positive semi-definite matrix is real and non-negative
+  end
+
+  # D: set of significant diagonal indices (those above threshold)
+  D_mask = d .>= tol  # Boolean mask
+  pivots = Int[]  # pivot set B (accumulates across outer iterations)
+
+  # Partial Cholesky vectors: L_partial[D_count, |B|] — only for I ∈ D
+  # These are used in step I only, for the subtraction in Eq. (9) of Folkestad.
+  # D_indices maps positions in the compressed array back to full indices.
+  D_indices = findall(D_mask)
+  nD = length(D_indices)
+  # Map from full index I to compressed index in D
+  D_map = zeros(Int, n2)
+  for (k, I) in enumerate(D_indices)
+    D_map[I] = k
+  end
+  L_partial = zeros(T, nD, 0)  # will hcat columns as pivots are found
+
+  max_rank = min(n2, naux)
+
+  while nD > 0
+    # Find D_max = max d[I] for I ∈ D
+    D_max = 0.0
+    for I in D_indices
+      if d[I] > D_max
+        D_max = d[I]
+      end
+    end
+    D_max < tol && break
+
+    # Qualify batch: Q = {I ∈ D : d[I] ≥ σ * D_max}
+    Q = Int[]
+    for I in D_indices
+      if d[I] >= sigma * D_max
+        push!(Q, I)
+      end
+    end
+    # Sort Q by descending diagonal value for numerical stability
+    sort!(Q, by=I -> d[I], rev=true)
+
+    # Compute columns V[D, Q]: V_DQ[k, j] = V[D_indices[k], Q[j]]
+    # = Σ_L Gtilde[L, D_indices[k]] * G[L, Q[j]]
+    # This is a BLAS-3 matrix multiply: Gtilde[:, D_indices]' * G[:, Q]
+    nQ = length(Q)
+    V_DQ = zeros(T, nD, nQ)
+    Gt_D = @view Gtilde[:, D_indices]
+    G_Q = @view G[:, Q]
+    mul!(V_DQ, transpose(Gt_D), G_Q)
+
+    # Subtract contributions from previously determined Cholesky vectors (Eq. 9)
+    nB_prev = length(pivots)
+    if nB_prev > 0
+      # L_partial has shape (nD_current, nB_prev)
+      # Need L_partial_Q: rows of L_partial corresponding to Q indices
+      Q_local = [D_map[q] for q in Q]
+      L_Q = @view L_partial[Q_local, :]
+      # V_DQ -= L_partial * transpose(L_Q)
+      mul!(V_DQ, L_partial, transpose(L_Q), -one(T), one(T))
+    end
+
+    # Inner pivoted Cholesky within the batch Q
+    # C: indices within Q that become new pivots
+    L_batch = zeros(T, nD, 0)  # new Cholesky vectors from this batch
+    n_batch = 0
+    for _ in 1:nQ
+      # Find max diagonal in Q
+      best_j = 0
+      best_val = 0.0
+      for j in 1:nQ
+        if d[Q[j]] > best_val
+          best_val = d[Q[j]]
+          best_j = j
+        end
+      end
+      best_val < tol && break
+
+      q = Q[best_j]  # full index of the new pivot
+      n_batch += 1
+
+      # Cholesky vector (compressed to D): Eq. (10) of Folkestad
+      # L^q_p = (V_DQ[p, best_j] - Σ_{J∈C} L_batch[p,J] * L_batch[Q_j_local,J]) / √(d[q])
+      Lq = V_DQ[:, best_j]
+      if n_batch > 1
+        q_local = D_map[q]
+        for j in 1:n_batch-1
+          Lq .-= L_batch[:, j] .* L_batch[q_local, j]
+        end
+      end
+      diag_sqrt = sqrt(d[q])
+      Lq ./= diag_sqrt
+
+      # Update diagonals: d[I] -= (L^q_I)² for I ∈ D
+      for (k, I) in enumerate(D_indices)
+        d[I] -= real(Lq[k]^2)
+        if d[I] < 0
+          d[I] = 0.0  # numerical floor
+        end
+      end
+
+      # Mark this pivot's diagonal as zero
+      d[q] = 0.0
+
+      push!(pivots, q)
+      L_batch = hcat(L_batch, Lq)
+
+      length(pivots) >= max_rank && break
+    end
+
+    # Accumulate batch vectors into L_partial
+    if n_batch > 0
+      L_partial = hcat(L_partial, L_batch)
+    end
+
+    # Screen D: remove elements with d[I] < tol
+    new_D_indices = Int[]
+    for I in D_indices
+      if d[I] >= tol
+        push!(new_D_indices, I)
+      end
+    end
+
+    if length(new_D_indices) < nD
+      # Rebuild compressed arrays
+      old_D_indices = D_indices
+      D_indices = new_D_indices
+      nD = length(D_indices)
+      fill!(D_map, 0)
+      for (k, I) in enumerate(D_indices)
+        D_map[I] = k
+      end
+      # Compress L_partial to only keep rows for active D
+      keep_mask = [I in Set(D_indices) for I in old_D_indices]
+      L_partial = L_partial[keep_mask, :]
+    end
+
+    length(pivots) >= max_rank && break
+  end
+
+  nB = length(pivots)
+  println("  Step I: $nB pivots determined (from $naux original auxiliary functions)")
+
+  # ═══════════════════════════════════════════════════════════════
+  # STEP II: Construct Cholesky vectors via inner projection (RI)
+  # ═══════════════════════════════════════════════════════════════
+  # Form Coulomb matrix among pivots: J[p,p'] = V[pivots[p], pivots[p']]
+  # J = Gtilde[:, pivots]' * G[:, pivots]  — (nB × nB) matrix
+  G_B = @view G[:, pivots]
+  J = transpose(Gtilde[:, pivots]) * G_B  # BLAS-3; shape (nB, nB)
+
+  # Cholesky decompose J = K * K^T (transpose, NOT conjugate transpose)
+  # or alternatively use SVD/Takagi decomposition for better numerical stability.
+  # For complex symmetric case, use our symmetric_pivoted_cholesky or Takagi.
+  # For real symmetric case, use Julia's built-in pivoted Cholesky or SVD.
+  if usesvd
+    # SVD-based decomposition: J = U Σ U^T (Takagi for complex, eigendecomposition for real)
+    F = svd(J)
+    nB_final = count(s -> s > tol, F.S)
+    if T <: Complex
+      # Takagi factorization for complex symmetric: J = U_T Σ U_T^T
+      # From SVD J = A Σ B†, Takagi phases: e^{iφ_k} = conj(A_k^T B_k)
+      # U_T = A * diag(√phases)
+      # J^{-1} = conj(U_T) Σ^{-1} conj(U_T)^T, so C = conj(U_T) Σ^{-1/2}
+      A = F.U[:, 1:nB_final]
+      B = F.Vt[1:nB_final, :]'  # = F.V[:, 1:nB_final]
+      phases = [conj(sum(A[:,k] .* B[:,k])) for k in 1:nB_final]
+      inv_sqrt_S = 1.0 ./ sqrt.(F.S[1:nB_final])
+      K_mat = conj(A) .* transpose(sqrt.(conj.(phases)) .* inv_sqrt_S)
+    else
+      # Real symmetric: J = U S U^T (symmetric SVD = eigendecomposition)
+      inv_sqrt_S = 1.0 ./ sqrt.(F.S[1:nB_final])
+      K_mat = F.U[:, 1:nB_final] .* inv_sqrt_S'
+    end
+    # K_mat: (nB, nB_final), such that L = V_all_B * K_mat gives Cholesky vectors
+    # with L * L^T ≈ V_all_B * J^{-1} * V_all_B^T
+  else
+    if T <: Complex
+      K_mat, rank_J = symmetric_pivoted_cholesky(J, tol * 1e-2)
+      # K_mat: shape (nB, rank_J), J ≈ K_mat * transpose(K_mat)
+      nB_final = rank_J
+    else
+      J_herm = Hermitian(J)
+      CA = cholesky(J_herm, RowMaximum(), check=false, tol=tol * 1e-2)
+      rank_J = CA.rank
+      # Unpivot: CA gives J[CA.p, CA.p] = CA.L * CA.U where CA.U = CA.L'
+      K_mat = CA.U[1:rank_J, invperm(CA.p)]'  # (nB, rank_J)
+      nB_final = rank_J
+    end
+  end
+
+  # V_all_B[I, k] = V[(p,q), pivots[k]] = Σ_L Gtilde[L, I] * G[L, pivots[k]]
+  # This is the key BLAS-3 operation: (n2, naux) × (naux, nB) → (n2, nB)
+  V_all_B = transpose(Gtilde) * G_B  # shape (n2, nB)
+
+  # Final Cholesky vectors via RI formula.
+  # SVD path: L = V_all_B * K_mat (K_mat = U * Σ^{-1/2})
+  # Cholesky path: L = V_all_B * K^{-T}, i.e. K * L^T = V_B^T
+  if usesvd
+    L_final = V_all_B * K_mat  # (n2, nB) × (nB, nB_final) → (n2, nB_final)
+  else
+    # K_mat: (nB, nB_final), transpose(V_all_B): (nB, n2)
+    # Overdetermined solve → L_final_T: (nB_final, n2)
+    L_final_T = K_mat \ transpose(V_all_B)
+    L_final = transpose(L_final_T)  # (n2, nB_final)
+  end
+
+  # Free intermediate arrays
+  Gtilde = nothing
+  V_all_B = nothing
+  L_partial = nothing
+
+  println("  Step II: $nB_final Cholesky vectors constructed")
+
+  # Reshape to B[norb, norb, nB_final]
+  B_out = reshape(L_final, norb, norb, nB_final)
+
+  return B_out, nB_final
+end
+
+"""
     setup_vasp!(EC::ECInfo, data::VaspData; ms2::Int=0)
 
 Populate `EC` from loaded VASP data for use with `ccdriver`.
@@ -338,51 +622,47 @@ function setup_vasp!(EC::ECInfo, data::VaspData; ms2::Int=0)
   # Nuclear repulsion / reference energy is zero for VASP periodic calculations
   EC.fd.int0 = 0.0
 
-  # Save 3-index Coulomb vertex as "mmL" in scratch
-  # CoulombVertex shape: (naux, norb, norb) → need (norb, norb, naux) for ElemCo convention
   naux = size(data.coulomb_vertex, 1)
   println("  Setting up DF integrals: naux=$naux, norb=$norb")
 
-  # Permute to ElemCo convention: mmL[p, q, L]
-  # B[p,q,L] such that (pq|rs)_chem = Σ_L B[p,q,L] * B[r,s,L]
-  mmL_data = permutedims(data.coulomb_vertex, (2, 3, 1))
+  # Reconstruct core Hamiltonian using ORIGINAL Gamma before Cholesky decomposition.
+  # VASP convention: (pq|rs) = Σ_L conj(Γ[L,q,p]) * Γ[L,r,s]
+  # J[p,q] = Σ_i (pq|ii) = Σ_L conj(Γ[L,q,p]) * Γ[L,i,i]
+  # K[p,q] = Σ_i (pi|iq) = Σ_L conj(Γ[L,i,p]) * Γ[L,i,q]
+  println("  Reconstructing core Hamiltonian h₀ from Fock eigenvalues and Coulomb vertex...")
 
-  # Save via memory-mapped file (type-aware: Float64 or ComplexF64)
-  T = eltype(mmL_data)
-  mmLfile, mmL = newmmap(EC, "mmL", (norb, norb, naux), T; description="vasp_coulomb_vertex")
+  Gamma = data.coulomb_vertex  # Γ[L,p,q], shape (naux, norb, norb)
+  # Two-step Cholesky decomposition of the Coulomb vertex to produce
+  # symmetric 3-index integrals: (pq|rs) = Σ_J B[p,q,J] * B[r,s,J]
+  thr = EC.options.cholesky.thr
+  sigma = EC.options.cholesky.sigma
+  usesvd = EC.options.cholesky.usesvd
+  println("  Performing two-step Cholesky decomposition (thr=$thr, σ=$sigma, usesvd=$usesvd)...")
+  mmL_data, naux_new = decompose_vasp_vertex(Gamma, thr; sigma, usesvd)
+
+  # Save via memory-mapped file
+  mmLfile, mmL = newmmap(EC, "mmL", (norb, norb, naux_new), T; description="vasp_coulomb_vertex")
   mmL .= mmL_data
   closemmap(EC, mmLfile, mmL)
 
-  # Reconstruct core Hamiltonian: h = F - (2J - K)
-  # F_{pq} = ε_p δ_{pq} in canonical MOs
-  # (pq|rs) = Σ_L B[p,q,L] * B[r,s,L]  (no conjugation)
-  # J[p,q] = Σ_i (pq|ii) = Σ_L B[p,q,L] * v_J[L],  v_J[L] = Σ_i B[i,i,L]
-  # K[p,q] = Σ_i (pi|iq) = Σ_{i,L} B[p,i,L] * B[i,q,L]
-  println("  Reconstructing core Hamiltonian h₀ from Fock eigenvalues and Coulomb vertex...")
-
-  B = mmL_data  # B[p,q,L]
   occ = 1:nocc
+  # Coulomb: v_J[L] = Σ_i Γ[L,i,i], then J[p,q] = Σ_L conj(Γ[L,q,p]) * v_J[L]
+  ooL = @view(mmL[occ, occ, :])  # (nocc, nocc, naux_new)
+  @mtensor v_J[L] := ooL[i, i, L]
+  @mtensor J[p, q] := mmL[p, q, L] * v_J[L]
 
-  # Coulomb: v_J[L] = Σ_i B[i,i,L], then J[p,q] = Σ_L B[p,q,L] * v_J[L]
-  B_oo = @mview B[occ, occ, :]  # (nocc, nocc, naux)
-  v_J = zeros(T, naux)
-  @mtensor v_J[L] = B_oo[i,i,L]
-  J = zeros(T, norb, norb)
-  @mtensor J[p,q] = B[p,q,L] * v_J[L]
-
-  # Exchange: K[p,q] = Σ_{i,L} B[p,i,L] * B[i,q,L]
-  B_po = @mview B[:, occ, :]  # (norb, nocc, naux)
-  B_oq = @mview B[occ, :, :]  # (nocc, norb, naux)
-  K = zeros(T, norb, norb)
-  @mtensor K[p,q] = B_po[p,i,L] * B_oq[i,q,L]
+  # Exchange: K[p,q] = Σ_i (pi|iq) = Σ_{i,L} conj(Γ[L,i,p]) * Γ[L,i,q]
+  moL = @view(mmL[:, occ, :])  # (norb, nocc, naux_new)
+  omL = @view(mmL[occ, :, :])  # (nocc, norb, naux_new)
+  @mtensor K[p, q] := moL[p, i, L] * omL[i, q, L]
 
   # h_{pq} = F_{pq} - 2*J[p,q] + K[p,q]
   h_full = -2 .* J .+ K
   for p in 1:norb
     h_full[p, p] += data.eigen_energies[p]
   end
-
   EC.fd.int1 = h_full
+
 
   # Set up orbital spaces
   setup_space_fd!(EC)

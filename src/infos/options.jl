@@ -420,6 +420,10 @@ end
   thred::Float64 = 1.e-6
   """`⟨1.e-4⟩` threshold for integral decomposition. """
   thr::Float64 = 1.e-4
+  """`⟨0.01⟩` span factor for two-step Cholesky batch qualification. """
+  sigma::Float64 = 0.01
+  """`⟨false⟩` use SVD (real) / Takagi (complex) instead of Cholesky for the J matrix in step II. """
+  usesvd::Bool = false
 end
 
 """

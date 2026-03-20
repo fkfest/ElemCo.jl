@@ -436,9 +436,9 @@ end
   Compute closed-shell Fock matrix from 1e-integrals `h1` and MO-basis 3-index integrals `mmL`.
   `occ` contains the indices of the occupied orbitals.
 
-  ``F_{pq} = h_{pq} + 2 J_{pq} - K_{pq}``
-  with ``J_{pq} = \\sum_L B_p^{qL} c_L``, ``c_L = \\sum_i B_i^{iL}``
-  and ``K_{pq} = \\sum_{iL} B_p^{iL} B_i^{qL}``.
+  ``F_p^q = h_p^q + 2 J_p^q - K_p^q``
+  with ``J_p^q = \\sum_L v_p^{qL} c^L``, ``c^L = \\sum_i v_i^{iL}``
+  and ``K_p^q = \\sum_{iL} v_p^{iL} v_i^{qL}``.
 """
 function gen_df3idx_fock(EC::ECInfo{T}, h1::AbstractMatrix, mmL::AbstractArray{<:Number,3}, 
                          occ::AbstractVector{Int}) where T
@@ -448,7 +448,8 @@ function gen_df3idx_fock(EC::ECInfo{T}, h1::AbstractMatrix, mmL::AbstractArray{<
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
   nocc = length(occ)
-  @buffer buf(T, (nocc*norb + 1)*maxL) begin
+  lenbuf = T <: Complex ? (2*nocc*norb + 1)*maxL : (nocc*norb + 1)*maxL
+  @buffer buf(T, lenbuf) begin
   for L in LBlks
     lenL = length(L)
     v!mmL = @mview mmL[:,:,L]
@@ -458,10 +459,18 @@ function gen_df3idx_fock(EC::ECInfo{T}, h1::AbstractMatrix, mmL::AbstractArray{<
     @mtensor cL[L] = v!ooL[i,i,L]
     @mtensor fock[p,q] += 2.0 * cL[L] * v!mmL[p,q,L]
     drop!(buf, cL)
-    # Exchange: K_pq = Σ_i Σ_L mmL[p,i,L]*conj(mmL[q,i,L])
+    # Exchange: K_pq = Σ_i Σ_L B[p,i,L] * B[i,q,L]
+    # (symmetric decomposition: first index is conjugated orbital, second is normal)
     piL = alloc!(buf, norb, nocc, lenL)
     piL .= @view(mmL[:,occ,L])
-    @mtensor fock[p,q] -= piL[p,i,L] * conj(piL[q,i,L])
+    if T <: Complex
+      ipL = alloc!(buf, nocc, norb, lenL)
+      ipL .= @view(mmL[occ,:,L])
+      @mtensor fock[p,q] -= piL[p,i,L] * ipL[i,q,L]
+      drop!(buf, ipL)
+    else
+      @mtensor fock[p,q] -= piL[p,i,L] * piL[q,i,L]
+    end
     drop!(buf, piL)
   end
   end #buffer
@@ -473,6 +482,8 @@ end
 
   Compute closed-shell Fock matrix from 1e-integrals `h1` and MO-basis 3-index integrals `mmL`
   using occupied MO coefficients `cMO_occ` (rotation from original to occupied MOs).
+  Uses symmetric decomposition convention: ``v_{pr}^{qs} = \\sum_L v_{p}^{qL} v_{r}^{sL}``.
+  Lower index of ``v`` transforms with ``\\bar{C}`` (conjugated), upper index with ``C``.
 """
 function gen_df3idx_fock(EC::ECInfo{T}, h1::AbstractMatrix, mmL::AbstractArray{<:Number,3}, 
                          cMO_occ::AbstractMatrix) where T
@@ -482,21 +493,29 @@ function gen_df3idx_fock(EC::ECInfo{T}, h1::AbstractMatrix, mmL::AbstractArray{<
   fock = copy(h1)
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  @buffer buf(T, (nocc*norb + 1)*maxL) begin
+  lenbuf = T <: Complex ? (2*nocc*norb + 1)*maxL : (nocc*norb + 1)*maxL
+  @buffer buf(T, lenbuf) begin
   for L in LBlks
     lenL = length(L)
     v!mmL = @mview mmL[:,:,L]
-    # half-transform: oqL[j,q,L] = Σ_p mmL[p,q,L] * cMO_occ[p,j]
-    oqL = alloc!(buf, nocc, norb, lenL)
-    @mtensor oqL[j,q,L] = v!mmL[p,q,L] * cMO_occ[p,j]
-    # Coulomb: cL = Σ_{jq} oqL[j,q,L] * conj(cMO_occ[q,j])
+    # half-transform: omL[j,q,L] = Σ_p mmL[p,q,L] * cMO_occ^*[p,j]
+    omL = alloc!(buf, nocc, norb, lenL)
+    @mtensor omL[j,q,L] = v!mmL[p,q,L] * conj(cMO_occ[p,j])
+    # Coulomb: cL = Σ_{jq} oqL[j,q,L] * cMO_occ[q,j]
     cL = alloc!(buf, lenL)
-    @mtensor cL[L] = oqL[j,q,L] * conj(cMO_occ[q,j])
+    @mtensor cL[L] = omL[j,q,L] * cMO_occ[q,j]
     @mtensor fock[p,q] += 2.0 * cL[L] * v!mmL[p,q,L]
     drop!(buf, cL)
-    # Exchange: K_pq = Σ_{jL} conj(oqL[j,p,L])*oqL[j,q,L]
-    @mtensor fock[p,q] -= conj(oqL[j,p,L]) * oqL[j,q,L]
-    drop!(buf, oqL)
+    # Exchange: K_pq = Σ_{jL} moL[p,j,L])*omL[j,q,L]
+    if T <: Complex
+      moL = alloc!(buf, norb, nocc, lenL)
+      @mtensor moL[p,j,L] = v!mmL[p,q,L] * cMO_occ[q,j]
+      @mtensor fock[p,q] -= moL[p,j,L] * omL[j,q,L]
+      drop!(buf, moL)
+    else
+      @mtensor fock[p,q] -= omL[j,p,L] * omL[j,q,L]
+    end
+    drop!(buf, omL)
   end
   end #buffer
   return fock
@@ -521,7 +540,8 @@ function gen_df3idx_fock(EC::ECInfo{T}, h1a::AbstractMatrix, h1b::AbstractMatrix
   maxL = maximum(length, LBlks)
   nocca = length(occa)
   noccb = length(occb)
-  @buffer buf(T, (max(nocca, noccb)*norb + 1)*maxL) begin
+  lenbuf = T <: Complex ? (2*max(nocca, noccb)*norb + 1)*maxL : (max(nocca, noccb)*norb + 1)*maxL
+  @buffer buf(T, lenbuf) begin
   for L in LBlks
     lenL = length(L)
     v!mmL = @mview mmL[:,:,L]
@@ -539,14 +559,28 @@ function gen_df3idx_fock(EC::ECInfo{T}, h1a::AbstractMatrix, h1b::AbstractMatrix
     if nocca > 0
       piL = alloc!(buf, norb, nocca, lenL)
       piL .= @view(mmL[:,occa,L])
-      @mtensor focka[p,q] -= piL[p,i,L] * conj(piL[q,i,L])
+      if T <: Complex
+        ipL = alloc!(buf, nocca, norb, lenL)
+        ipL .= @view(mmL[occa,:,L])
+        @mtensor focka[p,q] -= piL[p,i,L] * ipL[i,q,L]
+        drop!(buf, ipL)
+      else
+        @mtensor focka[p,q] -= piL[p,i,L] * piL[q,i,L]
+      end
       drop!(buf, piL)
     end
     # β exchange
     if noccb > 0
       PIL = alloc!(buf, norb, noccb, lenL)
       PIL .= @view(MML[:,occb,L])
-      @mtensor fockb[p,q] -= PIL[p,i,L] * conj(PIL[q,i,L])
+      if T <: Complex
+        IPL = alloc!(buf, noccb, norb, lenL)
+        IPL .= @view(MML[occb,:,L])
+        @mtensor fockb[p,q] -= PIL[p,i,L] * IPL[i,q,L]
+        drop!(buf, IPL)
+      else
+        @mtensor fockb[p,q] -= PIL[p,i,L] * PIL[q,i,L]
+      end
       drop!(buf, PIL)
     end
   end
@@ -559,6 +593,8 @@ end
 
   Compute UHF Fock matrices from 1e-integrals and MO-basis 3-index integrals
   using occupied MO coefficients (rotations from original to occupied MOs).
+  Uses symmetric decomposition convention: ``v_{pr}^{qs} = \\sum_L v_{p}^{qL} v_{r}^{sL}``.
+  Lower index of ``v`` transforms with ``\\bar{C}`` (conjugated), upper index with ``C``.
 
   Returns `SpinMatrix(Fα, Fβ)`.
 """
@@ -573,36 +609,51 @@ function gen_df3idx_fock(EC::ECInfo{T}, h1a::AbstractMatrix, h1b::AbstractMatrix
   fockb = copy(h1b)
   LBlks = get_spaceblocks(1:nL)
   maxL = maximum(length, LBlks)
-  @buffer buf(T, ((nocca + noccb)*norb + 1)*maxL) begin
+  lenbuf = T <: Complex ? (2*(nocca + noccb)*norb + 1)*maxL : ((nocca + noccb)*norb + 1)*maxL
+  @buffer buf(T, lenbuf) begin
   for L in LBlks
     lenL = length(L)
     v!mmL = @mview mmL[:,:,L]
     v!MML = @mview MML[:,:,L]
-    # half-transform α: oqL[j,q,L] = Σ_p mmL[p,q,L] * cMO_occa[p,j]
-    oqL = alloc!(buf, nocca, norb, lenL)
-    @mtensor oqL[j,q,L] = v!mmL[p,q,L] * cMO_occa[p,j]
-    # half-transform β: OqL[j,q,L] = Σ_p MML[p,q,L] * cMO_occb[p,j]
-    OqL = alloc!(buf, noccb, norb, lenL)
+    # half-transform α: omL[j,q,L] = Σ_p mmL[p,q,L] * cMO_occa[p,j]
+    omL = alloc!(buf, nocca, norb, lenL)
+    @mtensor omL[j,q,L] = v!mmL[p,q,L] * conj(cMO_occa[p,j])
+    # half-transform β: OML[j,q,L] = Σ_p MML[p,q,L] * cMO_occb[p,j]
+    OML = alloc!(buf, noccb, norb, lenL)
     if noccb > 0
-      @mtensor OqL[j,q,L] = v!MML[p,q,L] * cMO_occb[p,j]
+      @mtensor OML[j,q,L] = v!MML[p,q,L] * conj(cMO_occb[p,j])
     end
-    # Total Coulomb: cL = Σ_{jq} oqL[j,q,L]*conj(cMO_occa[q,j]) + Σ_{jq} OqL[j,q,L]*conj(cMO_occb[q,j])
+    # Total Coulomb: cL = Σ_{jq} omL[j,q,L]*cMO_occa[q,j] + Σ_{jq} OML[j,q,L]*cMO_occb[q,j]
     cL = alloc!(buf, lenL)
-    @mtensor cL[L] = oqL[j,q,L] * conj(cMO_occa[q,j])
+    @mtensor cL[L] = omL[j,q,L] * cMO_occa[q,j]
     if noccb > 0
-      @mtensor cL[L] += OqL[j,q,L] * conj(cMO_occb[q,j])
+      @mtensor cL[L] += OML[j,q,L] * cMO_occb[q,j]
     end
     @mtensor focka[p,q] += cL[L] * v!mmL[p,q,L]
     @mtensor fockb[p,q] += cL[L] * v!MML[p,q,L]
     drop!(buf, cL)
-    # β exchange (drop OqL before oqL for LIFO order)
+    # β exchange (drop OML before omL for LIFO order)
     if noccb > 0
-      @mtensor fockb[p,q] -= conj(OqL[j,p,L]) * OqL[j,q,L]
+      if T <: Complex
+        MOL = alloc!(buf, norb, noccb, lenL)
+        @mtensor MOL[p,j,L] = v!MML[p,q,L] * cMO_occb[q,j]
+        @mtensor fockb[p,q] -= MOL[p,j,L] * OML[j,q,L]
+        drop!(buf, MOL)
+      else
+        @mtensor fockb[p,q] -= OML[j,p,L] * OML[j,q,L]
+      end
     end
-    drop!(buf, OqL)
+    drop!(buf, OML)
     # α exchange
-    @mtensor focka[p,q] -= conj(oqL[j,p,L]) * oqL[j,q,L]
-    drop!(buf, oqL)
+    if T <: Complex
+      moL = alloc!(buf, norb, nocca, lenL)
+      @mtensor moL[p,j,L] = v!mmL[p,q,L] * cMO_occa[q,j]
+      @mtensor focka[p,q] -= moL[p,j,L] * omL[j,q,L]
+      drop!(buf, moL)
+    else
+      @mtensor focka[p,q] -= omL[j,p,L] * omL[j,q,L]
+    end
+    drop!(buf, omL)
   end
   end #buffer
   return SpinMatrix(focka, fockb)
