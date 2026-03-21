@@ -48,6 +48,7 @@ makedocs(
       "cctools.md",
       "constants.md",
       "decomptools.md",
+      "ldlt_decomposition.md",
       "dfcc.md",
       "dfdump.md",
       "dfhf.md",
@@ -83,6 +84,7 @@ makedocs(
       "interfaces.md",
       "molpro.md",
       "molden.md",
+      "vasp.md",
       "trexio_format.md"
     ],
     "release-notes.md", 
