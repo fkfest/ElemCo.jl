@@ -1,7 +1,7 @@
 # Tensor-decomposition tools
 
-See also: [LDLT Pivoted Symmetric Decomposition](@ref) for a detailed
-explanation of the algorithm, its assumptions, and performance characteristics.
+See also: [Pivoted Symmetric Decomposition](@ref) for a detailed
+explanation of the LDLT- and QR-pivoted decomposition algorithms, their assumptions, and performance characteristics.
 
 ```@docs
 ElemCo.DecompTools

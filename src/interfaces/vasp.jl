@@ -377,139 +377,179 @@ function decompose_vasp_vertex(Gamma::Array{T,3}, tol::Float64; sigma::Float64=0
   end
 
   # D: set of significant diagonal indices (those above threshold)
-  D_mask = d .>= tol  # Boolean mask
-  pivots = Int[]  # pivot set B (accumulates across outer iterations)
-
-  # Partial Cholesky vectors: L_partial[D_count, |B|] — only for I ∈ D
-  # These are used in step I only, for the subtraction in Eq. (9) of Folkestad.
-  # D_indices maps positions in the compressed array back to full indices.
-  D_indices = findall(D_mask)
+  D_indices = findall(di -> di >= tol, d)
   nD = length(D_indices)
-  # Map from full index I to compressed index in D
   D_map = zeros(Int, n2)
-  for (k, I) in enumerate(D_indices)
+  @inbounds for (k, I) in enumerate(D_indices)
     D_map[I] = k
   end
-  L_partial = zeros(T, nD, 0)  # will hcat columns as pivots are found
+
+  # Pre-allocate Cholesky vector storage with amortized doubling (avoids hcat)
+  est_cap = min(n2, max(64, isqrt(nD)))
+  L_storage = Matrix{T}(undef, nD, est_cap)
+  n_stored = 0
+
+  pivots = Int[]
+  sizehint!(pivots, est_cap)
+  is_pivot = falses(n2)  # BitVector for O(1) pivot lookup
+
+  # Pre-allocate work buffers
+  V_col = Vector{T}(undef, nD)
+  coeffs = Vector{T}(undef, est_cap)
+  Q_batch = Vector{Int}(undef, n2)
+  new_D_buf = Vector{Int}(undef, n2)
 
   max_rank = min(n2, naux)
 
   while nD > 0
     # Find D_max = max d[I] for I ∈ D
     D_max = 0.0
-    for I in D_indices
-      if d[I] > D_max
-        D_max = d[I]
-      end
+    @inbounds for I in D_indices
+      d[I] > D_max && (D_max = d[I])
     end
     D_max < tol && break
 
     # Qualify batch: Q = {I ∈ D : d[I] ≥ σ * D_max}
-    Q = Int[]
-    for I in D_indices
-      if d[I] >= sigma * D_max
-        push!(Q, I)
+    threshold = sigma * D_max
+    nQ = 0
+    @inbounds for I in D_indices
+      if d[I] >= threshold
+        nQ += 1
+        Q_batch[nQ] = I
       end
     end
-    # Sort Q by descending diagonal value for numerical stability
-    sort!(Q, by=I -> d[I], rev=true)
+    Q_view = @view Q_batch[1:nQ]
+    sort!(Q_view, by=I -> d[I], rev=true)
 
-    # Compute columns V[D, Q]: V_DQ[k, j] = V[D_indices[k], Q[j]]
-    # = Σ_L Gtilde[L, D_indices[k]] * G[L, Q[j]]
-    # This is a BLAS-3 matrix multiply: Gtilde[:, D_indices]' * G[:, Q]
-    nQ = length(Q)
-    V_DQ = zeros(T, nD, nQ)
-    Gt_D = @view Gtilde[:, D_indices]
-    G_Q = @view G[:, Q]
-    mul!(V_DQ, transpose(Gt_D), G_Q)
+    # Compute columns V[D, Q] using BLAS-3
+    # Copy non-contiguous columns into contiguous buffers for efficient BLAS-3
+    # (fancy-indexed SubArrays bypass optimized BLAS routines)
+    Gt_D = Gtilde[:, D_indices]       # contiguous copy (naux × nD)
+    G_Q = G[:, @view Q_batch[1:nQ]]   # contiguous copy (naux × nQ)
+    V_DQ = transpose(Gt_D) * G_Q      # BLAS-3 gemm (nD × nQ)
 
-    # Subtract contributions from previously determined Cholesky vectors (Eq. 9)
-    nB_prev = length(pivots)
-    if nB_prev > 0
-      # L_partial has shape (nD_current, nB_prev)
-      # Need L_partial_Q: rows of L_partial corresponding to Q indices
-      Q_local = [D_map[q] for q in Q]
-      L_Q = @view L_partial[Q_local, :]
-      # V_DQ -= L_partial * transpose(L_Q)
-      mul!(V_DQ, L_partial, transpose(L_Q), -one(T), one(T))
+    # Subtract previous Cholesky contributions using BLAS-3 (Eq. 9)
+    if n_stored > 0
+      # Extract Q rows from L_storage into contiguous buffer for efficient BLAS-3
+      L_Q_buf = Matrix{T}(undef, nQ, n_stored)
+      @inbounds for j in 1:nQ
+        q_local = D_map[Q_batch[j]]
+        for m in 1:n_stored
+          L_Q_buf[j, m] = L_storage[q_local, m]
+        end
+      end
+      # V_DQ -= L_storage[:, 1:n_stored] * L_Q_buf'
+      mul!(V_DQ, @view(L_storage[:, 1:n_stored]), transpose(L_Q_buf), -one(T), one(T))
     end
 
     # Inner pivoted Cholesky within the batch Q
-    # C: indices within Q that become new pivots
-    L_batch = zeros(T, nD, 0)  # new Cholesky vectors from this batch
+    n_stored_before = n_stored
     n_batch = 0
     for _ in 1:nQ
       # Find max diagonal in Q
       best_j = 0
       best_val = 0.0
-      for j in 1:nQ
-        if d[Q[j]] > best_val
-          best_val = d[Q[j]]
+      @inbounds for j in 1:nQ
+        if d[Q_batch[j]] > best_val
+          best_val = d[Q_batch[j]]
           best_j = j
         end
       end
       best_val < tol && break
 
-      q = Q[best_j]  # full index of the new pivot
+      q = Q_batch[best_j]  # full index of the new pivot
+      q_local = D_map[q]
       n_batch += 1
 
-      # Cholesky vector (compressed to D): Eq. (10) of Folkestad
-      # L^q_p = (V_DQ[p, best_j] - Σ_{J∈C} L_batch[p,J] * L_batch[Q_j_local,J]) / √(d[q])
-      Lq = V_DQ[:, best_j]
-      if n_batch > 1
-        q_local = D_map[q]
-        for j in 1:n_batch-1
-          Lq .-= L_batch[:, j] .* L_batch[q_local, j]
-        end
+      # Copy column into V_col buffer (no allocation)
+      @inbounds for k in 1:nD
+        V_col[k] = V_DQ[k, best_j]
       end
+
+      # Subtract current-batch contributions using BLAS-2 gemv
+      n_current = n_stored - n_stored_before
+      if n_current > 0
+        @inbounds for j in 1:n_current
+          coeffs[j] = L_storage[q_local, n_stored_before + j]
+        end
+        mul!(V_col, @view(L_storage[:, n_stored_before+1:n_stored]),
+             @view(coeffs[1:n_current]), -one(T), one(T))
+      end
+
+      # Normalize by sqrt(d[q])
       diag_sqrt = sqrt(d[q])
-      Lq ./= diag_sqrt
+      @inbounds for k in 1:nD
+        V_col[k] /= diag_sqrt
+      end
 
       # Update diagonals: d[I] -= (L^q_I)² for I ∈ D
-      for (k, I) in enumerate(D_indices)
-        d[I] -= real(Lq[k]^2)
-        if d[I] < 0
-          d[I] = 0.0  # numerical floor
-        end
+      @inbounds for (k, I) in enumerate(D_indices)
+        d[I] -= real(V_col[k]^2)
+        d[I] < 0 && (d[I] = 0.0)
       end
-
-      # Mark this pivot's diagonal as zero
       d[q] = 0.0
 
+      # Ensure L_storage capacity (amortized doubling)
+      if n_stored + 1 > size(L_storage, 2)
+        new_cap = 2 * size(L_storage, 2)
+        L_new = Matrix{T}(undef, nD, new_cap)
+        @views L_new[:, 1:n_stored] .= L_storage[:, 1:n_stored]
+        L_storage = L_new
+        coeffs = Vector{T}(undef, new_cap)
+      end
+
+      # Store Cholesky vector directly into L_storage (no hcat)
+      @inbounds for k in 1:nD
+        L_storage[k, n_stored + 1] = V_col[k]
+      end
+      n_stored += 1
+
       push!(pivots, q)
-      L_batch = hcat(L_batch, Lq)
+      is_pivot[q] = true
 
-      length(pivots) >= max_rank && break
+      n_stored >= max_rank && break
     end
 
-    # Accumulate batch vectors into L_partial
-    if n_batch > 0
-      L_partial = hcat(L_partial, L_batch)
-    end
+    # No progress in this batch — stop
+    n_batch == 0 && break
 
-    # Screen D: remove elements with d[I] < tol
-    new_D_indices = Int[]
-    for I in D_indices
-      if d[I] >= tol
-        push!(new_D_indices, I)
+    # Screen D: remove indices with d[I] < tol
+    nD_new = 0
+    @inbounds for I in D_indices
+      if !is_pivot[I] && d[I] >= tol
+        nD_new += 1
+        new_D_buf[nD_new] = I
       end
     end
 
-    if length(new_D_indices) < nD
-      # Rebuild compressed arrays
+    if nD_new < nD
       old_D_indices = D_indices
-      D_indices = new_D_indices
-      nD = length(D_indices)
+      D_indices = @view(new_D_buf[1:nD_new]) |> collect
+      nD = nD_new
       fill!(D_map, 0)
-      for (k, I) in enumerate(D_indices)
+      @inbounds for (k, I) in enumerate(D_indices)
         D_map[I] = k
       end
-      # Compress L_partial to only keep rows for active D
-      keep_mask = [I in Set(D_indices) for I in old_D_indices]
-      L_partial = L_partial[keep_mask, :]
+      # Compress L_storage rows to match new D_indices
+      if nD > 0
+        L_compressed = Matrix{T}(undef, nD, size(L_storage, 2))
+        @inbounds for j in 1:n_stored
+          for (old_k, I) in enumerate(old_D_indices)
+            new_k = D_map[I]
+            if new_k > 0
+              L_compressed[new_k, j] = L_storage[old_k, j]
+            end
+          end
+        end
+        L_storage = L_compressed
+      end
+      V_col = Vector{T}(undef, nD)
+    else
+      D_indices = @view(new_D_buf[1:nD_new]) |> collect
+      nD = nD_new
     end
 
-    length(pivots) >= max_rank && break
+    n_stored >= max_rank && break
   end
 
   nB = length(pivots)
@@ -520,7 +560,8 @@ function decompose_vasp_vertex(Gamma::Array{T,3}, tol::Float64; sigma::Float64=0
   # ═══════════════════════════════════════════════════════════════
   # Form Coulomb matrix among pivots: J[p,p'] = V[pivots[p], pivots[p']]
   # J = Gtilde[:, pivots]' * G[:, pivots]  — (nB × nB) matrix
-  G_B = @view G[:, pivots]
+  # Copy pivot columns into contiguous buffer for efficient BLAS-3
+  G_B = G[:, pivots]  # contiguous copy (naux × nB)
   J = transpose(Gtilde[:, pivots]) * G_B  # BLAS-3; shape (nB, nB)
 
   # Cholesky decompose J = K * K^T (transpose, NOT conjugate transpose)
@@ -565,6 +606,7 @@ function decompose_vasp_vertex(Gamma::Array{T,3}, tol::Float64; sigma::Float64=0
 
   # V_all_B[I, k] = V[(p,q), pivots[k]] = Σ_L Gtilde[L, I] * G[L, pivots[k]]
   # This is the key BLAS-3 operation: (n2, naux) × (naux, nB) → (n2, nB)
+  # G_B already holds contiguous pivot columns from J computation above
   V_all_B = transpose(Gtilde) * G_B  # shape (n2, nB)
 
   # Final Cholesky vectors via RI formula.
@@ -582,7 +624,7 @@ function decompose_vasp_vertex(Gamma::Array{T,3}, tol::Float64; sigma::Float64=0
   # Free intermediate arrays
   Gtilde = nothing
   V_all_B = nothing
-  L_partial = nothing
+  L_storage = nothing
 
   println("  Step II: $nB_final Cholesky vectors constructed")
 

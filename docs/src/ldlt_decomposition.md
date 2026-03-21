@@ -1,8 +1,11 @@
-# LDLT Pivoted Symmetric Decomposition
+# Pivoted Symmetric Decomposition
 
-This document explains the `ldlt_pivoted_symmetric_decompose` function in
-detail: how it works, why it is efficient, what assumptions it makes, and
-where it can fail.
+This document explains the pivoted symmetric decomposition functions:
+`ldlt_pivoted_symmetric_decompose` and `qr_pivoted_symmetric_decompose`.
+Both share the same two-step structure — pivot selection followed by
+Nyström approximation — but use different strategies for Step I.
+The LDLT variant is covered in full detail first, followed by the QR
+variant with a comparison of their strengths and weaknesses.
 
 ## Motivation
 
@@ -598,6 +601,149 @@ faster than the $O(n^3)$ full decomposition when $r \ll n$.
 
 ---
 
+## QR Pivoted Symmetric Decomposition
+
+The QR variant (`qr_pivoted_symmetric_decompose`) shares the same
+two-step structure as the LDLT method: **Step I** selects pivot columns,
+**Step II** applies the Nyström formula (identical to the LDLT case).
+The difference lies entirely in how Step I chooses and validates pivots.
+
+### Importance Metric: Squared Column Norms
+
+Instead of diagonal elements $d_I$, the QR variant uses the squared
+column norm as its importance metric:
+
+$$r_I = \|M_{:,I}\|^2 = \sum_j |M_{j,I}|^2$$
+
+This is always non-negative (even for indefinite or complex matrices),
+which simplifies the screening logic — no absolute values are needed.
+
+!!! note "Column norms vs. diagonal elements"
+    The squared column norm $r_I$ uses information from the *entire*
+    column $M_{:,I}$, while the LDLT diagonal $d_I = M_{II}$ uses only
+    one element.  This makes norms a more robust importance indicator
+    in some cases, but computing them initially costs $O(n^2)$ (one
+    pass over the full matrix) versus $O(n)$ for the diagonal.
+
+### Step I: Batched Column-Pivoted QR
+
+The algorithm maintains a set of candidate indices $D$ and an
+orthonormal basis $Q_{\text{acc}}$ accumulated from previous batches.
+Each iteration proceeds as follows:
+
+```
+Algorithm: QR Pivot Selection
+─────────────────────────────────────────────────────
+Input:  M (n×n symmetric), tol, σ
+Output: pivots (list of r selected column indices)
+
+1.  r[I] ← ‖M[:,I]‖²  for all I = 1, …, n
+2.  D ← { I : r[I] ≥ tol² }
+3.  pivots ← [],  Q_acc ← ∅  (orthonormal basis)
+
+4.  while D is non-empty:
+5.    r_max ← max{ r[I] : I ∈ D }
+6.    if r_max < tol²: break
+7.    batch ← { I ∈ D : r[I] ≥ σ · r_max }, sorted by r[I] desc
+8.    Cap batch to at most max_batch columns
+9.
+10.   Extract cols ← M[:, batch]
+11.   Project out Q_acc:  cols ← cols − Q_acc · (Q_acc' · cols)
+12.   Column-pivoted QR:  cols = Q · R · P
+13.   n_new ← number of |R[k,k]| > tol
+14.   if n_new = 0: break
+15.
+16.   Append top n_new pivots (by QR ordering) to pivots
+17.   Append corresponding Q columns to Q_acc
+18.
+19.   Update residual norms:
+20.     r[I] ← r[I] − ‖Q_new' · M[:,I]‖²   for I ∈ D
+21.   Screen D: remove indices with r[I] < tol²
+
+22. return pivots
+```
+
+### Key Differences from LDLT
+
+**Within-batch pivot selection:**  
+The LDLT variant processes candidates *one by one* inside each batch,
+using the Schur complement formula to update diagonals after each pivot.
+The QR variant hands the entire batch (up to `max_batch` columns) to a
+single column-pivoted QR factorization, which selects and orders the
+important columns in one shot.  This is a LAPACK-level operation
+(`geqp3`) that is heavily optimized.
+
+**Residual updates:**  
+LDLT updates the diagonal via the cheap scalar formula
+$d_I \leftarrow d_I - \ell_{I,k}^2 \cdot d_k$, which is $O(n)$ per
+pivot.  QR must update the residual column norms by projecting
+*all remaining columns* of $M$ against the new basis vectors:
+$r_I \leftarrow r_I - \|Q_{\text{new}}^T \, M_{:,I}\|^2$.  This
+requires reading the corresponding columns of $M$ and costs
+$O(n \cdot n_{\text{new}} \cdot n_D)$ per batch.  It is the main
+performance bottleneck of the QR variant.
+
+**Batch size control:**  
+The QR variant caps the batch size (default: 256, growing adaptively
+with discovered rank) to prevent the QR factorization from becoming
+$O(n^3)$ when the span factor selects too many candidates at once.
+The LDLT variant does not need this cap because its within-batch
+processing is $O(n)$ per pivot regardless of batch size.
+
+### Performance Characteristics
+
+Both methods share the same asymptotic complexity $O(n \, r^2)$, but
+with different constant factors:
+
+| Operation | LDLT | QR |
+|---|---|---|
+| Importance metric | $d_I = M_{II}$, $O(n)$ to initialize | $r_I = \|M_{:,I}\|^2$, $O(n^2)$ to initialize |
+| Within-batch selection | Sequential LDLT, $O(n \cdot b)$ | Column-pivoted QR, $O(n \cdot b^2)$ |
+| Residual update | Scalar: $d_I \leftarrow d_I - \ell^2 d$, $O(n)$ per pivot | Projection: $Q^T M$, $O(n \cdot n_{\text{new}} \cdot n_D)$ per batch |
+| Memory for basis | Not needed (diagonals suffice) | Accumulates $Q_{\text{acc}}$ ($n \times r$) |
+
+In practice, for a $10{,}000 \times 10{,}000$ matrix of rank 500, LDLT
+is roughly 4–5× faster than QR due to the cheaper residual updates.
+
+### When to Prefer QR over LDLT
+
+1. **Matrices where diagonals are misleading:**  QR uses full column
+   norms, which capture off-diagonal structure that the LDLT diagonal
+   $d_I = M_{II}$ might miss.  For matrices where important columns
+   have small diagonal elements but large off-diagonal entries, QR
+   can find pivots that LDLT would overlook.
+
+2. **Cross-validation:**  Since QR and LDLT use independent importance
+   metrics, running both and comparing the selected pivots can reveal
+   whether the decomposition is robust or sensitive to the pivot
+   selection strategy.
+
+3. **Matrices with uniform diagonal:**  If all diagonal elements are
+   similar (e.g., a correlation matrix with ones on the diagonal), the
+   LDLT strategy has little signal to distinguish important from
+   unimportant columns in the first batch.  Column norms may provide
+   better discrimination.
+
+### When LDLT Is Better
+
+1. **Speed:**  For typical quantum chemistry matrices, LDLT is 4–5×
+   faster than QR due to $O(n)$ per-pivot diagonal updates vs.
+   $O(n \cdot n_{\text{new}} \cdot n_D)$ per-batch matrix projections.
+
+2. **Memory:**  LDLT needs only the diagonal vector ($n$ values) plus
+   the LDLT column storage ($n \times r$).  QR additionally maintains
+   the orthonormal basis $Q_{\text{acc}}$ ($n \times r$), roughly
+   doubling the memory footprint.
+
+3. **Indefinite matrices:**  The LDLT diagonal $d_I$ naturally tracks
+   the sign of each pivot (positive or negative), giving it direct
+   insight into the spectral structure.  QR column norms are always
+   non-negative and cannot distinguish positive from negative
+   eigenvalue contributions — this information is recovered only in
+   Step II.
+
+---
+
 ## Comparison with Other Methods
 
 | Method | PSD required? | Cost | Handles complex symmetric? |
@@ -608,16 +754,12 @@ faster than the $O(n^3)$ full decomposition when $r \ll n$.
 | QR-pivoted decompose | No | $O(n \, r^2)$ | Yes |
 | **LDLT-pivoted decompose** | **No** | **$O(n \, r^2)$** | **Yes** |
 
-The LDLT-pivoted method combines the efficiency of pivoted Cholesky with
-the generality of eigendecomposition, handling indefinite and complex
-symmetric matrices at the same $O(n \, r^2)$ cost.
-
-The QR-pivoted variant uses column norms $\|M_{:,I}\|^2$ as the
-importance metric and column-pivoted QR for the within-batch selection.
-The LDLT variant uses the Schur complement diagonal $|d_I|$.  In
-practice, LDLT tends to be faster because it avoids the full column
-extraction and QR factorization within each batch — it only needs
-scalar diagonal updates.
+Both the LDLT-pivoted and QR-pivoted methods combine the efficiency of
+pivoted Cholesky with the generality of eigendecomposition, handling
+indefinite and complex symmetric matrices at $O(n \, r^2)$ cost.
+LDLT is the faster of the two due to its cheaper per-pivot updates,
+while QR offers a more robust importance metric based on full column
+norms.
 
 ## Extension to Hermitian Matrices
 
