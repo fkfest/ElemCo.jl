@@ -253,6 +253,10 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
   Q_batch_buf = Vector{Int}(undef, n)
   new_D_buf = Vector{Int}(undef, n)
 
+  # Maximum batch size to prevent O(n³) QR factorizations.
+  # Adaptive: grows with discovered rank but stays bounded.
+  max_batch = max(256, est_cap)
+
   while nD > 0
     # Find max squared column norm in D
     D_max = zero(real(T))
@@ -274,8 +278,12 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
     Q_view = @view Q_batch_buf[1:nQ]
     sort!(Q_view, by=I -> col_norms2[I], rev=true)
 
-    # Extract batch columns (allocation needed since columns are non-contiguous)
-    cols = M_in[:, Q_view]
+    # Cap batch size: keep only the most important columns
+    nQ = min(nQ, max_batch)
+
+    # Extract batch columns
+    batch_view = @view Q_batch_buf[1:nQ]
+    cols = M_in[:, batch_view]
 
     # Project out accumulated basis: cols -= Q_acc * (Q_acc' * cols)
     if n_acc > 0
@@ -284,8 +292,8 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
       mul!(cols, Q_view_acc, proj, -one(T), one(T))
     end
 
-    # Column-pivoted QR of residual columns to select important ones
-    F_qr = qr(cols, ColumnNorm())
+    # Column-pivoted QR of residual columns (in-place to avoid copy)
+    F_qr = qr!(cols, ColumnNorm())
     R_diag = abs.(diag(F_qr.R))
     n_new = count(rd -> rd > pivotol, R_diag)
     n_new == 0 && break
@@ -306,10 +314,18 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
       Q_acc = Q_new_buf
     end
 
-    # Update orthonormal basis — copy QR columns directly into Q_acc (no hcat)
-    Q_new = Matrix(F_qr.Q)[:, 1:n_new]
+    # Extract only the n_new columns of Q (thin extraction via lmul!)
+    # Cost: O(n * nQ * n_new) vs O(n * nQ²) for full Matrix(F_qr.Q)
+    Q_new = zeros(T, n, n_new)
+    @inbounds for k in 1:n_new
+      Q_new[k, k] = one(T)
+    end
+    lmul!(F_qr.Q, Q_new)
     @views Q_acc[:, n_acc+1:n_acc+n_new] .= Q_new
     n_acc += n_new
+
+    # Adapt max_batch based on discovered rank
+    max_batch = max(256, 2 * n_acc)
 
     # Update remaining D indices into pre-allocated buffer
     nD_new = 0
