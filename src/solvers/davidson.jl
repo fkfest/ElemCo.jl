@@ -205,10 +205,10 @@ function custom_dot(dav::Davidson{T}, customdots, tens, vecs, state=0) where T
   return dot::T
 end
 
-dispatch(f::Function, v::Vector, t, state) = f(reshape(v, size(t)), t, state)
-dispatch(f::Function, v::Vector, t) = f(reshape(v, size(t)), t)
-dispatch(f::Function, t, v, state) = f(t, reshape(v, size(t)), state)
-dispatch(f::Function, t, v) = f(t, reshape(v, size(t)))
+dispatch(f::F, v::Vector, t, state) where {F} = f(reshape(v, size(t)), t, state)
+dispatch(f::F, v::Vector, t) where {F} = f(reshape(v, size(t)), t)
+dispatch(f::F, t, v, state) where {F} = f(t, reshape(v, size(t)), state)
+dispatch(f::F, t, v) where {F} = f(t, reshape(v, size(t)))
 
 """
     update_Heff!(dav::Davidson, prods, state, customdots=())

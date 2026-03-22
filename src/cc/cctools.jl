@@ -1647,9 +1647,11 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::
     end
     T1 = zeros(0, 0) # Don't store T1 for orbopt methods
   end
-  open_dump(EC, "w") do io
-    transfer_orbitals_to_store!(io, EC, orbital_data)
-    dump_amplitudes(io, EC, T1, T2)
+  let T1 = T1, orbital_data = orbital_data
+    open_dump(EC, "w") do io
+      transfer_orbitals_to_store!(io, EC, orbital_data)
+      dump_amplitudes(io, EC, T1, T2)
+    end
   end
   return
 end
@@ -1692,9 +1694,11 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
     T1a = zeros(0, 0)
     T1b = zeros(0, 0)
   end
-  open_dump(EC, "w") do io
-    transfer_orbitals_to_store!(io, EC, orbital_data)
-    dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
+  let T1a = T1a, T1b = T1b, orbital_data = orbital_data
+    open_dump(EC, "w") do io
+      transfer_orbitals_to_store!(io, EC, orbital_data)
+      dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
+    end
   end
   return
 end
@@ -1817,7 +1821,7 @@ end
 
   Returns `(T1, T2, success::Bool)` for closed-shell case.
 """
-function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
+function try_fetch_restricted_starting_amplitudes(EC::ECInfo{T}) where T
   # Determine whether to use wf.start file
   use_start = EC.options.wf.start != ""
   
@@ -1862,7 +1866,7 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
   # Project amplitudes
   T1, T2 = project_amplitudes(EC, T1_old, T2_old, cMO_old, cMO_new, basis_old, current_basis;
                                classes_old=classes_old, classes_new=classes_new)
-  return (T1, T2, true)
+  return (Matrix{T}(T1), Array{T,4}(T2), true)
 end
 
 """
@@ -1879,7 +1883,7 @@ end
 
   Returns `(T1a, T1b, T2a, T2b, T2ab, success::Bool)` for unrestricted case.
 """
-function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
+function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo{T}) where T
   # Determine whether to use wf.start file
   use_start = EC.options.wf.start != ""
   
@@ -1928,7 +1932,7 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
                                                  cMO_old, cMO_new, basis_old, current_basis;
                                                  classes_old=classes_old, classes_new=classes_new,
                                                  occupations_old=occupations_old, occupations_new=occupations_new)
-  return (T1a, T1b, T2a, T2b, T2ab, true)
+  return (Matrix{T}(T1a), Matrix{T}(T1b), Array{T,4}(T2a), Array{T,4}(T2b), Array{T,4}(T2ab), true)
 end
 
 """
@@ -1938,11 +1942,11 @@ end
 
   Returns `(T1, T2, false)` where T1 and T2 are zero arrays.
 """
-function empty_restricted_amplitudes(EC::ECInfo)
+function empty_restricted_amplitudes(EC::ECInfo{T}) where T
   SP = EC.space
   nocc = length(SP['o'])
   nvirt = length(SP['v'])
-  return (zeros(nvirt, nocc), zeros(nvirt, nvirt, nocc, nocc), false)
+  return (zeros(T, nvirt, nocc), zeros(T, nvirt, nvirt, nocc, nocc), false)
 end
 
 """
@@ -1952,16 +1956,16 @@ end
 
   Returns `(T1a, T1b, T2a, T2b, T2ab, false)` where all arrays are zero.
 """
-function empty_unrestricted_amplitudes(EC::ECInfo)
+function empty_unrestricted_amplitudes(EC::ECInfo{T}) where T
   SP = EC.space
   nocc_a = length(SP['o'])
   nocc_b = length(SP['O'])
   nvirt_a = length(SP['v'])
   nvirt_b = length(SP['V'])
-  return (zeros(nvirt_a, nocc_a), zeros(nvirt_b, nocc_b),
-          zeros(nvirt_a, nvirt_a, nocc_a, nocc_a),
-          zeros(nvirt_b, nvirt_b, nocc_b, nocc_b),
-          zeros(nvirt_a, nvirt_b, nocc_a, nocc_b), false)
+  return (zeros(T, nvirt_a, nocc_a), zeros(T, nvirt_b, nocc_b),
+          zeros(T, nvirt_a, nvirt_a, nocc_a, nocc_a),
+          zeros(T, nvirt_b, nvirt_b, nocc_b, nocc_b),
+          zeros(T, nvirt_a, nvirt_b, nocc_a, nocc_b), false)
 end
 
 """

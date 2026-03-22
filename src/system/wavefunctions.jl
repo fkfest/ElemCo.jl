@@ -864,15 +864,15 @@ end
   Returns empty arrays if amplitudes are not found in the dump file.
 """
 function fetch_restricted_amplitudes end
-function fetch_restricted_amplitudes(EC::ECInfo; start::Bool=false)
+function fetch_restricted_amplitudes(EC::ECInfo{T}; start::Bool=false)::Tuple{Matrix{T}, Array{T,4}} where T
   open_dump(EC, "r"; start=start) do io
     return fetch_restricted_amplitudes(io, EC)
   end
 end
-function fetch_restricted_amplitudes(io::TrexioFile, EC::ECInfo)
+function fetch_restricted_amplitudes(io::TrexioFile, EC::ECInfo{T})::Tuple{Matrix{T}, Array{T,4}} where T
   println("Fetching restricted amplitudes ...")
-  T1 = read_trexio_singles(io)
-  T2 = read_trexio_doubles(io)
+  T1 = convert(Matrix{T}, read_trexio_singles(io))
+  T2 = convert(Array{T,4}, read_trexio_doubles(io))
   return (T1, T2)
 end
 
@@ -887,16 +887,17 @@ end
   Returns empty arrays if amplitudes are not found in the dump file.
 """
 function fetch_unrestricted_amplitudes end
-function fetch_unrestricted_amplitudes(EC::ECInfo; start::Bool=false)
+function fetch_unrestricted_amplitudes(EC::ECInfo{T}; start::Bool=false)::Tuple{Matrix{T}, Matrix{T}, Array{T,4}, Array{T,4}, Array{T,4}} where T
   open_dump(EC, "r"; start=start) do io
     return fetch_unrestricted_amplitudes(io, EC)
   end
 end
-function fetch_unrestricted_amplitudes(io::TrexioFile, EC::ECInfo)
+function fetch_unrestricted_amplitudes(io::TrexioFile, EC::ECInfo{T})::Tuple{Matrix{T}, Matrix{T}, Array{T,4}, Array{T,4}, Array{T,4}} where T
   println("Fetching unrestricted amplitudes ...")
   T1a, T1b = read_trexio_unrestricted_singles(io)
   T2a, T2b, T2ab = read_trexio_unrestricted_doubles(io)
-  return (T1a, T1b, T2a, T2b, T2ab)
+  return (convert(Matrix{T}, T1a), convert(Matrix{T}, T1b),
+          convert(Array{T,4}, T2a), convert(Array{T,4}, T2b), convert(Array{T,4}, T2ab))
 end
 
 """

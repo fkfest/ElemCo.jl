@@ -68,6 +68,7 @@ using Printf
 using Dates
 #BLAS.set_num_threads(1)
 using PrecompileTools
+using Preferences
 using .VersionInfo
 using .Utils
 using .ECInfos
@@ -1372,8 +1373,17 @@ macro molpro_output(ecvariables, kwargs...)
 end
 
 
-# precompile if not in development mode
-if !devel()
+# Precompilation preferences
+# Master toggle: defaults to true for release builds, false for development builds.
+# Override via LocalPreferences.toml: [ElemCo] precompile_workload = true/false
+const _precompile_workload = @load_preference("precompile_workload", !devel())
+# Individual section toggles (only used when master toggle is true):
+const _precompile_cc = @load_preference("precompile_cc", true)
+const _precompile_fci = @load_preference("precompile_fci", true)
+const _precompile_mcscf = @load_preference("precompile_mcscf", false)
+const _precompile_complex = @load_preference("precompile_complex", false)
+
+if _precompile_workload
   @setup_workload begin
     savestd = stdout
     redirect_stdout(devnull)
@@ -1381,11 +1391,34 @@ if !devel()
                 H 0.0 0.0 1.0"
     basis = "vdz"
     @compile_workload begin
-      @dfhf
-      @cc dcsd
-      @cc uccsd
-      @dfcc svd-dcsd
-      @dfmp2
+      _need_hf = _precompile_cc || _precompile_fci || _precompile_mcscf || _precompile_complex
+      if _need_hf
+        @dfhf
+      end
+      if _precompile_cc
+        @cc dcsd
+        @cc uccsd
+        @dfcc svd-dcsd
+        @dfmp2
+      end
+      if _precompile_fci
+        @fci
+      end
+      if _precompile_mcscf
+        @set wf ms2=2
+        @dfmcscf
+      end
+      if _precompile_complex
+        # Complex precompilation uses FCIDUMP-based workflow
+        # (DF-HF doesn't support complex 3-index integrals)
+        fd_c = FciDumps.FDump{ComplexF64,3}(EC.fd)
+        EC_c = ECInfo{ComplexF64}()
+        EC_c.fd = fd_c
+        Drivers.ccdriver(EC_c, "dcsd")
+        if _precompile_fci
+          Drivers.fcidriver(EC_c)
+        end
+      end
     end
     redirect_stdout(savestd)
   end
