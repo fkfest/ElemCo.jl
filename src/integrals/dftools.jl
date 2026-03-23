@@ -16,6 +16,7 @@ using ..ElemCo.FciDumps
 
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
 export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
+export calc_system_df_integrals
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -154,6 +155,26 @@ function generate_DF_integrals(EC::ECInfo, cMO::SpinMatrix; save3idx=true)
   # calculate 3-index integrals
   generate_3idx_integrals(EC, cMO, "mpfit"; save3idx)
   return EHF
+end
+
+"""
+    calc_system_df_integrals(EC::ECInfo)
+
+  Calculate 3-index integrals for the `EC.system` and store them in `mmL` file.
+  The routine is intended to be used in a combination with FDump integrals.
+"""
+function calc_system_df_integrals(EC::ECInfo)
+  space_save, _ = restore_system_space!(EC)
+  cMO = load_orbitals(EC)
+  # correlated MOs
+  SP = EC.space
+  if is_restricted(cMO) && SP['o'] == SP['O']
+    coMO = SpinMatrix(cMO[1][:,vcat(SP['o'],SP['v'])])
+  else
+    coMO = SpinMatrix(cMO[1][:,vcat(SP['o'],SP['v'])], cMO[2][:,vcat(SP['O'],SP['V'])])
+  end
+  generate_3idx_integrals(EC, coMO, "mpfit")
+  restore_space!(EC, space_save)
 end
 
 """

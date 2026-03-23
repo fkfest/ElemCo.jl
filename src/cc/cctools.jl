@@ -41,6 +41,7 @@ export dump_wavefunction_with_amplitudes!
 export dump_wavefunction_with_determinants!, try_fetch_starting_determinants
 export try_fetch_restricted_starting_amplitudes, try_fetch_unrestricted_starting_amplitudes
 export print_main_singles
+export rotate_U2pseudocanonical
 
 """ 
     calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
@@ -1988,4 +1989,30 @@ function print_main_singles(U1::AbstractMatrix, nelem; info="", thr=1e-4)
   end
   println()
 end
+
+""" 
+    rotate_U2pseudocanonical(EC::ECInfo, UaiX)
+
+  Diagonalize ϵv - ϵo transformed with UaiX (for update).
+  Return eigenvalues and rotated UaiX
+"""
+function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
+  SP = EC.space
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  UaiX2 = deepcopy(UaiX)
+  ϵo, ϵv = orbital_energies(EC)
+  for a in 1:nvirt
+    for i in 1:nocc
+      UaiX2[a,i,:] *= ϵv[a] - ϵo[i]
+    end
+  end
+
+  @mtensor Fdiff[X,Y] := conj(UaiX[a,i,X]) * UaiX2[a,i,Y]
+  diagFdiff = eigen(Hermitian(Fdiff))
+
+  @mtensor UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
+  return eltype(Fdiff).(diagFdiff.values), UaiX2
+end
+
 end # module

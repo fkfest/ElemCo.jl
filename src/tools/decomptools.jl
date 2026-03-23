@@ -6,13 +6,10 @@ using LinearAlgebra
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
-using ..ElemCo.OrbTools
-using ..ElemCo.DFTools
 using ..ElemCo.QMTensors
 
-export calc_integrals_decomposition, calc_df_integrals
+export calc_integrals_decomposition
 export eigen_decompose, svd_decompose
-export rotate_U2pseudocanonical
 export qr_pivoted_symmetric_decompose
 export ldlt_pivoted_symmetric_decompose
 export orthogonalize
@@ -156,6 +153,7 @@ Given ``M`` and pivot set ``B``, computes ``L`` such that
 function _nystrom_vectors(M::AbstractMatrix{T}, pivots::Vector{Int}, tol) where T
   nB = length(pivots)
   if nB == 0
+    n = size(M, 1)
     return (L = zeros(T, n, 0), rank = 0, neg_indices = Int[])
   end
 
@@ -236,6 +234,11 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
   # Initial squared column norms as importance metric (always non-negative)
   col_norms2 = vec(sum(abs2, M_in, dims=1))
   tol2 = pivotol^2
+
+  # Save original norms for detecting catastrophic cancellation in incremental updates
+  # (LAPACK-style safeguard: recompute when norm drops below eps^(2/3) of original)
+  orig_col_norms2 = copy(col_norms2)
+  recompute_ratio = eps(real(T))^(2/3)
 
   D_indices = findall(r -> r >= tol2, col_norms2)
   nD = length(D_indices)
@@ -350,6 +353,27 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
         col_norms2[I] < 0 && (col_norms2[I] = 0.0)
       end
 
+      # Recompute norms that may have suffered catastrophic cancellation.
+      # When a squared norm drops below eps^(2/3) of its original value,
+      # the incremental update has lost too many significant digits.
+      # Recompute the exact residual norm: ||M[:,I] - Q_acc * Q_acc' * M[:,I]||²
+      recompute_cols = Int[]
+      @inbounds for idx in 1:nD_new
+        I = new_D_buf[idx]
+        if col_norms2[I] < recompute_ratio * orig_col_norms2[I]
+          push!(recompute_cols, I)
+        end
+      end
+      if !isempty(recompute_cols)
+        Q_view_acc = @view Q_acc[:, 1:n_acc]
+        cols_r = M_in[:, recompute_cols]
+        proj_r = Q_view_acc' * cols_r
+        mul!(cols_r, Q_view_acc, proj_r, -one(T), one(T))
+        @inbounds for (k, I) in enumerate(recompute_cols)
+          col_norms2[I] = sum(abs2, @view cols_r[:, k])
+        end
+      end
+
       # Re-screen after norm update
       nD_final = 0
       @inbounds for idx in 1:nD_new
@@ -382,6 +406,14 @@ where ``S`` is a diagonal sign matrix with ``S_{kk} = -1`` for
 
 Works for non-positive definite matrices, including real symmetric indefinite
 and complex symmetric matrices.
+However, it is not guaranteed to find the optimal pivot set for indefinite matrices, 
+since the pivot selection is based on the magnitude of the diagonal elements, 
+which may not always correlate with the best low-rank approximation for indefinite matrices.
+Therefore, while this method can be applied to a broader class of matrices,
+it may not always yield the most efficient decomposition in terms of rank or accuracy for indefinite cases.
+The [`qr_pivoted_symmetric_decompose`](@ref) method may perform better for indefinite matrices
+due to its use of column norms as the pivoting metric, which can capture important features
+even when diagonal elements are small or negative.
 
 **Step I** uses a span-factor batched LDLT algorithm to determine the pivot set,
 following the spirit of the Cholesky-based approach of Folkestad et al. [JCP 150, 194112 (2019)]
@@ -634,26 +666,6 @@ function calc_integrals_decomposition(EC::ECInfo)
 end
 
 """
-    calc_df_integrals(EC::ECInfo)
-
-  Calculate 3-index integrals and store them in `mmL` file.
-  The routine is intended to be used in a combination with FDump integrals.
-"""
-function calc_df_integrals(EC::ECInfo)
-  space_save, _ = restore_system_space!(EC)
-  cMO = load_orbitals(EC)
-  # correlated MOs
-  SP = EC.space
-  if is_restricted(cMO) && SP['o'] == SP['O']
-    coMO = SpinMatrix(cMO[1][:,vcat(SP['o'],SP['v'])])
-  else
-    coMO = SpinMatrix(cMO[1][:,vcat(SP['o'],SP['v'])], cMO[2][:,vcat(SP['O'],SP['V'])])
-  end
-  generate_3idx_integrals(EC, coMO, "mpfit")
-  restore_space!(EC, space_save)
-end
-
-"""
     eigen_decompose(T2mat, nvirt, nocc, tol=1e-6)
 
   Eigenvector-decompose symmetric doubles `T2[ai,bj]` matrix: 
@@ -721,31 +733,5 @@ function svd_decompose(Amat, tol=1e-6; verbose=true, description="")
   end
   return U[:,1:naux], S[1:naux]
 end
-
-""" 
-    rotate_U2pseudocanonical(EC::ECInfo, UaiX)
-
-  Diagonalize ϵv - ϵo transformed with UaiX (for update).
-  Return eigenvalues and rotated UaiX
-"""
-function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
-  SP = EC.space
-  nocc = n_occ_orbs(EC)
-  nvirt = n_virt_orbs(EC)
-  UaiX2 = deepcopy(UaiX)
-  ϵo, ϵv = orbital_energies(EC)
-  for a in 1:nvirt
-    for i in 1:nocc
-      UaiX2[a,i,:] *= ϵv[a] - ϵo[i]
-    end
-  end
-
-  @mtensor Fdiff[X,Y] := conj(UaiX[a,i,X]) * UaiX2[a,i,Y]
-  diagFdiff = eigen(Hermitian(Fdiff))
-
-  @mtensor UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
-  return eltype(Fdiff).(diagFdiff.values), UaiX2
-end
-
 
 end #module

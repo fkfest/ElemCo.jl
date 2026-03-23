@@ -68,6 +68,7 @@ using ..ElemCo.FciDumps
 using ..ElemCo.MSystems
 using ..ElemCo.DIIS
 using ..ElemCo.DecompTools
+using ..ElemCo.DFTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
@@ -3152,7 +3153,7 @@ function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
   end
   if EC.options.cc.usedf && !isempty(EC.system)
     println("Using density fitting")
-    calc_df_integrals(EC)
+    calc_system_df_integrals(EC)
   else
     println("Decomposing integrals")
     calc_integrals_decomposition(EC)
