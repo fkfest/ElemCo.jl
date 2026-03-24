@@ -10,7 +10,7 @@ using ..ElemCo.QMTensors
 
 export calc_integrals_decomposition
 export eigen_decompose, svd_decompose
-export qr_pivoted_symmetric_decompose
+export qr_pivoted_symmetric_decompose, qr_pivoted_decompose
 export ldlt_pivoted_symmetric_decompose
 export orthogonalize
 
@@ -126,6 +126,57 @@ function orthogonalize(L::AbstractMatrix{T}, neg_indices::Vector{Int}=Int[]) whe
 end
 
 """
+      orthogonalize(DecompResult::NamedTuple) → (ortho, diag) or (U, S, V)
+
+  Convenience method to orthogonalize a decomposition result.
+  
+  For symmetric decomposition results from [`qr_pivoted_symmetric_decompose`](@ref) 
+  or [`ldlt_pivoted_symmetric_decompose`](@ref) (with fields `L`, `neg_indices`):
+  returns `(ortho, diag)` where ``M ≈ \\text{ortho} \\cdot \\text{diag}(d) \\cdot \\text{ortho}^T``.
+
+  For general decomposition results from [`qr_pivoted_decompose`](@ref) 
+  (with fields `Q`, `R`): returns `(U, S, V)` where ``M ≈ U \\cdot \\text{diag}(S) \\cdot V^\\dagger``.
+"""
+function orthogonalize(DecompResult::NamedTuple)
+  if hasproperty(DecompResult, :neg_indices)
+    return orthogonalize(DecompResult.L, DecompResult.neg_indices)
+  else
+    return orthogonalize(DecompResult.Q, DecompResult.R)
+  end
+end
+
+"""
+    orthogonalize(Q, R) → (U, S, V)
+
+Convert a general low-rank factorization ``M ≈ Q R`` (with ``Q`` orthonormal)
+into an approximate truncated SVD: ``M ≈ U \\cdot \\text{diag}(S) \\cdot V^\\dagger``.
+
+Computes the SVD of the small ``k × n`` matrix ``R``, then absorbs the
+left singular vectors into ``Q``.
+
+# Arguments
+- `Q`: orthonormal left factor, shape `(m, k)`
+- `R`: right factor, shape `(k, n)`
+
+# Returns
+- `U`: left singular vectors, shape `(m, k)`, orthonormal columns
+- `S::Vector{Float64}`: singular values (non-negative, descending), length `k`
+- `V`: right singular vectors, shape `(n, k)`, orthonormal columns
+"""
+function orthogonalize(Q_in::AbstractMatrix{T}, R_in::AbstractMatrix{T}) where T
+  k = size(R_in, 1)
+  if k == 0
+    n = size(R_in, 2)
+    m = size(Q_in, 1)
+    return zeros(T, m, 0), Float64[], zeros(T, n, 0)
+  end
+
+  F = svd(R_in)
+  U = Q_in * F.U
+  return U, F.S, F.V
+end
+
+"""
     _nystrom_vectors(M, pivots, tol) → (L, rank, neg_indices)
 
 Compute Nyström decomposition vectors from a symmetric matrix and a set of pivot indices.
@@ -190,50 +241,33 @@ function _nystrom_vectors(M::AbstractMatrix{T}, pivots::Vector{Int}, tol) where 
 end
 
 """
-    qr_pivoted_symmetric_decompose(M, tol; sigma=0.01, pivotol=tol) → (L, rank, neg_indices)
+    _qr_pivot_selection(M, tol; sigma=0.01) → Vector{Int}
 
-Two-step decomposition of a symmetric matrix using QR-based pivot
-selection and the Nyström formula.
+Span-factor batched QR pivot selection for column subset selection.
 
-Given a symmetric matrix ``M = M^T`` (real or complex), produces `L` such that ``M ≈ L \\cdot S \\cdot L^T`` (transpose, not adjoint),
-where ``S`` is a diagonal sign matrix with ``S_{kk} = -1`` for
-``k ∈`` `neg_indices` and ``+1`` otherwise.
+Works for any ``m × n`` matrix (real or complex, symmetric or not).
+Selects a subset of column indices that capture the column space of ``M``
+up to the given tolerance.
 
-**Step I** uses a span-factor batched QR algorithm to determine the pivot set:
-- Column norms ``r_I = \\|M_{:,I}\\|^2`` serve as importance metric (always non-negative)
+- Column norms ``r_I = \\|M_{:,I}\\|^2`` serve as importance metric
 - Batch selection: ``Q = \\{I ∈ D : r_I ≥ σ \\cdot \\max_D r\\}``
 - Within each batch, column-pivoted QR selects the important columns
 - Residual norms are updated by subtracting projections onto selected columns
-- Diagonal screening: indices below threshold are removed
-
-**Step II** uses the RI/Nyström formula ``M ≈ M_{:,B} J^{-1} M_{B,:}^T``
-where ``J = M_{B,B}``:
-- Complex: SVD/Takagi factorization ``J = U_T \\Sigma U_T^T`` →
-  ``C = \\overline{U_T} \\Sigma^{-1/2}`` with ``C C^T = J^{-1}``
-- Real: eigendecomposition ``J = Q \\Lambda Q^T`` →
-  ``C_k = q_k / \\sqrt{|\\lambda_k|}``; negative ``\\lambda_k`` tracked in `neg_indices`
 
 # Arguments
-- `M`: symmetric matrix (``M = M^T``), real or complex
-- `tol`: threshold for rank determination
+- `M`: matrix of any shape, real or complex
+- `tol`: tolerance for column pivoting in QR
 - `sigma`: span factor for batch pivot selection (default: 0.01)
-- `pivotol`: tolerance for column pivoting in QR (default: `tol`)
 
-# Returns NamedTuple
-- `L`: decomposition vectors, shape `(n, rank)`, type matches input
-- `rank`: number of decomposition vectors
-- `neg_indices`: column indices in `L` corresponding to negative eigenvalues
-  (empty for PSD or complex matrices)
+# Returns
+- `Vector{Int}`: selected column pivot indices
 """
-function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Float64=0.01, pivotol::Float64=tol) where T
-  n = size(M_in, 1)
+function _qr_pivot_selection(M_in::AbstractMatrix{T}, tol; sigma::Float64=0.01) where T
+  nrows, ncols = size(M_in)
 
-  # ═══════════════════════════════════════════════════════════════
-  # STEP I: Span-factor batched QR pivot selection
-  # ═══════════════════════════════════════════════════════════════
   # Initial squared column norms as importance metric (always non-negative)
   col_norms2 = vec(sum(abs2, M_in, dims=1))
-  tol2 = pivotol^2
+  tol2 = tol^2
 
   # Save original norms for detecting catastrophic cancellation in incremental updates
   # (LAPACK-style safeguard: recompute when norm drops below eps^(2/3) of original)
@@ -243,18 +277,18 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
   D_indices = findall(r -> r >= tol2, col_norms2)
   nD = length(D_indices)
 
-  est_cap = min(n, max(64, isqrt(nD)))
+  est_cap = min(ncols, max(64, isqrt(nD)))
   pivots = Int[]
   sizehint!(pivots, est_cap)
-  is_pivot = falses(n)  # BitVector for O(1) pivot lookup
+  is_pivot = falses(ncols)  # BitVector for O(1) pivot lookup
 
   # Pre-allocate orthonormal basis with amortized doubling (avoids hcat)
-  Q_acc = Matrix{T}(undef, n, est_cap)
+  Q_acc = Matrix{T}(undef, nrows, est_cap)
   n_acc = 0
 
   # Pre-allocate work buffers
-  Q_batch_buf = Vector{Int}(undef, n)
-  new_D_buf = Vector{Int}(undef, n)
+  Q_batch_buf = Vector{Int}(undef, ncols)
+  new_D_buf = Vector{Int}(undef, ncols)
 
   # Maximum batch size to prevent O(n³) QR factorizations.
   # Adaptive: grows with discovered rank but stays bounded.
@@ -298,7 +332,7 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
     # Column-pivoted QR of residual columns (in-place to avoid copy)
     F_qr = qr!(cols, ColumnNorm())
     R_diag = abs.(diag(F_qr.R))
-    n_new = count(rd -> rd > pivotol, R_diag)
+    n_new = count(rd -> rd > tol, R_diag)
     n_new == 0 && break
 
     # Record new pivots
@@ -312,14 +346,14 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
     # Ensure Q_acc capacity (amortized doubling)
     if n_acc + n_new > size(Q_acc, 2)
       new_cap = max(2 * size(Q_acc, 2), n_acc + n_new)
-      Q_new_buf = Matrix{T}(undef, n, new_cap)
+      Q_new_buf = Matrix{T}(undef, nrows, new_cap)
       @views Q_new_buf[:, 1:n_acc] .= Q_acc[:, 1:n_acc]
       Q_acc = Q_new_buf
     end
 
     # Extract only the n_new columns of Q (thin extraction via lmul!)
-    # Cost: O(n * nQ * n_new) vs O(n * nQ²) for full Matrix(F_qr.Q)
-    Q_new = zeros(T, n, n_new)
+    # Cost: O(nrows * nQ * n_new) vs O(nrows * nQ²) for full Matrix(F_qr.Q)
+    Q_new = zeros(T, nrows, n_new)
     @inbounds for k in 1:n_new
       Q_new[k, k] = one(T)
     end
@@ -390,8 +424,121 @@ function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Flo
     end
   end
 
-  # STEP II: Nyström approximation  M ≈ L S Lᵀ
+  return pivots
+end
+
+"""
+    _column_factorize(M, pivots, tol) → (Q, R, rank)
+
+Compute a low-rank factorization ``M ≈ Q R`` from selected column pivots.
+
+Given an ``m × n`` matrix ``M`` and a set of column pivot indices,
+computes orthonormal ``Q`` (``m × k``) and ``R`` (``k × n``) such that
+``M ≈ Q R`` via column-space projection.
+
+Uses SVD of the selected columns for robust rank determination,
+followed by ``R = Q^\\dagger M`` (adjoint projection).
+
+# Arguments
+- `M`: matrix of any shape, real or complex
+- `pivots`: vector of selected column indices
+- `tol`: threshold for rank determination from singular values
+
+# Returns NamedTuple
+- `Q`: orthonormal left factor, shape `(m, rank)`
+- `R`: right factor, shape `(rank, n)`
+- `rank`: effective rank
+"""
+function _column_factorize(M::AbstractMatrix{T}, pivots::Vector{Int}, tol) where T
+  m, n = size(M)
+  k = length(pivots)
+  if k == 0
+    return (Q = zeros(T, m, 0), R = zeros(T, 0, n), rank = 0)
+  end
+
+  # Extract selected columns and determine effective rank via SVD
+  C = M[:, pivots]
+  F = svd(C)
+  k_eff = count(s -> s > tol, F.S)
+  if k_eff == 0
+    return (Q = zeros(T, m, 0), R = zeros(T, 0, n), rank = 0)
+  end
+
+  # Truncate to effective rank
+  Q_thin = F.U[:, 1:k_eff]
+
+  # Low-rank factorization: M ≈ Q * (Q' * M) (column-space projection)
+  R_factor = Q_thin' * M
+
+  return (Q = Q_thin, R = R_factor, rank = k_eff)
+end
+
+"""
+    qr_pivoted_symmetric_decompose(M, tol; sigma=0.01, pivotol=tol) → (L, rank, neg_indices)
+
+Two-step decomposition of a symmetric matrix using QR-based pivot
+selection and the Nyström formula.
+
+Given a symmetric matrix ``M = M^T`` (real or complex), produces `L` such that ``M ≈ L \\cdot S \\cdot L^T`` (transpose, not adjoint),
+where ``S`` is a diagonal sign matrix with ``S_{kk} = -1`` for
+``k ∈`` `neg_indices` and ``+1`` otherwise.
+
+**Step I** uses [`_qr_pivot_selection`](@ref) to determine the pivot set.
+
+**Step II** uses the RI/Nyström formula ``M ≈ M_{:,B} J^{-1} M_{B,:}^T``
+where ``J = M_{B,B}``:
+- Complex: SVD/Takagi factorization ``J = U_T \\Sigma U_T^T`` →
+  ``C = \\overline{U_T} \\Sigma^{-1/2}`` with ``C C^T = J^{-1}``
+- Real: eigendecomposition ``J = Q \\Lambda Q^T`` →
+  ``C_k = q_k / \\sqrt{|\\lambda_k|}``; negative ``\\lambda_k`` tracked in `neg_indices`
+
+# Arguments
+- `M`: symmetric matrix (``M = M^T``), real or complex
+- `tol`: threshold for rank determination
+- `sigma`: span factor for batch pivot selection (default: 0.01)
+- `pivotol`: tolerance for column pivoting in QR (default: `tol`)
+
+# Returns NamedTuple
+- `L`: decomposition vectors, shape `(n, rank)`, type matches input
+- `rank`: number of decomposition vectors
+- `neg_indices`: column indices in `L` corresponding to negative eigenvalues
+  (empty for PSD or complex matrices)
+"""
+function qr_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::Float64=0.01, pivotol::Float64=tol) where T
+  pivots = _qr_pivot_selection(M_in, pivotol; sigma=sigma)
   return _nystrom_vectors(M_in, pivots, tol)
+end
+
+"""
+    qr_pivoted_decompose(M, tol; sigma=0.01, pivotol=tol) → (Q, R, rank)
+
+Low-rank decomposition of a general ``m × n`` matrix using QR-based
+column pivot selection and orthogonal projection.
+
+Given any matrix ``M`` (real or complex, not necessarily symmetric or square),
+produces orthonormal ``Q`` (``m × k``) and ``R`` (``k × n``) such that
+``M ≈ Q R``, where ``k`` is the effective rank.
+
+**Step I** uses [`_qr_pivot_selection`](@ref) to select important columns via
+span-factor batched QR with incremental norm updates.
+
+**Step II** orthonormalizes the selected columns via column-pivoted QR
+and computes the right factor as ``R = Q^\\dagger M`` (adjoint projection).
+
+# Arguments
+- `M`: matrix of any shape (``m × n``), real or complex
+- `tol`: threshold for rank determination
+- `sigma`: span factor for batch pivot selection (default: 0.01)
+- `pivotol`: tolerance for column pivoting in QR (default: `tol`)
+
+# Returns NamedTuple
+- `Q`: orthonormal left factor, shape `(m, rank)`
+- `R`: right factor, shape `(rank, n)`
+- `rank`: effective rank of the decomposition
+"""
+function qr_pivoted_decompose(M_in::AbstractMatrix{T}, tol; sigma::Float64=0.01, pivotol::Float64=tol) where T
+  pivots = _qr_pivot_selection(M_in, pivotol; sigma=sigma)
+  return _column_factorize(M_in, pivots, tol)
 end
 
 """

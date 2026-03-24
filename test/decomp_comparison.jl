@@ -16,6 +16,7 @@ using Random
 using ElemCo
 using ElemCo.DecompTools: symmetric_pivoted_cholesky, 
   qr_pivoted_symmetric_decompose,
+  qr_pivoted_decompose,
   ldlt_pivoted_symmetric_decompose,
   orthogonalize
 
@@ -204,5 +205,203 @@ M_neg_diag = B1 * transpose(B1)
 n_neg = count(real(M_neg_diag[i,i]) < 0 for i in 1:n)
 test_case("Complex symmetric ($n_neg/$n neg. real diagonals)", M_neg_diag, tol;
           expect_cholesky_fail = n_neg > 0)
+
+# ─────────────────────────────────────────────────────────────
+# General (non-symmetric, rectangular) matrix tests
+# ─────────────────────────────────────────────────────────────
+println("\n" * "#"^60)
+println("# GENERAL (NON-SYMMETRIC / RECTANGULAR) MATRICES")
+println("#"^60)
+
+function test_general(name, M, tol)
+  m, n = size(M)
+  T = eltype(M)
+  println("\n" * "="^60)
+  println("Test: $name")
+  println("  Size: $m×$n, Type: $T, tol: $tol")
+
+  result = qr_pivoted_decompose(M, tol; sigma=0.01)
+  err = maximum(abs.(M - result.Q * result.R))
+  ortho_err = maximum(abs.(result.Q' * result.Q - I(result.rank)))
+  println("  QR general:      rank=$(result.rank), max_error=$err, ortho_error=$ortho_err")
+  println("="^60)
+end
+
+# Test G1: Non-symmetric square, low rank
+n = 100; r = 20
+M_g1 = randn(n, r) * randn(r, n)
+test_general("Non-symmetric square low-rank ($r)", M_g1, tol)
+
+# Test G2: Tall rectangular, low rank
+m, n2 = 150, 80
+M_g2 = randn(m, r) * randn(r, n2)
+test_general("Tall $(m)×$(n2) low-rank ($r)", M_g2, tol)
+
+# Test G3: Wide rectangular, low rank
+M_g3 = randn(n2, r) * randn(r, m)
+test_general("Wide $(n2)×$(m) low-rank ($r)", M_g3, tol)
+
+# Test G4: Full-rank square
+M_g4 = randn(50, 50)
+test_general("Full-rank 50×50", M_g4, tol)
+
+# Test G5: Complex non-symmetric rectangular
+M_g5 = randn(ComplexF64, m, r) * randn(ComplexF64, r, n2)
+test_general("Complex $(m)×$(n2) low-rank ($r)", M_g5, tol)
+
+# Test G6: Very wide matrix (m < n)
+M_g6 = randn(10, r) * randn(r, 200)
+test_general("Very wide 10×200 low-rank ($r)", M_g6, tol)
+
+# Test G7: Very tall matrix (m >> n)
+M_g7 = randn(200, r) * randn(r, 10)
+test_general("Very tall 200×10 low-rank ($r)", M_g7, tol)
+
+# ─────────────────────────────────────────────────────────────
+# Numerical redundancy tests: gradual singular value decay
+# ─────────────────────────────────────────────────────────────
+println("\n" * "#"^60)
+println("# NUMERICAL REDUNDANCY: GRADUAL SINGULAR VALUE DECAY")
+println("#"^60)
+
+"""
+    make_symmetric_decay(n, decay_type; kwargs...) → M
+
+Build an `n×n` real symmetric matrix with controlled singular value decay.
+
+`decay_type` can be:
+- `:exponential` — `σ_i = exp(-α * i)`, kwarg `α` (default 0.3)
+- `:polynomial`  — `σ_i = (i+1)^{-p}`, kwarg `p` (default 2)
+- `:linear`      — `σ_i` linearly from 1 to `smin`, kwarg `smin` (default 1e-12)
+- `:step`        — first `k_big` values = 1, rest ∈ [gap, gap*ε], kwarg `k_big`, `gap` (default 1e-5)
+"""
+function make_symmetric_decay(n, decay_type; α=0.3, p=2.0, smin=1e-12, k_big=div(n,5), gap=1e-5)
+  if decay_type == :exponential
+    svals = [exp(-α * i) for i in 1:n]
+  elseif decay_type == :polynomial
+    svals = [(i + 1.0)^(-p) for i in 1:n]
+  elseif decay_type == :linear
+    svals = range(1.0, smin, length=n) |> collect
+  elseif decay_type == :step
+    svals = vcat(ones(k_big), range(gap, gap * 1e-7, length=n - k_big) |> collect)
+  else
+    error("Unknown decay type: $decay_type")
+  end
+  Q_mat, _ = qr(randn(n, n))
+  Q_mat = Matrix(Q_mat)
+  return Q_mat * Diagonal(svals) * Q_mat', svals
+end
+
+"""
+    make_general_decay(m, n, decay_type; kwargs...) → M
+
+Build an `m×n` real matrix with controlled singular value decay.
+
+Same decay types as `make_symmetric_decay`.
+"""
+function make_general_decay(m, n, decay_type; α=0.3, p=2.0, smin=1e-12, k_big=div(min(m,n),5), gap=1e-5)
+  r = min(m, n)
+  if decay_type == :exponential
+    svals = [exp(-α * i) for i in 1:r]
+  elseif decay_type == :polynomial
+    svals = [(i + 1.0)^(-p) for i in 1:r]
+  elseif decay_type == :linear
+    svals = range(1.0, smin, length=r) |> collect
+  elseif decay_type == :step
+    svals = vcat(ones(k_big), range(gap, gap * 1e-7, length=r - k_big) |> collect)
+  else
+    error("Unknown decay type: $decay_type")
+  end
+  U_mat, _ = qr(randn(m, m))
+  V_mat, _ = qr(randn(n, n))
+  U_mat = Matrix(U_mat)
+  V_mat = Matrix(V_mat)
+  return U_mat[:, 1:r] * Diagonal(svals) * V_mat[:, 1:r]', svals
+end
+
+function test_decay_symmetric(name, M, svals, tol)
+  n = size(M, 1)
+  # True rank at this tolerance
+  true_rank = count(s -> s > tol, svals)
+
+  println("\n" * "="^60)
+  println("Test: $name")
+  println("  Size: $n×$n, tol: $tol, true rank at tol: $true_rank")
+  println("  σ_1=$(svals[1]), σ_$(true_rank)=$(svals[true_rank]), σ_$(min(true_rank+1,n))=$(svals[min(true_rank+1,n)])")
+
+  # QR symmetric
+  L_qr, rank_qr, neg_qr = qr_pivoted_symmetric_decompose(M, tol; sigma=0.01)
+  err_qr = recon_error(M, L_qr, neg_qr)
+  println("  QR symmetric:  rank=$rank_qr, max_error=$err_qr")
+
+  # LDLT symmetric
+  L_ldlt, rank_ldlt, neg_ldlt = ldlt_pivoted_symmetric_decompose(M, tol; sigma=0.01)
+  err_ldlt = recon_error(M, L_ldlt, neg_ldlt)
+  println("  LDLT symmetric: rank=$rank_ldlt, max_error=$err_ldlt")
+
+  # QR general (applied to symmetric matrix for comparison)
+  result_gen = qr_pivoted_decompose(M, tol; sigma=0.01)
+  err_gen = maximum(abs.(M - result_gen.Q * result_gen.R))
+  println("  QR general:    rank=$(result_gen.rank), max_error=$err_gen")
+
+  println("="^60)
+end
+
+function test_decay_general(name, M, svals, tol)
+  m, n = size(M)
+  r = min(m, n)
+  true_rank = count(s -> s > tol, svals)
+
+  println("\n" * "="^60)
+  println("Test: $name")
+  println("  Size: $m×$n, tol: $tol, true rank at tol: $true_rank")
+  println("  σ_1=$(svals[1]), σ_$(true_rank)=$(svals[true_rank]), σ_$(min(true_rank+1,r))=$(svals[min(true_rank+1,r)])")
+
+  result = qr_pivoted_decompose(M, tol; sigma=0.01)
+  err = maximum(abs.(M - result.Q * result.R))
+  ortho_err = maximum(abs.(result.Q' * result.Q - I(result.rank)))
+  println("  QR general:    rank=$(result.rank), max_error=$err, ortho_error=$ortho_err")
+
+  println("="^60)
+end
+
+tol = 1e-6
+# ── Symmetric matrices with decay ──
+for n in [100, 500, 1000]
+  println("\n" * "-"^60)
+  println("  n = $n")
+  println("-"^60)
+
+  M_exp, s_exp = make_symmetric_decay(n, :exponential; α=0.3)
+  test_decay_symmetric("Symmetric exponential decay (n=$n, α=0.3)", M_exp, s_exp, tol)
+
+  M_poly, s_poly = make_symmetric_decay(n, :polynomial; p=2.0)
+  test_decay_symmetric("Symmetric polynomial decay (n=$n, p=2)", M_poly, s_poly, tol)
+
+  M_lin, s_lin = make_symmetric_decay(n, :linear; smin=1e-12)
+  test_decay_symmetric("Symmetric linear decay (n=$n)", M_lin, s_lin, tol)
+
+  M_step, s_step = make_symmetric_decay(n, :step; k_big=div(n, 5), gap=1e-5)
+  test_decay_symmetric("Symmetric step decay (n=$n, k=$(div(n,5)))", M_step, s_step, tol)
+end
+
+# ── General rectangular matrices with decay ──
+for (m, n) in [(200, 100), (100, 500), (500, 500), (1000, 200)]
+  println("\n" * "-"^60)
+  println("  m×n = $m×$n")
+  println("-"^60)
+
+  M_exp, s_exp = make_general_decay(m, n, :exponential; α=0.3)
+  test_decay_general("General exponential decay ($m×$n, α=0.3)", M_exp, s_exp, tol)
+
+  M_poly, s_poly = make_general_decay(m, n, :polynomial; p=2.0)
+  test_decay_general("General polynomial decay ($m×$n, p=2)", M_poly, s_poly, tol)
+
+  M_lin, s_lin = make_general_decay(m, n, :linear; smin=1e-12)
+  test_decay_general("General linear decay ($m×$n)", M_lin, s_lin, tol)
+
+  M_step, s_step = make_general_decay(m, n, :step; gap=1e-5)
+  test_decay_general("General step decay ($m×$n)", M_step, s_step, tol)
+end
 
 println("\n\nAll comparison tests completed.")

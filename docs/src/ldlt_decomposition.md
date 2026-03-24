@@ -1,11 +1,16 @@
 # Pivoted Symmetric Decomposition
 
 This document explains the pivoted symmetric decomposition functions:
-`ldlt_pivoted_symmetric_decompose` and `qr_pivoted_symmetric_decompose`.
-Both share the same two-step structure — pivot selection followed by
+`ldlt_pivoted_symmetric_decompose` and `qr_pivoted_symmetric_decompose`,
+as well as the general (non-symmetric, rectangular) variant
+`qr_pivoted_decompose`.
+The symmetric methods share the same two-step structure — pivot selection followed by
 Nyström approximation — but use different strategies for Step I.
+The general variant replaces the Nyström formula with a column-space
+projection, enabling its use on any $m \times n$ matrix.
 The LDLT variant is covered in full detail first, followed by the QR
-variant with a comparison of their strengths and weaknesses.
+variant with a comparison of their strengths and weaknesses, and finally
+the general decomposition.
 
 ## Motivation
 
@@ -744,22 +749,119 @@ is roughly 4–5× faster than QR due to the cheaper residual updates.
 
 ---
 
+## General (Non-Symmetric) QR Pivoted Decomposition
+
+The `qr_pivoted_decompose` function extends the QR pivot selection to
+**any** $m \times n$ matrix — real or complex, symmetric or not,
+square or rectangular.
+
+### Factored Form
+
+Given an arbitrary matrix $M$ of size $m \times n$, the decomposition
+produces:
+
+$$M \approx Q \, R$$
+
+where $Q$ is $m \times k$ with orthonormal columns ($Q^\dagger Q = I_k$)
+and $R$ is $k \times n$, with $k$ being the effective rank.
+
+### Two-Step Structure
+
+| Step | What it does | Details |
+|---|---|---|
+| **Step I** — Pivot selection | Same `_qr_pivot_selection` as the symmetric QR variant | Selects $k$ important column indices using column norms and batched column-pivoted QR |
+| **Step II** — Column factorization | Orthonormalize selected columns, project | SVD of $M_{:,B}$ + adjoint projection $R = Q^\dagger M$ |
+
+**Step I** is shared with `qr_pivoted_symmetric_decompose` via the
+internal `_qr_pivot_selection` helper.  The algorithm works with column
+norms and column-pivoted QR, which make no symmetry assumptions.
+
+**Step II** differs from the symmetric case:
+
+- **Symmetric**: Uses the Nyström formula $M \approx M_{:,B} \, J^{-1} \, M_{B,:}^T$,
+  which exploits $M_{B,:} = M_{:,B}^T$.
+- **General**: Computes a column-space projection:
+  1. Extract selected columns $C = M_{:,B}$, shape $(m, k)$
+  2. SVD of $C$ for robust rank determination:
+     $C = U \, \Sigma \, V^\dagger$
+  3. Truncate to effective rank $k_{\text{eff}}$ (number of
+     $\sigma_i > \text{tol}$)
+  4. $Q = U[:, 1{:}k_{\text{eff}}]$ (orthonormal)
+  5. $R = Q^\dagger \, M$ (adjoint projection, works for both real
+     and complex)
+
+### Orthogonalization to Approximate SVD
+
+The `orthogonalize` function can convert the $Q R$ factorization into
+an approximate truncated SVD:
+
+$$M \approx U \, \Sigma \, V^\dagger$$
+
+where $U$ ($m \times k$) and $V$ ($n \times k$) have orthonormal
+columns, and $\Sigma = \text{diag}(s_1, \ldots, s_k)$ contains the
+approximate singular values.
+
+This is computed by taking the SVD of the small $k \times n$ factor
+$R = U_R \, \Sigma \, V_R^\dagger$, then absorbing the left singular
+vectors: $U = Q \, U_R$.
+
+```julia
+# Usage:
+result = qr_pivoted_decompose(M, tol)
+U, S, V = orthogonalize(result)
+# M ≈ U * Diagonal(S) * V'
+```
+
+### Handling Rectangular Matrices
+
+For **tall** matrices ($m > n$): the maximum rank is bounded by $n$
+(number of columns), which is the natural limit for column selection.
+
+For **wide** matrices ($m < n$): the maximum rank is bounded by $m$
+(number of rows), since the column space is at most $m$-dimensional.
+The pivot selection correctly handles this — the column-pivoted QR of
+batch columns produces at most $m$ basis vectors.
+
+### Example
+
+```julia
+using ElemCo.DecompTools
+
+# Tall rectangular, low-rank matrix
+M = randn(150, 20) * randn(20, 80)  # rank ≈ 20
+
+# Low-rank factorization
+result = qr_pivoted_decompose(M, 1e-8)
+# result.Q: 150×20 orthonormal
+# result.R: 20×80
+# result.rank: 20
+
+# Approximate truncated SVD
+U, S, V = orthogonalize(result)
+# M ≈ U * Diagonal(S) * V'
+```
+
+---
+
 ## Comparison with Other Methods
 
-| Method | PSD required? | Cost | Handles complex symmetric? |
-|---|---|---|---|
-| Pivoted Cholesky | Yes | $O(n \, r^2)$ | Yes (but only PSD) |
-| Full eigendecomposition | No | $O(n^3)$ | No (for Hermitian) |
-| Full SVD / Takagi | No | $O(n^3)$ | Yes |
-| QR-pivoted decompose | No | $O(n \, r^2)$ | Yes |
-| **LDLT-pivoted decompose** | **No** | **$O(n \, r^2)$** | **Yes** |
+| Method | Symmetric? | PSD required? | Cost | Handles complex? |
+|---|---|---|---|---|
+| Pivoted Cholesky | Yes | Yes | $O(n \, r^2)$ | Hermitian PSD only |
+| Full eigendecomposition | Yes | No | $O(n^3)$ | Hermitian |
+| Full SVD / Takagi | Any | No | $O(n^3)$ | Yes |
+| **LDLT-pivoted symmetric** | **Yes** | **No** | **$O(n \, r^2)$** | **Complex symmetric** |
+| **QR-pivoted symmetric** | **Yes** | **No** | **$O(n \, r^2)$** | **Complex symmetric** |
+| **QR-pivoted general** | **Any** | **No** | **$O(m \, r^2)$** | **Yes** |
 
-Both the LDLT-pivoted and QR-pivoted methods combine the efficiency of
+The symmetric LDLT- and QR-pivoted methods combine the efficiency of
 pivoted Cholesky with the generality of eigendecomposition, handling
 indefinite and complex symmetric matrices at $O(n \, r^2)$ cost.
 LDLT is the faster of the two due to its cheaper per-pivot updates,
 while QR offers a more robust importance metric based on full column
-norms.
+norms.  The general QR-pivoted method (`qr_pivoted_decompose`) extends
+this to arbitrary $m \times n$ matrices — real or complex, symmetric
+or not — at the same asymptotic cost.
 
 ## Extension to Hermitian Matrices
 
