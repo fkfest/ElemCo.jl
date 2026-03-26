@@ -57,7 +57,7 @@ function calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
     save!(EC, "e_M", eps)
     if EC.options.wf.npositron > 0
       pfock = gen_pfock(EC)
-      save!(EC, "f_pp", pfock)
+      save!(EC, "fp_mm", pfock)
       sp_pos=1:1
       peps = diag(pfock)
       println("Occupied positron orbital energies: ", peps[sp_pos])
