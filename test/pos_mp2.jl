@@ -1,4 +1,5 @@
 using ElemCo
+@print_input
 
 geometry="bohr
             Li 0.000000 0.000000 0.000000
