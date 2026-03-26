@@ -17,7 +17,7 @@ export fetch_orbital_energies, fetch_orbital_occupations
 export load_wavefunction, save_wavefunction, copy_wavefunction
 export dump_amplitudes, has_amplitudes, has_dumpfile
 export fetch_restricted_amplitudes, fetch_unrestricted_amplitudes
-export transfer_orbitals_to_store!, OrbitalData, fetch_orbital_data
+export transfer_orbitals_to_store!, OrbitalData, rotate_orbitaldata!, fetch_orbital_data
 # Determinant I/O for CIPHI
 export dump_determinants, fetch_determinants, has_determinants
 export dump_determinants_multistate, state_filename
@@ -82,15 +82,18 @@ function open_dump(EC::ECInfo, intent; start::Bool=false)
 end
 
 """
-    open_dump(f::Function, EC::ECInfo, intent; start=false)
+    open_dump(f, EC::ECInfo, intent; start=false)
 
   Open the dump file for wavefunction, execute function `f` with the opened `TrexioFile`, and close the file.
 
 To be used as `open_dump(EC, intent) do io ... end`.
 `intent` can be "r", "w", or "u" (read, write, or update).
 If `start=true`, opens the start file (`wf.start`) instead.
+
+Note: `f` is typed as a type parameter rather than `::Function` to enable
+type inference of the return value through the closure.
 """
-function open_dump(f::Function, EC::ECInfo, intent; start::Bool=false)
+function open_dump(f::F, EC::ECInfo, intent; start::Bool=false) where {F}
   trexio = open_dump(EC, intent; start=start)
   try
     f(trexio)
@@ -109,7 +112,7 @@ function close_dump(trexio::TrexioFile)
 end
 
 """ 
-    dump_orbitals([io::TrexioFile,] EC::ECInfo, cMO::SpinMatrix; basis=nothing, type="HF", 
+    dump_orbitals([io::TrexioFile,] EC::ECInfo, cMO; basis=nothing, type="HF", 
                   energies=nothing, occupations=nothing, MO="mo")
 
   Dump orbitals to TREXIO file. 
@@ -117,26 +120,37 @@ end
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
 function dump_orbitals end
-function dump_orbitals(EC::ECInfo, cMO::SpinMatrix; 
+function dump_orbitals(EC::ECInfo, cMO; 
                        basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
   open_dump(EC, "w") do io
     dump_orbitals(io, EC, cMO; basis=basis, type=type, energies=energies, occupations=occupations, MO=MO)
   end
   return
 end
-function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO::SpinMatrix; 
+function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO; 
                        basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
   println("Dumping orbitals ...")
-  oenergies = prepare_orb_vectors(energies, is_restricted(cMO))
-  ooccupations = prepare_orb_vectors(occupations, is_restricted(cMO))
-  classes = prepare_orb_classes(EC, is_restricted(cMO))
+  ocoefs = prepare_orb_coefficients(cMO)
+  oenergies = prepare_orb_vectors(energies, is_restricted(ocoefs))
+  ooccupations = prepare_orb_vectors(occupations, is_restricted(ocoefs))
+  classes = prepare_orb_classes(EC, is_restricted(ocoefs))
   write_trexio_system(io, EC.system)
   if isnothing(basis)
     basis = generate_basis(EC, "ao")
   end
-  write_trexio_orbitals(io, cMO, basis; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
+  write_trexio_orbitals(io, ocoefs, basis; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
   return
 end
+
+"""
+    prepare_orb_coefficients(cMO)
+
+  Prepare orbital coefficients for dumping.
+"""
+prepare_orb_coefficients(cMO::SpinMatrix) = cMO
+prepare_orb_coefficients(cMO::AbstractMatrix) = SpinMatrix(cMO)
+prepare_orb_coefficients(cMO::Tuple{AbstractMatrix,AbstractMatrix}) = SpinMatrix(cMO[1], cMO[2])
+prepare_orb_coefficients(cMO) = error("Unsupported type for orbital coefficients: $(typeof(cMO))")
 
 """
     prepare_orb_vectors(input, restricted)
@@ -173,23 +187,21 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
   end
 end
 
-function prepare_orb_classes(EC::ECInfo, restricted)
-  if !haskey(EC.space, 'm')
-    setup_space_system!(EC)
+function prepare_orb_classes(EC::ECInfo, restricted; rotations=false)
+  if rotations && !isempty(EC.fd)
+    # we are storing rotations and have FCIDUMP, so use the fcidump full space
+    space_save, space_b4freeze = restore_fd_space!(EC)
+  else
+    space_save, space_b4freeze = restore_full_space!(EC)
   end
-  
-  # Save current space, apply freezing to determine core/deleted, then restore
-  space_save = save_space(EC)
-  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=false)
-  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=false)
-  
+
   # Now EC.space has the frozen configuration
   classa = fill("Deleted", length(EC.space['m']))
   classa[EC.space['o']] .= "Inactive"
   classa[EC.space['v']] .= "Virtual"
   classa[EC.space['a']] .= "Active"
-  # Mark frozen core: compare with saved space to find removed occupied orbitals
-  frozen_occ = setdiff(space_save['o'], EC.space['o'])
+  # Mark frozen core: compare with space before freezing to find removed occupied orbitals
+  frozen_occ = setdiff(space_b4freeze['o'], EC.space['o'])
   classa[frozen_occ] .= "Core"
     
   if restricted
@@ -199,8 +211,8 @@ function prepare_orb_classes(EC::ECInfo, restricted)
     classb[EC.space['O']] .= "Inactive"
     classb[EC.space['V']] .= "Virtual"
     classb[EC.space['a']] .= "Active"
-    # Mark frozen core: compare with saved space to find removed occupied orbitals
-    frozen_occ = setdiff(space_save['O'], EC.space['O'])
+    # Mark frozen core: compare with space before freezing to find removed occupied orbitals
+    frozen_occ = setdiff(space_b4freeze['O'], EC.space['O'])
     classb[frozen_occ] .= "Core"
   end
     
@@ -308,11 +320,43 @@ end
   Container for orbital data fetched from a dump file.
 """
 struct OrbitalData
-  cMO::SpinMatrix
+  cMO::SpinMatrix{Float64}
   mo_type::String
   basis::BasisSet
   energies::NTuple{2,Vector{Float64}}
   occupations::NTuple{2,Vector{Float64}}
+end
+
+OrbitalData(cMO::SpinMatrix{Float64}) = OrbitalData(cMO, "Rotation", BasisSet(), (Float64[], Float64[]), (Float64[], Float64[]))
+
+"""
+    rotate_orbitaldata!(orbital_data::OrbitalData, Rpq_a::Matrix{Float64}, Rpq_b::Union{Matrix{Float64}, Nothing}=nothing) -> OrbitalData
+  
+  Rotate the orbitals in `orbital_data` using the provided rotation matrices `Rpq_a` and `Rpq_b`.
+
+- If `Rpq_b` is `nothing` and the orbitals are restricted, only the alpha orbitals will be rotated, and the beta orbitals will follow the same rotation.
+- If `Rpq_b` is `nothing` but the orbitals are unrestricted, the same rotation will be applied to both alpha and beta orbitals.
+- If `Rpq_b` is provided and the orbitals are restricted, the beta orbitals will be rotated with `Rpq_b` if it is different from `Rpq_a`, effectively making the orbitals unrestricted.
+- If `Rpq_b` is provided and the orbitals are already unrestricted, the beta orbitals will be rotated with `Rpq_b`.
+"""
+function rotate_orbitaldata!(orbital_data::OrbitalData, Rpq_a::Matrix{Float64}, Rpq_b::Union{Matrix{Float64}, Nothing}=nothing)
+  if isnothing(Rpq_b) && is_restricted(orbital_data.cMO)
+    # beta orbitals will be rotated automatically with the same rotation as alpha
+  elseif isnothing(Rpq_b)
+    # If we have unrestricted orbitals but only one rotation, apply the same rotation to beta
+    orbital_data.cMO.β .= orbital_data.cMO.β * Rpq_a
+  elseif is_restricted(orbital_data.cMO)
+    # Make orbitals unrestricted if different rotations are provided
+    if Rpq_a !== Rpq_b
+      orbital_data.cMO.β = orbital_data.cMO.β * Rpq_b
+    end
+  else
+    # Unrestricted orbitals with separate rotations
+    orbital_data.cMO.β .= orbital_data.cMO.β * Rpq_b
+  end
+
+  orbital_data.cMO.α .= orbital_data.cMO.α * Rpq_a
+  return orbital_data
 end
 
 """
@@ -339,9 +383,7 @@ end
 
   Transfer orbitals from the dump file to an already opened store file.
 
-  If `orbital_data` is provided, uses it directly. Otherwise fetches from dump file.
-  
-  **Important**: When dump and store files are the same, `orbital_data` must be
+  **Important**: `orbital_data` must be
   pre-fetched before opening the store file to avoid reading from a truncated file.
   
   This properly handles cases where frozen orbitals or geometry differ
@@ -353,34 +395,11 @@ end
 # Arguments
 - `io_store`: An already opened TrexioFile for writing
 - `EC`: Electronic structure information object
-- `orbital_data`: Pre-fetched orbital data, or `nothing` to fetch from dump
+- `orbital_data`: Pre-fetched orbital data, or `nothing` to store unity rotation
 - `MO`: "mo" for molecular orbitals or "po" for positron orbitals
 """
 function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, 
-                                     orbital_data::Union{OrbitalData,Nothing}=nothing; MO="mo")
-  # If no orbital data was pre-fetched, this is a FCIDUMP-only case.
-  # Create a unity rotation for amplitude storage.
-  if isnothing(orbital_data)
-    println("No dump file found - storing unity rotation for FCIDUMP-only calculation ...")
-    norb = n_orbs(EC)
-    restricted = is_closed_shell(EC)
-    
-    # Create unity rotation matrix
-    unity = Matrix{Float64}(I, norb, norb)
-    if restricted
-      cRot = SpinMatrix(unity)
-    else
-      cRot = SpinMatrix(unity, copy(unity))
-    end
-    
-    # No classes for FCIDUMP-only
-    classes = (String[], String[])
-    
-    # Write unity rotation to store file
-    write_trexio_rotations(io_store, cRot; type="Rotation", classes=classes, MO=MO)
-    return
-  end
-  
+                                     orbital_data::OrbitalData; MO="mo")
   cMO = orbital_data.cMO
   mo_type = orbital_data.mo_type
   basis = orbital_data.basis
@@ -399,11 +418,7 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo,
   # Generate orbital classes from the system (not from dump file, 
   # because core orbital count may have changed)
   if !isempty(EC.system)
-    # Save current space, setup from system, generate classes, then restore
-    space_save = save_space(EC)
-    setup_space_system!(EC; verbose=false)
     classes = prepare_orb_classes(EC, is_restricted(cMO))
-    restore_space!(EC, space_save)
     # Use current basis for output (projection is done when retrieving amplitudes)
     basis = generate_basis(EC, "ao")
   else
@@ -416,6 +431,31 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo,
   write_trexio_system(io_store, EC.system)
   write_trexio_orbitals(io_store, cMO, basis; type=mo_type, classes=classes,
                         energies=energies, occupations=occupations, MO=MO)
+  return
+end
+
+function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, 
+                                     orbital_data::Nothing=nothing; MO="mo")
+  # If no orbital data was pre-fetched, this is a FCIDUMP-only case.
+  # Create a unity rotation for amplitude storage.
+  println("No dump file found - storing unity rotation for FCIDUMP-only calculation ...")
+  norb = n_orbs(EC)
+  restricted = is_closed_shell(EC)
+  
+  # Create unity rotation matrix
+  unity = Matrix{Float64}(I, norb, norb)
+  if restricted
+    cRot = SpinMatrix(unity)
+  else
+    cRot = SpinMatrix(unity, copy(unity))
+  end
+  
+  # No classes for FCIDUMP-only
+  classes = (String[], String[])
+  
+  # Write unity rotation to store file
+  write_trexio_rotations(io_store, cRot; type="Rotation", classes=classes, MO=MO)
+  return
 end
 
 """ 
@@ -439,7 +479,7 @@ function dump_rotations(io::TrexioFile, EC::ECInfo, cRot::SpinMatrix;
   println("Dumping orbital rotations ...")
   oenergies = prepare_orb_vectors(energies, is_restricted(cRot))
   ooccupations = prepare_orb_vectors(occupations, is_restricted(cRot))
-  classes = prepare_orb_classes(EC, is_restricted(cRot))
+  classes = prepare_orb_classes(EC, is_restricted(cRot); rotations=true)
   if biorthogonal && !is_biorthogonal(type)
     type *= " biorthogonal"
   end
@@ -709,7 +749,7 @@ function save_wavefunction(EC::ECInfo, wf::AbstractDict; state::Int=1)
 end
 
 """
-    copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start=false, state=0)
+    copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start=false, state=0, reverse=false)
 
   Copy the wavefunction dump file to `tofile`. If `tofile` is not given, copy to the current dump file for writing.
 
@@ -718,6 +758,7 @@ end
 - `start::Bool=false`: If true, copy from `wf.start` file instead of `wf.dump`.
 - `state::Int=0`: State number for determinant files. If 0, copies the main dump file.
                    If >0, copies the state-specific determinant file (e.g., `file_state2.h5`).
+- `reverse::Bool=false`: If true, copy from `tofile` to the dump file instead of the other way around.
 
   Note: This does not check the contents of the files.
 
@@ -733,17 +774,12 @@ copy_wavefunction(EC, "backup.h5"; start=true)
 copy_wavefunction(EC, "state2_backup.h5"; state=2)
 ```
 """
-function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=false, state::Int=0)
+function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=false, state::Int=0, reverse::Bool=false)
   if state > 0
     # Copy state-specific determinant file
     base_filename, _ = dumpfile(EC, "r"; start=start)
     from_filename = state_filename(base_filename, state)
     from_fullpath = joinpath(EC.scr, from_filename)
-    
-    if !isfile(from_fullpath)
-      @warn "State file $from_filename not found, nothing to copy."
-      return
-    end
     
     if tofile == ""
       # Default: copy to store location with state suffix
@@ -757,7 +793,12 @@ function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=fa
     from_fullpath = dumpfile(EC, "r"; start=start)[2]
     to_fullpath = tofile == "" ? dumpfile(EC, "w")[2] : tofile
   end
-  
+  if reverse
+    from_fullpath, to_fullpath = to_fullpath, from_fullpath
+  end
+  if !isfile(from_fullpath)
+    error("Source wavefunction file $from_fullpath not found, nothing to copy.")
+  end
   cp(from_fullpath, to_fullpath; force=true)
   return
 end

@@ -12,7 +12,7 @@ export devel, version, git_hash
 Return true if the version is a development version.
 """
 devel() = true
-const __VERSION__ = "0.14.1" * (devel() ? "+" : "")
+const __VERSION__ = "0.15.0" * (devel() ? "+" : "")
 
 
 """

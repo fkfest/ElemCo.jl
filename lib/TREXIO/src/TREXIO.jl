@@ -77,10 +77,36 @@ using Dates
     TREXIO_INVALID_ARG_13	    = 43	# Invalid argument 13
     TREXIO_INVALID_ARG_14	    = 44	# Invalid argument 14
     TREXIO_CORRUPTION_ATTEMPT	= 45 	# File offset is wrong, corruption risk
+    TREXIO_GROUP_ERROR          = 46    # Error creating or accessing group
 end
 
 export TrexioFile, TrexioExitCode
 export trexio_open, trexio_close
+export trexio_check_read_status, trexio_check_write_status
+
+"""
+    trexio_check_read_status(status::TrexioExitCode, what::String="")
+
+Check TREXIO read status and throw error if not successful.
+`what` is an optional description of the data being read.
+"""
+function trexio_check_read_status(status::TrexioExitCode, what::String="")
+  if status != TREXIO_SUCCESS
+    error("TREXIO error: Failed to read $what from TREXIO with status $(string(status))")
+  end
+end
+
+"""
+    trexio_check_write_status(status::TrexioExitCode, what::String="")
+
+Check TREXIO write status and throw error if not successful.
+`what` is an optional description of the data being written.
+"""
+function trexio_check_write_status(status::TrexioExitCode, what::String="")
+  if status != TREXIO_SUCCESS
+    error("TREXIO error: Failed to write $what to TREXIO with status $(string(status))")
+  end
+end
 
 """
     TrexioFile
@@ -342,320 +368,15 @@ end
 
 const SCALAR = String[]
 
-# Metadata fields (stored in metadata group at root level)
-const TREXIO_METADATA_FIELDS = [
-    TrexioField("metadata", "code_num", Int, SCALAR, "number of codes used to produce the file"),
-    TrexioField("metadata", "code", String, ["metadata.code_num"], "names of the codes used"),
-    TrexioField("metadata", "author_num", Int, SCALAR, "number of authors of the file"),
-    TrexioField("metadata", "author", String, ["metadata.author_num"], "names of the authors of the file"),
-    TrexioField("metadata", "package_version", String, SCALAR, "TREXIO version used to produce the file"),
-    TrexioField("metadata", "description", String, SCALAR, "text describing the content of file"),
-    TrexioField("metadata", "unsafe", Int, SCALAR, "indicates whether the file has been previously opened with 'u' mode; 1: true, 0: false"),
-]
+# Standard TREXIO fields (auto-generated from trex.org)
+include("trexio_standard_fields.jl")
+# Non-standard field extensions (violate the TREXIO standard)
+include("trexio_nonstandard_fields.jl")
 
-# 2. System fields
-## 2.1 Nucleus (nucleus group)
-const TREXIO_NUCLEUS_FIELDS = [
-    TrexioField("nucleus", "num", Int, SCALAR, "number of nuclei"),
-    TrexioField("nucleus", "charge", Float64, ["nucleus.num"], "charges of the nuclei"),
-    TrexioField("nucleus", "coord", Float64, ["3", "nucleus.num"], "coordinates of the atoms"),
-    TrexioField("nucleus", "label", String, ["nucleus.num"], "atom labels"),
-    TrexioField("nucleus", "point_group", String, SCALAR, "symmetry point group"),
-    TrexioField("nucleus", "repulsion", Float64, SCALAR, "nuclear repulsion energy"),
-]
-
-## 2.2 Cell (cell group)
-const TREXIO_CELL_FIELDS = [
-    TrexioField("cell", "a", Float64, ["3"], "first real space lattice vector"),
-    TrexioField("cell", "b", Float64, ["3"], "second real space lattice vector"),
-    TrexioField("cell", "c", Float64, ["3"], "third real space lattice vector"),
-    TrexioField("cell", "g_a", Float64, ["3"], "first reciprocal space lattice vector"),
-    TrexioField("cell", "g_b", Float64, ["3"], "second reciprocal space lattice vector"),
-    TrexioField("cell", "g_c", Float64, ["3"], "third reciprocal space lattice vector"),
-    TrexioField("cell", "two_pi", Int, SCALAR, "0 or 1; if two_pi=1, 2π is included in the reciprocal vectors"),
-]
-
-## 2.3 Periodic boundary calculations (pbc group)
-const TREXIO_PBC_FIELDS = [
-    TrexioField("pbc", "periodic", Int, SCALAR, "1: true or 0: false"),
-    TrexioField("pbc", "k_point_num", Int, SCALAR, "number of k-points"),
-    TrexioField("pbc", "k_point", Float64, ["3", "pbc.k_point_num"], "k-point sampling"),
-    TrexioField("pbc", "k_point_weight", Float64, ["pbc.k_point_num"], "k-point weights"),
-    TrexioField("pbc", "madelung", Float64, SCALAR, "Madelung correction of the Ewald probe charge method"),
-]
-
-## 2.4 Electron (electron group)
-const TREXIO_ELECTRON_FIELDS = [
-    TrexioField("electron", "num", Int, SCALAR, "number of electrons"),
-    TrexioField("electron", "up_num", Int, SCALAR, "number of spin-up electrons"),
-    TrexioField("electron", "dn_num", Int, SCALAR, "number of spin-down electrons"),
-]
-
-## 2.5 Ground or excited states (state group)
-const TREXIO_STATE_FIELDS = [
-    TrexioField("state", "num", Int, SCALAR, "number of states (including the ground state)"),
-    TrexioField("state", "id", Int, SCALAR, "index of the current state (0 is ground state)"),
-    TrexioField("state", "energy", Float64, SCALAR, "energy of the current state"),
-    TrexioField("state", "current_label", String, SCALAR, "label of the current state"),
-    TrexioField("state", "label", String, ["state.num"], "labels of all states"),
-    TrexioField("state", "file_name", String, ["state.num"], "names of the TREXIO files linked to the current one (i.e. containing data for other states)"),
-]
-
-## 3.1 Basis set (basis group)
-const TREXIO_BASIS_FIELDS = [
-    TrexioField("basis", "type", String, SCALAR, "type of basis set: \"Gaussian\", \"Slater\", \"Numerical\" or \"PW\" for plane waves"),
-    TrexioField("basis", "prim_num", Int, SCALAR, "total number of primitives"),
-    TrexioField("basis", "shell_num", Int, SCALAR, "total number of shells"),
-    TrexioField("basis", "nao_grid_num", Int, SCALAR, "total number of grid points for numerical orbitals"),
-    TrexioField("basis", "interp_coeff_cnt", Int, SCALAR, "number of coefficients for the numerical orbital interpolator"),
-    TrexioField("basis", "nucleus_index", Int, ["basis.shell_num"], "one-to-one correspondence between shells and atomic indices"),
-    TrexioField("basis", "shell_ang_mom", Int, ["basis.shell_num"], "one-to-one correspondence between shells and angular momenta"),
-    TrexioField("basis", "shell_factor", Float64, ["basis.shell_num"], "normalization factor for each shell (N_s)"),
-    TrexioField("basis", "r_power", Int, ["basis.shell_num"], "power to which r is raised (N_s)"),
-    TrexioField("basis", "nao_grid_start", Int, ["basis.shell_num"], "index of the first data point for a given numerical orbital"),
-    TrexioField("basis", "nao_grid_size", Int, ["basis.shell_num"], "number of data points per numerical orbital"),
-    TrexioField("basis", "shell_index", Int, ["basis.prim_num"], "one-to-one correspondence between primitives and shell index"),
-    TrexioField("basis", "exponent", Float64, ["basis.prim_num"], "exponents of the primitives (\\gamma_ks)"),
-    TrexioField("basis", "exponent_im", Float64, ["basis.prim_num"], "imaginary part of the exponents of the primitives (\\gamma_ks)"),
-    TrexioField("basis", "coefficient", Float64, ["basis.prim_num"], "coefficients of the primitives (a_ks)"),
-    TrexioField("basis", "coefficient_im", Float64, ["basis.prim_num"], "imaginary part of the coefficients of the primitives (a_ks)"),
-    TrexioField("basis", "oscillation_arg", Float64, ["basis.prim_num"], "additional argument to have oscillating orbitals (\\beta_ks)"),
-    TrexioField("basis", "oscillation_kind", String, SCALAR, "kind of oscillating function: \"Cos1\" or \"Cos2\""),
-    TrexioField("basis", "prim_factor", Float64, ["basis.prim_num"], "normalization coefficients for the primitives (f_ks)"),
-    TrexioField("basis", "e_cut", Float64, SCALAR, "energy cut-off for plane-wave calculations"),
-    TrexioField("basis", "nao_grid_radius", Float64, ["basis.nao_grid_num"], "radii of grid points for numerical orbitals"),
-    TrexioField("basis", "nao_grid_phi", Float64, ["basis.nao_grid_num"], "wave function values for numerical orbitals"),
-    TrexioField("basis", "nao_grid_grad", Float64, ["basis.nao_grid_num"], "radial gradient of numerical orbitals"),
-    TrexioField("basis", "nao_grid_lap", Float64, ["basis.nao_grid_num"], "Laplacian of numerical orbitals"),
-    TrexioField("basis", "interpolator_kind", String, SCALAR, "Kind of spline, e.g. \"Polynomial\""),
-    TrexioField("basis", "interpolator_phi", Float64, ["basis.interp_coeff_cnt", "basis.nao_grid_num"], "coefficients for numerical orbital interpolation function"),
-    TrexioField("basis", "interpolator_grad", Float64, ["basis.interp_coeff_cnt", "basis.nao_grid_num"], "coefficients for numerical orbital gradient interpolation function"),
-    TrexioField("basis", "interpolator_lap", Float64, ["basis.interp_coeff_cnt", "basis.nao_grid_num"], "coefficients for numerical orbital laplacian interpolation function"),
-    # non-standard fields
-    TrexioField("basis", "name", String, SCALAR, "name of the basis set", violator=true),
-]
-
-## 3.2 Effective core potentials (ecp group)
-const TREXIO_ECP_FIELDS = [
-    TrexioField("ecp", "max_ang_mom_plus_1", Int, ["nucleus.num"], "l_max+1, one higher than the max angular momentum in the removed core orbitals"),
-    TrexioField("ecp", "z_core", Int, ["nucleus.num"], "number of core electrons to remove per atom"),
-    TrexioField("ecp", "num", Int, SCALAR, "total number of ECP functions for all atoms and all values of l"),
-    TrexioField("ecp", "ang_mom", Int, ["ecp.num"], "one-to-one correspondence between ECP items and the angular momentum l"),
-    TrexioField("ecp", "nucleus_index", Int, ["ecp.num"], "one-to-one correspondence between ECP items and the atom index"),
-    TrexioField("ecp", "exponent", Float64, ["ecp.num"], "all ECP exponents α_A_ql"),
-    TrexioField("ecp", "coefficient", Float64, ["ecp.num"], "all ECP coefficients β_A_ql"),
-    TrexioField("ecp", "power", Int, ["ecp.num"], "all ECP powers n_A_ql"),
-]
-
-## 3.3 Numerical integration grid (grid group)
-const TREXIO_GRID_FIELDS = [
-    TrexioField("grid", "description", String, SCALAR, "details about the used quadratures can go here"),
-    TrexioField("grid", "rad_precision", Float64, SCALAR, "radial precision parameter (not used in some schemes like Krack-Köster)"),
-    TrexioField("grid", "num", Int, SCALAR, "number of grid points"),
-    TrexioField("grid", "max_ang_num", Int, SCALAR, "maximum number of angular grid points (for pruning)"),
-    TrexioField("grid", "min_ang_num", Int, SCALAR, "minimum number of angular grid points (for pruning)"),
-    TrexioField("grid", "coord", Float64, ["grid.num"], "discretized coordinate space"),
-    TrexioField("grid", "weight", Float64, ["grid.num"], "grid weights according to a given partitioning (e.g. Becke)"),
-    TrexioField("grid", "ang_num", Int, SCALAR, "number of angular integration points (if used)"),
-    TrexioField("grid", "ang_coord", Float64, ["grid.ang_num"], "discretized angular space (if used)"),
-    TrexioField("grid", "ang_weight", Float64, ["grid.ang_num"], "angular grid weights (if used)"),
-    TrexioField("grid", "rad_num", Int, SCALAR, "number of radial integration points (if used)"),
-    TrexioField("grid", "rad_coord", Float64, ["grid.rad_num"], "discretized radial space (if used)"),
-    TrexioField("grid", "rad_weight", Float64, ["grid.rad_num"], "radial grid weights (if used)"),
-]
-
-# 4. Orbitals
-## 4.1 Atomic orbitals (ao group)
-const TREXIO_AO_FIELDS = [
-    TrexioField("ao", "cartesian", Int, SCALAR, "1: true, 0: false"),
-    TrexioField("ao", "num", Int, SCALAR, "total number of atomic orbitals"),
-    TrexioField("ao", "shell", Int, ["ao.num"], "basis set shell for each AO"),
-    TrexioField("ao", "normalization", Float64, ["ao.num"], "normalization factor N'_i"),
-]
-
-## 4.1.1 One-electron integrals (ao_1e_int group)
-const TREXIO_AO_1E_INT_FIELDS = [
-    TrexioField("ao_1e_int", "overlap", Float64, ["ao.num", "ao.num"], "overlap integrals ⟨p|q⟩"),
-    TrexioField("ao_1e_int", "kinetic", Float64, ["ao.num", "ao.num"], "kinetic energy integrals ⟨p|T|q⟩"),
-    TrexioField("ao_1e_int", "potential_n_e", Float64, ["ao.num", "ao.num"], "electron-nucleus potential integrals ⟨p|V_ne|q⟩"),
-    TrexioField("ao_1e_int", "ecp", Float64, ["ao.num", "ao.num"], "effective core potential integrals ⟨p|V_ECP|q⟩"),
-    TrexioField("ao_1e_int", "core_hamiltonian", Float64, ["ao.num", "ao.num"], "core Hamiltonian integrals ⟨p|h|q⟩"),
-    TrexioField("ao_1e_int", "dipole_x", Float64, ["ao.num", "ao.num"], "dipole x component integrals ⟨p|μ_x|q⟩"),
-    TrexioField("ao_1e_int", "dipole_y", Float64, ["ao.num", "ao.num"], "dipole y component integrals ⟨p|μ_y|q⟩"),
-    TrexioField("ao_1e_int", "dipole_z", Float64, ["ao.num", "ao.num"], "dipole z component integrals ⟨p|μ_z|q⟩"),
-    TrexioField("ao_1e_int", "overlap_im", Float64, ["ao.num", "ao.num"], "overlap integrals ⟨p|q⟩ (imaginary part)"),
-    TrexioField("ao_1e_int", "kinetic_im", Float64, ["ao.num", "ao.num"], "kinetic energy integrals ⟨p|T|q⟩ (imaginary part)"),
-    TrexioField("ao_1e_int", "potential_n_e_im", Float64, ["ao.num", "ao.num"], "electron-nucleus potential integrals ⟨p|V_ne|q⟩ (imaginary part)"),
-    TrexioField("ao_1e_int", "ecp_im", Float64, ["ao.num", "ao.num"], "effective core potential integrals ⟨p|V_ECP|q⟩ (imaginary part)"),
-    TrexioField("ao_1e_int", "core_hamiltonian_im", Float64, ["ao.num", "ao.num"], "core Hamiltonian integrals ⟨p|h|q⟩ (imaginary part)"),
-    TrexioField("ao_1e_int", "dipole_x_im", Float64, ["ao.num", "ao.num"], "dipole x component integrals ⟨p|μ_x|q⟩ (imaginary part)"),
-    TrexioField("ao_1e_int", "dipole_y_im", Float64, ["ao.num", "ao.num"], "dipole y component integrals ⟨p|μ_y|q⟩ (imaginary part)"),
-    TrexioField("ao_1e_int", "dipole_z_im", Float64, ["ao.num", "ao.num"], "dipole z component integrals ⟨p|μ_z|q⟩ (imaginary part)"),
-]
-
-## 4.1.2 Two-electron integrals (ao_2e_int group)
-const TREXIO_AO_2E_INT_FIELDS = [
-    TrexioField("ao_2e_int", "eri", Float64, ["ao.num", "ao.num", "ao.num", "ao.num"], "electron repulsion integrals ⟨pq|rs⟩", sparse=true),
-    TrexioField("ao_2e_int", "eri_lr", Float64, ["ao.num", "ao.num", "ao.num", "ao.num"], "long-range electron repulsion integrals", sparse=true),
-    TrexioField("ao_2e_int", "eri_cholesky_num", Int, SCALAR, "number of Cholesky vectors for ERI"),
-    TrexioField("ao_2e_int", "eri_cholesky", Float64, ["ao.num", "ao.num", "ao_2e_int.eri_cholesky_num"], "Cholesky decomposition of the ERI", sparse=true),
-    TrexioField("ao_2e_int", "eri_lr_cholesky_num", Int, SCALAR, "number of Cholesky vectors for long range ERI"),
-    TrexioField("ao_2e_int", "eri_lr_cholesky", Float64, ["ao.num", "ao.num", "ao_2e_int.eri_lr_cholesky_num"], "Cholesky decomposition of the long range ERI", sparse=true),
-]
-
-## 4.2 Molecular orbitals (mo group)
-const TREXIO_MO_FIELDS = [
-    TrexioField("mo", "type", String, SCALAR, "free text to identify the set of MOs (HF, Natural, Local, CASSCF, etc)"),
-    TrexioField("mo", "num", Int, SCALAR, "number of MOs"),
-    TrexioField("mo", "coefficient", Float64, ["ao.num", "mo.num"], "MO coefficients"),
-    TrexioField("mo", "coefficient_im", Float64, ["ao.num", "mo.num"], "MO coefficients (imaginary part)"),
-    TrexioField("mo", "class", String, ["mo.num"], "choose among: Core, Inactive, Active, Virtual, Deleted"),
-    TrexioField("mo", "symmetry", String, ["mo.num"], "symmetry in the point group"),
-    TrexioField("mo", "occupation", Float64, ["mo.num"], "occupation number"),
-    TrexioField("mo", "energy", Float64, ["mo.num"], "for canonical MOs, corresponding eigenvalue"),
-    TrexioField("mo", "spin", Int, ["mo.num"], "for UHF wave functions, 0 is ↑ and 1 is ↓"),
-    TrexioField("mo", "k_point", Int, ["mo.num"], "for periodic calculations, the k point to which each MO belongs"),
-]
-
-## 4.2a Positron orbitals (po group) - non-standard, violator
-const TREXIO_PO_FIELDS = [
-    TrexioField("po", "type", String, SCALAR, "free text to identify the set of POs (HF, Natural, Local, CASSCF, etc)", violator=true),
-    TrexioField("po", "num", Int, SCALAR, "number of POs", violator=true),
-    TrexioField("po", "coefficient", Float64, ["ao.num", "po.num"], "PO coefficients", violator=true),
-    TrexioField("po", "coefficient_im", Float64, ["ao.num", "po.num"], "PO coefficients (imaginary part)", violator=true),
-    TrexioField("po", "class", String, ["po.num"], "choose among: Core, Inactive, Active, Virtual, Deleted", violator=true),
-    TrexioField("po", "symmetry", String, ["po.num"], "symmetry in the point group", violator=true),
-    TrexioField("po", "occupation", Float64, ["po.num"], "occupation number", violator=true),
-    TrexioField("po", "energy", Float64, ["po.num"], "for canonical POs, corresponding eigenvalue", violator=true),
-    TrexioField("po", "spin", Int, ["po.num"], "for UHF wave functions, 0 is ↑ and 1 is ↓", violator=true),
-    TrexioField("po", "k_point", Int, ["po.num"], "for periodic calculations, the k point to which each PO belongs", violator=true),
-]
-
-## 4.2.1 One-electron integrals (mo_1e_int group)
-const TREXIO_MO_1E_INT_FIELDS = [
-    TrexioField("mo_1e_int", "overlap", Float64, ["mo.num", "mo.num"], "overlap integrals ⟨p|q⟩"),
-    TrexioField("mo_1e_int", "kinetic", Float64, ["mo.num", "mo.num"], "kinetic energy integrals ⟨p|T|q⟩"),
-    TrexioField("mo_1e_int", "potential_n_e", Float64, ["mo.num", "mo.num"], "electron-nucleus potential integrals ⟨p|V_ne|q⟩"),
-    TrexioField("mo_1e_int", "ecp", Float64, ["mo.num", "mo.num"], "effective core potential integrals ⟨p|V_ECP|q⟩"),
-    TrexioField("mo_1e_int", "core_hamiltonian", Float64, ["mo.num", "mo.num"], "core Hamiltonian integrals ⟨p|h|q⟩"),
-    TrexioField("mo_1e_int", "dipole_x", Float64, ["mo.num", "mo.num"], "dipole x component integrals ⟨p|μ_x|q⟩"),
-    TrexioField("mo_1e_int", "dipole_y", Float64, ["mo.num", "mo.num"], "dipole y component integrals ⟨p|μ_y|q⟩"),
-    TrexioField("mo_1e_int", "dipole_z", Float64, ["mo.num", "mo.num"], "dipole z component integrals ⟨p|μ_z|q⟩"),
-    TrexioField("mo_1e_int", "overlap_im", Float64, ["mo.num", "mo.num"], "overlap integrals ⟨p|q⟩ (imaginary part)"),
-    TrexioField("mo_1e_int", "kinetic_im", Float64, ["mo.num", "mo.num"], "kinetic energy integrals ⟨p|T|q⟩ (imaginary part)"),
-    TrexioField("mo_1e_int", "potential_n_e_im", Float64, ["mo.num", "mo.num"], "electron-nucleus potential integrals ⟨p|V_ne|q⟩ (imaginary part)"),
-    TrexioField("mo_1e_int", "ecp_im", Float64, ["mo.num", "mo.num"], "effective core potential integrals ⟨p|V_ECP|q⟩ (imaginary part)"),
-    TrexioField("mo_1e_int", "core_hamiltonian_im", Float64, ["mo.num", "mo.num"], "core Hamiltonian integrals ⟨p|h|q⟩ (imaginary part)"),
-    TrexioField("mo_1e_int", "dipole_x_im", Float64, ["mo.num", "mo.num"], "dipole x component integrals ⟨p|μ_x|q⟩ (imaginary part)"),
-    TrexioField("mo_1e_int", "dipole_y_im", Float64, ["mo.num", "mo.num"], "dipole y component integrals ⟨p|μ_y|q⟩ (imaginary part)"),
-    TrexioField("mo_1e_int", "dipole_z_im", Float64, ["mo.num", "mo.num"], "dipole z component integrals ⟨p|μ_z|q⟩ (imaginary part)"),
-]
-
-## 4.2.2 Two-electron integrals (mo_2e_int group)
-const TREXIO_MO_2E_INT_FIELDS = [
-    TrexioField("mo_2e_int", "eri", Float64, ["mo.num", "mo.num", "mo.num", "mo.num"], "electron repulsion integrals ⟨pq|rs⟩", sparse=true),
-    TrexioField("mo_2e_int", "eri_lr", Float64, ["mo.num", "mo.num", "mo.num", "mo.num"], "long-range electron repulsion integrals", sparse=true),
-    TrexioField("mo_2e_int", "eri_cholesky_num", Int, SCALAR, "number of Cholesky vectors for ERI"),
-    TrexioField("mo_2e_int", "eri_cholesky", Float64, ["mo.num", "mo.num", "mo_2e_int.eri_cholesky_num"], "Cholesky decomposition of the ERI", sparse=true),
-    TrexioField("mo_2e_int", "eri_lr_cholesky_num", Int, SCALAR, "number of Cholesky vectors for long range ERI"),
-    TrexioField("mo_2e_int", "eri_lr_cholesky", Float64, ["mo.num", "mo.num", "mo_2e_int.eri_lr_cholesky_num"], "Cholesky decomposition of the long range ERI", sparse=true),
-]
-
-# 5. Multi-determinant information
-## 5.1 Slater determinants (determinant group)
-const TREXIO_DETERMINANT_FIELDS = [
-    TrexioField("determinant", "num", Int, SCALAR, "number of determinants"),
-    TrexioField("determinant", "list", Int, ["determinant.num"], "list of determinants as integer bit fields"),
-    TrexioField("determinant", "coefficient", Float64, ["determinant.num"], "coefficients of the determinants from the CI expansion"),
-    # Extended fields for separate alpha/beta storage with flexible n_int
-    TrexioField("determinant", "n_int", Int, SCALAR, "number of 64-bit integers per spin pattern (ceil(mo.num/64))", violator=true),
-    TrexioField("determinant", "alpha", Int, ["determinant.n_int", "determinant.num"], "alpha spin orbital patterns as 64-bit integer bit fields", violator=true),
-    TrexioField("determinant", "beta", Int, ["determinant.n_int", "determinant.num"], "beta spin orbital patterns as 64-bit integer bit fields", violator=true),
-]
-
-## 5.2 Configuration state functions (csf group)
-const TREXIO_CSF_FIELDS = [
-    TrexioField("csf", "num", Int, SCALAR, "number of CSFs"),
-    TrexioField("csf", "coefficient", Float64, ["csf.num"], "coefficients of the CSF expansion"),
-    TrexioField("csf", "det_coefficient", Float64, ["determinant.num", "csf.num"], "projection on the determinant basis", sparse=true),
-]
-
-## 5.3 Amplitudes (amplitude group)
-const TREXIO_AMPLITUDE_FIELDS = [
-    TrexioField("amplitude", "single", Float64, fill("mo.num", 2), "single excitation amplitudes", sparse=true),
-    TrexioField("amplitude", "single_exp", Float64, fill("mo.num", 2), "exponentialized single excitation amplitudes", sparse=true),
-    TrexioField("amplitude", "double", Float64, fill("mo.num", 4), "double excitation amplitudes", sparse=true),
-    TrexioField("amplitude", "double_exp", Float64, fill("mo.num", 4), "exponentialized double excitation amplitudes", sparse=true),
-    TrexioField("amplitude", "triple", Float64, fill("mo.num", 6), "triple excitation amplitudes", sparse=true),
-    TrexioField("amplitude", "triple_exp", Float64, fill("mo.num", 6), "exponentialized triple excitation amplitudes", sparse=true),
-    TrexioField("amplitude", "quadruple", Float64, fill("mo.num", 8), "quadruple excitation amplitudes", sparse=true),
-    TrexioField("amplitude", "quadruple_exp", Float64, fill("mo.num", 8), "exponentialized quadruple excitation amplitudes", sparse=true),
-    # non-standard fields
-    TrexioField("amplitude", "single_dense", Float64, ["v", "o"], "single excitation amplitudes (dense)", violator=true),
-    TrexioField("amplitude", "double_dense", Float64, ["v", "v", "o(o+1)/2"], "double excitation amplitudes (dense)", violator=true),
-    TrexioField("amplitude", "single_up_dense", Float64, ["v", "o"], "↑-spin component of the single excitation amplitudes (dense)", violator=true),
-    TrexioField("amplitude", "single_dn_dense", Float64, ["V", "O"], "↓-spin component of the single excitation amplitudes (dense)", violator=true),
-    TrexioField("amplitude", "double_upup_dense", Float64, ["v(v-1)/2", "o(o-1)/2"], "↑↑-spin component of the double excitation amplitudes (dense)", violator=true),
-    TrexioField("amplitude", "double_dndn_dense", Float64, ["V(V-1)/2", "O(O-1)/2"], "↓↓-spin component of the double excitation amplitudes (dense)", violator=true),
-    TrexioField("amplitude", "double_updn_dense", Float64, ["v", "V", "o", "O"], "↑↓-spin component of the double excitation amplitudes (dense)", violator=true),
-]
-
-## 5.4 Reduced density matrices (rdm group)
-const TREXIO_RDM_FIELDS = [
-    TrexioField("rdm", "1e", Float64, fill("mo.num", 2), "one body density matrix"),
-    TrexioField("rdm", "1e_up", Float64, fill("mo.num", 2), "↑-spin component of the one body density matrix"),
-    TrexioField("rdm", "1e_dn", Float64, fill("mo.num", 2), "↓-spin component of the one body density matrix"),
-    TrexioField("rdm", "1e_transition", Float64, ["mo.num", "mo.num", "state.num", "state.num"], "one-particle transition density matrices"),
-    TrexioField("rdm", "2e", Float64, fill("mo.num", 4), "two-body reduced density matrix (spin trace)", sparse=true),
-    TrexioField("rdm", "2e_upup", Float64, fill("mo.num", 4), "↑↑ component of the two-body reduced density matrix", sparse=true),
-    TrexioField("rdm", "2e_dndn", Float64, fill("mo.num", 4), "↓↓ component of the two-body reduced density matrix", sparse=true),
-    TrexioField("rdm", "2e_updn", Float64, fill("mo.num", 4), "↑↓ component of the two-body reduced density matrix", sparse=true),
-    TrexioField("rdm", "2e_transition", Float64, vcat(fill("mo.num", 4), fill("state.num", 2)), "two-particle transition density matrices", sparse=true),
-    TrexioField("rdm", "2e_cholesky_num", Int, SCALAR, "number of Cholesky vectors"),
-    TrexioField("rdm", "2e_cholesky", Float64, ["mo.num", "mo.num", "rdm.2e_cholesky_num"], "Cholesky decomposition of the two-body RDM (spin trace)", sparse=true),
-    TrexioField("rdm", "2e_upup_cholesky_num", Int, SCALAR, "number of Cholesky vectors"),
-    TrexioField("rdm", "2e_upup_cholesky", Float64, ["mo.num", "mo.num", "rdm.2e_upup_cholesky_num"], "Cholesky decomposition of the two-body RDM (↑↑)", sparse=true),
-    TrexioField("rdm", "2e_dndn_cholesky_num", Int, SCALAR, "number of Cholesky vectors"),
-    TrexioField("rdm", "2e_dndn_cholesky", Float64, ["mo.num", "mo.num", "rdm.2e_dndn_cholesky_num"], "Cholesky decomposition of the two-body RDM (↓↓)", sparse=true),
-    TrexioField("rdm", "2e_updn_cholesky_num", Int, SCALAR, "number of Cholesky vectors"),
-    TrexioField("rdm", "2e_updn_cholesky", Float64, ["mo.num", "mo.num", "rdm.2e_updn_cholesky_num"], "Cholesky decomposition of the two-body RDM (↑↓)", sparse=true),
-]
-
-# 6. Correlation factors
-## 6.1 Jastrow factor (jastrow group)
-const TREXIO_JASTROW_FIELDS = [
-    TrexioField("jastrow", "type", String, SCALAR, "type of Jastrow factor: CHAMP or Mu"),
-    TrexioField("jastrow", "en_num", Int, SCALAR, "number of Electron-nucleus parameters"),
-    TrexioField("jastrow", "ee_num", Int, SCALAR, "number of Electron-electron parameters"),
-    TrexioField("jastrow", "een_num", Int, SCALAR, "number of Electron-electron-nucleus parameters"),
-    TrexioField("jastrow", "en", Float64, ["jastrow.en_num"], "electron-nucleus parameters"),
-    TrexioField("jastrow", "ee", Float64, ["jastrow.ee_num"], "electron-electron parameters"),
-    TrexioField("jastrow", "een", Float64, ["jastrow.een_num"], "electron-electron-nucleus parameters"),
-    TrexioField("jastrow", "en_nucleus", Int, ["jastrow.en_num"], "nucleus relative to the eN parameter"),
-    TrexioField("jastrow", "een_nucleus", Int, ["jastrow.een_num"], "nucleus relative to the eeN parameter"),
-    TrexioField("jastrow", "ee_scaling", Float64, SCALAR, "κ_ee value in CHAMP Jastrow for electron-electron distances"),
-    TrexioField("jastrow", "en_scaling", Float64, ["nucleus.num"], "κ_α value in CHAMP Jastrow for electron-nucleus distances"),
-]
-
-# 7. Quantum Monte Carlo data (qmc group)
-const TREXIO_QMC_FIELDS = [
-    TrexioField("qmc", "num", Int, SCALAR, "number of 3N-dimensional points"),
-    TrexioField("qmc", "point", Float64, ["3", "electron.num", "qmc.num"], "3N-dimensional points"),
-    TrexioField("qmc", "psi", Float64, ["qmc.num"], "wave function evaluated at the points"),
-    TrexioField("qmc", "e_loc", Float64, ["qmc.num"], "local energy evaluated at the points"),
-]
-
-# Combine all field definitions
+# Combine all field definitions (standard + non-standard extensions)
 const ALL_TREXIO_FIELDS = vcat(
-    TREXIO_METADATA_FIELDS, TREXIO_NUCLEUS_FIELDS, TREXIO_CELL_FIELDS,
-    TREXIO_PBC_FIELDS, TREXIO_ELECTRON_FIELDS, TREXIO_STATE_FIELDS,
-    TREXIO_BASIS_FIELDS, TREXIO_ECP_FIELDS, TREXIO_GRID_FIELDS,
-    TREXIO_AO_FIELDS, TREXIO_AO_1E_INT_FIELDS, TREXIO_AO_2E_INT_FIELDS,
-    TREXIO_MO_FIELDS, TREXIO_MO_1E_INT_FIELDS, TREXIO_MO_2E_INT_FIELDS,
-    TREXIO_DETERMINANT_FIELDS, TREXIO_CSF_FIELDS, TREXIO_AMPLITUDE_FIELDS,
-    TREXIO_RDM_FIELDS, TREXIO_JASTROW_FIELDS, TREXIO_QMC_FIELDS,
-    # non-standard fields
-    TREXIO_PO_FIELDS,
+    STANDARD_TREXIO_FIELDS,
+    NONSTANDARD_TREXIO_FIELDS,
 )
 
 # Generate exports dynamically for all TREXIO fields
@@ -989,7 +710,8 @@ function generate_read_function(field::TrexioField)
             try
                 # Read from HDF5 attribute (TREXIO standard for scalars)
                 value = HDF5.read_attribute(group, $(field.attribute))
-                return convert($(field.type), value), TREXIO_SUCCESS
+                val = convert($(field.type), value)::$(field.type)
+                return val, TREXIO_SUCCESS
             catch e
                 return $(default_val), TREXIO_FAILURE
             end

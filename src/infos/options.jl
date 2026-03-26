@@ -149,6 +149,9 @@ end
   ampsvdfac::Float64 = 1.e-2
   """`⟨true⟩` use kext for doubles residual. """
   use_kext::Bool = true
+  """`⟨false⟩` use plus/minus factorization in kext. 
+  This kext has two times less FLOPs, but is less cache-friendly and can be slower for small systems. """
+  use_pm_kext::Bool = false
   """`⟨false⟩` calculate dressed <vv|vv>. """
   calc_d_vvvv::Bool = false
   """`⟨false⟩` calculate dressed <vv|vo>. """
@@ -188,6 +191,9 @@ end
   """`⟨2⟩` what to project in ``v_{ak}^{ci} T^{kj}_{cb}`` in SVD-DCSD:
   0: both, 1: amplitudes, 2: residual, 3: robust fit. """
   project_vovo_t2::Int = 2
+  """`⟨false⟩` use MP2 amplitudes for decomposition in SVD-DCSD. 
+  If `false`, one iteration of SVD-DCD is used for decomposition instead. """
+  decompose_using_mp2::Bool = false
   """`⟨false⟩` decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
   """`⟨"cc_amplitudes"⟩` main part of filename for start amplitudes. 
@@ -458,6 +464,8 @@ end
   time::Int = 2
   """`⟨2⟩` verbosity level for printing memory usage. """
   memory::Int = 2
+  """`⟨10⟩` maximum number of coefficients to print. """
+  ncoeff::Int = 10
 end
 
 """ 

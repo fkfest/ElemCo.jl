@@ -227,3 +227,43 @@ function detri_samespin_doubles(T2)
   T2full[swtrivv,swtrioo] = T2
   return T2full
 end
+
+"""
+    calc_tri_sym_antisym!(out_s, out_a, A)
+
+  Compute symmetric and antisymmetric combinations of a 3-index array `A[p,q,x]`
+  in a single pass over the data.
+  
+  ``out\\_s[pq,x] = A[p,q,x] + A[q,p,x]``  (symmetric in p,q)
+
+  ``out\\_a[pq,x] = A[p,q,x] - A[q,p,x]``  (antisymmetric in p,q)
+  
+  where `pq` is the upper triangular index for `p ≤ q`.
+
+  For each column `q`, the strided row `A[q, 1:q, x]` is copied into a small
+  contiguous buffer, then sum/difference is computed with stride-1 SIMD access.
+  Multi-threaded over `x`.
+"""
+function calc_tri_sym_antisym!(out_s::AbstractMatrix, out_a::AbstractMatrix,
+                               A::AbstractArray{<:Real,3})
+  norb = size(A, 1)
+  nx = size(A, 3)
+  @threadsbuffer tbuf(norb) begin
+  Threads.@threads for x in 1:nx
+    buf = alloc!(tbuf, norb)
+    @inbounds for q in 1:norb
+      pq0 = q * (q - 1) ÷ 2
+      @simd for p in 1:q
+        buf[p] = A[q, p, x]
+      end
+      @simd ivdep for p in 1:q-1
+        out_s[pq0 + p, x] = A[p, q, x] + buf[p]
+        out_a[pq0 + p, x] = A[p, q, x] - buf[p]
+      end
+      out_s[pq0 + q, x] = buf[q] + buf[q]
+      out_a[pq0 + q, x] = zero(eltype(A))
+    end
+    reset!(tbuf) # reset buffer for the next thread iteration
+  end
+  end # buffer 
+end

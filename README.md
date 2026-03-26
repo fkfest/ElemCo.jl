@@ -5,34 +5,14 @@ The integrals are obtained from a FCIDUMP file or calculated using an interface 
 
 ## Capabilities
 
-|          | Canonical          | DF               | Only closed-shell      |
-|:----------|:--------------------:|:------------------:|:-----------------------:|
-| RHF      |    :x:             |:heavy_check_mark:|:heavy_exclamation_mark:|
-| UHF      |    :x:             |:heavy_check_mark:|                        |
-| BO-HF    |:heavy_check_mark:  |                  |                        |
-| MCSCF    |   :x:              |:wrench:          |                        |
-| MP2      |:heavy_check_mark:  |:heavy_check_mark:|                        |
-| CCSD     | :heavy_check_mark: |                  |:heavy_check_mark:      |
-| RCCSD    | :heavy_check_mark: |                  |                        |
-| UCCSD    | :heavy_check_mark: |                  |                        |
-| ΛCCSD    | :heavy_check_mark: |                  |:heavy_check_mark:      |
-| ΛUCCSD   | :heavy_check_mark: |                  |                        |
-| CCSD(T)  | :heavy_check_mark: |                  |:heavy_check_mark:      |
-| UCCSD(T) | :heavy_check_mark: |                  |                        |
-| ΛCCSD(T) | :heavy_check_mark: |                  |:heavy_check_mark:      |
-| ΛUCCSD(T)| :heavy_check_mark: |                  |                        |
-| FR-CCSD  | :heavy_check_mark: |                  |                        |
-| 2D-CCSD  | :heavy_check_mark: |                  |                        |
-| DCSD     | :heavy_check_mark: |                  |:heavy_check_mark:      |
-| RDCSD    | :heavy_check_mark: |                  |                        |
-| UDCSD    | :heavy_check_mark: |                  |                        |
-| ΛDCSD    | :heavy_check_mark: |                  |:heavy_check_mark:|
-| ΛUDCSD   | :heavy_check_mark: |                  |                        |
-| FR-DCSD  | :heavy_check_mark: |                  |                        |
-| 2D-DCSD  | :heavy_check_mark: |                  |                        |
-| SVD-DCSD | :heavy_check_mark: |:heavy_check_mark:|:heavy_exclamation_mark:|
-| SVD-DC-CCSDT|:heavy_check_mark:|:heavy_check_mark:|:heavy_exclamation_mark:|
-| DMRG     | :heavy_check_mark: |                  |:heavy_exclamation_mark:|
+| Class           | Methods                               |
+|-----------------|---------------------------------------|
+| Mean-field      | DF-HF, DF-UHF, BO-HF, BO-UHF, DF-MCSCF|
+| Perturbative    | DF-MP2, MP2, UMP2, SOS-LT-DF-MP2      |
+| Coupled Cluster | CCSD, RCCSD, UCCSD, DCSD, RDCSD, UDCSD, CCSD(T), RCCSD(T), UCCSD(T), ΛCCSD(T), ΛUCCSD(T), FR-CCSD, FR-DCSD, 2D-CCSD, 2D-DCSD, CCSDT, UCCSDT, DC-CCSDT, UDC-CCSDT, FR-CCSDT, FR-DC-CCSDT, SVD-DF-DCSD, SVD-DC-CCSDT          |
+| CI              | FCI, CIPHI                            |
+| DMRG            | `ITensors.jl` interface               |
+| Excited states  | EOM-CCSD, EOM-DCSD, EOM-UCCSD, EOM-RCCSD, EOM-UDCSD, EOM-RDCSD, FCI, CIPHI  |
 
 ## Getting started
 
@@ -83,10 +63,10 @@ The `@print_input` macro prints the input file to the standard output. The calcu
 
 The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](https://elem.co.il/stable/elemco/)),
 
-- `@dfhf` - Performs a density-fitted Hartree-Fock calculation.
-- `@cc <method>` - Performs a coupled cluster calculation.
-- `@dfcc <method>` - Performs a coupled cluster calculation using density fitting.
-- `@set <option> <setting>` - Sets the options for the calculation.
+- `@dfhf` - Performs a density-fitted Hartree-Fock calculation,
+- `@cc <method>` - Performs a coupled cluster calculation,
+- `@dfcc <method>` - Performs a coupled cluster calculation using density fitting,
+- `@set <option> <setting>` - Sets the options for the calculation,
 
 etc.
 
@@ -132,8 +112,22 @@ basis = "vdz"
 @cc dcsd
 ```
 
-The `@dfhf` macro calculates the density-fitted Hartree-Fock energy and orbitals 
+The `@dfhf` macro calculates the density-fitted Hartree-Fock energy and orbitals
 and then DCSD calculation is performed using density-fitted integrals.
+
+Various [options](https://elem.co.il/stable/options/) can be set using the `@set` macro. It is advisable to set options locally for each calculation to avoid unintended side effects. For example, to change the convergence threshold of the Hartree-Fock calculation to `1e-8`, the following line can be added before the `@dfhf` macro:
+
+```julia
+@set scf thr=1e-8
+```
+
+or locally for the `@dfhf` macro as:
+
+```julia
+@dfhf begin
+  @set scf thr=1e-8
+end
+```
 
 Further example scripts are provided in the `examples` directory.
 

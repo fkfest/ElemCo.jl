@@ -12,7 +12,8 @@ using ..ElemCo.VersionInfo
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export warnerror
 export mainname, print_time, print_memory, free_memory
-export draw_line, draw_wiggly_line, print_info, draw_endline, kwarg_provided_in_macro
+export draw_line, draw_wiggly_line, print_info, print_info2, draw_endline
+export kwarg_provided_in_macro
 export subspace_in_space, get_spaceblocks, argmaxN
 export @istoplevel
 export @assert_devel
@@ -178,13 +179,32 @@ end
 
   Print `info` between two lines.
 
-  If `additional` not empty: additional info after main.
+  If `additional_info` not empty: additional info after main.
 """
 function print_info(info::AbstractString, additional_info::AbstractString="")
   println()
   draw_line()
   println(info)
   draw_line()
+  if additional_info != ""
+    println(additional_info)
+    draw_thin_line()
+  end
+  flush_output()
+end
+
+"""
+    print_info2(info::AbstractString, additional_info::AbstractString="")
+
+  Print secondary `info` between two thin lines.
+
+  If `additional_info` not empty: additional info after main.
+"""
+function print_info2(info::AbstractString, additional_info::AbstractString="")
+  println()
+  draw_thin_line()
+  println(info)
+  draw_thin_line()
   if additional_info != ""
     println(additional_info)
     draw_thin_line()
@@ -452,10 +472,15 @@ end
 ```julia
 julia> buf = zeros(1000)
 julia> reshaped_buf = reshape_buf(buf, 10, 10)
+```
 """
 @pib function reshape_buf(buf::AbstractVector, dims...; offset=0)
   len = prod(dims) + offset
-  @boundscheck(@assert length(buf) >= len "Buffer is too small to reshape to $(dims).")
+  @boundscheck begin
+    if length(buf) < len 
+      error("Buffer is too small to reshape to $dims.")
+    end
+  end
   return reshape(@view(buf[1+offset:len]), dims...)
 end
 
@@ -473,6 +498,7 @@ end
 julia> src = rand(3, 4)
 julia> dest = zeros(10, 10)
 julia> allocfree_permutedims!(@view(dest[1:4,2:4]), src, (2, 1))
+```
 """
 function allocfree_permutedims!(dest::AbstractArray{T1,2}, src::AbstractArray{T2,2}, perm::NTuple{2,Int}) where {T1,T2}
   @inbounds for I in CartesianIndices(src)

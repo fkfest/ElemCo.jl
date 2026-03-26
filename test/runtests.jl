@@ -23,6 +23,7 @@ end
 TESTS = [
 ("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_bohf", "h2o_triplet", "2d_cc"]),
 ("CC", ["h2-", "amp_restart", "noncanonical"]),
+("EOM", ["eom"]),
 ("FCI", ["fci_rhf", "fci_uhf"]),
 ("CIPHI", ["ciphi_rhf", "ciphi_uhf", "ciphi_rhf_st", "ciphi_restart"]),
 ("QV-CC", ["h2o_qv-ccd"]),
@@ -30,7 +31,7 @@ TESTS = [
 ("System", ["dummy"]),
 ("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc","svd_dc_ccsdt"]),
-("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase"]),
+("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase","h2o_wf"]),
 ("Unit-tests", ["unit_tests", "bufvec"]),
 ]
 

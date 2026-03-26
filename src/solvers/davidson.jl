@@ -310,7 +310,9 @@ function get_current_trial_vector!(dav::Davidson, tvecs, state=-1)
   @assert dav.nDim < dav.nDimTrial "Davidson: all trial vectors used"
   ipos = dav.nDim + 1
   if state > 0
-    @assert dav.states[ipos] == state "Davidson: trial vector for state $state not found"
+    if dav.states[ipos] != state
+      error("Davidson: trial vector for state $state not found")
+    end
   end
   t = loadtvecs(dav, ipos)
   @assert length(t) == length(tvecs) "Davidson: trial vector size mismatch"
@@ -333,7 +335,9 @@ function add_product_vector!(dav::Davidson, prods, state=0, customdots=())
   update_Heff!(dav, prods, state, customdots)
   dav.nDim += 1
   if state > 0
-    @assert dav.states[dav.nDim] == state "Davidson: mismatch of product vector for state $state"
+    if dav.states[dav.nDim] != state
+      error("Davidson: mismatch of product vector for state $state")
+    end
   end
   saveprods(dav, prods)
 end

@@ -221,7 +221,7 @@ end
 
   Return string representation of `method`.
   If `main` is true, return only the main part of the name, i.e., without
-  perturbative corrections.
+  perturbative corrections or `EOM`.
   If `root` is true, return the root name of the method, i.e., without any
   prefixes or suffixes.
 """
@@ -229,9 +229,13 @@ function method_name(method::ECMethod; main::Bool = true, root::Bool = false)
   name = ""
   if !root
     for spec in method.prefix
-      name *= spec
-      if length(spec) > 1
-        name *= "-"
+      if spec == "EOM" && main
+        continue
+      else
+        name *= spec
+        if length(spec) > 1
+          name *= "-"
+        end
       end
     end
   end

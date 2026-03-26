@@ -50,31 +50,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
   t1 = print_time(EC, t1, "R^{ef}_{mn} += U_{ij}^{ef} (\\hat v_{mn}^{ij} + v_{nm}^{cd} T^{ij}_{cd})",2)
   # the 4-external part
   if EC.options.cc.use_kext
-    # the `kext` part
-    int2 = integ2_ss(EC.fd)
-    # last two indices of integrals are stored as upper triangular 
-    dU2 = calc_dU2(EC, T1, T1, U2)
-    # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-    @mtensor Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
-    dU2 = nothing
-    Kmmoo = Array{Float64}(undef,norb,norb,nocc,nocc)
-    tripp = uppertriangular_cut(norb)
-    Kmmoo[tripp,:,:] = Kxoo
-    trippr = swapped_uppertriangular_cut(norb)
-    @mtensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
-    Kxoo = nothing
-    t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
-    # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
-    R2 += Kmmoo[SP['v'],SP['v'],:,:]
-    # ``R^e_m += 2 K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)``
-    if length(U1) > 0
-      @mtensor R1[e,m] += 2.0 * Kmmoo[SP['v'],SP['o'],:,:][e,j,m,j] 
-      if length(T1) > 0
-        @mtensor R1[e,m] += 2.0 * (Kmmoo[SP['v'],SP['v'],:,:][e,b,m,j] * T1[b,j])
-      end 
-      t1 = print_time(EC, t1, "R^e_m += 2 K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)",2)
-    end
-    Kmmoo = nothing
+    cc_lagrange_kext!(EC, R1, R2, T1, U2)
   else
     error("non-kext Λ equations not implemented")
   end
@@ -247,32 +223,192 @@ function calc_dU2(EC::ECInfo, T1, T12, U2, o1='o', v1='v', o2='o', v2='v')
 end
 
 """
-    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false)
+    cc_lagrange_kext!(EC::ECInfo, R1, R2, T1, U2, spin=:closed)
 
-Calculate the vector times the Jacobian for the unresticted CCSD or DCSD
+  Calculate the contribution of the 4-external integrals to the Λ equations for CCSD/DCSD.
+  
+  `spin` can be `:closed`, `:α`, or `:β`.
+"""
+function cc_lagrange_kext!(EC, R1, R2, T1, U2, spin=:closed)
+  t1 = time_ns()
+  fac = (spin == :closed) ? 2.0 : 1.0
+  spin = (spin == :closed) ? :α : spin
+  SP = EC.space
+  isα = (spin == :α)
+  # spaces for the given spin
+  o4s = space4spin('o', isα)
+  v4s = space4spin('v', isα)
+  # last two indices of integrals are stored as upper triangular 
+  int2 = integ2_ss(EC.fd, spin)
+  @assert ndims(int2) == 3 # should be (norb,norb,uppertriangular)
+  dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
+  # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
+  Kmmoo = calc_lagrange_K2(int2, dU2)
+  dU2 = nothing
+  t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
+  # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
+  @views R2 .+= Kmmoo[SP[v4s],SP[v4s],:,:]
+  # ``R^e_m += <fac> K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)``
+  if length(R1) > 0
+    @mtensor R1[e,m] += fac * Kmmoo[SP[v4s],SP[o4s],:,:][e,j,m,j] 
+    if length(T1) > 0
+      @mtensor R1[e,m] += fac * (Kmmoo[SP[v4s],SP[v4s],:,:][e,b,m,j] * T1[b,j])
+    end 
+    t1 = print_time(EC, t1, "R^e_m += K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)",2)
+  end
+  return
+end
+
+"""
+    cc_lagrange_kext4ab!(EC::ECInfo, R1a, R1b, R2, T1a, T1b, U2)
+
+  Calculate the contribution of the 4-external integrals to the Λ αβ equations for CCSD/DCSD.
+  
+"""
+function cc_lagrange_kext4ab!(EC, R1a, R1b, R2, T1a, T1b, U2)
+  t1 = time_ns()
+  norb = n_orbs(EC)
+  nocca = size(U2,3)
+  noccb = size(U2,4)
+  SP = EC.space
+  dU2 = calc_dU2(EC, T1a, T1b, U2, 'o','v','O','V')
+  Kmmoo = Array{Float64,4}(undef,norb,norb,nocca,noccb) 
+  if EC.fd.uhf
+    int2 = integ2_os(EC.fd)
+    # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``
+    Kmmoo = calc_lagrange_K2ab(int2, dU2)
+    int2 = nothing
+  else
+    int2 = integ2_ss(EC.fd)
+    # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``, ``r ≤ S``
+    Kmmoo = calc_lagrange_K2(int2, dU2; symmetrize=false)
+    # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{Qp}^{Sr}``, ``S ≤ r``
+    dU2 = permutedims(dU2, (2,1,3,4))
+    Koox = calc_lagrange_Koox(int2, dU2)
+    trippr = swapped_uppertriangular_cut(norb)
+    @mtensor Kmmoo[trippr,:,:][x,m,N] = Koox[m,N,x]
+    Koox = nothing
+    int2 = nothing
+  end
+  dU2 = nothing
+  t1 = print_time(EC, t1, "K_{mN}^{rS} = \\hat U_{mN}^{pQ} v_{pQ}^{rS}",2)
+  # ``R^{eF}_{mN} += K_{mN}^{rS} δ_r^e δ_S^F``
+  @views R2 .= Kmmoo[SP['v'],SP['V'],:,:]
+  # ``R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)``
+  if length(R1a) > 0
+    @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['O'],:,:][e,J,m,J] 
+    if length(T1b) > 0
+      @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['V'],:,:][e,B,m,J] * T1b[B,J]
+    end 
+  end
+  t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
+  # ``R^E_M += K_{jM}^{sR} δ_R^E (δ_s^j + δ_s^b T^j_b)``
+  if length(R1b) > 0
+    @mtensor R1b[E,M] += Kmmoo[SP['o'],SP['V'],:,:][j,E,j,M] 
+    if length(T1a) > 0
+      @mtensor R1b[E,M] += Kmmoo[SP['v'],SP['V'],:,:][b,E,j,M] * T1a[b,j]
+    end 
+  end
+  t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
+  return
+end
+
+
+"""
+    calc_lagrange_K2(int2, D2; symmetrize=true)
+
+  Calculate the kext K2 contribution to the CCSD Lagrange residuals by directly contracting the integrals with D2.
+
+  ``K_{ij}^{pq} = v^{pq}_{rs} D_ij^rs``
+
+  Return Kmmoo::Array{4}.
+"""
+function calc_lagrange_K2(int2, D2; symmetrize=true)
+  Koox = calc_lagrange_Koox(int2, D2)
+  norb = size(int2, 1)
+  tripp = uppertriangular_cut(norb)
+  trippr = swapped_uppertriangular_cut(norb)
+  Kmmoo = similar(D2)
+  @mtensor Kmmoo[tripp,:,:][x,m,n] = Koox[m,n,x]
+  if !symmetrize
+    return Kmmoo
+  end
+  @mtensor Kmmoo[trippr,:,:][x,m,n] = Koox[n,m,x]
+  return Kmmoo
+end
+
+"""
+    calc_lagrange_Koox(int2, D2)
+
+  Calculate 3-index intermediate in the kext in CCSD Lagrange residuals.
+
+Return Koox::Array{3}, where ``Koox_{mn}^x = v^{x}_{pq} D_{mn}^{pq}``.
+"""
+function calc_lagrange_Koox(int2, D2)
+  nocc1 = size(D2, 3)
+  nocc2 = size(D2, 4)
+  nrs = size(int2, 3)
+  Koox = Array{eltype(D2)}(undef, nocc1, nocc2, nrs)
+  rsBlks = get_spaceblocks(1:nrs)
+  for rs in rsBlks
+    v!int2 = @mview(int2[:, :, rs])
+    v!Koox = @mview(Koox[:, :, rs])
+    # <pq|rs> D^ij_rs
+    @mtensor v!Koox[m,n,x] = v!int2[p,q,x] * D2[p,q,m,n]
+  end
+  return Koox
+end
+
+"""
+    calc_lagrange_K2ab(int2, D2)
+
+Calculate the kext K2 contribution to the UCCSD Lagrange residuals for the αβ part 
+by directly contracting the integrals with D2.
+
+``K_{mN}^{rS} = v^{rS}_{pQ} D_{mN}^{pQ}`` 
+
+Return KmMoO::Array{4}.
+"""
+function calc_lagrange_K2ab(int2, D2)
+  norb = size(int2, 4)
+  KmMoO = similar(D2)
+  SBlks = get_spaceblocks(1:norb, 8)
+  for S in SBlks
+    v!int2 = @mview(int2[:, :, :, S])
+    # <pq|rs> D^ij_rs
+    @mtensor KmMoO[:,S,:,:][r,S,i,J] = v!int2[p,Q,r,S] * D2[p,Q,i,J]
+  end
+  return KmMoO
+end
+
+"""
+    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false, with_rhs=true)
+
+Calculate the vector times the Jacobian for the unrestricted CCSD or DCSD
 equations.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return R1a, R1b, R2a, R2b, R2ab
 """
-function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false)
+function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false, with_rhs=true)
   t1 = time_ns()
  
   T2ab = load4idx(EC, "T_vVoO")
   # Calculate 1RDM intermediates
   T1 = load2idx(EC, "T_vo")
   T2 = load4idx(EC, "T_vvoo")
-  D1α, dD1α = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1, T2, T2ab, :α)
+  D1α, dD1α = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1, T2, T2ab, :α; jacobian=!with_rhs)
   T1 = load2idx(EC, "T_VO")
   T2 = load4idx(EC, "T_VVOO")
-  D1β, dD1β = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1, T2, T2ab, :β)
+  D1β, dD1β = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1, T2, T2ab, :β; jacobian=!with_rhs)
   T1 = T2 = T2ab = nothing
   t1 = print_time(EC, t1, "calculate 1RDM",2)
 
-  R1a, R2a = calc_ccsd_vector_times_Jacobian4spin(EC, U1a, U2a, U2ab, D1α, dD1α, dD1β, :α; dc)
+  R1a, R2a = calc_ccsd_vector_times_Jacobian4spin(EC, U1a, U2a, U2ab, D1α, dD1α, dD1β, :α; dc, with_rhs)
   t1 = print_time(EC, t1, "calculate R1a, R2a",2)
-  R1b, R2b = calc_ccsd_vector_times_Jacobian4spin(EC, U1b, U2b, U2ab, D1β, dD1β, dD1α, :β; dc)
+  R1b, R2b = calc_ccsd_vector_times_Jacobian4spin(EC, U1b, U2b, U2ab, D1β, dD1β, dD1α, :β; dc, with_rhs)
   t1 = print_time(EC, t1, "calculate R1b, R2b",2)
-  ΔR1a, ΔR1b, R2ab = calc_ccsd_vector_times_Jacobian4ab(EC, U1a, U1b, U2a, U2b, U2ab, D1α, D1β; dc)
+  ΔR1a, ΔR1b, R2ab = calc_ccsd_vector_times_Jacobian4ab(EC, U1a, U1b, U2a, U2b, U2ab, D1α, D1β; dc, with_rhs)
   R1a += ΔR1a
   R1b += ΔR1b
   t1 = print_time(EC, t1, "calculate ΔR1a, ΔR1b, R2ab",2)
@@ -280,16 +416,17 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; d
 end
 
 """
-    calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1, dD1, dD1os, spin; dc=false)
+    calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1, dD1, dD1os, spin; dc=false, with_rhs=true)
 
 Calculate the vector times the CCSD/DCSD Jacobian for the given `spin`
 (same-spin residual for doubles). The singles residual is missing some terms
 which are added in `calc_ccsd_vector_times_Jacobian4ab`.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return R1 and R2 
 """
 function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab, 
-            D1, dD1, dD1os, spin; dc=false)
+            D1, dD1, dD1os, spin; dc=false, with_rhs=true)
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   t1 = time_ns()
 
@@ -311,7 +448,11 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   fov = fock[SP[o4s],SP[v4s]]
   dfov = dfock[SP[o4s],SP[v4s]] 
   if length(U1) > 0
-    @mtensor R1[e,m] := fov[m,e]
+    if with_rhs
+      @mtensor R1[e,m] := fov[m,e]
+    else
+      R1 = zero(U1)
+    end
     # ``R^e_m += \hat D_p^q (v_{mq}^{ep} - v_{mq}^{pe})``
     int2 = ints2(EC,m4s*o4s*m4s*m4s)
     @mtensor R1[e,m] += dD1[p,q] * (int2[:,:,:,SP[v4s]][q,m,p,e] - int2[:,:,SP[v4s],:][q,m,e,p])
@@ -334,7 +475,11 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   T1 = load2idx(EC, "T_"*v4s*o4s)
   T2 = load4idx(EC, "T_"*v4s*v4s*o4s*o4s)
   oovv = ints2(EC,o4s*o4s*v4s*v4s)
-  @mtensor R2[e,f,m,n] := oovv[m,n,e,f] - oovv[n,m,e,f]
+  if with_rhs
+    @mtensor R2[e,f,m,n] := oovv[m,n,e,f] - oovv[n,m,e,f]
+  else
+    R2 = zero(U2)
+  end
   int2 = load4idx(EC, "d_"*o4s*o4s*o4s*o4s)
   if !dc
     @mtensor int2[m,n,i,j] += 0.5 * (oovv[m,n,c,d] * T2[c,d,i,j])
@@ -346,38 +491,7 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   # the 4-external part
   if EC.options.cc.use_kext
     # the `kext` part
-    spin4int = EC.fd.uhf ? spin : :α
-    int2 = integ2_ss(EC.fd, spin4int)
-    dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
-    if ndims(int2) == 4
-      error("Non-triangular integrals not tested in kext equations in ΛUCCSD")
-      # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-      @mtensor Kmmoo[r,s,m,n] := int2[p,q,r,s] * dU2[p,q,m,n]
-      dU2 = nothing
-    else
-      # last two indices of integrals are stored as upper triangular 
-      # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-      @mtensor Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
-      Kmmoo = dU2
-      dU2 = nothing
-      tripp = uppertriangular_cut(norb)
-      Kmmoo[tripp,:,:] = Kxoo
-      trippr = swapped_uppertriangular_cut(norb)
-      @mtensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
-      Kxoo = nothing
-    end
-    t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
-    # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
-    R2 += Kmmoo[SP[v4s],SP[v4s],:,:]
-    # ``R^e_m += K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)``
-    if length(U1) > 0
-      @mtensor R1[e,m] += Kmmoo[SP[v4s],SP[o4s],:,:][e,j,m,j] 
-      if length(T1) > 0
-        @mtensor R1[e,m] += Kmmoo[SP[v4s],SP[v4s],:,:][e,b,m,j] * T1[b,j]
-      end 
-    end
-    t1 = print_time(EC, t1, "R^e_m += K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)",2)
-    Kmmoo = nothing
+    cc_lagrange_kext!(EC, R1, R2, T1, U2, spin)
   else
     error("non-kext Λ equations not implemented")
   end
@@ -510,15 +624,16 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
 end
 
 """
-    calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1a, D1b; dc=false)
+    calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1a, D1b; dc=false, with_rhs=true)
 
 Calculate the left vector times the CCSD/DCSD Jacobian for αβ component. 
 Additionally, remaining contributions to the singles residual are calculated.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return ΔR1a, ΔR1b, R2ab
 """
 function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1b::Matrix{Float64}, 
-          U2a::Array{Float64,4}, U2b::Array{Float64}, U2ab::Array{Float64}, D1a, D1b; dc=false) 
+          U2a::Array{Float64,4}, U2b::Array{Float64,4}, U2ab::Array{Float64,4}, D1a, D1b; dc=false, with_rhs=true) 
   t1 = time_ns()
 
   SP = EC.space
@@ -553,53 +668,16 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1
   # the 4-external part
   if EC.options.cc.use_kext
     # the `kext` part
-    dU2 = calc_dU2(EC, T1a, T1b, U2ab, 'o','v','O','V')
-    Kmmoo = Array{Float64,4}(undef,norb,norb,nocca,noccb) 
-    if EC.fd.uhf
-      int2 = integ2_os(EC.fd)
-      # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``
-      @mtensor Kmmoo[r,S,m,N] = int2[p,Q,r,S] * dU2[p,Q,m,N]
-      int2 = NOTHING4idx
-    else
-      int2_3idx = integ2_ss(EC.fd)
-      # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``, ``r ≤ S``
-      @mtensor Kxoo[x,m,N] := int2_3idx[p,Q,x] * dU2[p,Q,m,N]
-      tripp = uppertriangular_cut(norb)
-      Kmmoo[tripp,:,:] = Kxoo
-      # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{Qp}^{Sr}``, ``S ≤ r``
-      @mtensor Kxoo[x,m,N] = int2_3idx[Q,p,x] * dU2[p,Q,m,N]
-      trippr = swapped_uppertriangular_cut(norb)
-      @mtensor Kmmoo[trippr,:,:][x,m,N] = Kxoo[x,m,N]
-      Kxoo = NOTHING3idx
-      int2_3idx = NOTHING3idx
-    end
-    dU2 = NOTHING4idx
-    t1 = print_time(EC, t1, "K_{mN}^{rS} = \\hat U_{mN}^{pQ} v_{pQ}^{rS}",2)
-    # ``R^{eF}_{mN} += K_{mN}^{rS} δ_r^e δ_S^F``
-    R2 = Kmmoo[SP['v'],SP['V'],:,:]
-    # ``R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)``
-    if length(R1a) > 0
-      @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['O'],:,:][e,J,m,J] 
-      if length(T1b) > 0
-        @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['V'],:,:][e,B,m,J] * T1b[B,J]
-      end 
-    end
-    t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
-    # ``R^E_M += K_{jM}^{sR} δ_R^E (δ_s^j + δ_s^b T^j_b)``
-    if length(R1b) > 0
-      @mtensor R1b[E,M] += Kmmoo[SP['o'],SP['V'],:,:][j,E,j,M] 
-      if length(T1a) > 0
-        @mtensor R1b[E,M] += Kmmoo[SP['v'],SP['V'],:,:][b,E,j,M] * T1a[b,j]
-      end 
-    end
-    t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
-    Kmmoo = NOTHING4idx
+    R2 = similar(U2ab)
+    cc_lagrange_kext4ab!(EC, R1a, R1b, R2, T1a, T1b, U2ab)
   else
     error("non-kext Λ equations not implemented")
   end
 
   oOvV = ints2(EC,"oOvV")
-  @mtensor R2[e,F,m,N] += oOvV[m,N,e,F]
+  if with_rhs
+    @mtensor R2[e,F,m,N] += oOvV[m,N,e,F]
+  end
   T2ab = load4idx(EC, "T_vVoO")
   int2 = load4idx(EC, "d_oOoO")
   if !dc

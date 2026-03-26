@@ -72,7 +72,8 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   end
 
   if has_prefix(ecmethod, "EOM")
-    calc_eom(EC, ecmethod)
+    exc_energies = calc_eom(EC, ecmethod)
+    energies = merge(energies, exc_energies)
     t1 = print_time(EC, t1, "EOM", 1)
   end
 
@@ -648,12 +649,7 @@ end
 """
 function eval_dmrg_groundstate(EC::ECInfo, energies::OutDict)
   t1 = time_ns()
-  ext = Base.get_extension(@__MODULE__, :DmrgExt)
-  if isnothing(ext)
-    ECC = calc_dmrg()
-  else
-    ECC = ext.calc_dmrg(EC)
-  end
+  ECC = calc_dmrg_dispatch(EC)
   energies = output_energy(EC, ECC, energies, "DMRG")
   t1 = print_time(EC, t1,"DMRG",1)
   return energies
