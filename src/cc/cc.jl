@@ -1056,7 +1056,7 @@ function calc_posMP2(EC::ECInfo, addsingles=true)
   T2ep = update_doubles(EC, ints2(EC,"veop",:p), spincase=:αp, use_shift=false)
   EMp2 = calc_doubles_energy(EC, T2, T2ep)
   save!(EC, "T_vvoo", T2)
-  save!(EC, "T_vpoe", T2ep)
+  save!(EC, "T_vpos", T2ep)
   return EMp2
 end
 
