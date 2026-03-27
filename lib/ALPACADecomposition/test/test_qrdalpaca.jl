@@ -7,7 +7,7 @@
   A = V * V' + 0.01I
   A = 0.5 * (A + A')
 
-  res = qrdalpaca(A; tol=1e-10)
+  res = qrdalpaca(Symmetric(A); tol=1e-10)
   @test res.symmetry == :symmetric
   @test norm(A - reconstruct(res)) / norm(A) < 1e-6
 end
@@ -21,7 +21,7 @@ end
   A = V * V' + 0.01I
   A = 0.5 * (A + A')
 
-  res = qrdalpaca(A; tol=1e-10)
+  res = qrdalpaca(Hermitian(A); tol=1e-10)
   @test res.symmetry == :hermitian
   @test norm(A - reconstruct(res)) / norm(A) < 1e-6
 end

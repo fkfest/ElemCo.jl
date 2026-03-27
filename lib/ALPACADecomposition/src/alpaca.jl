@@ -138,18 +138,15 @@ end
 """
     _detect_symmetry(matrix) → Symbol
 
-Detect the symmetry type of `matrix` by checking `ishermitian` and `issymmetric`.
-Returns `:hermitian` for complex Hermitian, `:symmetric` for real symmetric or
-complex symmetric, or `:general` otherwise.
+Detect the symmetry type of `matrix` from its wrapper type.
+Returns `:hermitian` for `Hermitian`, `:symmetric` for `Symmetric`
+or real `Hermitian`, or `:general` for anything else.
+No element-by-element check is performed.
 """
-function _detect_symmetry(matrix::AbstractMatrix)
-  if ishermitian(matrix)
-    return eltype(matrix) <: Complex ? :hermitian : :symmetric
-  elseif issymmetric(matrix)
-    return :symmetric
-  else
-    return :general
-  end
+_detect_symmetry(::AbstractMatrix) = :general
+_detect_symmetry(::Symmetric) = :symmetric
+function _detect_symmetry(matrix::Hermitian)
+  return eltype(matrix) <: Complex ? :hermitian : :symmetric
 end
 
 """

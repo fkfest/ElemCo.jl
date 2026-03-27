@@ -261,7 +261,7 @@ end
   A = V * V'
   A = 0.5 * (A + A')
 
-  result = lpaca(A; tol=1e-10)
+  result = lpaca(Symmetric(A); tol=1e-10)
   @test result.symmetry == :symmetric
 
   A_approx = reconstruct(result)
@@ -277,7 +277,7 @@ end
   A = V * V'
   A = 0.5 * (A + A')
 
-  result = lpaca(A; tol=1e-10)
+  result = lpaca(Hermitian(A); tol=1e-10)
   @test result.symmetry == :hermitian
 
   A_approx = reconstruct(result)

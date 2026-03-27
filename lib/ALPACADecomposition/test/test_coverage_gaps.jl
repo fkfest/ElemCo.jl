@@ -190,7 +190,7 @@ end
   A = V * V'
   A = 0.5 * (A + A')
 
-  Q, R = alpaca_qr(A; tol=1e-10)
+  Q, R = alpaca_qr(Hermitian(A); tol=1e-10)
   @test norm(Q'Q - I(size(Q, 2))) < 1e-10
   A_approx = Q * R
   @test norm(A - A_approx) / norm(A) < 1e-6
@@ -490,7 +490,7 @@ end
   A = A' * A + 0.1I
   A = 0.5 * (A + A')
 
-  result = alpaca(A; tol=1e-12)
+  result = alpaca(Symmetric(A); tol=1e-12)
   @test length(result.pivot_indices) > 16  # must have grown past initial capacity
   @test norm(A - reconstruct(result)) / norm(A) < 1e-6
 end

@@ -53,7 +53,7 @@ end
   using LinearAlgebra
 
   A = fill(5.0, 1, 1)
-  result = alpaca(A; tol=1e-10)
+  result = alpaca(Symmetric(A); tol=1e-10)
   @test result.symmetry == :symmetric
   @test length(result.pivot_indices) == 1
   @test norm(A - reconstruct(result)) < 1e-10
@@ -99,7 +99,7 @@ end
 
   n = 5
   A = Matrix(1.0I, n, n)
-  result = alpaca(A; tol=1e-10)
+  result = alpaca(Symmetric(A); tol=1e-10)
   @test result.symmetry == :symmetric
   @test norm(A - reconstruct(result)) / norm(A) < 1e-6
 end
@@ -109,7 +109,7 @@ end
   using LinearAlgebra
 
   A = diagm([4.0, 3.0, 2.0, 1.0, 0.5])
-  result = alpaca(A; tol=1e-10)
+  result = alpaca(Symmetric(A); tol=1e-10)
   @test result.symmetry == :symmetric
   @test norm(A - reconstruct(result)) / norm(A) < 1e-6
 end

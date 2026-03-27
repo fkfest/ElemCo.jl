@@ -78,3 +78,19 @@ function elements!(buffer::AbstractVector, mat::DenseALPACAMatrix,
   end
   return buffer
 end
+
+"""
+    LinearAlgebra.issymmetric(matrix::AbstractALPACAMatrix) → Bool
+
+Default implementation returning `false`.  Override for custom matrix types
+that are known to be symmetric (e.g., integral matrices).
+"""
+LinearAlgebra.issymmetric(::AbstractALPACAMatrix) = false
+
+"""
+    LinearAlgebra.ishermitian(matrix::AbstractALPACAMatrix) → Bool
+
+Default implementation returning `false`.  Override for custom matrix types
+that are known to be Hermitian.
+"""
+LinearAlgebra.ishermitian(::AbstractALPACAMatrix) = false
