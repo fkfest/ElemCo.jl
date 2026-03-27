@@ -73,7 +73,7 @@ using ElemCo.VaspInterface
     # The diagonal should differ from eigenvalues (because of 2J-K subtraction)
     @test EC.fd.int1[1,1] != data.eigen_energies[1]
 
-    # Check mmL file was created and has correct shape (Cholesky decomposition reduces naux)
+    # Check mmL file was created and has correct shape (ALPACA decomposition reduces naux)
     mmLfile, mmL = mmap3idx(EC, "mmL")
     @test size(mmL, 1) == 96
     @test size(mmL, 2) == 96

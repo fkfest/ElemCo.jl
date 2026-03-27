@@ -7,6 +7,7 @@ module ElemCo
 
 include("version.jl")
 include("../lib/TREXIO/src/TREXIO.jl")  # Include standalone TREXIO module
+include("../lib/ALPACADecomposition/src/ALPACADecomposition.jl")  # Include standalone ALPACADecomposition module
 include("infos/abstractEC.jl")
 include("tools/mtensoroperations.jl")
 include("tools/descdict.jl")

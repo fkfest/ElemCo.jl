@@ -1,5 +1,6 @@
 Manifest*.toml
 docs/build
+lib/*/docs/build
 examples/*.out
 examples/ElemCo.jl-devel
 docs/equations/*.bbl

@@ -17,6 +17,8 @@ using ElemCo
 using ElemCo.DecompTools: symmetric_pivoted_cholesky, 
   qr_pivoted_symmetric_decompose,
   qr_pivoted_decompose,
+  greedy_qr_pivoted_decompose,
+  greedy_qr_pivoted_symmetric_decompose,
   ldlt_pivoted_symmetric_decompose,
   orthogonalize
 
@@ -118,6 +120,11 @@ function test_case(name, M, tol; expect_cholesky_fail=false)
   ortho_qr, diag_qr = orthogonalize(L_qr2, neg_qr2)
   err_ortho_qr = recon_error(M, L_qr2, neg_qr2)
   println("  QR decompose:     rank=$rank_qr2, neg=$(length(neg_qr2)), ortho=$(size(ortho_qr)), max_error=$err_ortho_qr")
+
+  # 3c. Greedy symmetric
+  L_gqr, rank_gqr, neg_gqr = greedy_qr_pivoted_symmetric_decompose(M, tol; sigma=0.01)
+  err_gqr = recon_error(M, L_gqr, neg_gqr)
+  println("  Greedy symmetric: rank=$rank_gqr, neg=$(length(neg_gqr)), max_error=$err_gqr")
 
   # 4. LDLT-pivoted two-step (span-factor batched, works for indefinite)
   L_ldlt, rank_ldlt, neg_ldlt = ldlt_pivoted_symmetric_decompose(M, tol; sigma=0.01)
@@ -224,6 +231,12 @@ function test_general(name, M, tol)
   err = maximum(abs.(M - result.Q * result.R))
   ortho_err = maximum(abs.(result.Q' * result.Q - I(result.rank)))
   println("  QR general:      rank=$(result.rank), max_error=$err, ortho_error=$ortho_err")
+
+  result_g = greedy_qr_pivoted_decompose(M, tol; sigma=0.01)
+  err_g = maximum(abs.(M - result_g.Q * result_g.R))
+  ortho_err_g = maximum(abs.(result_g.Q' * result_g.Q - I(result_g.rank)))
+  println("  Greedy QR:       rank=$(result_g.rank), max_error=$err_g, ortho_error=$ortho_err_g")
+
   println("="^60)
 end
 
@@ -344,6 +357,16 @@ function test_decay_symmetric(name, M, svals, tol)
   err_gen = maximum(abs.(M - result_gen.Q * result_gen.R))
   println("  QR general:    rank=$(result_gen.rank), max_error=$err_gen")
 
+  # Greedy QR general
+  result_greedy = greedy_qr_pivoted_decompose(M, tol; sigma=0.01)
+  err_greedy = maximum(abs.(M - result_greedy.Q * result_greedy.R))
+  println("  Greedy QR:     rank=$(result_greedy.rank), max_error=$err_greedy")
+
+  # Greedy symmetric
+  L_gs, rank_gs, neg_gs = greedy_qr_pivoted_symmetric_decompose(M, tol; sigma=0.01)
+  err_gs = recon_error(M, L_gs, neg_gs)
+  println("  Greedy symm:   rank=$rank_gs, max_error=$err_gs")
+
   println("="^60)
 end
 
@@ -361,6 +384,11 @@ function test_decay_general(name, M, svals, tol)
   err = maximum(abs.(M - result.Q * result.R))
   ortho_err = maximum(abs.(result.Q' * result.Q - I(result.rank)))
   println("  QR general:    rank=$(result.rank), max_error=$err, ortho_error=$ortho_err")
+
+  result_g = greedy_qr_pivoted_decompose(M, tol; sigma=0.01)
+  err_g = maximum(abs.(M - result_g.Q * result_g.R))
+  ortho_err_g = maximum(abs.(result_g.Q' * result_g.Q - I(result_g.rank)))
+  println("  Greedy QR:     rank=$(result_g.rank), max_error=$err_g, ortho_error=$ortho_err_g")
 
   println("="^60)
 end
