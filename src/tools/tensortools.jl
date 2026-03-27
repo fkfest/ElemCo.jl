@@ -170,7 +170,9 @@ end
 function ints1(EC::ECInfo, spaces::String, spincase = nothing)
   sc = spincase
   if isnothing(sc)
-    if isalphaspin(spaces[1],spaces[2])
+    if occursin('p', spaces)
+      sc = :p
+    elseif isalphaspin(spaces[1], spaces[2])
       sc = :α
     else
       sc = :β
@@ -231,6 +233,10 @@ function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, s
     @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
     out .= @view integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
     return out
+  end
+  SP = EC.space
+  if EC.options.wf.npositron > 0 && spincase == :p
+    return integ2(EC.fd,spincase)[sp1,sp2,sp3,sp4]
   end
   allint = integ2_ss(EC.fd, spincase)
   @assert ndims(allint) == 3

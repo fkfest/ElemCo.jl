@@ -115,12 +115,13 @@ function dfhf_positron(EC::ECInfo)
     thren = sqrt(EC.options.scf.thr)*0.1
   end
   direct = EC.options.scf.direct
-  if direct
-    error("Exiting function dfhf_positron: 'direct' option is enabled with positron.")
-  end
   guess = EC.options.scf.guess
   guess_pos = EC.options.scf.guess_pos
   Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
+  if direct
+    bao = generate_basis(EC, "ao")
+    bfit = generate_basis(EC, "jkfit")
+  end
   t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
   cMO = guess_orb(EC, guess)
   cPO = guess_pos_orb(EC, guess_pos)
@@ -141,7 +142,11 @@ function dfhf_positron(EC::ECInfo)
   for it=1:EC.options.scf.maxit
     eden = gen_density_matrix(EC, cMO, cMO, SP['o'])
     pden = gen_density_matrix(EC, cPO, cPO, [1])
-    fock, fock_pos, Jp = gen_dffock(EC, cMO, cPO)
+    if direct
+      fock, fock_pos, Jp = gen_dffock(EC, cMO, cPO, bao, bfit)
+    else
+      fock, fock_pos, Jp = gen_dffock(EC, cMO, cPO)
+    end
     fhsmall = fock + hsmall + Jp
     t1 = print_time(EC, t1, "generate DF-Fock matrices for e and e+", 2)
     @mtensor E_el = eden[p,q] * fhsmall[p,q]

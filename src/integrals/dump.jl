@@ -116,12 +116,16 @@ end
   int2bb::Array{Float64,N} = zeros(ntuple(d->0,Val(N)))
   """ αβ 2-e⁻ integrals for unrestricted orbitals fcidump. """
   int2ab::Array{Float64,4} = zeros(0,0,0,0)
+  """ e⁻e⁺ 2-body integrals for restricted orbitals fcidump. """
+  int2ep::Array{Float64,4} = zeros(0,0,0,0)
   """ 1-e⁻ integrals for restricted orbitals fcidump. """
   int1::Matrix{Float64} = zeros(0,0)
   """ α 1-e⁻ integrals for unrestricted orbitals fcidump. """
   int1a::Matrix{Float64} = zeros(0,0)
   """ β 1-e⁻ integrals for unrestricted orbitals fcidump. """
   int1b::Matrix{Float64} = zeros(0,0)
+  """ 1-e⁺ integrals for restricted orbitals fcidump. """
+  int1p::Matrix{Float64} = zeros(0,0)
   """ core energy """
   int0::Float64 = 0.0
   """ header of fcidump file, a dictionary of arrays. """
@@ -132,6 +136,8 @@ end
   modified::Bool = false
   """`⟨false⟩` a convinience variable, has to coincide with `head["IUHF"][1] > 0`. """
   uhf::Bool = false
+  """`⟨false⟩` a convenience variable, has to coincide with `head["NPOS"][1] > 0`. """
+  epdump::Bool = false
 end
 
 const TFDump = FDump{3}
@@ -163,11 +169,15 @@ FDump(int2aa::Array{Float64,N}, int2bb::Array{Float64,N}, int2ab::Array{Float64,
 
   Create a new FDump object
 """
-function FDump{N}(norb::Int, nelec::Int; ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[], 
+function FDump{N}(norb::Int, nelec::Int; npos::Int=0, ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[], 
                uhf=false, simtra=false) where N
   fd = FDump{N}()
   fd.head["NORB"] = [norb]
   fd.head["NELEC"] = [nelec]
+  if npos > 0
+    fd.head["NPOS"] = [npos]
+    fd.epdump = true
+  end
   fd.head["MS2"] = [ms2]
   fd.head["ISYM"] = [isym]
   if isempty(orbsym)
@@ -186,7 +196,7 @@ end
 
   Modify header of FDump object
 """
-function modify_header!(fd::FDump, norb::Int, nelec::Int; ms2::Int=-1, isym::Int=-1, orbsym::Vector{Int}=Int[])
+function modify_header!(fd::FDump, norb::Int, nelec::Int; npos::Int=-1, ms2::Int=-1, isym::Int=-1, orbsym::Vector{Int}=Int[])
   fd.head["NORB"] = [norb]
   fd.head["NELEC"] = [nelec]
   if ms2 >= 0
@@ -199,6 +209,14 @@ function modify_header!(fd::FDump, norb::Int, nelec::Int; ms2::Int=-1, isym::Int
     fd.head["ORBSYM"] = ones(Int,norb)
   else
     fd.head["ORBSYM"] = orbsym
+  end
+  if npos >= 0
+    fd.head["NPOS"] = [npos]
+    if npos > 0
+      fd.epdump = true
+    else
+      fd.epdump = false
+    end
   end
 end
 
@@ -251,6 +269,10 @@ function set_zero!(fd::FDump, norb::Int=0)
       fill!(fd.int1, 0.0)
       fill!(fd.int2, 0.0)
     end
+    if fd.epdump
+      fill!(fd.int1p, 0.0)
+      fill!(fd.int2ep, 0.0)
+    end
   else
     if fd.uhf
       fd.int1a = zeros(norb,norb)
@@ -261,6 +283,11 @@ function set_zero!(fd::FDump, norb::Int=0)
     else
       fd.int1 = zeros(norb,norb)
       fd.int2 = get_int2_zeros(fd.int2, norb)
+      fd.int2ep = get_int2_zeros(fd.int2ep, norb)
+    end
+    if fd.epdump
+      fd.int1p = zeros(norb,norb)
+      fd.int2ep = get_int2_zeros(fd.int2ep, norb)
     end
   end
 end
@@ -277,9 +304,13 @@ end
     integ1(fd::FDump, spincase::Symbol=:α)
 
   Return 1-e⁻ integrals (for UHF fcidump: for `spincase`).
-  `spincase` can be `:α` or `:β`.
+  `spincase` can be `:α` or `:β` or `:p`.
 """
 function integ1(fd::FDump, spincase::Symbol=:α)
+  if spincase == :p
+    @assert fd.epdump "Spincase :p only for positron fcidump"
+    return fd.int1p
+  end
   if !fd.uhf
     return fd.int1
   elseif spincase == :α
@@ -292,13 +323,17 @@ end
 """
     integ2(fd::FDump, spincase::Symbol=:α)
 
-  Return 2-e⁻ integrals (for UHF fcidump: for `spincase`).
-  `spincase` can be `:α`, `:β` or `:αβ`.
+  Return 2-e⁻ or e⁻e⁺ integrals (for UHF fcidump: for `spincase`).
+  `spincase` can be `:α`, `:β`, `:αβ` or `:p`.
 
   Use type-stable versions instead: 
   [`integ2_ss`](@ref) for same-spin integrals and [`integ2_os`](@ref) for opposite-spin integrals.
 """
 function integ2(fd::FDump, spincase::Symbol=:α)
+  if spincase == :p
+    @assert fd.epdump "Spincase :p only for positron fcidump"
+    return fd.int2ep
+  end
   if !fd.uhf
     return fd.int2
   elseif spincase == :α
@@ -313,10 +348,14 @@ end
 """
     integ2_ss(fd::FDump, spincase::Symbol=:α)
 
-  Return 2-e⁻ integrals (for UHF fcidump: for `spincase`).
-  `spincase` can be `:α` or `:β`.
+  Return 2-e⁻ or e⁻e⁺ integrals (for UHF fcidump: for `spincase`).
+  `spincase` can be `:α`, `:β`, or `:p`.
 """
 function integ2_ss(fd::FDump, spincase::Symbol=:α)
+  if spincase == :p
+    @assert fd.epdump "Spincase :p only for positron fcidump"
+    return fd.int2ep
+  end
   if !fd.uhf
     return fd.int2
   elseif spincase == :α
@@ -350,11 +389,25 @@ function read_fcidump(fcidump::String, ::Val{N}) where N
   fd.origin = fcidump
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
   simtra = (headvar(fd, "ST", Int) > 0)
+  positron = headvar(fd, "NPOS", Int)
   if simtra
     println("Non-Hermitian")
   end
+  if !isnothing(positron)
+    fd.epdump = (positron > 0)
+    if fd.epdump
+      if fd.uhf
+        error("UHF positron fcidump not supported")
+      end
+      println("Positron fcidump elements detected")
+    end
+  end
   done = false
   if !isnothing(headvar(fd, "NPY2", String)) || !isnothing(headvar(fd, "NPY2AA", String))
+    # assert that no positrons present
+    if !isnothing(positron) && positron > 0
+      error("Positron fcidump with npy files not supported")
+    end
     # try to read integrals from npy files
     done = read_integrals!(fd, dirname(fcidump))
   end
@@ -583,10 +636,17 @@ function read_integrals!(fd::FDump{N}, fdfile::IOStream) where N
   simtra = (st > 0)
   set_zero!(fd, norb)
   if fd.uhf
+    if fd.epdump
+      error("Positron fcidump with UHF not supported")
+    end
     print("UHF")
     fd.int0 = read_integrals!(fd.int1a, fd.int1b, fd.int2aa, fd.int2bb, fd.int2ab, norb, fdfile, simtra)
   else
-    fd.int0 = read_integrals!(fd.int1, fd.int2, norb, fdfile, simtra)
+    if fd.epdump
+      fd.int0 = read_integrals!(fd.int1, fd.int2, fd.int1p, fd.int2ep, norb, fdfile, simtra)
+    else
+      fd.int0 = read_integrals!(fd.int1, fd.int2, norb, fdfile, simtra)
+    end
   end
   return true
 end
@@ -675,6 +735,75 @@ function read_integrals!(int1a, int1b, int2aa, int2bb, int2ab, norb, fdfile, sim
   end
   return int0
 end
+
+"""
+    read_integrals!(int1::Matrix{Float64}, int2::Array{Float64,N},
+  int1p::Matrix{Float64}, int2ep::Array{Float64,4},
+  norb::Int, fdfile, simtra) where N
+
+  Read integrals from fcidump file with positron. 
+  We use a section counter to track which block we are reading:
+  section==0: electron-electron 2-body (int2)
+  section==1: electron-positron 2-body (int2ep)
+  section==2: electron 1-body (int1)
+  section==3: positron 1-body (int1p)
+  When section==4 and a separator is encountered, the next line is core energy.
+"""
+function read_integrals!(int1::Matrix{Float64}, int2::Array{Float64,N},
+  int1p::Matrix{Float64}, int2ep::Array{Float64,4},
+  norb::Int, fdfile, simtra) where N
+  int0 = 0.0
+  readint0 = false
+  section = 0
+
+  for linestr in eachline(fdfile)
+    line = split(linestr)
+    if length(line) != 5
+      continue
+    end
+
+    integ = parse(Float64, line[1])
+    i1 = parse(Int, line[2])
+    i2 = parse(Int, line[3])
+    i3 = parse(Int, line[4])
+    i4 = parse(Int, line[5])
+
+    if i1 > norb || i2 > norb || i3 > norb || i4 > norb
+      error("Index larger than norb: "*linestr)
+    end
+
+    if i4 > 0
+      if section == 0
+        set_int2!(int2, i1, i2, i3, i4, integ, simtra, false)
+      elseif section == 1
+        set_int2!(int2ep, i1, i2, i3, i4, integ, simtra, false)
+      else
+        error("Unexpected 2-electron integral line in section $(section)")
+      end
+    elseif i2 > 0
+      if section == 2
+        set_int1!(int1, i1, i2, integ, simtra)
+      elseif section == 3
+        set_int1!(int1p, i1, i2, integ, simtra)
+      else
+        error("Unexpected 1-electron integral line in section $(section)")
+      end
+    elseif i1 <= 0
+      if section < 4
+        section += 1
+      else
+      int0 = integ
+      readint0 = true
+      end
+    end
+  end
+
+  if !readint0
+    error("No core energy found in fcidump. Incomplete file?")
+  end
+  return int0
+end
+
 
 """
     headvar(head::FDumpHeader, key::String)
@@ -865,7 +994,17 @@ function write_integrals(fd::FDump, fdf, tol)
   simtra::Bool = (st > 0)
   if !fd.uhf
     write_integrals2(fd.int2, fdf, tol, simtra)
+    if fd.epdump
+      print_int_value(fdf,0.0,0,0,0,0)
+      write_integrals2(fd.int2ep, fdf, tol, simtra)
+      print_int_value(fdf,0.0,0,0,0,0)
+    end
     write_integrals1(fd.int1, fdf, tol, simtra)
+    if fd.epdump
+      print_int_value(fdf,0.0,0,0,0,0)
+      write_integrals1(fd.int1p, fdf, tol, simtra)
+      print_int_value(fdf,0.0,0,0,0,0)
+    end
   else
     write_integrals2(fd.int2aa, fdf, tol, simtra)
     print_int_value(fdf,0.0,0,0,0,0)
@@ -1275,9 +1414,16 @@ end
     int1_npy_filename(fd::FDump, spincase::Symbol=:α)
 
   Return filename for 1-e integrals in npy format.
-  `spincase` can be `:α` or `:β` for UHF fcidump.
+  `spincase` can be `:α`, `:β`, or `:p` for UHF fcidump.
 """
 function int1_npy_filename(fd::FDump, spincase::Symbol=:α)
+  if spincase == :p
+    file = headvar(fd, "NPY1P", String)
+    if isnothing(file)
+      file = "int1p.npy"
+    end
+    return file::String
+  end
   if !fd.uhf
     file = headvar(fd, "NPY1", String)
     if isnothing(file)
@@ -1306,9 +1452,16 @@ end
     int2_npy_filename(fd::FDump, spincase::Symbol=:α)
 
   Return filename for 2-e integrals in npy format. 
-  `spincase` can be `:α`, `:β` or `:αβ` for UHF fcidump.
+  `spincase` can be `:α`, `:β`, `:αβ`, or `:ep` for UHF fcidump.
 """
 function int2_npy_filename(fd::FDump, spincase::Symbol=:α)
+  if spincase == :ep
+    file = headvar(fd, "NPY2EP", String)
+    if isnothing(file)
+      file = "int2ep.npy"
+    end
+    return file::String
+  end
   if !fd.uhf
     file = headvar(fd, "NPY2", String)
     if isnothing(file)

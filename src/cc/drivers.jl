@@ -378,7 +378,11 @@ get_spinscalingfactor(EC::ECInfo, name) = getfield(EC.options.cc, Symbol(lowerca
 function eval_mp2_energy(EC::ECInfo, energies::OutDict, closed_shell, restricted)
   t1 = time_ns()
   if closed_shell
-    EMp2 = calc_MP2(EC)
+    if EC.options.wf.npositron > 0
+      EMp2 = calc_posMP2(EC)
+    else
+      EMp2 = calc_MP2(EC)
+    end
     method = "MP2"
   else
     EMp2 = calc_UMP2(EC)
