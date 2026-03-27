@@ -20,7 +20,7 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
-import ..ElemCo.ALPACADecomposition: AbstractALPACAMatrix, ALPACAOptions, alpaca, column!, elements!
+using ..ElemCo.ALPACADecomposition
 
 export load_vasp, setup_vasp!
 
@@ -320,7 +320,7 @@ The matrix has compound indices ``I = (q-1) n + p`` (pair ``(p,q)``) and
 
 The matrix is complex symmetric: ``V^T = V``.
 """
-struct VaspCoulombMatrix{T} <: AbstractALPACAMatrix
+struct VaspCoulombMatrix{T} <: AbstractALPACAMatrix{T}
   "conj(Γ[L,q,p]) reshaped as (naux, n²)"
   Gtilde::Matrix{T}
   "Original Γ[L,p,q], shape (naux, norb, norb)"
@@ -330,24 +330,24 @@ end
 
 Base.size(mat::VaspCoulombMatrix) = (mat.norb^2, mat.norb^2)
 
-function column!(buffer::AbstractVector, mat::VaspCoulombMatrix, j::Integer)
+function ALPACADecomposition.column!(buffer::AbstractVector, mat::VaspCoulombMatrix, j::Integer)
   norb = mat.norb
   # j maps to pair (r, s): j = (s-1)*norb + r
   r = ((j - 1) % norb) + 1
   s = ((j - 1) ÷ norb) + 1
-  # buffer = Gtilde' * Gamma[:, r, s]  (BLAS-2 gemv)
+  # buffer = Gtilde' * Gamma[:, r, s]
   mul!(buffer, transpose(mat.Gtilde), view(mat.Gamma, :, r, s))
   return buffer
 end
 
-function elements!(buffer::AbstractVector, mat::VaspCoulombMatrix{T},
+function ALPACADecomposition.elements!(buffer::AbstractVector, mat::VaspCoulombMatrix{T},
                    pairs::AbstractVector{<:Tuple{<:Integer,<:Integer}}) where T
   norb = mat.norb
   @inbounds for k in eachindex(pairs)
     I, J = pairs[k]
     r = ((J - 1) % norb) + 1
     s = ((J - 1) ÷ norb) + 1
-    # V[I,J] = Gtilde[:,I]' * Gamma[:,r,s]  (BLAS-1 dot)
+    # V[I,J] = Gtilde[:,I]' * Gamma[:,r,s]
     buffer[k] = transpose(view(mat.Gtilde, :, I)) * view(mat.Gamma, :, r, s)
   end
   return buffer

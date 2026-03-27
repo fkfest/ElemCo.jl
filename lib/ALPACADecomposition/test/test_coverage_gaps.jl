@@ -57,7 +57,7 @@ end
   Random.seed!(601)
 
   # Build a custom mat that wraps a dense matrix but isn't DenseALPACAMatrix
-  struct TestMatrix <: AbstractALPACAMatrix
+  struct TestMatrix <: AbstractALPACAMatrix{Float64}
     data::Matrix{Float64}
   end
   Base.size(o::TestMatrix) = size(o.data)
@@ -90,7 +90,7 @@ end
   using LinearAlgebra, Random
   Random.seed!(602)
 
-  struct TestMatrixGeneral <: AbstractALPACAMatrix
+  struct TestMatrixGeneral <: AbstractALPACAMatrix{Float64}
     data::Matrix{Float64}
   end
   Base.size(o::TestMatrixGeneral) = size(o.data)
@@ -288,7 +288,7 @@ end
   U = randn(n, k); V = randn(n, k)
   A = U * V' + 0.005 * randn(n, n)
 
-  struct QRDGenMatrix <: AbstractALPACAMatrix
+  struct QRDGenMatrix <: AbstractALPACAMatrix{Float64}
     data::Matrix{Float64}
   end
   Base.size(o::QRDGenMatrix) = size(o.data)
@@ -372,7 +372,7 @@ end
   A[1:10, 1:10] .= B1
   A[11:20, 11:20] .= B2
 
-  struct BlockMatrix <: AbstractALPACAMatrix
+  struct BlockMatrix <: AbstractALPACAMatrix{Float64}
     data::Matrix{Float64}
   end
   Base.size(o::BlockMatrix) = size(o.data)
@@ -514,7 +514,7 @@ end
 @testitem "Access: column! fallback throws MethodError" begin
   using ALPACADecomposition
 
-  struct BareMatrix <: AbstractALPACAMatrix end
+  struct BareMatrix <: AbstractALPACAMatrix{Float64} end
   Base.size(::BareMatrix) = (3, 3)
 
   buf = zeros(3)
@@ -524,7 +524,7 @@ end
 @testitem "Access: row! fallback throws MethodError" begin
   using ALPACADecomposition
 
-  struct BareMatrix2 <: AbstractALPACAMatrix end
+  struct BareMatrix2 <: AbstractALPACAMatrix{Float64} end
   Base.size(::BareMatrix2) = (3, 3)
 
   buf = zeros(3)
@@ -534,7 +534,7 @@ end
 @testitem "Access: elements! fallback throws MethodError" begin
   using ALPACADecomposition
 
-  struct BareMatrix3 <: AbstractALPACAMatrix end
+  struct BareMatrix3 <: AbstractALPACAMatrix{Float64} end
   Base.size(::BareMatrix3) = (3, 3)
 
   buf = zeros(1)

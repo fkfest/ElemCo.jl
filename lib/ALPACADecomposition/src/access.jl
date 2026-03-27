@@ -1,7 +1,10 @@
 """
-    AbstractALPACAMatrix
+    AbstractALPACAMatrix{T}
 
 Abstract matrix-free interface for on-demand matrix access.
+
+The type parameter `T` specifies the element type of the matrix
+(e.g., `Float64`, `ComplexF64`).
 
 Implementors must provide `Base.size(A)` together with:
 
@@ -15,7 +18,7 @@ needs to provide these principal elements, not arbitrary matrix entries.
 The only exception is when using [`PrincipalTriples`](@ref) (pre-computed
 values), which bypasses `elements!` entirely.
 """
-abstract type AbstractALPACAMatrix end
+abstract type AbstractALPACAMatrix{T} end
 
 """
     DenseALPACAMatrix(data)
@@ -23,7 +26,7 @@ abstract type AbstractALPACAMatrix end
 Dense wrapper used for matrices that are already materialized in memory.  
 This is the default for `alpaca(matrix)`.
 """
-struct DenseALPACAMatrix{T,M<:AbstractMatrix{T}} <: AbstractALPACAMatrix
+struct DenseALPACAMatrix{T,M<:AbstractMatrix{T}} <: AbstractALPACAMatrix{T}
   data::M
 end
 

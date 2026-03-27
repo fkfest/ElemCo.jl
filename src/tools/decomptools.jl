@@ -7,6 +7,7 @@ using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.QMTensors
+using ..ElemCo.ALPACADecomposition
 
 export calc_integrals_decomposition
 export eigen_decompose, svd_decompose
@@ -763,53 +764,71 @@ function ldlt_pivoted_symmetric_decompose(M_in::AbstractMatrix{T}, tol; sigma::F
 end
 
 """
+    IntegralMatrix{T} <: AbstractALPACAMatrix
+
+Matrix-free representation of the two-electron integral matrix for ALPACA decomposition.
+
+The matrix has compound indices ``I = (r-1) n + p`` and ``J = (s-1) n + q``
+(column-major order), with elements ``M_{IJ} = v_{pr}^{qs}``.
+
+The matrix is symmetric: ``M^T = M`` (complex symmetric for complex MOs).
+"""
+struct IntegralMatrix{T} <: AbstractALPACAMatrix{T}
+  "Two-electron integrals v[p,r,q,s], shape (n, n, n, n)"
+  v::Array{T,4}
+  n::Int
+end
+
+Base.size(mat::IntegralMatrix) = (mat.n^2, mat.n^2)
+
+function ALPACADecomposition.column!(buffer::AbstractVector, mat::IntegralMatrix, j::Integer)
+  n = mat.n
+  q = ((j - 1) % n) + 1
+  s = ((j - 1) ÷ n) + 1
+  # buffer[I] = v[p,r,q,s] where I = (r-1)*n + p
+  copyto!(buffer, 1, vec(view(mat.v, :, :, q, s)), 1, n^2)
+  return buffer
+end
+
+function ALPACADecomposition.elements!(buffer::AbstractVector, mat::IntegralMatrix{T},
+                   pairs::AbstractVector{<:Tuple{<:Integer,<:Integer}}) where T
+  n = mat.n
+  @inbounds for k in eachindex(pairs)
+    I, J = pairs[k]
+    p = ((I - 1) % n) + 1
+    r = ((I - 1) ÷ n) + 1
+    q = ((J - 1) % n) + 1
+    s = ((J - 1) ÷ n) + 1
+    buffer[k] = mat.v[p, r, q, s]
+  end
+  return buffer
+end
+
+"""
     calc_integrals_decomposition(EC::ECInfo)
 
   Decompose ``v_{pr}^{qs}`` as ``v_p^{qL} v_r^{sL}`` and store as `mmL`.
+
+  Uses the ALPACA algorithm with a matrix-free interface that accesses
+  elements of the ``n^2 \\times n^2`` integral matrix on demand,
+  avoiding materialization of the full dense matrix.
 """
 function calc_integrals_decomposition(EC::ECInfo)
   pqrs = permutedims(ints2(EC,"::::",:α),(1,3,2,4))
   n = size(pqrs,1)
-  if EC.options.cc.usecholesky
-    Mmat = reshape(pqrs, (n^2,n^2))
-    pqrs = nothing
-    if ec_eltype(EC) <: Complex
-      # Complex symmetric PSD matrix: need M = L*L^T (not L*L†)
-      pqP, naux1 = symmetric_pivoted_cholesky(Mmat, EC.options.cholesky.thr)
-    else
-      CA = cholesky(Hermitian(Mmat), RowMaximum(), check = false, tol = EC.options.cholesky.thr)
-      naux1 = CA.rank
-      pqP = CA.U[1:naux1,invperm(CA.p)]'
-    end
-  else
-    F = svd(reshape(pqrs, (n^2,n^2)))
-    S = F.S
-    pqrs = nothing
+  tol = EC.options.cholesky.thr
+  sigma = EC.options.cholesky.sigma
 
-    naux1 = 0
-    for s in S
-      if s > EC.options.cholesky.thr
-        naux1 += 1
-      else
-        break
-      end
-    end
+  mat = IntegralMatrix(pqrs, n)
+  opts = ALPACAOptions(tol=tol, sigma=sigma, symmetry=:symmetric, max_rank=n^2)
+  result = alpaca(mat; options=opts)
 
-    if ec_eltype(EC) <: Complex
-      # Takagi factorization for complex symmetric M = U Σ U^T
-      # From SVD M = A Σ B†, phases: e^{iφ_k} = conj(Aₖ^T Bₖ)
-      A = F.U[:, 1:naux1]
-      B = F.V[:, 1:naux1]
-      phases = [conj(sum(A[:,k] .* B[:,k])) for k in 1:naux1]
-      pqP = A .* transpose(sqrt.(phases) .* sqrt.(S[1:naux1]))
-    else
-      pqP = F.U[:,1:naux1].*sqrt.(S[1:naux1]')
-    end
+  naux1 = size(result.left, 2)
+  if !isempty(result.neg_indices)
+    @warn "ALPACA found $(length(result.neg_indices)) negative eigenvalues in integral matrix"
   end
   println("Integral auxiliary space size: ",naux1)
-  save!(EC, "mmL", reshape(pqP, (n,n,naux1)))
-  #B_comparison = pqP * pqP'
-  #println( B_comparison ≈ reshape(pqrs, (n^2,n^2)) )
+  save!(EC, "mmL", reshape(result.left, (n,n,naux1)))
 end
 
 """

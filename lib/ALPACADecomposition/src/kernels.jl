@@ -398,22 +398,3 @@ function _svd_from_CJ_RT(C::AbstractMatrix{T}, J::AbstractMatrix{T},
 
   return ALPACAResult{T}(left, right, Int[], col_pivots, row_pivots, :general)
 end
-
-"""
-    _matrix_eltype(matrix)
-
-Determine the element type of a matrix.
-"""
-_matrix_eltype(mat::DenseALPACAMatrix{T}) where T = T
-
-function _matrix_eltype(matrix::AbstractALPACAMatrix)
-  # Fallback: try to infer from size + a single element
-  n = size(matrix)[1]
-  buf = Vector{ComplexF64}(undef, 1)
-  try
-    elements!(buf, matrix, [(1, 1)])
-    return iszero(imag(buf[1])) ? Float64 : ComplexF64
-  catch
-    return Float64
-  end
-end

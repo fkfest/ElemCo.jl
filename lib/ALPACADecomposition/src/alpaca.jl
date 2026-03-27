@@ -25,12 +25,11 @@ function alpaca(matrix::AbstractALPACAMatrix;
   return _alpaca_impl(matrix, m, n, descriptor, options, Val(options.symmetry))
 end
 
-function _alpaca_impl(matrix::AbstractALPACAMatrix,
+function _alpaca_impl(matrix::AbstractALPACAMatrix{T},
                       m::Int, n::Int,
                       descriptor::AbstractPrincipalDescriptor,
                       options::ALPACAOptions,
-                      ::Val{S}) where S
-  T = _matrix_eltype(matrix)
+                      ::Val{S}) where {T, S}
 
   # Cache type ALPACACache{T,R,S} is fully specified → all dispatch is static
   cache = ALPACACache(T, m, n, Val{S}(), descriptor.pairs)
@@ -63,12 +62,11 @@ function lpaca(matrix::AbstractALPACAMatrix;
   return _lpaca_impl(matrix, m, n, descriptor, options, Val(options.symmetry))
 end
 
-function _lpaca_impl(matrix::AbstractALPACAMatrix,
+function _lpaca_impl(matrix::AbstractALPACAMatrix{T},
                      m::Int, n::Int,
                      descriptor::AbstractPrincipalDescriptor,
                      options::ALPACAOptions,
-                     ::Val{S}) where S
-  T = _matrix_eltype(matrix)
+                     ::Val{S}) where {T, S}
   RT = real(T)
 
   cache = ALPACACache(T, m, n, Val{S}(), descriptor.pairs)

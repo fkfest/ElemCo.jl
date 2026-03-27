@@ -63,15 +63,14 @@ significant columns the greedy phase may have missed.  Returns an
    column-pivoted QR, and extend ``Q`` with any newly discovered pivots.
 5. Re-finalize: Nyström (symmetric/hermitian) or SVD (general).
 """
-function qrdalpaca(matrix::AbstractALPACAMatrix;
+function qrdalpaca(matrix::AbstractALPACAMatrix{T};
                    principal=nothing,
-                   options::ALPACAOptions)
+                   options::ALPACAOptions) where T
   # ── Step 1: ALPACA pilot ──
   result = alpaca(matrix; principal, options)
   alpaca_pivots = result.pivot_indices
   k_alpaca = length(alpaca_pivots)
 
-  T = _matrix_eltype(matrix)
   RT = real(T)
   sym = options.symmetry
   sig = options.sigma

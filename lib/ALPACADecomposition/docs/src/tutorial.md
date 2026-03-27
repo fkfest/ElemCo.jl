@@ -275,7 +275,7 @@ on-the-fly), implement the matrix-free interface instead of materializing:
 using ALPACADecomposition
 
 # Example: a kernel matrix K(i,j) = exp(-|xᵢ - xⱼ|²/σ²)
-struct KernelMatrix <: AbstractALPACAMatrix
+struct KernelMatrix <: AbstractALPACAMatrix{Float64}
   points::Matrix{Float64}   # d × n
   sigma2::Float64
 end
