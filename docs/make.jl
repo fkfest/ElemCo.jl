@@ -48,7 +48,6 @@ makedocs(
       "cctools.md",
       "constants.md",
       "decomptools.md",
-      "ldlt_decomposition.md",
       "dfcc.md",
       "dfdump.md",
       "dfhf.md",
