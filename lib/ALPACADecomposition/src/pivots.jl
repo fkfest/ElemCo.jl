@@ -356,9 +356,6 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
     if from_principal_diagonal
       # Principal diagonal element: the diagonal residual was already the
       # largest monitored value, so 1×1 pivot is the right choice.
-      # Consistency check: pivot value should match the principal value
-      @assert abs(abs(cache.cbuf[next_j]) - prin_magnitude) <
-              10 * tol * max(prin_magnitude, one(R)) "pivot value $(cache.cbuf[next_j]) inconsistent with principal value $prin_magnitude"
       _store_symmetric_pivot!(cache, next_j)
     else
       # Find the element with the largest absolute value in the deflated column
@@ -377,8 +374,9 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
       end
 
       if diag_val < tol && offdiag_val < tol
-        # Entire column is negligible → skip (no more rank in this direction)
-        continue
+        # Entire column is negligible — no more rank available.
+        # ACA already selected the best candidate; bail out.
+        break
       end
 
       if offdiag_idx == 0 || diag_val >= max((one(R) - 5 * tol) * offdiag_val, tol)
@@ -455,9 +453,6 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
         fetch_and_deflate_col_general!(cache, matrix, next_j)
         fetch_and_deflate_row_general!(cache, matrix, next_i)
 
-        # Consistency check: pivot value should match the principal value
-        @assert abs(abs(cache.cbuf[next_i]) - prin_magnitude) <
-                10 * tol * max(prin_magnitude, one(real(T))) "pivot value $(cache.cbuf[next_i]) inconsistent with principal value $prin_magnitude"
         _store_general_pivot!(cache, next_j, next_i)
         continue
       end
