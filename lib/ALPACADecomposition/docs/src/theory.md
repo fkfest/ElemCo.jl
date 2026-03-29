@@ -54,8 +54,11 @@ ALPACA's key innovation is using **principal elements** — user-specified
 matrix entries whose residuals are tracked throughout the decomposition —
 as the **primary** pivot selection signal.
 
-For a symmetric matrix, the diagonal ``\{A_{ii}\}`` is a natural choice:
-as pivots are accepted, the deflated diagonal residual of index ``i`` is
+### Default: Diagonal Elements
+
+For a symmetric matrix, the diagonal ``\{A_{ii}\}`` is the default
+and most natural choice of principal elements.  As pivots are accepted,
+the deflated diagonal residual of index ``i`` is
 
 ```math
 p_i^{(k)} = A_{ii} - \sum_{\ell=1}^{k} \frac{c_\ell(i)^2}{d_\ell}
@@ -70,29 +73,52 @@ pivot.  **ACA serves only as a fallback**: ALPACA switches to the ACA
 candidate only when all principal residuals have fallen below the
 tolerance.
 
-For Hermitian matrices this becomes:
-```math
-p_i^{(k)} = A_{ii} - \sum_{\ell=1}^{k} \frac{c_\ell(i) \, \overline{c_\ell(i)}}{d_\ell}
-```
-and for general matrices:
-```math
-p_{ab}^{(k)} = A_{a,b} - \sum_{\ell=1}^{k} \frac{c_\ell(a) \, r_\ell(b)}{d_\ell}
-```
-where ``r_\ell(b)`` is the ``b``-th entry of the deflated row.
+### General Update Formula
+
+The principal elements are not restricted to diagonal entries — any set
+of ``(a, b)`` index pairs can be tracked.  The residual update for
+a principal pair ``(a, b)`` after pivot ``k`` is:
+
+- **Symmetric** (real or complex):
+  ```math
+  p_{ab}^{(k)} = p_{ab}^{(k-1)} - \frac{c_k(a) \cdot c_k(b)}{d_k}
+  ```
+- **Hermitian**: uses complex conjugation on the second index:
+  ```math
+  p_{ab}^{(k)} = p_{ab}^{(k-1)} - \frac{c_k(a) \cdot \overline{c_k(b)}}{d_k}
+  ```
+  For diagonal elements (``a = b``), this reduces to
+  ``p_{aa}^{(k)} = p_{aa}^{(k-1)} - |c_k(a)|^2 / d_k``,
+  which is always real (since ``A_{aa}`` is real for Hermitian matrices).
+- **General**: uses the row factor instead of the column factor:
+  ```math
+  p_{ab}^{(k)} = p_{ab}^{(k-1)} - \frac{c_k(a) \cdot r_k(b)}{d_k}
+  ```
+  where ``r_k(b)`` is the ``b``-th entry of the ``k``-th deflated row.
+
+For all symmetry classes, diagonal elements remain the default choice
+because they provide the most informative convergence signal: once all
+diagonal residuals are small, the matrix is well-approximated.
+Custom off-diagonal pairs can be specified for matrices where other
+entries are more informative (see the [Tutorial](@ref) for examples).
 
 ### Convergence
 
-The pivot loop terminates when *both* signals fall below the pivot
-tolerance `pivotol`:
+The principal signal is checked **first** at each iteration.  The ACA 
+fallback is computed **only** when the principal signal is insufficient:
 
-- Principal residual: ``\max_i \lvert p_i^{(k)} \rvert < \texttt{pivotol}``
-- ACA residual: ``\max_j \lvert L_{j,k} \rvert \cdot \lvert d_k \rvert < \texttt{pivotol}``
+1. If ``\max_i \lvert p_i^{(k)} \rvert \ge \texttt{pivotol}``,
+   the best principal element is selected as the next pivot.  No ACA
+   computation is performed.
+2. Otherwise, the ACA candidate is evaluated:
+   ``\max_{j \notin \text{pivots}} \lvert L_{j,k} \rvert \cdot \lvert d_k \rvert``.
+   If this exceeds `pivotol`, the ACA candidate becomes the pivot.
+3. If *both* signals are below `pivotol`, the loop terminates.
 
-As long as any principal residual remains above the tolerance, that
-principal element is selected as the next pivot.  Once all principal
-residuals are small, ACA residuals are checked as a secondary guard
-before termination.  This dual-signal convergence makes ALPACA
-significantly more robust than plain ACA.
+This principal-first, lazy-ACA strategy avoids unnecessary work when
+the principal signal is informative (the common case), while still
+using ACA as a safety net to catch pivots that the principal
+descriptor may have missed.
 
 ## The Pivot Loop
 
@@ -123,11 +149,20 @@ some columns of ``\mathbf{L}`` absorb a sign flip, tracked via
    \tilde{\mathbf{c}} = \mathbf{A}_{:,j} - \mathbf{L}_{1:k-1} \, \mathbf{L}_{j, 1:k-1}^\top
    ```
    This is a BLAS-2 operation (GEMV) on the cached factors.
-4. **Record pivot**: store
-   ``\mathbf{L}_{:,k} = \tilde{\mathbf{c}} / \sqrt{|\tilde{c}_j|}``
-   (with sign tracked in `neg_indices` if ``\tilde{c}_j < 0``).
-5. **Update principal residuals**: subtract the new pivot's contribution
+4. **1×1 vs 2×2 pivot decision**: See [below](@ref bk_pivot) for details.
+5. **Record pivot**: store ``d_k = \tilde{c}_j`` (the pivot element) and
+   ``\mathbf{L}_{:,k} = \tilde{\mathbf{c}} / d_k`` (the scaled column).
+   If ``d_k < 0``, record ``k`` as a negative index.
+6. **Update principal residuals**: subtract the new pivot's contribution
    from all tracked principal elements.
+
+The raw factorization maintained during the loop is
+```math
+\mathbf{A} \approx \sum_{k=1}^{r} d_k \, \mathbf{L}_{:,k} \, \mathbf{L}_{:,k}^\top
+```
+where the ``d_k`` are stored separately.  The Nyström finalization
+(see [below](@ref nystrom)) converts these raw factors into the
+cleaner ``\mathbf{L}\mathbf{L}^\top`` form.
 
 Because ``\mathbf{A} = \mathbf{A}^\top``, only columns are fetched —
 the rows are implicitly available from the symmetry.
@@ -149,6 +184,50 @@ pivot ``i_k``, fetching both ``\mathbf{A}_{:,j_k}`` and
 ``d_k = \tilde{c}_{i_k}``, and both column and row are deflated against
 all previous pivots before being stored.
 
+### [1×1 vs 2×2 Pivot Selection (Bunch-Kaufman)](@id bk_pivot)
+
+After fetching and deflating column ``j``, ALPACA inspects the deflated
+column ``\tilde{\mathbf{c}}`` to decide between a standard 1×1 pivot
+and a 2×2 Bunch-Kaufman pivot.  This is important for **indefinite**
+matrices where the diagonal element can be small or zero even though
+the column contains significant off-diagonal entries.
+
+Let ``d = |\tilde{c}_j|`` (diagonal) and
+``g = \max_{p \neq j,\, p \notin \text{pivots}} |\tilde{c}_p|``
+(largest off-diagonal).
+
+- **If the pivot was selected by a principal diagonal element**
+  (i.e., the principal pair has ``i = j``), the diagonal was already
+  the dominant monitored value, so a **1×1 pivot** is accepted directly
+  without scanning the column.
+
+- **1×1 pivot** is accepted when
+  ```math
+  d \ge \max\!\big((1 - 5\tau)\,g,\;\tau\big)
+  ```
+  where ``\tau`` is the pivot tolerance (`pivotol`).  This ensures
+  the diagonal is large enough relative to the off-diagonal for
+  numerical stability.
+
+- **2×2 Bunch-Kaufman pivot**: when the off-diagonal element ``g``
+  at index ``p^*`` dominates, ALPACA fetches and deflates column
+  ``p^*`` as well.  The 2×2 intersection block
+  ```math
+  \mathbf{B} = \begin{pmatrix}
+    \tilde{c}_j(j) & \tilde{c}_j(p^*) \\
+    \tilde{c}_{p^*}(j) & \tilde{c}_{p^*}(p^*)
+  \end{pmatrix}
+  ```
+  is eigendecomposed (for real symmetric and complex Hermitian) or
+  SVD-decomposed (for complex symmetric).  Each eigenvalue
+  ``\lambda_t`` above the tolerance produces a rotated rank-1 pivot:
+  ```math
+  \mathbf{L}_{:,k} = \frac{v_{1t}\,\tilde{\mathbf{c}}_j +
+                           v_{2t}\,\tilde{\mathbf{c}}_{p^*}}{\lambda_t}
+  ```
+  This allows ALPACA to handle indefinite matrices where the diagonal
+  is small but the 2×2 block has a large eigenvalue.
+
 !!! tip "Performance: symmetric vs general"
     The symmetric/Hermitian code path is significantly faster than the
     general path.  Symmetric mode fetches only one column per pivot,
@@ -159,7 +238,7 @@ all previous pivots before being stored.
     `issymmetric` / `ishermitian` for custom matrix types, or passing
     `symmetry=:symmetric` (or `:hermitian`) explicitly.
 
-## Nyström Finalization
+## [Nyström Finalization](@id nystrom)
 
 The raw factors from the pivot loop (returned by [`lpaca`](@ref))
 may contain small or spurious components due to finite-precision

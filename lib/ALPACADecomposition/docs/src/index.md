@@ -37,7 +37,7 @@ Three variants with increasing robustness are provided:
 | Complex symmetric | `:symmetric` | ``\mathbf{A} \approx \mathbf{L}\mathbf{L}^\top`` | `ComplexF64` |
 | General | `:general` | ``\mathbf{A} \approx \mathbf{L}\mathbf{R}^\dagger`` | any |
 
-For real symmetric and complex Hermitian cases, the result includes a vector of negative indices to track sign changes (``\pm 1``).
+For real symmetric and complex Hermitian cases, the result includes a vector of negative indices to track sign changes (``\pm 1``) for indefinite matrices.  ALPACA uses **2×2 Bunch-Kaufman pivoting** when off-diagonal elements dominate the diagonal, ensuring robust handling of indefinite matrices.
 
 ## Quick Start
 
@@ -63,6 +63,11 @@ ALPACADecomposition is part of the [ElemCo.jl](https://github.com/fkfest/ElemCo.
 
 ```julia
 using Pkg
+# From within the ElemCo.jl repository:
 Pkg.develop(path="lib/ALPACADecomposition")
+
+# Or from an absolute path:
+Pkg.develop(path="/path/to/ElemCo.jl/lib/ALPACADecomposition")
+
 using ALPACADecomposition
 ```

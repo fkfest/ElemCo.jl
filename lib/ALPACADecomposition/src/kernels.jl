@@ -22,6 +22,29 @@ No-op for `DenseALPACAMatrix` (columns can be read from the matrix directly).
 end
 
 """
+    _save_orig_col(cache, matrix) → saved copy or nothing
+
+Return a copy of the pending original column at slot `n_cols+1`.
+Returns `nothing` for `DenseALPACAMatrix` (originals are read from matrix data).
+"""
+@inline _save_orig_col(cache::ALPACACache, ::DenseALPACAMatrix) = nothing
+@inline function _save_orig_col(cache::ALPACACache{T}, ::AbstractALPACAMatrix) where T
+  return copy(@view cache.orig_columns[:, cache.n_cols + 1])
+end
+
+"""
+    _restore_orig_col!(cache, matrix, slot, saved)
+
+Write the saved original column into `orig_columns[:, slot]`.
+No-op for `DenseALPACAMatrix`.
+"""
+@inline _restore_orig_col!(cache::ALPACACache, ::DenseALPACAMatrix, ::Int, ::Nothing) = nothing
+@inline function _restore_orig_col!(cache::ALPACACache{T}, ::AbstractALPACAMatrix,
+                                     slot::Int, saved::Vector{T}) where T
+  @views cache.orig_columns[:, slot] .= saved
+end
+
+"""
     _store_orig_row!(cache, matrix)
 
 Store the current row buffer (`cache.rbuf`) into `orig_rows`.
@@ -173,13 +196,15 @@ end
 # ──────────────────────────────────────────────────────────────────
 
 """
-    update_principal_residuals!(cache, deflated_col, pivot_val)
+    update_principal_residuals!(cache, stored_col, pivot_val)
 
 Update principal residual values after accepting a pivot with value `pivot_val`.
 
-For each principal pair (a, b):
-  val_res[p] -= deflated_col[a] * deflated_col[b] / pivot_val   (symmetric)
-  val_res[p] -= deflated_col[a] * conj(deflated_col[b]) / pivot_val  (hermitian)
+The `stored_col` is the already-scaled column ``L_{:,k} = c_{:,k} / d_k``
+stored in the cache.  For each principal pair ``(a, b)``:
+
+    ``\\Delta_p = L_{a,k} \\cdot L_{b,k} \\cdot d_k`` (symmetric)
+    ``\\Delta_p = L_{a,k} \\cdot \\overline{L_{b,k}} \\cdot d_k`` (hermitian)
 
 The hermitian vs symmetric distinction is dispatched via the
 cache type parameter `S`.
@@ -205,10 +230,12 @@ function update_principal_residuals!(cache::ALPACACache{T},
 end
 
 """
-    update_principal_residuals_general!(cache, deflated_col, deflated_row, pivot_val)
+    update_principal_residuals_general!(cache, stored_col, stored_row, pivot_val)
 
 Update principal residuals for general matrices.
-  val_res[p] -= deflated_col[a] * deflated_row[b] / pivot_val
+The stored column/row are already scaled by ``1/d_k``:
+
+    ``\\Delta_p = L^C_{a,k} \\cdot L^R_{b,k} \\cdot d_k``
 """
 function update_principal_residuals_general!(cache::ALPACACache{T},
                                              deflated_col::AbstractVector{T},

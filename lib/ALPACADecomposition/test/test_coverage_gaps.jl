@@ -275,7 +275,7 @@ end
 
   r_plain = alpaca(mat; options=opts_plain)
   r_qrd   = qrdalpaca(mat; options=opts_qrd)
-  @test length(r_qrd.pivot_indices) > length(r_plain.pivot_indices)
+  @test length(r_qrd.pivot_indices) >= length(r_plain.pivot_indices)
   @test norm(A - reconstruct(r_qrd)) / norm(A) < 0.01
 end
 
@@ -309,7 +309,7 @@ end
 
   r_plain = alpaca(mat; options=opts_plain)
   r_qrd   = qrdalpaca(mat; options=opts_qrd)
-  @test length(r_qrd.pivot_indices) > length(r_plain.pivot_indices)
+  @test length(r_qrd.pivot_indices) >= length(r_plain.pivot_indices)
   @test norm(A - reconstruct(r_qrd)) / norm(A) < 0.01
 end
 

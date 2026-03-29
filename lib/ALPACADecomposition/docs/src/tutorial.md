@@ -230,7 +230,7 @@ result2 = alpaca(B; options=opts)
 
 ## 6. Principal Element Descriptors
 
-By default, ALPACA tracks the diagonal elements as the secondary
+By default, ALPACA tracks the diagonal elements as the primary
 pivot signal.  You can customize which elements are monitored.
 
 ### Custom Pairs

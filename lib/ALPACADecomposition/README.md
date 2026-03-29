@@ -6,8 +6,11 @@ ALPACA (**A**mended **L**ow-rank **P**rincipal-element **A**daptive **C**ross **
 
 The algorithm combines two pivoting signals:
 
-1. **ACA-style residual pivots** extracted from already requested rows and columns.
-2. **Principal-element pivots** extracted from a user-provided descriptor, defaulting to the diagonal for square matrices.
+1. **Principal-element pivots** (primary) — residuals of user-provided matrix elements
+   (defaulting to the diagonal for square matrices), tracked throughout the
+   decomposition.
+2. **ACA-style residual pivots** (fallback) — extracted from already fetched
+   columns/rows, used only when all principal residuals fall below the tolerance.
 
 Three variants are provided:
 
@@ -19,10 +22,13 @@ Three variants are provided:
 
 ## Supported Matrix Classes
 
-- **Real symmetric** (`symmetry=:symmetric`, `T<:Real`): `A ≈ L Lᵀ` (with a vector of negative indices)
-- **Complex Hermitian** (`symmetry=:hermitian`): `A ≈ L L†` (with a vector of negative indices)
+- **Real symmetric** (`symmetry=:symmetric`, `T<:Real`): `A ≈ L Lᵀ` (with `neg_indices` tracking sign flips for indefinite matrices)
+- **Complex Hermitian** (`symmetry=:hermitian`): `A ≈ L L†` (with `neg_indices` tracking sign flips)
 - **Complex symmetric** (`symmetry=:symmetric`, `T<:Complex`): `A ≈ L Lᵀ`
 - **General** (`symmetry=:general`): `A ≈ L R†` (rectangular matrices supported)
+
+For indefinite symmetric/Hermitian matrices, ALPACA uses **2×2 Bunch-Kaufman pivoting**
+to handle cases where the diagonal is small but off-diagonal elements are significant.
 
 ## Quick Start
 
@@ -56,7 +62,7 @@ For large or implicit matrices, implement the matrix-free interface to avoid
 materializing the full matrix:
 
 ```julia
-struct MyMatrix <: AbstractALPACAMatrix
+struct MyMatrix <: AbstractALPACAMatrix{Float64}
   # ...
 end
 
@@ -106,11 +112,20 @@ ALPACAOptions(;
 struct ALPACAResult{T}
   left::Matrix{T}           # left factor (n × r)
   right::Matrix{T}          # right factor (equals left for symmetric/hermitian)
-  neg_indices::Vector{Int}   # indices with −1 in sign diagonal D
+  neg_indices::Vector{Int}   # column indices where the sign diagonal entry is −1
+                             # (only for symmetric/hermitian; empty otherwise)
   pivot_indices::Vector{Int} # accepted column pivot indices
   row_pivots::Vector{Int}    # accepted row pivot indices (general only)
   symmetry::Symbol           # matrix class tag
 end
+```
+
+For symmetric/Hermitian results with `neg_indices`, the reconstruction is:
+```julia
+L = result.left
+D = ones(size(L, 2))
+D[result.neg_indices] .= -1
+A_approx = L * Diagonal(D) * L'
 ```
 
 ## Source Layout
@@ -128,3 +143,17 @@ src/
 ├── qrdalpaca.jl            # QR-refined variant (qrdalpaca)
 └── decompositions.jl       # Post-hoc decomposition extraction (SVD, Eigen, Takagi, QR)
 ```
+
+## Documentation
+
+Full documentation including theory, tutorial, and API reference is available
+in the `docs/` directory.  Build it locally with:
+
+```bash
+cd docs && julia --project=. make.jl
+```
+
+The documentation covers:
+- **Theory**: mathematical foundations, pivot selection, Nyström finalization, QR refinement
+- **Tutorial**: step-by-step examples from basic usage to custom matrix-free interfaces
+- **API Reference**: complete docstrings for all exported functions and types
