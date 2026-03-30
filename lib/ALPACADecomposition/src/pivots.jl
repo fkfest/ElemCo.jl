@@ -72,28 +72,242 @@ end
 """
     _eigendecompose_2x2(B, ::Val{S})
 
-Decompose a 2×2 block `B` according to symmetry type `S`:
-- `:symmetric` (real): eigendecomposition of `Symmetric(B)`
-- `:hermitian`: eigendecomposition of `Hermitian(B)`, eigenvalues converted to `T`
-- `:symmetric` (complex): SVD of `B`, singular values converted to `T`
+Analytical decomposition of a 2×2 block `B` according to symmetry type `S`:
+- `:symmetric` (real): eigendecomposition of symmetric 2×2 matrix
+- `:hermitian`: eigendecomposition of Hermitian 2×2 matrix
+- `:symmetric` (complex): Takagi factorization of complex symmetric 2×2 matrix
 
-Returns `(values::Vector{T}, vectors::Matrix{T})`.
+Returns `(values, V)` where `V` is the rotation matrix to be used
+by `_attempt_2x2_pivot!`.  For real symmetric and Hermitian, `V` contains
+the eigenvectors.  For complex symmetric, `V = conj(U)` where `U` are the
+Takagi vectors (``B = U Σ Uᵀ``); the conjugation ensures `B V / Σ = U`,
+giving correct ``L D Lᵀ`` factors.
 """
 function _eigendecompose_2x2(B::AbstractMatrix{T}, ::Val{:symmetric}) where {T<:Real}
-  F = eigen(Symmetric(B))
-  return F.values, F.vectors
+  # F = eigen(Symmetric(B))
+  a, d = real(B[1,1]), real(B[2,2])
+  b = B[1,2]
+  Δ = sqrt((a - d)^2 + 4*b^2)
+  λ1 = (a + d - Δ) / 2
+  λ2 = (a + d + Δ) / 2
+  # Eigenvectors: rotation matrix
+  v1 = T[λ1 - d, b]
+  v2 = T[λ2 - d, b]
+  v1 ./= norm(v1)
+  v2 ./= norm(v2)
+  if abs(λ1) < abs(λ2)
+    V = hcat(v2, v1)
+    return T[λ2, λ1], V
+  else
+    V = hcat(v1, v2)
+    return T[λ1, λ2], V
+  end
 end
 
 function _eigendecompose_2x2(B::AbstractMatrix{T}, ::Val{:hermitian}) where T
-  F = eigen(Hermitian(B))
-  # Convert real eigenvalues to complex type T for consistent typing
-  return T.(F.values), F.vectors
+  # F = eigen(Hermitian(B))
+  a, d = real(B[1,1]), real(B[2,2])
+  z = B[1,2]
+  Δ = sqrt((a - d)^2 + 4*abs2(z))
+  λ1 = (a + d - Δ) / 2
+  λ2 = (a + d + Δ) / 2
+  v1 = T[T(λ1) - T(d), conj(z)]
+  v2 = T[T(λ2) - T(d), conj(z)]
+  v1 ./= norm(v1)
+  v2 ./= norm(v2)
+  if abs(λ1) < abs(λ2)
+    V = hcat(v2, v1)
+    return T[λ2, λ1], V
+  else
+    V = hcat(v1, v2)
+    return T[λ1, λ2], V
+  end
 end
 
-# Complex symmetric: use SVD to get pseudo-eigendecomposition
+# Complex symmetric: Takagi (Autonne–Takagi) factorization B = U Σ Uᵀ.
+# For a complex symmetric 2×2 matrix, the Takagi decomposition gives
+# real non-negative singular values σ and a unitary U such that B = U Σ Uᵀ.
+#
+# The caller (_attempt_2x2_pivot!) builds L-columns as [d_j, d_p]·V/λ.
+# For the LDLᵀ factorization to be consistent, we need L[pivots,:] = U
+# (so LDLᵀ = UΣUᵀ = B).  Since B·conj(U)/Σ = U (Takagi relation), the
+# rotation matrix V passed to the caller must be conj(U).
 function _eigendecompose_2x2(B::AbstractMatrix{T}, ::Val{:symmetric}) where {T<:Complex}
+  σ, U = _takagi_2x2(B)
+  return σ, conj.(U)
+end
+
+"""
+    _takagi_2x2_from_svd(B) → (σ::Vector, U::Matrix)
+
+Reference implementation: Takagi factorization of a 2×2 complex symmetric
+matrix via LAPACK SVD.  Given SVD ``B = U_s Σ V_s^†``, the symmetry
+``B = B^T`` implies ``\\overline{V_s} = U_s D_φ`` for a diagonal phase matrix
+``D_φ``.  The Takagi vectors are ``U_T = U_s \\sqrt{D_φ}``, giving
+``B = U_T Σ U_T^T``.
+
+For degenerate singular values (``σ_1 ≈ σ_2``), uses an antilinear
+fixed-point iteration ``T(v) = B \\bar v / σ`` whose ``+1`` eigenvectors
+are the Takagi vectors.
+"""
+function _takagi_2x2_from_svd(B::AbstractMatrix{T}) where {T<:Complex}
+  RT = real(T)
   F = svd(B)
-  return T.(F.S), F.U
+  σ = F.S
+  degen_tol = RT(128) * eps(RT) * max(σ[1], one(RT))
+  if abs(σ[1] - σ[2]) < degen_tol
+    # Degenerate case: use T-operator approach
+    U_takagi = _takagi_degenerate(B, σ[1])
+  else
+    U_takagi = similar(F.U)
+    for k in 1:2
+      u = F.U[:, k]
+      v = F.V[:, k]
+      # Phase: conj(V[:,k]) = U[:,k] * φ_k → φ_k = conj(v[l]) / u[l]
+      l = abs(u[1]) >= abs(u[2]) ? 1 : 2
+      phase_k = conj(v[l]) / u[l]
+      U_takagi[:, k] = u * sqrt(phase_k)
+    end
+  end
+  return T.(σ), U_takagi
+end
+
+"""
+    _takagi_2x2(B) → (σ::Vector, U::Matrix)
+
+Analytical Takagi factorization of a 2×2 complex symmetric matrix
+``B = B^T``.  Returns real non-negative singular values ``σ`` (descending)
+and unitary ``U`` such that ``B = U \\operatorname{diag}(σ) U^T``.
+
+Computes eigenvalues of ``\\bar B B`` (Hermitian PSD) analytically to get
+``σ_k^2`` and right singular vectors ``v_k``, then derives Takagi vectors
+via the SVD phase relation ``Q_k = (B v_k / σ_k) \\sqrt{φ_k}``.
+
+For degenerate singular values (``σ_1 ≈ σ_2``), uses an antilinear
+fixed-point iteration ``T(v) = B \\bar v / σ`` whose ``+1`` eigenvectors
+are the Takagi vectors.
+"""
+function _takagi_2x2(B::AbstractMatrix{T}) where {T<:Complex}
+  RT = real(T)
+
+  # B̄B is 2×2 Hermitian PSD — eigenvalues give σ², eigenvectors give
+  # right singular vectors of B.
+  BbarB = B' * B
+  h11, h22 = real(BbarB[1,1]), real(BbarB[2,2])
+  h12 = BbarB[1,2]
+  Δ = sqrt((h11 - h22)^2 + 4 * abs2(h12))
+  s2_1 = (h11 + h22 + Δ) / 2                     # larger eigenvalue
+  s2_2 = max((h11 + h22 - Δ) / 2, zero(RT))       # smaller eigenvalue
+  σ_1 = sqrt(s2_1)
+  σ_2 = sqrt(s2_2)
+
+  # Degenerate case: σ₁ ≈ σ₂ → B̄B ≈ σ²I, eigenvectors arbitrary.
+  # Use the antilinear T-operator approach instead.
+  # Δ suffers catastrophic cancellation when h11 ≈ h22 and h12 ≈ 0,
+  # so use a robust threshold (relative to trace of B̄B).
+  degen_tol = RT(128) * eps(RT) * max(σ_1, one(RT))
+  if abs(σ_1 - σ_2) < degen_tol
+    U = _takagi_degenerate(B, σ_1)
+    return T[T(σ_1), T(σ_2)], U
+  end
+
+  # Eigenvectors of B̄B (Hermitian 2×2)
+  if abs(h12) < eps(RT) * max(abs(h11), abs(h22), one(RT))
+    # Diagonal B̄B: eigenvectors are standard basis vectors
+    if h11 >= h22
+      v1 = T[one(T), zero(T)]
+      v2 = T[zero(T), one(T)]
+    else
+      v1 = T[zero(T), one(T)]   # for larger eigenvalue s2_1 = h22
+      v2 = T[one(T), zero(T)]
+    end
+  else
+    # Eigenvector for larger eigenvalue s2_1
+    v1 = T[s2_1 - h22, conj(h12)]
+    v1 ./= norm(v1)
+    # Orthogonal eigenvector for smaller eigenvalue s2_2
+    v2 = T[-h12, s2_1 - h22]
+    v2 ./= norm(v2)
+  end
+
+  # Build Takagi vectors from right singular vectors via phase correction.
+  # SVD: B v_k = σ_k u_k (left singular vector).
+  # For B = Bᵀ: conj(v_k) = u_k φ_k, so Takagi vector Q_k = u_k √φ_k.
+  U = Matrix{T}(undef, 2, 2)
+  for (col, v, σ_k) in ((1, v1, σ_1), (2, v2, σ_2))
+    if σ_k < eps(RT) * max(σ_1, one(RT))
+      # Zero singular value: orthogonal complement of other Takagi vector
+      if col == 2
+        U[:, 2] = T[-conj(U[2,1]), conj(U[1,1])]
+      else
+        U[:, 1] = v
+      end
+      continue
+    end
+    u_svd = B * v / σ_k                    # left singular vector
+    l = abs(u_svd[1]) >= abs(u_svd[2]) ? 1 : 2
+    phase_k = conj(v[l]) / u_svd[l]        # conj(v) = u * phase
+    U[:, col] = u_svd * sqrt(phase_k)
+  end
+
+  return T[T(σ_1), T(σ_2)], U
+end
+
+"""
+    _takagi_degenerate(B, σ) → U::Matrix
+
+Compute Takagi vectors for a 2×2 complex symmetric matrix with degenerate
+singular values ``σ_1 ≈ σ_2 ≈ σ``.
+
+Uses the antilinear operator ``T(v) = B \\bar v / σ``, which satisfies
+``T^2 = I`` (since ``\\bar B B = σ^2 I``).  The ``+1`` eigenvectors of
+``T`` give the Takagi vectors.  For a starting vector ``v``, the projection
+``v + T(v)`` lands in the ``+1`` eigenspace.  If the orthogonal complement
+falls in the ``-1`` eigenspace, multiplying by ``i`` flips the sign
+(``T(iv) = -iT(v) = iv`` when ``T(v)=-v``).
+"""
+function _takagi_degenerate(B::AbstractMatrix{T}, σ::Real) where {T<:Complex}
+  U = Matrix{T}(undef, 2, 2)
+  RT = real(T)
+
+  if σ < eps(RT)
+    # B ≈ 0: any unitary works
+    U[:, 1] = T[one(T), zero(T)]
+    U[:, 2] = T[zero(T), one(T)]
+    return U
+  end
+
+  # First Takagi vector: project e₁ onto +1 eigenspace of T
+  v0 = T[one(T), zero(T)]
+  Tv = B * conj.(v0) / σ
+  u1 = v0 + Tv
+  if norm(u1) < RT(0.1)
+    # e₁ is (nearly) in the −1 eigenspace; try e₂
+    v0 = T[zero(T), one(T)]
+    Tv = B * conj.(v0) / σ
+    u1 = v0 + Tv
+  end
+  u1 ./= norm(u1)
+  U[:, 1] = u1
+
+  # Second Takagi vector: start from orthogonal complement of u1,
+  # project onto +1 eigenspace, then re-orthogonalize.
+  v0 = T[-conj(u1[2]), conj(u1[1])]
+  Tv = B * conj.(v0) / σ
+  u2 = v0 + Tv
+  nrm = norm(u2)
+  if nrm < RT(0.1)
+    # Orthogonal complement is in −1 eigenspace of T.
+    # Multiply by i: T(iv) = −iT(v) = −i(−v) = iv, so iv is in +1 eigenspace.
+    u2 = T(im) * v0
+    Tv = B * conj.(u2) / σ
+    u2 = u2 + Tv
+  end
+  u2 -= (U[:, 1]' * u2) * U[:, 1]     # Gram-Schmidt
+  u2 ./= norm(u2)
+  U[:, 2] = u2
+
+  return U
 end
 
 """
@@ -103,11 +317,18 @@ Attempt a 2×2 Bunch-Kaufman pivot using columns `j` and `partner`.
 
 Column `j` must already be fetched+deflated (passed as `deflated_j`).
 Fetches column `partner`, computes the 2×2 intersection block in the
-deflated basis, eigendecomposes it, and stores two rotated rank-1 pivots
-with the eigenvalues as pivot diagonal values.
+deflated basis, decomposes it (eigendecomposition for real symmetric /
+Hermitian, Takagi factorization for complex symmetric), and stores
+two rotated rank-1 pivots with the eigenvalues / singular values as
+pivot diagonal values.
 
 The rotated (deflated, scaled) columns are stored in `cache.columns` for
 correct subsequent deflation and raw-factor (`lpaca`) reconstruction.
+
+For complex symmetric matrices, uses the Takagi factorization
+``B = U Σ Uᵀ``.  The rotation uses ``\bar{U}`` (complex conjugate of
+Takagi vectors) so that ``B \bar{U} / Σ = U``, producing correct
+``L D Lᵀ`` factors at the pivot positions.
 
 Returns `true` if at least one valid pivot was stored.
 """
@@ -324,6 +545,8 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
   # Initialize principal values
   init_principal_values!(cache, matrix, descriptor)
 
+  last_cold_start_k = -1  # guard against repeated cold starts at the same rank
+
   for iter in 1:min(n, max_rank)
     k = cache.n_cols  # number of pivots so far
 
@@ -345,7 +568,20 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
       if aca_best_idx > 0 && aca_magnitude >= tol
         next_j = aca_best_idx
       else
-        break
+        # Cold start: both principal and ACA failed (e.g. zero-diagonal matrix).
+        # Pick the first non-pivot column so the 1×1/2×2 decision logic can
+        # inspect it.  Break if we already tried at this rank (no progress).
+        k == last_cold_start_k && break
+        last_cold_start_k = k
+        cold_j = 0
+        @inbounds for p in 1:n
+          if !cache.is_pivot[p]
+            cold_j = p
+            break
+          end
+        end
+        cold_j == 0 && break
+        next_j = cold_j
       end
     end
 

@@ -219,8 +219,9 @@ Let ``d = |\tilde{c}_j|`` (diagonal) and
   \end{pmatrix}
   ```
   is eigendecomposed (for real symmetric and complex Hermitian) or
-  SVD-decomposed (for complex symmetric).  Each eigenvalue
-  ``\lambda_t`` above the tolerance produces a rotated rank-1 pivot:
+  Takagi-decomposed (for complex symmetric).  Each eigenvalue /
+  singular value ``\lambda_t`` above the tolerance produces a rotated
+  rank-1 pivot:
   ```math
   \mathbf{L}_{:,k} = \frac{v_{1t}\,\tilde{\mathbf{c}}_j +
                            v_{2t}\,\tilde{\mathbf{c}}_{p^*}}{\lambda_t}
@@ -369,8 +370,8 @@ recomputed from scratch to maintain numerical stability.
 
 Once all significant columns have been found, the combined pivot set
 (ALPACA pivots + QR-discovered pivots) is used to re-run the Nyström
-(symmetric/Hermitian) or SVD (general) finalization to produce the
-final amended factors.
+(symmetric/Hermitian), Takagi (complex symmetric), or SVD (general)
+finalization to produce the final amended factors.
 
 ## Decomposition Extraction
 

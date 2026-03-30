@@ -354,8 +354,8 @@ end
   r_plain = alpaca(mat; options=opts_plain, principal=bad_principal)
   r_qrd   = qrdalpaca(mat; options=opts_qrd, principal=bad_principal)
 
-  # Plain ALPACA only finds block 1; qrdalpaca finds both blocks
-  @test length(r_qrd.pivot_indices) > length(r_plain.pivot_indices)
+  # Both should find all pivots (cold-start fallback helps plain ALPACA too)
+  @test length(r_qrd.pivot_indices) >= length(r_plain.pivot_indices)
   @test length(r_qrd.pivot_indices) == n
   @test norm(A - reconstruct(r_qrd)) / norm(A) < 1e-6
 end
@@ -392,7 +392,7 @@ end
   r_plain = alpaca(mat; options=opts_plain, principal=bad_principal)
   r_qrd   = qrdalpaca(mat; options=opts_qrd, principal=bad_principal)
 
-  @test length(r_qrd.pivot_indices) > length(r_plain.pivot_indices)
+  @test length(r_qrd.pivot_indices) >= length(r_plain.pivot_indices)
   @test length(r_qrd.pivot_indices) == n
   @test norm(A - reconstruct(r_qrd)) / norm(A) < 1e-6
 end
@@ -419,7 +419,7 @@ end
   r_plain = alpaca(mat; options=opts_plain, principal=bad_principal)
   r_qrd   = qrdalpaca(mat; options=opts_qrd, principal=bad_principal)
 
-  @test length(r_qrd.pivot_indices) > length(r_plain.pivot_indices)
+  @test length(r_qrd.pivot_indices) >= length(r_plain.pivot_indices)
   @test length(r_qrd.pivot_indices) == n
   @test norm(A - reconstruct(r_qrd)) / norm(A) < 1e-6
 end

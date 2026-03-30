@@ -88,8 +88,8 @@ U_takagi, D_takagi = alpaca_takagi(A_csym; tol=1e-8)
 
 ### `alpaca` — Standard (Nyström-Amended)
 
-The default. Produces the cleanest factors by eigendecomposing or
-SVD-decomposing the pivot submatrix:
+The default. Produces the cleanest factors by eigendecomposing (or
+Takagi-decomposing for complex symmetric) the pivot submatrix:
 
 ```julia
 result = alpaca(A; tol=1e-8)

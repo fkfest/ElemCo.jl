@@ -262,7 +262,8 @@ end
 Compute Nyström decomposition vectors from stored original (undeflated)
 columns in the cache.
 
-For symmetric (real or complex): eigendecomposition / SVD of the pivot block.
+For symmetric (real): eigendecomposition of the pivot block.
+For complex symmetric: Takagi-based SVD of the pivot block.
 For Hermitian: eigendecomposition of the pivot block.
 
 Returns `ALPACAResult{T}`.
