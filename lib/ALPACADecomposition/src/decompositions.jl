@@ -347,6 +347,7 @@ for (run_func, variant_desc) in _DECOMP_VARIANTS
     docstring = """
         $fname(result::ALPACAResult)
         $fname(matrix::AbstractMatrix; kwargs...)
+        $fname(matrix::AbstractALPACAMatrix; kwargs...)
 
     Compute a low-rank $suffix decomposition via $variant_desc.
 
@@ -360,6 +361,10 @@ for (run_func, variant_desc) in _DECOMP_VARIANTS
       @doc $docstring
       $fname(result::ALPACAResult) = $extract_func(result)
       function $fname(matrix::AbstractMatrix; kwargs...)
+        result = $run_func(matrix; kwargs...)
+        return $extract_func(result)
+      end
+      function $fname(matrix::AbstractALPACAMatrix; kwargs...)
         result = $run_func(matrix; kwargs...)
         return $extract_func(result)
       end

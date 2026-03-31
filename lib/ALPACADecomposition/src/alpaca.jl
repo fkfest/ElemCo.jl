@@ -73,9 +73,9 @@ function _lpaca_impl(matrix::AbstractALPACAMatrix{T},
   alpaca_pivots!(cache, matrix, options, descriptor)
 
   # Use the factorization already computed during the pivot loop:
-  #   cache.columns[:, 1:k] = L (deflated factor, scaled by pivot values)
+  #   cache.columns[:, 1:k] = L (scaled: L_ik = c̃_k(i)/d_k)
   #   cache.pivot_diag[1:k] = d_k (pivot values)
-  #   M ≈ L Lᵀ (symmetric) or L_C L_Rᵀ (general)
+  #   M ≈ L D Lᵀ (symmetric) or L_C D L_Rᵀ (general)
   k = cache.n_cols
   pivots = cache.pivot_indices[1:k]
   d = cache.pivot_diag[1:k]

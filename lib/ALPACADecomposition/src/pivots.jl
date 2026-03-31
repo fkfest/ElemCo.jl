@@ -668,6 +668,8 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
   # Initialize principal values
   init_principal_values!(cache, matrix, descriptor)
 
+  last_cold_start_k = -1  # guard against repeated cold starts at the same rank
+
   for iter in 1:min(m, ncols, max_rank)
     k = cache.n_cols
 
@@ -696,11 +698,13 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
     end
 
     # ── ACA fallback: argmax of last stored row → next column ──
-    aca_col, aca_magnitude = _aca_next_col(cache, ncols)
+    aca_col, _ = _aca_next_col(cache, ncols)
 
-    if aca_col > 0 && aca_magnitude >= tol && !cache.is_pivot[aca_col]
+    if aca_col > 0 && !cache.is_pivot[aca_col]
       # ACA: maxabs of last row gave us a column; fetch+deflate it,
-      # then maxabs of this column gives us a row
+      # then maxabs of this column gives us a row.
+      # The actual stopping criterion is the max element of the
+      # freshly deflated column
       next_j = aca_col
       fetch_and_deflate_col_general!(cache, matrix, next_j)
 
@@ -719,7 +723,32 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
       end
       _store_general_pivot!(cache, next_j, next_i)
     else
-      break
+      # Cold start: both principal and ACA failed (e.g. zero-diagonal matrix).
+      # Pick the first non-pivot column so we can start the ACA chain.
+      k == last_cold_start_k && break
+      last_cold_start_k = k
+      cold_j = 0
+      @inbounds for p in 1:ncols
+        if !cache.is_pivot[p]
+          cold_j = p
+          break
+        end
+      end
+      cold_j == 0 && break
+
+      fetch_and_deflate_col_general!(cache, matrix, cold_j)
+
+      cold_i, cold_val = _aca_next_row(cache, m)
+      if cold_i == 0 || cold_val < tol
+        break
+      end
+
+      fetch_and_deflate_row_general!(cache, matrix, cold_i)
+
+      if abs(cache.cbuf[cold_i]) < tol
+        break
+      end
+      _store_general_pivot!(cache, cold_j, cold_i)
     end
   end
 

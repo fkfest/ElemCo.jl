@@ -118,6 +118,35 @@ end
   @test norm(A - A_approx) / max(norm(A), 1.0) < 1e-6
 end
 
+@testitem "alpaca: general weakly-coupled blocks" setup=[Helpers] begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  # Test that ACA does not stop prematurely when the last row's
+  # deflated values underestimate the remaining residual due to
+  # weak cross-block coupling.
+  Random.seed!(42)
+  m, n = 80, 70; r2 = 15
+  B1 = randn(m, 20)
+  B1[31:80, :] .= 1e-9 * randn(50, 20)
+  V1 = randn(20, 20)
+  U2 = zeros(m, r2)
+  U2[31:80, :] = randn(50, r2)
+  U2[1:30, :] = 1e-9 * randn(30, r2)
+  V2 = randn(50, r2)
+  A = zeros(m, n)
+  A[:, 1:20] = B1 * V1
+  A[:, 21:70] = U2 * V2'
+
+  principal = PrincipalPairs([(1, 1)])
+  for tol in [1e-4, 1e-6]
+    result = alpaca(A; tol=tol, symmetry=:general, principal=principal)
+    A_approx = reconstruct(result)
+    rk = size(result.left, 2)
+    @test rk == 35
+    @test norm(A - A_approx) / norm(A) < 1e-10
+  end
+end
+
 @testitem "alpaca: zero matrix" begin
   using ALPACADecomposition
   using LinearAlgebra

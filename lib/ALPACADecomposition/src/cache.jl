@@ -15,7 +15,7 @@ Stores fetched columns, rows (general case), principal element residuals,
 and work buffers. All storage grows by amortized doubling.
 """
 mutable struct ALPACACache{T,R<:Real,S}
-  # Column cache: columns[:,1:n_cols] stores deflated pivot columns
+  # Column cache: columns[:,1:n_cols] stores scaled deflated columns (L_ik = c̃_k(i)/d_k)
   columns::Matrix{T}
   # Original (undeflated) pivot columns for Nyström/SVD finalization
   orig_columns::Matrix{T}
