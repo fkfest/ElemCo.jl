@@ -161,7 +161,7 @@ The raw factorization maintained during the loop is
 \mathbf{A} \approx \sum_{k=1}^{r} d_k \, \mathbf{L}_{:,k} \, \mathbf{L}_{:,k}^\top
 ```
 where the ``d_k`` are stored separately.  The decomposition finalization
-(see [below](@ref finalization)) converts these raw factors into the
+(see [below](@ref decomposition_finalization)) converts these raw factors into the
 cleaner ``\mathbf{L}\mathbf{L}^\top`` form.
 
 Because ``\mathbf{A} = \mathbf{A}^\top``, only columns are fetched —
