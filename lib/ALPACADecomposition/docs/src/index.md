@@ -25,7 +25,7 @@ Three variants with increasing robustness are provided:
 | Variant       | Description |
 |:--------------|:------------|
 | [`lpaca`](@ref)     | Raw factors from the pivot loop (no eigen/SVD amendment) |
-| [`alpaca`](@ref)    | Nyström / SVD-finalized factors (eigenvalues below `tol` are truncated) |
+| [`alpaca`](@ref)    | Decomposition-finalized factors (eigenvalues below `tol` are truncated) |
 | [`qrdalpaca`](@ref) | `alpaca` followed by column-pivoted QR refinement to recover missed columns |
 
 ## Supported Matrix Classes

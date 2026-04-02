@@ -160,8 +160,8 @@ The raw factorization maintained during the loop is
 ```math
 \mathbf{A} \approx \sum_{k=1}^{r} d_k \, \mathbf{L}_{:,k} \, \mathbf{L}_{:,k}^\top
 ```
-where the ``d_k`` are stored separately.  The Nyström finalization
-(see [below](@ref nystrom)) converts these raw factors into the
+where the ``d_k`` are stored separately.  The decomposition finalization
+(see [below](@ref finalization)) converts these raw factors into the
 cleaner ``\mathbf{L}\mathbf{L}^\top`` form.
 
 Because ``\mathbf{A} = \mathbf{A}^\top``, only columns are fetched —
@@ -239,38 +239,42 @@ Let ``d = |\tilde{c}_j|`` (diagonal) and
     `issymmetric` / `ishermitian` for custom matrix types, or passing
     `symmetry=:symmetric` (or `:hermitian`) explicitly.
 
-## [Nyström Finalization](@id nystrom)
+## [Decomposition Finalization](@id decomposition_finalization)
 
 The raw factors from the pivot loop (returned by [`lpaca`](@ref))
 may contain small or spurious components due to finite-precision
-arithmetic.  The **Nyström finalization** step in [`alpaca`](@ref) cleans
+arithmetic.  The **decomposition finalization** step in [`alpaca`](@ref) cleans
 up the result.
 
-Given the column pivots ``\{j_1, \ldots, j_k\}``, define:
-- ``\mathbf{C} = \mathbf{A}_{:, \text{pivots}} \in \mathbb{R}^{m \times k}``
-  — the full (undeflated) pivot columns
-- ``\mathbf{J} = \mathbf{A}_{\text{pivots}, \text{pivots}} \in \mathbb{R}^{k \times k}``
-  — the pivot submatrix
+Given the pivot-loop factors
+``\mathbf{L} = [\mathbf{L}_1, \ldots, \mathbf{L}_k]`` and pivot
+diagonal values ``d_1, \ldots, d_k``, we form the full factor matrix:
+```math
+\hat{\mathbf{L}} = \mathbf{L} \cdot \text{diag}(\sqrt{|d_k|})
+```
 
-For **symmetric/Hermitian matrices**, we diagonalize ``\mathbf{J}``:
+For **real symmetric** and **complex Hermitian matrices**, we apply
+QR-compressed eigendecomposition:
+1. QR decompose ``\hat{\mathbf{L}} = \mathbf{Q} \mathbf{R}``
+2. Form ``\mathbf{M} = \mathbf{R} \, \mathbf{D} \, \mathbf{R}^\dagger``
+   where ``\mathbf{D} = \text{diag}(\pm 1)`` from the pivot signs
+3. Eigendecompose ``\mathbf{M} = \mathbf{V} \boldsymbol{\Lambda} \mathbf{V}^\dagger``
+4. Retain only components with ``|\lambda_i| > \tau``
+5. Build ``\mathbf{L}_{\text{final}} = \mathbf{Q} \mathbf{V}_r \sqrt{|\boldsymbol{\Lambda}_r|}``
+
+The signs of the retained eigenvalues are stored in `neg_indices` so that
 ```math
-\mathbf{J} = \mathbf{V} \boldsymbol{\Lambda} \mathbf{V}^\dagger
-```
-and retain only components with ``\lvert \lambda_i \rvert > \tau``.  The
-amended left factor is:
-```math
-\mathbf{L}_{\text{amended}} = \mathbf{C} \, \mathbf{V}_r \, \lvert \boldsymbol{\Lambda}_r \rvert^{-1/2}
-```
-where the subscript ``r`` denotes the retained components. The signs of
-the eigenvalues are stored in `neg_indices` so that
-```math
-\mathbf{A} \approx \mathbf{L}_{\text{amended}} \, \tilde{\mathbf{D}} \, \mathbf{L}_{\text{amended}}^\dagger,
+\mathbf{A} \approx \mathbf{L}_{\text{final}} \, \tilde{\mathbf{D}} \, \mathbf{L}_{\text{final}}^\dagger,
 \qquad \tilde{\mathbf{D}} = \text{diag}(\pm 1).
 ```
 
-For **general matrices**, the finalization uses the SVD of
-``\mathbf{J}`` to produce left and right factors ``\mathbf{L}, \mathbf{R}``
-such that ``\mathbf{A} \approx \mathbf{L}\mathbf{R}^\dagger``.
+For **complex symmetric matrices**, the finalization uses the SVD of
+``\mathbf{R} \mathbf{R}^T`` with Autonne-Takagi phase correction.
+
+For **general matrices**, dual QR factorizations of the left and right
+factors are combined with SVD of the core matrix to produce left and
+right factors ``\mathbf{L}, \mathbf{R}`` such that
+``\mathbf{A} \approx \mathbf{L}\mathbf{R}^\dagger``.
 
 ## QR Refinement (QRdALPACA)
 
@@ -368,10 +372,10 @@ recomputed from scratch to maintain numerical stability.
 
 ### Re-finalization
 
-Once all significant columns have been found, the combined pivot set
-(ALPACA pivots + QR-discovered pivots) is used to re-run the Nyström
-(symmetric/Hermitian), Takagi (complex symmetric), or SVD (general)
-finalization to produce the final amended factors.
+Once all significant columns have been found, the new pivots are
+incorporated into the cache (fetch + deflate against all existing
+pivots) and the decomposition finalization is re-run on the extended
+factor set to produce the final amended factors.
 
 ## Decomposition Extraction
 

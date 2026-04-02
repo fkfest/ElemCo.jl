@@ -17,16 +17,12 @@ and work buffers. All storage grows by amortized doubling.
 mutable struct ALPACACache{T,R<:Real,S}
   # Column cache: columns[:,1:n_cols] stores scaled deflated columns (L_ik = c̃_k(i)/d_k)
   columns::Matrix{T}
-  # Original (undeflated) pivot columns for Nyström/SVD finalization
-  orig_columns::Matrix{T}
   n_cols::Int
   col_index::Vector{Int}    # col_index[k] = original column index of columns[:,k]
   col_map::Vector{Int}      # col_map[j] = cache slot for column j (0 = not fetched)
 
   # Row cache (general case only): rows[:,1:n_rows] stores deflated pivot rows
   rows::Matrix{T}
-  # Original (undeflated) pivot rows (general case only)
-  orig_rows::Matrix{T}
   n_rows::Int
   row_index::Vector{Int}
   row_map::Vector{Int}
@@ -85,16 +81,14 @@ function ALPACACache(::Type{T}, m::Int, n::Int, ::Val{S},
 
   # columns have m rows (one entry per matrix row)
   columns = Matrix{T}(undef, m, cap)
-  orig_columns = Matrix{T}(undef, m, cap)
   # rows have n entries (one entry per matrix column), general only
   rows = use_rows ? Matrix{T}(undef, n, cap) : Matrix{T}(undef, 0, 0)
-  orig_rows = use_rows ? Matrix{T}(undef, n, cap) : Matrix{T}(undef, 0, 0)
 
   ALPACACache{T,R,S}(
-    columns, orig_columns, 0,
+    columns, 0,
     Vector{Int}(undef, cap),
     zeros(Int, n),              # col_map: maps column index j (1..n)
-    rows, orig_rows, 0,
+    rows, 0,
     use_rows ? Vector{Int}(undef, cap) : Int[],
     use_rows ? zeros(Int, m) : Int[],  # row_map: maps row index i (1..m)
     copy(pairs),
@@ -127,10 +121,6 @@ function _ensure_col_capacity!(cache::ALPACACache{T}, needed::Int) where T
   @views new_cols[:, 1:cache.n_cols] .= cache.columns[:, 1:cache.n_cols]
   cache.columns = new_cols
 
-  new_orig = Matrix{T}(undef, n, new_cap)
-  @views new_orig[:, 1:cache.n_cols] .= cache.orig_columns[:, 1:cache.n_cols]
-  cache.orig_columns = new_orig
-
   new_idx = Vector{Int}(undef, new_cap)
   @views new_idx[1:cache.n_cols] .= cache.col_index[1:cache.n_cols]
   cache.col_index = new_idx
@@ -157,10 +147,6 @@ function _ensure_row_capacity!(cache::ALPACACache{T}, needed::Int) where T
   new_rows = Matrix{T}(undef, n, new_cap)
   @views new_rows[:, 1:cache.n_rows] .= cache.rows[:, 1:cache.n_rows]
   cache.rows = new_rows
-
-  new_orig = Matrix{T}(undef, n, new_cap)
-  @views new_orig[:, 1:cache.n_rows] .= cache.orig_rows[:, 1:cache.n_rows]
-  cache.orig_rows = new_orig
 
   new_idx = Vector{Int}(undef, new_cap)
   @views new_idx[1:cache.n_rows] .= cache.row_index[1:cache.n_rows]

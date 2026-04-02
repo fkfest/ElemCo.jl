@@ -99,8 +99,8 @@ end
 # Strategy: block-diagonal matrix with a zero-gap separating two blocks.
 # Bad principal covers only block 1 → ALPACA finds block 1, cold-start
 # hits the zero gap and stops → QR refinement discovers block 2.
-# This exercises: _fetch_elements!, _symmetric_refactorize,
-# _general_refactorize, the batched QR loop, norm updates, etc.
+# This exercises: _extend_cache_symmetric!, _extend_cache_general!,
+# the batched QR loop, norm updates, decomposition_finalize, etc.
 
 @testitem "qrdalpaca: symmetric QR refinement via zero-gap" setup=[Helpers] begin
   using ALPACADecomposition
@@ -349,7 +349,7 @@ end
   Random.seed!(47)
 
   # Multiple blocks with general (non-symmetric) entries
-  # Tests _general_refactorize with multiple refinement pivots
+  # Tests _extend_cache_general! with multiple refinement pivots
   n = 60
   A = zeros(n, n)
   block_ranges = [1:12, 21:32, 41:48, 51:60]

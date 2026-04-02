@@ -19,77 +19,65 @@ function _fetch_columns!(dest::AbstractMatrix{T}, matrix::AbstractALPACAMatrix,
 end
 
 """
-    _fetch_elements!(dest, matrix::AbstractALPACAMatrix, row_indices, col_indices, buf)
-
-Fill `dest[l, t] = matrix[row_indices[l], col_indices[t]]` via `elements!`.
-"""
-function _fetch_elements!(dest::AbstractMatrix{T}, matrix::AbstractALPACAMatrix,
-                          row_indices, col_indices,
-                          buf::AbstractVector{T}) where T
-  pairs = Tuple{Int,Int}[]
-  for t in eachindex(col_indices)
-    for l in eachindex(row_indices)
-      push!(pairs, (row_indices[l], col_indices[t]))
-    end
-  end
-  resize!(buf, length(pairs))
-  elements!(buf, matrix, pairs)
-  k = 0
-  nr = length(row_indices)
-  @inbounds for t in eachindex(col_indices)
-    for l in 1:nr
-      k += 1
-      dest[l, t] = buf[k]
-    end
-  end
-  return dest
-end
-
-"""
     qrdalpaca(matrix; principal=nothing, options=ALPACAOptions(...))
 
 Matrix-free ALPACA decomposition with QR-pivoted refinement.
 
-Runs ALPACA, then checks remaining columns via column-pivoted QR for any
-significant columns the greedy phase may have missed.  Returns an
-`ALPACAResult` with the combined pivot set.
+Runs ALPACA pivot selection, then checks remaining columns via
+column-pivoted QR for any significant columns the greedy phase may
+have missed.  New pivots found by QR refinement are incorporated into
+the cache (fetch + deflate) and the final low-rank factorization is
+obtained by decomposition-based finalization.
 
 # Algorithm
-1. Run `alpaca(matrix; ...)` to obtain initial pivots.
-2. Build an orthonormal basis ``Q`` from the selected columns (thin SVD).
-3. Compute residual column norms ``\\|M_{:,j} - Q Q^\\dagger M_{:,j}\\|^2``
-   for every non-pivot column ``j``.
-4. Repeatedly select batches of columns with large residuals, run
+1. Run ALPACA pivot loop to build initial factors in the cache.
+2. QR-decompose raw pivot columns (reused in finalization).
+3. Quick reconstruction pre-check on a random sample; also computes
+   projection norms for sampled columns.
+4. Compute residual column norms ``\\|M_{:,j} - Q Q^\\dagger M_{:,j}\\|^2``
+   for remaining non-pivot columns.
+5. Repeatedly select batches of columns with large residuals, run
    column-pivoted QR, and extend ``Q`` with any newly discovered pivots.
-5. Re-finalize: Nyström (symmetric/hermitian) or SVD (general).
+6. Extend the cache with new pivots (fetch + deflate), then finalize.
 """
 function qrdalpaca(matrix::AbstractALPACAMatrix{T};
                    principal=nothing,
                    options::ALPACAOptions) where T
-  # ── Step 1: ALPACA pilot ──
-  result = alpaca(matrix; principal, options)
-  alpaca_pivots = result.pivot_indices
-  k_alpaca = length(alpaca_pivots)
+  m, n = _validate_matrix(matrix, options.symmetry)
+  descriptor = normalize_principal_descriptor(options.symmetry, min(m, n), principal)
+  return _qrdalpaca_impl(matrix, m, n, descriptor, options, Val(options.symmetry))
+end
+
+function _qrdalpaca_impl(matrix::AbstractALPACAMatrix{T},
+                         m::Int, n::Int,
+                         descriptor::AbstractPrincipalDescriptor,
+                         options::ALPACAOptions,
+                         ::Val{S}) where {T, S}
+  # ── Step 1: ALPACA pivot loop (keeping cache alive) ──
+  cache = ALPACACache(T, m, n, Val{S}(), descriptor.pairs)
+  alpaca_pivots!(cache, matrix, options, descriptor)
+  k_alpaca = cache.n_cols
 
   RT = real(T)
   sym = options.symmetry
   sig = options.sigma
   tol_val = options.pivotol
-  m, n = size(matrix)
   max_pivots = min(m, n, options.max_rank)
 
   if k_alpaca == 0 || k_alpaca >= max_pivots
-    return result
+    return decomposition_finalize(cache, options.tol)
   end
 
-  # ── Step 2+3: Quick reconstruction pre-check + QR projection fallback ──
+  # ── Step 2: Quick reconstruction pre-check + QR projection fallback ──
+  # Use raw cache factors directly: M ≈ C*D*C' (sym/herm) or C*D*R^T (general)
   cbuf = Vector{T}(undef, m)
-  L = result.left
-  R = result.right
-  n_basis = size(L, 2)
+  k = k_alpaca
+  C = cache.columns[:, 1:k]
+  d = cache.pivot_diag[1:k]
+  n_basis = k
 
   is_pivot = falses(n)
-  @inbounds for p in alpaca_pivots
+  @inbounds for p in cache.pivot_indices
     is_pivot[p] = true
   end
 
@@ -98,9 +86,29 @@ function qrdalpaca(matrix::AbstractALPACAMatrix{T};
   non_pivots = [j for j in 1:n if !is_pivot[j]]
   nn = length(non_pivots)
 
-  # Quick reconstruction pre-check: M[:,j] ≈ L S L[j,:] (symmetric) or L R[j,:] (general).
-  # Sample non-pivot columns and compare reconstruction errors against tol.
-  # If all sampled residuals are small, skip the expensive QR refinement.
+  # Compute reconstruction coefficients from raw cache factors
+  _recon_coeffs(indices) = if sym == :general
+    Diagonal(d) * transpose(cache.rows[indices, 1:k])  # M ≈ C*D*Rᵀ
+  elseif sym == :hermitian
+    Diagonal(d) * C[indices, :]'                        # M ≈ C*D*C'
+  else
+    Diagonal(d) * transpose(C[indices, :])              # M ≈ C*D*Cᵀ
+  end
+
+  # QR of raw columns (computed once, reused in decomposition_finalize)
+  column_qr = qr(C)
+  n_acc = n_basis
+  cap = max(2 * n_basis, 64)
+  Q_acc = Matrix{T}(undef, m, cap)
+  # Build thin Q via lmul! (avoids materializing full m×m Q matrix)
+  @views Q_acc[:, 1:n_acc] .= zero(T)
+  @inbounds for j in 1:n_acc
+    Q_acc[j, j] = one(T)
+  end
+  lmul!(column_qr.Q, @view Q_acc[:, 1:n_acc])
+
+  # Quick reconstruction pre-check on a random sample of non-pivot columns.
+  # Also computes projection norms for the sampled columns to avoid refetching.
   #
   # Sample size for 99.9% confidence of detecting missed columns:
   #   P(detect ≥ 1 from d missed in N) = 1 - (1 - d/N)^k ≥ 0.999
@@ -108,27 +116,8 @@ function qrdalpaca(matrix::AbstractALPACAMatrix{T};
   # With d = √N:  k ≈ 7√N  (detects ≥ √N missed columns)
   # With d = 0.01N: k ≈ 700 (detects ≥ 1% missed columns)
   n_sample = min(nn, max(ceil(Int, 7*sqrt(nn)), 700))
+  sampled = falses(n)  # track which columns already have norms
   if n_sample > 0
-    if sym == :general
-      # General: M ≈ L R', nothing extra needed
-    else
-      signs = ones(RT, n_basis)
-      signs[result.neg_indices] .= -one(RT)
-      L_S = L .* transpose(signs)
-    end
-
-    # Compute reconstruction coefficients for a batch of columns
-    _recon_coeffs(indices) = if sym == :general
-      R[indices, :]'                 # adjoint: M ≈ L R'
-    elseif sym == :hermitian
-      L_S[indices, :]'              # adjoint: M ≈ L L'
-    else
-      transpose(L_S[indices, :])    # transpose: M ≈ L Lᵀ
-    end
-
-    # Threshold: compare max absolute element deviation directly against tol.
-    # After Nyström finalization the factors are stable, consistent with
-    # ALPACA's element-wise pivot tolerance.
     recon_threshold = tol_val
 
     # Sample non-pivot columns
@@ -137,35 +126,39 @@ function qrdalpaca(matrix::AbstractALPACAMatrix{T};
     else
       non_pivots
     end
-    cols_true = Matrix{T}(undef, m, length(sample_idx))
-    _fetch_columns!(cols_true, matrix, sample_idx, cbuf)
-    cols_true .-= L * _recon_coeffs(sample_idx)
+    cols_batch = Matrix{T}(undef, m, length(sample_idx))
+    _fetch_columns!(cols_batch, matrix, sample_idx, cbuf)
+
+    # Compute projection norms for sampled columns (before modifying cols_batch)
+    col_n2 = vec(sum(abs2, cols_batch, dims=1))
+    Qt_cols = @views Q_acc[:, 1:n_acc]' * cols_batch
+    proj_n2 = vec(sum(abs2, Qt_cols, dims=1))
+    @inbounds for (i, j) in enumerate(sample_idx)
+      col_norms2[j] = max(col_n2[i] - proj_n2[i], zero(RT))
+      sampled[j] = true
+    end
+
+    # Check element-wise reconstruction
+    cols_batch .-= C * _recon_coeffs(sample_idx)
     recon_ok = true
     @inbounds for i in eachindex(sample_idx)
-      if maximum(abs, @view cols_true[:, i]) >= recon_threshold
+      if maximum(abs, @view cols_batch[:, i]) >= recon_threshold
         recon_ok = false
         break
       end
     end
     if recon_ok
-      return result
+      return decomposition_finalize(cache, options.tol; column_qr)
     end
   end
 
-  # Reconstruction check failed → compute QR for precise projection residuals.
-  # Projection residual ||col||² - ||Q'col||² measures component outside span(L)
-  # and is numerically stable with threshold tol².
-  F_qr_basis = qr(L)
-  n_acc = n_basis
-  cap = max(2 * n_basis, 64)
-  Q_acc = Matrix{T}(undef, m, cap)
-  @views Q_acc[:, 1:n_acc] .= Matrix(F_qr_basis.Q)[:, 1:n_acc]
-
-  # Compute projection residuals for all non-pivot columns
-  batch_size = max(nn, 256)
-  for start in 1:batch_size:nn
-    stop = min(start + batch_size - 1, nn)
-    batch_idx = non_pivots[start:stop]
+  # Reconstruction check failed → compute projection residuals for remaining columns.
+  remaining = [j for j in non_pivots if !sampled[j]]
+  n_rem = length(remaining)
+  batch_size = max(n_rem, 256)
+  for start in 1:batch_size:n_rem
+    stop = min(start + batch_size - 1, n_rem)
+    batch_idx = remaining[start:stop]
     nb = length(batch_idx)
     cols_batch = Matrix{T}(undef, m, nb)
     _fetch_columns!(cols_batch, matrix, batch_idx, cbuf)
@@ -179,7 +172,7 @@ function qrdalpaca(matrix::AbstractALPACAMatrix{T};
 
   D_indices = [j for j in 1:n if col_norms2[j] >= tol2]
   if isempty(D_indices)
-    return result
+    return decomposition_finalize(cache, options.tol; column_qr)
   end
 
   # ── Step 4: Batched QR refinement ──
@@ -273,17 +266,16 @@ function qrdalpaca(matrix::AbstractALPACAMatrix{T};
   end
 
   if isempty(refinement_pivots)
-    return result
+    return decomposition_finalize(cache, options.tol; column_qr)
   end
 
-  # ── Step 5: Re-finalize with combined pivots ──
-  all_pivots = vcat(alpaca_pivots, refinement_pivots)
-
-  if sym == :general
-    return _general_refactorize(matrix, all_pivots, result.row_pivots, options.tol, cbuf)
+  # ── Step 6: Extend cache with new pivots, then finalize ──
+  if S === :general
+    _extend_cache_general!(cache, matrix, refinement_pivots, tol_val)
   else
-    return _symmetric_refactorize(matrix, all_pivots, options.tol, sym, cbuf)
+    _extend_cache_symmetric!(cache, matrix, refinement_pivots, tol_val)
   end
+  return decomposition_finalize(cache, options.tol)
 end
 
 """
@@ -306,89 +298,45 @@ function qrdalpaca(matrix::AbstractMatrix;
 end
 
 """
-    _symmetric_refactorize(matrix, pivots, tol, sym, cbuf) → ALPACAResult
+    _extend_cache_symmetric!(cache, matrix, new_pivots, tol)
 
-Nyström re-finalization from combined pivot set for symmetric/hermitian matrices.
-Fetches data via the matrix-free interface, then delegates to `_nystrom_from_CJ`.
+Incorporate QR-discovered pivots into the ALPACA cache for
+symmetric/hermitian matrices.  For each new pivot, fetches and deflates
+the column against all existing cache pivots, then stores it as a new
+pivot (with the standard Schur-complement scaling).
+
+Pivots whose deflated diagonal entry is below `tol` are skipped.
 """
-function _symmetric_refactorize(matrix::AbstractALPACAMatrix, pivots::Vector{Int},
-                                tol, sym::Symbol, cbuf::AbstractVector{T}) where T
-  k = length(pivots)
-  m = size(matrix)[1]
-
-  C = Matrix{T}(undef, m, k)
-  _fetch_columns!(C, matrix, pivots, cbuf)
-
-  J = Matrix{T}(undef, k, k)
-  ebuf = Vector{T}(undef, k * k)
-  _fetch_elements!(J, matrix, pivots, pivots, ebuf)
-
-  return _nystrom_from_CJ(C, J, pivots, tol, sym)
+function _extend_cache_symmetric!(cache::ALPACACache{T}, matrix::AbstractALPACAMatrix,
+                                  new_pivots::Vector{Int}, tol) where T
+  for j in new_pivots
+    fetch_and_deflate_symmetric!(cache, matrix, j)
+    pivot_val = cache.cbuf[j]
+    abs(pivot_val) < tol && continue
+    _store_symmetric_pivot!(cache, j)
+  end
 end
 
 """
-    _general_refactorize(M, col_pivots, row_pivots, tol, cbuf) → ALPACAResult
+    _extend_cache_general!(cache, matrix, new_col_pivots, tol)
 
-SVD factorization from combined pivot set for general matrices.
-Uses the matrix-free interface for column/row/element access.
+Incorporate QR-discovered column pivots into the ALPACA cache for
+general matrices.  For each new column pivot, fetches and deflates
+the column, finds the best row partner, fetches and deflates that row,
+then stores both in the cache.
+
+Pivots whose best row entry is below `tol` are skipped.
 """
-function _general_refactorize(matrix::AbstractALPACAMatrix, col_pivots::Vector{Int},
-                              row_pivots::Vector{Int}, tol,
-                              cbuf::AbstractVector{T}) where T
-  m, n = size(matrix)
-  k = length(col_pivots)
-
-  C = Matrix{T}(undef, m, k)
-  _fetch_columns!(C, matrix, col_pivots, cbuf)
-
-  # For general: we need row pivots too.  Use the original ALPACA row pivots
-  # where available, and use the col_pivots as row indices for any extras.
-  # J = M[row_pivots, col_pivots] — but row_pivots may be shorter than col_pivots
-  # after QR added new col pivots.  Pad with pivot-column-based row selection.
-  kr = length(row_pivots)
-  if kr < k
-    # Need more row pivots. Use the rows that have max absolute value
-    # in the new columns.
-    is_row = falses(m)
-    for r in row_pivots
-      is_row[r] = true
+function _extend_cache_general!(cache::ALPACACache{T,R,:general}, matrix::AbstractALPACAMatrix,
+                                new_col_pivots::Vector{Int}, tol) where {T,R}
+  m = length(cache.cbuf)
+  for j in new_col_pivots
+    fetch_and_deflate_col_general!(cache, matrix, j)
+    best_row, best_val = _aca_next_row(cache, m)
+    if best_row == 0 || best_val < tol
+      continue
     end
-    new_cols = C[:, kr+1:k]
-    extra_rows = Int[]
-    for t in 1:k-kr
-      best_row = 0
-      best_val = -one(real(T))
-      col_t = @view new_cols[:, t]
-      for i in 1:m
-        if !is_row[i]
-          v = abs(col_t[i])
-          if v > best_val
-            best_val = v
-            best_row = i
-          end
-        end
-      end
-      if best_row > 0
-        push!(extra_rows, best_row)
-        is_row[best_row] = true
-      end
-    end
-    row_pivots = vcat(row_pivots, extra_rows)
+    fetch_and_deflate_row_general!(cache, matrix, best_row)
+    _store_general_pivot!(cache, j, best_row)
   end
-
-  rp = row_pivots[1:k]
-
-  J = Matrix{T}(undef, k, k)
-  ebuf = Vector{T}(undef, k * k)
-  _fetch_elements!(J, matrix, rp, col_pivots, ebuf)
-
-  # RT[:, t] = M[row_pivots[t], :]  →  fetch rows via row!
-  rbuf = Vector{T}(undef, n)
-  RT = Matrix{T}(undef, n, k)
-  @inbounds for t in 1:k
-    row!(rbuf, matrix, rp[t])
-    RT[:, t] .= rbuf
-  end
-
-  return _svd_from_CJ_RT(C, J, RT, col_pivots, rp, tol)
 end

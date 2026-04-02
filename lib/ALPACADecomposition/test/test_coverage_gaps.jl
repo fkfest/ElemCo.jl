@@ -338,7 +338,7 @@ end
 
   # Block diagonal: strong block 1, weak block 2.
   # Bad principal points only at block 1 → ALPACA misses block 2 entirely.
-  # QR refinement discovers the missing block → _symmetric_refactorize path.
+  # QR refinement discovers the missing block → _extend_cache_symmetric! path.
   n = 20
   B1 = randn(10, 10); B1 = B1' * B1 + 10I   # strong block, eigenvalues ~10
   B2 = randn(10, 10); B2 = 0.1 * (B2' * B2) + 0.1I  # weak block, eigenvalues ~0.1
@@ -403,7 +403,7 @@ end
   Random.seed!(42)
 
   # Complex hermitian block diagonal with bad principal
-  # Covers the hermitian _recon_coeffs path (L_S' adjoint) and _symmetric_refactorize
+  # Covers the hermitian _recon_coeffs path (L_S' adjoint) and _extend_cache_symmetric!
   n = 20
   B1 = randn(ComplexF64, 10, 10); B1 = B1' * B1 + 10I
   B2 = randn(ComplexF64, 10, 10); B2 = 0.1 * (B2' * B2) + 0.1I

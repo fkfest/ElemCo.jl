@@ -16,7 +16,7 @@ Three variants are provided:
 
 | Variant       | Description |
 |:--------------|:------------|
-| `alpaca`      | Nyström / SVD-finalized factors (eigenvalues below `tol` are truncated) |
+| `alpaca`      | Decomposition-finalized factors (eigenvalues below `tol` are truncated) |
 | `lpaca`       | Raw factors from the pivot loop (no eigen/SVD amendment) |
 | `qrdalpaca`   | `alpaca` followed by column-pivoted QR refinement to recover missed columns |
 
@@ -76,7 +76,8 @@ result = alpaca(MyMatrix(...); options=ALPACAOptions(tol=1e-8, symmetry=:symmetr
 
 The interface guarantees:
 - `elements!` is called **exactly once** at initialization (for `PrincipalPairs`).
-- Every column and row is fetched **at most once**.
+- Every column and row is fetched **at most once** during the pivot selection phase.
+  The QR refinement variant (`qrdalpaca`) may re-fetch columns for residual norm computation.
 
 ## Principal Descriptors
 
@@ -137,7 +138,7 @@ src/
 ├── descriptors.jl          # Principal descriptor types and normalization
 ├── results.jl              # ALPACAOptions, ALPACAResult
 ├── cache.jl                # ALPACACache with zero-allocation inner loop
-├── kernels.jl              # Fetch, deflation, Nyström/SVD finalization
+├── kernels.jl              # Fetch and deflation kernels
 ├── pivots.jl               # Main pivot selection loop (ACA + principal)
 ├── alpaca.jl               # Public API (alpaca, lpaca, convenience wrappers)
 ├── qrdalpaca.jl            # QR-refined variant (qrdalpaca)
@@ -154,6 +155,6 @@ cd docs && julia --project=. make.jl
 ```
 
 The documentation covers:
-- **Theory**: mathematical foundations, pivot selection, Nyström finalization, QR refinement
+- **Theory**: mathematical foundations, pivot selection, decomposition finalization, QR refinement
 - **Tutorial**: step-by-step examples from basic usage to custom matrix-free interfaces
 - **API Reference**: complete docstrings for all exported functions and types

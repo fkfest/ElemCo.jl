@@ -65,21 +65,48 @@ end
 Result of an ALPACA low-rank decomposition with element type `T`.
 
 # Fields
-- `left::Matrix{T}`: left factor (`n × r`).  For symmetric / Hermitian,
-  `A ≈ L L'` (with sign flips tracked in `neg_indices` for indefinite matrices).
+- `left::Matrix{T}`: left factor (`n × r`).  For symmetric / Hermitian
+  via `alpaca()`, columns are eigenvectors scaled by ``\\sqrt{|\\lambda_k|}``,
+  so that ``A ≈ L \\, \\text{diag}(\\pm 1) \\, L^\\dagger``.
+  The eigenvalues ``\\lambda_k`` are stored in the `eigenvalues` field.
+  For `lpaca()`, columns are raw deflated pivot columns (unscaled).
+  For general matrices, `A ≈ L R'`.
 - `right::Matrix{T}`: right factor.  Equals `left` for symmetric / Hermitian;
   independent for general matrices where `A ≈ L R'`.
-- `neg_indices::Vector{Int}`: column indices with negative sign
-  (empty for general and complex symmetric).
+- `neg_indices::Vector{Int}`: column indices with negative eigenvalue.
+  For backward compatibility with `lpaca()` results where eigenvalues may be empty.
 - `pivot_indices::Vector{Int}`: accepted column pivot indices.
 - `row_pivots::Vector{Int}`: accepted row pivot indices (general only; empty otherwise).
 - `symmetry::Symbol`: matrix class (`:symmetric`, `:hermitian`, or `:general`).
+- `eigenvalues::Vector{R}`: spectral values of the approximation.
+  The semantics depend on the symmetry type:
+  - **Real symmetric / Hermitian** via `alpaca()`: eigenvalues ``\\lambda_k``
+    (can be negative) such that ``A ≈ L \\, \\text{diag}(\\lambda) \\, L^\\dagger``.
+    Column ``k`` of ``L`` has norm ``\\sqrt{|\\lambda_k|}``
+    and carries the corresponding eigenvector direction.
+  - **Complex symmetric** via `alpaca()`: Takagi (singular) values ``\\sigma_k \\geq 0``
+    such that ``A ≈ L \\, \\text{diag}(\\sigma) \\, L^T`` with Takagi vectors
+    recoverable as ``L \\, \\text{diag}(1/\\sqrt{\\sigma})``.
+  - **General** via `alpaca()`: singular values ``\\sigma_k \\geq 0`` such that
+    ``A ≈ L \\, \\text{diag}(\\sigma) \\, R^\\dagger`` with orthonormal factors
+    recoverable as ``L \\, \\text{diag}(1/\\sqrt{\\sigma})`` and
+    ``R \\, \\text{diag}(1/\\sqrt{\\sigma})``.
+  - Empty for `lpaca()` results.
 """
-struct ALPACAResult{T}
+struct ALPACAResult{T, R<:Real}
   left::Matrix{T}
   right::Matrix{T}
   neg_indices::Vector{Int}
   pivot_indices::Vector{Int}
   row_pivots::Vector{Int}
   symmetry::Symbol
+  eigenvalues::Vector{R}
+end
+
+function ALPACAResult{T}(left, right, neg, pivots, row_pivots, sym, eigenvalues::Vector{R}) where {T, R<:Real}
+  return ALPACAResult{T, R}(left, right, neg, pivots, row_pivots, sym, eigenvalues)
+end
+
+function ALPACAResult{T}(left, right, neg, pivots, row_pivots, sym) where T
+  return ALPACAResult{T, real(T)}(left, right, neg, pivots, row_pivots, sym, real(T)[])
 end

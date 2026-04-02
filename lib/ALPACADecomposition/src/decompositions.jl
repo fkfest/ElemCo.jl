@@ -86,7 +86,16 @@ function _extract_svd(result::ALPACAResult{T}) where T
   end
 
   sym = result.symmetry
-  if sym == :general
+  if !isempty(result.eigenvalues)
+    if sym == :general
+      return _svd_from_singular_values(L, R, result.eigenvalues)
+    elseif sym == :symmetric && T <: Complex
+      return _svd_from_takagi_values(L, result.eigenvalues)
+    else
+      # Real symmetric / complex Hermitian: eigenvalues stored
+      return _svd_from_eigenvalues(L, result.eigenvalues)
+    end
+  elseif sym == :general
     return _svd_general(L, R)
   elseif sym == :symmetric && T <: Complex
     # A ≈ L * Lᵀ = L * conj(L)^*
@@ -94,6 +103,57 @@ function _extract_svd(result::ALPACAResult{T}) where T
   else  # real symmetric or hermitian
     return _svd_symmetric_hermitian(L, result.neg_indices)
   end
+end
+
+"""
+    _svd_from_eigenvalues(L, eigenvalues) → (U, S, Vt)
+
+Fast SVD extraction when eigenvalues are precomputed and `L` stores
+sqrt-scaled eigenvectors: ``L = L_\\text{ortho} \\, \\text{diag}(\\sqrt{|\\lambda|})``
+with ``A ≈ L \\, D_{\\pm} \\, L^\\dagger``.
+
+Recovers orthonormal eigenvectors by dividing out ``\\sqrt{|\\lambda|}``,
+then singular values are ``|\\lambda|``, sorted descending.
+"""
+function _svd_from_eigenvalues(L::Matrix{T}, eigenvalues::Vector{<:Real}) where T
+  S = abs.(eigenvalues)
+  inv_sqrt = 1 ./ sqrt.(S)
+  signs = T <: Real ? T.(sign.(eigenvalues)) : complex(T).(sign.(eigenvalues))
+  # L_ortho = L * diag(1/√|λ|), U = L_ortho * diag(sign(λ))
+  U = L .* transpose(signs .* inv_sqrt)
+  V = L .* transpose(inv_sqrt)
+  return (U = U, S = S, Vt = Matrix(V'))
+end
+
+"""
+    _svd_from_takagi_values(L, takagi_values) → (U, S, Vt)
+
+Fast SVD extraction for complex symmetric matrices with precomputed Takagi
+values.  ``L = U_\\text{Takagi} \\, \\text{diag}(\\sqrt{\\sigma})``, so
+``A ≈ L L^T = U \\, \\text{diag}(\\sigma) \\, U^T``.
+
+SVD form: ``U``, ``S = \\sigma``, ``V = \\bar{U}``, ``V^\\dagger = U^T``.
+"""
+function _svd_from_takagi_values(L::Matrix{T}, takagi_values::Vector{<:Real}) where T
+  inv_sqrt = 1 ./ sqrt.(takagi_values)
+  U = L .* transpose(inv_sqrt)
+  return (U = U, S = takagi_values, Vt = Matrix(transpose(U)))
+end
+
+"""
+    _svd_from_singular_values(L, R, singular_values) → (U, S, Vt)
+
+Fast SVD extraction for general matrices with precomputed singular values.
+``L = U_\\text{ortho} \\, \\text{diag}(\\sqrt{\\sigma})``,
+``R = V_\\text{ortho} \\, \\text{diag}(\\sqrt{\\sigma})``, so
+``A ≈ U \\, \\text{diag}(\\sigma) \\, V^\\dagger``.
+"""
+function _svd_from_singular_values(L::Matrix{T}, R::Matrix{T},
+                                   singular_values::Vector{<:Real}) where T
+  inv_sqrt = 1 ./ sqrt.(singular_values)
+  U = L .* transpose(inv_sqrt)
+  V = R .* transpose(inv_sqrt)
+  return (U = U, S = singular_values, Vt = Matrix(V'))
 end
 
 """
@@ -170,9 +230,18 @@ function _extract_eigen(result::ALPACAResult{T}) where T
   end
 
   sym = result.symmetry
-  if (sym == :symmetric && T <: Real) || sym == :hermitian
+  if !isempty(result.eigenvalues) && ((sym == :symmetric && T <: Real) || sym == :hermitian)
+    # Fast path for real symmetric / Hermitian: recover orthonormal
+    # eigenvectors from sqrt-scaled L (eigenvalues are actual eigenvalues)
+    inv_sqrt = 1 ./ sqrt.(abs.(result.eigenvalues))
+    vectors = L .* transpose(inv_sqrt)
+    return (values = result.eigenvalues, vectors = vectors)
+  elseif (sym == :symmetric && T <: Real) || sym == :hermitian
     return _eigen_symmetric_hermitian(L, result.neg_indices)
-  else  # general or complex symmetric
+  elseif sym == :symmetric && T <: Complex
+    # A ≈ L * Lᵀ = L * conj(L)'; use conj(L) as right factor
+    return _eigen_general(L, conj(L))
+  else  # general
     return _eigen_general(L, R)
   end
 end
@@ -269,6 +338,13 @@ function _extract_takagi(result::ALPACAResult{T}) where T
             D = Vector{real(T)}(undef, 0))
   end
 
+  if !isempty(result.eigenvalues)
+    # Fast path: Takagi values precomputed, L = U_takagi * diag(√σ)
+    inv_sqrt = 1 ./ sqrt.(result.eigenvalues)
+    U = L .* transpose(inv_sqrt)
+    return (U = U, D = result.eigenvalues)
+  end
+
   QL = qr(L)
   M = QL.R * transpose(QL.R)  # r×r complex symmetric (no conjugate)
   F = svd(M)
@@ -307,6 +383,24 @@ function _extract_qr(result::ALPACAResult{T}) where T
     n = size(L, 1); m = size(R, 1)
     return (Q = Matrix{T}(undef, n, 0),
             R = Matrix{T}(undef, 0, m))
+  end
+
+  if !isempty(result.eigenvalues)
+    sym = result.symmetry
+    inv_sqrt = 1 ./ sqrt.(abs.(result.eigenvalues))
+    Q_ortho = L .* transpose(inv_sqrt)
+    R_part = if sym == :general
+      # A ≈ U * diag(σ) * V', Q = U, R = diag(σ) * V'
+      V_ortho = R .* transpose(inv_sqrt)
+      Diagonal(T.(result.eigenvalues)) * V_ortho'
+    elseif sym == :symmetric && T <: Complex
+      # A ≈ U * diag(σ) * U^T, Q = U, R = diag(σ) * U^T
+      Diagonal(T.(result.eigenvalues)) * transpose(Q_ortho)
+    else
+      # Real sym / Hermitian: A ≈ L_ortho * diag(λ) * L_ortho'
+      Diagonal(T.(result.eigenvalues)) * Q_ortho'
+    end
+    return (Q = Q_ortho, R = R_part)
   end
 
   sym = result.symmetry

@@ -86,10 +86,11 @@ U_takagi, D_takagi = alpaca_takagi(A_csym; tol=1e-8)
 
 ## 3. Algorithm Variants
 
-### `alpaca` — Standard (Nyström-Amended)
+### `alpaca` — Standard (Decomposition-Finalized)
 
-The default. Produces the cleanest factors by eigendecomposing (or
-Takagi-decomposing for complex symmetric) the pivot submatrix:
+The default. Produces the cleanest factors by QR-compressed
+eigendecomposition (or Takagi factorization for complex symmetric)
+of the pivot-loop factors:
 
 ```julia
 result = alpaca(A; tol=1e-8)
@@ -97,7 +98,7 @@ result = alpaca(A; tol=1e-8)
 
 ### `lpaca` — Raw Factors
 
-Skips the Nyström amendment step. Returns the raw decomposition
+Skips the decomposition finalization step. Returns the raw decomposition
 from the pivot loop. Faster, but the factors may contain small
 spurious components:
 
@@ -192,7 +193,7 @@ result = alpaca(A; tol=1e-12)
 
 Controls when pivots are accepted.  By default equals `tol`.
 Setting it smaller than `tol` finds more pivots before the
-Nyström finalization filters them:
+decomposition finalization filters them:
 
 ```julia
 result = alpaca(A; tol=1e-6, pivotol=1e-8)

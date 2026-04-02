@@ -343,17 +343,14 @@ function _attempt_2x2_pivot!(cache::ALPACACache{T,R,S},
   # Partner must not already be a pivot
   cache.is_pivot[partner] && return false
 
-  # Save the original (undeflated) column j (no-op for DenseALPACAMatrix)
-  saved_orig_j = _save_orig_col(cache, matrix)
-
   # Fetch and deflate the partner column (dispatches hermitian/symmetric).
   fetch_and_deflate_symmetric!(cache, matrix, partner)
   deflated_partner = copy(cache.cbuf)
-  saved_orig_partner = _save_orig_col(cache, matrix)
 
-  # 2×2 intersection block from deflated columns
-  B = T[deflated_j[j]       deflated_j[partner];
-        deflated_partner[j]  deflated_partner[partner]]
+  # 2×2 intersection block M_remaining[{j,partner}, {j,partner}]:
+  #   B[r,c] = deflated column c, row r.
+  B = T[deflated_j[j]       deflated_partner[j];
+        deflated_j[partner]  deflated_partner[partner]]
 
   # Eigendecompose
   λ, V = _eigendecompose_2x2(B, Val(S))
@@ -369,7 +366,6 @@ function _attempt_2x2_pivot!(cache::ALPACACache{T,R,S},
   end
 
   indices = (j, partner)
-  saved_origs = (saved_orig_j, saved_orig_partner)
   stored = 0
   for t in 1:2
     abs(λ[t]) < tol && break
@@ -385,9 +381,6 @@ function _attempt_2x2_pivot!(cache::ALPACACache{T,R,S},
     jj = indices[t]
     store_column!(cache, jj, cache.cbuf)
     k = cache.n_cols
-
-    # Restore original column for Nyström finalization (no-op for DenseALPACAMatrix)
-    _restore_orig_col!(cache, matrix, k, saved_origs[t])
 
     # Record pivot + update residuals
     store_pivot!(cache, jj, λ[t])
@@ -753,6 +746,61 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
   end
 
   return cache.pivot_indices, cache.row_pivot_indices
+end
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Post-pivot-loop column scaling
+# ──────────────────────────────────────────────────────────────────────────────
+
+"""
+    _scale_pivot_columns!(cache; from=1)
+
+Transform the raw pivot-loop factors in-place so that downstream code
+can use `cache.columns` directly without additional scaling.
+Only scales columns `from:k` where `k = cache.n_cols`.
+
+Dispatches on the cache symmetry type `S` and element type `T`.
+"""
+function _scale_pivot_columns! end
+
+# General: L_C *= d, so M ≈ L_C * L_R^T
+function _scale_pivot_columns!(cache::ALPACACache{T,R,:general}; from::Int=1) where {T,R}
+  k = cache.n_cols
+  @inbounds for t in from:k
+    d = cache.pivot_diag[t]
+    @views cache.columns[:, t] .*= d
+    cache.pivot_diag[t] = one(T)
+  end
+end
+
+# Complex symmetric: L *= √d, so M ≈ L L^T
+function _scale_pivot_columns!(cache::ALPACACache{<:Complex,R,:symmetric}; from::Int=1) where R
+  k = cache.n_cols
+  @inbounds for t in from:k
+    sd = sqrt(Complex(cache.pivot_diag[t]))
+    @views cache.columns[:, t] .*= sd
+    cache.pivot_diag[t] = one(eltype(cache.pivot_diag))
+  end
+end
+
+# Real symmetric: L *= √|d|, d ← sign(d)
+function _scale_pivot_columns!(cache::ALPACACache{<:Real,R,:symmetric}; from::Int=1) where R
+  k = cache.n_cols
+  @inbounds for t in from:k
+    d = cache.pivot_diag[t]
+    @views cache.columns[:, t] .*= sqrt(abs(d))
+    cache.pivot_diag[t] = d < zero(R) ? -one(R) : one(R)
+  end
+end
+
+# Hermitian: L *= √|Re(d)|, d ← sign(Re(d))
+function _scale_pivot_columns!(cache::ALPACACache{T,R,:hermitian}; from::Int=1) where {T,R}
+  k = cache.n_cols
+  @inbounds for t in from:k
+    rd = real(cache.pivot_diag[t])
+    @views cache.columns[:, t] .*= sqrt(abs(rd))
+    cache.pivot_diag[t] = rd < zero(R) ? -one(T) : one(T)
+  end
 end
 
 """

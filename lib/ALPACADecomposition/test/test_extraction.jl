@@ -47,6 +47,19 @@ end
   @test norm(A - A_approx) / norm(A) < 1e-6
 end
 
+@testitem "alpaca_svd: general complex" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(404)
+  n = 8
+  A = randn(ComplexF64, n, n)
+
+  U, S, Vt = alpaca_svd(A; tol=1e-10)
+  @test all(S .>= 0)
+  A_approx = U * Diagonal(S) * Vt
+  @test norm(A - A_approx) / norm(A) < 1e-6
+end
+
 @testitem "alpaca_svd: rectangular" begin
   using ALPACADecomposition
   using LinearAlgebra, Random
@@ -160,6 +173,36 @@ end
   @test norm(A - A_approx) / norm(A) < 1e-4
 end
 
+@testitem "alpaca_eigen: general complex" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(415)
+  n = 8
+  A = randn(ComplexF64, n, n)
+
+  vals, vecs = alpaca_eigen(A; tol=1e-10)
+  # Verify A * v ≈ λ * v
+  for i in 1:length(vals)
+    @test norm(A * vecs[:, i] - vals[i] * vecs[:, i]) / abs(vals[i]) < 1e-4
+  end
+end
+
+@testitem "alpaca_eigen: complex symmetric" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(416)
+  n = 8
+  V = randn(ComplexF64, n, 3)
+  A = V * transpose(V)
+  A = 0.5 * (A + transpose(A))
+
+  vals, vecs = alpaca_eigen(A; tol=1e-10, symmetry=:symmetric)
+  # Verify A * v ≈ λ * v
+  for i in 1:length(vals)
+    @test norm(A * vecs[:, i] - vals[i] * vecs[:, i]) / max(abs(vals[i]), 1e-14) < 1e-4
+  end
+end
+
 @testitem "lpaca_eigen: real symmetric" begin
   using ALPACADecomposition
   using LinearAlgebra, Random
@@ -270,6 +313,18 @@ end
   @test norm(A - A_approx) / norm(A) < 1e-6
 end
 
+@testitem "alpaca_qr: general complex" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(435)
+  A = randn(ComplexF64, 8, 8)
+
+  Q, R = alpaca_qr(A; tol=1e-10)
+  @test norm(Q'Q - I(size(Q, 2))) < 1e-10
+  A_approx = Q * R
+  @test norm(A - A_approx) / norm(A) < 1e-6
+end
+
 @testitem "lpaca_qr: real symmetric" begin
   using ALPACADecomposition
   using LinearAlgebra, Random
@@ -298,4 +353,103 @@ end
   @test norm(Q'Q - I(size(Q, 2))) < 1e-10
   A_approx = Q * R
   @test norm(A - A_approx) / norm(A) < 1e-6
+end
+
+# ──────────────────────────────────────────────────────────────────
+# ACA mode: empty principal elements
+# ──────────────────────────────────────────────────────────────────
+# With principal=Tuple{Int,Int}[], no principal elements are monitored,
+# reducing ALPACA to pure ACA with Bunch-Kaufman pivoting.
+
+@testitem "ACA mode: alpaca_svd symmetric" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(501)
+  n = 10
+  V = randn(n, 3)
+  A = V * V'
+  A = 0.5 * (A + A')
+
+  U, S, Vt = alpaca_svd(Symmetric(A); tol=1e-10, principal=Tuple{Int,Int}[])
+  @test all(S .>= 0)
+  @test norm(A - U * Diagonal(S) * Vt) / norm(A) < 1e-6
+end
+
+@testitem "ACA mode: alpaca_svd indefinite" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(502)
+  n = 8
+  Q_raw = randn(n, n); Qm, _ = qr(Q_raw); Qm = Matrix(Qm)
+  λ = [3.0, 1.0, -0.5, -2.0, zeros(n - 4)...]
+  A = Qm * Diagonal(λ) * Qm'
+  A = 0.5 * (A + A')
+
+  U, S, Vt = alpaca_svd(Symmetric(A); tol=1e-10, principal=Tuple{Int,Int}[])
+  @test norm(A - U * Diagonal(S) * Vt) / norm(A) < 1e-6
+end
+
+@testitem "ACA mode: alpaca_svd general" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(503)
+  A = randn(8, 8)
+
+  U, S, Vt = alpaca_svd(A; tol=1e-10, principal=Tuple{Int,Int}[])
+  @test norm(A - U * Diagonal(S) * Vt) / norm(A) < 1e-6
+end
+
+@testitem "ACA mode: alpaca_svd complex hermitian" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(504)
+  n = 8
+  V = randn(ComplexF64, n, 3)
+  A = V * V'
+  A = 0.5 * (A + A')
+
+  U, S, Vt = alpaca_svd(Hermitian(A); tol=1e-10, principal=Tuple{Int,Int}[])
+  @test norm(A - U * Diagonal(S) * Vt) / norm(A) < 1e-6
+end
+
+@testitem "ACA mode: lpaca_svd symmetric" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(505)
+  n = 10
+  V = randn(n, 3)
+  A = V * V'
+  A = 0.5 * (A + A')
+
+  U, S, Vt = lpaca_svd(Symmetric(A); tol=1e-10, principal=Tuple{Int,Int}[])
+  @test norm(A - U * Diagonal(S) * Vt) / norm(A) < 1e-6
+end
+
+@testitem "ACA mode: lpaca_eigen indefinite" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(506)
+  n = 8
+  Q_raw = randn(n, n); Qm, _ = qr(Q_raw); Qm = Matrix(Qm)
+  λ = [3.0, 1.0, -0.5, -2.0, zeros(n - 4)...]
+  A = Qm * Diagonal(λ) * Qm'
+  A = 0.5 * (A + A')
+
+  vals, vecs = lpaca_eigen(Symmetric(A); tol=1e-10, principal=Tuple{Int,Int}[])
+  @test any(vals .> 0) && any(vals .< 0)
+  A_approx = vecs * Diagonal(vals) * vecs'
+  @test norm(A - A_approx) / norm(A) < 1e-6
+end
+
+@testitem "ACA mode: qrdalpaca_svd symmetric" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(507)
+  n = 10
+  V = randn(n, 3)
+  A = V * V' + 0.01I
+  A = 0.5 * (A + A')
+
+  U, S, Vt = qrdalpaca_svd(Symmetric(A); tol=1e-10, principal=Tuple{Int,Int}[])
+  @test norm(A - U * Diagonal(S) * Vt) / norm(A) < 1e-6
 end
