@@ -16,6 +16,8 @@ export alpaca_svd, lpaca_svd, qrdalpaca_svd
 export alpaca_eigen, lpaca_eigen, qrdalpaca_eigen
 export alpaca_takagi, lpaca_takagi, qrdalpaca_takagi
 export alpaca_qr, lpaca_qr, qrdalpaca_qr
+export LLAMAResult
+export llama, llama_svd
 
 include("access.jl")
 include("descriptors.jl")
@@ -26,5 +28,6 @@ include("pivots.jl")
 include("alpaca.jl")
 include("qrdalpaca.jl")
 include("decompositions.jl")
+include("llama.jl")
 
 end

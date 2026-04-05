@@ -295,8 +295,10 @@ function _build_options(matrix::AbstractMatrix;
   if symmetry === nothing
     symmetry = _detect_symmetry(matrix)
   end
-  pivotol = pivotol === nothing ? tol : pivotol
-  return ALPACAOptions(; tol, pivotol, sigma, qr, symmetry, max_rank)
+  if pivotol !== nothing
+    return ALPACAOptions(; tol, pivotol, sigma, qr, symmetry, max_rank)
+  end
+  return ALPACAOptions(; tol, sigma, qr, symmetry, max_rank)
 end
 
 """

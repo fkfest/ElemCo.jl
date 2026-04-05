@@ -120,6 +120,67 @@ the principal signal is informative (the common case), while still
 using ACA as a safety net to catch pivots that the principal
 descriptor may have missed.
 
+## Pivot Tolerance Scaling
+
+The pivot acceptance threshold (`pivotol`) determines when a candidate
+pivot is large enough to be included in the decomposition.  For a matrix
+``\mathbf{A} \in \mathbb{R}^{m \times n}`` with singular value ``\sigma``,
+the corresponding per-element signal magnitude scales as
+
+```math
+|A_{ij}| \sim \frac{\sigma}{\sqrt{m}}
+```
+
+because the singular vectors have unit norm distributed across ``m``
+entries.  Using `pivotol = tol` in this regime causes the algorithm to
+miss singular values near `tol` in large matrices, since their
+per-element contributions fall well below `tol`.
+
+### Default auto-scaling: ``\text{tol}/\sqrt{m}``
+
+By default (`pivotol = NaN`), the effective pivot tolerance is
+automatically scaled:
+
+```math
+\text{pivotol} = \frac{\text{tol}}{\sqrt{m}}
+```
+
+This compensates for the ``1/\sqrt{m}`` dilution of singular-value
+signal across matrix rows, ensuring that singular values above `tol`
+produce element magnitudes safely above `pivotol`.
+
+### Adaptive scaling via effective dimensionality (LLAMA)
+
+For matrices with block-localized singular vectors, the signal is
+concentrated in a subset of the ``m`` rows rather than spread uniformly.
+Using ``\sqrt{m}`` in this case is overly conservative — the effective
+number of rows carrying signal is smaller than ``m``.
+
+LLAMA exploits the row-norm vector
+``\mathbf{d} = \text{diag}(\mathbf{A}\mathbf{A}^\top)``
+(which is always available as input) to estimate the **effective
+dimensionality**:
+
+```math
+m_{\text{eff}} = \frac{\|\mathbf{d}\|_1}{\|\mathbf{d}\|_\infty}
+  = \frac{\sum_i d_i}{\max_i d_i}
+```
+
+This ratio measures how uniformly the signal energy is distributed:
+- For globally distributed singular vectors: ``m_{\text{eff}} \approx m``
+- For block-localized singular vectors: ``m_{\text{eff}} \ll m``
+
+The adaptive pivot tolerance is then:
+
+```math
+\text{pivotol}_{\text{LLAMA}} = \frac{\text{tol}}{\sqrt{m_{\text{eff}}}}
+```
+
+Since ``m_{\text{eff}} \leq m``, this yields a less aggressive (larger)
+pivot tolerance that better matches the actual signal concentration,
+avoiding unnecessary work on rows with negligible content while still
+reliably detecting all significant singular values.
+
 ## The Pivot Loop
 
 At its core, ALPACA performs an incremental rank-revealing factorization

@@ -61,7 +61,7 @@ function _qrdalpaca_impl(matrix::AbstractALPACAMatrix{T},
   RT = real(T)
   sym = options.symmetry
   sig = options.sigma
-  tol_val = options.pivotol
+  tol_val = resolve_pivotol(options, m)
   max_pivots = min(m, n, options.max_rank)
 
   if k_alpaca == 0 || k_alpaca >= max_pivots

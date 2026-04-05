@@ -80,6 +80,34 @@ function elements!(buffer::AbstractVector, mat::DenseALPACAMatrix,
 end
 
 """
+    TransposedALPACAMatrix(parent)
+
+Matrix-free wrapper that presents `parent` as its transpose:
+columns of `TransposedALPACAMatrix` are rows of `parent` and vice versa.
+Used internally by [`llama`](@ref) for column-guided decomposition via the
+`d_col` keyword.
+"""
+struct TransposedALPACAMatrix{T, M<:AbstractALPACAMatrix{T}} <: AbstractALPACAMatrix{T}
+  parent::M
+end
+
+Base.size(m::TransposedALPACAMatrix) = reverse(size(m.parent))
+
+function column!(buffer::AbstractVector, m::TransposedALPACAMatrix, j::Integer)
+  row!(buffer, m.parent, j)
+end
+
+function row!(buffer::AbstractVector, m::TransposedALPACAMatrix, i::Integer)
+  column!(buffer, m.parent, i)
+end
+
+function elements!(buffer::AbstractVector, m::TransposedALPACAMatrix,
+                   pairs::AbstractVector{<:Tuple{<:Integer,<:Integer}})
+  swapped = [(j, i) for (i, j) in pairs]
+  elements!(buffer, m.parent, swapped)
+end
+
+"""
     LinearAlgebra.issymmetric(matrix::AbstractALPACAMatrix) → Bool
 
 Default implementation returning `false`.  Override for custom matrix types

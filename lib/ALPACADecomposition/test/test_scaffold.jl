@@ -45,7 +45,7 @@ end
 
   options = ALPACAOptions(tol=1e-8, symmetry=:hermitian)
   @test options.tol == 1e-8
-  @test options.pivotol == 1e-8
+  @test isnan(options.pivotol)  # NaN = auto-scale to tol/√m
   @test options.qr == false
   @test options.symmetry == :hermitian
   @test options.sigma == 0.01

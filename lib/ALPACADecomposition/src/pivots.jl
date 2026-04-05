@@ -311,7 +311,7 @@ function _takagi_degenerate(B::AbstractMatrix{T}, σ::Real) where {T<:Complex}
 end
 
 """
-    _attempt_2x2_pivot!(cache, matrix, j, partner, deflated_j, options) → Bool
+    _attempt_2x2_pivot!(cache, matrix, j, partner, deflated_j, pivotol) → Bool
 
 Attempt a 2×2 Bunch-Kaufman pivot using columns `j` and `partner`.
 
@@ -336,9 +336,8 @@ function _attempt_2x2_pivot!(cache::ALPACACache{T,R,S},
                               matrix::AbstractALPACAMatrix,
                               j::Int, partner::Int,
                               deflated_j::Vector{T},
-                              options::ALPACAOptions) where {T,R,S}
+                              tol::R) where {T,R,S}
   n = length(cache.cbuf)
-  tol = options.pivotol
 
   # Partner must not already be a pivot
   cache.is_pivot[partner] && return false
@@ -531,7 +530,7 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
                         options::ALPACAOptions,
                         descriptor::AbstractPrincipalDescriptor) where {T,R,S}
   n = length(cache.cbuf)
-  tol = options.pivotol
+  tol = resolve_pivotol(options, n)
   tol2 = abs2(tol)
   max_rank = options.max_rank
 
@@ -614,7 +613,7 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
       else
         # Off-diagonal is significantly larger → 2×2 Bunch-Kaufman
         if !_attempt_2x2_pivot!(cache, matrix, next_j, offdiag_idx,
-                                copy(cache.cbuf), options)
+                                copy(cache.cbuf), tol)
           # 2×2 failed (both eigenvalues below tol); try 1×1 if diagonal is usable
           if diag_val >= tol
             # Re-fetch column (2×2 attempt may have overwritten cbuf)
@@ -654,7 +653,7 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
                                 descriptor::AbstractPrincipalDescriptor) where T
   m = length(cache.cbuf)       # number of rows in the matrix
   ncols = length(cache.rbuf)   # number of columns in the matrix
-  tol = options.pivotol
+  tol = resolve_pivotol(options, m)
   tol2 = abs2(tol)
   max_rank = options.max_rank
 

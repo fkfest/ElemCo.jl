@@ -1,11 +1,15 @@
 """
-    ALPACAOptions(; tol, pivotol=tol, sigma=0.01, qr=false, symmetry=:symmetric, max_rank=typemax(Int))
+    ALPACAOptions(; tol, pivotol=NaN, sigma=0.01, qr=false, symmetry=:symmetric, max_rank=typemax(Int))
 
 Configuration for ALPACA decompositions.
 
 # Fields
 - `tol::Float64`: convergence tolerance for the low-rank approximation.
-- `pivotol::Float64`: pivot acceptance threshold (defaults to `tol`).
+- `pivotol::Float64`: pivot acceptance threshold. `NaN` (default) means
+  auto-scale to `tol / √m` at the call site, where `m` is the row count.
+  This ensures that singular values above `tol` are reliably detected even
+  in large matrices where per-element magnitudes are much smaller than
+  the singular values.
 - `sigma::Float64`: batch-screening ratio for QR refinement (default `0.01`).
 - `qr::Bool`: whether QR refinement is enabled.
 - `symmetry::Symbol`: matrix class — `:symmetric`, `:hermitian`, or `:general`.
@@ -20,7 +24,7 @@ struct ALPACAOptions
   max_rank::Int
 
   function ALPACAOptions(; tol::Real,
-                         pivotol::Real=tol,
+                         pivotol::Real=NaN,
                          sigma::Real=0.01,
                          qr::Bool=false,
                          symmetry::Symbol=:symmetric,
@@ -28,8 +32,8 @@ struct ALPACAOptions
     if tol <= 0
       throw(ArgumentError("tol must be positive"))
     end
-    if pivotol <= 0
-      throw(ArgumentError("pivotol must be positive"))
+    if !isnan(pivotol) && pivotol <= 0
+      throw(ArgumentError("pivotol must be positive or NaN (auto)"))
     end
     if sigma <= 0
       throw(ArgumentError("sigma must be positive"))
@@ -44,6 +48,34 @@ struct ALPACAOptions
     return new(Float64(tol), Float64(pivotol), Float64(sigma), qr,
                symmetry, Int(max_rank))
   end
+end
+
+"""
+    resolve_pivotol(options::ALPACAOptions, m::Integer) → Float64
+
+Resolve the effective pivot tolerance. If `options.pivotol` is `NaN`
+(auto-scale), returns `options.tol / √m`. Otherwise returns `options.pivotol`.
+"""
+function resolve_pivotol(options::ALPACAOptions, m::Integer)
+  isnan(options.pivotol) ? options.tol / sqrt(m) : options.pivotol
+end
+
+"""
+    resolve_pivotol(options::ALPACAOptions, d_row::AbstractVector{<:Real}) → Float64
+
+Resolve the effective pivot tolerance using row norms for adaptive scaling.
+If `options.pivotol` is `NaN` (auto-scale), computes an effective dimensionality
+``m_{\\text{eff}} = \\|d_{\\text{row}}\\|_1 / \\|d_{\\text{row}}\\|_\\infty``
+and returns `options.tol / √m_eff`.  For uniformly distributed singular vectors
+this equals `tol / √m`; for localized singular vectors ``m_{\\text{eff}} < m``,
+yielding a less aggressive (larger) pivot tolerance.
+"""
+function resolve_pivotol(options::ALPACAOptions, d_row::AbstractVector{<:Real})
+  isnan(options.pivotol) || return options.pivotol
+  d_max = maximum(d_row)
+  d_max <= 0 && return options.tol  # degenerate: fall back to tol
+  m_eff = max(1.0, sum(d_row) / d_max)
+  return options.tol / sqrt(m_eff)
 end
 
 """
