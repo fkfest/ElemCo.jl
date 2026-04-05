@@ -342,7 +342,250 @@ Note: general matrices cannot use `alpaca_eigen` or `alpaca_takagi`
 for eigenvalue / Takagi extraction in the usual sense, but SVD and
 QR extraction work for any matrix class.
 
-## 9. Block Diagonal Matrices — When QRdALPACA Helps
+## 9. LLAMA: Column-Space Basis for General Matrices
+
+**LLAMA** (**L**eft **L**owrank **A**mended **M**atrix **A**pproximation) is a
+dedicated algorithm for computing an orthonormal column-space basis
+``\mathbf{Q}`` for general (non-symmetric) matrices.  It uses the
+squared ``\ell_2`` row norms ``\mathbf{d}_\text{row} = \text{diag}(\mathbf{AA}^H)``
+(mnemonic: **LL**AMA ↔ ``\ell_2``) as an external guidance signal for
+row selection, replacing ALPACA's diagonal-based principal element signal.
+
+### When to use LLAMA instead of ALPACA
+
+Use LLAMA when:
+
+1. **You have ``\text{diag}(\mathbf{AA}^H)`` available cheaply** —
+   for example, from Cholesky-decomposed integrals in quantum chemistry.
+2. **The matrix is block-diagonal or has localized singular vectors** —
+   LLAMA's row-norm guidance discovers all blocks, while ALPACA/ACA
+   can get stuck cycling within the first block found.
+3. **You need an orthonormal ``\mathbf{Q}`` directly** — LLAMA's SVD
+   finalization produces ``\mathbf{Q}`` automatically, whereas ALPACA
+   returns raw factors that require post-processing.
+4. **The matrix is rectangular with ``n \gg m``** — column-guided mode
+   (`d_col`) provides up to 2× speedup.
+
+Use ALPACA instead when:
+
+- The matrix is **symmetric or Hermitian** — ALPACA's symmetric path
+  fetches only columns (2× fewer accesses than LLAMA).
+- You need **eigendecomposition** or **Takagi decomposition** —
+  these are only available from ALPACA results.
+- You **don't have ``\mathbf{d}_\text{row}``** and computing it would
+  be expensive for your matrix-free interface.
+
+### Basic Usage
+
+```julia
+using ALPACADecomposition
+using LinearAlgebra
+
+# Build a rank-4 rectangular matrix
+m, n, r = 100, 200, 4
+U0 = Matrix(qr(randn(m, r)).Q)
+V0 = Matrix(qr(randn(n, r)).Q)
+A = U0 * Diagonal([10.0, 5.0, 2.0, 1.0]) * V0'
+
+# Compute d_row = diag(AA')
+d_row = vec(sum(abs2, A, dims=2))
+
+# Run LLAMA
+result = llama(DenseALPACAMatrix(A); d_row, tol=1e-10)
+
+Q = result.Q                  # orthonormal column-space basis (m × r)
+S = result.singular_values    # approximate singular values
+println("Rank found: ", size(Q, 2))   # → 4
+
+# Check: projector onto column space matches
+P_approx = Q * Q'
+P_exact = U0 * U0'
+@assert norm(P_approx - P_exact) < 1e-6
+```
+
+### Dense Convenience (auto-computed norms)
+
+For dense matrices, LLAMA can auto-compute the row/column norms:
+
+```julia
+# No need to pass d_row — computed automatically
+result = llama(A; tol=1e-10)
+Q = result.Q
+```
+
+When ``n > m``, the convenience wrapper automatically switches to
+column-guided mode (using ``\mathbf{d}_\text{col}`` internally) for
+better performance.
+
+### Full SVD Extraction
+
+Request right singular vectors with `fullsvd=true`:
+
+```julia
+result = llama(A; tol=1e-10, fullsvd=true)
+Q = result.Q          # left singular vectors  (m × r)
+S = result.singular_values
+V = result.V          # right singular vectors (n × r)
+
+# Verify: A ≈ Q * diag(S) * V'
+@assert norm(A - Q * Diagonal(S) * V') / norm(A) < 1e-7
+```
+
+Or use the `llama_svd` convenience function that returns
+`(U, S, Vt)` directly:
+
+```julia
+U, S, Vt = llama_svd(A; tol=1e-10)
+# A ≈ U * Diagonal(S) * Vt
+@assert norm(A - U * Diagonal(S) * Vt) / norm(A) < 1e-7
+```
+
+### Column-Guided Mode
+
+When the matrix has many more columns than rows (``n \gg m``),
+pass ``\mathbf{d}_\text{col} = \text{diag}(\mathbf{A}^H\mathbf{A})``
+instead for faster execution:
+
+```julia
+d_col = vec(sum(abs2, A, dims=1))
+result = llama(A; d_col, tol=1e-10)
+Q = result.Q  # same quality, ~1.5–2× faster when n >> m
+```
+
+Under the hood, LLAMA transposes the problem and works on
+``\mathbf{A}^T``, reducing the dominant inner-loop cost from
+``O((m+2n)r^2)`` to ``O((2m+n)r^2)``.  The returned ``\mathbf{Q}``
+still spans the column space of the *original* ``\mathbf{A}``.
+
+!!! warning "`d_row` and `d_col` are mutually exclusive"
+    You cannot pass both.  Choose based on which is cheaper to compute
+    or which dimension is smaller.
+
+### Symmetric and Hermitian Convenience
+
+Although LLAMA is designed for general matrices, convenience
+methods for `Symmetric` and `Hermitian` wrappers are provided.
+These auto-compute `d_row` from column norms (which equal row
+norms by symmetry):
+
+```julia
+A_sym = Symmetric(V * V')
+result = llama(A_sym; tol=1e-10)
+
+A_herm = Hermitian(randn(ComplexF64, 50, 5) * randn(ComplexF64, 5, 50))
+result = llama(A_herm; tol=1e-10)
+```
+
+!!! tip "For symmetric matrices, prefer ALPACA"
+    ALPACA's symmetric path is 2× faster because it fetches only
+    columns.  Use LLAMA for symmetric matrices only when you specifically
+    need its row-norm-guided behavior or the iterative
+    ``P\Sigma^2 P`` correction.
+
+### Matrix-Free Interface
+
+LLAMA uses the same `AbstractALPACAMatrix` interface as ALPACA.
+Implement `column!` and `row!` for your custom matrix type:
+
+```julia
+struct MyFactoredMatrix{T} <: AbstractALPACAMatrix{T}
+  U::Matrix{T}
+  s::Vector{T}
+  V::Matrix{T}
+end
+
+Base.size(A::MyFactoredMatrix) = (size(A.U, 1), size(A.V, 1))
+
+function ALPACADecomposition.column!(buf, A::MyFactoredMatrix, j)
+  mul!(buf, A.U, A.s .* A.V[j, :])
+  return buf
+end
+
+function ALPACADecomposition.row!(buf, A::MyFactoredMatrix, i)
+  mul!(buf, A.V, A.s .* A.U[i, :])
+  return buf
+end
+
+# Precompute d_row externally (e.g. from Cholesky factors)
+d_row = vec(sum(abs2, U0 * Diagonal(S0) * V0', dims=2))
+mat = MyFactoredMatrix(U0, diag(S0), V0)
+result = llama(mat; d_row, tol=1e-10)
+```
+
+!!! note "No `elements!` needed"
+    Unlike ALPACA, LLAMA does **not** call `elements!` — it has no
+    principal element descriptor.  You only need `column!`, `row!`,
+    and `Base.size`.
+
+### Controlling Options
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `tol` | *(required)* | Convergence threshold: inner loop stops when all residuals < `tol²`; SVD truncates at `tol` |
+| `pivotol` | `NaN` (auto) | Pivot acceptance threshold. `NaN` → adaptive: `tol / √m_eff` (see below) |
+| `max_rank` | `typemax(Int)` | Upper bound on discovered rank |
+| `fullsvd` | `false` | If `true`, compute and return right singular vectors `V` |
+| `d_row` | `nothing` | Squared ℓ₂ row norms; drives row pivot selection |
+| `d_col` | `nothing` | Squared ℓ₂ column norms; triggers column-guided mode |
+
+**Adaptive pivot tolerance.** When `pivotol = NaN` (the default),
+LLAMA computes the **effective dimensionality** from the row norms:
+
+```math
+m_{\text{eff}} = \frac{\|\mathbf{d}_\text{row}\|_1}{\|\mathbf{d}_\text{row}\|_\infty}
+  = \frac{\sum_i d_i}{\max_i d_i}
+```
+
+and sets `pivotol = tol / √m_eff`.  For matrices with
+block-localized singular vectors, ``m_\text{eff} \ll m``, yielding
+a larger (less aggressive) pivot tolerance that avoids unnecessary
+work on negligible rows while still detecting all significant
+singular values.
+
+### Result Type
+
+```julia
+struct LLAMAResult{T, R}
+  Q::Matrix{T}                      # orthonormal column-space basis (m × r)
+  singular_values::Vector{R}        # approximate singular values
+  col_pivots::Vector{Int}           # column indices accessed from A
+  row_pivots::Vector{Int}           # row indices used as successful pivots
+  V::Union{Nothing, Matrix{T}}      # right singular vectors (n × r), or nothing
+end
+```
+
+### Example: Discovering Block Structure
+
+This example shows LLAMA's key advantage on a block-diagonal matrix
+where the diagonal is zero — making ALPACA's principal elements
+uninformative:
+
+```julia
+using ALPACADecomposition
+using LinearAlgebra
+
+# Two disjoint blocks placed off-diagonal
+n = 100
+r1, r2 = 3, 3
+B1 = randn(n÷2, r1)
+B2 = 0.1 * randn(n÷2, r2)
+
+A = zeros(n, n)
+A[1:n÷2, n÷2+1:n] = B1 * B2'      # upper-right block
+A[n÷2+1:n, 1:n÷2] = B2 * B1'      # lower-left block
+# Note: diag(A) is all zeros!
+
+# ALPACA with default diagonal principal elements → may miss a block
+result_alpaca = alpaca(A; tol=1e-8, symmetry=:general)
+println("ALPACA pivots: ", length(result_alpaca.pivot_indices))
+
+# LLAMA with d_row guidance → finds all blocks
+d_row = vec(sum(abs2, A, dims=2))
+result_llama = llama(A; d_row, tol=1e-8)
+println("LLAMA rank: ", size(result_llama.Q, 2))   # finds the full rank
+```
+
+## 10. Block Diagonal Matrices — When QRdALPACA Helps
 
 A common scenario where `qrdalpaca` shines: the matrix has multiple
 blocks, and the principal descriptor only covers one of them.
@@ -366,7 +609,7 @@ println("qrdalpaca found: ", length(result_qrd.pivot_indices), " pivots")
 # qrdalpaca recovers the pivots from block 2 that alpaca missed
 ```
 
-## 10. Hermitian Complex Matrices
+## 11. Hermitian Complex Matrices
 
 Complex Hermitian matrices (``A = A^\dagger``) are handled seamlessly:
 
@@ -380,7 +623,7 @@ U, S, Vt = alpaca_svd(A_herm; tol=1e-8)
 @assert norm(A_herm - U * Diagonal(S) * Vt) / norm(A_herm) < 1e-7
 ```
 
-## 11. Tips and Best Practices
+## 12. Tips and Best Practices
 
 1. **Start with `alpaca`**.  Only switch to `qrdalpaca` if you suspect
    missing pivots (e.g. reconstruction error is unexpectedly large).
@@ -403,3 +646,11 @@ U, S, Vt = alpaca_svd(A_herm; tol=1e-8)
    A non-empty `neg_indices` means the matrix has negative
    eigenvalues — the reconstruction formula must include the sign
    diagonal.
+
+7. **Use `llama` for general matrices with available row norms.**
+   When ``\text{diag}(\mathbf{AA}^H)`` is cheap (e.g. quantum chemistry
+   integrals), LLAMA's row-norm guidance gives better block-structure
+   discovery than ALPACA's general mode.
+
+8. **Use `llama` with `d_col` when ``n \gg m``.**
+   Column-guided mode provides up to 2× speedup for wide matrices.

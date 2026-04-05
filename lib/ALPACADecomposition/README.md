@@ -194,10 +194,10 @@ modified pivot selection strategy and an iterative SVD correction:
    aggressive than the Gram formula, correctly revealing rows where the
    ACA approximation overshot.
 
-For block-structured matrices, the algorithm skips exhausted rows (whose deflated
-content is below tolerance) rather than terminating, allowing discovery of all
-independent blocks.  The `PΣ²P` correction catches components missed by the
-Gram overshoot.
+For block-structured matrices, the algorithm breaks out of the inner loop
+when it encounters an exhausted row (whose deflated content is below tolerance),
+letting the outer `PΣ²P` correction detect missed components and trigger a
+new pass with corrected residuals — discovering all independent blocks.
 
 ### Column-Guided Mode (`d_col`)
 

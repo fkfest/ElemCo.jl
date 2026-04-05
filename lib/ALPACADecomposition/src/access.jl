@@ -137,7 +137,7 @@ function elements!(buffer::AbstractVector, m::SymmetricALPACAMatrix,
 end
 
 LinearAlgebra.issymmetric(::SymmetricALPACAMatrix) = true
-LinearAlgebra.ishermitian(::SymmetricALPACAMatrix) = eltype(m) <: Real
+LinearAlgebra.ishermitian(::SymmetricALPACAMatrix{T}) where T = T <: Real
 
 """
     HermitianALPACAMatrix(parent)
@@ -170,7 +170,7 @@ function elements!(buffer::AbstractVector, m::HermitianALPACAMatrix,
   elements!(buffer, m.parent, pairs)
 end
 
-LinearAlgebra.issymmetric(m::HermitianALPACAMatrix) = eltype(m) <: Real
+LinearAlgebra.issymmetric(::HermitianALPACAMatrix{T}) where T = T <: Real
 LinearAlgebra.ishermitian(::HermitianALPACAMatrix) = true
 
 """

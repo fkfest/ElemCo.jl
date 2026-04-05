@@ -183,15 +183,20 @@
 #
 # When a row is selected by residual but its deflated content is
 # near-zero (|r̃|∞ < tol or |p| < tol), the row is "exhausted" —
-# its information is already captured.  LLAMA marks it and moves
-# to the next candidate.  A budget of max(rank, 10) consecutive
-# exhausted rows limits wasted work.
+# its information is already captured.  LLAMA marks it and
+# immediately breaks out of the inner loop instead of continuing
+# to the next row candidate.
 #
-# This skip logic is essential for block-structured matrices:
-# rows in already-captured blocks have near-zero deflated rows
-# but may still have large Gram residuals (false positives from
-# the overshoot problem).  Skipping them lets the algorithm find
-# genuine new content in other blocks.
+# The outer loop's PΣ²P correction detects any components that
+# were missed by the early termination and triggers a new inner
+# loop pass with corrected residuals.
+#
+# This is essential for block-structured matrices: rows in
+# already-captured blocks have near-zero deflated rows but may
+# still have large Gram residuals (false positives from the
+# overshoot problem).  Breaking immediately and relying on the
+# outer correction avoids wasting time on exhausted rows while
+# still discovering all blocks.
 #
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║                    NOTATION                                  ║
@@ -538,7 +543,6 @@ function llama(matrix::AbstractALPACAMatrix{T};
   row_gram = Matrix{T}(undef, init_cap, init_cap) # R^H R accumulated incrementally
 
   rank = 0
-  consecutive_exhausted = 0
 
   # Outer-loop state (must be visible after loop for fallthrough return)
   Q_final = Matrix{T}(undef, m, 0)
@@ -592,10 +596,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
     if best_col == 0 || best_val < pivotol_rt
       is_row_pivot[best_row] = true
       residual[best_row] = zero(RT)
-      consecutive_exhausted += 1
-      # Budget: stop after max(rank, 10) consecutive exhausted rows
-      consecutive_exhausted >= max(rank, 10) && break
-      continue
+      break
     end
 
     # ── Fetch and deflate column (cross-coupled: uses stored rows) ──
@@ -614,12 +615,8 @@ function llama(matrix::AbstractALPACAMatrix{T};
     if abs(pivot_val) < pivotol_rt
       is_row_pivot[best_row] = true
       residual[best_row] = zero(RT)
-      consecutive_exhausted += 1
-      consecutive_exhausted >= max(rank, 10) && break
-      continue
+      break
     end
-
-    consecutive_exhausted = 0
 
     # ── Scale and store ──
     inv_pv = one(T) / pivot_val
@@ -716,7 +713,6 @@ function llama(matrix::AbstractALPACAMatrix{T};
   for rp in row_pivots
     is_row_pivot[rp] = true
   end
-  consecutive_exhausted = 0
 
   end  # outer loop
 
