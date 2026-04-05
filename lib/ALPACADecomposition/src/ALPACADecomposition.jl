@@ -5,6 +5,7 @@ using Random: randperm
 
 export AbstractALPACAMatrix
 export DenseALPACAMatrix
+export SymmetricALPACAMatrix, HermitianALPACAMatrix
 export column!, row!, elements!
 export AbstractPrincipalDescriptor
 export PrincipalPairs, PrincipalTriples

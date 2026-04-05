@@ -393,3 +393,154 @@ end
 
   @test_throws ArgumentError llama(A; d_row, d_col, tol=1e-10)
 end
+
+# ──────────────────────────────────────────────────────────────────
+# Symmetric / Hermitian wrappers
+# ──────────────────────────────────────────────────────────────────
+
+@testitem "llama: real Symmetric dense convenience" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(540)
+
+  n, r = 30, 4
+  U0 = Matrix(qr(randn(n, r)).Q)
+  S0 = Diagonal([10.0, 5.0, 2.0, 1.0])
+  A = U0 * S0 * U0'  # symmetric, rank-r
+  A = Symmetric(A)
+
+  result = llama(A; tol=1e-10)
+  Q = result.Q
+
+  P_approx = Q * Q'
+  P_exact = U0 * U0'
+  @test norm(P_approx - P_exact) < 1e-6
+  @test size(Q, 2) == r
+end
+
+@testitem "llama: real Symmetric SVD" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(541)
+
+  n, r = 25, 3
+  U0 = Matrix(qr(randn(n, r)).Q)
+  true_sv = [8.0, 3.0, 1.0]
+  S0 = Diagonal(true_sv)
+  A = U0 * S0 * U0'
+  A = Symmetric(A)
+
+  U, S, Vt = llama_svd(A; tol=1e-10)
+
+  sv = sort(S, rev=true)
+  @test sv ≈ true_sv atol=1e-8
+  @test size(U, 2) == r
+
+  A_approx = U * Diagonal(S) * Vt
+  @test norm(A - A_approx) / norm(A) < 1e-8
+end
+
+@testitem "llama: complex Hermitian dense convenience" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(542)
+
+  n, r = 25, 4
+  U0 = Matrix(qr(randn(ComplexF64, n, r)).Q)
+  S0 = Diagonal([10.0, 5.0, 2.0, 1.0])
+  A = U0 * S0 * U0'  # hermitian, rank-r
+  A = Hermitian(A)
+
+  result = llama(A; tol=1e-10)
+  Q = result.Q
+
+  P_approx = Q * Q'
+  P_exact = U0 * U0'
+  @test norm(P_approx - P_exact) < 1e-6
+  @test size(Q, 2) == r
+end
+
+@testitem "llama: complex Hermitian SVD" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(543)
+
+  n, r = 20, 3
+  U0 = Matrix(qr(randn(ComplexF64, n, r)).Q)
+  true_sv = [8.0, 3.0, 1.0]
+  S0 = Diagonal(true_sv)
+  A = U0 * S0 * U0'
+  A = Hermitian(A)
+
+  U, S, Vt = llama_svd(A; tol=1e-10)
+
+  sv = sort(S, rev=true)
+  @test sv ≈ true_sv atol=1e-8
+  @test size(U, 2) == r
+
+  A_approx = U * Diagonal(S) * Vt
+  @test norm(A - A_approx) / norm(A) < 1e-8
+end
+
+@testitem "llama: SymmetricALPACAMatrix row! equals column!" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(544)
+
+  n = 15
+  A = randn(n, n)
+  A = A + A'  # make symmetric
+  wrapped = SymmetricALPACAMatrix(DenseALPACAMatrix(A))
+
+  buf_col = zeros(n)
+  buf_row = zeros(n)
+  for j in 1:n
+    column!(buf_col, wrapped, j)
+    row!(buf_row, wrapped, j)
+    @test buf_col == buf_row
+  end
+
+  @test issymmetric(wrapped)
+  @test ishermitian(wrapped)
+end
+
+@testitem "llama: HermitianALPACAMatrix row! equals conj(column!)" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(545)
+
+  n = 15
+  A = randn(ComplexF64, n, n)
+  A = A + A'  # make hermitian
+  wrapped = HermitianALPACAMatrix(DenseALPACAMatrix(A))
+
+  buf_col = zeros(ComplexF64, n)
+  buf_row = zeros(ComplexF64, n)
+  for j in 1:n
+    column!(buf_col, wrapped, j)
+    row!(buf_row, wrapped, j)
+    @test buf_row == conj(buf_col)
+  end
+
+  @test !issymmetric(wrapped)
+  @test ishermitian(wrapped)
+end
+
+@testitem "llama: real Hermitian treated as symmetric" begin
+  using ALPACADecomposition
+  using LinearAlgebra, Random
+  Random.seed!(546)
+
+  n, r = 20, 3
+  U0 = Matrix(qr(randn(n, r)).Q)
+  S0 = Diagonal([6.0, 3.0, 1.0])
+  A = U0 * S0 * U0'
+  A = Hermitian(A)
+
+  result = llama(A; tol=1e-10)
+  @test size(result.Q, 2) == r
+
+  P_approx = result.Q * result.Q'
+  P_exact = U0 * U0'
+  @test norm(P_approx - P_exact) < 1e-6
+end

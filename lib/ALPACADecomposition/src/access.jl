@@ -108,6 +108,72 @@ function elements!(buffer::AbstractVector, m::TransposedALPACAMatrix,
 end
 
 """
+    SymmetricALPACAMatrix(parent)
+
+Matrix-free wrapper for symmetric matrices.  Only [`column!`](@ref) must be
+implemented on `parent`; [`row!`](@ref) is derived by calling `column!`
+(since ``A_{i,:} = A_{:,i}`` for symmetric matrices).
+[`elements!`](@ref) delegates directly to `parent`.
+
+See also [`HermitianALPACAMatrix`](@ref).
+"""
+struct SymmetricALPACAMatrix{T, M<:AbstractALPACAMatrix{T}} <: AbstractALPACAMatrix{T}
+  parent::M
+end
+
+Base.size(m::SymmetricALPACAMatrix) = size(m.parent)
+
+function column!(buffer::AbstractVector, m::SymmetricALPACAMatrix, j::Integer)
+  column!(buffer, m.parent, j)
+end
+
+function row!(buffer::AbstractVector, m::SymmetricALPACAMatrix, i::Integer)
+  column!(buffer, m.parent, i)
+end
+
+function elements!(buffer::AbstractVector, m::SymmetricALPACAMatrix,
+                   pairs::AbstractVector{<:Tuple{<:Integer,<:Integer}})
+  elements!(buffer, m.parent, pairs)
+end
+
+LinearAlgebra.issymmetric(::SymmetricALPACAMatrix) = true
+LinearAlgebra.ishermitian(::SymmetricALPACAMatrix) = eltype(m) <: Real
+
+"""
+    HermitianALPACAMatrix(parent)
+
+Matrix-free wrapper for Hermitian matrices.  Only [`column!`](@ref) must be
+implemented on `parent`; [`row!`](@ref) is derived by calling `column!` and
+conjugating the result (since ``A_{i,:} = \\overline{A_{:,i}}`` for Hermitian
+matrices).  [`elements!`](@ref) delegates directly to `parent`.
+
+See also [`SymmetricALPACAMatrix`](@ref).
+"""
+struct HermitianALPACAMatrix{T, M<:AbstractALPACAMatrix{T}} <: AbstractALPACAMatrix{T}
+  parent::M
+end
+
+Base.size(m::HermitianALPACAMatrix) = size(m.parent)
+
+function column!(buffer::AbstractVector, m::HermitianALPACAMatrix, j::Integer)
+  column!(buffer, m.parent, j)
+end
+
+function row!(buffer::AbstractVector, m::HermitianALPACAMatrix, i::Integer)
+  column!(buffer, m.parent, i)
+  conj!(buffer)
+  return buffer
+end
+
+function elements!(buffer::AbstractVector, m::HermitianALPACAMatrix,
+                   pairs::AbstractVector{<:Tuple{<:Integer,<:Integer}})
+  elements!(buffer, m.parent, pairs)
+end
+
+LinearAlgebra.issymmetric(m::HermitianALPACAMatrix) = eltype(m) <: Real
+LinearAlgebra.ishermitian(::HermitianALPACAMatrix) = true
+
+"""
     LinearAlgebra.issymmetric(matrix::AbstractALPACAMatrix) → Bool
 
 Default implementation returning `false`.  Override for custom matrix types

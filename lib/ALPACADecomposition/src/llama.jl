@@ -755,6 +755,50 @@ function llama(matrix::AbstractMatrix{T};
   return llama(DenseALPACAMatrix(matrix); d_row, d_col, tol, pivotol, max_rank, oversample, fullsvd)
 end
 
+"""
+    llama(matrix::Symmetric; tol, [d_row], kwargs...)
+
+Convenience interface for `Symmetric` matrices.  Only needs column access
+since rows equal columns.  If `d_row` is not provided, it is computed as
+the squared ``\\ell_2`` norms of the columns (equal to row norms for
+symmetric matrices).
+"""
+function llama(matrix::Symmetric{T};
+               tol::Real,
+               pivotol::Real=NaN,
+               d_row::Union{AbstractVector{<:Real}, Nothing}=nothing,
+               max_rank::Integer=typemax(Int),
+               oversample::Integer=0,
+               fullsvd::Bool=false) where T
+  if d_row === nothing
+    d_row = vec(sum(abs2, parent(matrix), dims=1))
+  end
+  wrapped = SymmetricALPACAMatrix(DenseALPACAMatrix(parent(matrix)))
+  return llama(wrapped; d_row, tol, pivotol, max_rank, oversample, fullsvd)
+end
+
+"""
+    llama(matrix::Hermitian; tol, [d_row], kwargs...)
+
+Convenience interface for `Hermitian` matrices.  Only needs column access
+since rows are the complex conjugates of columns.  If `d_row` is not
+provided, it is computed as the squared ``\\ell_2`` norms of the columns
+(equal to row norms for Hermitian matrices).
+"""
+function llama(matrix::Hermitian{T};
+               tol::Real,
+               pivotol::Real=NaN,
+               d_row::Union{AbstractVector{<:Real}, Nothing}=nothing,
+               max_rank::Integer=typemax(Int),
+               oversample::Integer=0,
+               fullsvd::Bool=false) where T
+  if d_row === nothing
+    d_row = vec(sum(abs2, parent(matrix), dims=1))
+  end
+  wrapped = HermitianALPACAMatrix(DenseALPACAMatrix(parent(matrix)))
+  return llama(wrapped; d_row, tol, pivotol, max_rank, oversample, fullsvd)
+end
+
 # ──────────────────────────────────────────────────────────────────
 # SVD extraction
 # ──────────────────────────────────────────────────────────────────
@@ -812,6 +856,54 @@ function llama_svd(matrix::AbstractMatrix{T};
     end
   end
   result = llama(DenseALPACAMatrix(matrix); d_row, d_col, tol, pivotol, max_rank, oversample, fullsvd=true)
+  r = size(result.Q, 2)
+  RT = real(T)
+  if r == 0
+    return (U = Matrix{T}(undef, m, 0),
+            S = Vector{RT}(undef, 0),
+            Vt = Matrix{T}(undef, 0, n))
+  end
+  return (U = result.Q, S = result.singular_values,
+          Vt = result.V')
+end
+
+"""
+    llama_svd(matrix::Symmetric; tol, [d_row], kwargs...) → (U, S, Vt)
+
+Convenience interface for `Symmetric` matrices.  See [`llama`](@ref) for details.
+"""
+function llama_svd(matrix::Symmetric{T};
+                   tol::Real,
+                   pivotol::Real=NaN,
+                   d_row::Union{AbstractVector{<:Real}, Nothing}=nothing,
+                   max_rank::Integer=typemax(Int),
+                   oversample::Integer=0) where T
+  result = llama(matrix; d_row, tol, pivotol, max_rank, oversample, fullsvd=true)
+  m, n = size(matrix)
+  r = size(result.Q, 2)
+  RT = real(T)
+  if r == 0
+    return (U = Matrix{T}(undef, m, 0),
+            S = Vector{RT}(undef, 0),
+            Vt = Matrix{T}(undef, 0, n))
+  end
+  return (U = result.Q, S = result.singular_values,
+          Vt = result.V')
+end
+
+"""
+    llama_svd(matrix::Hermitian; tol, [d_row], kwargs...) → (U, S, Vt)
+
+Convenience interface for `Hermitian` matrices.  See [`llama`](@ref) for details.
+"""
+function llama_svd(matrix::Hermitian{T};
+                   tol::Real,
+                   pivotol::Real=NaN,
+                   d_row::Union{AbstractVector{<:Real}, Nothing}=nothing,
+                   max_rank::Integer=typemax(Int),
+                   oversample::Integer=0) where T
+  result = llama(matrix; d_row, tol, pivotol, max_rank, oversample, fullsvd=true)
+  m, n = size(matrix)
   r = size(result.Q, 2)
   RT = real(T)
   if r == 0
