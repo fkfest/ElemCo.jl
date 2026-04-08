@@ -1,0 +1,15 @@
+version: 100
+type: Tensor
+scalarType: Complex64
+dimensions:
+  - length:     10
+    type: State
+  - length:     10
+    type: State
+  - length:      1
+    type: State
+  - length:      1
+    type: State
+elements:
+  type: IeeeBinaryFile
+unit: 0.1481847434769  # = (Angstrom^3/Bohr^3)
