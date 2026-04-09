@@ -1255,7 +1255,7 @@ macro dummy(atoms)
     println("Dummy atoms set to: ", $(esc(atoms)))
     if !isempty($(esc(:EC)).fd)
       println("The integrals will be recalculated.")
-      $(esc(:EC)).fd = TFDump()  # reset fcidump
+      $(esc(:EC)).fd = FDump{ec_eltype($(esc(:EC))),3}() # reset fcidump
     end
   end
 end
