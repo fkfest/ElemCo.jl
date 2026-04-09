@@ -284,13 +284,13 @@ function contract_df_integrals!(EC::ECInfo{T}) where T
         v!int2 = @mview int2[:,:,qs]    # (norb, norb)
         if first
           @mtensor v!int2[p,r] = v!Lmm_q[L,p] * v!Lmm_s[L,r]
-          first = false
         else
           @mtensor v!int2[p,r] += v!Lmm_q[L,p] * v!Lmm_s[L,r]
         end
       end
     end
     drop!(buf, Lmm)
+    first = false
   end
   end #buffer
   flushmmap(EC, int2)

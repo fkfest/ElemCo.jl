@@ -27,14 +27,15 @@ separate alpha/beta bit fields.
 # Arguments
 - `trexio::TrexioFile`: Open TREXIO file handle (must be opened with write/update mode)
 - `determinants::Vector{<:AbstractDeterminant}`: Vector of determinants (must have `alpha` and `beta` fields)
-- `coefficients::AbstractVector{Float64}`: CI coefficients for each determinant
+- `coefficients::AbstractVector{<:Number}`: CI coefficients for each determinant
 
 # Storage Format
 - `determinant.num`: Number of determinants
 - `determinant.n_int`: Number of 64-bit integers per spin pattern (ceil(mo.num/64))
 - `determinant.alpha`: Alpha spin patterns as Int64 bit fields [n_int, n_dets]
 - `determinant.beta`: Beta spin patterns as Int64 bit fields [n_int, n_dets]
-- `determinant.coefficient`: CI coefficients [n_dets]
+- `determinant.coefficient`: CI coefficients (real part) [n_dets]
+- `determinant.coefficient_im`: CI coefficients (imaginary part) [n_dets] (only for complex)
 
 The number of orbitals is determined from `mo.num` in the TREXIO file.
 Bit `i` in the pattern indicates orbital `i+1` is occupied (0-indexed bits).
@@ -50,7 +51,21 @@ end
 """
 function write_trexio_determinants(trexio::TrexioFile, 
                                    determinants::Vector{D}, 
-                                   coefficients::AbstractVector{<:Number}) where {D <: AbstractDeterminant}
+                                   coefficients::AbstractVector{<:Complex}) where {D <: AbstractDeterminant}
+  # Write real parts via the real-valued method
+  write_trexio_determinants(trexio, determinants, real.(coefficients))
+  # Write imaginary parts
+  n_dets = length(coefficients)
+  if n_dets > 0
+    status = TREXIO.trexio_write_determinant_coefficient_im(trexio, Vector{Float64}(imag.(coefficients)))
+    @assert status == TREXIO.TREXIO_SUCCESS "Failed to write determinant.coefficient_im with status $status"
+  end
+  return TREXIO.TREXIO_SUCCESS
+end
+
+function write_trexio_determinants(trexio::TrexioFile, 
+                                   determinants::Vector{D}, 
+                                   coefficients::AbstractVector{<:Real}) where {D <: AbstractDeterminant}
   n_dets = length(determinants)
   @assert n_dets == length(coefficients) "Number of determinants ($n_dets) must match coefficients ($(length(coefficients)))"
   
@@ -134,7 +149,7 @@ end
 
 """
     read_trexio_determinants(trexio::TrexioFile; OPattern::Type=UInt64) 
-      -> (Vector{SimpleDeterminant{OPattern}}, Vector{Float64})
+      -> (Vector{SimpleDeterminant{OPattern}}, Vector{<:Number})
 
 Read determinants and CI coefficients from TREXIO file.
 
@@ -144,7 +159,7 @@ Read determinants and CI coefficients from TREXIO file.
 
 # Returns
 - `determinants::Vector{SimpleDeterminant{OPattern}}`: Vector of determinants
-- `coefficients::Vector{Float64}`: CI coefficients
+- `coefficients::Vector{<:Number}`: CI coefficients (complex if imaginary part is stored)
 
 # Example
 ```julia
@@ -190,6 +205,13 @@ function read_trexio_determinants(trexio::TrexioFile; OPattern::Type=UInt64)
   coefficients, status = TREXIO.trexio_read_determinant_coefficient(trexio)
   @assert status == TREXIO.TREXIO_SUCCESS "Failed to read determinant.coefficient with status $status"
   
+  # Check for imaginary part
+  if TREXIO.trexio_has_determinant_coefficient_im(trexio)
+    coefficients_im, status_im = TREXIO.trexio_read_determinant_coefficient_im(trexio)
+    @assert status_im == TREXIO.TREXIO_SUCCESS "Failed to read determinant.coefficient_im with status $status_im"
+    coefficients = complex.(coefficients, coefficients_im)
+  end
+
   # Unpack determinants
   determinants = Vector{SimpleDeterminant{OPattern}}(undef, n_dets)
   for i in 1:n_dets

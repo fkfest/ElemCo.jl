@@ -176,7 +176,15 @@ end
 function density4temperature(EC::ECInfo, ϵ, cMOr, nocc, nelec, temperature)
   cMOl = transpose(inv(cMOr))
   ϵ_real = real.(ϵ)
-  fermi = (ϵ_real[nocc] + ϵ_real[nocc+1])/2
+  if isempty(ϵ_real)  
+    throw(ArgumentError("Cannot build finite-temperature density from an empty orbital spectrum"))  
+  elseif nocc <= 0  
+    fermi = ϵ_real[begin]  
+  elseif nocc >= length(ϵ_real)  
+    fermi = ϵ_real[end]  
+  else  
+    fermi = (ϵ_real[nocc] + ϵ_real[nocc+1]) / 2  
+  end
   function occfun(eps) 
     if eps < fermi
       return 1/(1+exp((eps-fermi)*Constants.HARTREE2K/temperature))

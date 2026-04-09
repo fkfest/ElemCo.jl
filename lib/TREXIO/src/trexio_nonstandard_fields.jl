@@ -26,6 +26,7 @@ const TREXIO_DETERMINANT_EXT_FIELDS = [
     TrexioField("determinant", "n_int", Int, SCALAR, "number of 64-bit integers per spin pattern (ceil(mo.num/64))", violator=true),
     TrexioField("determinant", "alpha", Int, ["determinant.n_int", "determinant.num"], "alpha spin orbital patterns as 64-bit integer bit fields", violator=true),
     TrexioField("determinant", "beta", Int, ["determinant.n_int", "determinant.num"], "beta spin orbital patterns as 64-bit integer bit fields", violator=true),
+    TrexioField("determinant", "coefficient_im", Float64, ["determinant.num"], "CI coefficients (imaginary part)", violator=true),
 ]
 
 ## 5.3a Dense amplitude fields - non-standard

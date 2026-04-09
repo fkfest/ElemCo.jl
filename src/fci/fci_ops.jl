@@ -856,8 +856,8 @@ function apply_1e_op!(result::AbstractVector{T}, coeffs::AbstractVector{T},
       end
 
       # Matrix multiplication: output_k = op_matrix_1e * input_k
-      input_k_mat = reshape(view(input_k, 1:(n_orb_val * n_blk_k)), n_orb_val, n_blk_k)
-      output_k_mat = reshape(view(output_k, 1:(n_orb_val * n_blk_k)), n_orb_val, n_blk_k)
+      input_k_mat = reshape(view(input_k, 1:(n_orb_val * n_blk_k)), Int(n_orb_val), Int(n_blk_k))
+      output_k_mat = reshape(view(output_k, 1:(n_orb_val * n_blk_k)), Int(n_orb_val), Int(n_blk_k))
 
       mul!(output_k_mat, op_matrix_1e, input_k_mat, prefactor, 0.0)
 
