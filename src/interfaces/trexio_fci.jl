@@ -34,8 +34,8 @@ separate alpha/beta bit fields.
 - `determinant.n_int`: Number of 64-bit integers per spin pattern (ceil(mo.num/64))
 - `determinant.alpha`: Alpha spin patterns as Int64 bit fields [n_int, n_dets]
 - `determinant.beta`: Beta spin patterns as Int64 bit fields [n_int, n_dets]
-- `determinant.coefficient`: CI coefficients (real part) [n_dets]
-- `determinant.coefficient_im`: CI coefficients (imaginary part) [n_dets] (only for complex)
+- `determinant.coefficient`: CI coefficients (real part) `[n_dets]`
+- `determinant.coefficient_im`: CI coefficients, imaginary part `[n_dets]` (complex only)
 
 The number of orbitals is determined from `mo.num` in the TREXIO file.
 Bit `i` in the pattern indicates orbital `i+1` is occupied (0-indexed bits).
