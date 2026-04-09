@@ -8,6 +8,7 @@
 
 * Batching of 4-index integrals is implemented in `kext` routines. This should substantially reduce the memory demand of closed-shell and open-shell CCSD/DCSD.
 * The `kext`-type contractions are implemented for unrestricted full-triples methods (UCCSDT and UDC-CCSDT).
+* `@savewf` accepts orbital coefficients as matrix or tuple of matrices.
 
 ### Added
 
@@ -24,6 +25,9 @@
 * A new factorization of `kext` contractions for closed-shell CCSD/DCSD using a symmetric/antisymmetric representation is implemented (can be activated by setting `@set cc use_pm_kext=true`). This algorithm has two times less FLOPs than the standard implementation, however, it can be less efficient because of cache-unfriendly access in the construction of the intermediates (which is parallelized using `Threads.@threads` and should scale well with the number of threads). The standard implementation is still used by default, but the new one can be activated for testing and benchmarking purposes.
 
 ### Fixed
+
+* Fix a situation when an fcidump was deleted immediately after creation if dummy atoms are present. Now the fcidump is deleted in the `@dummy` macro directly and not in `@setupEC`.
+* Fix `freeze_nvirt` option (which was apparently not working at all before).
 
 ## Version [v0.15.0] - 2026.02.05
 

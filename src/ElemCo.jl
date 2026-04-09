@@ -101,7 +101,7 @@ using .VaspInterface
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile, @deletefile
-export @loadwf, @savewf, @copywf
+export @loadwf, @savewf, @copywf, @usewf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
 export @set_default_eltype
 # from ECInfos
@@ -401,6 +401,48 @@ macro copywf(args...)
       $(esc(:@tryECinit))
       strto = @var2string($(esc(to_file_expr)), $(esc(to_file)))
       copy_wavefunction($(esc(:EC)), strto; $(kwargs...))
+    end
+  end
+end
+
+"""
+    @usewf(from_file::AbstractString=""; start=false, state=0)
+
+  Copy wavefunction data to the current trexio dump file from another dump file, i.e., it does the opposite of [`@copywf`](@ref).
+
+  If `from_file` is not provided, the wavefunction is copied from [`EC.options.wf.store`](@ref ECInfos.WfOptions) file.
+  Note: This does not check the contents of the files.
+
+# Keyword Arguments
+- `start::Bool=false`: If true, copy to `wf.start` file instead of `wf.dump`.
+- `state::Int=0`: State number for determinant files. If 0, copies to the main dump file.
+                   If >0, copies to the state-specific determinant file (e.g., `file_state2.h5`).
+
+# Examples
+```julia
+julia> @usewf  # copy store to dump
+julia> @usewf "backup.h5"  # copy from backup file to dump
+julia> @usewf start=true  # copy store to start file
+julia> @usewf "backup.h5" start=true  # copy backup file to start file
+julia> @usewf state=2  # copy store file to state 2 determinant file
+julia> @usewf "state2_backup.h5" state=2  # copy specific file to state 2
+```
+"""
+macro usewf(args...)
+  positional, kwargs = separate_kwargs(args)
+  
+  if isempty(positional)
+    return quote
+      $(esc(:@tryECinit))
+      copy_wavefunction($(esc(:EC)), ""; $(kwargs...), reverse=true)
+    end
+  else
+    from_file_expr = positional[1]
+    from_file = clean_exprstring(from_file_expr)
+    return quote
+      $(esc(:@tryECinit))
+      strto = @var2string($(esc(from_file_expr)), $(esc(from_file)))
+      copy_wavefunction($(esc(:EC)), strto; $(kwargs...), reverse=true)
     end
   end
 end
@@ -715,15 +757,28 @@ macro dfmcscf(opts_block=nothing)
 end
 
 """
-    @dfints()
+    @dfints(opts_block=nothing)
 
   Generate 2 and 4-idx MO integrals using density fitting.
   The MO coefficients are read from [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
 """
-macro dfints()
-  return quote
-    $(esc(:@tryECinit))
-    dfdump($(esc(:EC)))
+macro dfints(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        dfdump($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      dfdump($(esc(:EC)))
+    end
   end
 end
 
@@ -1197,6 +1252,11 @@ macro dummy(atoms)
   return quote
     $(esc(:@tryECinit))
     set_dummy!($(esc(:EC)).system, $(esc(atoms)))
+    println("Dummy atoms set to: ", $(esc(atoms)))
+    if !isempty($(esc(:EC)).fd)
+      println("The integrals will be recalculated.")
+      $(esc(:EC)).fd = TFDump()  # reset fcidump
+    end
   end
 end
 

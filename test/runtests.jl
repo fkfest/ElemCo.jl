@@ -31,7 +31,7 @@ TESTS = [
 ("System", ["dummy"]),
 ("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc","svd_dc_ccsdt"]),
-("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase", "vasp", "df3idx_vasp"]),
+("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase","h2o_wf", "vasp", "df3idx_vasp"]),
 ("Unit-tests", ["unit_tests", "bufvec"]),
 ("Complex", ["complex_cc", "complex_eom", "complex_lambda", "complex_fci", "complex_bohf", "complex_trexio", "df3idx_complex"]),
 ]
