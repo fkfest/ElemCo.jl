@@ -73,7 +73,7 @@ using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
 
-export calc_MP2, calc_UMP2, calc_UMP2_energy 
+export calc_MP2, calc_UMP2, calc_UMP2_energy, calc_posMP2 
 export calc_cc, calc_pertT
 export calc_lm_cc, calc_1RDM
 export calc_ccsd_vector_times_Jacobian, calc_intermediates4Jacobian
@@ -165,6 +165,26 @@ function calc_doubles_energy(EC::ECInfo, T2)
   ET2SS = ET2d - ET2ex
   ET2OS = ET2d
   ET2 = ET2SS + ET2OS
+  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
+end
+
+"""
+    calc_doubles_energy(EC::ECInfo, T2, T2ep)
+
+  Calculate energy for αα (T2), and αp (T2ep) doubles amplitudes.
+  Returns total energy, SS, OS and Openshell contributions
+  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
+"""
+function calc_doubles_energy(EC::ECInfo, T2, T2ep)
+  oovv = ints2(EC, "oovv")
+  @mtensor begin
+    ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
+    ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
+    ET2ep = T2ep[a,b,i,j] * ints2(EC, "opve", :p)[i,j,a,b]
+  end
+  ET2SS = ET2d - ET2ex
+  ET2OS = ET2d
+  ET2 = ET2SS + ET2OS + 2.0 * ET2ep
   return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
 end
 
@@ -1023,6 +1043,22 @@ function calc_MP2(EC::ECInfo, addsingles=true)
     # add singles energies to MP2 energies
     EMp2 = map(+, EMp2, EMp2s) 
   end
+  return EMp2
+end
+
+""" 
+    calc_posMP2(EC::ECInfo, addsingles=true)
+
+  Calculate restricted MP2 energy and amplitudes with positrons. 
+  The amplitudes are stored in `T_vvoo`  and `T_veop` files.
+  Return EMp2 `OutDict` with keys (`E`, `ESS`, `EOS`, `EO`).
+"""
+function calc_posMP2(EC::ECInfo, addsingles=true)
+  T2 = update_doubles(EC, ints2(EC,"vvoo"), use_shift=false)
+  T2ep = update_doubles(EC, ints2(EC,"veop",:p), spincase=:αp, use_shift=false)
+  EMp2 = calc_doubles_energy(EC, T2, T2ep)
+  save!(EC, "T_vvoo", T2)
+  save!(EC, "T_veop", T2ep)
   return EMp2
 end
 

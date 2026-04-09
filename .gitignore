@@ -8,6 +8,10 @@ docs/equations/*.blg
 docs/equations/*.log
 docs/equations/*.out
 docs/equations/*.toc
+docs/equations/*.aux
+docs/equations/*.fdb_latexmk
+docs/equations/*.fls
+docs/equations/*.synctex.gz
 docs/src/release-notes.md
 tasks/
 LocalPreferences.toml
