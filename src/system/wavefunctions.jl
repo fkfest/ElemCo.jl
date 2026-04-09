@@ -170,6 +170,9 @@ function prepare_orb_vectors(input::Vector{Float64}, restricted)
     error("For unrestricted orbitals, provide input as a tuple of two vectors.")
   end
 end
+function prepare_orb_vectors(input::Vector{ComplexF64}, restricted)
+  return prepare_orb_vectors(real.(input), restricted)
+end
 function prepare_orb_vectors(input::Tuple{Vector{Float64},Vector{Float64}}, restricted)
   if restricted
     return (input[1], Float64[])
@@ -185,6 +188,9 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
     @assert length(input) == 2 "For unrestricted orbitals, provide input as a vector of two vectors."
     return (input[1], input[2])
   end
+end
+function prepare_orb_vectors(input::Vector{Vector{ComplexF64}}, restricted)
+  return prepare_orb_vectors([real.(v) for v in input], restricted)
 end
 
 function prepare_orb_classes(EC::ECInfo, restricted; rotations=false)
@@ -827,13 +833,13 @@ is_biorthogonal(type::AbstractString) = "biorthogonal" ∈ split(lowercase(type)
   `T2` is the doubles amplitude tensor (nvirt × nvirt × nocc × nocc).
 """
 function dump_amplitudes end
-function dump_amplitudes(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_amplitudes(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4})
   open_dump(EC, "u") do io
     dump_amplitudes(io, EC, T1, T2)
   end
   return
 end
-function dump_amplitudes(io::TrexioFile, EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_amplitudes(io::TrexioFile, EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4})
   println("Dumping amplitudes ...")
   write_trexio_amplitudes(io, T1, T2)
   return
@@ -848,8 +854,8 @@ end
   `T2a`, `T2b`, `T2ab` are the αα, ββ, and αβ doubles amplitude tensors.
 """
 function dump_amplitudes(EC::ECInfo, T1a::AbstractMatrix, T1b::AbstractMatrix, 
-                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
-                         T2ab::AbstractArray{<:Real,4})
+                         T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, 
+                         T2ab::AbstractArray{<:Number,4})
   open_dump(EC, "u") do io
     dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
   end
@@ -857,8 +863,8 @@ function dump_amplitudes(EC::ECInfo, T1a::AbstractMatrix, T1b::AbstractMatrix,
 end
 function dump_amplitudes(io::TrexioFile, EC::ECInfo, 
                          T1a::AbstractMatrix, T1b::AbstractMatrix, 
-                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
-                         T2ab::AbstractArray{<:Real,4})
+                         T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, 
+                         T2ab::AbstractArray{<:Number,4})
   println("Dumping amplitudes ...")
   write_trexio_amplitudes(io, T1a, T1b, T2a, T2b, T2ab)
   return
@@ -875,15 +881,15 @@ end
   Returns empty arrays if amplitudes are not found in the dump file.
 """
 function fetch_restricted_amplitudes end
-function fetch_restricted_amplitudes(EC::ECInfo; start::Bool=false)
+function fetch_restricted_amplitudes(EC::ECInfo{T}; start::Bool=false)::Tuple{Matrix{T}, Array{T,4}} where T
   open_dump(EC, "r"; start=start) do io
     return fetch_restricted_amplitudes(io, EC)
   end
 end
-function fetch_restricted_amplitudes(io::TrexioFile, EC::ECInfo)
+function fetch_restricted_amplitudes(io::TrexioFile, EC::ECInfo{T})::Tuple{Matrix{T}, Array{T,4}} where T
   println("Fetching restricted amplitudes ...")
-  T1 = read_trexio_singles(io)
-  T2 = read_trexio_doubles(io)
+  T1 = convert(Matrix{T}, read_trexio_singles(io))
+  T2 = convert(Array{T,4}, read_trexio_doubles(io))
   return (T1, T2)
 end
 
@@ -898,16 +904,17 @@ end
   Returns empty arrays if amplitudes are not found in the dump file.
 """
 function fetch_unrestricted_amplitudes end
-function fetch_unrestricted_amplitudes(EC::ECInfo; start::Bool=false)
+function fetch_unrestricted_amplitudes(EC::ECInfo{T}; start::Bool=false)::Tuple{Matrix{T}, Matrix{T}, Array{T,4}, Array{T,4}, Array{T,4}} where T
   open_dump(EC, "r"; start=start) do io
     return fetch_unrestricted_amplitudes(io, EC)
   end
 end
-function fetch_unrestricted_amplitudes(io::TrexioFile, EC::ECInfo)
+function fetch_unrestricted_amplitudes(io::TrexioFile, EC::ECInfo{T})::Tuple{Matrix{T}, Matrix{T}, Array{T,4}, Array{T,4}, Array{T,4}} where T
   println("Fetching unrestricted amplitudes ...")
   T1a, T1b = read_trexio_unrestricted_singles(io)
   T2a, T2b, T2ab = read_trexio_unrestricted_doubles(io)
-  return (T1a, T1b, T2a, T2b, T2ab)
+  return (convert(Matrix{T}, T1a), convert(Matrix{T}, T1b),
+          convert(Array{T,4}, T2a), convert(Array{T,4}, T2b), convert(Array{T,4}, T2ab))
 end
 
 """

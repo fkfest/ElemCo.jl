@@ -131,6 +131,44 @@ end
 
 Further example scripts are provided in the `examples` directory.
 
+### Precompilation
+
+`ElemCo.jl` uses `PrecompileTools.jl` to reduce time-to-first-execution.
+By default the coupled cluster and FCI workloads are precompiled in release builds.
+You can select which parts of the code to precompile using the `Preferences.jl` mechanism
+by editing `LocalPreferences.toml` in the project directory:
+
+```toml
+[ElemCo]
+precompile_workload = true   # master toggle (default: true for releases, false for development builds)
+precompile_cc = true          # coupled cluster methods (DCSD, UCCSD, SVD-DCSD, MP2)
+precompile_fci = true         # FCI
+precompile_mcscf = false      # DF-MCSCF
+precompile_complex = false    # complex-valued calculations
+```
+
+Alternatively, preferences can be set from the Julia REPL:
+
+```julia
+using Preferences, ElemCo
+set_preferences!(ElemCo,
+                 "precompile_workload" => true,
+                 "precompile_cc" => true,
+                 "precompile_fci" => true,
+                 "precompile_mcscf" => true;
+                 force=true)
+```
+
+To disable all precompilation (e.g. during development):
+
+```toml
+[ElemCo]
+precompile_workload = false
+```
+
+It is also recommended to [activate the precompilation](https://quantumkithub.github.io/TensorOperations.jl/stable/man/precompilation) in the `TensorOperations` module to reduce
+the precompilation time of `ElemCo.jl`.
+
 Documentation is available at <https://elem.co.il>.
 
 ```

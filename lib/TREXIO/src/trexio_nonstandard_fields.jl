@@ -26,17 +26,25 @@ const TREXIO_DETERMINANT_EXT_FIELDS = [
     TrexioField("determinant", "n_int", Int, SCALAR, "number of 64-bit integers per spin pattern (ceil(mo.num/64))", violator=true),
     TrexioField("determinant", "alpha", Int, ["determinant.n_int", "determinant.num"], "alpha spin orbital patterns as 64-bit integer bit fields", violator=true),
     TrexioField("determinant", "beta", Int, ["determinant.n_int", "determinant.num"], "beta spin orbital patterns as 64-bit integer bit fields", violator=true),
+    TrexioField("determinant", "coefficient_im", Float64, ["determinant.num"], "CI coefficients (imaginary part)", violator=true),
 ]
 
 ## 5.3a Dense amplitude fields - non-standard
 const TREXIO_AMPLITUDE_EXT_FIELDS = [
     TrexioField("amplitude", "single_dense", Float64, ["v", "o"], "single excitation amplitudes (dense)", violator=true),
+    TrexioField("amplitude", "single_dense_im", Float64, ["v", "o"], "single excitation amplitudes, imaginary part (dense)", violator=true),
     TrexioField("amplitude", "double_dense", Float64, ["v", "v", "o(o+1)/2"], "double excitation amplitudes (dense)", violator=true),
+    TrexioField("amplitude", "double_dense_im", Float64, ["v", "v", "o(o+1)/2"], "double excitation amplitudes, imaginary part (dense)", violator=true),
     TrexioField("amplitude", "single_up_dense", Float64, ["v", "o"], "↑-spin component of the single excitation amplitudes (dense)", violator=true),
+    TrexioField("amplitude", "single_up_dense_im", Float64, ["v", "o"], "↑-spin component of the single excitation amplitudes, imaginary part (dense)", violator=true),
     TrexioField("amplitude", "single_dn_dense", Float64, ["V", "O"], "↓-spin component of the single excitation amplitudes (dense)", violator=true),
+    TrexioField("amplitude", "single_dn_dense_im", Float64, ["V", "O"], "↓-spin component of the single excitation amplitudes, imaginary part (dense)", violator=true),
     TrexioField("amplitude", "double_upup_dense", Float64, ["v(v-1)/2", "o(o-1)/2"], "↑↑-spin component of the double excitation amplitudes (dense)", violator=true),
+    TrexioField("amplitude", "double_upup_dense_im", Float64, ["v(v-1)/2", "o(o-1)/2"], "↑↑-spin component of the double excitation amplitudes, imaginary part (dense)", violator=true),
     TrexioField("amplitude", "double_dndn_dense", Float64, ["V(V-1)/2", "O(O-1)/2"], "↓↓-spin component of the double excitation amplitudes (dense)", violator=true),
+    TrexioField("amplitude", "double_dndn_dense_im", Float64, ["V(V-1)/2", "O(O-1)/2"], "↓↓-spin component of the double excitation amplitudes, imaginary part (dense)", violator=true),
     TrexioField("amplitude", "double_updn_dense", Float64, ["v", "V", "o", "O"], "↑↓-spin component of the double excitation amplitudes (dense)", violator=true),
+    TrexioField("amplitude", "double_updn_dense_im", Float64, ["v", "V", "o", "O"], "↑↓-spin component of the double excitation amplitudes, imaginary part (dense)", violator=true),
 ]
 
 # Combine all non-standard field definitions

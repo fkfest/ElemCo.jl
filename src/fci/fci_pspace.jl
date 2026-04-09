@@ -4,13 +4,13 @@
 using LinearAlgebra
 
 """
-    project_to_pspace(r::FCIVector, pspace_data::PSpaceData) -> Vector{Scalar}
+    project_to_pspace(r::FCIVector{O,T}, pspace_data::PSpaceData) where {O, T} -> Vector{T}
 
 Extract P-space components from full CI vector.
 Returns a vector of size n_pspace containing the coefficients at P-space determinants.
 """
-function project_to_pspace(r::FCIVector, pspace_data::PSpaceData)
-  r_pspace = Vector{Scalar}(undef, pspace_data.n_pspace)
+function project_to_pspace(r::FCIVector{O,T}, pspace_data::PSpaceData) where {O, T}
+  r_pspace = Vector{T}(undef, pspace_data.n_pspace)
   for i in 1:(pspace_data.n_pspace)
     addr = pspace_data.indices[i]
     r_pspace[i] = r.data[addr]
@@ -23,7 +23,7 @@ end
 
 Build P-space Hamiltonian using selected CI framework.
 """
-function build_pspace_hamiltonian_selected!(context::FCIContext)
+function build_pspace_hamiltonian_selected!(context::FCIContext{OPattern, T}) where {OPattern, T}
   # Get P-space data from context
   pspace = context.pspace_data
   n_pspace = length(pspace.determinants)
@@ -32,17 +32,17 @@ function build_pspace_hamiltonian_selected!(context::FCIContext)
   selected_ctx = setup_selected_ci_from_determinants!(context, pspace.determinants)
 
   # Initialize P-space Hamiltonian matrix
-  H_pspace = zeros(Scalar, n_pspace, n_pspace)
+  H_pspace = zeros(T, n_pspace, n_pspace)
 
   # For each P-space determinant
   for i in 1:n_pspace
     # Create unit vector for determinant i
-    unit_vec = zeros(Scalar, n_pspace)
-    unit_vec[i] = one(Scalar)
+    unit_vec = zeros(T, n_pspace)
+    unit_vec[i] = one(T)
 
     # Apply Hamiltonian using new interface
-    result_vec = zeros(Scalar, n_pspace)
-    contract_hamiltonian_selected!(result_vec, unit_vec, selected_ctx, one(Scalar))
+    result_vec = zeros(T, n_pspace)
+    contract_hamiltonian_selected!(result_vec, unit_vec, selected_ctx, one(T))
 
     # Store column of Hamiltonian matrix
     H_pspace[:, i] = result_vec
@@ -136,11 +136,11 @@ function select_pspace_determinants!(context::FCIContext)
   end
 
   # Create candidate list with energy and excitation level
-  candidates = Tuple{Address, Scalar, Int}[]  # (address, energy, excitation_level)
+  candidates = Tuple{Address, Float64, Int}[]  # (address, energy, excitation_level)
 
   # Calculate HF energy once (used for thresholding and sorting)
   hf_addr = address_from_determinant(context, hf_ref)
-  hf_energy::Scalar = context.diag_h.data[hf_addr]
+  hf_energy = real(context.diag_h.data[hf_addr])
 
   for addr in Address(1):n_total
     det = determinant_from_address(context, addr)
@@ -154,7 +154,7 @@ function select_pspace_determinants!(context::FCIContext)
     end
 
     # Get diagonal energy for this determinant
-    diagonal_energy = context.diag_h.data[addr]  # addr is now 1-based
+    diagonal_energy = real(context.diag_h.data[addr])  # addr is now 1-based
 
     # Apply energy threshold (relative to HF diagonal energy)
     if diagonal_energy - hf_energy > opts.pspace_energy_threshold
@@ -236,7 +236,7 @@ function diagonalize_pspace_hamiltonian!(context::FCIContext)
   end
 
   # Full diagonalization 
-  eigenvals, eigenvecs = eigen(Symmetric(pspace.hamiltonian))
+  eigenvals, eigenvecs = eigen(Hermitian(pspace.hamiltonian))
 
   # Store results (eigenvalues are already sorted by eigen())
   pspace.eigenvalues = eigenvals
@@ -271,7 +271,7 @@ Uses the same hybrid selection method as traditional P-space.
 # Returns
 - Vector of selected determinants
 """
-function select_small_space_determinants(context::FCIContext{OPattern}, target_size, nstates=1) where OPattern
+function select_small_space_determinants(context::FCIContext{OPattern, T}, target_size, nstates=1) where {OPattern, T}
   # Build HF reference determinant
   hf_ref = get_reference_determinant(context)
   
@@ -286,10 +286,10 @@ function select_small_space_determinants(context::FCIContext{OPattern}, target_s
   
   # Create candidate list with energy and excitation level
   # Use similar criteria as traditional P-space but with larger threshold
-  candidates = Tuple{Determinant{OPattern}, Scalar, Int}[]  # (determinant, energy, excitation_level)
+  candidates = Tuple{Determinant{OPattern}, Float64, Int}[]  # (determinant, energy, excitation_level)
   
   hf_addr = address_from_determinant(context, hf_ref)
-  hf_energy::Scalar = context.diag_h.data[hf_addr]
+  hf_energy = real(context.diag_h.data[hf_addr])
   
   # Use larger energy threshold for small-space (more permissive)
   pspace_energy_threshold = 1.0  # Hartree (much larger than typical P-space)
@@ -307,7 +307,7 @@ function select_small_space_determinants(context::FCIContext{OPattern}, target_s
     end
     
     # Get diagonal energy for this determinant
-    diagonal_energy = context.diag_h.data[addr]
+    diagonal_energy = real(context.diag_h.data[addr])
     
     # Apply energy threshold (relative to HF diagonal energy)
     if diagonal_energy - hf_energy > pspace_energy_threshold
@@ -353,7 +353,7 @@ then calculates diagonal energies only for the generated determinants.
 # Returns
 - Vector of selected determinants
 """
-function select_small_space_determinants(context::CIPHIContext{OPattern}, target_size, nstates=1) where OPattern
+function select_small_space_determinants(context::CIPHIContext{OPattern, T}, target_size, nstates=1) where {OPattern, T}
   # Build HF reference determinant
   hf_ref = get_reference_determinant(context)
   
@@ -435,18 +435,18 @@ function select_small_space_determinants(context::CIPHIContext{OPattern}, target
   # For now, we'll stop at doubles for efficiency
   
   # Flatten and calculate diagonal energies
-  candidates = Tuple{Determinant{OPattern}, Scalar, Int}[]  # (determinant, energy, excitation_level)
+  candidates = Tuple{Determinant{OPattern}, Float64, Int}[]  # (determinant, energy, excitation_level)
   
   for (level, dets) in enumerate(candidates_by_level)
     for det in dets
       # Calculate diagonal energy on-the-fly using compute_diagonal_element
-      diagonal_energy = compute_diagonal_element(det, context)
+      diagonal_energy = real(compute_diagonal_element(det, context))
       push!(candidates, (det, diagonal_energy, level-1))
     end
   end
   
   # Calculate HF energy for sorting
-  hf_energy = compute_diagonal_element(hf_ref, context)
+  hf_energy = real(compute_diagonal_element(hf_ref, context))
   
   # Sort using hybrid method: weight both energy and excitation level
   sort!(candidates, by = x -> (x[3] * 0.1 + (x[2] - hf_energy)))
@@ -471,7 +471,7 @@ function select_small_space_determinants(context::CIPHIContext{OPattern}, target
 end
 
 """
-    build_small_space_hamiltonian(context::Union{FCIContext, CIPHIContext}, determinants::Vector{Determinant}) -> Matrix{Scalar}
+    build_small_space_hamiltonian(context::Union{FCIContext, CIPHIContext}, determinants::Vector{Determinant}) -> Matrix
 
 Build Hamiltonian matrix for small space of determinants.
 Uses Selected CI framework for efficient matrix element computation.
@@ -483,7 +483,7 @@ Uses Selected CI framework for efficient matrix element computation.
 # Returns
 - Hamiltonian matrix H[i,j] = ⟨det_i|H|det_j⟩
 """
-function build_small_space_hamiltonian(context::Union{FCIContext,CIPHIContext}, determinants)::Matrix{Scalar}
+function build_small_space_hamiltonian(context::Union{FCIContext{O,T},CIPHIContext{O,T}}, determinants)::Matrix{T} where {O, T}
   n_small = length(determinants)
   
   if context.options.print_level >= 2
@@ -504,10 +504,10 @@ end
 
 Result from small-space Hamiltonian diagonalization.
 """
-struct SmallSpaceResult{OPattern}
+struct SmallSpaceResult{OPattern, T}
   determinants::Vector{Determinant{OPattern}}    # Determinants in small space
-  eigenvalues::Vector{Float64}         # Eigenvalues (nstates lowest)
-  eigenvectors::Matrix{Float64}        # Eigenvectors in small-space basis (n_small × nstates)
+  eigenvalues::Vector{Float64}         # Eigenvalues (nstates lowest, always real for Hermitian)
+  eigenvectors::Matrix{T}              # Eigenvectors in small-space basis (n_small × nstates)
   n_small::Int                         # Size of small space
   nstates::Int                         # Number of states computed
 end
@@ -532,8 +532,8 @@ This provides better initial guesses for all states, preventing missed excited s
 # Returns
 - `SmallSpaceResult` containing determinants, eigenvalues, and eigenvectors
 """
-function initialize_multistate_from_small_space(context::Union{FCIContext, CIPHIContext{OPattern}},
-                                target_selection::Int, nstates::Int)::SmallSpaceResult{OPattern} where OPattern
+function initialize_multistate_from_small_space(context::Union{FCIContext{OPattern, T}, CIPHIContext{OPattern, T}},
+                                target_selection::Int, nstates::Int) where {OPattern, T}
   
   if context.options.print_level >= 1
     println("\nSmall-Space Initial Guess Generation")
@@ -576,7 +576,7 @@ function initialize_multistate_from_small_space(context::Union{FCIContext, CIPHI
     end
   end
   
-  return SmallSpaceResult{OPattern}(small_space_dets, eigenvalues_selected, eigenvectors_selected,
+  return SmallSpaceResult{OPattern, T}(small_space_dets, eigenvalues_selected, eigenvectors_selected,
                           n_small, nstates)
 end
 
@@ -649,7 +649,7 @@ subsequent full FCI Davidson iterations.
 - `context`: FCI context
 - `n_states`: Number of states to compute (CIPHI will compute the same number of roots)
 """
-function setup_pspace_ciphi!(context::FCIContext, n_states::Int=1)
+function setup_pspace_ciphi!(context::FCIContext{OPattern, T}, n_states::Int=1) where {OPattern, T}
   opts = context.options
   
   if context.options.print_level >= 1
@@ -715,8 +715,8 @@ function setup_pspace_ciphi!(context::FCIContext, n_states::Int=1)
   
   # Resize eigenvalue/eigenvector storage (will be filled by diagonalize_pspace_hamiltonian!)
   # For now, pre-populate with CIPHI results
-  context.pspace_data.eigenvalues = zeros(Scalar, n_selected)
-  context.pspace_data.eigenvectors = zeros(Scalar, n_selected, n_selected)
+  context.pspace_data.eigenvalues = zeros(T, n_selected)
+  context.pspace_data.eigenvectors = zeros(T, n_selected, n_selected)
   
   # Store CIPHI eigenvector coefficients for ground state as first eigenvector (good initial guess)
   # coeffs_ciphi_matrix is (n_dets × nstates), extract ground state coefficients
@@ -733,15 +733,15 @@ end
 # ===========================================
 
 """
-    project_pspace_to_fullspace!(v_full::FCIVector, v_pspace::Vector{Scalar}, 
+    project_pspace_to_fullspace!(v_full::FCIVector, v_pspace::AbstractVector, 
                                  pspace_data::PSpaceData)
 
 Project P-space eigenvector onto full CI space.
 Zeros coefficients for determinants not in P-space and normalizes.
 """
-function project_pspace_to_fullspace!(v_full::FCIVector, v_pspace::Vector{Scalar}, pspace_data::PSpaceData)
+function project_pspace_to_fullspace!(v_full::FCIVector{O,T}, v_pspace::AbstractVector, pspace_data::PSpaceData) where {O, T}
   # Zero the full vector
-  fill!(v_full.data, 0.0)
+  fill!(v_full.data, zero(T))
 
   # Project P-space coefficients onto full space
   for i in 1:(pspace_data.n_pspace)

@@ -19,55 +19,75 @@ export dfhf, dfhf_positron, dfuhf
     dfhf(EC::ECInfo)
 
   Perform closed-shell DF-HF calculation.
+  If `EC.fd.df3idx` is set, uses pre-existing 3-index integrals (mmL) in MO basis (S=I).
   Returns the energy as the `HF` key in `OutDict`.
 """
-function dfhf(EC::ECInfo)
+function dfhf(EC::ECInfo{T}) where T
+  use_df3idx = EC.fd.df3idx
   t1 = time_ns()
-  print_info("DF-HF")
-  setup_space_system!(EC)
+  if use_df3idx
+    print_info("DF-HF (3-index)")
+    setup_space_fd!(EC)
+  else
+    print_info("DF-HF")
+    setup_space_system!(EC)
+  end
   SP = EC.space
   norb = length(SP[':'])
+  @assert SP['o'] == SP['O'] "DF-HF only for closed-shell"
   diis = Diis(EC)
   thren = EC.options.scf.thren
   if thren < 0.0
     thren = sqrt(EC.options.scf.thr)*0.1
   end
-  direct = EC.options.scf.direct
-  guess = EC.options.scf.guess
-  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
-  if direct
-    bao = generate_basis(EC, "ao")
-    bfit = generate_basis(EC, "jkfit")
+  direct = false
+  local sao, hsmall, mmLfile, mmL, bao, bfit
+  Enuc = zero(real(T))
+  if use_df3idx
+    hsmall = EC.fd.int1
+    Enuc = EC.fd.int0
+    mmLfile, mmL = mmap3idx(EC, "mmL")
+    cMO = Matrix{T}(I, norb, norb)
+    sao = Matrix{T}(I, norb, norb)
+  else
+    @assert T == Float64 "DF-HF with 3-index integrals only implemented for real case"
+    direct = EC.options.scf.direct
+    guess = EC.options.scf.guess
+    Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
+    if direct
+      bao = generate_basis(EC, "ao")
+      bfit = generate_basis(EC, "jkfit")
+    end
+    t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
+    cMO_sm, loaded = try_load_starting_orbitals(EC)
+    if !loaded
+      cMO_sm = guess_orb(EC, guess)
+    end
+    t1 = print_time(EC, t1, "guess orbitals", 2)
+    @assert is_restricted(cMO_sm) "DF-HF only implemented for closed-shell"
+    cMO = cMO_sm.α
+    hsmall = load(EC, "h_AA", Val(2))
+    sao = load(EC, "S_AA", Val(2))
   end
-  t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-  # Try to load starting orbitals from wf.start
-  cMO, loaded = try_load_starting_orbitals(EC)
-  if !loaded
-    cMO = guess_orb(EC, guess)
-  end
-  t1 = print_time(EC, t1, "guess orbitals", 2)
-  @assert is_restricted(cMO) "DF-HF only implemented for closed-shell"
-  cMO = cMO.α
-  ϵ = zeros(norb)
-  hsmall = load(EC, "h_AA", Val(2))
-  sao = load(EC, "S_AA", Val(2))
-  # display(sao)
-  EHF = 0.0
-  previousEHF = 0.0
+  ϵ = zeros(real(T), norb)
+  EHF = zero(real(T))
+  previousEHF = zero(real(T))
   println("Iter     Energy      DE          Res         Time")
   flush_output()
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
-    if direct
+    cMO2 = cMO[:,SP['o']]
+    if use_df3idx
+      fock = gen_df3idx_fock(EC, hsmall, mmL, cMO2)
+    elseif direct
       fock = gen_dffock(EC, cMO, bao, bfit)
     else
       fock = gen_dffock(EC, cMO)
     end
     t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
-    cMO2 = cMO[:,SP['o']]
     fhsmall = fock + hsmall
-    @mtensor efhsmall = (cMO2[p,i]*fhsmall[p,q])*cMO2[q,i]
-    EHF = efhsmall + Enuc
+    @mtensor efhsmall = (conj(cMO2[p,i])*fhsmall[p,q])*cMO2[q,i]
+    EHF = real(efhsmall) + Enuc
     ΔE = EHF - previousEHF 
     previousEHF = EHF
     den2 = cMO2*cMO2'
@@ -81,19 +101,31 @@ function dfhf(EC::ECInfo)
     t1 = print_time(EC, t1, "HF residual", 2)
     perform!(diis, [fock], [Δfock])
     t1 = print_time(EC, t1, "DIIS", 2)
-    # use Hermitian to ensure real eigenvalues and normalized orbitals
-    ϵ_new, cMO_new = eigen(Hermitian(fock),Hermitian(sao))
+    if use_df3idx
+      ϵ_new, cMO_new = eigen(Hermitian(fock))
+    else
+      ϵ_new, cMO_new = eigen(Hermitian(fock),Hermitian(sao))
+    end
     ϵ .= ϵ_new
     cMO .= cMO_new
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
-    # display(ϵ)
   end
   normalize_phase!(cMO)
+  if use_df3idx
+    close(mmLfile)
+    transform_3idx!(EC, "mmL", cMO)
+    EC.fd.int1 = cMO' * hsmall * cMO
+    t1 = print_time(EC, t1, "transform integrals", 0)
+  end
   println("DF-HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
-  dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
+  if use_df3idx
+    dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
+  else
+    dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
+  end
   return OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
 end
 
@@ -192,12 +224,19 @@ end
     dfuhf(EC::ECInfo)
 
   Perform DF-UHF calculation.
+  If `EC.fd.df3idx` is set, uses pre-existing 3-index integrals (mmL/MML) in MO basis (S=I).
   Returns the energy as the `UHF` and `HF` keys in `OutDict`.
 """
-function dfuhf(EC::ECInfo)
+function dfuhf(EC::ECInfo{T}) where T
+  use_df3idx = EC.fd.df3idx
   t1 = time_ns()
-  print_info("DF-UHF")
-  setup_space_system!(EC)
+  if use_df3idx
+    print_info("DF-UHF (3-index)")
+    setup_space_fd!(EC)
+  else
+    print_info("DF-UHF")
+    setup_space_system!(EC)
+  end
   SP = EC.space
   norb = length(SP[':'])
   diis = Diis(EC)
@@ -205,47 +244,78 @@ function dfuhf(EC::ECInfo)
   if thren < 0.0
     thren = sqrt(EC.options.scf.thr)*0.1
   end
-  direct = EC.options.scf.direct
-  guess = EC.options.scf.guess
-  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
-  if direct
-    bao = generate_basis(EC, "ao")
-    bfit = generate_basis(EC, "jkfit")
+  direct = false
+  local sao, hsmall, h1a, h1b, mmLfile, mmL, MMLfile, MML, bao, bfit
+  has_MML = false
+  Enuc = zero(real(T))
+  if use_df3idx
+    h1a = EC.fd.uhf ? EC.fd.int1a : EC.fd.int1
+    h1b = EC.fd.uhf ? EC.fd.int1b : EC.fd.int1
+    Enuc = EC.fd.int0
+    mmLfile, mmL = mmap3idx(EC, "mmL")
+    has_MML = file_exists(EC, "MML")
+    if has_MML
+      MMLfile, MML = mmap3idx(EC, "MML")
+    else
+      MMLfile = mmLfile
+      MML = mmL
+    end
+    cMO = SpinMatrix(Matrix{T}(I, norb, norb), Matrix{T}(I, norb, norb))
+    sao = Matrix{T}(I, norb, norb)
+  else
+    @assert T == Float64 "DF-UHF with 3-index integrals only implemented for real case"
+    direct = EC.options.scf.direct
+    guess = EC.options.scf.guess
+    Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
+    if direct
+      bao = generate_basis(EC, "ao")
+      bfit = generate_basis(EC, "jkfit")
+    end
+    t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
+    cMO, loaded = try_load_starting_orbitals(EC)
+    if !loaded
+      cMO = guess_orb(EC, guess)
+    end
+    t1 = print_time(EC, t1, "guess orbitals", 2)
+    unrestrict!(cMO)
+    hsmall = load2idx(EC, "h_AA")
+    sao = load2idx(EC, "S_AA")
   end
-  t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-  # Try to load starting orbitals from wf.start
-  cMO, loaded = try_load_starting_orbitals(EC)
-  if !loaded
-    cMO = guess_orb(EC, guess)
-  end
-  t1 = print_time(EC, t1, "guess orbitals", 2)
-  unrestrict!(cMO)
-  ϵ = [zeros(norb), zeros(norb)] 
-  hsmall = load2idx(EC, "h_AA")
-  sao = load2idx(EC, "S_AA")
-  # display(sao)
-  EHF = 0.0
-  previousEHF = 0.0
+  ϵ = [zeros(real(T), norb), zeros(real(T), norb)]
+  EHF = zero(real(T))
+  previousEHF = zero(real(T))
   println("Iter     Energy      DE          Res         Time")
   flush_output()
   t0 = time_ns()
   for it=1:EC.options.scf.maxit
-    if direct
+    if use_df3idx
+      fock = gen_df3idx_fock(EC, h1a, h1b, mmL, MML, cMO[1][:, SP['o']], cMO[2][:, SP['O']])
+    elseif direct
       fock = gen_dffock(EC, cMO, bao, bfit)
     else
       fock = gen_dffock(EC, cMO)
     end
     t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
-    efhsmall = Float64[0.0, 0.0]
-    Δfock = Matrix{Float64}[zeros(norb,norb), zeros(norb,norb)]
-    var = 0.0
+    efhsmall = [zero(real(T)), zero(real(T))]
+    Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
+    var = zero(real(T))
     for (ispin, sp) = enumerate(['o', 'O'])
-      den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])
-      fhsmall = fock[ispin] + hsmall
-      @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
-      efhsmall[ispin] = efh
-      Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
-      var += sum(abs2,Δfock[ispin])
+      if use_df3idx
+        h1s = ispin == 1 ? h1a : h1b
+        cMO_occ = cMO[ispin][:, SP[sp]]
+        den = cMO_occ * cMO_occ'
+        fhsmall = fock[ispin] + h1s
+        @mtensor efh = 0.5 * (den[q,p] * fhsmall[p,q])
+        efhsmall[ispin] = real(efh)
+        Δfock[ispin] = den * fock[ispin] - fock[ispin] * den
+      else
+        den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])
+        fhsmall = fock[ispin] + hsmall
+        @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
+        efhsmall[ispin] = efh
+        Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
+      end
+      var += sum(abs2, Δfock[ispin])
     end
     EHF = efhsmall[1] + efhsmall[2] + Enuc
     ΔE = EHF - previousEHF 
@@ -258,21 +328,46 @@ function dfuhf(EC::ECInfo)
     perform!(diis, fock, Δfock)
     t1 = print_time(EC, t1, "DIIS", 2)
     for ispin = 1:2
-      # use Hermitian to ensure real eigenvalues and normalized orbitals
-      ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]), Hermitian(sao))
+      if use_df3idx
+        ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]))
+      else
+        ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]), Hermitian(sao))
+      end
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
-    # display(ϵ)
   end
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
+  end
+  if use_df3idx
+    close(mmLfile)
+    if has_MML
+      close(MMLfile)
+    else
+      copy_file!(EC, "mmL", "MML") # if MML not exists, copy mmL to MML to simplify transform_3idx!
+    end
+    transform_3idx!(EC, "mmL", cMO[1])
+    transform_3idx!(EC, "MML", cMO[2])
+    EC.fd.int1a = cMO[1]' * h1a * cMO[1]
+    EC.fd.int1b = cMO[2]' * h1b * cMO[2]
+    if !EC.fd.uhf
+      # make UHF-type
+      EC.fd.int1 = zeros(T, 0, 0)
+      EC.fd.uhf = true
+      EC.fd.head["IUHF"] = [1]
+    end
+    t1 = print_time(EC, t1, "transform integrals", 2)
   end
   println("DF-UHF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
   occupationsa = [ones(length(SP['o'])); zeros(length(SP['v']))]
   occupationsb = [ones(length(SP['O'])); zeros(length(SP['V']))]
-  dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
+  if use_df3idx
+    dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
+  else
+    dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
+  end
   return OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
 end
 

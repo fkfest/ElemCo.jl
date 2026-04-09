@@ -8,8 +8,8 @@ EMP2_test  =  -0.287815830908
 ECCSD_T_test =  -0.329259440500 + EHF_test
 EΛCCSD_T_test = -0.326915143863 + EHF_test
 EDCSD_test =  -0.328754956597 + EHF_test
-EDC_CCSDT_useT3_test = -0.330053201279 + EHF_test
-EDC_CCSDT_test = -0.330450039481 + EHF_test
+EDC_CCSDT_useT3_test = -0.330053889942 + EHF_test
+EDC_CCSDT_test = -0.330451448749 + EHF_test
 
 @print_input
 
@@ -29,7 +29,7 @@ end
 energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)
 @test abs(last_energy(energies)-EDCSD_test) < epsilon
 
-@set cholesky thr = 1.e-4
+@set cholesky thr = 1.e-5
 @set cc ampsvdtol = 1.e-4
 energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
 @test abs(last_energy(energies)-EDC_CCSDT_test) < epsilon

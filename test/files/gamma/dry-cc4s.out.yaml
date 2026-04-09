@@ -1,0 +1,227 @@
+executionEnvironment:
+  buildDate: Jul 30 2025 17:20:56
+  compiler: g++ (SUSE Linux) 7.5.0
+  dryRanks: 0
+  hosts:
+    0:
+      host: alnode317
+      ranks:
+        0: 0
+        1: 1
+        10: 10
+        11: 11
+        12: 12
+        13: 13
+        14: 14
+        15: 15
+        16: 16
+        17: 17
+        18: 18
+        19: 19
+        2: 2
+        20: 20
+        21: 21
+        22: 22
+        23: 23
+        3: 3
+        4: 4
+        5: 5
+        6: 6
+        7: 7
+        8: 8
+        9: 9
+  startTime: "Mon Mar 23 14:50:53 2026\n"
+  totalProcesses: 24
+  version: heads/master-0-gd43a2280
+statistics:
+  floatingPointOperations: 193596484
+  flops: 751684892.87789047
+  realtime: 0.257550053
+steps:
+  0:
+    in:
+      fileName: CoulombVertex.yaml
+    name: Read
+    out:
+      destination: 0x319a3f0
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.018780381
+  1:
+    in:
+      fileName: EigenEnergies.yaml
+    name: Read
+    out:
+      destination: 0x319cc60
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.001226500
+  10:
+    in:
+      amplitudes: 0x2ebf420
+      coulombIntegrals: 0x31db3d0
+      deltaIntegralsHH: 0x2ec9bd0
+      deltaIntegralsPPHH: 0x2ec8020
+      mp2PairEnergies: 0x2ebaf00
+      slicedEigenEnergies: 0x2ee31d0
+    name: BasisSetCorrection
+    out:
+      energy:
+        correction: 0
+        pplCorrection: 0
+        secondOrderCorrection: 0
+        uncorrectedCorrelation: 0
+        unit: 0.036749322175638782
+    statistics:
+      floatingPointOperations: 75202
+      flops: 58526282.037812255
+      realtime: 0.001284927
+  11:
+    in:
+      fileName: CoulombVertexSingularVectors.yaml
+    name: Read
+    out:
+      destination: 0x2ec6dd0
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.008462782
+  12:
+    in:
+      fileName: GridVectors.yaml
+    name: Read
+    out:
+      destination: 0x31f0680
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.001362515
+  13:
+    in:
+      fileName: CoulombPotential.yaml
+    name: Read
+    out:
+      destination: 0x2ec6a40
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.000775159
+  14:
+    in:
+      amplitudes: 0x2ebf420
+      coulombPotential: 0x2ec6a40
+      coulombVertexSingularVectors: 0x2ec6dd0
+      gridVectors: 0x31f0680
+      slicedCoulombVertex: 0x31d3c30
+    name: FiniteSizeCorrection
+    out:
+      transitionStructureFactor: 0x31effd0
+    statistics:
+      floatingPointOperations: 1214558
+      flops: 1520356406.0966573
+      realtime: 0.000798864
+  2:
+    in:
+      eigenEnergies: 0x319cc60
+    name: DefineHolesAndParticles
+    out:
+      slicedEigenEnergies: 0x2ee31d0
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.000097607
+  3:
+    in:
+      operator: 0x319a3f0
+      slicedEigenEnergies: 0x2ee31d0
+    name: SliceOperator
+    out:
+      slicedOperator: 0x31d3c30
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.000786456
+  4:
+    in:
+      slicedCoulombVertex: 0x31d3c30
+    name: VertexCoulombIntegrals
+    out:
+      coulombIntegrals: 0x31db3d0
+    statistics:
+      floatingPointOperations: 309760
+      flops: 585948657.61084425
+      realtime: 0.000528647
+  5:
+    in:
+      amplitudesConvergence: 1.0000000000000001e-05
+      coulombIntegrals: 0x31db3d0
+      energyConvergence: 1.0000000000000001e-05
+      integralsSliceSize: 100
+      levelShift: 0
+      linearized: 0
+      maxIterations: 30
+      method: Ccsd
+      mixer:
+        maxResidua: 5
+        type: DiisMixer
+      ppl: 1
+      slicedCoulombVertex: 0x31d3c30
+      slicedEigenEnergies: 0x2ee31d0
+    name: CoupledCluster
+    out:
+      amplitudes: 0x2ebf420
+      convergenceReached: 0
+      energy:
+        correlation: 0
+        direct: 0
+        exchange: 0
+        secondOrder: 0
+        unit: 0.036749322175638754
+    statistics:
+      floatingPointOperations: 191974964
+      flops: 1098299012.9821341
+      realtime: 0.174792986
+  6:
+    in:
+      amplitudes: 0x2ebf420
+      coulombIntegrals: 0x31db3d0
+      slicedEigenEnergies: 0x2ee31d0
+    name: PerturbativeTriples
+    out:
+      {}
+    statistics:
+      floatingPointOperations: 22000
+      flops: 1448989000.8562207
+      realtime: 0.000015183
+  7:
+    in:
+      fileName: DeltaIntegralsHH.yaml
+    name: Read
+    out:
+      destination: 0x2ec9bd0
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.013155378
+  8:
+    in:
+      fileName: DeltaIntegralsPPHH.yaml
+    name: Read
+    out:
+      destination: 0x2ec8020
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.006276916
+  9:
+    in:
+      fileName: Mp2PairEnergies.yaml
+    name: Read
+    out:
+      destination: 0x2ebaf00
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.000796882

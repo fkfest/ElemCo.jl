@@ -7,6 +7,7 @@ module ElemCo
 
 include("version.jl")
 include("../lib/TREXIO/src/TREXIO.jl")  # Include standalone TREXIO module
+include("../lib/ALPACADecomposition/src/ALPACADecomposition.jl")  # Include standalone ALPACADecomposition module
 include("infos/abstractEC.jl")
 include("tools/mtensoroperations.jl")
 include("tools/descdict.jl")
@@ -37,7 +38,7 @@ include("scf/orbtools.jl")
 include("scf/fockfactory.jl")
 include("integrals/dumptools.jl")
 include("integrals/dftools.jl")
-include("integrals/decomptools.jl")
+include("tools/decomptools.jl")
 include("fci/fci.jl")
 include("cc/cctools.jl")
 include("cc/dfcc.jl")
@@ -55,6 +56,7 @@ include("scf/dfmcscf.jl")
 
 include("interfaces/molpro.jl")
 include("interfaces/molden.jl")
+include("interfaces/vasp.jl")
 include("interfaces/interfaces.jl")
 
 try
@@ -67,6 +69,7 @@ using Printf
 using Dates
 #BLAS.set_num_threads(1)
 using PrecompileTools
+using Preferences
 using .VersionInfo
 using .Utils
 using .ECInfos
@@ -93,12 +96,16 @@ using .DMRG
 using .Interfaces
 using .TREXIO  # Use the standalone TREXIO module
 using .TrexioInterface
+using .VaspInterface
 
 
 export @mainname, @print_input
 export @loadfile, @savefile, @copyfile, @deletefile
 export @loadwf, @savewf, @copywf, @usewf
 export @ECinit, @tryECinit, @setupEC, @set, @opt, @reset, @run, @var2string, @dummy
+export @set_default_eltype
+# from ECInfos
+export ECInfo, ec_eltype, DEFAULT_ELTYPE, set_default_eltype!
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @fci, @ciphi, @sci, @ciϕ
@@ -441,11 +448,14 @@ macro usewf(args...)
 end
 
 """ 
-    @ECinit()
+    @ECinit(T=DEFAULT_ELTYPE[])
 
-  Initialize `EC::ECInfo` and add molecular system and/or fcidump 
+  Initialize `EC::ECInfo{T}` and add molecular system and/or fcidump 
   if variables `geometry::String` and `basis::Dict{String,Any}`
   and/or `fcidump::String` are defined.
+
+  `T` is the element type for the fcidump integrals (default: `DEFAULT_ELTYPE[]`, 
+  which is `Float64` unless changed via [`set_default_eltype!`](@ref) or [`@set_default_eltype`](@ref)).
 
   If `EC` is already initialized, it will be overwritten.
 
@@ -458,19 +468,42 @@ basis = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvtz-jkfit", "mpfit"=>"cc-pvdz-mpfit"
 Occupied orbitals:[1]
 
 ```
+```julia
+@ECinit ComplexF64  # use complex integrals
+```
 """
-macro ECinit()
+macro ECinit(T=nothing)
+  if isnothing(T)
+    ecexpr = :(ECInfo{DEFAULT_ELTYPE[]}())
+  else
+    ecexpr = :(ECInfo{$(esc(T))}())
+  end
   if @istoplevel
     return quote
-      const $(esc(:EC)) = ECInfo()
+      const $(esc(:EC)) = $ecexpr
       $(esc(:@setupEC))
     end
   else
     return quote
-      $(esc(:EC)) = ECInfo()
+      $(esc(:EC)) = $ecexpr
       $(esc(:@setupEC))
     end
   end
+end
+
+""" 
+    @set_default_eltype(T)
+
+  Set the default element type for new `ECInfo` objects.
+
+  # Examples
+```julia
+@set_default_eltype ComplexF64
+@ECinit  # will create ECInfo{ComplexF64}
+```
+"""
+macro set_default_eltype(T)
+  return :(set_default_eltype!($(esc(T))))
 end
 
 """ 
@@ -485,7 +518,7 @@ macro setupEC()
       @assert(typeof($(esc(:fcidump))) <: AbstractString, "fcidump must be a String")
       if fd_origin($(esc(:EC)).fd) != $(esc(:fcidump))
         println("FCIDump: ",$(esc(:fcidump)))
-        $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)))
+        $(esc(:EC)).fd = read_fcidump($(esc(:fcidump)), ec_eltype($(esc(:EC))))
       end
     catch err
       isa(err, UndefVarError) || rethrow(err)
@@ -497,7 +530,7 @@ macro setupEC()
       system = parse_geometry($(esc(:geometry)),$(esc(:basis)))
       if !isapprox(system, $(esc(:EC)).system) && !isempty($(esc(:EC)).fd)
         println("Geometry or basis changed, the integrals will be regenerated.")
-        $(esc(:EC)).fd = TFDump()  # reset fcidump
+        $(esc(:EC)).fd = FDump{ec_eltype($(esc(:EC))),3}()  # reset fcidump
       end
       if !issame(system, $(esc(:EC)).system)
         println("Geometry: ",$(esc(:geometry)))
@@ -1222,7 +1255,7 @@ macro dummy(atoms)
     println("Dummy atoms set to: ", $(esc(atoms)))
     if !isempty($(esc(:EC)).fd)
       println("The integrals will be recalculated.")
-      $(esc(:EC)).fd = TFDump()  # reset fcidump
+      $(esc(:EC)).fd = FDump{ec_eltype($(esc(:EC))),3}() # reset fcidump
     end
   end
 end
@@ -1401,8 +1434,17 @@ macro molpro_output(ecvariables, kwargs...)
 end
 
 
-# precompile if not in development mode
-if !devel()
+# Precompilation preferences
+# Master toggle: defaults to true for release builds, false for development builds.
+# Override via LocalPreferences.toml: [ElemCo] precompile_workload = true/false
+const _precompile_workload = @load_preference("precompile_workload", !devel())
+# Individual section toggles (only used when master toggle is true):
+const _precompile_cc = @load_preference("precompile_cc", true)
+const _precompile_fci = @load_preference("precompile_fci", true)
+const _precompile_mcscf = @load_preference("precompile_mcscf", false)
+const _precompile_complex = @load_preference("precompile_complex", false)
+
+if _precompile_workload
   @setup_workload begin
     savestd = stdout
     redirect_stdout(devnull)
@@ -1410,11 +1452,34 @@ if !devel()
                 H 0.0 0.0 1.0"
     basis = "vdz"
     @compile_workload begin
-      @dfhf
-      @cc dcsd
-      @cc uccsd
-      @dfcc svd-dcsd
-      @dfmp2
+      _need_hf = _precompile_cc || _precompile_fci || _precompile_mcscf || _precompile_complex
+      if _need_hf
+        @dfhf
+      end
+      if _precompile_cc
+        @cc dcsd
+        @cc uccsd
+        @dfcc svd-dcsd
+        @dfmp2
+      end
+      if _precompile_fci
+        @fci
+      end
+      if _precompile_mcscf
+        @set wf ms2=2
+        @dfmcscf
+      end
+      if _precompile_complex
+        # Complex precompilation uses FCIDUMP-based workflow
+        # (DF-HF doesn't support complex 3-index integrals)
+        fd_c = FciDumps.FDump{ComplexF64,3}(EC.fd)
+        EC_c = ECInfo{ComplexF64}()
+        EC_c.fd = fd_c
+        Drivers.ccdriver(EC_c, "dcsd")
+        if _precompile_fci
+          Drivers.fcidriver(EC_c)
+        end
+      end
     end
     redirect_stdout(savestd)
   end

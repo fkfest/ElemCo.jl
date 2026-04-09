@@ -83,6 +83,7 @@ makedocs(
       "interfaces.md",
       "molpro.md",
       "molden.md",
+      "vasp.md",
       "trexio_format.md"
     ],
     "release-notes.md", 

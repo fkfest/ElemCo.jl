@@ -4,12 +4,12 @@
 
 """
     heatbath_selection(selected_ctx::SelectedCIContext,
-                       variational_coeffs::AbstractVector{Scalar},
+                       variational_coeffs::AbstractVector,
                        options::CIPHIOptions,
                        E_current::Float64,
                        setup_data::CIPHISetupData,
                        detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true) 
-                       -> (VecDict{Determinant, Scalar}, (Float64, Float64))
+                       -> (VecDict{Determinant, Float64}, Tuple)
 
 Select determinants using Heat-Bath preselection + perturbative selection.
 Uses efficient excitation generation with threshold-based filtering.
@@ -19,13 +19,13 @@ Returns selected determinants together with the weights and PT2 energy correctio
 If `store_dets` is false, only the PT2 energy is returned (with empty determinant list).
 """
 function heatbath_selection(selected_ctx::SelectedCIContext,
-                            variational_coeffs::AbstractVector{Scalar},
+                            variational_coeffs::AbstractVector{T},
                             options::CIPHIOptions,
                             E_current::Float64,
                             setup_data::CIPHISetupData,
-                            coeffs_dg::Union{Nothing, AbstractVector{Scalar}}=nothing,
+                            coeffs_dg::Union{Nothing, AbstractVector}=nothing,
                             detorder::Union{Nothing, Vector{Int}}=nothing, store_dets::Bool=true;
-                            pt2_correct::Bool=false)
+                            pt2_correct::Bool=false) where T
   t0 = time_ns()
   shift = options.pt2_shift
   variational_dets = determinants(selected_ctx)
@@ -33,18 +33,18 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   ThrNeglect = options.thr_negligible
   # Get HB candidates determinants from variational space together with the H*c values
   DetType = eltype(variational_dets)
-  candidates = Dict{DetType, ExcVals}()
-  newcandidates = VecDict{DetType, ExcVals}()  # Temporary storage for new candidates
+  candidates = Dict{DetType, ExcVals{T}}()
+  newcandidates = VecDict{DetType, ExcVals{T}}()  # Temporary storage for new candidates
   if pt2_correct
     # for the correct PT2 it's important to add the variational determinants to the candidates space
     # otherwise the neglected pt estimation might include contributions from variational determinants
     for det in variational_dets
-      candidates[det] = ExcVals(0.0, 0.0)  # Initialize with zero coefficient
+      candidates[det] = ExcVals(zero(T), zero(T))  # Initialize with zero coefficient
     end
   end
-  fockd_buf = FockDiagonal(ctx.n_orb) # Reusable Fock diagonal buffer
+  fockd_buf = FockDiagonal(ctx.n_orb, T) # Reusable Fock diagonal buffer
   spaces_buf = OrbSpaces(ctx.n_orb)  # Reusable orbital spaces buffer
-  pt_negl = 0.0
+  pt_negl = zero(T)
   # Use efficient threshold-based excitation generation
   eps_h = options.epsilon_h > -0.1 ? options.epsilon_h : options.epsilon/10.0
   eps_c = options.epsilon_c > -0.1 ? options.epsilon_c : options.epsilon_h
@@ -91,8 +91,8 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
   t0 = print_time(options.print_level, t0, "candidate determinants", 1)
 
   # Select determinants above threshold or until target reached
-  new_dets = VecDict{DetType, Scalar}()
-  pt2_correction = 0.0
+  new_dets = VecDict{DetType, Float64}()
+  pt2_correction = zero(T)
   t2sq = 0.0
   # use square of epsilon_p to match probability definition (T_2^2)
   eps_p = options.epsilon_p > -0.1 ? options.epsilon_p : options.epsilon
@@ -125,16 +125,16 @@ function heatbath_selection(selected_ctx::SelectedCIContext,
 end
 
 """
-    modify_excitation!(excitations::Dict{Determinant, ExcVals},
-                       det::Determinant, vals::ExcVals) -> Float64
+    modify_excitation!(excitations::Dict{Determinant, ExcVals{T}},
+                       det::Determinant, vals::ExcVals{T}) -> T
 
 Modify existing excitation entry in the excitations dictionary by adding new ExcVals.
 If the determinant is not present, returns the energy contribution from the new ExcVals.
 """
-function modify_excitation!(excitations::Dict{Determinant{OPattern}, ExcVals},
-                 det::Determinant{OPattern}, vals::ExcVals) where OPattern
+function modify_excitation!(excitations::Dict{Determinant{OPattern}, ExcVals{T}},
+                 det::Determinant{OPattern}, vals::ExcVals{T}) where {OPattern, T}
   v1 = get(excitations, det, nothing)
-  en = 0.0
+  en = zero(T)
   if !isnothing(v1)
     @inbounds excitations[det] = v1 + vals
   else
@@ -144,12 +144,13 @@ function modify_excitation!(excitations::Dict{Determinant{OPattern}, ExcVals},
 end
 
 """
-    generate_excitations!(excitations::VecDict{Determinant, ExcVals},
-                          det::Determinant, coef::Scalar, 
-                          coef_dg::Union{Scalar, Nothing}, ecorr::Scalar,
+    generate_excitations!(excitations::VecDict{Determinant, ExcVals{T}},
+                          newexcitations::VecDict{Determinant, ExcVals{T}},
+                          det::Determinant, coef, 
+                          coef_dg, ecorr,
                           ctx::FCIContext,
                           setup_data::CIPHISetupData, spaces::OrbSpaces, fockd::FockDiagonal,
-                          epsilon::Float64, shift) -> Int
+                          epsilon::Float64, epsilon_c::Float64  , shift) -> Int
 
 Generate only excitations with |H| > epsilon using pre-computed data.
 
@@ -165,14 +166,14 @@ Works with both FCIContext and CIPHIContext.
 `fockd` is the Fock diagonal object used to store Fock matrix diagonals for the determinant.
 `coef_dg` is the bra coefficient of the determinant (dagger) if needed, otherwise `nothing`.
 """
-function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals},
-                               newexcitations::VecDict{Determinant{OPattern}, ExcVals},
+function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals{T}},
+                               newexcitations::VecDict{Determinant{OPattern}, ExcVals{T}},
                                det::Determinant{OPattern}, coef, 
-                               coef_dg::Union{Scalar, Nothing}, ecorr,
-                               ctx::Union{FCIContext{OPattern}, CIPHIContext{OPattern}},
+                               coef_dg, ecorr,
+                               ctx::Union{FCIContext{OPattern, T}, CIPHIContext{OPattern, T}},
                                setup_data::CIPHISetupData,
                                spaces::OrbSpaces, fockd::FockDiagonal,
-                               epsilon::Float64, epsilon_c::Float64, shift) where OPattern
+                               epsilon::Float64, epsilon_c::Float64, shift) where {OPattern, T}
   n_orb = ctx.n_orb
   empty!(newexcitations)
   set_orbspaces!(spaces, det)
@@ -186,7 +187,7 @@ function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}
   fa = fockd.alpha
   fb = fockd.beta
   
-  pt = 0.0
+  pt = zero(T)
 
   # ===========================================
   # 1. Generate double excitations using pre-computed lists
@@ -225,21 +226,23 @@ function generate_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}
 end
 
 """
-    add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant,
-                    coef::Scalar, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function,
+    add_excitations!(excitations::VecDict{Determinant, ExcVals{T}},
+                    newexcitations::VecDict{Determinant, ExcVals{T}}, 
+                    det::Determinant,
+                    coef, coef_dg, double_excitation_phase::Function,
                     occ, pchb_excitations, fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64)
 
 Generate same-spin double excitations from occupied orbitals using pre-computed
 Heat-Bath lists, adding only those with |H| > epsilon and storing in excitations dictionary
 together with their weighted matrix elements.
 """
-function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
-                          newexcitations::VecDict{Determinant{OPattern}, ExcVals},
+function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals{T}}, 
+                          newexcitations::VecDict{Determinant{OPattern}, ExcVals{T}},
                           det::Determinant{OPattern},
-                          coef, coef_dg::Union{Scalar, Nothing}, double_excitation_phase::Function, 
+                          coef, coef_dg, double_excitation_phase::Function, 
                           occ, pchb_excitations,
-                          fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where OPattern
-  pt = 0.0
+                          fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where {OPattern, T}
+  pt = zero(T)
   for idx_i in eachindex(occ)
     i = occ[idx_i]
     for idx_j in (idx_i+1):length(occ)
@@ -281,20 +284,22 @@ function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals},
 end
 
 """
-    add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant, coef::Scalar,
-                    coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, n_orb, 
+    add_excitations!(excitations::VecDict{Determinant, ExcVals{T}},
+                    newexcitations::VecDict{Determinant, ExcVals{T}},
+                    det::Determinant, coef,
+                    coef_dg, alpha_occ, beta_occ, n_orb, 
                     pchb_excitations, fa, fb, ecorr, shift, epsilon::Float64, epsilon_c::Float64)
 
 Generate mixed-spin double excitations from occupied alpha and beta orbitals
 using pre-computed Heat-Bath lists, adding only those with |H| > epsilon.
 """
-function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
-                          newexcitations::VecDict{Determinant{OPattern}, ExcVals},
+function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals{T}}, 
+                          newexcitations::VecDict{Determinant{OPattern}, ExcVals{T}},
                           det::Determinant{OPattern},
-                          coef, coef_dg::Union{Scalar, Nothing}, alpha_occ, beta_occ, 
+                          coef, coef_dg, alpha_occ, beta_occ, 
                           n_orb, pchb_excitations,
-                          fa, fb, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where OPattern
-  pt = 0.0
+                          fa, fb, ecorr, shift, epsilon::Float64, epsilon_c::Float64) where {OPattern, T}
+  pt = zero(T)
   for i_alpha in alpha_occ
     for i_beta in beta_occ
       pq_key = trip_index(i_alpha, i_beta, n_orb)
@@ -328,21 +333,23 @@ function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals},
 end
 
 """
-    add_excitations!(excitations::VecDict{Determinant, ExcVals}, det::Determinant,
-                    coef::Scalar, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
+    add_excitations!(excitations::VecDict{Determinant, ExcVals{T}},
+                    newexcitations::VecDict{Determinant, ExcVals{T}},
+                    det::Determinant,
+                    coef, coef_dg, single_excitation_phase::Function, 
                     occs, virts, occs_opp, int1, h1e2_same, h1e2_opp,
                     fdiag, ecorr, shift, epsilon::Float64, epsilon_c::Float64)
 
 Add single excitations to the excitations dictionary.
 """
-function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals}, 
-                          newexcitations::VecDict{Determinant{OPattern}, ExcVals},
+function add_excitations!(excitations::Dict{Determinant{OPattern}, ExcVals{T}}, 
+                          newexcitations::VecDict{Determinant{OPattern}, ExcVals{T}},
                           det::Determinant{OPattern},
-                          coef, coef_dg::Union{Scalar, Nothing}, single_excitation_phase::Function, 
+                          coef, coef_dg, single_excitation_phase::Function, 
                           occs, virts, occs_opp, int1, h1e2_same, h1e2_opp, singles_denom,
                           fdiag, ecorr, shift, 
-                          epsilon::Float64, epsilon_c::Float64) where OPattern
-  pt = 0.0
+                          epsilon::Float64, epsilon_c::Float64) where {OPattern, T}
+  pt = zero(T)
   for i in occs
     for a in virts
       # Compute Fock matrix element f_ai

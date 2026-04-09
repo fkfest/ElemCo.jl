@@ -117,6 +117,41 @@ To set options ([`ElemCo.ECInfos.Options`](@ref)) for the DF-HF, CC, etc calcula
 
 This code sets the maximum number of iterations for the SCF procedure to 10 using the [`@set`](@ref) macro, and then computes DF-HF using the new options using the [`@dfhf`](@ref) macro.
 
+### Precompilation
+
+`ElemCo.jl` uses `PrecompileTools.jl` to reduce time-to-first-execution.
+By default the coupled cluster and FCI workloads are precompiled in release builds.
+You can select which parts of the code to precompile using the `Preferences.jl` mechanism
+by editing `LocalPreferences.toml` in the project directory:
+
+```toml
+[ElemCo]
+precompile_workload = true   # master toggle (default: true for releases, false for development builds)
+precompile_cc = true          # coupled cluster methods (DCSD, UCCSD, SVD-DCSD, MP2)
+precompile_fci = true         # FCI
+precompile_mcscf = false      # DF-MCSCF
+precompile_complex = false    # complex-valued calculations
+```
+
+Alternatively, preferences can be set from the Julia REPL:
+
+```julia
+using Preferences, ElemCo
+set_preferences!(ElemCo,
+                 "precompile_workload" => true,
+                 "precompile_cc" => true,
+                 "precompile_fci" => true,
+                 "precompile_mcscf" => true;
+                 force=true)
+```
+
+To disable all precompilation (e.g. during development):
+
+```toml
+[ElemCo]
+precompile_workload = false
+```
+
 ### Using AVX2 instructions on AMD "Zen" machines
 
 MKL tends to be rather slow on AMD "Zen" machines (stand 2024).

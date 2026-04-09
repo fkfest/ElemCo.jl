@@ -45,7 +45,7 @@ Arguments:
 
 Returns: Correction vector t_P (orthogonal to u_P)
 """
-function solve_projected_pspace_system(r_P::Vector{Scalar}, u_P::Vector{Scalar}, 
+function solve_projected_pspace_system(r_P::AbstractVector, u_P::AbstractVector, 
                                        theta, pspace_data::PSpaceData, shift, alpha)
   n_p = pspace_data.n_pspace
   H_P = pspace_data.hamiltonian
@@ -103,7 +103,7 @@ Arguments:
 Result: t is orthogonal to u by construction (dot(t, u) ≈ 0)
 """
 function jacobi_davidson_correction!(t::FCIVector, r::FCIVector, u::FCIVector,
-                                     theta, context::FCIContext, shift)
+                                     theta, context::FCIContext{O, T}, shift) where {O, T}
   # Corrected Jacobi-Davidson with proper P-Q space coupling
   debug = context.options.print_level >= 2
   
@@ -153,7 +153,7 @@ function jacobi_davidson_correction!(t::FCIVector, r::FCIVector, u::FCIVector,
     
     # Step 4: Compute α = u_Q^T (H_QQ - E) u_Q using diagonal
     # α = Σ_{i∈Q} u_Q[i]² (diag_H[i] - θ)
-    alpha = 0.0
+    alpha = zero(T)
     for i in 1:length(u_Q.data)
       if abs(u_Q.data[i]) > 1e-15  # Only Q-space indices (where u_Q is non-zero)
         alpha += u_Q.data[i]^2 * (diag_h.data[i] - theta + shift)
@@ -166,7 +166,7 @@ function jacobi_davidson_correction!(t::FCIVector, r::FCIVector, u::FCIVector,
     orthogonalize_against!(t_Q_perp, u_Q)
     
     # β = Σ_{i∈Q} u_Q[i] (diag_H[i] - θ) t_Q_perp[i]
-    beta = 0.0
+    beta = zero(T)
     for i in 1:length(u_Q.data)
       if abs(u_Q.data[i]) > 1e-15
         beta += u_Q.data[i] * (diag_h.data[i] - theta + shift) * t_Q_perp.data[i]
@@ -313,19 +313,14 @@ This is called when the subspace becomes too large.
 # Returns
 - New subspace size after refresh
 """
-function refresh_davidson_subspace!(V::Vector{FCIVector{OPattern}}, HV::Vector{FCIVector{OPattern}},
-                                    eigenvecs::Matrix{Scalar}, k::Int, n_keep::Int) where OPattern
+function refresh_davidson_subspace!(V::Vector{<:FCIVector{OPattern}}, HV::Vector{<:FCIVector{OPattern}},
+                                    eigenvecs::AbstractMatrix, k::Int, n_keep::Int) where OPattern
   # Transform the V and HV to the eigenvector basis
   # Keep the first n_keep eigenvectors (lowest energy ones)
 
   # Create temporary storage for transformed vectors
-  # Calculate n_elec and n_spin from existing vector
-  n_elec = Int(V[1].n_elec_a + V[1].n_elec_b)
-  n_orb = Int(V[1].n_orb)
-  n_spin = Int(V[1].n_elec_a - V[1].n_elec_b)
-
-  V_new = [FCIVector{OPattern}(n_elec, n_orb, n_spin) for _ in 1:n_keep]
-  HV_new = [FCIVector{OPattern}(n_elec, n_orb, n_spin) for _ in 1:n_keep]
+  V_new = [zero(V[1]) for _ in 1:n_keep]
+  HV_new = [zero(V[1]) for _ in 1:n_keep]
 
   # Transform to eigenvector basis and keep only n_keep vectors
   for i in 1:n_keep
@@ -371,7 +366,7 @@ Always returns arrays of energies and states for type stability.
 # Returns
 - `Tuple{Vector{Scalar}, Vector{FCIVector}}`: Arrays of energies and corresponding eigenvectors
 """
-function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothing} = nothing) where OPattern
+function davidson_fci!(context::FCIContext{OPattern, T}, n_states::Union{Int, Nothing} = nothing) where {OPattern, T}
   # Use nstates from options if n_states not provided
   n_states = isnothing(n_states) ? context.options.nstates : n_states
 
@@ -422,11 +417,11 @@ function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothi
   n_spin = context.n_elec[1] - context.n_elec[2]
   n_elec = context.n_elec[1] + context.n_elec[2]
   V = [
-    FCIVector{OPattern}(n_elec, context.n_orb, n_spin) for
+    FCIVector{OPattern, T}(n_elec, context.n_orb, n_spin) for
     _ in 1:subspace_size
   ]
   HV = [
-    FCIVector{OPattern}(n_elec, context.n_orb, n_spin) for
+    FCIVector{OPattern, T}(n_elec, context.n_orb, n_spin) for
     _ in 1:subspace_size
   ]
 
@@ -442,7 +437,7 @@ function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothi
 
   # Always supplement with diagonal-based guesses, especially for excited states
   # This ensures we have initial vectors spanning determinants outside P-space
-  diag_sorted = sort([(context.diag_h.data[i], i) for i in 1:length(context.diag_h.data)])
+  diag_sorted = sort([(real(context.diag_h.data[i]), i) for i in 1:length(context.diag_h.data)])
   
   if pspace_success && n_states > 1
     # P-space guesses provided for first n_states vectors
@@ -489,19 +484,19 @@ function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothi
 
   # Unified convergence tracking (always use arrays, even for single state)
   converged_states = fill(false, n_states)
-  energies = zeros(Scalar, n_states)
-  old_energies = fill(Inf, n_states)
+  energies = zeros(T, n_states)
+  old_energies = fill(T(Inf), n_states)
 
   iter = 0
   for iter in 1:max_iter
     # Build subspace Hamiltonian matrix
-    T = zeros(Scalar, k, k)
+    T_mat = zeros(T, k, k)
     @inbounds for i in 1:k, j in 1:k
-      T[i, j] = dot(V[i], HV[j])
+      T_mat[i, j] = dot(V[i], HV[j])
     end
 
     # Diagonalize subspace
-    eigenvals, eigenvecs = eigen(Hermitian(T))
+    eigenvals, eigenvecs = eigen(Hermitian(T_mat))
 
     # Unified convergence check (always use arrays, even for single state)
     energies[1:n_states] .= eigenvals[1:n_states]
@@ -597,21 +592,21 @@ function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothi
       
       # Store current eigenvector coefficients and Ritz vectors for each state BEFORE expansion
       # This prevents bounds errors when k changes during the loop
-      state_data = Tuple{Int, FCIVector{OPattern}, FCIVector{OPattern}, Float64, Float64}[]  # (istate, coeff, resid, energy, res_norm)
+      state_data = Tuple{Int, FCIVector{OPattern, T}, FCIVector{OPattern, T}, Float64, Float64}[]  # (istate, coeff, resid, energy, res_norm)
      
       n_spin = context.n_elec[1] - context.n_elec[2]
       n_elec = context.n_elec[1] + context.n_elec[2]
       for istate in 1:n_states
         if !converged_states[istate]
           # Form current eigenvector for this state using the CURRENT subspace size k_start
-          coeff_state = FCIVector{OPattern}(n_elec, context.n_orb, n_spin)
+          coeff_state = FCIVector{OPattern, T}(n_elec, context.n_orb, n_spin)
           clear!(coeff_state)
           for j in 1:k_start
             add!(coeff_state, V[j], eigenvecs[j, istate])
           end
 
           # Form residual: r = H|ψ⟩ - E|ψ⟩
-          resid_state = FCIVector{OPattern}(n_elec, context.n_orb, n_spin)
+          resid_state = FCIVector{OPattern, T}(n_elec, context.n_orb, n_spin)
           clear!(resid_state)
           for j in 1:k_start
             add!(resid_state, HV[j], eigenvecs[j, istate])
@@ -623,7 +618,7 @@ function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothi
           if residual_norm < conv_tol
             converged_states[istate] = true
           else
-            push!(state_data, (istate, coeff_state, resid_state, energies[istate], residual_norm))
+            push!(state_data, (istate, coeff_state, resid_state, real(energies[istate]), residual_norm))
           end
         end
       end
@@ -704,21 +699,21 @@ function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothi
   end
 
   # Build final subspace and extract eigenvectors (unified approach)
-  T = zeros(Scalar, k, k)
+  T_mat = zeros(T, k, k)
   @inbounds for i in 1:k, j in 1:k
-    T[i, j] = dot(V[i], HV[j])
+    T_mat[i, j] = dot(V[i], HV[j])
   end
-  eigenvals, eigenvecs = eigen(Hermitian(T))
+  eigenvals, eigenvecs = eigen(Hermitian(T_mat))
 
   # Extract final states (unified approach)
   final_energies = eigenvals[1:n_states] .+ context.fcidump.int0
-  final_states = Vector{FCIVector{OPattern}}(undef, n_states)
+  final_states = Vector{FCIVector{OPattern, T}}(undef, n_states)
 
   n_spin = context.n_elec[1] - context.n_elec[2]
   n_elec = context.n_elec[1] + context.n_elec[2]
   for istate in 1:n_states
     final_states[istate] =
-      FCIVector{OPattern}(n_elec, context.n_orb, n_spin)
+      FCIVector{OPattern, T}(n_elec, context.n_orb, n_spin)
     clear!(final_states[istate])
 
     for j in 1:k
@@ -732,7 +727,6 @@ function davidson_fci!(context::FCIContext{OPattern}, n_states::Union{Int, Nothi
   end
 
   # Set ground state in context for backward compatibility
-  context.energy_fci = final_energies[1]
   copy!(context.coeff.data, final_states[1].data)
 
   # Always return arrays for type stability
@@ -787,7 +781,7 @@ The key difference from `davidson_fci!` is that matrix elements are computed
 on-the-fly using `contract_hamiltonian_selected!`, maintaining O(N_selected)
 memory usage rather than O(N_full).
 """
-function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses::Matrix{Scalar};
+function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses::AbstractMatrix;
                                nstates::Int = 1,
                                max_iterations::Int = 50,
                                convergence_threshold::Float64 = 1e-8,
@@ -822,16 +816,17 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
 
   ThrNeglect = selected_ctx.base_context.options.thr_negligible
   
+  Ts = eltype(initial_guesses)
   # Precompute diagonal elements for preconditioner
-  diagonal = zeros(Scalar, n_dets)
+  diagonal = zeros(Ts, n_dets)
   for i in 1:n_dets
     det_i = selected_ctx.selected_dets.determinants[i]
     diagonal[i] = diagonal_matrix_element(det_i, selected_ctx.base_context)
   end
   
   # Davidson subspace vectors
-  V = [zeros(Scalar, n_dets) for _ in 1:max_subspace]
-  HV = [zeros(Scalar, n_dets) for _ in 1:max_subspace]
+  V = [zeros(Ts, n_dets) for _ in 1:max_subspace]
+  HV = [zeros(Ts, n_dets) for _ in 1:max_subspace]
   
   # Initialize with guess vector(s)
   k = min(max(nstates, n_guess), max_subspace)
@@ -853,7 +848,7 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
     
     # Orthogonalize against previous vectors
     for j in 1:(i-1)
-      overlap = dot(V[i], V[j])
+      overlap = dot(V[j], V[i])
       V[i] .-= overlap .* V[j]
     end
     norm_val = norm(V[i])
@@ -874,7 +869,7 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
     
     # Gram-Schmidt orthogonalization
     for j in 1:(i-1)
-      overlap = dot(V[i], V[j])
+      overlap = dot(V[j], V[i])
       V[i] .-= overlap .* V[j]
     end
     V[i] ./= norm(V[i])
@@ -890,14 +885,14 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
   iteration = 0
   max_residual = Inf  # Initialize outside loop for warning message
   eigenvalues = zeros(Float64, nstates)
-  eigenvectors = zeros(Scalar, n_dets, nstates)
-  sub_vecs = zeros(Scalar, 1, 1)  # Placeholder
+  eigenvectors = zeros(Ts, n_dets, nstates)
+  sub_vecs = zeros(Ts, 1, 1)  # Placeholder
 
   for iter in 1:max_iterations
     iteration = iter
     
     # Build subspace Hamiltonian matrix
-    H_sub = zeros(Scalar, k, k)
+    H_sub = zeros(Ts, k, k)
     
     if hermitian
       for i in 1:k
@@ -932,7 +927,7 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
     
     # Compute Ritz vectors and residuals
     max_residual = 0.0
-    residuals = [zeros(Scalar, n_dets) for _ in 1:nstates]
+    residuals = [zeros(Ts, n_dets) for _ in 1:nstates]
     
     for iroot in 1:nstates
       # Ritz vector: linear combination of subspace vectors
@@ -982,18 +977,18 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
         break  # Subspace is full
       end
       
-      # Preconditioned residual with level shift
-      # For Hermitian: standard Davidson preconditioner with shift
-      # For non-Hermitian: same formula works (shift prevents small denominators)
-      correction = zeros(Scalar, n_dets)
+      # Preconditioned residual: r * conj(d) / (|d|² + σ)
+      # Tikhonov-regularized Davidson preconditioner. For real d: r * d/(d²+σ).
+      # For complex d: uses |d|² instead of d² to avoid near-zero denominators.
+      correction = zeros(Ts, n_dets)
       for i in 1:n_dets
         denom = eigenvalues[iroot] - diagonal[i]
-        correction[i] = residuals[iroot][i] * denom/(denom^2 + shift)
+        correction[i] = residuals[iroot][i] * conj(denom) / (abs2(denom) + shift)
       end
       
       # Gram-Schmidt orthogonalization
       for j in 1:k+n_new
-        overlap = dot(correction, V[j])
+        overlap = dot(V[j], correction)
         correction .-= overlap .* V[j]
       end
       
@@ -1036,7 +1031,7 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
  
   if !hermitian
     # calculate the left eigenvectors for non-Hermitian case
-    left_eigenvectors = zeros(Scalar, n_dets, nstates)
+    left_eigenvectors = zeros(Ts, n_dets, nstates)
     left_sub_vecs = inv(sub_vecs')
     for iroot in 1:nstates
       # Ritz vector: linear combination of subspace vectors

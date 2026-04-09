@@ -436,7 +436,7 @@ end
 # Generate wrapper functions for mo and po variants of TREXIO orbital functions
 # Uses type-stable dispatch via Val{Symbol} instead of runtime string comparison
 for action in ("has", "write", "read")
-  for field in ("num", "type", "spin", "coefficient", "class", "energy", "occupation")
+  for field in ("num", "type", "spin", "coefficient", "coefficient_im", "class", "energy", "occupation")
     fname = Symbol("trexio_" * action * "_MO_" * field)
     fmoname = Symbol("trexio_" * action * "_mo_" * field)
     fponame = Symbol("trexio_" * action * "_po_" * field)
@@ -464,6 +464,25 @@ end
   
   `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """ 
+function _write_trexio_orbital_transformation_data(trexio::TrexioFile, coefficients::SpinMatrix{<:Complex}, 
+                                                   order, type, classes, energies, occupations, MO="mo")
+  # Write real parts via the standard real pathway
+  real_coeffs = if is_restricted(coefficients)
+    SpinMatrix(real.(coefficients[1]))
+  else
+    SpinMatrix(real.(coefficients[1]), real.(coefficients[2]))
+  end
+  _write_trexio_orbital_transformation_data(trexio, real_coeffs, order, type, classes, energies, occupations, MO)
+  # Write imaginary parts using TREXIO coefficient_im field
+  if is_restricted(coefficients)
+    status = trexio_write_MO_coefficient_im(MO, trexio, imag.(coefficients[1][order, :]))
+    trexio_check_write_status(status, "$(MO)_coefficient_im")
+  else
+    status = trexio_write_MO_coefficient_im(MO, trexio, imag.(hcat(coefficients...)[order, :]))
+    trexio_check_write_status(status, "$(MO)_coefficient_im")
+  end
+end
+
 function _write_trexio_orbital_transformation_data(trexio::TrexioFile, coefficients::SpinMatrix, 
                                                    order, type, classes, energies, occupations, MO="mo")
   nbasis, nmo = size(coefficients)
@@ -531,6 +550,13 @@ function _read_trexio_orbital_transformations(trexio::TrexioFile, order, verbose
   trexio_check_read_status(status, "$(MO)_num")
   coefficients, status = trexio_read_MO_coefficient(MO, trexio)
   trexio_check_read_status(status, "$(MO)_coefficient")
+  # Check for imaginary part (complex coefficients)
+  has_im = trexio_has_MO_coefficient_im(MO, trexio)
+  if has_im
+    coefficients_im, status_im = trexio_read_MO_coefficient_im(MO, trexio)
+    trexio_check_read_status(status_im, "$(MO)_coefficient_im")
+    coefficients = complex.(coefficients, coefficients_im)
+  end
   if size(coefficients, 1) != nao
     error("Basis size mismatch: basis has $nao, orbitals have $(size(coefficients, 1))")
   end
@@ -661,12 +687,28 @@ function read_trexio_orbital_occupations(trexio::TrexioFile, MO="mo")
 end
 
 """
-    write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2}, T2::AbstractArray{Float64,4})
+    write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{<:Number,2}, T2::AbstractArray{<:Number,4})
 
 Write CC amplitudes to TREXIO format using the standalone TREXIO module.
 This is a custom extension for storing amplitude data.
 """
-function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2}, T2::AbstractArray{Float64,4})
+function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{<:Complex,2}, T2::AbstractArray{<:Complex,4})
+  # Write real parts
+  write_trexio_amplitudes(trexio, real.(T1), real.(T2))
+  # Write imaginary parts
+  if length(T1) > 0
+    status = TREXIO.trexio_write_amplitude_single_dense_im(trexio, imag.(T1))
+    trexio_check_write_status(status, "T1 amplitudes (imaginary)")
+  end
+  if length(T2) > 0
+    a,b,i,j = size(T2)
+    @assert a == b && i == j "T2 amplitudes must be in vvoo order with equal dimensions"
+    status = TREXIO.trexio_write_amplitude_double_dense_im(trexio, imag.(T2)[:,:,uppertriangular_cut(i)])
+    trexio_check_write_status(status, "T2 amplitudes (imaginary)")
+  end
+end
+
+function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{<:Number,2}, T2::AbstractArray{<:Number,4})
   if length(T1) > 0
     status = TREXIO.trexio_write_amplitude_single_dense(trexio, T1)
     trexio_check_write_status(status, "T1 amplitudes")
@@ -679,8 +721,39 @@ function write_trexio_amplitudes(trexio::TrexioFile, T1::AbstractArray{Float64,2
   end
 end
 
-function write_trexio_amplitudes(trexio::TrexioFile, T1a::AbstractArray{Float64,2}, T1b::AbstractArray{Float64,2},
-                                 T2a::AbstractArray{Float64,4}, T2b::AbstractArray{Float64,4}, T2ab::AbstractArray{Float64,4})
+function write_trexio_amplitudes(trexio::TrexioFile, T1a::AbstractArray{<:Complex,2}, T1b::AbstractArray{<:Complex,2},
+                                 T2a::AbstractArray{<:Complex,4}, T2b::AbstractArray{<:Complex,4}, T2ab::AbstractArray{<:Complex,4})
+  # Write real parts via the real-valued method
+  write_trexio_amplitudes(trexio, real.(T1a), real.(T1b), real.(T2a), real.(T2b), real.(T2ab))
+  # Write imaginary parts
+  if length(T1a) > 0
+    status = TREXIO.trexio_write_amplitude_single_up_dense_im(trexio, imag.(T1a))
+    trexio_check_write_status(status, "T1a amplitudes (imaginary)")
+  end
+  if length(T1b) > 0
+    status = TREXIO.trexio_write_amplitude_single_dn_dense_im(trexio, imag.(T1b))
+    trexio_check_write_status(status, "T1b amplitudes (imaginary)")
+  end
+  if length(T2a) > 0
+    a,b,i,j = size(T2a)
+    @assert a == b && i == j "T2a amplitudes must be in vvoo order with equal dimensions"
+    status = TREXIO.trexio_write_amplitude_double_upup_dense_im(trexio, imag.(T2a)[strict_uppertriangular_cut(a),strict_uppertriangular_cut(i)])
+    trexio_check_write_status(status, "T2a amplitudes (imaginary)")
+  end
+  if length(T2b) > 0
+    a,b,i,j = size(T2b)
+    @assert a == b && i == j "T2b amplitudes must be in VVOO order with equal dimensions"
+    status = TREXIO.trexio_write_amplitude_double_dndn_dense_im(trexio, imag.(T2b)[strict_uppertriangular_cut(a),strict_uppertriangular_cut(i)])
+    trexio_check_write_status(status, "T2b amplitudes (imaginary)")
+  end
+  if length(T2ab) > 0
+    status = TREXIO.trexio_write_amplitude_double_updn_dense_im(trexio, imag.(T2ab))
+    trexio_check_write_status(status, "T2ab amplitudes (imaginary)")
+  end
+end
+
+function write_trexio_amplitudes(trexio::TrexioFile, T1a::AbstractArray{<:Number,2}, T1b::AbstractArray{<:Number,2},
+                                 T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, T2ab::AbstractArray{<:Number,4})
   if length(T1a) > 0
     status = TREXIO.trexio_write_amplitude_single_up_dense(trexio, T1a)
     trexio_check_write_status(status, "T1a amplitudes")
@@ -718,6 +791,11 @@ function read_trexio_singles(trexio::TrexioFile)
     return zeros(0, 0)  # No T1 amplitudes found
   end
   trexio_check_read_status(status, "T1 amplitudes")
+  if TREXIO.trexio_has_amplitude_single_dense_im(trexio)
+    T1_im, status_im = TREXIO.trexio_read_amplitude_single_dense_im(trexio)
+    trexio_check_read_status(status_im, "T1 amplitudes (imaginary)")
+    T1 = complex.(T1, T1_im)
+  end
   return T1
 end
 
@@ -732,6 +810,11 @@ function read_trexio_doubles(trexio::TrexioFile)
     return zeros(0, 0, 0, 0)  # No T2 amplitudes found
   end
   trexio_check_read_status(status, "T2 amplitudes")
+  if TREXIO.trexio_has_amplitude_double_dense_im(trexio)
+    T2_im, status_im = TREXIO.trexio_read_amplitude_double_dense_im(trexio)
+    trexio_check_read_status(status_im, "T2 amplitudes (imaginary)")
+    T2 = complex.(T2, T2_im)
+  end
   return detri_doubles(T2)
 end
 
@@ -746,12 +829,22 @@ function read_trexio_unrestricted_singles(trexio::TrexioFile)
     T1a = zeros(0, 0)
   else
     trexio_check_read_status(status, "T1a amplitudes")
+    if TREXIO.trexio_has_amplitude_single_up_dense_im(trexio)
+      T1a_im, status_im = TREXIO.trexio_read_amplitude_single_up_dense_im(trexio)
+      trexio_check_read_status(status_im, "T1a amplitudes (imaginary)")
+      T1a = complex.(T1a, T1a_im)
+    end
   end
   T1b, status = TREXIO.trexio_read_amplitude_single_dn_dense(trexio)
   if status == TREXIO.TREXIO_HAS_NOT
     T1b = zeros(0, 0)
   else
     trexio_check_read_status(status, "T1b amplitudes")
+    if TREXIO.trexio_has_amplitude_single_dn_dense_im(trexio)
+      T1b_im, status_im = TREXIO.trexio_read_amplitude_single_dn_dense_im(trexio)
+      trexio_check_read_status(status_im, "T1b amplitudes (imaginary)")
+      T1b = complex.(T1b, T1b_im)
+    end
   end
   return (T1a, T1b)
 end
@@ -767,6 +860,11 @@ function read_trexio_unrestricted_doubles(trexio::TrexioFile)
     T2a_full = zeros(0, 0, 0, 0)
   else
     trexio_check_read_status(status, "T2a amplitudes")
+    if TREXIO.trexio_has_amplitude_double_upup_dense_im(trexio)
+      T2a_im, status_im = TREXIO.trexio_read_amplitude_double_upup_dense_im(trexio)
+      trexio_check_read_status(status_im, "T2a amplitudes (imaginary)")
+      T2a = complex.(T2a, T2a_im)
+    end
     T2a_full = detri_samespin_doubles(T2a)
   end
   T2b, status = TREXIO.trexio_read_amplitude_double_dndn_dense(trexio)
@@ -774,6 +872,11 @@ function read_trexio_unrestricted_doubles(trexio::TrexioFile)
     T2b_full = zeros(0, 0, 0, 0)
   else
     trexio_check_read_status(status, "T2b amplitudes")
+    if TREXIO.trexio_has_amplitude_double_dndn_dense_im(trexio)
+      T2b_im, status_im = TREXIO.trexio_read_amplitude_double_dndn_dense_im(trexio)
+      trexio_check_read_status(status_im, "T2b amplitudes (imaginary)")
+      T2b = complex.(T2b, T2b_im)
+    end
     T2b_full = detri_samespin_doubles(T2b)
   end
   T2ab, status = TREXIO.trexio_read_amplitude_double_updn_dense(trexio)
@@ -781,6 +884,11 @@ function read_trexio_unrestricted_doubles(trexio::TrexioFile)
     T2ab = zeros(0, 0, 0, 0)
   else
     trexio_check_read_status(status, "T2ab amplitudes")
+    if TREXIO.trexio_has_amplitude_double_updn_dense_im(trexio)
+      T2ab_im, status_im = TREXIO.trexio_read_amplitude_double_updn_dense_im(trexio)
+      trexio_check_read_status(status_im, "T2ab amplitudes (imaginary)")
+      T2ab = complex.(T2ab, T2ab_im)
+    end
   end
   return (T2a_full, T2b_full, T2ab)
 end

@@ -96,6 +96,20 @@ end
 
 ODDict(pairs::Pair{K, V}...) where {K, V} = ODDict{K, V}(pairs...)
 
+# Flexible constructor for ODDict{K, Float64} accepting pairs with any numeric value type
+# (e.g., mixed ComplexF64 and Float64 pairs from tensor contractions)
+function ODDict{K, Float64}(pair1::Pair{K, <:Number}, pairs::Pair{K, <:Number}...) where K
+  keys = K[]
+  values = Float64[]
+  descriptions = String[]
+  for (key, value) in (pair1, pairs...)
+    push!(keys, key)
+    push!(values, Float64(real(value)))
+    push!(descriptions, "")
+  end
+  return ODDict(keys, values, descriptions)
+end
+
 function ODDict{K, V}(pairs::Pair{K, Tuple{V, String}}...) where {K, V}
   keys = K[]
   values = V[]
@@ -103,6 +117,19 @@ function ODDict{K, V}(pairs::Pair{K, Tuple{V, String}}...) where {K, V}
   for (key, value_desc) in pairs
     push!(keys, key)
     push!(values, value_desc[1])
+    push!(descriptions, value_desc[2])
+  end
+  return ODDict(keys, values, descriptions)
+end
+
+# Flexible constructor for ODDict{K, Float64} accepting tuples with any numeric value type
+function ODDict{K, Float64}(pair1::Pair{K, <:Tuple{<:Number, String}}, pairs::Pair{K, <:Tuple{<:Number, String}}...) where K
+  keys = K[]
+  values = Float64[]
+  descriptions = String[]
+  for (key, value_desc) in (pair1, pairs...)
+    push!(keys, key)
+    push!(values, Float64(real(value_desc[1])))
     push!(descriptions, value_desc[2])
   end
   return ODDict(keys, values, descriptions)
@@ -128,6 +155,10 @@ function Base.setindex!(dict::ODDict{K, V}, value::V, key::K) where {K, V}
     dict.values[index] = value
   end
 end
+
+# Accept complex values in Float64 ODDict (takes real part)
+Base.setindex!(dict::ODDict{K, Float64}, value::Complex, key::K) where K =
+  setindex!(dict, Float64(real(value)), key)
 
 function Base.setindex!(dict::ODDict{K, V}, value_desc::Tuple{V,String}, key::K) where {K, V}
   index = findfirst(isequal(key), dict.keys)
@@ -304,7 +335,9 @@ end
 
 function Base.merge(dict1::ODDict, pairs::Pair{K, Tuple{V, String}}...) where {K, V}
   dict = copy(dict1)
-  push!(dict, pairs...)
+  for pair in pairs
+    push!(dict, pair.first, pair.second...)
+  end
   return dict
 end
 
@@ -329,6 +362,12 @@ end
 function Base.push!(dict::ODDict{K, V}, pair::Pair{K, Tuple{V, String}}) where {K, V}
   push!(dict, pair.first, pair.second...)
 end
+
+# Accept complex values in Float64 ODDict (takes real part)
+Base.push!(dict::ODDict{K, Float64}, key::K, value::Complex, description::String="") where K =
+  push!(dict, key, Float64(real(value)), description)
+Base.push!(dict::ODDict{K, Float64}, pair::Pair{K, Tuple{<:Complex, String}}) where K =
+  push!(dict, pair.first, Float64(real(pair.second[1])), pair.second[2])
 
 function Base.push!(dict::ODDict{K, V}, pairs::Vararg{Pair{K, V},N}) where {K, V, N}
   for pair in pairs

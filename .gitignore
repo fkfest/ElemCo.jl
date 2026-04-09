@@ -1,5 +1,6 @@
 Manifest*.toml
 docs/build
+lib/*/docs/build
 examples/*.out
 examples/ElemCo.jl-devel
 docs/equations/*.bbl
@@ -12,5 +13,6 @@ docs/equations/*.fdb_latexmk
 docs/equations/*.fls
 docs/equations/*.synctex.gz
 docs/src/release-notes.md
+tasks/
 LocalPreferences.toml
 .vscode
