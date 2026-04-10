@@ -166,11 +166,12 @@ LLAMA exploits the row-norm vector
 dimensionality**:
 
 ```math
-m_{\text{eff}} = \frac{\|\mathbf{d}\|_1}{\|\mathbf{d}\|_\infty}
-  = \frac{\sum_i d_i}{\max_i d_i}
+m_{\text{eff}} = \frac{\sum_i \sqrt{d_i}}{\sqrt{\max_i d_i}}
+  = \frac{\sum_i \|\mathbf{A}_{i,:}\|}{\max_i \|\mathbf{A}_{i,:}\|}
 ```
 
-This ratio measures how uniformly the signal energy is distributed:
+This ratio measures how uniformly the signal amplitude (row norms)
+is distributed:
 - For globally distributed singular vectors: ``m_{\text{eff}} \approx m``
 - For block-localized singular vectors: ``m_{\text{eff}} \ll m``
 
@@ -642,21 +643,28 @@ When a row is selected by residual but its deflated content is
 near-zero (``\|\tilde{\mathbf{r}}\|_\infty < \text{pivotol}`` or
 ``|p| < \text{pivotol}``), the row is **exhausted**: its information
 is already captured by the existing factors.  LLAMA marks it and
-immediately **breaks out of the inner loop** rather than continuing
-to the next row candidate.
+uses a `needs_recompute` flag to decide the next action:
 
-This strategy avoids wasting time iterating through many
-exhausted rows (which would each require an ``O(nr)`` row fetch and
-deflation).  The outer loop's
-``\mathbf{P}\boldsymbol{\Sigma}^2\mathbf{P}`` correction
-(Stage 3) detects any components missed by the early termination
-and triggers a new inner loop pass with corrected residuals.
+- If the flag is **true** (new Gram updates have occurred since the
+  last recomputation), LLAMA **recomputes all non-pivot residuals
+  from scratch** using the stored ACA factors and the row Gram matrix,
+  resets the flag, and continues the inner loop with accurate residuals.
+- If the flag is **false** (residuals were already recomputed after the
+  most recent Gram update), the exhaustion is genuine and the inner
+  loop **breaks** to finalization.
 
-This is particularly important for block-structured matrices:
-rows in already-captured blocks have near-zero deflated content
-but may still have large Gram residuals (false positives from
-the residual overshoot).  Breaking immediately and relying on
-the outer correction discovers all blocks efficiently.
+The flag is set after each successful pivot (whose Gram update may
+cause residuals to overshoot to zero) and cleared after each
+recomputation.  This limits the expensive ``O(m r^2)``
+recomputation to at most ``r`` times total (once per successful
+pivot).
+
+This is particularly important for block-structured and non-square
+matrices: rows in already-captured blocks have near-zero deflated
+content but may still have large Gram residuals (false positives
+from the residual overshoot).  The ``\mathbf{P}\boldsymbol{\Sigma}^2
+\mathbf{P}`` correction (Stage 3) provides additional safeguards
+across outer iterations.
 
 #### Stage 2: SVD Finalization
 

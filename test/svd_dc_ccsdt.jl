@@ -4,19 +4,19 @@ using ElemCo.ECInfos
 @testset "H2O Closed-Shell SVD-DC-CCSDT Test" begin
 epsilon    =   1.e-6
 EHF_test   = -75.6457645933
-EDC_CCSDT_useT3_test = -0.33003948228084784 + EHF_test
-EDC_CCSDT_test = -0.3300175166370924 + EHF_test
-EDC_CCSDTp_test = -0.32981896554725615 + EHF_test
+EDC_CCSDT_useT3_test = -0.330394818949 + EHF_test
+EDC_CCSDT_test = -0.330199442786 + EHF_test
+EDC_CCSDTp_test = -0.329890770108 + EHF_test
 
-EDC_CCSDT_voXL_test = Dict(:combined  => -75.97578184022076,
-                        :symcombined  => -75.97578210995636,
-                        :triples      => -75.97579540955509,
-                        :full         => -75.97578210995638)
+EDC_CCSDT_voXL_test = Dict(:combined  => -75.975963232268,
+                        :symcombined  => -75.975963992872,
+                        :triples      => -75.975968047548,
+                        :full         => -75.975964036106)
 
-EDC_CCSDTp_voXL_test = Dict(:combined => -75.97558419740024,
-                        :symcombined  => -75.97558355886652,
-                        :triples      => -75.97559061683168,
-                        :full         => -75.97558355886655)
+EDC_CCSDTp_voXL_test = Dict(:combined => -75.975657017185,
+                        :symcombined  => -75.975655349732,
+                        :triples      => -75.975657802073,
+                        :full         => -75.975655363428)
 geometry = basis = nothing
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 

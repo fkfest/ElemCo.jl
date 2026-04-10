@@ -183,20 +183,29 @@
 #
 # When a row is selected by residual but its deflated content is
 # near-zero (|r̃|∞ < tol or |p| < tol), the row is "exhausted" —
-# its information is already captured.  LLAMA marks it and
-# immediately breaks out of the inner loop instead of continuing
-# to the next row candidate.
+# its information is already captured.  LLAMA marks the row and
+# uses a `needs_recompute` flag to decide the next action:
 #
-# The outer loop's PΣ²P correction detects any components that
-# were missed by the early termination and triggers a new inner
-# loop pass with corrected residuals.
+# - If `needs_recompute` is true (i.e., new Gram updates have
+#   occurred since the last recomputation), LLAMA recomputes ALL
+#   non-pivot residuals from scratch using the stored ACA factors
+#   and the row Gram matrix, then continues the inner loop.
+# - If `needs_recompute` is false (residuals were already
+#   recomputed after the most recent Gram update), the exhaustion
+#   is genuine and the inner loop breaks to finalization.
 #
-# This is essential for block-structured matrices: rows in
-# already-captured blocks have near-zero deflated rows but may
-# still have large Gram residuals (false positives from the
-# overshoot problem).  Breaking immediately and relying on the
-# outer correction avoids wasting time on exhausted rows while
-# still discovering all blocks.
+# The flag is set to true after each successful pivot (which adds
+# a Gram update that may overshoot residuals) and reset to false
+# after each recomputation.  This limits the expensive O(m·r²)
+# recomputation to at most r times total (once per successful
+# pivot), while still ensuring that Gram-induced false convergence
+# is detected.
+#
+# This is essential for non-square matrices where the Gram
+# cross-terms accumulate quickly: after a few pivots, many rows
+# appear converged (residual clamped to zero) even though their
+# true error is significant.  Recomputation restores the correct
+# values, allowing the algorithm to discover all components.
 #
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║                    NOTATION                                  ║
@@ -362,6 +371,61 @@ function _llama_correction!(residual::AbstractVector{RT}, Q::AbstractMatrix{T},
 end
 
 """
+    _llama_recompute_residuals!(residual, d_row, cols_store, pivot_diag, row_gram,
+                                rank, is_row_pivot)
+
+Recompute all non-pivot residuals from scratch using the stored ACA
+factors and the incrementally accumulated row Gram matrix.
+
+For each non-pivot row ``i``:
+
+``\\text{residual}[i] = \\max\\bigl(d_{\\text{row}}[i]
+- \\Re\\bigl(\\phi_i^H\\, G_R\\, \\phi_i\\bigr),\\; 0\\bigr)``
+
+where ``\\phi_i[t] = d_t \\cdot C[i,t]`` and ``G_R = R^H R``.
+
+This avoids the accumulated numerical drift of the incremental
+Gram update, which can make residuals overshoot to zero due to
+the cross-term in the non-orthogonal ACA factorization.
+
+Cost: ``O(m \\cdot r^2)`` where ``r`` is the current rank.
+"""
+function _llama_recompute_residuals!(residual::AbstractVector{RT},
+                                     d_row::AbstractVector{<:Real},
+                                     cols_store::AbstractMatrix{T},
+                                     pivot_diag::AbstractVector{T},
+                                     row_gram::AbstractMatrix{T},
+                                     rank::Int,
+                                     is_row_pivot::AbstractVector{Bool}) where {T, RT<:Real}
+  m = length(residual)
+  rank == 0 && return zero(RT)
+
+  Cv = @view cols_store[:, 1:rank]
+  G_R = @view row_gram[1:rank, 1:rank]
+  dv = @view pivot_diag[1:rank]
+
+  # phi_mat[i,t] = d_t * C[i,t]  (m × rank)
+  phi_mat = Cv .* transpose(dv)
+  # W[i,t] = Σ_u phi_mat[i,u] * G_R[u,t]  (m × rank)
+  W = phi_mat * G_R
+  # norms[i] = Re(Σ_t conj(phi_mat[i,t]) * W[i,t]) = ||approx[i,:]||²
+  # vectorized: sum along dim 2 of conj(phi_mat) .* W
+
+  max_res = zero(RT)
+  @inbounds for i in 1:m
+    if !is_row_pivot[i]
+      s = zero(RT)
+      for t in 1:rank
+        s += RT(real(conj(phi_mat[i, t]) * W[i, t]))
+      end
+      residual[i] = max(RT(d_row[i]) - s, zero(RT))
+      max_res = max(max_res, residual[i])
+    end
+  end
+  return max_res
+end
+
+"""
     llama(matrix::AbstractALPACAMatrix{T};
           d_row, tol, max_rank=typemax(Int),
           oversample=0, fullsvd=false) → LLAMAResult
@@ -455,10 +519,15 @@ For an ``m \\times n`` matrix of numerical rank ``r``:
 Residuals are tracked via the Gram-corrected formula
 ``||A[i,:]||^2 - ||\\text{approx}[i,:]||^2``, which can undershoot
 zero due to the non-orthogonal nature of ACA (shared by LU and
-any non-SVD decomposition).  The iterative ``P \\Sigma^2 P``
-correction catches these overshoots.  Singular values near the
-tolerance boundary may be captured or not, depending on the
-accumulated deflation residual.
+any non-SVD decomposition).  When a row appears exhausted (deflated
+content near zero), LLAMA uses a `needs_recompute` flag to decide
+whether to recompute all residuals from scratch or break: after each
+successful pivot the flag is set, and at most one recomputation is
+performed per pivot.  This limits the ``O(m r^2)`` recomputation
+cost to at most ``r`` times total.  The iterative ``P \\Sigma^2 P``
+correction catches any remaining overshoots across outer iterations.
+Singular values near the tolerance boundary may be captured or not,
+depending on the accumulated deflation residual.
 
 # Example
 ```julia
@@ -508,7 +577,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
   if isnan(pivotol)
     d_max = maximum(d_row)
     if d_max > 0
-      m_eff = max(one(RT), RT(sum(d_row) / d_max))
+      m_eff = max(one(RT), RT(sum(sqrt, d_row) / sqrt(d_max)))
     else
       m_eff = RT(m)
     end
@@ -556,6 +625,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
   for outer in 1:max_outer
 
   rank_at_start = rank
+  needs_recompute = false  # set true after each Gram update, false after recomputation
   for iter in 1:m
     # ── Select row: argmax residual ──
     max_res = zero(RT)
@@ -596,7 +666,16 @@ function llama(matrix::AbstractALPACAMatrix{T};
     if best_col == 0 || best_val < pivotol_rt
       is_row_pivot[best_row] = true
       residual[best_row] = zero(RT)
-      break
+      if needs_recompute
+        # Gram overshoot may have zeroed residuals prematurely — recompute once
+        max_res = _llama_recompute_residuals!(residual, d_row, cols_store, pivot_diag,
+                                               row_gram, rank, is_row_pivot)
+        needs_recompute = false
+        max_res < pivotol2 && break
+        continue
+      else
+        break
+      end
     end
 
     # ── Fetch and deflate column (cross-coupled: uses stored rows) ──
@@ -615,7 +694,15 @@ function llama(matrix::AbstractALPACAMatrix{T};
     if abs(pivot_val) < pivotol_rt
       is_row_pivot[best_row] = true
       residual[best_row] = zero(RT)
-      break
+      if needs_recompute
+        max_res = _llama_recompute_residuals!(residual, d_row, cols_store, pivot_diag,
+                                               row_gram, rank, is_row_pivot)
+        needs_recompute = false
+        max_res < pivotol2 && break
+        continue
+      else
+        break
+      end
     end
 
     # ── Scale and store ──
@@ -690,6 +777,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
     is_col_pivot[best_col] = true
     is_row_pivot[best_row] = true
     residual[best_row] = zero(RT)
+    needs_recompute = true  # Gram update may overshoot for next rows
 
     rank >= max_r && break
   end  # inner loop

@@ -11,7 +11,7 @@ using ..ElemCo.QMTensors
 using ..ElemCo.ALPACADecomposition
 
 export calc_integrals_decomposition
-export svd_decompose
+export svd_decompose, svd_decompose_dense, svd_decompose_llama
 
 """
     IntegralMatrix{T} <: AbstractALPACAMatrix{T}
@@ -99,14 +99,46 @@ function calc_integrals_decomposition(EC::ECInfo)
 end
 
 """
-    svd_decompose(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
+    svd_decompose_llama(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
 
-  SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``.
+  SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``
+  using LLAMA low-rank approximation.
   Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`
 """
-function svd_decompose(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
+function svd_decompose_llama(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
+  result = llama(Amat; tol=tol)
+  naux = length(result.singular_values)
+  if verbose
+    println(description, " SVD-basis size: ", naux)
+  end
+  return reshape(result.Q, (nvirt,nocc,naux))
+end
+
+"""
+    svd_decompose_llama(Amat, tol=1e-6; verbose=true, description="")
+
+  SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} Σ_X δ_{XY} V^{Y}_{ξ'}``
+  using LLAMA low-rank approximation.
+  Return ``U^{X}_{ξ}`` as `U[ξ,X]` and ``Σ_X`` for ``Σ_X`` > `tol`
+"""
+function svd_decompose_llama(Amat, tol=1e-6; verbose=true, description="")
+  result = llama(Amat; tol=tol)
+  naux = length(result.singular_values)
+  if verbose
+    println(description, " SVD-basis size: ", naux)
+  end
+  return result.Q, result.singular_values
+end
+
+"""
+    svd_decompose_dense(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
+
+  SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``
+  using full dense SVD.
+  Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`
+"""
+function svd_decompose_dense(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
   U, S, = svd(Amat)
-  # display(S)
   naux = 0
   for s in S
     if s > tol
@@ -115,7 +147,6 @@ function svd_decompose(Amat, nvirt, nocc, tol=1e-6; verbose=true, description=""
       break
     end
   end
-  # display(S[1:naux])
   if verbose
     println(description, " SVD-basis size: ", naux)
   end
@@ -123,14 +154,14 @@ function svd_decompose(Amat, nvirt, nocc, tol=1e-6; verbose=true, description=""
 end
 
 """
-    svd_decompose(Amat, tol=1e-6; verbose=true, description="")
+    svd_decompose_dense(Amat, tol=1e-6; verbose=true, description="")
 
   SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} Σ_X δ_{XY} V^{Y}_{ξ'}``.
-  Return ``U^{X}_{ξ}`` as `U[ξ,X]` for ``Σ_X`` > `tol`
+  using full dense SVD.
+  Return ``U^{X}_{ξ}`` as `U[ξ,X]` and ``Σ_X`` for ``Σ_X`` > `tol`
 """
-function svd_decompose(Amat, tol=1e-6; verbose=true, description="")
+function svd_decompose_dense(Amat, tol=1e-6; verbose=true, description="")
   U, S, = svd(Amat)
-  # display(S)
   naux = 0
   for s in S
     if s > tol
@@ -139,11 +170,46 @@ function svd_decompose(Amat, tol=1e-6; verbose=true, description="")
       break
     end
   end
-  # display(S[1:naux])
   if verbose
     println(description, " SVD-basis size: ", naux)
   end
   return U[:,1:naux], S[1:naux]
+end
+
+"""
+    svd_decompose(Amat, nvirt, nocc, tol=1e-6; method=:llama, verbose=true, description="")
+
+  SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``.
+  Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`.
+
+  `method` selects the algorithm: `:llama` (default) or `:dense`.
+"""
+function svd_decompose(Amat, nvirt, nocc, tol=1e-6; method=:llama, verbose=true, description="")
+  if method == :llama
+    return svd_decompose_llama(Amat, nvirt, nocc, tol; verbose, description)
+  elseif method == :dense
+    return svd_decompose_dense(Amat, nvirt, nocc, tol; verbose, description)
+  else
+    throw(ArgumentError("Unknown SVD method: $method. Use :llama or :dense."))
+  end
+end
+
+"""
+    svd_decompose(Amat, tol=1e-6; method=:llama, verbose=true, description="")
+
+  SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} Σ_X δ_{XY} V^{Y}_{ξ'}``.
+  Return ``U^{X}_{ξ}`` as `U[ξ,X]` and ``Σ_X`` for ``Σ_X`` > `tol`.
+
+  `method` selects the algorithm: `:llama` (default) or `:dense`.
+"""
+function svd_decompose(Amat, tol=1e-6; method=:llama, verbose=true, description="")
+  if method == :llama
+    return svd_decompose_llama(Amat, tol; verbose, description)
+  elseif method == :dense
+    return svd_decompose_dense(Amat, tol; verbose, description)
+  else
+    throw(ArgumentError("Unknown SVD method: $method. Use :llama or :dense."))
+  end
 end
 
 end #module

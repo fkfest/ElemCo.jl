@@ -8,8 +8,8 @@ EMP2_test  =  -0.287815830908
 ECCSD_T_test =  -0.329259440500 + EHF_test
 EΛCCSD_T_test = -0.326915143863 + EHF_test
 EDCSD_test =  -0.328754956597 + EHF_test
-EDC_CCSDT_useT3_test = -0.330053889942 + EHF_test
-EDC_CCSDT_test = -0.330451448749 + EHF_test
+EDC_CCSDT_useT3_test = -0.330870307369 + EHF_test
+EDC_CCSDT_test = -0.330263995332 + EHF_test
 
 @print_input
 
