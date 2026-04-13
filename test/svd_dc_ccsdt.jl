@@ -17,6 +17,8 @@ EDC_CCSDTp_voXL_test = Dict(:combined => -75.975657017185,
                         :symcombined  => -75.975655349732,
                         :triples      => -75.975657802073,
                         :full         => -75.975655363428)
+EDC_CCSDT_h2o_test = -0.2180870800882972
+EDC_CCSDTp_h2o_test = -0.21809592911756576
 geometry = basis = nothing
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 
@@ -41,4 +43,14 @@ for sp in [:symcombined, :triples, :full]
   @test abs(energies["SVD-DC-CCSDT+"]-EDC_CCSDTp_voXL_test[sp]) < epsilon
 end
 
+geometry = "O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+basis = "vdz"
+fcidump=nothing
+@ECinit
+@dfhf
+energies = @cc svd-dc-ccsdt
+@test abs(energies["SVD-DC-CCSDTc"]-EDC_CCSDT_h2o_test) < epsilon
+@test abs(energies["SVD-DC-CCSDT+c"]-EDC_CCSDTp_h2o_test) < epsilon
 end
