@@ -13,6 +13,7 @@ using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDumps
+using ..ElemCo.OrbTools
 
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
 export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
