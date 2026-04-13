@@ -371,8 +371,22 @@ function _llama_correction!(residual::AbstractVector{RT}, Q::AbstractMatrix{T},
 end
 
 """
+    _ensure_recompute_buffers!(W_buf, DG_vec, rank) -> W_buf
+
+Ensure `W_buf` (``m \\times r``) and `DG_vec` (length ``\\geq r^2``) have
+sufficient capacity for rank `r`.  Returns the (possibly reallocated) `W_buf`.
+"""
+function _ensure_recompute_buffers!(W_buf::Matrix{T}, DG_vec::Vector{T}, rank::Int) where T
+  W_buf = _ensure_capacity!(W_buf, rank, 2)
+  if rank * rank > length(DG_vec)
+    resize!(DG_vec, rank * rank)
+  end
+  return W_buf
+end
+
+"""
     _llama_recompute_residuals!(residual, d_row, cols_store, pivot_diag, row_gram,
-                                rank, is_row_pivot)
+                                rank, is_row_pivot, phi_buf, W_buf)
 
 Recompute all non-pivot residuals from scratch using the stored ACA
 factors and the incrementally accumulated row Gram matrix.
@@ -388,6 +402,11 @@ This avoids the accumulated numerical drift of the incremental
 Gram update, which can make residuals overshoot to zero due to
 the cross-term in the non-orthogonal ACA factorization.
 
+Uses one ``m \\times r`` buffer (`W_buf`) and one length-``r^2`` vector
+(`DG_vec`, reshaped to ``r \\times r``): computes ``DG = \\mathrm{diag}(d) \\cdot G_R``
+(``O(r^2)``), then BLAS GEMM ``W = C \\cdot DG`` (``O(m r^2)``), and a scalar
+inner loop for the per-row dot products (``O(m r)``).
+
 Cost: ``O(m \\cdot r^2)`` where ``r`` is the current rank.
 """
 function _llama_recompute_residuals!(residual::AbstractVector{RT},
@@ -396,7 +415,9 @@ function _llama_recompute_residuals!(residual::AbstractVector{RT},
                                      pivot_diag::AbstractVector{T},
                                      row_gram::AbstractMatrix{T},
                                      rank::Int,
-                                     is_row_pivot::AbstractVector{Bool}) where {T, RT<:Real}
+                                     is_row_pivot::AbstractVector{Bool},
+                                     W_buf::AbstractMatrix{T},
+                                     DG_vec::AbstractVector{T}) where {T, RT<:Real}
   m = length(residual)
   rank == 0 && return zero(RT)
 
@@ -404,19 +425,25 @@ function _llama_recompute_residuals!(residual::AbstractVector{RT},
   G_R = @view row_gram[1:rank, 1:rank]
   dv = @view pivot_diag[1:rank]
 
-  # phi_mat[i,t] = d_t * C[i,t]  (m × rank)
-  phi_mat = Cv .* transpose(dv)
-  # W[i,t] = Σ_u phi_mat[i,u] * G_R[u,t]  (m × rank)
-  W = phi_mat * G_R
-  # norms[i] = Re(Σ_t conj(phi_mat[i,t]) * W[i,t]) = ||approx[i,:]||²
-  # vectorized: sum along dim 2 of conj(phi_mat) .* W
+  # DG[t,u] = dv[t] * G_R[t,u]  — O(r²), row-scale
+  DG = reshape(@view(DG_vec[1:rank*rank]), rank, rank)
+  @inbounds for u in 1:rank
+    for t in 1:rank
+      DG[t, u] = dv[t] * G_R[t, u]
+    end
+  end
 
+  # BLAS GEMM: W = Cv * DG  — O(m·r²)
+  W = @view W_buf[:, 1:rank]
+  mul!(W, Cv, DG)
+
+  # Per-row: s_i = Re(Σ_t conj(dv[t]*Cv[i,t]) * W[i,t])  — O(m·r)
   max_res = zero(RT)
   @inbounds for i in 1:m
     if !is_row_pivot[i]
       s = zero(RT)
       for t in 1:rank
-        s += RT(real(conj(phi_mat[i, t]) * W[i, t]))
+        s += RT(real(conj(dv[t] * Cv[i, t]) * W[i, t]))
       end
       residual[i] = max(RT(d_row[i]) - s, zero(RT))
       max_res = max(max_res, residual[i])
@@ -608,6 +635,8 @@ function llama(matrix::AbstractALPACAMatrix{T};
   init_cap = min(max_r, 64)
   cols_store = Matrix{T}(undef, m, init_cap)   # scaled deflated columns
   rows_store = Matrix{T}(undef, n, init_cap)   # scaled deflated rows
+  recomp_DG = Vector{T}(undef, 0)              # DG vector (reshaped to r×r) for residual recomputation
+  recomp_W = Matrix{T}(undef, m, 0)            # W buffer for residual recomputation
   pivot_diag = Vector{T}(undef, init_cap)      # pivot values
   row_gram = Matrix{T}(undef, init_cap, init_cap) # R^H R accumulated incrementally
 
@@ -668,8 +697,9 @@ function llama(matrix::AbstractALPACAMatrix{T};
       residual[best_row] = zero(RT)
       if needs_recompute
         # Gram overshoot may have zeroed residuals prematurely — recompute once
+        recomp_W = _ensure_recompute_buffers!(recomp_W, recomp_DG, rank)
         max_res = _llama_recompute_residuals!(residual, d_row, cols_store, pivot_diag,
-                                               row_gram, rank, is_row_pivot)
+                                               row_gram, rank, is_row_pivot, recomp_W, recomp_DG)
         needs_recompute = false
         max_res < pivotol2 && break
         continue
@@ -695,8 +725,9 @@ function llama(matrix::AbstractALPACAMatrix{T};
       is_row_pivot[best_row] = true
       residual[best_row] = zero(RT)
       if needs_recompute
+        recomp_W = _ensure_recompute_buffers!(recomp_W, recomp_DG, rank)
         max_res = _llama_recompute_residuals!(residual, d_row, cols_store, pivot_diag,
-                                               row_gram, rank, is_row_pivot)
+                                               row_gram, rank, is_row_pivot, recomp_W, recomp_DG)
         needs_recompute = false
         max_res < pivotol2 && break
         continue

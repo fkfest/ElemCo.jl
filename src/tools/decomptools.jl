@@ -138,7 +138,7 @@ end
   Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`
 """
 function svd_decompose_dense(Amat, nvirt, nocc, tol=1e-6; verbose=true, description="")
-  U, S, = svd(Amat)
+  U, S, = svd(Amat; full=false)
   naux = 0
   for s in S
     if s > tol
@@ -161,7 +161,7 @@ end
   Return ``U^{X}_{ξ}`` as `U[ξ,X]` and ``Σ_X`` for ``Σ_X`` > `tol`
 """
 function svd_decompose_dense(Amat, tol=1e-6; verbose=true, description="")
-  U, S, = svd(Amat)
+  U, S, = svd(Amat; full=false)
   naux = 0
   for s in S
     if s > tol
