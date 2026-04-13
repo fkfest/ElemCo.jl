@@ -246,7 +246,7 @@ function run_benchmark(A_factored::FactoredMatrix, true_sv::Vector{Float64},
   # Compute d_row for LLAMA (and m_eff reporting)
   d_row = vec(sum(abs2, A_factored.U .* A_factored.s', dims=2))
   d_max = maximum(d_row)
-  m_eff = d_max > 0 ? max(1.0, sum(d_row) / d_max) : Float64(m)
+  m_eff = d_max > 0 ? max(1.0, sum(sqrt, d_row) / sqrt(d_max)) : Float64(m)
 
   println("\n┌──────────────────────────────────────────────────────────────────────────────────")
   @printf("│ Tolerance: %.0e   (ALPACA pivotol = tol/√m = %.2e,  LLAMA pivotol = tol/√m_eff = %.2e)\n",
