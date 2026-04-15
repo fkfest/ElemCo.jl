@@ -9,6 +9,8 @@
 * Batching of 4-index integrals is implemented in `kext` routines. This should substantially reduce the memory demand of closed-shell and open-shell CCSD/DCSD.
 * The `kext`-type contractions are implemented for unrestricted full-triples methods (UCCSDT and UDC-CCSDT).
 * `@savewf` accepts orbital coefficients as matrix or tuple of matrices.
+* Use LLAMA for svd decompositions.
+* Some speedups in (T) calculations.
 
 ### Added
 

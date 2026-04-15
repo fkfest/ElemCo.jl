@@ -20,6 +20,7 @@ export print_nonzeros
 export @mtensor, @mtensoropt
 export @tensor, @tensoropt 
 export @mview, mview
+export @buftensor
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
