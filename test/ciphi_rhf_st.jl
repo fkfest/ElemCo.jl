@@ -9,7 +9,7 @@ using ElemCo
   E_CIPHI_PT2_test = -76.379775159873
   
   @print_input
-  
+  geometry = nothing 
   fcidump = joinpath(@__DIR__,"files","H2O_ST1_SWAP.FCIDUMP") 
 
   @set ciphi use_mp2=true epsilon=1.e-4
@@ -32,8 +32,7 @@ end
   E_CIPHI_test = -76.35024356548195
   E_CIPHI_PT2_test = -76.350524245628
 
-  @print_input
-
+  geometry = nothing
   fcidump = joinpath(@__DIR__, "files", "H2O_ST1.FCIDUMP")
 
   @freeze_orbs [1,[20:24;]...]
