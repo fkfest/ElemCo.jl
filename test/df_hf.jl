@@ -56,8 +56,18 @@ energies = @dfcc svd-dcsd
 energies = @dfcc svd-dcsd
 @test abs(energies["SVD-DCSD"]-ESVDDCSD_ft_test) < epsilon
 
+# Test MO-first half-transform route (triggered when norbs ≤ nao/2)
+@set cc use_full_t2=false
+@set int fcidump=""
+@set wf ms2=0 freeze_nvirt=12
+EC.fd = ElemCo.FciDumps.FDump{Float64,3}()
+@dfhf
+EDCSD_fv_test = -76.12720216862047
+energies = @cc dcsd
+@test abs(energies["DCSD"]-EDCSD_fv_test) < epsilon
+
 @set scf direct=false
-@set wf ms2=2
+@set wf ms2=2 freeze_nvirt=0
 EUHF = @dfuhf
 @test abs(EUHF["HF"]-EUHF_test) < epsilon
 end

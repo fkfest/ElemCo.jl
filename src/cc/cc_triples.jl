@@ -356,6 +356,9 @@ function calc_pertT_closed_shell(EC::ECInfo{Ty}; save_t3=false) where Ty
 
   X = zeros(Ty, nvir, nvir, nvir)
   Kijk = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
 
   Enb3 = zero(Ty)
   IntX = zeros(Ty, nvir, nocc)
@@ -391,19 +394,29 @@ function calc_pertT_closed_shell(EC::ECInfo{Ty}; save_t3=false) where Ty
         v!ovji = @mview ovoo[:,:,j,i]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ij[d,b] * v!vvvk[a,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2ik[d,c] * v!vvvj[a,b,d]
-          Kijk[a,b,c] += v!T2jk[b,d] * v!vvvi[c,a,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!ovik[l,c]
-          Kijk[a,b,c] -= v!T2i[c,a,l] * v!ovkj[l,b]
-          Kijk[a,b,c] -= v!T2k[a,c,l] * v!ovij[l,b]
-          Kijk[a,b,c] -= v!T2j[c,b,l] * v!ovki[l,a]
-          Kijk[a,b,c] -= v!T2k[b,c,l] * v!ovji[l,a]
+          # Accumulate [b,a,c] layout
+          W[b,a,c] = v!T2ij[d,b] * v!vvvk[a,c,d]
+          W[b,a,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
+          Kijk[a,b,c] += W[b,a,c]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          W[a,c,b] -= v!T2k[a,c,l] * v!ovij[l,b]
+          Kijk[a,b,c] += W[a,c,b]
+          # Accumulate [c,a,b] layout
+          W[c,a,b] = v!T2ik[d,c] * v!vvvj[a,b,d]
+          W[c,a,b] -= v!T2i[c,a,l] * v!ovkj[l,b]
+          Kijk[a,b,c] += W[c,a,b]
+          # Accumulate [b,c,a] layout
+          W[b,c,a] = v!T2jk[b,d] * v!vvvi[c,a,d]
+          W[b,c,a] -= v!T2k[b,c,l] * v!ovji[l,a]
+          Kijk[a,b,c] += W[b,c,a]
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2j[c,b,l] * v!ovki[l,a]
+          Kijk[a,b,c] += W[c,b,a]
         end
         ϵoijk = ϵo[i] + ϵo[j] + ϵo[k]
         if save_t3
@@ -432,11 +445,13 @@ function calc_pertT_closed_shell(EC::ECInfo{Ty}; save_t3=false) where Ty
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += fac * (X[a,b,c] * v!vv_jk[b,c])
-        @mtensor v!IntX_j[b] += fac * (X[a,b,c] * v!vv_ik[a,c])
         @mtensor v!IntX_k[c] += fac * (X[a,b,c] * v!vv_ij[a,b])
         @mtensor v!IntY_i[a] += fac * (X[a,b,c] * conj(v!T2jk[b,c]))
-        @mtensor v!IntY_j[b] += fac * (X[a,b,c] * conj(v!T2ik[a,c]))
         @mtensor v!IntY_k[c] += fac * (X[a,b,c] * conj(v!T2ij[a,b]))
+        # Permute X once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = X[a,b,c]
+        @mtensor v!IntX_j[b] += fac * (W[b,a,c] * v!vv_ik[a,c])
+        @mtensor v!IntY_j[b] += fac * (W[b,a,c] * conj(v!T2ik[a,c]))
       end 
     end
   end
@@ -509,6 +524,12 @@ function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
   fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
   pseudocan_transform!(pct, fov, "ov")
   
+  X = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
+
   Enb3 = zero(Ty)
   IntX = zeros(Ty, nvir, nocc)
   IntY = zeros(Ty, nvir, nocc)
@@ -540,21 +561,31 @@ function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
         v!ovji = @mview ovoo[:,:,j,i]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
-          Kijk[a,b,c] := v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ij[d,b] * v!vvvk[a,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2ik[d,c] * v!vvvj[a,b,d]
-          Kijk[a,b,c] += v!T2jk[b,d] * v!vvvi[c,a,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
+          # Direct to Kijk [a,b,c] layout
+          Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!ovik[l,c]
-          Kijk[a,b,c] -= v!T2i[c,a,l] * v!ovkj[l,b]
-          Kijk[a,b,c] -= v!T2k[a,c,l] * v!ovij[l,b]
-          Kijk[a,b,c] -= v!T2j[c,b,l] * v!ovki[l,a]
-          Kijk[a,b,c] -= v!T2k[b,c,l] * v!ovji[l,a]
+          # Accumulate [b,a,c] layout
+          W[b,a,c] = v!T2ij[d,b] * v!vvvk[a,c,d]
+          W[b,a,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
+          Kijk[a,b,c] += W[b,a,c]  # combine into Kijk
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          W[a,c,b] -= v!T2k[a,c,l] * v!ovij[l,b]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,a,b] layout
+          W[c,a,b] = v!T2ik[d,c] * v!vvvj[a,b,d]
+          W[c,a,b] -= v!T2i[c,a,l] * v!ovkj[l,b]
+          Kijk[a,b,c] += W[c,a,b]  # combine into Kijk
+          # Accumulate [b,c,a] layout
+          W[b,c,a] = v!T2jk[b,d] * v!vvvi[c,a,d]
+          W[b,c,a] -= v!T2k[b,c,l] * v!ovji[l,a]
+          Kijk[a,b,c] += W[b,c,a]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2j[c,b,l] * v!ovki[l,a]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
-        @mtensor  X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
+        @mtensor  X[a,b,c] = 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
 
         ϵoijk = ϵo[i] + ϵo[j] + ϵo[k]
         for abc ∈ CartesianIndices(X)
@@ -579,19 +610,29 @@ function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
         v!ov_ji = @mview ov_oo[:,:,j,i]
         @mtensor begin
           # K^{abc}_{ijk} = v^{bc}_{dk} Λ_{ij}^{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!U2ij[a,d] * v!vv_vk[b,c,d]
-          Kijk[a,b,c] += v!U2ij[d,b] * v!vv_vk[a,c,d]
-          Kijk[a,b,c] += v!U2ik[a,d] * v!vv_vj[c,b,d]
-          Kijk[a,b,c] += v!U2ik[d,c] * v!vv_vj[a,b,d]
-          Kijk[a,b,c] += v!U2jk[b,d] * v!vv_vi[c,a,d]
-          Kijk[a,b,c] += v!U2jk[d,c] * v!vv_vi[b,a,d]
-
-          Kijk[a,b,c] -= v!U2i[b,a,l] * v!ov_jk[l,c]
           Kijk[a,b,c] -= v!U2j[a,b,l] * v!ov_ik[l,c]
-          Kijk[a,b,c] -= v!U2i[c,a,l] * v!ov_kj[l,b]
-          Kijk[a,b,c] -= v!U2k[a,c,l] * v!ov_ij[l,b]
-          Kijk[a,b,c] -= v!U2j[c,b,l] * v!ov_ki[l,a]
-          Kijk[a,b,c] -= v!U2k[b,c,l] * v!ov_ji[l,a]
+          # Accumulate [b,a,c] layout
+          W[b,a,c] = v!U2ij[d,b] * v!vv_vk[a,c,d]
+          W[b,a,c] -= v!U2i[b,a,l] * v!ov_jk[l,c]
+          Kijk[a,b,c] += W[b,a,c]  # combine into Kijk
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!U2ik[a,d] * v!vv_vj[c,b,d]
+          W[a,c,b] -= v!U2k[a,c,l] * v!ov_ij[l,b]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,a,b] layout
+          W[c,a,b] = v!U2ik[d,c] * v!vv_vj[a,b,d]
+          W[c,a,b] -= v!U2i[c,a,l] * v!ov_kj[l,b]
+          Kijk[a,b,c] += W[c,a,b]  # combine into Kijk
+          # Accumulate [b,c,a] layout
+          W[b,c,a] = v!U2jk[b,d] * v!vv_vi[c,a,d]
+          W[b,c,a] -= v!U2k[b,c,l] * v!ov_ji[l,a]
+          Kijk[a,b,c] += W[b,c,a]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!U2jk[d,c] * v!vv_vi[b,a,d]
+          W[c,b,a] -= v!U2j[c,b,l] * v!ov_ki[l,a]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         @mtensor Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
         
@@ -605,11 +646,13 @@ function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += fac * (X[a,b,c] * v!vv_jk[b,c])
-        @mtensor v!IntX_j[b] += fac * (X[a,b,c] * v!vv_ik[a,c])
         @mtensor v!IntX_k[c] += fac * (X[a,b,c] * v!vv_ij[a,b])
         @mtensor v!IntY_i[a] += fac * (X[a,b,c] * v!U2jk[b,c])
-        @mtensor v!IntY_j[b] += fac * (X[a,b,c] * v!U2ik[a,c])
         @mtensor v!IntY_k[c] += fac * (X[a,b,c] * v!U2ij[a,b])
+        # Permute X once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = X[a,b,c]
+        @mtensor v!IntX_j[b] += fac * (W[b,a,c] * v!vv_ik[a,c])
+        @mtensor v!IntY_j[b] += fac * (W[b,a,c] * v!U2ik[a,c])
       end 
     end
   end
@@ -742,6 +785,9 @@ function calc_pertT_samespin(EC::ECInfo{Ty}, T1, T2, pct, spin::Symbol) where Ty
 
   T = zeros(Ty, nvir, nvir, nvir)
   Kijk = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
 
   Enb3 = zero(Ty)
   IntX = zeros(Ty, nvir, nocc)
@@ -763,13 +809,17 @@ function calc_pertT_samespin(EC::ECInfo{Ty}, T1, T2, pct, spin::Symbol) where Ty
         v!voij = @mview vooo[:,:,i,j]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!vokj[c,l]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!voki[c,l]
           Kijk[a,b,c] -= v!T2k[b,c,l] * v!voij[a,l]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2i[b,a,l] * v!vokj[c,l]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         # antisymmetrize K = A(a,b,c) Kijk[a,b,c]
         @mtensor  T[a,b,c] = Kijk[a,b,c] - Kijk[c,b,a]
@@ -793,11 +843,13 @@ function calc_pertT_samespin(EC::ECInfo{Ty}, T1, T2, pct, spin::Symbol) where Ty
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += T[a,b,c] * v!vv_jk[b,c]
-        @mtensor v!IntX_j[b] += T[a,b,c] * v!vv_ik[a,c]
         @mtensor v!IntX_k[c] += T[a,b,c] * v!vv_ij[a,b]
         @mtensor v!IntY_i[a] += T[a,b,c] * conj(v!T2jk[b,c])
-        @mtensor v!IntY_j[b] += T[a,b,c] * conj(v!T2ik[a,c])
         @mtensor v!IntY_k[c] += T[a,b,c] * conj(v!T2ij[a,b])
+        # Permute T once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = T[a,b,c]
+        @mtensor v!IntX_j[b] += W[b,a,c] * v!vv_ik[a,c]
+        @mtensor v!IntY_j[b] += W[b,a,c] * conj(v!T2ik[a,c])
       end 
     end
   end
@@ -888,6 +940,11 @@ function calc_pertT_mixedspin(EC::ECInfo{Ty}, T1, T2, T1os, T2mix, pct, spin::Sy
 
   T = zeros(Ty, nvir, nvir, nVir)
   Kijk = zeros(Ty, nvir, nvir, nVir)
+  # Single buffer for all three permutation layouts (used sequentially).
+  W_buf = zeros(Ty, nvir * nvir * nVir)
+  W_Cvv = reshape(W_buf, nVir, nvir, nvir)
+  W_vCv = reshape(W_buf, nvir, nVir, nvir)
+  W_vvC = reshape(W_buf, nvir, nvir, nVir)
 
   Enb3 = zero(Ty)
   IntX = zeros(Ty, nvir, nocc)
@@ -917,20 +974,32 @@ function calc_pertT_mixedspin(EC::ECInfo{Ty}, T1, T2, T1os, T2mix, pct, spin::Sy
         v!VoKi = @mview VoOo[:,:,K,i]
         @mtensor begin
           # K_{abC}^{ijK} = v_{bC}^{dK} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,C] layout
           Kijk[a,b,C] = v!T2ij[a,d] * v!vVvK[b,C,d]
-          Kijk[a,b,C] += v!T2Kj[C,d] * v!vvvi[b,a,d]
-          Kijk[a,b,C] += v!T2Ki[C,d] * v!vvvj[a,b,d]
-          Kijk[a,b,C] += v!T2Kj[D,b] * v!VvVi[C,a,D]
-          Kijk[a,b,C] += v!T2Ki[D,a] * v!VvVj[C,b,D]
-          Kijk[a,b,C] -= T2K[C,b,l] * v!voij[a,l]
-          Kijk[a,b,C] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
-          Kijk[a,b,C] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Kj[C,d] * v!vvvi[b,a,d]
+          W_Cvv[C,b,a] -= T2K[C,b,l] * v!voij[a,l]
+          W_Cvv[C,b,a] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Ki[C,d] * v!vvvj[a,b,d]
+          W_Cvv[C,a,b] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Kj[D,b] * v!VvVi[C,a,D]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Ki[D,a] * v!VvVj[C,b,D]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
         end
         # antisymmetrize ΔK = A(a,b) ΔKijk[a,b,C]
         Kijk -= permutedims(Kijk,[2,1,3])
         @mtensor begin
-          Kijk[a,b,C] -= v!T2i[b,a,l] * v!VoKj[C,l]
           Kijk[a,b,C] -= v!T2j[a,b,l] * v!VoKi[C,l]
+          # Accumulate [b,a,C] layout (negated)
+          W_vvC[b,a,C] = v!T2i[b,a,l] * v!VoKj[C,l]
+          # Combine accumulator into Kijk
+          Kijk[a,b,C] -= W_vvC[b,a,C]
         end
         T .= Kijk
         ϵoijK = ϵo[i] + ϵo[j] + ϵO[K]
@@ -951,11 +1020,14 @@ function calc_pertT_mixedspin(EC::ECInfo{Ty}, T1, T2, T1os, T2mix, pct, spin::Sy
         v!IntY_j   = @mview IntY[:,j]
         v!IntYos_K = @mview IntYos[:,K]
         @mtensor v!IntX_i[a] += T[a,b,C] * v!vV_jK[b,C]
-        @mtensor v!IntX_j[b] += T[a,b,C] * v!vV_iK[a,C]
         @mtensor v!IntXos_K[C] += T[a,b,C] * v!vv_ij[a,b]
         @mtensor v!IntY_i[a] += T[a,b,C] * conj(v!T2Kj[C,b])
-        @mtensor v!IntY_j[b] += T[a,b,C] * conj(v!T2Ki[C,a])
         @mtensor v!IntYos_K[C] += T[a,b,C] * conj(v!T2ij[a,b])
+        # Permute T for [b]-output contractions, matching index order of second operand
+        @mtensor W_vvC[b,a,C] = T[a,b,C]
+        @mtensor v!IntX_j[b] += W_vvC[b,a,C] * v!vV_iK[a,C]
+        @mtensor W_vCv[b,C,a] = T[a,b,C]
+        @mtensor v!IntY_j[b] += W_vCv[b,C,a] * conj(v!T2Ki[C,a])
       end 
     end
   end
@@ -1008,6 +1080,10 @@ function calc_ΛpertT_samespin(EC::ECInfo{Ty}, T2, U1, U2, pct, spin::Symbol) wh
 
   T = zeros(Ty, nvir, nvir, nvir)
   Kijk = zeros(Ty, nvir, nvir, nvir)
+  X = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
 
   Enb3 = zero(Ty)
   IntX = zeros(Ty, nvir, nocc)
@@ -1029,13 +1105,17 @@ function calc_ΛpertT_samespin(EC::ECInfo{Ty}, T2, U1, U2, pct, spin::Symbol) wh
         v!voij = @mview vooo[:,:,i,j]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!vokj[c,l]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!voki[c,l]
           Kijk[a,b,c] -= v!T2k[b,c,l] * v!voij[a,l]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2i[b,a,l] * v!vokj[c,l]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         # antisymmetrize K = A(a,b,c) Kijk[a,b,c]
         @mtensor  T[a,b,c] = Kijk[a,b,c] - Kijk[c,b,a]
@@ -1060,17 +1140,21 @@ function calc_ΛpertT_samespin(EC::ECInfo{Ty}, T2, U1, U2, pct, spin::Symbol) wh
         v!vo_ki = @mview vo_oo[:,:,k,i]
         v!vo_ij = @mview vo_oo[:,:,i,j]
         @mtensor begin
-          # K^{abc}_{ijk} = v_{dk}^{bc} Λ_{ij}^{ad} + ...
-          Kijk[a,b,c] := v!U2ij[a,d] * v!vv_vk[b,c,d]
-          Kijk[a,b,c] += v!U2ik[a,d] * v!vv_vj[c,b,d]
-          Kijk[a,b,c] += v!U2jk[d,c] * v!vv_vi[b,a,d]
-
-          Kijk[a,b,c] -= v!U2i[b,a,l] * v!vo_kj[c,l]
+          # K^{abc}_{ijk} = v_{dk}^{bc} \Lambda_{ij}^{ad} + ...
+          # Direct to Kijk [a,b,c] layout
+          Kijk[a,b,c] = v!U2ij[a,d] * v!vv_vk[b,c,d]
           Kijk[a,b,c] -= v!U2j[a,b,l] * v!vo_ki[c,l]
           Kijk[a,b,c] -= v!U2k[b,c,l] * v!vo_ij[a,l]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!U2ik[a,d] * v!vv_vj[c,b,d]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!U2jk[d,c] * v!vv_vi[b,a,d]
+          W[c,b,a] -= v!U2i[b,a,l] * v!vo_kj[c,l]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         # antisymmetrize K = A(a,b,c) Kijk[a,b,c]
-        @mtensor  X[a,b,c] := Kijk[a,b,c] - Kijk[c,b,a]
+        @mtensor  X[a,b,c] = Kijk[a,b,c] - Kijk[c,b,a]
         @mtensor Kijk[a,b,c] = X[a,b,c] - X[b,a,c] - X[a,c,b]
 
         @mtensor Enb3 += 1/6*(Kijk[a,b,c] * T[a,b,c])
@@ -1085,11 +1169,13 @@ function calc_ΛpertT_samespin(EC::ECInfo{Ty}, T2, U1, U2, pct, spin::Symbol) wh
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += T[a,b,c] * v!vv_jk[b,c]
-        @mtensor v!IntX_j[b] += T[a,b,c] * v!vv_ik[a,c]
         @mtensor v!IntX_k[c] += T[a,b,c] * v!vv_ij[a,b]
         @mtensor v!IntY_i[a] += T[a,b,c] * v!U2jk[b,c]
-        @mtensor v!IntY_j[b] += T[a,b,c] * v!U2ik[a,c]
         @mtensor v!IntY_k[c] += T[a,b,c] * v!U2ij[a,b]
+        # Permute T once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = T[a,b,c]
+        @mtensor v!IntX_j[b] += W[b,a,c] * v!vv_ik[a,c]
+        @mtensor v!IntY_j[b] += W[b,a,c] * v!U2ik[a,c]
       end 
     end
   end
@@ -1213,6 +1299,11 @@ function calc_ΛpertT_mixedspin(EC::ECInfo{Ty}, T2, T2mix, U1, U2, U1os, U2mix, 
 
   T = zeros(Ty, nvir, nvir, nVir)
   Kijk = zeros(Ty, nvir, nvir, nVir)
+  # Single buffer for all three permutation layouts (used sequentially).
+  W_buf = zeros(Ty, nvir * nvir * nVir)
+  W_Cvv = reshape(W_buf, nVir, nvir, nvir)
+  W_vCv = reshape(W_buf, nvir, nVir, nvir)
+  W_vvC = reshape(W_buf, nvir, nvir, nVir)
 
   Enb3 = zero(Ty)
   IntX = zeros(Ty, nvir, nocc)
@@ -1243,20 +1334,32 @@ function calc_ΛpertT_mixedspin(EC::ECInfo{Ty}, T2, T2mix, U1, U2, U1os, U2mix, 
         v!VoKi = @mview VoOo[:,:,K,i]
         @mtensor begin
           # K_{abC}^{ijK} = v_{bC}^{dK} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,C] layout
           Kijk[a,b,C] = v!T2ij[a,d] * v!vVvK[b,C,d]
-          Kijk[a,b,C] += v!T2Kj[C,d] * v!vvvi[b,a,d]
-          Kijk[a,b,C] += v!T2Ki[C,d] * v!vvvj[a,b,d]
-          Kijk[a,b,C] += v!T2Kj[D,b] * v!VvVi[C,a,D]
-          Kijk[a,b,C] += v!T2Ki[D,a] * v!VvVj[C,b,D]
-          Kijk[a,b,C] -= T2K[C,b,l] * v!voij[a,l]
-          Kijk[a,b,C] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
-          Kijk[a,b,C] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Kj[C,d] * v!vvvi[b,a,d]
+          W_Cvv[C,b,a] -= T2K[C,b,l] * v!voij[a,l]
+          W_Cvv[C,b,a] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Ki[C,d] * v!vvvj[a,b,d]
+          W_Cvv[C,a,b] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Kj[D,b] * v!VvVi[C,a,D]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Ki[D,a] * v!VvVj[C,b,D]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
         end
         # antisymmetrize ΔK = A(a,b) ΔKijk[a,b,C]
         Kijk -= permutedims(Kijk,[2,1,3])
         @mtensor begin
-          Kijk[a,b,C] -= v!T2i[b,a,l] * v!VoKj[C,l]
           Kijk[a,b,C] -= v!T2j[a,b,l] * v!VoKi[C,l]
+          # Accumulate [b,a,C] layout (negated)
+          W_vvC[b,a,C] = v!T2i[b,a,l] * v!VoKj[C,l]
+          # Combine accumulator into Kijk
+          Kijk[a,b,C] -= W_vvC[b,a,C]
         end
         T .= Kijk
         ϵoijK = ϵo[i] + ϵo[j] + ϵO[K]
@@ -1284,20 +1387,28 @@ function calc_ΛpertT_mixedspin(EC::ECInfo{Ty}, T2, T2mix, U1, U2, U1os, U2mix, 
         v!Vo_Ki = @mview Vo_Oo[:,:,K,i]
         @mtensor begin
           # K^{abC}_{ijK} = v_{dK}^{bC} Λ_{ij}^{ad} + ...
+          # Direct to Kijk [a,b,C] layout
           Kijk[a,b,C] = v!U2ij[a,d] * v!vV_vK[b,C,d]
-          Kijk[a,b,C] += v!U2Kj[C,d] * v!vv_vi[b,a,d]
-          Kijk[a,b,C] += v!U2Ki[C,d] * v!vv_vj[a,b,d]
-          Kijk[a,b,C] += v!U2Kj[D,b] * v!Vv_Vi[C,a,D]
-          Kijk[a,b,C] += v!U2Ki[D,a] * v!Vv_Vj[C,b,D]
-          Kijk[a,b,C] -= U2K[C,b,l] * v!vo_ij[a,l]
-          Kijk[a,b,C] -= v!U2mixi[C,a,L] * v!vO_jK[b,L]
-          Kijk[a,b,C] -= v!U2mixj[C,b,L] * v!vO_iK[a,L]
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!U2Kj[C,d] * v!vv_vi[b,a,d]
+          W_Cvv[C,b,a] -= U2K[C,b,l] * v!vo_ij[a,l]
+          W_Cvv[C,b,a] -= v!U2mixj[C,b,L] * v!vO_iK[a,L]
+          W_Cvv[C,b,a] += v!U2Ki[D,a] * v!Vv_Vj[C,b,D]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!U2Ki[C,d] * v!vv_vj[a,b,d]
+          W_Cvv[C,a,b] -= v!U2mixi[C,a,L] * v!vO_jK[b,L]
+          W_Cvv[C,a,b] += v!U2Kj[D,b] * v!Vv_Vi[C,a,D]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
         end
         # antisymmetrize ΔK = A(a,b) ΔKijk[a,b,C]
         Kijk -= permutedims(Kijk,[2,1,3])
         @mtensor begin
-          Kijk[a,b,C] -= v!U2i[b,a,l] * v!Vo_Kj[C,l]
           Kijk[a,b,C] -= v!U2j[a,b,l] * v!Vo_Ki[C,l]
+          # Accumulate [b,a,C] layout (negated)
+          W_vvC[b,a,C] = v!U2i[b,a,l] * v!Vo_Kj[C,l]
+          # Combine accumulator into Kijk
+          Kijk[a,b,C] -= W_vvC[b,a,C]
         end
 
         @mtensor Enb3 += 0.5 * (Kijk[a,b,C] * T[a,b,C])
@@ -1312,11 +1423,14 @@ function calc_ΛpertT_mixedspin(EC::ECInfo{Ty}, T2, T2mix, U1, U2, U1os, U2mix, 
         v!IntY_j = @mview IntY[:,j]
         v!IntYos_K = @mview IntYos[:,K]
         @mtensor v!IntX_i[a] += T[a,b,C] * v!vV_jK[b,C]
-        @mtensor v!IntX_j[b] += T[a,b,C] * v!vV_iK[a,C]
         @mtensor v!IntXos_K[C] += T[a,b,C] * v!vv_ij[a,b]
         @mtensor v!IntY_i[a] += T[a,b,C] * v!U2Kj[C,b]
-        @mtensor v!IntY_j[b] += T[a,b,C] * v!U2Ki[C,a]
         @mtensor v!IntYos_K[C] += T[a,b,C] * v!U2ij[a,b]
+        # Permute T for [b]-output contractions, matching index order of second operand
+        @mtensor W_vvC[b,a,C] = T[a,b,C]
+        @mtensor v!IntX_j[b] += W_vvC[b,a,C] * v!vV_iK[a,C]
+        @mtensor W_vCv[b,C,a] = T[a,b,C]
+        @mtensor v!IntY_j[b] += W_vCv[b,C,a] * v!U2Ki[C,a]
       end 
     end
   end
