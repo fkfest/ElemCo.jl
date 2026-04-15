@@ -348,10 +348,10 @@ function refresh_davidson_subspace!(V::Vector{<:FCIVector{OPattern}}, HV::Vector
       add!(V_new[i], V_new[j], -overlap)
       add!(HV_new[i], HV_new[j], -overlap)
     end
+    nrm = norm(V_new[i])
     if nrm < 1e-12
       error("Linear dependency detected during subspace refresh. Consider increasing n_keep.")
     end
-    nrm = norm(V_new[i])
     V_new[i].data .*= inv(nrm)
     HV_new[i].data .*= inv(nrm)
   end

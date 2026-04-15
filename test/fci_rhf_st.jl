@@ -8,7 +8,7 @@ using ElemCo
   E_FCI_test = -54.562038540256
 
   @print_input
-
+  geometry = nothing
   fcidump = joinpath(@__DIR__, "files", "N_ST1.FCIDUMP")
 
   # Run full FCI
