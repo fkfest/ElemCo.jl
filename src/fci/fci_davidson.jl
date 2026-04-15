@@ -336,10 +336,21 @@ function refresh_davidson_subspace!(V::Vector{<:FCIVector{OPattern}}, HV::Vector
     for j in 1:k
       add!(HV_new[i], HV[j], eigenvecs[j, i])
     end
+  end
 
-    # Normalize (should already be normalized, but ensure numerical stability)
-    normalize!(V_new[i])
-    # HV vectors are not normalized - they correspond to H*V
+  # Gram-Schmidt orthogonalization of V_new, applying same transformations to HV_new.
+  # This maintains HV_new[i] = H * V_new[i] while ensuring V_new is orthonormal.
+  # For Hermitian case, eigenvecs are unitary so this is essentially a no-op.
+  # For non-Hermitian case (ST), eigenvecs are not orthogonal and this step is essential.
+  for i in 1:n_keep
+    for j in 1:(i - 1)
+      overlap = dot(V_new[j], V_new[i])
+      add!(V_new[i], V_new[j], -overlap)
+      add!(HV_new[i], HV_new[j], -overlap)
+    end
+    nrm = norm(V_new[i])
+    V_new[i].data .*= inv(nrm)
+    HV_new[i].data .*= inv(nrm)
   end
 
   # Copy transformed vectors back
@@ -369,6 +380,7 @@ Always returns arrays of energies and states for type stability.
 function davidson_fci!(context::FCIContext{OPattern, T}, n_states::Union{Int, Nothing} = nothing) where {OPattern, T}
   # Use nstates from options if n_states not provided
   n_states = isnothing(n_states) ? context.options.nstates : n_states
+  hermitian = is_hermitian(context)
 
   # Scale max_iter for multi-state calculations (excited states need more iterations)
   max_iter = context.options.max_iter
@@ -496,7 +508,7 @@ function davidson_fci!(context::FCIContext{OPattern, T}, n_states::Union{Int, No
     end
 
     # Diagonalize subspace
-    eigenvals, eigenvecs = eigen(Hermitian(T_mat))
+    eigenvals, eigenvecs = _eigen_subspace(T_mat, hermitian)
 
     # Unified convergence check (always use arrays, even for single state)
     energies[1:n_states] .= eigenvals[1:n_states]
@@ -703,7 +715,7 @@ function davidson_fci!(context::FCIContext{OPattern, T}, n_states::Union{Int, No
   @inbounds for i in 1:k, j in 1:k
     T_mat[i, j] = dot(V[i], HV[j])
   end
-  eigenvals, eigenvecs = eigen(Hermitian(T_mat))
+  eigenvals, eigenvecs = _eigen_subspace(T_mat, hermitian)
 
   # Extract final states (unified approach)
   final_energies = eigenvals[1:n_states] .+ context.fcidump.int0
@@ -911,7 +923,8 @@ function davidson_selected_ci!(selected_ctx::SelectedCIContext, initial_guesses:
         end
       end
       # Solve eigenvalue problem for non-Hermitian matrix
-      sub_vals, sub_vecs = eigen(H_sub)
+      # Use _eigen_subspace to rotate complex eigenvectors to real for real T
+      sub_vals, sub_vecs = _eigen_subspace(H_sub, false)
     end
     
     # Extract lowest nstates eigenvalues

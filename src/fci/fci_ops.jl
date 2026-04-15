@@ -187,18 +187,29 @@ function form_string_substs_for_spin!(result::Vector{SubstResult{OPattern}}, op_
 end
 
 """
-    get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar})
+    get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar}; simtra::Bool=false)
 
 Extract diagonal pair antisymmetrized integrals for 2-electron terms.
+When `simtra=true`, computes both orderings independently (no i↔j symmetry assumed).
 """
-function get_diagonal_pair_antisym_ints(int2e::AbstractArray{T,4}) where T
+function get_diagonal_pair_antisym_ints(int2e::AbstractArray{T,4}; simtra::Bool=false) where T
   n_orb = size(int2e, 1)
   jk = zeros(T, n_orb, n_orb)
-  @inbounds for i in 2:n_orb
-    for j in 1:i-1
-      jij = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])  # v_ij^ij - v_ij^ji
-      jk[i, j] = jij
-      jk[j, i] = jij
+  if simtra
+    @inbounds for i in 1:n_orb
+      for j in 1:n_orb
+        if i != j
+          jk[i, j] = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])
+        end
+      end
+    end
+  else
+    @inbounds for i in 2:n_orb
+      for j in 1:i-1
+        jij = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])  # v_ij^ij - v_ij^ji
+        jk[i, j] = jij
+        jk[j, i] = jij
+      end
     end
   end
   return jk
@@ -308,12 +319,13 @@ Initialize Hamiltonian terms for the FCI calculation and compute diagonal Hamilt
 function init_hamiltonian_terms!(context::FCIContext)
   n_orb = context.n_orb
   n_elec = context.n_elec[1] + context.n_elec[2]
+  simtra = is_similarity_transformed(context.fcidump)
 
   if context.fcidump.uhf
     # UHF case: Handle all three spin-separated integral tensors properly
     # Precompute heval_data for UHF
     context.heval_data = HEvalData(context.fcidump.int2aa, context.fcidump.int2bb, context.fcidump.int2ab,
-                                  context.fcidump.int1a, context.fcidump.int1b)
+                                  context.fcidump.int1a, context.fcidump.int1b; simtra)
     # Create modified copies of all three integral tensors
     int2aa_modified = copy(context.fcidump.int2aa)
     int2bb_modified = copy(context.fcidump.int2bb)
@@ -348,20 +360,20 @@ function init_hamiltonian_terms!(context::FCIContext)
       
       # Use 2e term with all three UHF integral tensors (1e terms absorbed)
       h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2aa_modified, 
-                                  int2bb_modified, int2ab_modified)
+                                  int2bb_modified, int2ab_modified; simtra)
       push!(context.hamiltonian_terms, h2_term)
     else
       # Use separate 1e and 2e terms with all three UHF integral tensors
       h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
       h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2aa_modified, 
-                                  int2bb_modified, int2ab_modified)
+                                  int2bb_modified, int2ab_modified; simtra)
       push!(context.hamiltonian_terms, h1_term)
       push!(context.hamiltonian_terms, h2_term)
     end
   else
     # RHF case: Use spatial integrals
     # Precompute heval_data for RHF
-    context.heval_data = HEvalData(context.fcidump.int2, context.fcidump.int1)
+    context.heval_data = HEvalData(context.fcidump.int2, context.fcidump.int1; simtra)
 
     int2_modified = copy(context.fcidump.int2)
     # Compute diagonal with unmodified integrals
@@ -376,12 +388,12 @@ function init_hamiltonian_terms!(context::FCIContext)
       # Absorb 1e terms into 2e integrals
       absorb_1e!(int2_modified, n_orb, n_elec, context.mod_core_h_a, context.mod_core_h_a)
       # Use only 2e term (1e terms absorbed)
-      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified; simtra)
       push!(context.hamiltonian_terms, h2_term)
     else
       # Use separate 1e and 2e terms
       h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
-      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified; simtra)
       push!(context.hamiltonian_terms, h1_term)
       push!(context.hamiltonian_terms, h2_term)
     end
@@ -767,10 +779,11 @@ mutable struct HamiltonianTerm2e{T} <: HamiltonianTerm
 
   function HamiltonianTerm2e(n_orb::Integer, thr::Float64, op2_matrix_aa::AbstractArray{T},
                              op2_matrix_bb::Union{AbstractArray{T}, Nothing} = nothing,
-                             op2_matrix_ab::Union{AbstractArray{T}, Nothing} = nothing) where T
+                             op2_matrix_ab::Union{AbstractArray{T}, Nothing} = nothing;
+                             simtra::Bool = false) where T
     n_orb_int = Int(n_orb)
     spatial = (op2_matrix_bb === nothing)
-    use_pair_sym = !(T <: Complex)
+    use_pair_sym = !(T <: Complex) && !simtra
     if use_pair_sym
       mat_aa = convert_op2_to_pair_matrix(op2_matrix_aa, n_orb_int)
       mat_bb = spatial ? mat_aa : convert_op2_to_pair_matrix(op2_matrix_bb, n_orb_int)

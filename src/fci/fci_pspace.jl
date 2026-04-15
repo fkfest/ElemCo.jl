@@ -236,7 +236,7 @@ function diagonalize_pspace_hamiltonian!(context::FCIContext)
   end
 
   # Full diagonalization 
-  eigenvals, eigenvecs = eigen(Hermitian(pspace.hamiltonian))
+  eigenvals, eigenvecs = _eigen_subspace(pspace.hamiltonian, is_hermitian(context))
 
   # Store results (eigenvalues are already sorted by eigen())
   pspace.eigenvalues = eigenvals
@@ -562,7 +562,7 @@ function initialize_multistate_from_small_space(context::Union{FCIContext{OPatte
     println("  Diagonalizing small-space Hamiltonian for $nstates states")
   end
   
-  eigenvals, eigenvecs = eigen(Hermitian(H_small))
+  eigenvals, eigenvecs = _eigen_subspace(H_small, is_hermitian(context))
 
   # Extract nstates lowest states
   eigenvalues_selected = eigenvals[1:nstates]

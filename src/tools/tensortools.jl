@@ -364,14 +364,14 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
 end
 
 """ 
-    rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector)
+    rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true)
 
   Transform complex eigenvectors of a real matrix to a real space 
   such that they block-diagonalize the matrix.
 
   Return the eigenvectors and "eigenvalues" (the diagonal of the matrix) in the real space.
 """
-function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector)
+function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true)
   evecs_real::Matrix{Float64} = real.(evecs)
   evals_real::Vector{Float64} = real.(evals)
   npairs = 0
@@ -391,7 +391,9 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
       continue
     end
     i = idx[ii]
-    println("complex eigenvalue: ", evals[i], " ", i)
+    if verbose
+      println("complex eigenvalue: ", evals[i], " ", i)
+    end
     # find the complex conjugate eigenvalue
     # and the corresponding eigenvector
     iicc = ii+1
@@ -406,15 +408,16 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
     evecs_real[:,inext] = imag.(@view(evecs[:,inext]))
     normalize!(@view(evecs_real[:,i]))
     normalize!(@view(evecs_real[:,inext]))
-    evals_real[inext] = real(evals[inext])
+    evals_real[inext] = real(evals[inext])  
     npairs += 1
   end
-
-  println("$npairs eigenvector pairs rotated to the real space")
+  if verbose
+    println("$npairs eigenvector pairs rotated to the real space")
+  end
   return evecs_real, evals_real
 end
 
-function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64})
+function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64}; verbose=true)
   return evecs, evals
 end
 
