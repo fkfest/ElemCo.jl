@@ -304,40 +304,41 @@ function HEvalData(int2e_aa::AbstractArray{T, 4}, int2e_bb::AbstractArray{T, 4},
 end
 
 """
-    _eigen_nonhermitian(T_mat::AbstractMatrix{T}) where T <: Real
+    _eigen_nonhermitian(T_mat::AbstractMatrix{T}, warn_n_complex=0) where T <: Real
 
 Diagonalize a non-Hermitian real matrix.
 Uses `rotate_eigenvectors_to_real` to handle complex conjugate eigenvalue pairs
 by rotating eigenvectors to a real basis.
 Returns (eigenvalues, eigenvectors) sorted in ascending order.
 """
-function _eigen_nonhermitian(T_mat::AbstractMatrix{T}) where T <: Real
+function _eigen_nonhermitian(T_mat::AbstractMatrix{T}, warn_n_complex=0) where T <: Real
   F = eigen(T_mat)
-  evecs, evals = rotate_eigenvectors_to_real(F.vectors, F.values; verbose=false)
+  evecs, evals = rotate_eigenvectors_to_real(F.vectors, F.values; verbose=false, warn_n_complex=warn_n_complex)
   perm = sortperm(evals)
   return evals[perm], evecs[:, perm]
 end
 
-function _eigen_nonhermitian(T_mat::AbstractMatrix{T}) where T <: Complex
+function _eigen_nonhermitian(T_mat::AbstractMatrix{T}, warn_n_complex=0) where T <: Complex
   F = eigen(T_mat)
   perm = sortperm(F.values; by=real)
   return F.values[perm], F.vectors[:, perm]
 end
 
 """
-    _eigen_subspace(T_mat::AbstractMatrix, hermitian::Bool)
+    _eigen_subspace(T_mat::AbstractMatrix, hermitian::Bool; warn_n_complex=0)
 
 Diagonalize a subspace Hamiltonian matrix.
 For Hermitian case, uses `eigen(Hermitian(T_mat))`.
 For non-Hermitian case (similarity-transformed), uses `eigen(T_mat)` 
-with rotation to real space for real-valued matrices.
+with rotation to real space for real-valued matrices 
+(prints warning if complex eigenvalues are encountered for the first `warn_n_complex` eigenvalues).
 Returns `Tuple{Vector{T}, Matrix{T}}` for type stability.
 """
-function _eigen_subspace(T_mat::AbstractMatrix{T}, hermitian::Bool) where T
+function _eigen_subspace(T_mat::AbstractMatrix{T}, hermitian::Bool; warn_n_complex=0) where T
   if hermitian
     F = eigen(Hermitian(T_mat))
     return convert(Vector{T}, F.values), F.vectors
   else
-    return _eigen_nonhermitian(T_mat)
+    return _eigen_nonhermitian(T_mat, warn_n_complex)
   end
 end

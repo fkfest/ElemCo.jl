@@ -364,14 +364,16 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
 end
 
 """ 
-    rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true)
+    rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true, warn_n_complex=0)
 
   Transform complex eigenvectors of a real matrix to a real space 
   such that they block-diagonalize the matrix.
 
+  If verbose is false, only information about the first `warn_n_complex` eigenvalues will be printed.
+
   Return the eigenvectors and "eigenvalues" (the diagonal of the matrix) in the real space.
 """
-function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true)
+function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true, warn_n_complex=0)
   evecs_real::Matrix{Float64} = real.(evecs)
   evals_real::Vector{Float64} = real.(evals)
   npairs = 0
@@ -391,7 +393,7 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
       continue
     end
     i = idx[ii]
-    if verbose
+    if verbose || i <= warn_n_complex
       println("complex eigenvalue: ", evals[i], " ", i)
     end
     # find the complex conjugate eigenvalue
@@ -417,7 +419,7 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
   return evecs_real, evals_real
 end
 
-function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64}; verbose=true)
+function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64}; verbose=true, warn_n_complex=0)
   return evecs, evals
 end
 
