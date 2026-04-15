@@ -245,12 +245,12 @@ end
 
 HEvalData() = HEvalData{Float64}()
 
-function HEvalData(int2e::AbstractArray{T, 4}, core_h::AbstractArray{T, 2}) where T
+function HEvalData(int2e::AbstractArray{T, 4}, core_h::AbstractArray{T, 2}; simtra::Bool=false) where T
   # RHF case
   n_orb = size(core_h, 1)
   
   # Precompute JK and JAB matrices
-  jk = get_diagonal_pair_antisym_ints(int2e)
+  jk = get_diagonal_pair_antisym_ints(int2e; simtra)
   jab = get_diagonal_pair_ints(int2e)
   
   # One-electron integrals
@@ -270,13 +270,13 @@ function HEvalData(int2e::AbstractArray{T, 4}, core_h::AbstractArray{T, 2}) wher
 end
 
 function HEvalData(int2e_aa::AbstractArray{T, 4}, int2e_bb::AbstractArray{T, 4}, int2e_ab::AbstractArray{T, 4}, 
-                   core_h_a::AbstractArray{T, 2}, core_h_b::AbstractArray{T, 2}) where T
+                   core_h_a::AbstractArray{T, 2}, core_h_b::AbstractArray{T, 2}; simtra::Bool=false) where T
   # UHF case
   n_orb = size(core_h_a, 1)
   
   # Precompute JK and JAB matrices
-  jkaa = get_diagonal_pair_antisym_ints(int2e_aa)
-  jkbb = get_diagonal_pair_antisym_ints(int2e_bb)
+  jkaa = get_diagonal_pair_antisym_ints(int2e_aa; simtra)
+  jkbb = get_diagonal_pair_antisym_ints(int2e_bb; simtra)
   jab = get_diagonal_pair_ints(int2e_ab)
   
   # One-electron integrals
@@ -301,4 +301,44 @@ function HEvalData(int2e_aa::AbstractArray{T, 4}, int2e_bb::AbstractArray{T, 4},
   end
   return HEvalData(jkaa, jkbb, jab, ha, hb,
                    h1e2_aa, h1e2_bb, h1e2_ab, h1e2_ba)
+end
+
+"""
+    _eigen_nonhermitian(T_mat::AbstractMatrix{T}, warn_n_complex=0) where T <: Real
+
+Diagonalize a non-Hermitian real matrix.
+Uses `rotate_eigenvectors_to_real` to handle complex conjugate eigenvalue pairs
+by rotating eigenvectors to a real basis.
+Returns (eigenvalues, eigenvectors) sorted in ascending order.
+"""
+function _eigen_nonhermitian(T_mat::AbstractMatrix{T}, warn_n_complex=0) where T <: Real
+  F = eigen(T_mat)
+  evecs, evals = rotate_eigenvectors_to_real(F.vectors, F.values; verbose=false, warn_n_complex=warn_n_complex)
+  perm = sortperm(evals)
+  return evals[perm], evecs[:, perm]
+end
+
+function _eigen_nonhermitian(T_mat::AbstractMatrix{T}, warn_n_complex=0) where T <: Complex
+  F = eigen(T_mat)
+  perm = sortperm(F.values; by=real)
+  return F.values[perm], F.vectors[:, perm]
+end
+
+"""
+    _eigen_subspace(T_mat::AbstractMatrix, hermitian::Bool; warn_n_complex=0)
+
+Diagonalize a subspace Hamiltonian matrix.
+For Hermitian case, uses `eigen(Hermitian(T_mat))`.
+For non-Hermitian case (similarity-transformed), uses `eigen(T_mat)` 
+with rotation to real space for real-valued matrices 
+(prints warning if complex eigenvalues are encountered for the first `warn_n_complex` eigenvalues).
+Returns `Tuple{Vector{T}, Matrix{T}}` for type stability.
+"""
+function _eigen_subspace(T_mat::AbstractMatrix{T}, hermitian::Bool; warn_n_complex=0) where T
+  if hermitian
+    F = eigen(Hermitian(T_mat))
+    return convert(Vector{T}, F.values), F.vectors
+  else
+    return _eigen_nonhermitian(T_mat, warn_n_complex)
+  end
 end

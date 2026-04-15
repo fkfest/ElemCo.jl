@@ -694,9 +694,6 @@ function eval_fci(EC::ECInfo, ref_energy; ciphi=false)
     return merge(energies, "E" => Egs - ref_energy)
   else
     println("Setting up FCI..."); flush(stdout)
-    if is_similarity_transformed(EC.fd)
-      error("FCI not implemented for similarity transformed Hamiltonians!")
-    end
     fci_ctx = FCIContext(fdump, EC.options.fci; occa=EC.space['o'], occb=EC.space['O'])
     println("FCI context setup complete."); flush(stdout)
     E_FCI = run_fci!(fci_ctx)

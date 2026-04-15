@@ -16,6 +16,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.Utils
 using ..ElemCo.AbstractEC: AbstractDeterminant
+using ..ElemCo.TensorTools: rotate_eigenvectors_to_real
 
 # Export main types and functions
 export FCIContext
