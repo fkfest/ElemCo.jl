@@ -27,7 +27,7 @@ TESTS = [
 ("FCI", ["fci_rhf", "fci_uhf", "fci_rhf_st"]),
 ("CIPHI", ["ciphi_rhf", "ciphi_uhf", "ciphi_rhf_st", "ciphi_restart"]),
 ("QV-CC", ["h2o_qv-ccd"]),
-("DF", ["df_hf", "basis", "df_uhf", "df_mcscf", "levenshtein", "df3idx"]),
+("DF", ["df_hf", "basis", "df_uhf", "df_mcscf", "levenshtein", "df3idx", "localization"]),
 ("System", ["dummy"]),
 ("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc","svd_dc_ccsdt"]),

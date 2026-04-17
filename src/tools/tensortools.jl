@@ -7,6 +7,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
 using ..ElemCo.MTensorOperations
+using ..ElemCo.ALPACADecomposition
 
 export save!, load, load_all, load!, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
@@ -326,16 +327,30 @@ function detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
 end
 
 """ 
-    sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
+    sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false, max_rank::Integer = 0)
 
   Return NON-SYMMETRIC (pseudo)sqrt-inverse of a hermitian matrix using Cholesky decomposition.
   
   Starting from ``A^{-1} = A^{-1} L (A^{-1} L)^† = M M^†``
   with ``A = L L^†``.
   By solving the equation ``L^† M = 1`` (for low-rank: using QR decomposition).
+
+  If `max_rank > 0`, use LPACA decomposition with explicit rank control
+  instead of threshold-based Cholesky truncation.
+
   Return `M`.
 """
-function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
+function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false, max_rank::Integer = 0)
+  if max_rank > 0
+    result = lpaca(Hermitian(A); tol = tol, max_rank = max_rank)
+    L = result.left
+    r = size(L, 2)
+    if verbose && r < size(A, 1)
+      redund = size(A, 1) - r
+      println("$redund vectors removed using ALPACA decomposition")
+    end
+    return L' \ Matrix(I, r, r)
+  end
   CA = cholesky(Hermitian(A), RowMaximum(), check = false, tol = tol)
   if CA.rank < size(A,1)
     if verbose

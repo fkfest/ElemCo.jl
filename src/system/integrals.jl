@@ -13,6 +13,7 @@ using ..ElemCo.Libcint
 export generate_basis # from BasisSets
 export overlap!, kinetic!, nuclear!
 export overlap, kinetic, nuclear
+export dipole, dipole!
 export eri_2e4idx!, eri_2e3idx!, eri_2e2idx!
 export eri_2e4idx, eri_2e3idx, eri_2e2idx
 export n_ao4sphshell, n_ao4cartshell

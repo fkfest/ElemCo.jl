@@ -176,6 +176,9 @@ end
   ``V_{XZ}^{L} U^{iZ}_{a}``. This is an additional approximation, which reduces the scaling of the 
   most expensive steps and is useful for large systems. """
   project_voXL::Bool = false
+  """`⟨false⟩` use dense SVD for the amplitude decomposition in SVD-DC-CCSDT instead of LLAMA low-rank approximation.
+  This is useful for small systems, but becomes unfeasible for large systems. """
+  use_dense_decomposition::Bool = false
   """`⟨:combined⟩` type of space for project_voXL. Possible values are :combined, :symcombined, :triples, :full. """ 
   space4voXL::Symbol = :combined
   """`⟨0.0⟩` imaginary shift for denominator in doubles decomposition. """
@@ -234,6 +237,36 @@ end
   ignore_error::Bool = false
   """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
   keepOQVorbitals::Bool = false
+  """`⟨:adaptive⟩` pivot tolerance mode for LLAMA decomposition:
+  - `:adaptive` use LLAMA's internal adaptive `tol/sqrt(m_eff)` pivot tolerance (default)
+  - `:maxdim` use `tol/sqrt(max(m,n))` as pivot tolerance (more robust for difficult cases, e.g., ghost atoms)
+  If `ampsvd_pivotol > 0`, use that explicit value instead (overrides mode). """
+  ampsvd_pivotol_mode::Symbol = :adaptive
+  """`⟨0.0⟩` explicit pivot tolerance for LLAMA. If > 0, overrides `ampsvd_pivotol_mode`. """
+  ampsvd_pivotol::Float64 = 0.0
+  """`⟨false⟩` localize orbitals (IBO for occupied, orthogonal PAOs for virtual)
+  before amplitude decomposition in SVD-DC methods.
+  The localization rotation is applied only to the matrices entering `svd_decompose`,
+  and the resulting U vectors are transformed back to the canonical basis. """
+  localize::Bool = false
+end
+
+"""
+  Options for orbital localization.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct LocOptions
+  """`⟨true⟩` localize virtual orbitals using orthogonal PAOs (OPAO) in addition to occupied. """
+  virtual::Bool = true
+  """`⟨4⟩` Localization exponent: 2 for Pipek-Mezey, 4 for fourth-moment (default). """
+  exponent::Int = 4
+  """`⟨"ibo"⟩` Localization method: `"ibo"` (Intrinsic Bond Orbitals), `"pm"` (Pipek-Mezey with Mulliken charges), or `"boys"` (Foster-Boys). """
+  method::String = "ibo"
+  """`⟨"minao"⟩` Minimal basis set for IAO construction. """
+  minao::String = "minao"
+  """`⟨false⟩` Localize core orbitals among themselves (separately from valence). """
+  localize_core::Bool = false
 end
 
 """
@@ -504,4 +537,6 @@ end
   davidson::DavidsonOptions = DavidsonOptions()
   """ Print options ([`PrintOptions`](@ref)). """
   print::PrintOptions = PrintOptions()
+  """ Localization options ([`LocOptions`](@ref)). """
+  loc::LocOptions = LocOptions()
 end

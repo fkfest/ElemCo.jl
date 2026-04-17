@@ -191,3 +191,47 @@ function calc_1e!(out, callback::Function, bs1::BasisSet, bs2::BasisSet)
   end #threadsbuffer
   return out
 end
+
+"""
+    dipole(basis::BasisSet)
+
+Compute the AO dipole integral matrices ``\\langle \\mu | r_\\alpha | \\nu \\rangle``
+for ``\\alpha = x, y, z``.
+
+Returns a tuple `(Dx, Dy, Dz)` of nao × nao matrices.
+"""
+function dipole(basis::BasisSet)
+  nao = n_ao(basis)
+  Dx = zeros(nao, nao)
+  Dy = zeros(nao, nao)
+  Dz = zeros(nao, nao)
+  dipole!(Dx, Dy, Dz, basis)
+  return (Dx, Dy, Dz)
+end
+
+function dipole!(Dx, Dy, Dz, basis::BasisSet)
+  callback = is_cartesian(basis) ? cint1e_r_cart! : cint1e_r_sph!
+  nao4sh = Int[n_ao(ash, basis.cartesian) for ash in basis]
+  nao_max = maximum(nao4sh)
+  ao_offset = cumsum(vcat(0, nao4sh))
+  buf = zeros(Cdouble, 3 * nao_max^2)
+  for j in eachindex(nao4sh)
+    lenj = nao4sh[j]
+    joff = ao_offset[j]
+    for i in 1:j
+      leni = nao4sh[i]
+      ioff = ao_offset[i]
+      callback(buf, MVector(Cint(i-1), Cint(j-1)), basis.lib)
+      block_size = leni * lenj
+      for jj in 1:lenj, ii in 1:leni
+        idx = (jj-1)*leni + ii
+        Dx[ioff+ii, joff+jj] = buf[idx]
+        Dx[joff+jj, ioff+ii] = buf[idx]
+        Dy[ioff+ii, joff+jj] = buf[block_size + idx]
+        Dy[joff+jj, ioff+ii] = buf[block_size + idx]
+        Dz[ioff+ii, joff+jj] = buf[2*block_size + idx]
+        Dz[joff+jj, ioff+ii] = buf[2*block_size + idx]
+      end
+    end
+  end
+end

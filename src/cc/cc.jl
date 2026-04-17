@@ -3560,12 +3560,14 @@ function calc_triples_decomposition_without_triples(EC::ECInfo{Ty}, T2) where Ty
 
   # first approx for U^iX_a from doubles decomposition
   tol2 = sqrt(EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
-  UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nocc*nvirt, nocc*nvirt)), 
-                       nvirt, nocc, tol2; description="Intermediate triples")
+  Amat, R_occ, R_virt = prepare_doubles_for_decomposition(EC, T2)
+  UaiX = svd_decompose(EC, Amat, nvirt, nocc, tol2; description="Intermediate triples")
+  backtransform_svd_vectors!(UaiX, R_occ, R_virt)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX) 
-  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), 
-                       nvirt, nocc, EC.options.cc.ampsvdtol; description="Triples")
+  D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX)
+  D2mat, _, _ = prepare_doubles_for_decomposition(EC, D2; permuted=true, R_occ, R_virt)
+  UaiX = svd_decompose(EC, D2mat, nvirt, nocc, EC.options.cc.ampsvdtol; description="Triples")
+  backtransform_svd_vectors!(UaiX, R_occ, R_virt)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -3598,8 +3600,8 @@ function calc_triples_decomposition(EC::ECInfo{Ty}) where Ty
     Triples_Amplitudes[:,k,:,i,:,j] = permutedims(T3[:,:,:,ijk],(3,1,2))
   end
   close(t3file)
-  UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), 
-                      nvirt, nocc, sqrt(EC.options.cc.ampsvdtol); description="Triples")
+  Amat = reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt))
+  UaiX = svd_decompose(EC, Amat, nvirt, nocc, sqrt(EC.options.cc.ampsvdtol); description="Triples")
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -3930,8 +3932,9 @@ function calc_space4project_voXL(EC::ECInfo{T}, T2) where T
     end
     # decompose ``\tilde T_2``
     tol2 = sqrt(EC.options.cc.ampsvdtol)
-    UvoY = svd_decompose(reshape(tT2, (nocc*nvirt, nocc*nvirt)), 
-                      nvirt, nocc, tol2; description="Contravariant doubles")
+    tT2mat, R_occ, R_virt = prepare_doubles_for_decomposition(EC, tT2; permuted=true)
+    UvoY = svd_decompose(EC, tT2mat, nvirt, nocc, tol2; description="Contravariant doubles")
+    backtransform_svd_vectors!(UvoY, R_occ, R_virt)
     # overlap of spaces
     @mtensor S_XY[X,Y] := UvoX[a,i,X] * UvoY[a,i,Y]
     nX, nY = size(S_XY)
@@ -3939,7 +3942,7 @@ function calc_space4project_voXL(EC::ECInfo{T}, T2) where T
     S = Matrix{T}(I, nX+nY, nX+nY) 
     S[1:nX,nX+1:end] = S_XY
     S[nX+1:end,1:nX] = S_XY'
-    TU_ZbX, Sigma = svd_decompose(S, tol2*tol2; description="Combined")
+    TU_ZbX, Sigma = svd_decompose(S, tol2*tol2; description="Combined", method=:dense)
     # display(Sigma)
     TU_ZbX ./= sqrt.(Sigma')
     UvoZ = Array{T}(undef, nvirt, nocc, nX+nY)
