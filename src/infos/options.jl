@@ -239,18 +239,18 @@ end
   ignore_error::Bool = false
   """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
   keepOQVorbitals::Bool = false
-  """`⟨:adaptive⟩` pivot tolerance mode for LLAMA decomposition:
+  """`⟨:maxdim⟩` pivot tolerance mode for LLAMA decomposition:
   - `:adaptive` use LLAMA's internal adaptive `tol/sqrt(m_eff)` pivot tolerance (default)
   - `:maxdim` use `tol/sqrt(max(m,n))` as pivot tolerance (more robust for difficult cases, e.g., ghost atoms)
   If `ampsvd_pivotol > 0`, use that explicit value instead (overrides mode). """
-  ampsvd_pivotol_mode::Symbol = :adaptive
+  ampsvd_pivotol_mode::Symbol = :maxdim
   """`⟨0.0⟩` explicit pivot tolerance for LLAMA. If > 0, overrides `ampsvd_pivotol_mode`. """
   ampsvd_pivotol::Float64 = 0.0
-  """`⟨false⟩` localize orbitals (IBO for occupied, orthogonal PAOs for virtual)
+  """`⟨true⟩` localize orbitals (IBO for occupied, orthogonal PAOs for virtual)
   before amplitude decomposition in SVD-DC methods.
   The localization rotation is applied only to the matrices entering `svd_decompose`,
   and the resulting U vectors are transformed back to the canonical basis. """
-  localize::Bool = false
+  localize::Bool = true
 end
 
 """

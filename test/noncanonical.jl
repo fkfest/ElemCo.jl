@@ -2,10 +2,10 @@ using ElemCo
 
 @testset "Non-canonical (T) Test" begin
 epsilon    =  1.e-6
-ECCSD_T_test = -76.239039404821
-EΛCCSD_T_test = -76.238991646372
-EUCCSD_T_test = -76.080165365237
-EΛUCCSD_T_test = -76.080094112897
+ECCSD_T_test = -76.238992574422
+EΛCCSD_T_test = -76.238950007049
+EUCCSD_T_test = -76.080208726356
+EΛUCCSD_T_test = -76.080133760103
 
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067

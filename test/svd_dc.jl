@@ -3,15 +3,15 @@ using ElemCo
 @testset "SVD-DCSD Closed-Shell Test" begin
 epsilon    =  1.e-6
 EHF_test   =      -76.02145513971418
-ESVDDCSD_test =  -0.220422025511 + EHF_test
-ESVDDCD_test =   -76.240864671122
-ESVDDCSD_px_test =-0.220836904556 + EHF_test
-ESVDDCSD_ft_test =-0.220523567255 + EHF_test
-ESVDDCSD_ft0_test =-0.220504680811 + EHF_test
-ESVDDCSD_ft1_test =-0.220587552033 + EHF_test
-ESVDDCSD_ft2_test =-0.220389510164 + EHF_test
-ESVDDCSD_ft3_test =-0.220515977661 + EHF_test
-ESVDDCSD_fd_test =-0.220051799461 + EHF_test
+ESVDDCSD_test =  -0.220383027388 + EHF_test
+ESVDDCD_test =   -76.240828390449
+ESVDDCSD_px_test =-0.220822649009 + EHF_test
+ESVDDCSD_ft_test =-0.220499793252 + EHF_test
+ESVDDCSD_ft0_test =-0.220576957006 + EHF_test
+ESVDDCSD_ft1_test =-0.220583618431 + EHF_test
+ESVDDCSD_ft2_test =-0.220448607893 + EHF_test
+ESVDDCSD_ft3_test =-0.220504552889 + EHF_test
+ESVDDCSD_fd_test =-0.220042607267 + EHF_test
 
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067

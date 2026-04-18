@@ -341,7 +341,7 @@ function _prepare_doubles_impl(T2::AbstractArray, R_occ::AbstractMatrix, R_virt:
     @mtensor T2a[a,b,i,j] := R_virt[a,a2] * T2[a2,b,i,j]
     @mtensor T2b[a,b,i,j] := R_virt[b,b2] * T2a[a,b2,i,j]
     @mtensor T2a[a,b,i,j] = R_occ[i,i2] * T2b[a,b,i2,j]
-    @mtensor T2b[a,i,b,j] = R_occ[j,j2] * T2a[a,b,i,j2]
+    @mtensor T2b[a,i,b,j] := R_occ[j,j2] * T2a[a,b,i,j2]
   end
   nv, no = size(T2b, 1), size(T2b, 2)
   return reshape(T2b, (nv*no, nv*no))
