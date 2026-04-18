@@ -120,6 +120,8 @@ end
   i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
   At the moment, it works only for BO-HF."""
   pseudo::Bool = false
+  """`⟨""⟩` Minimal basis set for SAD guess. If empty, use `"minao"` type from basis Dict, or `"minao"` basis as fallback. """
+  minao::String = ""
 end
   
 """ 
@@ -259,12 +261,12 @@ end
 @kwdef mutable struct LocOptions
   """`⟨true⟩` localize virtual orbitals using orthogonal PAOs (OPAO) in addition to occupied. """
   virtual::Bool = true
-  """`⟨4⟩` Localization exponent: 2 for Pipek-Mezey, 4 for fourth-moment (default). """
-  exponent::Int = 4
+  """`⟨0⟩` Localization exponent: 0 for automatic (4 for IBO, 2 for PM), or set explicitly. """
+  exponent::Int = 0
   """`⟨"ibo"⟩` Localization method: `"ibo"` (Intrinsic Bond Orbitals), `"pm"` (Pipek-Mezey with Mulliken charges), or `"boys"` (Foster-Boys). """
   method::String = "ibo"
-  """`⟨"minao"⟩` Minimal basis set for IAO construction. """
-  minao::String = "minao"
+  """`⟨""⟩` Minimal basis set for IAO construction. If empty, use `"minao"` type from basis Dict, or `"minao"` basis as fallback. """
+  minao::String = ""
   """`⟨false⟩` Localize core orbitals among themselves (separately from valence). """
   localize_core::Bool = false
 end

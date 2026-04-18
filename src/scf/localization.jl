@@ -27,7 +27,8 @@ export compute_localization_rotations, localize_orbitals
 Compute Intrinsic Atomic Orbitals (IAOs) following Knizia, JCTC 2013, 9, 4834.
 
 The IAOs are constructed from a minimal basis and the occupied MOs.
-The minimal basis is determined by `EC.options.loc.minao` (default: `"minao"`).
+The minimal basis is determined by `EC.options.loc.minao`. If empty (default),
+the `"minao"` type from the basis Dict is used; otherwise `"minao"` as fallback.
 All nmin IAOs are returned (not just nocc), ensuring each atom contributes
 IAOs that can capture bonding character in the IBO charge analysis.
 Ghost atom minimal basis functions are excluded.
@@ -39,8 +40,7 @@ Returns `(C_iao, iao_atoms, natom)` where:
 """
 function compute_iaos(EC::ECInfo, cMO_occ::AbstractMatrix{T}) where T
   bao = generate_basis(EC, "ao")
-  minao_basis = EC.options.loc.minao
-  bminao = generate_basis(EC, basisset=minao_basis)
+  bminao = generate_minao_basis(EC, EC.options.loc.minao)
 
   S = overlap(bao)             # nAO × nAO
   S12_full = overlap(bminao, bao)   # nmin_full × nAO
@@ -183,10 +183,10 @@ function _jacobi_localization!(
           qAi = charges[A, i]
           qAj = charges[A, j]
           qAij = compute_qAij(i, j, A)
-          qAi_pm1 = qAi > 0 ? qAi^(p - 1) : zero(real(T))
-          qAj_pm1 = qAj > 0 ? qAj^(p - 1) : zero(real(T))
-          qAi_pm2 = qAi > 0 ? qAi^(p - 2) : zero(real(T))
-          qAj_pm2 = qAj > 0 ? qAj^(p - 2) : zero(real(T))
+          qAi_pm1 = qAi^(p - 1)
+          qAj_pm1 = qAj^(p - 1)
+          qAi_pm2 = qAi^(p - 2)
+          qAj_pm2 = qAj^(p - 2)
           grad += 2 * p * qAij * (qAi_pm1 - qAj_pm1)
           hess += p * (4 * (p - 1) * qAij^2 * (qAi_pm2 + qAj_pm2) -
                        2 * (qAi - qAj) * (qAi_pm1 - qAj_pm1))
@@ -236,6 +236,84 @@ function _jacobi_localization!(
 end
 
 """
+    _ao_compactness_sweep!(M, R, orbs; maxiter=50, tol=1e-10)
+
+Maximize AO compactness ``\\sum_i \\sum_\\mu |M_{\\mu i}|^4`` by 2×2 Jacobi rotations
+among the orbital indices in `orbs`.
+
+Both `M` (nbas × norb representation matrix) and `R` (norb × norb rotation accumulator)
+are modified in-place. This can be used as a starting guess (pre-localization)
+or as a post-convergence refinement to break degeneracies.
+"""
+function _ao_compactness_sweep!(M::AbstractMatrix{T}, R::AbstractMatrix{T},
+                                orbs::AbstractVector{Int};
+                                maxiter::Int=50, tol::Float64=1e-10) where T
+  nbas = size(M, 1)
+  norbs = length(orbs)
+  norbs <= 1 && return nothing
+  norb_full = size(R, 1)
+  for _sweep in 1:maxiter
+    max_rot = zero(real(T))
+    for gi in 1:norbs, gj in gi+1:norbs
+      ii = orbs[gi]
+      jj = orbs[gj]
+      PP = zero(real(T))
+      QQ = zero(real(T))
+      PQ = zero(real(T))
+      for mu in 1:nbas
+        p_mu = (abs2(M[mu, ii]) - abs2(M[mu, jj])) / 2
+        w_mu = real(conj(M[mu, ii]) * M[mu, jj])
+        PP += p_mu^2
+        QQ += w_mu^2
+        PQ += p_mu * w_mu
+      end
+      angle = atan(2 * PQ, PP - QQ) / 4
+      abs(angle) < 1e-14 && continue
+      max_rot = max(max_rot, abs(angle))
+      c = cos(angle)
+      s = sin(angle)
+      for mu in 1:nbas
+        mi = M[mu, ii]; mj = M[mu, jj]
+        M[mu, ii] = c * mi + s * mj
+        M[mu, jj] = -s * mi + c * mj
+      end
+      for k in 1:norb_full
+        ri = R[k, ii]; rj = R[k, jj]
+        R[k, ii] = c * ri + s * rj
+        R[k, jj] = -s * ri + c * rj
+      end
+    end
+    max_rot < tol && break
+  end
+  return nothing
+end
+
+"""
+    _find_degenerate_groups(charges::AbstractMatrix, nocc::Int; charge_tol=1e-6)
+
+Identify groups of orbitals with identical atom-resolved charges (degenerate under localization).
+Returns a vector of groups, where each group is a vector of orbital indices.
+"""
+function _find_degenerate_groups(charges::AbstractMatrix, nocc::Int; charge_tol::Float64=1e-6)
+  groups = Vector{Vector{Int}}()
+  assigned = falses(nocc)
+  for i in 1:nocc
+    assigned[i] && continue
+    group = [i]
+    for j in i+1:nocc
+      assigned[j] && continue
+      if maximum(abs.(charges[:, i] .- charges[:, j])) < charge_tol
+        push!(group, j)
+        assigned[j] = true
+      end
+    end
+    assigned[i] = true
+    length(group) > 1 && push!(groups, group)
+  end
+  return groups
+end
+
+"""
     localize_ibo(cMO_occ::AbstractMatrix, S::AbstractMatrix, C_iao::AbstractMatrix, 
                  iao_atoms::Vector{Int}, natom::Int; exponent=4, maxiter=500, tol=1e-10)
 
@@ -265,6 +343,9 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
     println("IBO localization: only $natom unique atom(s), returning identity rotation")
     return R
   end
+
+  # Pre-localization: AO compactness as a starting guess for faster convergence
+  _ao_compactness_sweep!(Q, R, collect(1:nocc))
 
   # Compute partial charges: q_A^i = Σ_{μ∈A} |Q[μ,i]|²  (skip ghost atoms with iao_atoms[mu]==0)
   charges = zeros(real(T), natom, nocc)
@@ -309,73 +390,18 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
     compute_qAij, rotate_workspace!, update_charges!;
     exponent, maxiter, tol, method_name="IBO")
 
-  # Post-convergence refinement: break degeneracy by maximizing AO compactness.
-  # For orbital pairs with identical atom-resolved charges (e.g., lone pairs on the
-  # same atom), the IBO functional is exactly flat and the rotation angle is arbitrary.
-  # We refine by maximizing ∑_i ∑_μ |Q_{μi}|⁴ within each degenerate subgroup,
-  # which prefers orbitals localized on the fewest IAOs (e.g., σ/π separation).
+  # Post-convergence refinement: break degeneracy by maximizing AO compactness
+  # within degenerate subgroups (orbital pairs with identical atom-resolved charges).
   fill!(charges, zero(real(T)))
   for i in 1:nocc, mu in 1:niao
     A = iao_atoms[mu]; A == 0 && continue
     charges[A, i] += abs2(Q[mu, i])
   end
 
-  charge_tol = 1e-6
-  groups = Vector{Vector{Int}}()
-  assigned = falses(nocc)
-  for i in 1:nocc
-    assigned[i] && continue
-    group = [i]
-    for j in i+1:nocc
-      assigned[j] && continue
-      if maximum(abs.(charges[:, i] .- charges[:, j])) < charge_tol
-        push!(group, j)
-        assigned[j] = true
-      end
-    end
-    assigned[i] = true
-    length(group) > 1 && push!(groups, group)
-  end
-
+  groups = _find_degenerate_groups(charges, nocc)
   if !isempty(groups)
     for group in groups
-      ng = length(group)
-      for _sweep in 1:50
-        max_rot = zero(real(T))
-        for gi in 1:ng, gj in gi+1:ng
-          ii = group[gi]
-          jj = group[gj]
-          # Compute optimal angle for AO compactness: maximize ∑_μ |Q_μi|^4 + |Q_μj|^4
-          PP = zero(real(T))
-          QQ = zero(real(T))
-          PQ = zero(real(T))
-          for mu in 1:niao
-            p_mu = (abs2(Q[mu, ii]) - abs2(Q[mu, jj])) / 2
-            w_mu = real(conj(Q[mu, ii]) * Q[mu, jj])
-            PP += p_mu^2
-            QQ += w_mu^2
-            PQ += p_mu * w_mu
-          end
-          angle = atan(2 * PQ, PP - QQ) / 4
-          abs(angle) < 1e-14 && continue
-          max_rot = max(max_rot, abs(angle))
-          c = cos(angle)
-          s = sin(angle)
-          for mu in 1:niao
-            qi = Q[mu, ii]
-            qj = Q[mu, jj]
-            Q[mu, ii] = c * qi + s * qj
-            Q[mu, jj] = -s * qi + c * qj
-          end
-          for k in 1:nocc
-            ri = R[k, ii]
-            rj = R[k, jj]
-            R[k, ii] = c * ri + s * rj
-            R[k, jj] = -s * ri + c * rj
-          end
-        end
-        max_rot < 1e-10 && break
-      end
+      _ao_compactness_sweep!(Q, R, group)
     end
     println("IBO: refined $(length(groups)) degenerate group(s) by AO compactness")
   end
@@ -414,7 +440,6 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
 
   # Work with C (MO coefficients) and P = S*C (overlap-weighted coefficients)
   C = copy(cMO_occ)  # nAO × nocc
-  P = S * C           # nAO × nocc
 
   # Current rotation matrix (accumulates Jacobi rotations)
   R = Matrix{T}(I, nocc, nocc)
@@ -423,6 +448,12 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
     println("PM localization: only $natom unique atom(s), returning identity rotation")
     return R
   end
+
+  # Pre-localization: AO compactness on overlap-weighted coefficients
+  P_pre = S * C
+  _ao_compactness_sweep!(P_pre, R, collect(1:nocc))
+  C = cMO_occ * R  # Apply pre-localization rotation
+  P = S * C
 
   # Compute Mulliken partial charges: q_A^i = Σ_{μ∈A} Re(P[μ,i] * C̄[μ,i])
   charges = zeros(real(T), natom, nocc)
@@ -470,6 +501,20 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
     compute_qAij, rotate_workspace!, update_charges!;
     exponent, maxiter, tol, method_name="PM")
 
+  # Post-convergence refinement: break degeneracy by AO compactness
+  fill!(charges, zero(real(T)))
+  for i in 1:nocc, mu in 1:nao
+    A = ao_atoms[mu]; A == 0 && continue
+    charges[A, i] += real(P[mu, i] * conj(C[mu, i]))
+  end
+  groups = _find_degenerate_groups(charges, nocc)
+  if !isempty(groups)
+    for group in groups
+      _ao_compactness_sweep!(P, R, group)
+    end
+    println("PM: refined $(length(groups)) degenerate group(s) by AO compactness")
+  end
+
   return R
 end
 
@@ -500,13 +545,18 @@ function localize_boys(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
   nocc = size(cMO_occ, 2)
   nao = size(cMO_occ, 1)
 
+  # Current rotation matrix (accumulates Jacobi rotations)
+  R = Matrix{T}(I, nocc, nocc)
+
+  # Pre-localization: AO compactness on overlap-weighted coefficients
+  P_pre = S * copy(cMO_occ)
+  _ao_compactness_sweep!(P_pre, R, collect(1:nocc))
+
   # Work with C (MO coefficients) and DC_α = D_α * C (dipole-weighted coefficients)
-  C = copy(cMO_occ)
+  C = cMO_occ * R  # Apply pre-localization rotation
   DCx = Dx * C
   DCy = Dy * C
   DCz = Dz * C
-
-  R = Matrix{T}(I, nocc, nocc)
 
   # Treat x, y, z as 3 "atoms" for the Jacobi framework
   natom = 3
@@ -553,6 +603,22 @@ function localize_boys(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
   _jacobi_localization!(R, charges, natom, nocc,
     compute_qAij, rotate_workspace!, update_charges!;
     exponent=2, maxiter, tol, method_name="Boys")
+
+  # Post-convergence refinement: break degeneracy by AO compactness
+  # (orbitals with identical dipole moment vectors)
+  for i in 1:nocc
+    charges[1, i] = real(dot(view(C, :, i), view(DCx, :, i)))
+    charges[2, i] = real(dot(view(C, :, i), view(DCy, :, i)))
+    charges[3, i] = real(dot(view(C, :, i), view(DCz, :, i)))
+  end
+  groups = _find_degenerate_groups(charges, nocc)
+  if !isempty(groups)
+    P_post = S * C
+    for group in groups
+      _ao_compactness_sweep!(P_post, R, group)
+    end
+    println("Boys: refined $(length(groups)) degenerate group(s) by AO compactness")
+  end
 
   return R
 end
@@ -664,7 +730,7 @@ Options are read from `EC.options.loc`:
 - `method::String`: `"ibo"` (default), `"pm"` (Pipek-Mezey with Mulliken charges),
   or `"boys"` (Foster-Boys, maximizes sum of squared orbital dipole moments).
 - `virtual::Bool`: if `true` (default), also localize virtual orbitals via OPAO.
-- `exponent::Int`: localization exponent, 2 for Pipek-Mezey, 4 for fourth-moment (default).
+- `exponent::Int`: localization exponent (0=auto: 4 for IBO, 2 for PM; Boys ignores exponent).
 
 # Examples
 ```julia
@@ -680,19 +746,27 @@ Options are read from `EC.options.loc`:
 """
 function localize_orbitals(EC::ECInfo)
   localize_virtual = EC.options.loc.virtual
-  exponent = EC.options.loc.exponent
   method = lowercase(EC.options.loc.method)
+  if method ∉ ("ibo", "pm", "boys")
+    error("Unknown localization method \"$method\". Valid methods: \"ibo\", \"pm\", \"boys\".")
+  end
   use_pm = method == "pm"
   use_boys = method == "boys"
   method_name = use_boys ? "Boys" : use_pm ? "PM" : "IBO"
+  # Auto-select exponent: 2 for PM, 4 for IBO (Boys does not use exponent)
+  exponent = EC.options.loc.exponent
+  if exponent == 0
+    exponent = use_pm ? 2 : 4
+  end
 
-  println("Localizing orbitals ($method_name" * (localize_virtual ? "+OPAO" : "") * ", exponent=$exponent)...")
+  exp_str = use_boys ? "" : ", exponent=$exponent"
+  println("Localizing orbitals ($method_name" * (localize_virtual ? "+OPAO" : "") * "$exp_str)...")
 
   # Fetch current orbitals, energies, and occupations
   use_start = EC.options.wf.start != ""
   cMO, type, basis = fetch_orbitals(EC; start=use_start)
-  energies = fetch_orbital_energies(EC)
-  occupations = fetch_orbital_occupations(EC)
+  energies = fetch_orbital_energies(EC; start=use_start)
+  occupations = fetch_orbital_occupations(EC; start=use_start)
   has_basis = !isempty(basis)
 
   if !is_restricted(cMO)
