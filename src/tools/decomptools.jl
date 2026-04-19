@@ -160,14 +160,14 @@ function _compute_pivotol(Amat, tol, pivotol, pivotol_mode)
 end
 
 """
-    svd_decompose_llama(Amat, nvirt, nocc, tol=1e-6; pivotol=NaN, pivotol_mode=:maxdim, verbose=true, description="")
+    svd_decompose_llama(Amat, nvirt, nocc, tol=1e-6; pivotol=0.0, pivotol_mode=:maxdim, verbose=true, description="")
 
   SVD-decompose `A[ai,ξ]` as ``U^{iX}_a Σ_X δ_{XY} V^{Y}_{ξ}``
   using LLAMA low-rank approximation.
   Return ``U^{iX}_a`` as `U[a,i,X]` for ``Σ_X`` > `tol`.
   If `pivotol > 0`, it overrides LLAMA's pivot tolerance.
-  Otherwise, `pivotol_mode` controls the computation:
-  `:maxdim` uses `tol/sqrt(max(m,n))`, `:adaptive` uses LLAMA's internal logic.
+  Otherwise, `pivotol_mode` controls the computed pivot tolerance:
+  `:maxdim` (default) uses `tol/sqrt(max(m,n))`, `:adaptive` delegates to LLAMA's internal logic.
 """
 function svd_decompose_llama(Amat, nvirt, nocc, tol=1e-6; pivotol=0.0, pivotol_mode=:maxdim,
                              verbose=true, description="")
@@ -183,13 +183,14 @@ function svd_decompose_llama(Amat, nvirt, nocc, tol=1e-6; pivotol=0.0, pivotol_m
 end
 
 """
-    svd_decompose_llama(Amat, tol=1e-6; pivotol=NaN, pivotol_mode=:maxdim, verbose=true, description="")
+    svd_decompose_llama(Amat, tol=1e-6; pivotol=0.0, pivotol_mode=:maxdim, verbose=true, description="")
 
   SVD-decompose `A[ξ,ξ']` as ``U^{X}_{ξ} Σ_X δ_{XY} V^{Y}_{ξ'}``
   using LLAMA low-rank approximation.
   Return ``U^{X}_{ξ}`` as `U[ξ,X]` and ``Σ_X`` for ``Σ_X`` > `tol`.
   If `pivotol > 0`, it overrides LLAMA's pivot tolerance.
-  Otherwise, `pivotol_mode` controls the computation.
+  Otherwise, `pivotol_mode` controls the computed pivot tolerance:
+  `:maxdim` (default) uses `tol/sqrt(max(m,n))`, `:adaptive` delegates to LLAMA's internal logic.
 """
 function svd_decompose_llama(Amat, tol=1e-6; pivotol=0.0, pivotol_mode=:maxdim, verbose=true, description="")
   effective_pivotol = _compute_pivotol(Amat, tol, pivotol, pivotol_mode)
@@ -344,7 +345,8 @@ function _prepare_doubles_impl(T2::AbstractArray, R_occ::AbstractMatrix, R_virt:
     @mtensor T2b[a,i,b,j] := R_occ[j,j2] * T2a[a,b,i,j2]
   end
   nv, no = size(T2b, 1), size(T2b, 2)
-  return reshape(T2b, (nv*no, nv*no))
+  T2_flat = reshape(T2b, (nv*no, nv*no))
+  return T2_flat
 end
 
 """

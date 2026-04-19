@@ -167,11 +167,10 @@ end
   """
   function subspace_overlap(EC, molpro_orbs_file, molpro_overlap_file, nocc)
     C_molpro = ElemCo.Interfaces.import_matrix(EC, molpro_orbs_file)
-    bao = ElemCo.BasisSets.generate_basis(EC, "ao")
-    S = ElemCo.Integrals.overlap(bao)
+    S_ref = ElemCo.Interfaces.import_matrix(EC, molpro_overlap_file)
     cMO, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
     C_elemco = cMO[1]
-    S_cross = C_elemco[:, 1:nocc]' * S * C_molpro[:, 1:nocc]
+    S_cross = C_elemco[:, 1:nocc]' * S_ref * C_molpro[:, 1:nocc]
     sv = svdvals(S_cross)
     # Per-orbital: greedy matching of |<i|j>|
     per_orb = Float64[]
@@ -254,11 +253,10 @@ end
   """
   function subspace_overlap_boys(EC, molpro_orbs_file, molpro_overlap_file, nocc)
     C_molpro = ElemCo.Interfaces.import_matrix(EC, molpro_orbs_file)
-    bao = ElemCo.BasisSets.generate_basis(EC, "ao")
-    S = ElemCo.Integrals.overlap(bao)
+    S_ref = ElemCo.Interfaces.import_matrix(EC, molpro_overlap_file)
     cMO, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
     C_elemco = cMO[1]
-    S_cross = C_elemco[:, 1:nocc]' * S * C_molpro[:, 1:nocc]
+    S_cross = C_elemco[:, 1:nocc]' * S_ref * C_molpro[:, 1:nocc]
     sv = svdvals(S_cross)
     per_orb = Float64[]
     for i in 1:nocc

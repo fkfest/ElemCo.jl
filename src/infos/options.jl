@@ -240,7 +240,7 @@ end
   """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
   keepOQVorbitals::Bool = false
   """`⟨:maxdim⟩` pivot tolerance mode for LLAMA decomposition:
-  - `:adaptive` use LLAMA's internal adaptive `tol/sqrt(m_eff)` pivot tolerance (default)
+  - `:adaptive` use LLAMA's internal adaptive `tol/sqrt(m_eff)` pivot tolerance
   - `:maxdim` use `tol/sqrt(max(m,n))` as pivot tolerance (more robust for difficult cases, e.g., ghost atoms)
   If `ampsvd_pivotol > 0`, use that explicit value instead (overrides mode). """
   ampsvd_pivotol_mode::Symbol = :maxdim

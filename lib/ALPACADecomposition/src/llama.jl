@@ -648,6 +648,13 @@ function llama(matrix::AbstractALPACAMatrix{T};
   sv = RT[]
   nk = 0
 
+  # Equivalence tolerances for stable pivot selection: among candidates within
+  # this tolerance of each other, prefer the lower index (original order).
+  # Row residuals are squared norms → use tol/10 (tol = tol_rt² is the squared scale).
+  # Column values are absolute values → use tol_rt/10 (unsquared scale).
+  equiv_tol_row = tol / 10
+  equiv_tol_col = tol_rt / 10
+
   # ── Outer loop: SVD-corrected residual from accessed rows ──
   max_outer = 10
   rank_at_start = 0
@@ -656,11 +663,11 @@ function llama(matrix::AbstractALPACAMatrix{T};
   rank_at_start = rank
   needs_recompute = false  # set true after each Gram update, false after recomputation
   for iter in 1:m
-    # ── Select row: argmax residual ──
+    # ── Select row: argmax residual (stable: prefer lower index on ties) ──
     max_res = zero(RT)
     best_row = 0
     @inbounds for i in 1:m
-      if !is_row_pivot[i] && residual[i] > max_res
+      if !is_row_pivot[i] && residual[i] > max_res + equiv_tol_row
         max_res = residual[i]
         best_row = i
       end
@@ -678,13 +685,13 @@ function llama(matrix::AbstractALPACAMatrix{T};
       mul!(rbuf, Rv, cv, -one(T), one(T))
     end
 
-    # ── Select column: argmax |deflated_row| ──
+    # ── Select column: argmax |deflated_row| (stable: prefer lower index on ties) ──
     best_col = 0
     best_val = zero(RT)
     @inbounds for j in 1:n
       if !is_col_pivot[j]
         v = abs(rbuf[j])
-        if v > best_val
+        if v > best_val + equiv_tol_col
           best_val = v
           best_col = j
         end

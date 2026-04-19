@@ -432,7 +432,7 @@ residual, which helps when the latest column has small entries
 
 Returns `(0, 0)` when no pivots have been stored yet.
 """
-function _aca_candidate_symmetric(cache::ALPACACache{T,R}, n::Int) where {T,R}
+function _aca_candidate_symmetric(cache::ALPACACache{T,R}, n::Int, equiv_tol::Real=zero(R)) where {T,R}
   k = cache.n_cols
   k == 0 && return (0, zero(R))
 
@@ -446,7 +446,7 @@ function _aca_candidate_symmetric(cache::ALPACACache{T,R}, n::Int) where {T,R}
     if !cache.is_pivot[p]
       v = abs(last_col[p])
       mag = v * abs_dk
-      if mag > best_mag
+      if mag > best_mag + equiv_tol
         best_mag = mag
         best_idx = p
       end
@@ -461,7 +461,7 @@ function _aca_candidate_symmetric(cache::ALPACACache{T,R}, n::Int) where {T,R}
       if !cache.is_pivot[p]
         v = abs(prev_col[p])
         mag = v * abs_dk1
-        if mag > best_mag
+        if mag > best_mag + equiv_tol
           best_idx = p
           best_mag = mag
         end
@@ -480,7 +480,7 @@ returning its index and estimated residual magnitude (`|entry| * |d_k|`).
 
 Returns `(0, 0)` when no pivots have been stored yet.
 """
-function _aca_next_col(cache::ALPACACache{T,R,:general}, ncols::Int) where {T,R}
+function _aca_next_col(cache::ALPACACache{T,R,:general}, ncols::Int, equiv_tol::Real=zero(R)) where {T,R}
   k = cache.n_cols
   k == 0 && return (0, zero(R))
 
@@ -492,7 +492,7 @@ function _aca_next_col(cache::ALPACACache{T,R,:general}, ncols::Int) where {T,R}
     if !cache.is_pivot[j]
       v = abs(last_row[j])
       mag = v * abs_dk
-      if mag > best_mag
+      if mag > best_mag + equiv_tol
         best_mag = mag
         best_col = j
       end
@@ -510,13 +510,13 @@ to find the best row partner.
 
 Returns `(0, 0)` if all rows are already pivoted.
 """
-function _aca_next_row(cache::ALPACACache{T}, m::Int) where T
+function _aca_next_row(cache::ALPACACache{T}, m::Int, equiv_tol::Real=zero(real(T))) where T
   best_row = 0
   best_val = zero(real(T))
   @inbounds for i in 1:m
     if !cache.is_row_pivot[i]
       v = abs(cache.cbuf[i])
-      if v > best_val
+      if v > best_val + equiv_tol
         best_val = v
         best_row = i
       end
@@ -533,6 +533,10 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
   tol = resolve_pivotol(options, n)
   tol2 = abs2(tol)
   max_rank = options.max_rank
+  # Equivalence tolerance for stable pivot selection: among candidates within
+  # this tolerance of each other, prefer the lower index (original order).
+  # Use resolved pivotol scale since all comparisons are against tol or tol2.
+  equiv_tol = R(tol / 10)
 
   # Initialize principal values
   init_principal_values!(cache, matrix, descriptor)
@@ -543,7 +547,7 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
     k = cache.n_cols  # number of pivots so far
 
     # ── Candidate selection: principal first, ACA as fallback ──
-    prin_best_slot = _argmax_principal(cache)
+    prin_best_slot = _argmax_principal(cache, equiv_tol)
     prin_magnitude = prin_best_slot > 0 ?
       abs(cache.principal_values[prin_best_slot]) : zero(R)
 
@@ -556,7 +560,7 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
       from_principal_diagonal = (prin_i == next_j)
     else
       # Fall back to ACA: argmax |residual| in most recent stored column(s)
-      aca_best_idx, aca_magnitude = _aca_candidate_symmetric(cache, n)
+      aca_best_idx, aca_magnitude = _aca_candidate_symmetric(cache, n, equiv_tol)
       if aca_best_idx > 0 && aca_magnitude >= tol
         next_j = aca_best_idx
       else
@@ -595,7 +599,7 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
         p == next_j && continue
         cache.is_pivot[p] && continue
         v = abs(cache.cbuf[p])
-        if v > offdiag_val
+        if v > offdiag_val + equiv_tol
           offdiag_val = v
           offdiag_idx = p
         end
@@ -651,11 +655,14 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
                                 matrix::AbstractALPACAMatrix,
                                 options::ALPACAOptions,
                                 descriptor::AbstractPrincipalDescriptor) where T
+  R = real(T)
   m = length(cache.cbuf)       # number of rows in the matrix
   ncols = length(cache.rbuf)   # number of columns in the matrix
   tol = resolve_pivotol(options, m)
   tol2 = abs2(tol)
   max_rank = options.max_rank
+  # Equivalence tolerance for stable pivot selection: use resolved pivotol scale
+  equiv_tol = R(tol / 10)
 
   # Initialize principal values
   init_principal_values!(cache, matrix, descriptor)
@@ -666,9 +673,9 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
     k = cache.n_cols
 
     # ── Principal proposal ──
-    prin_slot = _argmax_principal(cache)
+    prin_slot = _argmax_principal(cache, equiv_tol)
     prin_magnitude = prin_slot > 0 ?
-      abs(cache.principal_values[prin_slot]) : zero(real(T))
+      abs(cache.principal_values[prin_slot]) : zero(R)
 
     local next_i::Int, next_j::Int
 
@@ -690,7 +697,7 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
     end
 
     # ── ACA fallback: argmax of last stored row → next column ──
-    aca_col, _ = _aca_next_col(cache, ncols)
+    aca_col, _ = _aca_next_col(cache, ncols, equiv_tol)
 
     if aca_col > 0 && !cache.is_pivot[aca_col]
       # ACA: maxabs of last row gave us a column; fetch+deflate it,
@@ -701,7 +708,7 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
       fetch_and_deflate_col_general!(cache, matrix, next_j)
 
       # Find best unused row from the deflated column
-      next_i, best_i_val = _aca_next_row(cache, m)
+      next_i, best_i_val = _aca_next_row(cache, m, equiv_tol)
       if next_i == 0 || best_i_val < tol
         break
       end
@@ -730,7 +737,7 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
 
       fetch_and_deflate_col_general!(cache, matrix, cold_j)
 
-      cold_i, cold_val = _aca_next_row(cache, m)
+      cold_i, cold_val = _aca_next_row(cache, m, equiv_tol)
       if cold_i == 0 || cold_val < tol
         break
       end
@@ -812,14 +819,14 @@ For `:general` caches, checks `is_row_pivot` for the first index
 and `is_pivot` for the second.  For symmetric-like caches, checks
 `is_pivot` for both.
 """
-function _argmax_principal(cache::ALPACACache{T,R,:general}) where {T,R}
+function _argmax_principal(cache::ALPACACache{T,R,:general}, equiv_tol::Real=zero(R)) where {T,R}
   best_slot = 0
   best_val = zero(real(T))
   @inbounds for p in eachindex(cache.principal_values)
     a, b = cache.principal_pairs[p]
     (cache.is_row_pivot[a] || cache.is_pivot[b]) && continue
     v = abs(cache.principal_values[p])
-    if v > best_val
+    if v > best_val + equiv_tol
       best_val = v
       best_slot = p
     end
@@ -827,14 +834,14 @@ function _argmax_principal(cache::ALPACACache{T,R,:general}) where {T,R}
   return best_slot
 end
 
-function _argmax_principal(cache::ALPACACache{T}) where T
+function _argmax_principal(cache::ALPACACache{T}, equiv_tol::Real=zero(real(T))) where T
   best_slot = 0
   best_val = zero(real(T))
   @inbounds for p in eachindex(cache.principal_values)
     a, b = cache.principal_pairs[p]
     (cache.is_pivot[a] || cache.is_pivot[b]) && continue
     v = abs(cache.principal_values[p])
-    if v > best_val
+    if v > best_val + equiv_tol
       best_val = v
       best_slot = p
     end
