@@ -8,17 +8,17 @@ EDC_CCSDT_useT3_test = -0.330039669331 + EHF_test
 EDC_CCSDT_test = -0.330015957345 + EHF_test
 EDC_CCSDTp_test = -0.329817180107 + EHF_test
 
-EDC_CCSDT_voXL_test = Dict(:combined  => -75.975780187954,
-                        :symcombined  => -75.975780550664,
-                        :triples      => -75.975793596448,
-                        :full         => -75.975780550664)
+EDC_CCSDT_voXL_test = Dict(:combined  => -75.975783094931,
+                        :symcombined  => -75.975780550643,
+                        :triples      => -75.975793596425,
+                        :full         => -75.975780550643)
 
-EDC_CCSDTp_voXL_test = Dict(:combined => -75.975582932904,
-                        :symcombined  => -75.975581773426,
-                        :triples      => -75.975588840881,
-                        :full         => -75.975581773426)
-EDC_CCSDT_h2o_test = -0.218098235227
-EDC_CCSDTp_h2o_test = -0.218095086985
+EDC_CCSDTp_voXL_test = Dict(:combined => -75.975583498077,
+                        :symcombined  => -75.975581773090,
+                        :triples      => -75.975588840547,
+                        :full         => -75.975581773090)
+EDC_CCSDT_h2o_test = -0.218098152120
+EDC_CCSDTp_h2o_test = -0.218094991939
 geometry = basis = nothing
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 

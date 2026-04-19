@@ -650,10 +650,10 @@ function llama(matrix::AbstractALPACAMatrix{T};
 
   # Equivalence tolerances for stable pivot selection: among candidates within
   # this tolerance of each other, prefer the lower index (original order).
-  # Row residuals are squared norms → use tol/10 (tol = tol_rt² is the squared scale).
-  # Column values are absolute values → use tol_rt/10 (unsquared scale).
-  equiv_tol_row = tol / 10
-  equiv_tol_col = tol_rt / 10
+  # Row residuals are squared norms → use pivotol2.
+  # Column values are absolute values → use pivotol_rt/10 (unsquared scale).
+  equiv_tol_row = pivotol2
+  equiv_tol_col = pivotol_rt / 10
 
   # ── Outer loop: SVD-corrected residual from accessed rows ──
   max_outer = 10
