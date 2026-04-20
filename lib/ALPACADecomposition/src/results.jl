@@ -1,5 +1,5 @@
 """
-    ALPACAOptions(; tol, pivotol=NaN, sigma=0.01, qr=false, symmetry=:symmetric, max_rank=typemax(Int))
+    ALPACAOptions(; tol, pivotol=NaN, sigma=0.01, qr=false, symmetry=:symmetric, max_rank=typemax(Int), smooth_tol=0.5)
 
 Configuration for ALPACA decompositions.
 
@@ -14,6 +14,10 @@ Configuration for ALPACA decompositions.
 - `qr::Bool`: whether QR refinement is enabled.
 - `symmetry::Symbol`: matrix class — `:symmetric`, `:hermitian`, or `:general`.
 - `max_rank::Int`: upper bound on the rank of the approximation.
+- `smooth_tol::Float64`: smooth truncation floor as a fraction of `pivotol`.
+  Pivots with `|D| ∈ [pivotol * smooth_tol, pivotol]` are smoothly attenuated
+  via Hermite smoothstep.  Set to `0.0` to disable (hard cutoff).
+  Default `0.5`.
 """
 struct ALPACAOptions
   tol::Float64
@@ -22,13 +26,15 @@ struct ALPACAOptions
   qr::Bool
   symmetry::Symbol
   max_rank::Int
+  smooth_tol::Float64
 
   function ALPACAOptions(; tol::Real,
                          pivotol::Real=NaN,
                          sigma::Real=0.01,
                          qr::Bool=false,
                          symmetry::Symbol=:symmetric,
-                         max_rank::Integer=typemax(Int))
+                         max_rank::Integer=typemax(Int),
+                         smooth_tol::Real=0.5)
     if tol <= 0
       throw(ArgumentError("tol must be positive"))
     end
@@ -45,8 +51,11 @@ struct ALPACAOptions
     if symmetry ∉ valid_symmetry
       throw(ArgumentError("symmetry must be one of $(valid_symmetry)"))
     end
+    if smooth_tol < 0 || smooth_tol >= 1
+      throw(ArgumentError("smooth_tol must be in [0, 1)"))
+    end
     return new(Float64(tol), Float64(pivotol), Float64(sigma), qr,
-               symmetry, Int(max_rank))
+               symmetry, Int(max_rank), Float64(smooth_tol))
   end
 end
 
@@ -88,6 +97,7 @@ function ALPACAOptions(options::ALPACAOptions; kwargs...)
   return ALPACAOptions(; tol=options.tol, pivotol=options.pivotol,
                        sigma=options.sigma, qr=options.qr,
                        symmetry=options.symmetry, max_rank=options.max_rank,
+                       smooth_tol=options.smooth_tol,
                        kwargs...)
 end
 

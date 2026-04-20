@@ -236,6 +236,81 @@ function _jacobi_localization!(
 end
 
 """
+    _fix_sign_convention!(R::AbstractMatrix)
+
+Fix the sign ambiguity of column vectors in a rotation matrix.
+
+For each column, ensures the element with the largest absolute value is positive.
+This makes the rotation matrix deterministic across platforms and Julia versions,
+where Jacobi sweeps or eigendecompositions may converge to equivalent solutions
+that differ by column signs.
+"""
+function _fix_sign_convention!(R::AbstractMatrix)
+  for j in axes(R, 2)
+    _, idx = findmax(abs, @view R[:, j])
+    if real(R[idx, j]) < 0
+      R[:, j] .*= -1
+    end
+  end
+  return R
+end
+
+"""
+    _deterministic_group_rotation!(M, R, group)
+
+Apply a deterministic rotation within a degenerate orbital group.
+
+Replaces the iterative AO compactness sweep for degeneracy refinement with a
+non-iterative eigendecomposition, ensuring platform-independent results.
+
+Computes a basis-index-weighted overlap matrix within the group and diagonalizes it.
+The eigenvectors (sorted by eigenvalue) define a unique rotation that breaks the
+degeneracy deterministically. This avoids the platform-dependent convergence behavior
+of Jacobi sweeps within degenerate subspaces.
+"""
+function _deterministic_group_rotation!(M::AbstractMatrix{T}, R::AbstractMatrix,
+                                        group::AbstractVector{Int}) where T
+  length(group) <= 1 && return nothing
+  nbas = size(M, 1)
+  ng = length(group)
+
+  # Compute basis-index-weighted overlap matrix within the group
+  # W[k,l] = Σ_μ μ * conj(M[μ, i_k]) * M[μ, i_l]
+  # The weight μ (basis index) ensures distinct eigenvalues for non-trivially
+  # degenerate orbitals, breaking the degeneracy deterministically.
+  W = zeros(real(T), ng, ng)
+  for l in 1:ng, k in 1:ng
+    ik = group[k]
+    il = group[l]
+    s = zero(real(T))
+    for mu in 1:nbas
+      s += mu * real(conj(M[mu, ik]) * M[mu, il])
+    end
+    W[k, l] = s
+  end
+
+  # Diagonalize: eigenvalues sorted, eigenvectors determined up to sign
+  eig = eigen(Hermitian(W))
+  V = eig.vectors  # ng × ng
+
+  # Fix eigenvector sign convention before applying rotation
+  for j in 1:ng
+    _, idx = findmax(abs, @view V[:, j])
+    if real(V[idx, j]) < 0
+      V[:, j] .*= -1
+    end
+  end
+
+  # Apply rotation to M and R within the group
+  M_group = M[:, group] * V
+  M[:, group] .= M_group
+  R_group = R[:, group] * V
+  R[:, group] .= R_group
+
+  return nothing
+end
+
+"""
     _ao_compactness_sweep!(M, R, orbs; maxiter=50, tol=1e-10)
 
 Maximize AO compactness ``\\sum_i \\sum_\\mu |M_{\\mu i}|^4`` by 2×2 Jacobi rotations
@@ -314,6 +389,35 @@ function _find_degenerate_groups(charges::AbstractMatrix, nocc::Int; charge_tol:
 end
 
 """
+    _canonical_orbital_order(charges, nocc, natom)
+
+Determine a canonical permutation for localized orbitals based on partial charges.
+
+Sorts orbitals by: (1) dominant atom index (ascending), (2) charge on dominant atom (descending),
+(3) full charge vector as tiebreaker. This ensures a platform-independent orbital ordering
+after Jacobi localization, which may converge to equivalent solutions in different order
+depending on BLAS implementation details.
+"""
+function _canonical_orbital_order(charges::AbstractMatrix{<:Real}, nocc::Int, natom::Int)
+  # Build sort key for each orbital: (dominant atom, -dominant charge, [-charge_A1, -charge_A2, ...])
+  keys = Vector{Tuple{Int, Float64, Vector{Float64}}}(undef, nocc)
+  for i in 1:nocc
+    dominant_atom = 1
+    dominant_charge = charges[1, i]
+    for A in 2:natom
+      if charges[A, i] > dominant_charge
+        dominant_atom = A
+        dominant_charge = charges[A, i]
+      end
+    end
+    # Negative charges for descending sort
+    full_charges = [-charges[A, i] for A in 1:natom]
+    keys[i] = (dominant_atom, -dominant_charge, full_charges)
+  end
+  return sortperm(keys)
+end
+
+"""
     localize_ibo(cMO_occ::AbstractMatrix, S::AbstractMatrix, C_iao::AbstractMatrix, 
                  iao_atoms::Vector{Int}, natom::Int; exponent=4, maxiter=500, tol=1e-10)
 
@@ -343,9 +447,6 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
     println("IBO localization: only $natom unique atom(s), returning identity rotation")
     return R
   end
-
-  # Pre-localization: AO compactness as a starting guess for faster convergence
-  _ao_compactness_sweep!(Q, R, collect(1:nocc))
 
   # Compute partial charges: q_A^i = Σ_{μ∈A} |Q[μ,i]|²  (skip ghost atoms with iao_atoms[mu]==0)
   charges = zeros(real(T), natom, nocc)
@@ -390,7 +491,7 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
     compute_qAij, rotate_workspace!, update_charges!;
     exponent, maxiter, tol, method_name="IBO")
 
-  # Post-convergence refinement: break degeneracy by maximizing AO compactness
+  # Post-convergence refinement: break degeneracy deterministically
   # within degenerate subgroups (orbital pairs with identical atom-resolved charges).
   fill!(charges, zero(real(T)))
   for i in 1:nocc, mu in 1:niao
@@ -401,10 +502,26 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
   groups = _find_degenerate_groups(charges, nocc)
   if !isempty(groups)
     for group in groups
+      # First: deterministic rotation to ensure platform-independent starting point
+      _deterministic_group_rotation!(Q, R, group)
+      # Then: AO compactness sweep to maximize locality within the group
       _ao_compactness_sweep!(Q, R, group)
     end
-    println("IBO: refined $(length(groups)) degenerate group(s) by AO compactness")
+    println("IBO: refined $(length(groups)) degenerate group(s)")
   end
+
+  # Canonical ordering: sort localized orbitals by (dominant atom, descending charge)
+  # to ensure platform-independent orbital order.
+  fill!(charges, zero(real(T)))
+  for i in 1:nocc, mu in 1:niao
+    A = iao_atoms[mu]; A == 0 && continue
+    charges[A, i] += abs2(Q[mu, i])
+  end
+  perm = _canonical_orbital_order(charges, nocc, natom)
+  R .= R[:, perm]
+
+  # Fix sign ambiguity: ensure largest element in each column is positive
+  _fix_sign_convention!(R)
 
   return R
 end
@@ -515,6 +632,18 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
     println("PM: refined $(length(groups)) degenerate group(s) by AO compactness")
   end
 
+  # Canonical ordering by partial charges
+  fill!(charges, zero(real(T)))
+  for i in 1:nocc, mu in 1:nao
+    A = ao_atoms[mu]; A == 0 && continue
+    charges[A, i] += real(P[mu, i] * conj(C[mu, i]))
+  end
+  perm = _canonical_orbital_order(charges, nocc, natom)
+  R .= R[:, perm]
+
+  # Fix sign ambiguity: ensure largest element in each column is positive
+  _fix_sign_convention!(R)
+
   return R
 end
 
@@ -620,6 +749,18 @@ function localize_boys(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
     println("Boys: refined $(length(groups)) degenerate group(s) by AO compactness")
   end
 
+  # Canonical ordering by dipole moment vector
+  for i in 1:nocc
+    charges[1, i] = real(dot(view(C, :, i), view(DCx, :, i)))
+    charges[2, i] = real(dot(view(C, :, i), view(DCy, :, i)))
+    charges[3, i] = real(dot(view(C, :, i), view(DCz, :, i)))
+  end
+  perm = _canonical_orbital_order(charges, nocc, natom)
+  R .= R[:, perm]
+
+  # Fix sign ambiguity: ensure largest element in each column is positive
+  _fix_sign_convention!(R)
+
   return R
 end
 
@@ -661,6 +802,9 @@ function compute_opao_rotation(cMO_virt::AbstractMatrix{T},
   # Virtual rotation: express canonical virtuals in OPAO basis
   # R_virt = C_virt^T S C_OPAO  (nvirt × nvirt)
   R_virt = cMO_virt' * S * C_OPAO
+
+  # Fix sign ambiguity: ensure largest element in each column is positive
+  _fix_sign_convention!(R_virt)
 
   return R_virt
 end

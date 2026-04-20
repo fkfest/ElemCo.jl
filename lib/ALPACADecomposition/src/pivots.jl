@@ -7,6 +7,58 @@ for indefinite or zero-diagonal cases.
 """
 
 # ──────────────────────────────────────────────────────────────────
+# Smooth pivot scaling helpers
+# ──────────────────────────────────────────────────────────────────
+
+"""
+    _smoothstep(t) → Float64
+
+Hermite smoothstep: ``3t^2 - 2t^3`` for ``t \\in [0,1]``.
+Returns 0 for ``t \\le 0`` and 1 for ``t \\ge 1``.
+"""
+function _smoothstep(t::Real)
+  t <= 0 && return zero(t)
+  t >= 1 && return one(t)
+  return t * t * (3 - 2 * t)
+end
+
+"""
+    _smooth_pivot_scale(value, tol, scale_floor) → scale ∈ [0, 1]
+
+Compute a smooth attenuation factor for a pivot value near the threshold.
+- `|value| ≥ tol` → 1 (full contribution)
+- `|value| ≤ tol * scale_floor` → 0 (no contribution)
+- Between: smoothstep interpolation
+
+This ensures that borderline pivots (whose inclusion depends on BLAS
+implementation or numerical noise) contribute smoothly rather than
+discontinuously, reducing platform sensitivity of the final decomposition.
+"""
+function _smooth_pivot_scale(value::Real, tol::Real, scale_floor::Real)
+  av = abs(value)
+  av >= tol && return one(av)
+  low = tol * scale_floor
+  av <= low && return zero(av)
+  return _smoothstep((av - low) / (tol - low))
+end
+
+"""
+    _apply_smooth_pivot_scaling!(pivot_diag, k, tol, scale_floor)
+
+Scale pivot diagonal values in-place using [`_smooth_pivot_scale`](@ref).
+Only pivots `1:k` with `|D| < tol` are affected; pivots well above the
+threshold are left unchanged.
+"""
+function _apply_smooth_pivot_scaling!(pivot_diag::AbstractVector, k::Int, tol::Real, scale_floor::Real)
+  @inbounds for i in 1:k
+    s = _smooth_pivot_scale(abs(pivot_diag[i]), tol, scale_floor)
+    if s < 1
+      pivot_diag[i] *= s
+    end
+  end
+end
+
+# ──────────────────────────────────────────────────────────────────
 # Shared pivot-acceptance helpers
 # ──────────────────────────────────────────────────────────────────
 
@@ -531,12 +583,17 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
                         descriptor::AbstractPrincipalDescriptor) where {T,R,S}
   n = length(cache.cbuf)
   tol = resolve_pivotol(options, n)
-  tol2 = abs2(tol)
+  cache.pivotol = tol
+  smooth_floor = R(options.smooth_tol)
+  use_smooth = smooth_floor > 0
+  # Extended threshold: accept pivots down to tol * smooth_floor (they will be attenuated)
+  tol_ext = use_smooth ? tol * smooth_floor : tol
+  tol2 = abs2(tol_ext)
   max_rank = options.max_rank
   # Equivalence tolerance for stable pivot selection: among candidates within
   # this tolerance of each other, prefer the lower index (original order).
   # Use resolved pivotol scale since all comparisons are against tol or tol2.
-  equiv_tol = R(tol / 10)
+  equiv_tol = R(tol_ext / 10)
 
   # Initialize principal values
   init_principal_values!(cache, matrix, descriptor)
@@ -553,7 +610,7 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
 
     local next_j::Int
     local from_principal_diagonal::Bool = false
-    if prin_magnitude >= (k == 0 ? tol2 : tol) && prin_best_slot > 0
+    if prin_magnitude >= (k == 0 ? tol2 : tol_ext) && prin_best_slot > 0
       # Principal: pick either index from the best pair (both are non-pivots,
       # guaranteed by _argmax_principal)
       prin_i, next_j = cache.principal_pairs[prin_best_slot]
@@ -561,7 +618,7 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
     else
       # Fall back to ACA: argmax |residual| in most recent stored column(s)
       aca_best_idx, aca_magnitude = _aca_candidate_symmetric(cache, n, equiv_tol)
-      if aca_best_idx > 0 && aca_magnitude >= tol
+      if aca_best_idx > 0 && aca_magnitude >= tol_ext
         next_j = aca_best_idx
       else
         # Cold start: both principal and ACA failed (e.g. zero-diagonal matrix).
@@ -605,21 +662,21 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
         end
       end
 
-      if diag_val < tol && offdiag_val < tol
+      if diag_val < tol_ext && offdiag_val < tol_ext
         # Entire column is negligible — no more rank available.
         # ACA already selected the best candidate; bail out.
         break
       end
 
-      if offdiag_idx == 0 || diag_val >= max((one(R) - 5 * tol) * offdiag_val, tol)
+      if offdiag_idx == 0 || diag_val >= max((one(R) - 5 * tol_ext) * offdiag_val, tol_ext)
         # Diagonal is large enough for a stable 1×1 pivot
         _store_symmetric_pivot!(cache, next_j)
       else
         # Off-diagonal is significantly larger → 2×2 Bunch-Kaufman
         if !_attempt_2x2_pivot!(cache, matrix, next_j, offdiag_idx,
-                                copy(cache.cbuf), tol)
-          # 2×2 failed (both eigenvalues below tol); try 1×1 if diagonal is usable
-          if diag_val >= tol
+                                copy(cache.cbuf), tol_ext)
+          # 2×2 failed (both eigenvalues below tol_ext); try 1×1 if diagonal is usable
+          if diag_val >= tol_ext
             # Re-fetch column (2×2 attempt may have overwritten cbuf)
             fetch_and_deflate_symmetric!(cache, matrix, next_j)
             _store_symmetric_pivot!(cache, next_j)
@@ -631,9 +688,6 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
 
   return cache.pivot_indices
 end
-
-# ──────────────────────────────────────────────────────────────────────────────
-# General-matrix pivot loop with separate row / column pivots
 # ──────────────────────────────────────────────────────────────────────────────
 
 """
@@ -659,10 +713,14 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
   m = length(cache.cbuf)       # number of rows in the matrix
   ncols = length(cache.rbuf)   # number of columns in the matrix
   tol = resolve_pivotol(options, m)
-  tol2 = abs2(tol)
+  cache.pivotol = tol
+  smooth_floor = R(options.smooth_tol)
+  use_smooth = smooth_floor > 0
+  tol_ext = use_smooth ? tol * smooth_floor : tol
+  tol2 = abs2(tol_ext)
   max_rank = options.max_rank
   # Equivalence tolerance for stable pivot selection: use resolved pivotol scale
-  equiv_tol = R(tol / 10)
+  equiv_tol = R(tol_ext / 10)
 
   # Initialize principal values
   init_principal_values!(cache, matrix, descriptor)
@@ -679,7 +737,7 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
 
     local next_i::Int, next_j::Int
 
-    if prin_magnitude >= (k == 0 ? tol2 : tol) && prin_slot > 0
+    if prin_magnitude >= (k == 0 ? tol2 : tol_ext) && prin_slot > 0
       # Principal gives both row and column directly
       prin_i, prin_j = cache.principal_pairs[prin_slot]
       if !cache.is_row_pivot[prin_i] && !cache.is_pivot[prin_j]
@@ -709,7 +767,7 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
 
       # Find best unused row from the deflated column
       next_i, best_i_val = _aca_next_row(cache, m, equiv_tol)
-      if next_i == 0 || best_i_val < tol
+      if next_i == 0 || best_i_val < tol_ext
         break
       end
 
@@ -717,7 +775,7 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
       fetch_and_deflate_row_general!(cache, matrix, next_i)
 
       # Pivot value at intersection
-      if abs(cache.cbuf[next_i]) < tol
+      if abs(cache.cbuf[next_i]) < tol_ext
         break
       end
       _store_general_pivot!(cache, next_j, next_i)
@@ -738,13 +796,13 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
       fetch_and_deflate_col_general!(cache, matrix, cold_j)
 
       cold_i, cold_val = _aca_next_row(cache, m, equiv_tol)
-      if cold_i == 0 || cold_val < tol
+      if cold_i == 0 || cold_val < tol_ext
         break
       end
 
       fetch_and_deflate_row_general!(cache, matrix, cold_i)
 
-      if abs(cache.cbuf[cold_i]) < tol
+      if abs(cache.cbuf[cold_i]) < tol_ext
         break
       end
       _store_general_pivot!(cache, cold_j, cold_i)

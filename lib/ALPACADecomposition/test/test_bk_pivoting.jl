@@ -588,8 +588,9 @@ end
   A = 0.5 * (A + A')
 
   result = alpaca(A; tol=tol, symmetry=:symmetric)
-  # Should find ~2 significant pivots (λ=±1), skip the rest
-  @test length(result.pivot_indices) <= 3
+  # Should find ~2 significant pivots (λ=±1), plus possibly borderline
+  # pivots near tol that are captured by smooth scaling
+  @test length(result.pivot_indices) <= 4
 
   A_approx = reconstruct(result)
   # Error should be on the order of the dropped eigenvalues

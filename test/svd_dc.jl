@@ -11,7 +11,7 @@ ESVDDCSD_ft0_test =-0.220576957006 + EHF_test
 ESVDDCSD_ft1_test =-0.220583618431 + EHF_test
 ESVDDCSD_ft2_test =-0.220448607893 + EHF_test
 ESVDDCSD_ft3_test =-0.220504552889 + EHF_test
-ESVDDCSD_fd_test =-0.220041226903 + EHF_test
+ESVDDCSD_fd_test =-0.220041563508 + EHF_test
 
 geometry="bohr
      O      0.000000000    0.000000000   -0.130186067
