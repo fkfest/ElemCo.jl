@@ -4,21 +4,21 @@ using ElemCo.ECInfos
 @testset "H2O Closed-Shell SVD-DC-CCSDT Test" begin
 epsilon    =   1.e-6
 EHF_test   = -75.6457645933
-EDC_CCSDT_useT3_test = -0.330394818949 + EHF_test
-EDC_CCSDT_test = -0.330199442786 + EHF_test
-EDC_CCSDTp_test = -0.329890770108 + EHF_test
+EDC_CCSDT_useT3_test = -0.330039976949 + EHF_test
+EDC_CCSDT_test = -0.330017097798 + EHF_test
+EDC_CCSDTp_test = -0.329818058834 + EHF_test
 
-EDC_CCSDT_voXL_test = Dict(:combined  => -75.975963232268,
-                        :symcombined  => -75.975963992872,
-                        :triples      => -75.975968047548,
-                        :full         => -75.975964036106)
+EDC_CCSDT_voXL_test = Dict(:combined  => -75.975782064090,
+                        :symcombined  => -75.975781691098,
+                        :triples      => -75.975794897497,
+                        :full         => -75.975781691098)
 
-EDC_CCSDTp_voXL_test = Dict(:combined => -75.975657017185,
-                        :symcombined  => -75.975655349732,
-                        :triples      => -75.975657802073,
-                        :full         => -75.975655363428)
-EDC_CCSDT_h2o_test = -0.2180870800882972
-EDC_CCSDTp_h2o_test = -0.21809592911756576
+EDC_CCSDTp_voXL_test = Dict(:combined => -75.975583742673,
+                        :symcombined  => -75.975582652134,
+                        :triples      => -75.975589762134,
+                        :full         => -75.975582652134)
+EDC_CCSDT_h2o_test = -0.218098876473
+EDC_CCSDTp_h2o_test = -0.218094997738
 geometry = basis = nothing
 fcidump = joinpath(@__DIR__,"files","H2O.FCIDUMP")
 

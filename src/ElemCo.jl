@@ -35,6 +35,7 @@ include("solvers/diis.jl")
 include("solvers/davidson.jl")
 include("cc/laplace.jl")
 include("scf/orbtools.jl")
+include("scf/localization.jl")
 include("scf/fockfactory.jl")
 include("integrals/dumptools.jl")
 include("integrals/dftools.jl")
@@ -85,6 +86,7 @@ using .DFCoupledCluster
 using .FciDumps
 using .DumpTools
 using .OrbTools
+using .OrbLocalization
 using .Elements
 using .MSystems
 using .BasisSets
@@ -108,6 +110,7 @@ export @set_default_eltype
 export ECInfo, ec_eltype, DEFAULT_ELTYPE, set_default_eltype!
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
+export @localize
 export @fci, @ciphi, @sci, @ciϕ
 export @import_matrix, @export_molden
 export @molpro_input, @molpro_output, @check_molproinfo
@@ -752,6 +755,50 @@ macro dfmcscf(opts_block=nothing)
     return quote
       $(esc(:@tryECinit))
       dfmcscf($(esc(:EC)))
+    end
+  end
+end
+
+"""
+    @localize(opts_block=nothing)
+
+  Localize the current orbitals using IBO/Pipek-Mezey/Boys (occupied) and optionally OPAO (virtual).
+  
+  The orbitals are read from [`WfOptions.start`](@ref ECInfos.WfOptions) and stored
+  to [`WfOptions.store`](@ref ECInfos.WfOptions).
+  If `start` or `store` is not specified, the orbitals are read from and/or stored back to 
+  [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+
+  # Options (set via `@set loc`)
+  - `virtual::Bool`: if `true` (default), also localize virtual orbitals via OPAO.
+  - `exponent::Int`: IBO exponent, 2 for Pipek-Mezey, 4 for fourth-moment (default).
+
+  # Examples
+```julia
+@dfhf
+@localize
+# with local options:
+@localize begin
+  @set loc virtual=false exponent=2
+end
+```
+"""
+macro localize(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        localize_orbitals($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      localize_orbitals($(esc(:EC)))
     end
   end
 end

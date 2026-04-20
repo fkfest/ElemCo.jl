@@ -10,13 +10,16 @@ the types of the basis sets, and the values are the basis set:
 ```julia
 basis = Dict("ao"=>"cc-pVTZ",
              "jkfit"=>"cc-pvtz-jkfit",
-             "mpfit"=>"cc-pvtz-mpfit")
+             "mpfit"=>"cc-pvtz-mpfit",
+             "minao"=>"ano-rcc-mb")
 ```
 
-The basis set dictionary contains three keys: `ao`, `jkfit`, and
+The basis set dictionary contains the keys `ao`, `jkfit`, and
 `mpfit`. The `ao` key contains the basis set for the AO integrals, the
 `jkfit` key contains the basis set for the density fitting integrals in the Hartree-Fock calculations,
 and the `mpfit` key contains the fitting basis set for the correlated calculations.
+
+An optional `minao` key can be used to control the minimal basis used for SAD guesses and IAO construction in orbital localization. If it is omitted, ElemCo falls back to the built-in `minao` basis. The same behavior can also be overridden explicitly with `@set scf minao="..."` and `@set loc minao="..."`.
 
 Alternatively, you can define the basis set using a string that defines the AO basis. In this case, the `jkfit` and `mpfit` basis names will be generated automatically. Here's an example of how you can define the basis set using a string:
 

@@ -280,18 +280,19 @@ function fetch_orbital_classes(io::TrexioFile, EC::ECInfo; MO="mo")
 end
 
 """
-    fetch_orbital_energies([io::TrexioFile,] EC::ECInfo, MO="mo") -> (Vector{Float64}, Vector{Float64})
+    fetch_orbital_energies([io::TrexioFile,] EC::ECInfo, MO="mo"; start=false) -> (Vector{Float64}, Vector{Float64})
   
   Fetch orbital energies from the trexio dump.
   
 Returns tuples of orbital energies for alpha and beta spins.
 
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+If `start=true`, reads from the start file (`wf.start`) instead of the current dump file.
 """
 function fetch_orbital_energies end
-function fetch_orbital_energies(ECInfo, MO="mo")
-  open_dump(ECInfo, "r") do io
-    return fetch_orbital_energies(io, ECInfo, MO)
+function fetch_orbital_energies(EC::ECInfo, MO="mo"; start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_orbital_energies(io, EC, MO)
   end
 end
 function fetch_orbital_energies(io::TrexioFile, EC::ECInfo, MO="mo")

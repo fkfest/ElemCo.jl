@@ -574,7 +574,8 @@ function llama(matrix::AbstractALPACAMatrix{T};
                pivotol::Real=NaN,
                max_rank::Integer=typemax(Int),
                oversample::Integer=0,
-               fullsvd::Bool=false) where T
+               fullsvd::Bool=false,
+               smooth_tol::Real=0.5) where T
   # ── Column-guided dispatch: transpose the problem ──
   if d_col !== nothing
     d_row === nothing || throw(ArgumentError(
@@ -584,7 +585,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
       "d_col length $(length(d_col)) must match column count $n"))
     result_t = llama(TransposedALPACAMatrix(matrix);
                      d_row=d_col, tol=tol, pivotol=pivotol, max_rank=max_rank,
-                     oversample=oversample, fullsvd=true)
+                     oversample=oversample, fullsvd=true, smooth_tol=smooth_tol)
     result_t.V === nothing && return LLAMAResult{T, real(T)}(
       Matrix{T}(undef, m, 0), real(T)[], result_t.row_pivots, result_t.col_pivots, nothing)
     # V of A^T spans col(conj(A)); conjugate to get col(A)
@@ -612,7 +613,11 @@ function llama(matrix::AbstractALPACAMatrix{T};
   else
     pivotol_rt = RT(pivotol)
   end
-  pivotol2 = pivotol_rt^2
+  # Smooth pivot scaling: disable when max_rank is explicitly set
+  smooth_floor = (max_rank < typemax(Int)) ? zero(RT) : RT(smooth_tol)
+  use_smooth = smooth_floor > 0
+  pivotol_rt_ext = use_smooth ? pivotol_rt * smooth_floor : pivotol_rt
+  pivotol2 = pivotol_rt_ext^2
 
   length(d_row) == m || throw(ArgumentError(
     "d_row length $(length(d_row)) must match row count $m"))
@@ -648,6 +653,13 @@ function llama(matrix::AbstractALPACAMatrix{T};
   sv = RT[]
   nk = 0
 
+  # Equivalence tolerances for stable pivot selection: among candidates within
+  # this tolerance of each other, prefer the lower index (original order).
+  # Row residuals are squared norms → use pivotol2.
+  # Column values are absolute values → use pivotol_rt/10 (unsquared scale).
+  equiv_tol_row = pivotol2
+  equiv_tol_col = pivotol_rt_ext / 10
+
   # ── Outer loop: SVD-corrected residual from accessed rows ──
   max_outer = 10
   rank_at_start = 0
@@ -656,11 +668,11 @@ function llama(matrix::AbstractALPACAMatrix{T};
   rank_at_start = rank
   needs_recompute = false  # set true after each Gram update, false after recomputation
   for iter in 1:m
-    # ── Select row: argmax residual ──
+    # ── Select row: argmax residual (stable: prefer lower index on ties) ──
     max_res = zero(RT)
     best_row = 0
     @inbounds for i in 1:m
-      if !is_row_pivot[i] && residual[i] > max_res
+      if !is_row_pivot[i] && residual[i] > max_res + equiv_tol_row
         max_res = residual[i]
         best_row = i
       end
@@ -678,13 +690,13 @@ function llama(matrix::AbstractALPACAMatrix{T};
       mul!(rbuf, Rv, cv, -one(T), one(T))
     end
 
-    # ── Select column: argmax |deflated_row| ──
+    # ── Select column: argmax |deflated_row| (stable: prefer lower index on ties) ──
     best_col = 0
     best_val = zero(RT)
     @inbounds for j in 1:n
       if !is_col_pivot[j]
         v = abs(rbuf[j])
-        if v > best_val
+        if v > best_val + equiv_tol_col
           best_val = v
           best_col = j
         end
@@ -692,7 +704,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
     end
 
     # If deflated row is near-zero, this row is already well-captured
-    if best_col == 0 || best_val < pivotol_rt
+    if best_col == 0 || best_val < pivotol_rt_ext
       is_row_pivot[best_row] = true
       residual[best_row] = zero(RT)
       if needs_recompute
@@ -721,7 +733,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
 
     # ── Pivot value at intersection ──
     pivot_val = cbuf[best_row]
-    if abs(pivot_val) < pivotol_rt
+    if abs(pivot_val) < pivotol_rt_ext
       is_row_pivot[best_row] = true
       residual[best_row] = zero(RT)
       if needs_recompute
@@ -817,6 +829,11 @@ function llama(matrix::AbstractALPACAMatrix{T};
   rank == 0 && return LLAMAResult{T, RT}(Matrix{T}(undef, m, 0), RT[], col_pivots, row_pivots, nothing)
   new_pivots = rank - rank_at_start
 
+  # Smooth pivot scaling: attenuate borderline pivots before finalization
+  if use_smooth
+    _apply_smooth_pivot_scaling!(pivot_diag, rank, pivotol_rt, smooth_floor)
+  end
+
   Q_final, sv, V_final, nk = _llama_finalize(cols_store, rows_store, pivot_diag, row_gram, rank, tol_rt, fullsvd)
   nk == 0 && return LLAMAResult{T, RT}(Matrix{T}(undef, m, 0), RT[], col_pivots, row_pivots, nothing)
 
@@ -858,7 +875,8 @@ function llama(matrix::AbstractMatrix{T};
                d_col::Union{AbstractVector{<:Real}, Nothing}=nothing,
                max_rank::Integer=typemax(Int),
                oversample::Integer=0,
-               fullsvd::Bool=false) where T
+               fullsvd::Bool=false,
+               smooth_tol::Real=0.5) where T
   if d_row === nothing && d_col === nothing
     m, n = size(matrix)
     if n > m
@@ -867,7 +885,7 @@ function llama(matrix::AbstractMatrix{T};
       d_row = vec(sum(abs2, matrix, dims=2))
     end
   end
-  return llama(DenseALPACAMatrix(matrix); d_row, d_col, tol, pivotol, max_rank, oversample, fullsvd)
+  return llama(DenseALPACAMatrix(matrix); d_row, d_col, tol, pivotol, max_rank, oversample, fullsvd, smooth_tol)
 end
 
 """
@@ -884,12 +902,13 @@ function llama(matrix::Symmetric{T};
                d_row::Union{AbstractVector{<:Real}, Nothing}=nothing,
                max_rank::Integer=typemax(Int),
                oversample::Integer=0,
-               fullsvd::Bool=false) where T
+               fullsvd::Bool=false,
+               smooth_tol::Real=0.5) where T
   if d_row === nothing
     d_row = vec(sum(abs2, parent(matrix), dims=1))
   end
   wrapped = SymmetricALPACAMatrix(DenseALPACAMatrix(parent(matrix)))
-  return llama(wrapped; d_row, tol, pivotol, max_rank, oversample, fullsvd)
+  return llama(wrapped; d_row, tol, pivotol, max_rank, oversample, fullsvd, smooth_tol)
 end
 
 """
@@ -906,12 +925,13 @@ function llama(matrix::Hermitian{T};
                d_row::Union{AbstractVector{<:Real}, Nothing}=nothing,
                max_rank::Integer=typemax(Int),
                oversample::Integer=0,
-               fullsvd::Bool=false) where T
+               fullsvd::Bool=false,
+               smooth_tol::Real=0.5) where T
   if d_row === nothing
     d_row = vec(sum(abs2, parent(matrix), dims=1))
   end
   wrapped = HermitianALPACAMatrix(DenseALPACAMatrix(parent(matrix)))
-  return llama(wrapped; d_row, tol, pivotol, max_rank, oversample, fullsvd)
+  return llama(wrapped; d_row, tol, pivotol, max_rank, oversample, fullsvd, smooth_tol)
 end
 
 # ──────────────────────────────────────────────────────────────────

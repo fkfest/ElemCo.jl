@@ -6,6 +6,8 @@
 
 ### Changed
 
+* SVD-DC methods now localize orbitals before amplitude decomposition by default (`cc.localize=true`), and LLAMA now uses `ampsvd_pivotol_mode=:maxdim` by default for more robust rank selection in difficult cases such as ghost-atom calculations.
+* The minimal basis used for SAD guesses and IAO construction now defaults to MINAO. It can be overridden explicitly with `scf.minao` and `loc.minao`, or via a `"minao"` entry in the basis dictionary.
 * Batching of 4-index integrals is implemented in `kext` routines. This should substantially reduce the memory demand of closed-shell and open-shell CCSD/DCSD.
 * The `kext`-type contractions are implemented for unrestricted full-triples methods (UCCSDT and UDC-CCSDT).
 * `@savewf` accepts orbital coefficients as matrix or tuple of matrices.
@@ -14,6 +16,7 @@
 
 ### Added
 
+* Orbital localization support with Intrinsic Bond Orbitals (IBO), Pipek-Mezey, and Foster-Boys localization for occupied orbitals, plus optional orthogonal projected atomic orbitals (OPAOs) for virtual orbitals.
 * **Complex-valued calculations**: Systematic support for `ComplexF64` integrals and amplitudes throughout the codebase. When a complex FCIDUMP is loaded, `ECInfo{ComplexF64}` propagates the element type through solvers, tensor tools, CC methods, EOM, and interfaces. Key changes:
   - `TFDump`/`QFDump` type aliases are now parametric (`FDump{T,3}`/`FDump{T,4}`)
   - DIIS and Davidson solvers are parametric (`Diis{T}`, `Davidson{T}`) with correct Hermitian symmetry

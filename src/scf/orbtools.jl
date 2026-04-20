@@ -52,14 +52,11 @@ end
   Guess MO coefficients from atomic densities.
 """
 function guess_sad(EC::ECInfo)
-  minao = "ano-rcc-mb"
-  # minao = "ano-r0"
-  # minao = "sto-6g"
-  bminao = generate_basis(EC, basisset=minao)
+  bminao = generate_minao_basis(EC, EC.options.scf.minao)
   bao = generate_basis(EC, "ao")
   smin2ao = overlap(bminao, bao)
   smin = overlap(bminao)
-  eldist = electron_distribution(EC.system, minao)
+  eldist = electron_distribution(EC.system, bminao)
   sao = load(EC, "S_AA", Val(2))
   denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
   eigs, cMO = eigen(Hermitian(-denao), Hermitian(sao))

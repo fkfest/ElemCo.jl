@@ -65,7 +65,7 @@ function _qrdalpaca_impl(matrix::AbstractALPACAMatrix{T},
   max_pivots = min(m, n, options.max_rank)
 
   if k_alpaca == 0 || k_alpaca >= max_pivots
-    return decomposition_finalize(cache, options.tol)
+    return decomposition_finalize(cache, options.tol; smooth_tol=options.smooth_tol)
   end
 
   # ── Step 2: Quick reconstruction pre-check + QR projection fallback ──
@@ -148,7 +148,7 @@ function _qrdalpaca_impl(matrix::AbstractALPACAMatrix{T},
       end
     end
     if recon_ok
-      return decomposition_finalize(cache, options.tol; column_qr)
+      return decomposition_finalize(cache, options.tol; column_qr, smooth_tol=options.smooth_tol)
     end
   end
 
@@ -172,7 +172,7 @@ function _qrdalpaca_impl(matrix::AbstractALPACAMatrix{T},
 
   D_indices = [j for j in 1:n if col_norms2[j] >= tol2]
   if isempty(D_indices)
-    return decomposition_finalize(cache, options.tol; column_qr)
+    return decomposition_finalize(cache, options.tol; column_qr, smooth_tol=options.smooth_tol)
   end
 
   # ── Step 4: Batched QR refinement ──
@@ -266,7 +266,7 @@ function _qrdalpaca_impl(matrix::AbstractALPACAMatrix{T},
   end
 
   if isempty(refinement_pivots)
-    return decomposition_finalize(cache, options.tol; column_qr)
+    return decomposition_finalize(cache, options.tol; column_qr, smooth_tol=options.smooth_tol)
   end
 
   # ── Step 6: Extend cache with new pivots, then finalize ──
@@ -275,7 +275,7 @@ function _qrdalpaca_impl(matrix::AbstractALPACAMatrix{T},
   else
     _extend_cache_symmetric!(cache, matrix, refinement_pivots, tol_val)
   end
-  return decomposition_finalize(cache, options.tol)
+  return decomposition_finalize(cache, options.tol; smooth_tol=options.smooth_tol)
 end
 
 """
@@ -291,9 +291,10 @@ function qrdalpaca(matrix::AbstractMatrix;
                    options::Union{ALPACAOptions,Nothing}=nothing,
                    pivotol::Union{Real,Nothing}=nothing,
                    sigma::Real=0.01,
-                   max_rank::Integer=typemax(Int))
+                   max_rank::Integer=typemax(Int),
+                   smooth_tol::Real=0.5)
   options = _build_options(matrix; tol, symmetry, options, pivotol, sigma,
-                           qr=true, max_rank)
+                           qr=true, max_rank, smooth_tol)
   return qrdalpaca(DenseALPACAMatrix(matrix); principal, options)
 end
 

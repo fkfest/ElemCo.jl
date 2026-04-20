@@ -46,6 +46,9 @@ mutable struct ALPACACache{T,R<:Real,S}
   # Row pivot tracking (general case only)
   row_pivot_indices::Vector{Int}
   is_row_pivot::BitVector
+
+  # Resolved pivot tolerance (set by the pivot loop for use in finalization)
+  pivotol::R
 end
 
 const INITIAL_CAPACITY = 256
@@ -102,7 +105,8 @@ function ALPACACache(::Type{T}, m::Int, n::Int, ::Val{S},
     Vector{T}(undef, cap),
     Vector{T}(undef, np),
     Int[],
-    use_rows ? falses(m) : falses(0)  # is_row_pivot: tracks row indices (1..m)
+    use_rows ? falses(m) : falses(0),  # is_row_pivot: tracks row indices (1..m)
+    zero(R)                             # pivotol: set by pivot loop
   )
 end
 

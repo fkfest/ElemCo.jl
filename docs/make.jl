@@ -66,6 +66,7 @@ makedocs(
       "fockfactory.md",
       "integrals.md",
       "laplace.md",
+      "localization.md",
       "mio.md",
       "mnpy.md",
       "msystems.md",

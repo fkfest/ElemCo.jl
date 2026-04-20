@@ -42,7 +42,7 @@ function _alpaca_impl(matrix::AbstractALPACAMatrix{T},
 
   cache = ALPACACache(T, m, n, Val{S}(), descriptor.pairs)
   alpaca_pivots!(cache, matrix, options, descriptor)
-  return decomposition_finalize(cache, options.tol)
+  return decomposition_finalize(cache, options.tol; smooth_tol=options.smooth_tol)
 end
 
 # ──────────────────────────────────────────────────────────────────
@@ -50,22 +50,31 @@ end
 # ──────────────────────────────────────────────────────────────────
 
 """
-    decomposition_finalize(cache::ALPACACache, tol) → ALPACAResult
+    decomposition_finalize(cache::ALPACACache, tol; smooth_tol=0.0) → ALPACAResult
 
 Build the low-rank factorization from the pivot-loop factors stored in
-the cache.  Dispatches to:
+the cache.  When `smooth_tol > 0`, borderline pivot values (between
+`pivotol * smooth_tol` and `pivotol`) are attenuated via smoothstep
+scaling before the decomposition step.
+
+Dispatches to:
 - [`_decomposition_finalize_general`](@ref) for general matrices (dual-QR + SVD),
 - [`_decomp_finalize_eigen`](@ref) for real symmetric / Hermitian (QR + eigendecomposition),
 - [`_decomp_finalize_takagi`](@ref) for complex symmetric (QR + Autonne-Takagi).
 """
 function decomposition_finalize(cache::ALPACACache{T,R,S}, tol;
-                                column_qr=nothing) where {T,R,S}
+                                column_qr=nothing,
+                                smooth_tol::Real=0.0) where {T,R,S}
   if cache.n_cols == 0
     m = length(cache.cbuf)
     ncols = S === :general ? length(cache.rbuf) : m
     return ALPACAResult{T}(
       Matrix{T}(undef, m, 0), Matrix{T}(undef, ncols, 0),
       Int[], cache.pivot_indices, Int[], S, R[])
+  end
+  # Apply smooth scaling to borderline pivots before decomposition
+  if smooth_tol > 0
+    _apply_smooth_pivot_scaling!(cache.pivot_diag, cache.n_cols, cache.pivotol, R(smooth_tol))
   end
   if S === :general
     return _decomposition_finalize_general(cache, tol; column_qr)
@@ -109,7 +118,7 @@ function _decomp_finalize_eigen(cache::ALPACACache{T,R}, tol, sym::Symbol;
 
   # Truncate small eigenvalues, sort by descending magnitude
   keep = sortperm(abs.(E.values), rev=true)
-  nk = count(v -> abs(v) > tol, E.values)
+  nk = count(s -> abs(s) > tol, E.values)
   if nk == 0
     return ALPACAResult{T}(
       Matrix{T}(undef, n, 0), Matrix{T}(undef, n, 0),
@@ -246,8 +255,11 @@ function _lpaca_impl(matrix::AbstractALPACAMatrix{T},
                      ::Val{S}) where {T, S}
   RT = real(T)
 
+  # Disable smooth scaling for lpaca: no finalization step to truncate
+  # borderline pivots, so the pivot loop must not extend below tol.
+  opts = options.smooth_tol > 0 ? ALPACAOptions(options; smooth_tol=0.0) : options
   cache = ALPACACache(T, m, n, Val{S}(), descriptor.pairs)
-  alpaca_pivots!(cache, matrix, options, descriptor)
+  alpaca_pivots!(cache, matrix, opts, descriptor)
   _scale_pivot_columns!(cache)
 
   # After _scale_pivot_columns!:
@@ -289,16 +301,17 @@ function _build_options(matrix::AbstractMatrix;
                         pivotol::Union{Real,Nothing},
                         sigma::Real,
                         qr::Bool,
-                        max_rank::Integer)
+                        max_rank::Integer,
+                        smooth_tol::Real=0.5)
   options !== nothing && return options
   tol === nothing && throw(ArgumentError("provide either `tol` or `options`"))
   if symmetry === nothing
     symmetry = _detect_symmetry(matrix)
   end
   if pivotol !== nothing
-    return ALPACAOptions(; tol, pivotol, sigma, qr, symmetry, max_rank)
+    return ALPACAOptions(; tol, pivotol, sigma, qr, symmetry, max_rank, smooth_tol)
   end
-  return ALPACAOptions(; tol, sigma, qr, symmetry, max_rank)
+  return ALPACAOptions(; tol, sigma, qr, symmetry, max_rank, smooth_tol)
 end
 
 """
@@ -339,8 +352,9 @@ function alpaca(matrix::AbstractMatrix;
                 pivotol::Union{Real,Nothing}=nothing,
                 sigma::Real=0.01,
                 qr::Bool=false,
-                max_rank::Integer=typemax(Int))
-  options = _build_options(matrix; tol, symmetry, options, pivotol, sigma, qr, max_rank)
+                max_rank::Integer=typemax(Int),
+                smooth_tol::Real=0.5)
+  options = _build_options(matrix; tol, symmetry, options, pivotol, sigma, qr, max_rank, smooth_tol)
   return alpaca(DenseALPACAMatrix(matrix); principal, options)
 end
 
@@ -359,8 +373,9 @@ function lpaca(matrix::AbstractMatrix;
                options::Union{ALPACAOptions,Nothing}=nothing,
                pivotol::Union{Real,Nothing}=nothing,
                sigma::Real=0.01,
-               max_rank::Integer=typemax(Int))
+               max_rank::Integer=typemax(Int),
+               smooth_tol::Real=0.5)
   options = _build_options(matrix; tol, symmetry, options, pivotol, sigma,
-                           qr=false, max_rank)
+                           qr=false, max_rank, smooth_tol)
   return lpaca(DenseALPACAMatrix(matrix); principal, options)
 end
