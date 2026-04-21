@@ -293,16 +293,19 @@ function _deterministic_group_rotation!(M::AbstractMatrix{T}, R::AbstractMatrix,
   eig = eigen(Hermitian(W))
   V = eig.vectors  # ng × ng
 
-  # Fix eigenvector sign convention before applying rotation
+  # Apply rotation to M first, then fix signs based on AO coefficients.
+  # M_group = M[:,group] * V is platform-independent (invariant to the
+  # degenerate-subspace ambiguity in M), so sign-fixing on M_group is deterministic.
+  M_group = M[:, group] * V
+
   for j in 1:ng
-    _, idx = findmax(abs, @view V[:, j])
-    if real(V[idx, j]) < 0
+    _, idx = findmax(abs, @view M_group[:, j])
+    if real(M_group[idx, j]) < 0
+      M_group[:, j] .*= -1
       V[:, j] .*= -1
     end
   end
 
-  # Apply rotation to M and R within the group
-  M_group = M[:, group] * V
   M[:, group] .= M_group
   R_group = R[:, group] * V
   R[:, group] .= R_group
@@ -400,7 +403,11 @@ depending on BLAS implementation details.
 """
 function _canonical_orbital_order(charges::AbstractMatrix{<:Real}, nocc::Int, natom::Int)
   # Build sort key for each orbital: (dominant atom, -dominant charge, [-charge_A1, -charge_A2, ...])
-  keys = Vector{Tuple{Int, Float64, Vector{Float64}}}(undef, nocc)
+  # Quantize charges in keys to avoid platform-dependent ordering caused by
+  # sub-ulp floating-point differences in degenerate localized orbitals.
+  key_tol = 1e-10
+  quantize(x) = round(Float64(x) / key_tol) * key_tol
+  keys = Vector{Tuple{Int, Float64, Vector{Float64}, Int}}(undef, nocc)
   for i in 1:nocc
     dominant_atom = 1
     dominant_charge = charges[1, i]
@@ -411,8 +418,8 @@ function _canonical_orbital_order(charges::AbstractMatrix{<:Real}, nocc::Int, na
       end
     end
     # Negative charges for descending sort
-    full_charges = [-charges[A, i] for A in 1:natom]
-    keys[i] = (dominant_atom, -dominant_charge, full_charges)
+    full_charges = [-quantize(charges[A, i]) for A in 1:natom]
+    keys[i] = (dominant_atom, -quantize(dominant_charge), full_charges, i)
   end
   return sortperm(keys)
 end
