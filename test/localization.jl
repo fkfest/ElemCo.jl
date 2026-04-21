@@ -1,6 +1,32 @@
 using ElemCo
 using LinearAlgebra
 
+@testset "Canonical localization ordering tie-breakers" begin
+  charges = [
+    1.0   1.0   0.669 0.669;
+    0.0   0.0   0.331 0.331
+  ]
+  coeffs = [
+    0.95  0.10  0.95  0.10;
+    0.10  0.95  0.10  0.95;
+    0.00  0.00  0.05  0.90;
+    0.00  0.00  0.90  0.05
+  ]
+  labels = ["core", "lone_pair", "bond_a", "bond_b"]
+
+  # Same-atom orbitals have identical charge keys here, so canonical ordering
+  # must fall back to the coefficient fingerprint rather than the input order.
+  input_order = [2, 4, 1, 3]
+  charges_perm = charges[:, input_order]
+  coeffs_perm = coeffs[:, input_order]
+  labels_perm = labels[input_order]
+
+  perm = ElemCo.OrbLocalization._canonical_orbital_order(
+    charges_perm, coeffs_perm, size(charges_perm, 2), size(charges_perm, 1))
+
+  @test labels_perm[perm] == ["core", "lone_pair", "bond_a", "bond_b"]
+end
+
 @testset "Orbital Localization Test" begin
   epsilon = 1.e-6
 
