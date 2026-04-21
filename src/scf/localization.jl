@@ -293,16 +293,19 @@ function _deterministic_group_rotation!(M::AbstractMatrix{T}, R::AbstractMatrix,
   eig = eigen(Hermitian(W))
   V = eig.vectors  # ng × ng
 
-  # Fix eigenvector sign convention before applying rotation
+  # Apply rotation to M first, then fix signs based on AO coefficients.
+  # M_group = M[:,group] * V is platform-independent (invariant to the
+  # degenerate-subspace ambiguity in M), so sign-fixing on M_group is deterministic.
+  M_group = M[:, group] * V
+
   for j in 1:ng
-    _, idx = findmax(abs, @view V[:, j])
-    if real(V[idx, j]) < 0
+    _, idx = findmax(abs, @view M_group[:, j])
+    if real(M_group[idx, j]) < 0
+      M_group[:, j] .*= -1
       V[:, j] .*= -1
     end
   end
 
-  # Apply rotation to M and R within the group
-  M_group = M[:, group] * V
   M[:, group] .= M_group
   R_group = R[:, group] * V
   R[:, group] .= R_group
@@ -389,30 +392,41 @@ function _find_degenerate_groups(charges::AbstractMatrix, nocc::Int; charge_tol:
 end
 
 """
-    _canonical_orbital_order(charges, nocc, natom)
+    _canonical_orbital_order(charges, M, nocc, natom)
 
-Determine a canonical permutation for localized orbitals based on partial charges.
+Determine a canonical permutation for localized orbitals.
 
 Sorts orbitals by: (1) dominant atom index (ascending), (2) charge on dominant atom (descending),
-(3) full charge vector as tiebreaker. This ensures a platform-independent orbital ordering
-after Jacobi localization, which may converge to equivalent solutions in different order
-depending on BLAS implementation details.
+(3) full charge vector (descending), and (4) an abs² coefficient fingerprint in the
+representation matrix `M` as a deterministic tiebreaker for orbitals localized on the same atom.
+The coefficient fingerprint is compared in the native basis order of `M`, which is stronger than
+using only sorted magnitudes and reliably distinguishes symmetry-related same-atom orbitals.
 """
-function _canonical_orbital_order(charges::AbstractMatrix{<:Real}, nocc::Int, natom::Int)
-  # Build sort key for each orbital: (dominant atom, -dominant charge, [-charge_A1, -charge_A2, ...])
-  keys = Vector{Tuple{Int, Float64, Vector{Float64}}}(undef, nocc)
+function _canonical_orbital_order(charges::AbstractMatrix{<:Real}, M::AbstractMatrix,
+                                  nocc::Int, natom::Int)
+  # Build sort key for each orbital: (dominant atom, -dominant charge,
+  # [-charge_A1, ...], [-|M_1|², -|M_2|², ...], original_index)
+  # Quantize keys to avoid platform-dependent ordering caused by sub-ulp noise.
+  key_tol = 1e-6
+  quantize(x) = round(Float64(x) / key_tol) * key_tol
+  nrepr = size(M, 1)
+  keys = Vector{Tuple{Int, Float64, Vector{Float64}, Vector{Float64}, Int}}(undef, nocc)
   for i in 1:nocc
     dominant_atom = 1
-    dominant_charge = charges[1, i]
+    dominant_charge = quantize(charges[1, i])
     for A in 2:natom
-      if charges[A, i] > dominant_charge
+      charge_A = quantize(charges[A, i])
+      if charge_A > dominant_charge
         dominant_atom = A
-        dominant_charge = charges[A, i]
+        dominant_charge = charge_A
       end
     end
-    # Negative charges for descending sort
-    full_charges = [-charges[A, i] for A in 1:natom]
-    keys[i] = (dominant_atom, -dominant_charge, full_charges)
+    full_charges = [-quantize(charges[A, i]) for A in 1:natom]
+    coeff_fingerprint = Vector{Float64}(undef, nrepr)
+    for mu in 1:nrepr
+      coeff_fingerprint[mu] = -quantize(abs2(M[mu, i]))
+    end
+    keys[i] = (dominant_atom, -dominant_charge, full_charges, coeff_fingerprint, i)
   end
   return sortperm(keys)
 end
@@ -517,7 +531,7 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
     A = iao_atoms[mu]; A == 0 && continue
     charges[A, i] += abs2(Q[mu, i])
   end
-  perm = _canonical_orbital_order(charges, nocc, natom)
+  perm = _canonical_orbital_order(charges, Q, nocc, natom)
   R .= R[:, perm]
 
   # Fix sign ambiguity: ensure largest element in each column is positive
@@ -638,7 +652,7 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
     A = ao_atoms[mu]; A == 0 && continue
     charges[A, i] += real(P[mu, i] * conj(C[mu, i]))
   end
-  perm = _canonical_orbital_order(charges, nocc, natom)
+  perm = _canonical_orbital_order(charges, P, nocc, natom)
   R .= R[:, perm]
 
   # Fix sign ambiguity: ensure largest element in each column is positive
@@ -755,7 +769,8 @@ function localize_boys(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
     charges[2, i] = real(dot(view(C, :, i), view(DCy, :, i)))
     charges[3, i] = real(dot(view(C, :, i), view(DCz, :, i)))
   end
-  perm = _canonical_orbital_order(charges, nocc, natom)
+  P_order = S * C
+  perm = _canonical_orbital_order(charges, P_order, nocc, natom)
   R .= R[:, perm]
 
   # Fix sign ambiguity: ensure largest element in each column is positive
