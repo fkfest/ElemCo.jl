@@ -405,16 +405,16 @@ function _canonical_orbital_order(charges::AbstractMatrix{<:Real}, nocc::Int, na
   # Build sort key for each orbital: (dominant atom, -dominant charge, [-charge_A1, -charge_A2, ...])
   # Quantize charges in keys to avoid platform-dependent ordering caused by
   # sub-ulp floating-point differences in degenerate localized orbitals.
-  key_tol = 1e-10
+  key_tol = 1e-6
   quantize(x) = round(Float64(x) / key_tol) * key_tol
   keys = Vector{Tuple{Int, Float64, Vector{Float64}, Int}}(undef, nocc)
   for i in 1:nocc
     dominant_atom = 1
-    dominant_charge = charges[1, i]
+    dominant_charge = quantize(charges[1, i])
     for A in 2:natom
-      if charges[A, i] > dominant_charge
+      if quantize(charges[A, i]) > dominant_charge
         dominant_atom = A
-        dominant_charge = charges[A, i]
+        dominant_charge = quantize(charges[A, i])
       end
     end
     # Negative charges for descending sort
