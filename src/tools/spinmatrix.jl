@@ -98,7 +98,7 @@ Base.iterate(mat::SpinMatrix, state=1) = state > 2 ? nothing : (mat[state], stat
 
 Base.eltype(mat::SpinMatrix) = eltype(mat.α)
 
-Base.copy(mat::SpinMatrix) = SpinMatrix(copy(mat.α), copy(mat.β))
+Base.copy(mat::SpinMatrix) = is_restricted(mat) ? SpinMatrix(copy(mat.α)) : SpinMatrix(copy(mat.α), copy(mat.β))
 
 Base.copy!(mat::SpinMatrix, mat2::SpinMatrix) = (copy!(mat.α, mat2.α); copy!(mat.β, mat2.β))
 

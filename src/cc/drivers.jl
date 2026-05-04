@@ -18,12 +18,162 @@ using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
+using ..ElemCo.Properties
 using ..ElemCo.FockFactory
 using ..ElemCo.FCI
 using ..ElemCo.EOM
+using ..ElemCo.DfDump: dfdump
 using LinearAlgebra: diag
 
 export ccdriver, dfccdriver, fcidriver, extrapolate
+
+"""
+    need_correlated_properties(EC::ECInfo)
+
+  Return `true` when the conventional or DF correlated drivers must construct a
+  correlated 1-RDM for property output or natural-orbital storage.
+"""
+need_correlated_properties(EC::ECInfo) = EC.options.cc.properties || !isempty(EC.options.wf.natorb)
+
+"""
+    need_lagrange_multipliers(EC::ECInfo, method::ECMethod)
+
+  Return `true` when the calculation requires lambda amplitudes either because
+  the requested method is a Λ-variant or because post-processing needs the
+  correlated density.
+"""
+need_lagrange_multipliers(EC::ECInfo, method::ECMethod) = has_prefix(method, "Λ") || need_correlated_properties(EC)
+
+"""
+    need_fci_properties(EC::ECInfo, ciphi::Bool)
+
+  Return `true` when FCI or CIPHI must construct correlated property data for
+  dipole output or natural-orbital storage.
+"""
+need_fci_properties(EC::ECInfo, ciphi::Bool) = (ciphi ? EC.options.ciphi.properties : EC.options.fci.properties) || !isempty(EC.options.wf.natorb)
+
+"""
+    dfmp2_property_rdm(EC::ECInfo, method::ECMethod)
+
+  Build the restricted DF-MP2 correlated 1-RDM directly from the saved doubles
+  amplitudes. DF-MP2 properties use `U2 = T2` and do not require a separate
+  Lagrange-multiplier solve.
+"""
+function dfmp2_property_rdm(EC::ECInfo{T}, method::ECMethod) where T
+  if is_unrestricted(method) || has_prefix(method, "R")
+    error("DF-MP2 correlated properties are only implemented for restricted methods.")
+  end
+  empty_singles = zeros(T, 0, 0)
+  T2 = read_starting_guess4amplitudes(EC, Val(2))
+  return CoupledCluster.calc_correlated_1rdm(EC, method, empty_singles, T2, empty_singles, T2)
+end
+
+"""
+    write_fci_dipole(EC::ECInfo, ciphi::Bool)
+
+  Return `true` when the FCI or CIPHI driver should print and store dipole
+  components in the returned output dictionary.
+"""
+write_fci_dipole(EC::ECInfo, ciphi::Bool) = ciphi ? EC.options.ciphi.properties : EC.options.fci.properties
+
+"""
+    has_perturbative_triples(method::ECMethod)
+
+  Return `true` when `method` carries a perturbative triples correction.
+"""
+has_perturbative_triples(method::ECMethod) = method.exclevel[3] ∈ [:pert, :pertiter]
+
+"""
+    defer_lambda_perturbative_triples(method::ECMethod)
+
+  Return `true` when perturbative triples must be evaluated after the lambda
+  equations rather than in the initial energy-only pass.
+"""
+defer_lambda_perturbative_triples(method::ECMethod) = has_prefix(method, "Λ") && has_perturbative_triples(method)
+
+function add_perturbative_triples(EC::ECInfo, ecmethod::ECMethod, energies::OutDict;
+                                  save_pert_t3::Bool=false, timer=time_ns())
+  if is_similarity_transformed(EC.fd) && !has_prefix(ecmethod, "Λ")
+    warnerror("Perturbative triples for similarity transformed Hamiltonians must be calculated
+      with ΛCCSD(T) method! The error can be ignored by setting the option `cc.ignore_error=true`.",
+      !EC.options.cc.ignore_error)
+  end
+  main_name = method_name(ecmethod)
+  ECC = energies[main_name*"c"]
+  EHF = energies["HF"]
+  ET3, ET3b = values(calc_pertT(EC, ecmethod; save_t3=save_pert_t3))
+  println()
+  output_E_method(ECC+ET3b+EHF, main_name*"[T]", "total energy:      ")
+  output_E_method(ECC+ET3, main_name*"(T)", "correlation energy:")
+  output_E_method(ECC+ET3+EHF, main_name*"(T)", "total energy:       ")
+  println()
+  timer = print_time(EC, timer, "(T)", 1)
+  energies_out = copy(energies)
+  push!(energies_out, "[T]"=>(ET3b,"[T] energy contribution"),
+                      "(T)"=>(ET3,"(T) energy contribution"),
+                      main_name*"(T)c"=>(ECC+ET3,"$main_name(T) correlation energy"),
+                      main_name*"(T)"=>(ECC+ET3+EHF,"$main_name(T) total energy"))
+  return energies_out, timer
+end
+
+"""
+    correlated_dipole(EC::ECInfo, rdm::SpinMatrix)
+
+  Evaluate the dipole moment from a correlated MO-space 1-RDM when the current
+  wavefunction dump still contains orbitals and AO-basis metadata.
+"""
+function correlated_dipole(EC::ECInfo, rdm::SpinMatrix)
+  if !has_dumpfile(EC) || isempty(EC.system)
+    return nothing
+  end
+  orbital_data = fetch_orbital_data(EC)
+  if isnothing(orbital_data) || isempty(orbital_data.basis)
+    return nothing
+  end
+  return calc_dipole_moment(EC, orbital_data.cMO, rdm; basis=orbital_data.basis)
+end
+
+"""
+    full_space_fci_rdm(EC::ECInfo, rdm_active::AbstractMatrix, occ_key::Char, occval)
+
+  Embed an active-space FCI/CIPHI 1-RDM into the full orbital space and restore
+  the frozen occupied reference contribution.
+"""
+function full_space_fci_rdm(EC::ECInfo, rdm_active::AbstractMatrix, occ_key::Char, occval)
+  space_save, space_b4freeze = restore_full_space!(EC)
+  frozen_space = save_space(EC)
+  rdm_sym = 0.5 * (rdm_active + rdm_active')
+  full_size = length(space_b4freeze[':'])
+  if size(rdm_sym, 1) == full_size
+    rdm = Matrix(rdm_sym)
+  else
+    active_orbs = sort(union(frozen_space['o'], frozen_space['v'], frozen_space['O'], frozen_space['V']))
+    @assert size(rdm_sym, 1) == length(active_orbs)
+    rdm = zeros(eltype(rdm_sym), full_size, full_size)
+    rdm[active_orbs, active_orbs] = rdm_sym
+  end
+  frozen_occs = setdiff(space_b4freeze[occ_key], frozen_space[occ_key])
+  CoupledCluster.add_reference_density!(rdm, frozen_occs, occval)
+  restore_space!(EC, space_save)
+  return rdm
+end
+
+"""
+    fci_property_rdms(EC::ECInfo, rdm_a::AbstractMatrix, rdm_b::AbstractMatrix, closed_shell::Bool)
+
+  Construct the dipole and storage 1-RDM payloads used by FCI and CIPHI property
+  post-processing in the full orbital space.
+"""
+function fci_property_rdms(EC::ECInfo, rdm_a::AbstractMatrix, rdm_b::AbstractMatrix, closed_shell::Bool)
+  occa_key = 'o'
+  occb_key = closed_shell ? 'o' : 'O'
+  occval = one(eltype(rdm_a))
+  rdma_full = full_space_fci_rdm(EC, rdm_a, occa_key, occval)
+  rdmb_full = full_space_fci_rdm(EC, rdm_b, occb_key, occval)
+  dipole_rdm = SpinMatrix(rdma_full, rdmb_full)
+  storage_rdm = closed_shell ? SpinMatrix(copy(rdma_full + rdmb_full)) : copy(dipole_rdm)
+  return dipole_rdm, storage_rdm
+end
 
 """ 
     ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
@@ -60,6 +210,11 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # t1 = print_time(EC, t1, "MP2", 1)
   end
 
+  request_properties = need_correlated_properties(EC)
+  need_lm = need_lagrange_multipliers(EC, ecmethod)
+  defer_pert_t = need_lm && defer_lambda_perturbative_triples(ecmethod)
+  rdm = nothing
+
   if ecmethod.theory == "MP"
     save_last_amplitudes(EC, ecmethod)
     # do nothing
@@ -67,13 +222,31 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     energies = eval_dmrg_groundstate(EC, energies)
     t1 = print_time(EC, t1, "DMRG", 1)
   elseif ecmethod.exclevel[2] != :none
-    energies = eval_cc_groundstate(EC, ecmethod, energies)
+    ecmethod_cc = defer_pert_t ? ECMethod(method_name(ecmethod; main=true)) : ecmethod
+    energies = eval_cc_groundstate(EC, ecmethod_cc, energies)
     t1 = print_time(EC, t1, "ground state CC", 1)
   end
 
-  if EC.options.cc.properties
+  if need_lm
     calc_lm_cc(EC, ecmethod)
     t1 = print_time(EC, t1, "CC Lagrange multipliers", 1)
+    if request_properties
+      rdm = CoupledCluster.calc_correlated_1rdm(EC, ecmethod)
+      if EC.options.cc.properties
+        dipole = correlated_dipole(EC, rdm)
+        if isnothing(dipole)
+          println("WARNING: Dipole moment requires stored orbitals, AO basis data, and molecular geometry.")
+        else
+          output_dipole(method_name(ecmethod), dipole)
+          energies = add_dipole_entries(energies, method_name(ecmethod), dipole; include_method_aliases=true)
+        end
+      end
+      write_correlated_properties!(EC, rdm)
+    end
+  end
+
+  if defer_pert_t
+    energies, t1 = add_perturbative_triples(EC, ecmethod, energies; timer=t1)
   end
 
   if has_prefix(ecmethod, "EOM")
@@ -109,10 +282,12 @@ function dfccdriver(EC::ECInfo, method)
   
   energies = OutDict()
   root_name = method_name(ecmethod, root=true)
+  request_properties = need_correlated_properties(EC)
+  rdm = nothing
   if EC.fd.df3idx
     energies, unrestricted_orbs = eval_df3idx_mo_integrals(EC, energies, closed_shell)
   else
-    onthefly = root_name == "MP2" 
+    onthefly = root_name == "MP2"
     energies, unrestricted_orbs = eval_df_mo_integrals(EC, energies; save3idx=!onthefly)
   end
   t1 = time_ns()
@@ -124,6 +299,12 @@ function dfccdriver(EC::ECInfo, method)
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
 
   main_name = method_name(ecmethod)
+  if has_prefix(ecmethod, "Λ")
+    error("$main_name DF Lagrange multipliers are not implemented.")
+  end
+  if request_properties && (root_name != "MP2" || has_prefix(ecmethod, "SOS"))
+    error("Correlated properties in dfccdriver are only implemented for restricted DF-MP2.")
+  end
   
   if has_prefix(ecmethod, "SVD") 
     @assert ecmethod.exclevel[3] == :none "Only doubles SVD DF at this point!"
@@ -153,6 +334,21 @@ function dfccdriver(EC::ECInfo, method)
   elseif root_name == "CCS"
   else
     error("$main_name DF method not implemented!")
+  end
+
+  if request_properties
+    rdm = dfmp2_property_rdm(EC, ecmethod)
+    if EC.options.cc.properties
+      dipole = correlated_dipole(EC, rdm)
+      if isnothing(dipole)
+        println("WARNING: Dipole moment requires stored orbitals, AO basis data, and molecular geometry.")
+      else
+        output_dipole(method_name(ecmethod), dipole)
+        energies = add_dipole_entries(energies, method_name(ecmethod), dipole; include_method_aliases=true)
+      end
+    end
+    write_correlated_properties!(EC, rdm)
+    t1 = print_time(EC, t1, "DF-MP2 correlated properties", 1)
   end
 
   if has_prefix(ecmethod, "EOM")
@@ -186,9 +382,23 @@ function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   energies = eval_hf_energy(EC, energies, closed_shell)
   # t1 = print_time(EC, t1, "HF energy", 1)
 
-  E_FCI = eval_fci(EC, energies["HF"]; ciphi=ciphi)
+  request_properties = need_fci_properties(EC, ciphi)
+  E_FCI, fci_rdm = eval_fci(EC, energies["HF"]; ciphi=ciphi, return_rdm=request_properties)
   method = ciphi ? "CIPHI" : "FCI"
   energies = output_energy(EC, E_FCI, energies, method)
+  if request_properties && !isnothing(fci_rdm)
+    dipole_rdm, storage_rdm = fci_property_rdms(EC, fci_rdm[1], fci_rdm[2], closed_shell)
+    if write_fci_dipole(EC, ciphi)
+      dipole = correlated_dipole(EC, dipole_rdm)
+      if isnothing(dipole)
+        println("WARNING: Dipole moment requires stored orbitals, AO basis data, and molecular geometry.")
+      else
+        output_dipole(method, dipole)
+        energies = add_dipole_entries(energies, method, dipole; include_method_aliases=true)
+      end
+    end
+    write_correlated_properties!(EC, storage_rdm)
+  end
   t1 = print_time(EC, t1, method, 1)
 
   delete_temporary_files!(EC)
@@ -460,7 +670,6 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
     return eval_svd_dc_ccsdt(EC, ecmethod, energies)
   end
   t1 = time_ns()
-  EHF = energies["HF"]
   main_name = method_name(ecmethod)
   ECC = calc_cc(EC, ECMethod(main_name))
   if has_prefix(ecmethod, "O") && has_prefix(ecmethod, "QV")
@@ -479,28 +688,9 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   end
   t1 = print_time(EC, t1, "CC", 1)
 
-  if has_prefix(ecmethod, "Λ")
-    calc_lm_cc(EC, ecmethod)
-    t1 = print_time(EC, t1, "ΛCC", 1)
-  end
-
-  if ecmethod.exclevel[3] ∈ [ :pert, :pertiter]
-    if is_similarity_transformed(EC.fd) && !has_prefix(ecmethod, "Λ")
-      warnerror("Perturbative triples for similarity transformed Hamiltonians must be calculated
-      with ΛCCSD(T) method! The error can be ignored by setting the option `cc.ignore_error=true`.",
-      !EC.options.cc.ignore_error)
-    end
-    ET3, ET3b = values(calc_pertT(EC, ecmethod; save_t3=save_pert_t3))
-    println()
-    output_E_method(ECC["E"]+ET3b+EHF, main_name*"[T]", "total energy:      ")
-    output_E_method(ECC["E"]+ET3, main_name*"(T)", "correlation energy:")
-    output_E_method(ECC["E"]+ET3+EHF, main_name*"(T)", "total energy:       ")
-    println()
-    t1 = print_time(EC, t1, "(T)", 1)
-    push!(energies, "[T]"=>(ET3b,"[T] energy contribution"), 
-                    "(T)"=>(ET3,"(T) energy contribution"),
-                    main_name*"(T)c"=>(ECC["E"]+ET3,"$main_name(T) correlation energy"),
-                    main_name*"(T)"=>(ECC["E"]+ET3+EHF,"$main_name(T) total energy"))
+  if has_perturbative_triples(ecmethod) && !defer_lambda_perturbative_triples(ecmethod)
+    energies, t1 = add_perturbative_triples(EC, ecmethod, energies;
+                                            save_pert_t3=save_pert_t3, timer=t1)
   end
   return energies
 end
@@ -627,7 +817,7 @@ function eval_df3idx_mo_integrals(EC::ECInfo, energies::OutDict, closed_shell)
   return merge(energies, "HF"=>(ERef,"Reference energy")), EC.fd.uhf
 end
 
-function eval_fci(EC::ECInfo, ref_energy; ciphi=false)
+function eval_fci(EC::ECInfo, ref_energy; ciphi=false, return_rdm=false)
   t1 = time_ns()
   # Create basic FCI setup
   norb = length(EC.space[':'])
@@ -688,12 +878,21 @@ function eval_fci(EC::ECInfo, ref_energy; ciphi=false)
       push!(energies, "E-correction" => pt2[1][1])
       push!(energies, "E-correction δ" => pt2[1][2])
     end
+    rdm = nothing
+    if return_rdm && size(coefs, 2) > 0
+      rdm_a = zeros(eltype(coefs), norb, norb)
+      rdm_b = zeros(eltype(coefs), norb, norb)
+      FCI.make_selected_1rdms!(rdm_a, rdm_b, dets, @view(coefs[:, 1]), norb)
+      rdm = (rdm_a, rdm_b)
+    end
     # Store determinants if wf.store is set
     nstates = length(E_CIPHI)
     dump_wavefunction_with_determinants!(EC, dets, coefs; nstates=nstates)
-    return merge(energies, "E" => Egs - ref_energy)
+    return merge(energies, "E" => Egs - ref_energy), rdm
   else
     println("Setting up FCI..."); flush(stdout)
+    compute_rdms = EC.options.fci.compute_rdms
+    EC.options.fci.compute_rdms = compute_rdms || return_rdm
     fci_ctx = FCIContext(fdump, EC.options.fci; occa=EC.space['o'], occb=EC.space['O'])
     println("FCI context setup complete."); flush(stdout)
     E_FCI = run_fci!(fci_ctx)
@@ -703,7 +902,9 @@ function eval_fci(EC::ECInfo, ref_energy; ciphi=false)
     for i = 1:length(E_FCI)-1
       energies["ω$i"] = E_FCI[i+1] - Egs
     end
-    return merge(energies, "E" => Egs - ref_energy)
+    rdm = return_rdm ? (copy(fci_ctx.rdm1_a), copy(fci_ctx.rdm1_b)) : nothing
+    EC.options.fci.compute_rdms = compute_rdms
+    return merge(energies, "E" => Egs - ref_energy), rdm
   end
 end
 

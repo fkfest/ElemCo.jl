@@ -20,7 +20,7 @@ export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 export get_options, with_local_options
-export FCIOptions, CIPHIOptions
+export FCIOptions, CIPHIOptions, RegionOptions
 export DEFAULT_ELTYPE, set_default_eltype!, ec_eltype
 
 include("options.jl")

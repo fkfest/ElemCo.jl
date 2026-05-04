@@ -1013,6 +1013,102 @@ function calc_1RDM(EC::ECInfo{T}, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobi
   return D1, dD1
 end
 
+function real_rdm_if_small(EC::ECInfo, value, label::AbstractString)
+  eltype(value) <: Real && return value
+  value_real = real.(value)
+  diff = sum(abs2, value) - sum(abs2, value_real)
+  if diff > EC.options.scf.imagtol
+    println("Large imaginary part in $label neglected!")
+    println("Difference between squared norms:", diff)
+  end
+  return value_real
+end
+
+function add_reference_density!(rdm::AbstractMatrix, occs, occval)
+  for i in occs
+    rdm[i, i] += occval
+  end
+  return rdm
+end
+
+function full_1rdm(EC::ECInfo, dD1::AbstractMatrix, occ_key::Char, occval)
+  space_save, space_b4freeze = restore_full_space!(EC)
+  frozen_space = save_space(EC)
+  rdm_active = 0.5 * (dD1 + dD1')
+  rdm_active = real_rdm_if_small(EC, rdm_active, "1-RDM")
+  full_size = length(space_b4freeze[':'])
+  if size(rdm_active, 1) == full_size
+    rdm = Matrix{Float64}(rdm_active)
+  else
+    active_orbs = sort(union(frozen_space['o'], frozen_space['v'], frozen_space['O'], frozen_space['V']))
+    @assert size(rdm_active, 1) == length(active_orbs)
+    rdm = zeros(Float64, full_size, full_size)
+    rdm[active_orbs, active_orbs] = rdm_active
+  end
+  add_reference_density!(rdm, space_b4freeze[occ_key], occval)
+  restore_space!(EC, space_save)
+  return rdm
+end
+
+"""
+    calc_correlated_1rdm(EC::ECInfo, method::ECMethod)
+
+  Build the correlated 1-RDM from the saved CC amplitudes and the converged
+  Lagrange multipliers stored in the temporary `U_*` files.
+"""
+function calc_correlated_1rdm(EC::ECInfo{T}, method::ECMethod) where T
+  has_singles = (method.exclevel[1] == :full)
+  if is_unrestricted(method) || has_prefix(method, "R")
+    T1a = has_singles ? read_starting_guess4amplitudes(EC, Val(1), :α) : zeros(T, 0, 0)
+    T1b = has_singles ? read_starting_guess4amplitudes(EC, Val(1), :β) : zeros(T, 0, 0)
+    U1a = has_singles ? load2idx(EC, "U_vo") : zeros(T, 0, 0)
+    U1b = has_singles ? load2idx(EC, "U_VO") : zeros(T, 0, 0)
+    T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
+    T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
+    T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    U2a = load4idx(EC, "U_vvoo")
+    U2b = load4idx(EC, "U_VVOO")
+    U2ab = load4idx(EC, "U_vVoO")
+    return calc_correlated_1rdm(EC, method,
+                                T1a, T1b, T2a, T2b, T2ab,
+                                U1a, U1b, U2a, U2b, U2ab)
+  end
+  T1 = has_singles ? read_starting_guess4amplitudes(EC, Val(1)) : zeros(T, 0, 0)
+  U1 = has_singles ? load2idx(EC, "U_vo") : zeros(T, 0, 0)
+  T2 = read_starting_guess4amplitudes(EC, Val(2))
+  U2 = load4idx(EC, "U_vvoo")
+  return calc_correlated_1rdm(EC, method, T1, T2, U1, U2)
+end
+
+"""
+    calc_correlated_1rdm(EC::ECInfo, method::ECMethod, T1, T2, U1, U2)
+
+  Build the full-space restricted correlated 1-RDM from amplitudes and
+  converged Lagrange multipliers.
+"""
+function calc_correlated_1rdm(EC::ECInfo, method::ECMethod, T1, T2, U1, U2)
+  _, dD1 = calc_1RDM(EC, U1, U2, T1, T2)
+  return SpinMatrix(full_1rdm(EC, dD1, 'o', 2.0))
+end
+
+"""
+    calc_correlated_1rdm(EC::ECInfo, method::ECMethod,
+                         T1a, T1b, T2a, T2b, T2ab,
+                         U1a, U1b, U2a, U2b, U2ab)
+
+  Build the full-space unrestricted correlated 1-RDM from amplitudes and
+  converged Lagrange multipliers.
+"""
+function calc_correlated_1rdm(EC::ECInfo, method::ECMethod,
+                              T1a, T1b, T2a, T2b, T2ab,
+                              U1a, U1b, U2a, U2b, U2ab)
+  _, dD1a = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1a, T2a, T2ab, :α)
+  _, dD1b = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1b, T2b, T2ab, :β)
+  rdma = full_1rdm(EC, dD1a, 'o', 1.0)
+  rdmb = full_1rdm(EC, dD1b, 'O', 1.0)
+  return SpinMatrix(rdma, rdmb)
+end
+
 """
     calc_vT2_intermediates(EC::ECInfo, T2; dc=false)
 
@@ -1214,25 +1310,30 @@ end
 """
     calc_lm_cc(EC::ECInfo, method::ECMethod)
 
-  Calculate coupled cluster Lagrange multipliers.
+  Solve coupled cluster Lagrange multipliers and persist the converged `U_*`
+  tensors for downstream post-processing.
 
   Exact specification of the method is given by `method`.
 """
 function calc_lm_cc(EC::ECInfo{T}, method::ECMethod) where T
   print_info(method_name(method)*" Lagrange multipliers")
   highest_full_exc = max_full_exc(method)
+  has_singles = (method.exclevel[1] == :full)
   if highest_full_exc > 2
     error("only implemented upto doubles")
   end
   if is_unrestricted(method) || has_prefix(method, "R")
-    if method.exclevel[1] == :full
+    if has_singles
       T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
       T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
     else
       T1a = zeros(T, 0, 0)
       T1b = zeros(T, 0, 0)
+      save_current_singles(EC,
+                           read_starting_guess4amplitudes(EC, Val(1), :α),
+                           read_starting_guess4amplitudes(EC, Val(1), :β))
     end
-    if method.exclevel[2] != :full
+    if method.exclevel[2] == :none
       error("No doubles is not implemented")
     end
     T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
@@ -1240,17 +1341,19 @@ function calc_lm_cc(EC::ECInfo{T}, method::ECMethod) where T
     T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
     lm_cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), EC, method)
   else
-    if method.exclevel[1] == :full
+    if has_singles
       T1 = read_starting_guess4amplitudes(EC, Val(1))
     else
       T1 = zeros(T, 0, 0)
+      save_current_singles(EC, read_starting_guess4amplitudes(EC, Val(1)))
     end
-    if method.exclevel[2] != :full
+    if method.exclevel[2] == :none
       error("No doubles is not implemented")
     end
     T2 = read_starting_guess4amplitudes(EC, Val(2))
     lm_cc_iterations!((T1,), (T2,), EC, method)
   end
+  return nothing
 end
 
 """
@@ -1287,6 +1390,7 @@ end
 """
 function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC" || last(method.theory,2) == "DC")
+  do_sing = (method.exclevel[1] == :full)
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(LMs1) == 2) && (length(LMs2) == 3)
   else
@@ -1295,14 +1399,16 @@ function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   LMs = (LMs1..., LMs2...)
   # dress integrals
   t1 = time_ns()
-  calc_dressed_ints(EC, LMs1...; calc_d_vovv=true)
+  if do_sing
+    calc_dressed_ints(EC, LMs1...; calc_d_vovv=true)
+  else
+    pseudo_dressed_ints(EC, is_unrestricted(method) || has_prefix(method, "R"); calc_d_vovv=true)
+  end
   t1 = print_time(EC, t1, "dressing integrals",2)
   calc_vT2_intermediates(EC, LMs2...; dc)
 
   diis = Diis(EC)
   transform_amplitudes2lagrange_multipliers!(LMs1, LMs2)
-
-  do_sing = (method.exclevel[1] == :full)
 
   NormR1 = 0.0
   NormLM1 = 0.0

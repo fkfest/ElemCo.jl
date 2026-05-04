@@ -12,6 +12,8 @@ ElemCo provides three localization schemes for occupied orbitals:
 
 Virtual orbitals can optionally be localized as orthogonal projected atomic orbitals (OPAOs).
 
+For fragment-tagged dumps and PiOS-style region selection, see [Orbital Regions](region.md).
+
 ## Basic usage
 
 ```julia
