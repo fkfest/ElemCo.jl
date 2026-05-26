@@ -3015,7 +3015,10 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   if has_prefix(method, "2D")
     ene = Eh["E"] + Eh["EIAS"]
     W = load1idx(EC,"2d_ccsd_W")[1]
-    push!(Eh, "EW"=>W, "E"=>ene)
+    if abs(imag(W)) > 1.e-6
+      @warn "Singlet/triplet energy contribution W has a significant imaginary part: $W. Taking the real part for final energy."
+    end
+    push!(Eh, "EW"=>real(W), "E"=>ene)
   end
   t0 = print_time(EC, t0, "total", 1)
   return Eh
