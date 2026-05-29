@@ -119,12 +119,13 @@ function dfhf(EC::ECInfo{T}) where T
     t1 = print_time(EC, t1, "transform integrals", 0)
   end
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
-  dipole_occupations = [ones(length(SP['o'])); zeros(length(SP['v']))]
   dipole = nothing
   if use_df3idx
     println("WARNING: DF-HF dipole moments are unavailable for pretransformed 3-index integrals.")
   else
-    dipole = calc_dipole_moment(EC, SpinMatrix(cMO), SpinMatrix(Diagonal(dipole_occupations)); basis=direct ? bao : nothing)
+    # restricted 1-RDM convention: α holds the total (spin-summed) density, so use the
+    # doubly-occupied `occupations` (not a per-spin density) for the dipole RDM.
+    dipole = calc_dipole_moment(EC, SpinMatrix(cMO), SpinMatrix(Diagonal(occupations)); basis=direct ? bao : nothing)
     if !isnothing(dipole)
       output_dipole("DF-HF", dipole)
     end

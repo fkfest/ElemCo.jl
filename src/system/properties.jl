@@ -93,7 +93,8 @@ end
 function nuclear_dipole_components(system::MSystem)
   dip = zeros(Float64, 3)
   for atom in system
-    dip .+= Float64(atom.atomic_number) .* Vector(atom.position)
+    is_dummy(atom) && continue
+    dip .+= atom.charge .* Vector(atom.position)
   end
   return dip
 end
@@ -154,6 +155,9 @@ end
 
   Calculate total molecular dipole components in Debye from a MO-space 1-RDM.
   Returns `(μx, μy, μz, |μ|)` or `nothing` when the AO basis / geometry is unavailable.
+
+  For a restricted `rdm`, `rdm.α` is taken to be the total (spin-summed) density;
+  for an unrestricted `rdm`, `rdm.α` and `rdm.β` are the per-spin densities.
 """
 function calc_dipole_moment(EC::ECInfo, cMO::SpinMatrix, rdm::SpinMatrix; basis=nothing)
   if isempty(EC.system)

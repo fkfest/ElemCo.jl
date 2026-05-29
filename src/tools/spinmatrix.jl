@@ -13,7 +13,10 @@ mutable struct SpinMatrix{T<:Number}
     return new{Ty}(mat1, mat2)
   end
   function SpinMatrix(mat::AbstractMatrix{Ty}) where {Ty}
-    return new{Ty}(mat, mat)
+    # convert once so that both fields share the same array (β === α ⟹ restricted);
+    # `new{Ty}(mat, mat)` with a non-`Matrix` input would convert twice and yield α !== β.
+    m = convert(Matrix{Ty}, mat)
+    return new{Ty}(m, m)
   end
   function SpinMatrix{Ty}() where {Ty}
     return new{Ty}(zeros(Ty,0,0), zeros(Ty,0,0))
