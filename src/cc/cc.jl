@@ -2466,6 +2466,13 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3
   end
   t1 = print_time(EC,t1,"ccsdt triples",2)
 
+  if fixref
+    # frozen-reference (FRS/FRT): the reference αβ-doubles amplitude is kept
+    # fixed in cc_iterations!, so its residual element has to be projected out
+    activeorbs = oss_active_orbitals(EC)
+    R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub] = 0.0
+  end
+
   return R1a, R1b, R2a, R2b, R2ab, R3a, R3b, R3aab, R3abb
 end
 
