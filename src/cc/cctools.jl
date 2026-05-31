@@ -1866,7 +1866,7 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo{T}) where T
     # Same file - project onto current basis (in case orbitals were modified)
     if !isempty(EC.system)
       current_basis = generate_basis(EC, "ao")
-      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true, redthr=EC.options.scf.redthr)
       use_projection = true
     end
     classes_new = (String[], String[])
@@ -1931,7 +1931,7 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo{T}) where T
     # Same file - project onto current basis (in case orbitals were modified)
     if !isempty(EC.system)
       current_basis = generate_basis(EC, "ao")
-      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true, redthr=EC.options.scf.redthr)
       use_projection = true
     end
     classes_new = (String[], String[])

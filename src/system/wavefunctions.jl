@@ -122,7 +122,7 @@ end
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
 function dump_orbitals end
-function dump_orbitals(EC::ECInfo, cMO; 
+function dump_orbitals(EC::ECInfo, cMO;
                        basis=nothing, type="HF", energies=nothing, occupations=nothing,
                        classes=nothing, MO="mo")
   open_dump(EC, "w") do io
@@ -131,7 +131,7 @@ function dump_orbitals(EC::ECInfo, cMO;
   end
   return
 end
-function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO; 
+function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO;
                        basis=nothing, type="HF", energies=nothing, occupations=nothing,
                        classes=nothing, MO="mo")
   println("Dumping orbitals ...")
@@ -235,7 +235,9 @@ end
 """
     prepare_class_vectors(classes, orbitals::SpinMatrix)
 
-  Normalize explicit orbital classes for dumping.
+  Normalize explicit orbital classes for dumping into the `(classa, classb)` form
+  expected by `write_trexio_orbitals`. `classes` is either a vector of class strings
+  (restricted) or a tuple of `(alpha, beta)` vectors (unrestricted).
 """
 function prepare_class_vectors(classes, orbitals::SpinMatrix)
   error("Unsupported input type for explicit orbital classes: $(typeof(classes))")

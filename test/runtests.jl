@@ -27,13 +27,13 @@ TESTS = [
 ("FCI", ["fci_rhf", "fci_uhf", "fci_rhf_st"]),
 ("CIPHI", ["ciphi_rhf", "ciphi_uhf", "ciphi_rhf_st", "ciphi_restart"]),
 ("QV-CC", ["h2o_qv-ccd"]),
-("DF", ["df_hf", "basis", "df_uhf", "df_mcscf", "levenshtein", "df3idx", "localization"]),
+("DF", ["df_hf", "redundant_hf", "basis", "df_uhf", "df_mcscf", "levenshtein", "df3idx", "localization"]),
 ("System", ["dummy"]),
 ("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc","svd_dc_ccsdt"]),
 ("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase","h2o_wf", "vasp", "df3idx_vasp"]),
 ("Unit-tests", ["unit_tests", "bufvec"]),
-("Complex", ["complex_cc", "complex_eom", "complex_lambda", "complex_fci", "complex_bohf", "complex_trexio", "df3idx_complex"]),
+("Complex", ["complex_cc", "complex_eom", "complex_lambda", "complex_fci", "complex_bohf", "complex_trexio", "df3idx_complex", "complex_fcidump_roundtrip"]),
 ]
 
 # long tests

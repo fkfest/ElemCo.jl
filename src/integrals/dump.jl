@@ -282,6 +282,18 @@ end
 is_similarity_transformed(fd::FDump) = headvar(fd, "ST", Int) > 0
 
 """
+    uses_reduced_permsym(fd::FDump{T}) where {T<:Number}
+
+  Return true if the reduced (similarity-transformed) permutational symmetry has to be
+  used when reading/writing the integrals.
+
+  This is the case for similarity-transformed fcidumps (`ST=1`), and *always* for complex
+  integrals, which lack the full permutational symmetry of real integrals. Complex integrals
+  therefore use the same symmetry as `ST=1` without setting the `ST` flag.
+"""
+uses_reduced_permsym(fd::FDump{T}) where {T<:Number} = is_similarity_transformed(fd) || T <: Complex
+
+"""
     set_zero!(fd::FDump, norb::Int=0)
 
   Set all integrals to zero.
@@ -671,7 +683,7 @@ function read_integrals!(fd::FDump{<:Number,N}, fdfile::IOStream) where N
   if isnothing(st)
     error("ST option not found in fcidump")
   end
-  simtra = (st > 0)
+  simtra = uses_reduced_permsym(fd)
   set_zero!(fd, norb)
   if fd.uhf
     if fd.epdump
@@ -1058,7 +1070,7 @@ function write_integrals(fd::FDump, fdf, tol)
   if isnothing(st)
     error("ST option not found in fcidump")
   end
-  simtra::Bool = (st > 0)
+  simtra::Bool = uses_reduced_permsym(fd)
   if !fd.uhf
     write_integrals2(fd.int2, fdf, tol, simtra)
     if fd.epdump
