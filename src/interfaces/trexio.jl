@@ -31,6 +31,7 @@ export write_trexio_system, read_trexio_system
 export write_trexio_basis, read_trexio_basis
 export write_trexio_orbitals, read_trexio_orbitals
 export write_trexio_rotations, read_trexio_rotations
+export write_trexio_1rdm
 export read_trexio_orbital_classes, read_trexio_orbital_energies, read_trexio_orbital_occupations
 export write_trexio_amplitudes
 export read_trexio_singles, read_trexio_doubles
@@ -117,6 +118,33 @@ function close_trexio(trexio::TrexioFile)
   if status != TREXIO.TREXIO_SUCCESS
     @warn "Warning: Failed to properly close TREXIO file"
   end
+end
+
+"""
+    write_trexio_1rdm(trexio::TrexioFile, rdm::SpinMatrix)
+
+  Write one-particle reduced density matrices to TREXIO.
+  Restricted densities are written to `rdm.1e`.
+  Unrestricted densities are written to `rdm.1e_up`, `rdm.1e_dn`, and their sum to `rdm.1e`.
+"""
+function write_trexio_1rdm(trexio::TrexioFile, rdm::SpinMatrix)
+  if is_restricted(rdm)
+    status = trexio_write_rdm_1e(trexio, Matrix{Float64}(rdm.α))
+    trexio_check_write_status(status, "rdm.1e")
+    return
+  end
+  nmo = size(rdm.α, 1)
+  rdm_up = zeros(Float64, 2*nmo, 2*nmo)
+  rdm_dn = zeros(Float64, 2*nmo, 2*nmo)
+  rdm_up[1:nmo, 1:nmo] = Matrix{Float64}(rdm.α)
+  rdm_dn[nmo+1:2*nmo, nmo+1:2*nmo] = Matrix{Float64}(rdm.β)
+  status = trexio_write_rdm_1e_up(trexio, rdm_up)
+  trexio_check_write_status(status, "rdm.1e_up")
+  status = trexio_write_rdm_1e_dn(trexio, rdm_dn)
+  trexio_check_write_status(status, "rdm.1e_dn")
+  status = trexio_write_rdm_1e(trexio, rdm_up + rdm_dn)
+  trexio_check_write_status(status, "rdm.1e")
+  return
 end
 
 """

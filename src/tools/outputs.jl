@@ -10,6 +10,7 @@ using Printf
 export output_time, output_memory, flush_output
 export output_iteration
 export output_E_var, output_E_method, output_norms, output_state
+export output_dipole
 export output_single_excitation
 
 """
@@ -103,6 +104,16 @@ end
 """
 function output_E_method(En, method::AbstractString, info::AbstractString="")
   @printf "%s %s \t%16.12f \n" method info real(En)
+  flush(stdout)
+end
+
+"""
+    output_dipole(method::AbstractString, dipole)
+
+  Output dipole components in Debye.
+"""
+function output_dipole(method::AbstractString, dipole)
+  @printf "%s dipole [D]: x=%11.6f y=%11.6f z=%11.6f |μ|=%11.6f\n" method real(dipole[1]) real(dipole[2]) real(dipole[3]) real(dipole[4])
   flush(stdout)
 end
 

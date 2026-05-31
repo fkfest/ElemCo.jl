@@ -27,6 +27,7 @@ include("system/integrals.jl")
 include("infos/ecinfos.jl")
 
 include("interfaces/trexio.jl")
+include("system/properties.jl")
 include("system/wavefunctions.jl")
 
 include("infos/ecmethods.jl")
@@ -36,9 +37,11 @@ include("solvers/davidson.jl")
 include("cc/laplace.jl")
 include("scf/orbtools.jl")
 include("scf/localization.jl")
+include("scf/region.jl")
 include("scf/fockfactory.jl")
 include("integrals/dumptools.jl")
 include("integrals/dftools.jl")
+include("integrals/dfdump.jl")
 include("tools/decomptools.jl")
 include("fci/fci.jl")
 include("cc/cctools.jl")
@@ -51,7 +54,6 @@ include("cc/drivers.jl")
 include("scf/bohf.jl")
 
 include("scf/dfhf.jl")
-include("integrals/dfdump.jl")
 
 include("scf/dfmcscf.jl")
 
@@ -75,6 +77,7 @@ using .VersionInfo
 using .Utils
 using .ECInfos
 using .QMTensors
+using .Properties
 using .Wavefunctions
 using .ECMethods
 using .TensorTools
@@ -87,6 +90,7 @@ using .FciDumps
 using .DumpTools
 using .OrbTools
 using .OrbLocalization
+using .OrbRegion
 using .Elements
 using .MSystems
 using .BasisSets
@@ -110,7 +114,7 @@ export @set_default_eltype
 export ECInfo, ec_eltype, DEFAULT_ELTYPE, set_default_eltype!
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
-export @localize
+export @localize, @region
 export @fci, @ciphi, @sci, @ciϕ
 export @import_matrix, @export_molden
 export @molpro_input, @molpro_output, @check_molproinfo
@@ -799,6 +803,68 @@ macro localize(opts_block=nothing)
     return quote
       $(esc(:@tryECinit))
       localize_orbitals($(esc(:EC)))
+    end
+  end
+end
+
+"""
+    @region(centers=nothing, opts_block=nothing)
+
+  Build a region-tagged orbital dump from localized occupied orbitals and fragment OPAOs.
+
+`centers` is an optional list of atom indices or center labels. When omitted, the
+requested centers are taken from `region.inclusive_centers` and `region.exclusive_centers`.
+The macro reads orbitals from
+[`WfOptions.start`](@ref ECInfos.WfOptions) when provided, otherwise from
+[`WfOptions.dump`](@ref ECInfos.WfOptions), and writes the tagged result to
+[`WfOptions.store`](@ref ECInfos.WfOptions) if set, otherwise back to the main dump.
+
+Optionally, a `begin...end` block can be provided to set local `region` or `loc`
+options for this call.
+
+# Examples
+```julia
+@region [1, 2]
+@region [:O, :H1] begin
+  @set region mode=:exclusive occ_charge_thr=0.25 atom_charge_thr=0.15
+end
+@region [:C1, :C2, :C3, :C4] begin
+  @set region pi=:both pi_occupied=1 pi_virtual=1
+end
+@region begin
+  @set region inclusive_centers=[:H1] exclusive_centers=[:O]
+end
+```
+"""
+macro region(args...)
+  local_opts_expr = nothing
+  centers_expr = :(Any[])
+
+  if isempty(args)
+    nothing
+  elseif length(args) == 1 && is_options_block(args[1])
+    local_opts_expr = parse_options_block(args[1])
+  elseif is_options_block(args[end])
+    length(args) == 2 || error("@region accepts an optional centers argument and at most one options block")
+    centers_expr = args[1]
+    local_opts_expr = parse_options_block(args[end])
+  elseif length(args) == 1
+    centers_expr = args[1]
+  else
+    error("@region accepts an optional centers argument and at most one options block")
+  end
+
+  if isnothing(local_opts_expr)
+    return quote
+      $(esc(:@tryECinit))
+      region_orbitals($(esc(:EC)), $(esc(centers_expr)))
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts_expr) do
+        region_orbitals($(esc(:EC)), $(esc(centers_expr)))
+      end
     end
   end
 end

@@ -10,6 +10,7 @@ using ..ElemCo.Wavefunctions
 using ..ElemCo.OrbTools
 using ..ElemCo.DFTools
 using ..ElemCo.FockFactory
+using ..ElemCo.Properties
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
@@ -119,10 +120,21 @@ function dfhf(EC::ECInfo{T}) where T
     EC.fd.int1 = cMO' * hsmall * cMO
     t1 = print_time(EC, t1, "transform integrals", 0)
   end
+  occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
+  dipole = nothing
+  if use_df3idx
+    println("WARNING: DF-HF dipole moments are unavailable for pretransformed 3-index integrals.")
+  else
+    # restricted 1-RDM convention: α holds the total (spin-summed) density, so use the
+    # doubly-occupied `occupations` (not a per-spin density) for the dipole RDM.
+    dipole = calc_dipole_moment(EC, SpinMatrix(cMO), SpinMatrix(Diagonal(occupations)); basis=direct ? bao : nothing)
+    if !isnothing(dipole)
+      output_dipole("DF-HF", dipole)
+    end
+  end
   println("DF-HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
-  occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
   if use_df3idx
     dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
   else
@@ -130,7 +142,8 @@ function dfhf(EC::ECInfo{T}) where T
     classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
     dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes)
   end
-  return OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
+  energies = OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
+  return isnothing(dipole) ? energies : add_dipole_entries(energies, "DF-HF", dipole)
 end
 
 """
@@ -368,11 +381,21 @@ function dfuhf(EC::ECInfo{T}) where T
     end
     t1 = print_time(EC, t1, "transform integrals", 2)
   end
+  occupationsa = [ones(length(SP['o'])); zeros(length(SP['v']))]
+  occupationsb = [ones(length(SP['O'])); zeros(length(SP['V']))]
+  dipole = nothing
+  if use_df3idx
+    println("WARNING: DF-UHF dipole moments are unavailable for pretransformed 3-index integrals.")
+  else
+    rdm = SpinMatrix(Diagonal(occupationsa), Diagonal(occupationsb))
+    dipole = calc_dipole_moment(EC, cMO, rdm; basis=direct ? bao : nothing)
+    if !isnothing(dipole)
+      output_dipole("DF-UHF", dipole)
+    end
+  end
   println("DF-UHF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
-  occupationsa = [ones(length(SP['o'])); zeros(length(SP['v']))]
-  occupationsb = [ones(length(SP['O'])); zeros(length(SP['V']))]
   if use_df3idx
     dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
   else
@@ -381,7 +404,8 @@ function dfuhf(EC::ECInfo{T}) where T
                              orbital_classes_with_deleted(SP['O'], norb, nredund)) : nothing
     dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
   end
-  return OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
+  energies = OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
+  return isnothing(dipole) ? energies : add_dipole_entries(energies, "DF-UHF", dipole)
 end
 
 end #module

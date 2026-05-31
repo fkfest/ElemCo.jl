@@ -1,4 +1,5 @@
 using ElemCo
+using LinearAlgebra
 
 @testset "ΛUDCSD Test" begin
 epsilon    =  1.e-6
@@ -26,6 +27,8 @@ let
   T2a, T2b, T2ab = @loadfile("cc_amplitudes_2") 
   D1a, dD1a = ElemCo.calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1a, T2a, T2ab, :α)
   D1b, dD1b = ElemCo.calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1b, T2b, T2ab, :β)
+  @test abs(tr(dD1a)) < epsilon
+  @test abs(tr(dD1b)) < epsilon
 end
 
 end

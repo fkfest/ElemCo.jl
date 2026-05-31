@@ -11,6 +11,30 @@ export save_ecvariables_to_file
 export MolproInfo
 export get_molecule
 
+const MOLPRO_FILE_KEYS = ("XML", "ORBITALS", "ECORBITALS", "ECVARIABLES")
+
+function resolve_exportdata_file(exportdata_file::AbstractString; caller_dir::AbstractString="")
+  if isfile(exportdata_file)
+    return abspath(exportdata_file)
+  elseif !isempty(caller_dir)
+    candidate = joinpath(caller_dir, exportdata_file)
+    if isfile(candidate)
+      return abspath(candidate)
+    end
+  end
+  return exportdata_file
+end
+
+function resolve_exportdata_paths!(vardict::Dict{String, String}, exportdata_file::AbstractString)
+  base_dir = dirname(abspath(exportdata_file))
+  for key in MOLPRO_FILE_KEYS
+    if haskey(vardict, key) && !isabspath(vardict[key])
+      vardict[key] = normpath(joinpath(base_dir, vardict[key]))
+    end
+  end
+  return vardict
+end
+
 """
     MolproInfo
 
@@ -36,7 +60,9 @@ The exportdata file contains variable definitions in the format:
 Returns a `MolproInfo` object with parsed variables and XML document.
 """
 function MolproInfo(exportdata_file::AbstractString="elemcoil")
+  exportdata_file = resolve_exportdata_file(exportdata_file)
   vardict = parse_exportdata_file(exportdata_file)
+  resolve_exportdata_paths!(vardict, exportdata_file)
   @assert haskey(vardict, "XML") "No XML variable found in exportdata file"
   xml_doc = read(vardict["XML"], Node) 
   molecule = get_xml_last(xml_doc, "//molecule")

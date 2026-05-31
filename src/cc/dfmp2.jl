@@ -2,8 +2,8 @@
     calc_dfmp2(EC::ECInfo)
 
   Perform density-fitted MP2 calculation.
-  If `save` is set in [`CcOptions.save`](@ref ECInfos.CcOptions), save T2 amplitudes to 
-  `save`*"_2" file.
+  Materialize T2 amplitudes only when they are needed for an explicit doubles
+  save or for the MP2 lambda/property path.
 
   Args:
     EC: ECInfo object
@@ -74,18 +74,42 @@ function calc_dfmp2(EC::ECInfo{T}) where T
   ϵo = eps[SP['o']]
   ϵv = eps[SP['v']]
   savet2 = !isempty(EC.options.cc.save)
-  if savet2
-    t2filename, description = save_or_start_file(EC, "T", 2)
-    t2filename *= "_2"
-    description *= " MP2"
-    T2file, T2 = newmmap(EC, t2filename, (nvir,nvir,nocc,nocc); description)
-    println("Save doubles amplitudes to file $t2filename")
+  if savet2 || EC.options.cc.properties || !isempty(EC.options.wf.natorb)
+    T2file, T2 = newmmap(EC, "T_vvoo", (nvir,nvir,nocc,nocc);
+                         description="tmp DF-MP2 doubles amplitudes")
+    EMP2d, EMP2ex, EMP2diag = calc_dfmp2_energy_components(Lvo, ϵo, ϵv) do irange, j, t_vvij
+      T2[:,:,irange,j] .= t_vvij
+      permutedims!(@view(T2[:,:,j,irange]), t_vvij, (2,1,3))
+    end
+    if savet2
+      try2save_doubles!(EC, T2)
+    end
+    closemmap(EC, T2file, T2)
+  else
+    EMP2d, EMP2ex, EMP2diag = calc_dfmp2_energy_components(Lvo, ϵo, ϵv) do irange, j, t_vvij
+    end
   end
-  EMP2d = zero(T)
-  EMP2ex = zero(T)
-  EMP2diag = zero(T)
+  t1 = print_time(EC, t1, "energy calculation", 1)
+  EMP2SS = real(2*EMP2d - 2*EMP2ex)
+  EMP2OS = real(2*EMP2d + EMP2diag)
+  EMP2 = EMP2SS + EMP2OS
+  return OutDict("E"=>EMP2, "ESS"=>EMP2SS, "EOS"=>EMP2OS, "EO"=>0.0)
+end
+
+"""
+    calc_dfmp2_energy_components(store_doubles!, Lvo, ϵo, ϵv)
+
+  Accumulate the DF-MP2 energy components and call `store_doubles!` for each
+  completed `t_vvij` block when doubles amplitudes must be materialized.
+"""
+function calc_dfmp2_energy_components(store_doubles!, Lvo, ϵo, ϵv)
+  nvir = size(Lvo, 2)
+  nocc = size(Lvo, 3)
+  EMP2d = zero(eltype(Lvo))
+  EMP2ex = zero(eltype(Lvo))
+  EMP2diag = zero(eltype(Lvo))
   lenbuf = auto_calc_buffer_length4calc_dfmp2_2(nvir, nocc)
-  @buffer buf(T, lenbuf) begin
+  @buffer buf(eltype(Lvo), lenbuf) begin
   for j = 1:nocc
     irange = 1:j
     leni = length(irange)
@@ -110,21 +134,11 @@ function calc_dfmp2(EC::ECInfo{T}) where T
     v!vvii = @mview vvij[:,:,j]
     v!t_vvii = @mview t_vvij[:,:,j]
     @mtensor EMP2diag += conj(v!vvii[a,b]) * v!t_vvii[a,b]
+    store_doubles!(irange, j, t_vvij)
     drop!(buf, vvij, t_vvij)
-    if savet2
-      T2[:,:,irange,j] .= t_vvij
-      permutedims!(@view(T2[:,:,j,irange]), t_vvij, (2,1,3))
-    end
   end
   end # buf buffer
-  if savet2
-    closemmap(EC, T2file, T2)
-  end
-  t1 = print_time(EC, t1, "energy calculation", 1)
-  EMP2SS = real(2*EMP2d - 2*EMP2ex)
-  EMP2OS = real(2*EMP2d + EMP2diag)
-  EMP2 = EMP2SS + EMP2OS
-  return OutDict("E"=>EMP2, "ESS"=>EMP2SS, "EOS"=>EMP2OS, "EO"=>0.0)
+  return EMP2d, EMP2ex, EMP2diag
 end
 
 # Function to calculate length for buffer(s) buf

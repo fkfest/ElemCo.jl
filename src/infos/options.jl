@@ -17,6 +17,9 @@
   dump::String = "wf.h5"
   """`⟨""⟩` filename to store the output wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
   store::String = ""
+  """`⟨""⟩` filename to store correlated natural orbitals and occupations (stored in TREXIO format).
+  If non-empty, the correlated 1-RDM is still written to the usual `dump`/`store` file. """
+  natorb::String = ""
   """`⟨""⟩` filename to read starting amplitudes from (TREXIO format). 
   If empty, amplitudes are read from `dump`. If provided, amplitudes (and MOs/basis) 
   are read from this file and projected to the current MO basis. """
@@ -277,6 +280,51 @@ end
 end
 
 """
+  Options for region-fragment orbital selection.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct RegionOptions
+  """`⟨:inclusive⟩` occupied-selection mode for centers passed directly to `@region`.
+  - `:inclusive`: treat `@region(centers)` as additional inclusive centers
+  - `:exclusive`: treat `@region(centers)` as additional exclusive centers
+  """
+  mode::Symbol = :inclusive
+  """`⟨Symbol[]⟩` additional center labels selected with the inclusive occupied-orbital rule, e.g. `[:O]`.
+      The orbitals with significant contributions from these centers are added to the fragment. """
+  inclusive_centers::Vector{Symbol} = Symbol[]
+  """`⟨Symbol[]⟩` additional center labels selected with the exclusive occupied-orbital rule, e.g. `[:O, :H1]`. 
+      The orbitals with significant contributions exclusively from these centers are added to the fragment. """
+  exclusive_centers::Vector{Symbol} = Symbol[]
+  """`⟨:none⟩` π-space selection mode.
+  - `:none`: use the default IBO/PAO region selection
+  - `:occupied`: select occupied π orbitals and keep PAO-defined virtuals
+  - `:both`: select both occupied and virtual π orbitals
+  """
+  pi::Symbol = :none
+  """`⟨-1⟩` override for the total number of π electrons used by the PiOS counting model.
+    Use `-1` to keep the automatic chemistry-based count. """
+  pi_electrons::Int = -1
+  """`⟨-1⟩` override for the number of occupied π orbitals to keep in restricted PiOS runs.
+    Use `-1` to keep the full automatically determined occupied π space. """
+  pi_occupied::Int = -1
+  """`⟨-1⟩` override for the number of virtual π orbitals to keep in restricted `region.pi=:both` runs.
+    Use `-1` to keep the full automatically determined virtual π space. """
+  pi_virtual::Int = -1
+  """`⟨:complement⟩` fragment virtual-space construction mode.
+  - `:complement`: build antibonding-like virtual targets by projecting fragment IAOs into the virtual space, then augment them with support-atom OPAOs selected from accumulated fragment charge
+  - `:support_opao`: use the support-atom OPAO construction directly
+  """
+  virtual::Symbol = :complement
+  """`⟨0.2⟩` threshold for selecting localized occupied orbitals from the requested centers. """
+  occ_charge_thr::Float64 = 0.2
+  """`⟨0.2⟩` threshold for adding atoms to the PAO support of the selected fragment. """
+  atom_charge_thr::Float64 = 0.2
+  """`⟨false⟩` pseudo-canonicalize the selected fragment occupied and virtual subspaces. """
+  pseudo::Bool = false
+end
+
+"""
   Option for FCI calculations.
 
   $(TYPEDFIELDS)
@@ -290,6 +338,8 @@ end
   conv_tol::Float64 = 1e-8
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
+  """`⟨false⟩` calculate properties such as dipole moments. """
+  properties::Bool = false
   """`⟨1⟩` Number of states to compute """
   nstates::Int = 1
   """`⟨2⟩` Number of guess vectors to use """
@@ -338,6 +388,8 @@ end
   tol::Float64 = 1e-6
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
+  """`⟨false⟩` calculate properties such as dipole moments. """
+  properties::Bool = false
   """`⟨50⟩` Maximum CIPHI iterations """
   max_iter::Int = 50
   """`⟨0.1⟩` Level shift to improve convergence """
@@ -546,4 +598,6 @@ end
   print::PrintOptions = PrintOptions()
   """ Localization options ([`LocOptions`](@ref)). """
   loc::LocOptions = LocOptions()
+  """ Region selection options ([`RegionOptions`](@ref)). """
+  region::RegionOptions = RegionOptions()
 end

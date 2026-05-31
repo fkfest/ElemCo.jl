@@ -179,4 +179,48 @@ end
   rm(tmpdir; force=true, recursive=true)
 end
 
+# ============================================================
+# Real 1-RDM write helper
+# ============================================================
+@testset "Real 1-RDM write" begin
+  tmpdir = mktempdir()
+  trexio_file = joinpath(tmpdir, "test_rdm.h5")
+
+  rotations = SpinMatrix(Matrix{Float64}(I, norb, norb))
+  rdm = SpinMatrix(diagm(0 => [2.0, 2.0, 0.0, 0.0, 0.0]))
+
+  open_trexio(trexio_file, "w") do io
+    write_trexio_rotations(io, rotations; type="TestRDM")
+    write_trexio_1rdm(io, rdm)
+  end
+
+  open_trexio(trexio_file, "r") do io
+    @test ElemCo.TREXIO.trexio_has_rdm_1e(io)
+  end
+
+  rm(tmpdir; force=true, recursive=true)
+end
+
+@testset "Unrestricted 1-RDM write" begin
+  tmpdir = mktempdir()
+  trexio_file = joinpath(tmpdir, "test_urdm.h5")
+
+  rotations = SpinMatrix(Matrix{Float64}(I, norb, norb), Matrix{Float64}(I, norb, norb))
+  rdm = SpinMatrix(diagm(0 => [1.0, 1.0, 1.0, 0.0, 0.0]),
+                   diagm(0 => [1.0, 1.0, 0.0, 0.0, 0.0]))
+
+  open_trexio(trexio_file, "w") do io
+    write_trexio_rotations(io, rotations; type="UTestRDM")
+    write_trexio_1rdm(io, rdm)
+  end
+
+  open_trexio(trexio_file, "r") do io
+    @test ElemCo.TREXIO.trexio_has_rdm_1e(io)
+    @test ElemCo.TREXIO.trexio_has_rdm_1e_up(io)
+    @test ElemCo.TREXIO.trexio_has_rdm_1e_dn(io)
+  end
+
+  rm(tmpdir; force=true, recursive=true)
+end
+
 end

@@ -2862,6 +2862,172 @@ Natural orbital occupations $n_i$ indicate importance of orbitals. Used for:
 \end{itemize}
 
 
+\chapter{Orbital localization and region fragments}
+
+\section{Localized occupied orbitals}
+
+The region workflow starts from localized occupied orbitals. In the default implementation, the valence occupied space is localized with the intrinsic bond orbital (IBO) functional
+\begin{equation}
+  \mathcal{L}_{\mathrm{IBO}} = \sum_i \sum_A \left(q_A^i\right)^p,
+\end{equation}
+with IAO charges
+\begin{equation}
+  q_A^i = \sum_{\mu \in A} \left|\langle \mathrm{IAO}_\mu | \phi_i \rangle\right|^2,
+\end{equation}
+where $A$ labels atoms, $i$ labels occupied orbitals, and $p=4$ by default.
+The working IAOs are obtained from the occupied orbitals $C_{\mathrm{occ}}$ and the minimal-basis overlap blocks
+\begin{equation}
+  P_{12} = S^{-1} S_{12},
+  \qquad
+  B = S_{21} C_{\mathrm{occ}},
+  \qquad
+  D = S_{22}^{-1} B.
+\end{equation}
+Following the revised formulation from supplementary materials of Ref.~\cite{senjeanGeneralizationIntrinsic2021}, 
+\elemcoil{} first builds the proto-IAOs
+\begin{equation}
+  A_{\mathrm{proto}} = P_{12} + \left(C_{\mathrm{occ}} - P_{12} D \left(B^\dagger D\right)^{-1}\right) B^\dagger,
+\end{equation}
+and then performs a metric L\"owdin orthogonalization,
+\begin{equation}
+  C_{\mathrm{IAO}} = A_{\mathrm{proto}}\left(A_{\mathrm{proto}}^\dagger S A_{\mathrm{proto}}\right)^{-1/2}.
+\end{equation}
+Only non-ghost minimal-basis functions are retained in this construction.
+The localized occupied orbitals are related to the input occupied orbitals through a rotation matrix
+\begin{equation}
+  |\tilde \phi_i\rangle = \sum_j |\phi_j\rangle R_{ji}.
+\end{equation}
+
+Let $\mathcal{C}_{\mathrm{arg}}$ denote the explicit center list passed to \cmd{@region}, and let
+$\mathcal{C}_{\mathrm{incl}}^{\mathrm{opt}}$ and $\mathcal{C}_{\mathrm{excl}}^{\mathrm{opt}}$ denote
+\cmd{region.inclusive\_centers} and \cmd{region.exclusive\_centers}, respectively.
+The effective center sets are
+\begin{align}
+  \mathcal{C}_{\mathrm{incl}} &=
+  \begin{cases}
+    \mathcal{C}_{\mathrm{incl}}^{\mathrm{opt}} \cup \mathcal{C}_{\mathrm{arg}}, & \cmd{region.mode = :inclusive}, \\
+    \mathcal{C}_{\mathrm{incl}}^{\mathrm{opt}}, & \cmd{region.mode = :exclusive},
+  \end{cases} \\
+  \mathcal{C}_{\mathrm{excl}} &=
+  \begin{cases}
+    \mathcal{C}_{\mathrm{excl}}^{\mathrm{opt}}, & \cmd{region.mode = :inclusive}, \\
+    \mathcal{C}_{\mathrm{excl}}^{\mathrm{opt}} \cup \mathcal{C}_{\mathrm{arg}}, & \cmd{region.mode = :exclusive}.
+  \end{cases}
+\end{align}
+An occupied orbital is retained when it satisfies either the inclusive or the exclusive rule:
+\begin{align}
+  i \in \mathcal{F}_{\mathrm{occ}}^{\mathrm{incl}} &\iff \exists A \in \mathcal{C}_{\mathrm{incl}} : q_A^i \ge \tau_{\mathrm{occ}}, \\
+  i \in \mathcal{F}_{\mathrm{occ}}^{\mathrm{excl}} &\iff \left(\exists A \in \mathcal{C}_{\mathrm{excl}} : q_A^i \ge \tau_{\mathrm{occ}}\right) \wedge
+  \left(\forall B,\ q_B^i \ge \tau_{\mathrm{occ}} \Rightarrow B \in \mathcal{C}_{\mathrm{excl}}\right),
+\end{align}
+where $\tau_{\mathrm{occ}} =$ \cmd{region.occ\_charge\_thr}.
+The selected occupied orbitals are written as fragment-inactive orbitals in the tagged dump.
+
+\section{Fragment virtual orbitals from support-atom OPAOs}
+
+In the non-pi workflow, the fragment virtual space is built from support-atom projected atomic orbitals.
+If $\mathcal{C}_{\mathrm{all}} = \mathcal{C}_{\mathrm{incl}} \cup \mathcal{C}_{\mathrm{excl}}$, the support set is defined as
+\begin{equation}
+  \mathcal{S} = \mathcal{C}_{\mathrm{all}} \cup \left\{A\ \middle|\ \exists i \in \mathcal{F}_{\mathrm{occ}},\ q_A^i \ge \tau_{\mathrm{atom}}\right\},
+\end{equation}
+where $\tau_{\mathrm{atom}} =$ \cmd{region.atom\_charge\_thr}.
+
+Let $C_v$ denote the canonical virtual orbitals and let $S_{\mathrm{AO},\mathcal{S}}$ denote the AO overlap columns corresponding to AO functions on support atoms.
+The fragment PAOs are formed as
+\begin{equation}
+  C_{\mathrm{PAO}} = C_v C_v^\dagger S_{\mathrm{AO},\mathcal{S}}.
+\end{equation}
+Their overlap matrix is
+\begin{equation}
+  S_{\mathrm{PAO}} = C_{\mathrm{PAO}}^\dagger S C_{\mathrm{PAO}}.
+\end{equation}
+An inverse square root factor $M$ is built such that
+\begin{equation}
+  M^\dagger S_{\mathrm{PAO}} M = I,
+\end{equation}
+which yields orthogonal PAOs
+\begin{equation}
+  C_{\mathrm{OPAO}} = C_{\mathrm{PAO}} M.
+\end{equation}
+The corresponding virtual rotation is obtained from
+\begin{equation}
+  R_{\mathrm{virt}} = C_v^\dagger S C_{\mathrm{OPAO}}.
+\end{equation}
+
+\section{Local pi axes and target orbitals}
+
+For \cmd{region.pi = :occupied} or \cmd{:both}, one local target $p'_z$ orbital is constructed for each selected atom.
+The bonding graph is built from the distance criterion
+\begin{equation}
+  r_{AB} \lt 1.3\left(R_A + R_B\right),
+\end{equation}
+where $R_A$ and $R_B$ are element-specific covalent radii.
+
+For each selected atom $A$, a local plane neighborhood $\mathcal{P}_A$ is assembled from bonded neighbors first, with nearest-atom fallbacks if the bonded graph is insufficient to define a plane.
+The code then constructs the symmetric matrix
+\begin{equation}
+  G_A = \sum_{B \in \mathcal{P}_A} \left(\vect{R}_B - \vect{R}_A\right)\left(\vect{R}_B - \vect{R}_A\right)^\dagger,
+\end{equation}
+and takes the normalized eigenvector corresponding to the smallest eigenvalue as the local plane normal $\vect{n}_A$.
+
+If $|p_x^A\rangle$, $|p_y^A\rangle$, and $|p_z^A\rangle$ denote the highest-valence p-type IAOs on atom $A$, the target local pi orbital is
+\begin{equation}
+  |p'_{z,A}\rangle = n_{A,x}|p_x^A\rangle + n_{A,y}|p_y^A\rangle + n_{A,z}|p_z^A\rangle.
+\end{equation}
+
+\section{Pi-space projector}
+
+Let $P_Z$ be the matrix whose columns are the target orbitals $|p'_{z,A}\rangle$ and let $C_{\mathrm{blk}}$ denote either the occupied or the virtual block under consideration.
+The projected overlaps are
+\begin{equation}
+  X = P_Z^\dagger S C_{\mathrm{blk}},
+  \qquad
+  S_\pi = P_Z^\dagger S P_Z.
+\end{equation}
+\elemcoil{} diagonalizes the projector-overlap matrix
+\begin{equation}
+  O = X^\dagger S_\pi^{-1} X.
+\end{equation}
+If
+\begin{equation}
+  O U = U \Lambda,
+\end{equation}
+the rotated block is formed with eigenvectors ordered by descending eigenvalues, so the leading orbitals are those with the largest pi-projector overlap.
+
+The automatic total number of local $\pi$ electrons is
+\begin{equation}
+  n_{\pi,e} =
+  \begin{cases}
+    \cmd{region.pi\_electrons}, & \text{if this option is set non-negative}, \\
+    \sum\limits_{A \in \mathcal{C}_{\mathrm{all}}} n_{\pi,e}(A), & \text{otherwise},
+  \end{cases}
+\end{equation}
+where the fallback atomic contributions $n_{\pi,e}(A)$ use an element- and coordination-based main-group $p$-block rule.
+
+For restricted references, the default occupied and virtual $\pi$ counts are
+\begin{equation}
+  n_{\pi,\mathrm{occ}} = \frac{n_{\pi,e}}{2},
+  \qquad
+  n_{\pi,\mathrm{virt}} = N_{\mathrm{centers}} - n_{\pi,\mathrm{occ}}.
+\end{equation}
+These defaults can be overridden by \cmd{region.pi\_occupied} and \cmd{region.pi\_virtual}, in which case only the leading occupied and virtual projector-ordered orbitals are retained.
+For unrestricted references, the alpha and beta occupied counts are split using the spin population difference $m_s^{(2)} = N_\alpha - N_\beta$,
+\begin{equation}
+  n_{\pi,\mathrm{occ}}^\alpha = \frac{n_{\pi,e} + m_s^{(2)}}{2},
+  \qquad
+  n_{\pi,\mathrm{occ}}^\beta = \frac{n_{\pi,e} - m_s^{(2)}}{2}.
+\end{equation}
+
+\section{Pseudo-canonicalization}
+
+If \cmd{region.pseudo = true}, the selected fragment occupied and fragment virtual blocks are semicanonicalized by diagonalizing the corresponding Fock subblocks. For a fragment block $C_f$ this amounts to diagonalizing
+\begin{equation}
+  F_f = C_f^\dagger F_{\mathrm{AO}} C_f,
+\end{equation}
+and rotating the block with the eigenvectors of $F_f$.
+
+
+
 \chapter{Automatically generated UCCSDT and UDC-CCSDT}
 Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} 
 were generated with version 1.0.1 of the \quantwo\ program\cite{quantwo}.

@@ -77,6 +77,62 @@ function extract_full_to_selected!(v_selected::AbstractVector, v_full::FCIVector
   end
 end
 
+function make_selected_1rdms!(rdm_a::AbstractMatrix{T}, rdm_b::AbstractMatrix{T},
+                              determinants::AbstractVector{Determinant{OPattern}},
+                              coefficients::AbstractVector, n_orb::Integer) where {T, OPattern}
+  @assert length(determinants) == length(coefficients)
+  @assert size(rdm_a) == (n_orb, n_orb)
+  @assert size(rdm_b) == (n_orb, n_orb)
+
+  fill!(rdm_a, zero(T))
+  fill!(rdm_b, zero(T))
+
+  det_index = Dict{Determinant{OPattern}, Int}()
+  for i in eachindex(determinants)
+    det_index[determinants[i]] = i
+  end
+
+  occa = Int[]
+  virta = Int[]
+  occb = Int[]
+  virtb = Int[]
+
+  for i in eachindex(determinants)
+    det = determinants[i]
+    coeff_i = coefficients[i]
+
+    occupied_and_virtual_orbitals!(occa, virta, det.alpha, n_orb)
+    occupied_and_virtual_orbitals!(occb, virtb, det.beta, n_orb)
+
+    for orb in occa
+      rdm_a[orb, orb] += conj(coeff_i) * coeff_i
+    end
+    for orb in occb
+      rdm_b[orb, orb] += conj(coeff_i) * coeff_i
+    end
+
+    for orb_i in occa, orb_a in virta
+      det_j = single_excitation_alpha(det, orb_i, orb_a)
+      j = get(det_index, det_j, 0)
+      if j != 0
+        phase = calculate_excitation_phase(det.alpha, orb_i, orb_a)
+        rdm_a[orb_a, orb_i] += phase * conj(coefficients[j]) * coeff_i
+      end
+    end
+
+    for orb_i in occb, orb_a in virtb
+      det_j = single_excitation_beta(det, orb_i, orb_a)
+      j = get(det_index, det_j, 0)
+      if j != 0
+        phase = calculate_excitation_phase(det.beta, orb_i, orb_a)
+        rdm_b[orb_a, orb_i] += phase * conj(coefficients[j]) * coeff_i
+      end
+    end
+  end
+
+  return rdm_a, rdm_b
+end
+
 
 
 # ===========================================

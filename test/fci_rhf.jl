@@ -1,5 +1,6 @@
 using Test
 using ElemCo
+using ElemCo.TrexioInterface
 
 @testset "Full CI - RHF Systems" begin
   println("\n=== Testing Full CI with RHF ===")
@@ -34,6 +35,26 @@ using ElemCo
   @test abs(energies["FCI"] - E_FCI_test) < epsilon
   @test abs(energies["ω1"] - omega1_test) < epsilon
   @test abs(energies["ω2"] - omega2_test) < epsilon
+
+  fci_natorb = "fci_natorb.h5"
+  @set fci properties=true
+  @set wf natorb=fci_natorb
+  energies = @fci
+
+  @test abs(energies["FCI"] - E_FCI_test) < epsilon
+  @test energies["DMZ"] > 0.0
+  @test last(keys(energies)) == "E"
+  open_trexio(joinpath(EC.scr, fci_natorb), "r") do io
+    @test !ElemCo.TREXIO.trexio_has_rdm_1e(io)
+    occa, occb = read_trexio_orbital_occupations(io, "mo")
+    @test isempty(occb)
+    @test abs(sum(occa) - 10.0) < epsilon
+  end
+  open_trexio(ElemCo.Wavefunctions.dumpfile(EC, "w")[2], "r") do io
+    @test ElemCo.TREXIO.trexio_has_rdm_1e(io)
+  end
+  @set fci properties=false
+  @set wf natorb=""
       
   energies = @fci begin
     @set fci conv_tol=1.e-8 max_iter=100

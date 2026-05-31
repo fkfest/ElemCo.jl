@@ -22,9 +22,77 @@ using ..ElemCo.Wavefunctions
 export compute_localization_rotations, localize_orbitals
 
 """
+    _metric_orthogonalize(C::AbstractMatrix, S::AbstractMatrix; tol=1e-12)
+
+  Löwdin-orthogonalize the columns of `C` with respect to the metric `S`.
+"""
+function _metric_orthogonalize(C::AbstractMatrix{T}, S::AbstractMatrix;
+                               tol::Float64=1e-12) where T
+  Tout = promote_type(T, eltype(S))
+  metric = Hermitian(C' * S * C)
+  eigenpairs = eigen(metric)
+  inv_sqrt = [real(val) > tol ? 1.0 / sqrt(real(val)) : 0.0 for val in eigenpairs.values]
+  return Matrix{Tout}(C * (eigenpairs.vectors * Diagonal(inv_sqrt) * eigenpairs.vectors'))
+end
+
+"""
+    _compute_proto_iaos(EC::ECInfo, cMO_occ::AbstractMatrix)
+
+  Construct the non-orthogonal proto-IAOs using the revised Senjean/Knizia
+  formulation based on the depolarized occupied orbitals from Eq. (S20) and
+  the efficient matrix factorization from Eq. (S44) of the supplementary
+  information to Senjean et al., JCTC 2021, 17, 1337-1354.
+
+  Returns `(proto_iao, iao_atoms, natom, S)` where `S` is the AO overlap
+  matrix for the main basis.
+"""
+function _compute_proto_iaos(EC::ECInfo, cMO_occ::AbstractMatrix{T}) where T
+  bao = generate_basis(EC, "ao")
+  bminao = generate_minao_basis(EC, EC.options.loc.minao)
+
+  S_full = overlap(bao)
+  S21_full = overlap(bminao, bao)
+  S22_full = overlap(bminao)
+
+  aos_min_full = ao_list(bminao)
+  ghost_mask = [is_dummy(EC.system[Int(ao.icentre)]) for ao in aos_min_full]
+  real_idx = findall(.!ghost_mask)
+
+  Tout = promote_type(T, eltype(S_full), eltype(S21_full), eltype(S22_full))
+  S = Matrix{Tout}(S_full)
+  S21 = Matrix{Tout}(S21_full[real_idx, :])
+  S22 = Matrix{Tout}(S22_full[real_idx, real_idx])
+  S12 = S21'
+  C_occ = Matrix{Tout}(cMO_occ)
+
+  S_factor = cholesky(Hermitian(S))
+  S22_factor = cholesky(Hermitian(S22))
+
+  P12 = S_factor \ S12
+  t1 = S21 * C_occ
+  t2 = S22_factor \ t1
+  sdpo_factor = cholesky(Hermitian(t1' * t2))
+  t3 = Matrix{Tout}(adjoint(sdpo_factor \ adjoint(t2)))
+
+  proto_iao = Matrix{Tout}(P12 + (C_occ - P12 * t3) * t1')
+
+  iao_atoms_raw = [Int(aos_min_full[idx].icentre) for idx in real_idx]
+  unique_atoms = sort(unique(iao_atoms_raw))
+  atom_remap = Dict(a => idx for (idx, a) in enumerate(unique_atoms))
+  iao_atoms = [atom_remap[a] for a in iao_atoms_raw]
+  natom = length(unique_atoms)
+
+  return proto_iao, iao_atoms, natom, S
+end
+
+"""
     compute_iaos(EC::ECInfo, cMO_occ::AbstractMatrix)
 
 Compute Intrinsic Atomic Orbitals (IAOs) following Knizia, JCTC 2013, 9, 4834.
+
+The proto-IAOs are built with the revised depolarized-orbital formulation
+recommended in the supplementary information to Senjean et al., JCTC 2021,
+17, 1337-1354, and are then Löwdin-orthogonalized under the AO overlap metric.
 
 The IAOs are constructed from a minimal basis and the occupied MOs.
 The minimal basis is determined by `EC.options.loc.minao`. If empty (default),
@@ -39,63 +107,8 @@ Returns `(C_iao, iao_atoms, natom)` where:
 - `natom`: number of unique (non-ghost) atoms represented in the IAOs
 """
 function compute_iaos(EC::ECInfo, cMO_occ::AbstractMatrix{T}) where T
-  bao = generate_basis(EC, "ao")
-  bminao = generate_minao_basis(EC, EC.options.loc.minao)
-
-  S = overlap(bao)             # nAO × nAO
-  S12_full = overlap(bminao, bao)   # nmin_full × nAO
-  S11_full = overlap(bminao)        # nmin_full × nmin_full
-
-  # Exclude minimal basis functions on ghost atoms
-  aos_min_full = ao_list(bminao)
-  ghost_mask = [is_dummy(EC.system[Int(ao.icentre)]) for ao in aos_min_full]
-  real_idx = findall(.!ghost_mask)
-
-  S12 = Matrix{T}(S12_full[real_idx, :])   # nmin × nAO
-  S11 = Matrix{T}(S11_full[real_idx, real_idx])  # nmin × nmin
-
-  # s12_T = S12' is nAO × nmin
-  s12_T = S12'  # nAO × nmin
-
-  # Step 1: depolarized MO coefficients in minbas
-  # ctild_minbas = S11^{-1} S12 C_occ  (nmin × nocc)
-  ctild_minbas = S11 \ (S12 * cMO_occ)
-
-  # Step 2: p12 = S^{-1} s12_T  (nAO × nmin) — minbas functions in AO representation
-  p12 = S \ s12_T
-
-  # Step 3: depolarized MOs in AO representation
-  # ctild = S^{-1} s12_T ctild_minbas = p12 ctild_minbas  (nAO × nocc)
-  ctild = p12 * ctild_minbas
-
-  # Step 4: Löwdin-orthogonalize ctild under S-metric
-  StC = ctild' * S * ctild  # nocc × nocc
-  evals, evecs = eigen(Hermitian(StC))
-  evals_inv_sqrt = [e > 1e-12 ? 1.0/sqrt(e) : 0.0 for e in evals]
-  ctild = ctild * (evecs * Diagonal(evals_inv_sqrt) * evecs')  # nAO × nocc
-
-  # Step 5: Knizia's eq. (10) — construct IAOs
-  # P_occ = C_occ C_occ^T S  (projector onto occupied space)
-  # P_ctild = ctild ctild^T S  (projector onto depolarized space)
-  # A = (I + 2 P_occ P_ctild - P_occ - P_ctild) p12  (nAO × nmin)
-  P_occ_S = cMO_occ * (cMO_occ' * S)  # nAO × nAO (= P_occ acting via S)
-  P_ctild_S = ctild * (ctild' * S)     # nAO × nAO
-
-  A = p12 + 2 * P_occ_S * (P_ctild_S * p12) - P_occ_S * p12 - P_ctild_S * p12
-
-  # Step 6: Löwdin-orthogonalize IAOs under S-metric
-  StA = A' * S * A  # nmin × nmin
-  evals2, evecs2 = eigen(Hermitian(StA))
-  evals2_inv_sqrt = [e > 1e-12 ? 1.0/sqrt(e) : 0.0 for e in evals2]
-  C_iao = A * (evecs2 * Diagonal(evals2_inv_sqrt) * evecs2')  # nAO × nmin
-
-  # Atom assignment: each IAO inherits the atom of its parent minbas function
-  iao_min_atoms_raw = [Int(aos_min_full[j].icentre) for j in real_idx]
-  unique_atoms = sort(unique(iao_min_atoms_raw))
-  atom_remap = Dict(a => idx for (idx, a) in enumerate(unique_atoms))
-  iao_atoms = [atom_remap[a] for a in iao_min_atoms_raw]
-  natom = length(unique_atoms)
-
+  proto_iao, iao_atoms, natom, S = _compute_proto_iaos(EC, cMO_occ)
+  C_iao = _metric_orthogonalize(proto_iao, S)
   return C_iao, iao_atoms, natom
 end
 
@@ -207,7 +220,8 @@ function _jacobi_localization!(
       s = sin(angle)
       rotate_workspace!(i, j, c, s)
       for k in 1:nocc
-        ri = R[k, i]; rj = R[k, j]
+        ri = R[k, i]
+        rj = R[k, j]
         R[k, i] = c * ri + s * rj
         R[k, j] = -s * ri + c * rj
       end
@@ -351,12 +365,14 @@ function _ao_compactness_sweep!(M::AbstractMatrix{T}, R::AbstractMatrix{T},
       c = cos(angle)
       s = sin(angle)
       for mu in 1:nbas
-        mi = M[mu, ii]; mj = M[mu, jj]
+        mi = M[mu, ii]
+        mj = M[mu, jj]
         M[mu, ii] = c * mi + s * mj
         M[mu, jj] = -s * mi + c * mj
       end
       for k in 1:norb_full
-        ri = R[k, ii]; rj = R[k, jj]
+        ri = R[k, ii]
+        rj = R[k, jj]
         R[k, ii] = c * ri + s * rj
         R[k, jj] = -s * ri + c * rj
       end
@@ -432,7 +448,7 @@ function _canonical_orbital_order(charges::AbstractMatrix{<:Real}, M::AbstractMa
 end
 
 """
-    localize_ibo(cMO_occ::AbstractMatrix, S::AbstractMatrix, C_iao::AbstractMatrix, 
+    localize_ibo(cMO_occ::AbstractMatrix, S::AbstractMatrix, C_iao::AbstractMatrix,
                  iao_atoms::Vector{Int}, natom::Int; exponent=4, maxiter=500, tol=1e-10)
 
 Localize occupied orbitals using the IBO criterion.
@@ -440,12 +456,14 @@ Localize occupied orbitals using the IBO criterion.
 Maximizes ``\\sum_i \\sum_A (q_A^i)^p`` where ``q_A^i = \\sum_{\\mu \\in A} |\\langle iao_\\mu | \\phi_i \\rangle|^2``
 using 2×2 Jacobi rotations.
 
-Returns the rotation matrix `R_occ` (nocc × nocc) that transforms canonical to localized occupied MOs:
-`C_occ_loc = C_occ * R_occ`.
+Returns `(R_occ, charges)` where:
+- `R_occ` is the rotation matrix (nocc × nocc) that transforms canonical to localized occupied MOs,
+  `C_occ_loc = C_occ * R_occ`
+- `charges` is the final atom-resolved IBO charge matrix (natom × nocc)
 """
 function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::AbstractMatrix,
                       iao_atoms::Vector{Int}, natom::Int;
-                      exponent::Int=4, maxiter::Int=500, 
+                      exponent::Int=4, maxiter::Int=500,
                       tol::Float64=1e-10) where T
   nocc = size(cMO_occ, 2)
   niao = size(C_iao, 2)
@@ -456,18 +474,18 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
   # Current rotation matrix (accumulates Jacobi rotations)
   R = Matrix{T}(I, nocc, nocc)
 
-  # Early exit: if only 1 unique atom, the IBO functional is constant
-  if natom <= 1
-    println("IBO localization: only $natom unique atom(s), returning identity rotation")
-    return R
-  end
-
   # Compute partial charges: q_A^i = Σ_{μ∈A} |Q[μ,i]|²  (skip ghost atoms with iao_atoms[mu]==0)
   charges = zeros(real(T), natom, nocc)
   for i in 1:nocc, mu in 1:niao
     A = iao_atoms[mu]
     A == 0 && continue
     charges[A, i] += abs2(Q[mu, i])
+  end
+
+  # Early exit: if only 1 unique atom, the IBO functional is constant
+  if natom <= 1
+    println("IBO localization: only $natom unique atom(s), returning identity rotation")
+    return R, charges
   end
 
   # IBO-specific callbacks for the shared Jacobi sweep
@@ -482,7 +500,8 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
 
   rotate_workspace! = (i, j, c, s) -> begin
     for mu in 1:niao
-      qi = Q[mu, i]; qj = Q[mu, j]
+      qi = Q[mu, i]
+      qj = Q[mu, j]
       Q[mu, i] = c * qi + s * qj
       Q[mu, j] = -s * qi + c * qj
     end
@@ -509,10 +528,10 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
   # within degenerate subgroups (orbital pairs with identical atom-resolved charges).
   fill!(charges, zero(real(T)))
   for i in 1:nocc, mu in 1:niao
-    A = iao_atoms[mu]; A == 0 && continue
+    A = iao_atoms[mu]
+    A == 0 && continue
     charges[A, i] += abs2(Q[mu, i])
   end
-
   groups = _find_degenerate_groups(charges, nocc)
   if !isempty(groups)
     for group in groups
@@ -528,7 +547,8 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
   # to ensure platform-independent orbital order.
   fill!(charges, zero(real(T)))
   for i in 1:nocc, mu in 1:niao
-    A = iao_atoms[mu]; A == 0 && continue
+    A = iao_atoms[mu]
+    A == 0 && continue
     charges[A, i] += abs2(Q[mu, i])
   end
   perm = _canonical_orbital_order(charges, Q, nocc, natom)
@@ -537,7 +557,8 @@ function localize_ibo(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix, C_iao::Abst
   # Fix sign ambiguity: ensure largest element in each column is positive
   _fix_sign_convention!(R)
 
-  return R
+  charges = charges[:, perm]
+  return R, charges
 end
 
 """
@@ -606,10 +627,12 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
 
   rotate_workspace! = (i, j, c, s) -> begin
     for mu in 1:nao
-      ci = C[mu, i]; cj = C[mu, j]
+      ci = C[mu, i]
+      cj = C[mu, j]
       C[mu, i] = c * ci + s * cj
       C[mu, j] = -s * ci + c * cj
-      pi = P[mu, i]; pj = P[mu, j]
+      pi = P[mu, i]
+      pj = P[mu, j]
       P[mu, i] = c * pi + s * pj
       P[mu, j] = -s * pi + c * pj
     end
@@ -635,7 +658,8 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
   # Post-convergence refinement: break degeneracy by AO compactness
   fill!(charges, zero(real(T)))
   for i in 1:nocc, mu in 1:nao
-    A = ao_atoms[mu]; A == 0 && continue
+    A = ao_atoms[mu]
+    A == 0 && continue
     charges[A, i] += real(P[mu, i] * conj(C[mu, i]))
   end
   groups = _find_degenerate_groups(charges, nocc)
@@ -649,7 +673,8 @@ function localize_pm(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
   # Canonical ordering by partial charges
   fill!(charges, zero(real(T)))
   for i in 1:nocc, mu in 1:nao
-    A = ao_atoms[mu]; A == 0 && continue
+    A = ao_atoms[mu]
+    A == 0 && continue
     charges[A, i] += real(P[mu, i] * conj(C[mu, i]))
   end
   perm = _canonical_orbital_order(charges, P, nocc, natom)
@@ -863,7 +888,7 @@ function compute_localization_rotations(EC::ECInfo; exponent::Int=4)
   println("  Computing IAOs...")
   C_iao, iao_atoms, natom = compute_iaos(EC, cMO_all_occ)
   println("  Localizing occupied orbitals (IBO, exponent=$exponent)...")
-  R_occ = localize_ibo(cMO_occ, S, C_iao, iao_atoms, natom; exponent=exponent)
+  R_occ, _ = localize_ibo(cMO_occ, S, C_iao, iao_atoms, natom; exponent=exponent)
 
   # OPAO for virtual orbitals
   println("  Computing orthogonal PAO rotation for virtual orbitals...")
@@ -984,10 +1009,10 @@ function localize_orbitals(EC::ECInfo)
     println("  Computing IAOs...")
     C_iao, iao_atoms, natom = compute_iaos(EC, cMO_all_occ)
     println("  Localizing occupied orbitals (IBO, exponent=$exponent)...")
-    R_occ = localize_ibo(cMO_occ, S, C_iao, iao_atoms, natom; exponent=exponent)
+    R_occ, _ = localize_ibo(cMO_occ, S, C_iao, iao_atoms, natom; exponent=exponent)
     if localize_core && ncore > 0
       println("  Localizing core orbitals (IBO, exponent=$exponent)...")
-      R_core = localize_ibo(cMO_core, S, C_iao, iao_atoms, natom; exponent=exponent)
+      R_core, _ = localize_ibo(cMO_core, S, C_iao, iao_atoms, natom; exponent=exponent)
     end
   end
 
