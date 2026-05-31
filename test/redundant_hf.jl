@@ -40,38 +40,45 @@ hf = @dfhf
 uhf = @dfuhf
 @test abs(uhf["HF"] - ECART_UHF_test) < epsilon
 
-# --- Genuinely redundant basis (near-singular overlap): must remove orbitals and converge ---
+# --- Genuinely redundant basis: must remove orbitals, converge, and freeze them post-HF ---
+# A ghost (dummy) H atom placed almost on top of a real H duplicates its 5 cc-pVDZ
+# basis functions, giving 5 redundant AO-overlap eigenvalues (~1e-9..1e-7) cleanly
+# separated from the rest (next eigenvalue ~2e-2). The count is therefore structural and
+# platform-independent, while the overlap stays invertible (no exact singularity).
 # (the @set/@dfhf macros operate on a variable named `EC`, so we reassign it here)
-ERED_HF_test = 3.8875344839277854
+ERED_HF_test  = -1.1287163498537338
+EMP2_red_test = -1.1550849286798515
+ECCSD_red_test = -1.1634368032972102
 xyz2 = "bohr
      H1 0.0 0.0 0.0
-     H2 0.0 0.0 0.15"
-basis2 = Dict("ao"=>"aug-cc-pVTZ", "jkfit"=>"aug-cc-pvtz-jkfit", "mpfit"=>"aug-cc-pvtz-mpfit")
-EC = ElemCo.ECInfo(system=ElemCo.parse_geometry(xyz2, basis2))
+     H2 0.0 0.0 1.4
+     H3 0.0 0.0 0.001"
+basis2 = Dict("ao"=>"cc-pVDZ", "jkfit"=>"cc-pvdz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
+sys = ElemCo.parse_geometry(xyz2, basis2)
+ElemCo.MSystems.set_dummy!(sys, [3])   # H3 is a ghost: basis only, no charge/electrons
+EC = ElemCo.ECInfo(system=sys)
 @set int cartesian=false
-@set scf direct=true redthr=1.e-6
+@set scf direct=true redthr=1.e-5
+@test ElemCo.OrbTools.n_redundant_orbitals(EC) == 5   # 5 duplicated functions projected out
 hfr = @dfhf
-@test abs(hfr["HF"] - ERED_HF_test) < 1.e-5
-@test ElemCo.OrbTools.n_redundant_orbitals(EC) == 1   # one orbital projected out
+@test abs(hfr["HF"] - ERED_HF_test) < 1.e-6
 
-# HF must record the redundant orbital as "Deleted" in the wavefunction dump,
+# HF must record the redundant orbitals as "Deleted" in the wavefunction dump,
 # and post-HF must read that count back
 classa, classb = ElemCo.Wavefunctions.fetch_orbital_classes(EC)
-@test count(==("Deleted"), classa) == 1
-@test ElemCo.OrbTools.n_deleted_orbitals(EC) == 1
+@test count(==("Deleted"), classa) == 5
+@test ElemCo.OrbTools.n_deleted_orbitals(EC) == 5
 
-# post-HF must freeze the redundant orbital out of the correlation treatment
-EMP2_red_test = 3.857215582177273
+# post-HF must freeze the redundant orbitals out of the correlation treatment
 mp2r = @dfmp2
-@test abs(mp2r["MP2"] - EMP2_red_test) < 1.e-5
+@test abs(mp2r["MP2"] - EMP2_red_test) < 1.e-6
 
-# FCIDump route: the dump is generated with the redundant orbital already removed
-ECCSD_red_test = 3.85137481631957
+# FCIDump route: the dump is generated with the redundant orbitals already removed
 fdump_red = "redundant_hf_test.FCIDUMP"
 @set int fcidump=fdump_red
 @set scf direct=false
 @dfints
 ccr = ElemCo.ccdriver(EC, "ccsd"; fcidump=fdump_red)
-@test abs(ccr["CCSD"] - ECCSD_red_test) < 1.e-5
+@test abs(ccr["CCSD"] - ECCSD_red_test) < 1.e-6
 rm(fdump_red)
 end
