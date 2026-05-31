@@ -28,7 +28,7 @@ export orbital_classes_with_deleted, n_deleted_orbitals
     REDUNDANT_ORBITAL_ENERGY
 
   Sentinel orbital energy assigned to the linearly-dependent (redundant) orbitals that
-  the (DF-)HF projects out (see [`eigen_orth`](@ref)). It is far above any physical
+  the (DF-)HF projects out (see `eigen_orth`). It is far above any physical
   orbital energy and is used to identify these orbitals in the wavefunction dump,
   distinguishing them from ordinary frozen/deleted virtuals.
 """
@@ -113,9 +113,9 @@ end
   contains no class/energy information, the recomputed redundancy is used as a fallback.
 
   Redundant orbitals are identified as those both marked `"Deleted"` and parked at the
-  sentinel energy [`REDUNDANT_ORBITAL_ENERGY`](@ref); this distinguishes them from
-  ordinary frozen virtuals, which are also stored as `"Deleted"` but keep their physical
-  orbital energy.
+  sentinel energy `REDUNDANT_ORBITAL_ENERGY`; this distinguishes them from ordinary
+  frozen virtuals, which are also stored as `"Deleted"` but keep their physical orbital
+  energy.
 """
 function n_deleted_orbitals(EC::ECInfo; MO="mo")
   nredund = n_redundant_orbitals(EC)
