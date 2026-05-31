@@ -41,7 +41,7 @@ function dfhf(EC::ECInfo{T}) where T
     thren = sqrt(EC.options.scf.thr)*0.1
   end
   direct = false
-  local sao, hsmall, mmLfile, mmL, bao, bfit
+  local sao, hsmall, mmLfile, mmL, bao, bfit, Xorth, Xredundant
   Enuc = zero(real(T))
   if use_df3idx
     hsmall = EC.fd.int1
@@ -68,6 +68,8 @@ function dfhf(EC::ECInfo{T}) where T
     cMO = cMO_sm.α
     hsmall = load(EC, "h_AA", Val(2))
     sao = load(EC, "S_AA", Val(2))
+    Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
+    @assert size(Xorth, 2) ≥ length(SP['o']) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left for $(length(SP['o'])) occupied. Lower scf.redthr."
   end
   ϵ = zeros(real(T), norb)
   EHF = zero(real(T))
@@ -104,7 +106,7 @@ function dfhf(EC::ECInfo{T}) where T
     if use_df3idx
       ϵ_new, cMO_new = eigen(Hermitian(fock))
     else
-      ϵ_new, cMO_new = eigen(Hermitian(fock),Hermitian(sao))
+      ϵ_new, cMO_new = eigen_orth(fock, Xorth, Xredundant)
     end
     ϵ .= ϵ_new
     cMO .= cMO_new
@@ -124,7 +126,9 @@ function dfhf(EC::ECInfo{T}) where T
   if use_df3idx
     dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
   else
-    dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
+    nredund = size(Xredundant, 2)
+    classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
+    dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes)
   end
   return OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
 end
@@ -165,6 +169,8 @@ function dfhf_positron(EC::ECInfo)
   ε_pos = zeros(norb)
   hsmall = load(EC, "h_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
+  Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
+  @assert size(Xorth, 2) ≥ length(SP['o']) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left for $(length(SP['o'])) occupied. Lower scf.redthr."
   # display(sao)
   EHF = 0.0
   previousEHF = 0.0
@@ -196,9 +202,9 @@ function dfhf_positron(EC::ECInfo)
     t1 = print_time(EC, t1, "HF residual", 2)
     perform!(diis, [fock, fock_pos], [Δfock, Δfock_pos])
     t1 = print_time(EC, t1, "DIIS", 2)
-    # use Hermitian to ensure real eigenvalues and normalized orbitals
-    ϵ_new, cMO_new = eigen(Hermitian(fock),Hermitian(sao))
-    ε_new_pos, cPO_new = eigen(Hermitian(fock_pos),Hermitian(sao))
+    # solve in the (canonically) orthonormalized basis to handle redundant basis sets
+    ϵ_new, cMO_new = eigen_orth(fock, Xorth, Xredundant)
+    ε_new_pos, cPO_new = eigen_orth(fock_pos, Xorth, Xredundant)
     ϵ .= ϵ_new
     ε_pos .= ε_new_pos
     cMO .= cMO_new
@@ -213,7 +219,9 @@ function dfhf_positron(EC::ECInfo)
   delete_temporary_files!(EC)
   open_dump(EC, "w") do io
     occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
-    dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, MO="mo")
+    nredund = size(Xredundant, 2)
+    classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
+    dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes, MO="mo")
     occupations = [1.0; zeros(length(SP['m'])-1)]
     dump_orbitals(io, EC, SpinMatrix(cPO); type="DF-HF positron", energies=ε_pos, occupations=occupations, MO="po")
   end
@@ -245,7 +253,7 @@ function dfuhf(EC::ECInfo{T}) where T
     thren = sqrt(EC.options.scf.thr)*0.1
   end
   direct = false
-  local sao, hsmall, h1a, h1b, mmLfile, mmL, MMLfile, MML, bao, bfit
+  local sao, hsmall, h1a, h1b, mmLfile, mmL, MMLfile, MML, bao, bfit, Xorth, Xredundant
   has_MML = false
   Enuc = zero(real(T))
   if use_df3idx
@@ -280,6 +288,8 @@ function dfuhf(EC::ECInfo{T}) where T
     unrestrict!(cMO)
     hsmall = load2idx(EC, "h_AA")
     sao = load2idx(EC, "S_AA")
+    Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
+    @assert size(Xorth, 2) ≥ max(length(SP['o']), length(SP['O'])) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left. Lower scf.redthr."
   end
   ϵ = [zeros(real(T), norb), zeros(real(T), norb)]
   EHF = zero(real(T))
@@ -331,7 +341,7 @@ function dfuhf(EC::ECInfo{T}) where T
       if use_df3idx
         ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]))
       else
-        ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]), Hermitian(sao))
+        ϵ[ispin], cMO[ispin] = eigen_orth(fock[ispin], Xorth, Xredundant)
       end
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
@@ -366,7 +376,10 @@ function dfuhf(EC::ECInfo{T}) where T
   if use_df3idx
     dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
   else
-    dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
+    nredund = size(Xredundant, 2)
+    classes = nredund > 0 ? (orbital_classes_with_deleted(SP['o'], norb, nredund),
+                             orbital_classes_with_deleted(SP['O'], norb, nredund)) : nothing
+    dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
   end
   return OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
 end

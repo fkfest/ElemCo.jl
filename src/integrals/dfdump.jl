@@ -426,7 +426,12 @@ function dfdump(EC::ECInfo)
   norbs = size(cMO,2)
   space_save = save_space(EC)
   ncore_orbs = freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
-  nfrozvirt = freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
+  nredund = n_deleted_orbitals(EC)
+  if nredund > 0
+    EC.options.wf.npositron > 0 && error("Redundant (linearly-dependent) basis sets are not supported with positrons.")
+    println("Freezing $nredund deleted (linearly-dependent) orbital(s) for the correlation treatment")
+  end
+  nfrozvirt = freeze_nvirt!(EC, EC.options.wf.freeze_nvirt + nredund)
 
   nelec = guess_nelec(EC.system) - 2*ncore_orbs
   npos = EC.options.wf.npositron

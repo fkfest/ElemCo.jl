@@ -120,20 +120,20 @@ end
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
 function dump_orbitals end
-function dump_orbitals(EC::ECInfo, cMO; 
-                       basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
+function dump_orbitals(EC::ECInfo, cMO;
+                       basis=nothing, type="HF", energies=nothing, occupations=nothing, classes=nothing, MO="mo")
   open_dump(EC, "w") do io
-    dump_orbitals(io, EC, cMO; basis=basis, type=type, energies=energies, occupations=occupations, MO=MO)
+    dump_orbitals(io, EC, cMO; basis=basis, type=type, energies=energies, occupations=occupations, classes=classes, MO=MO)
   end
   return
 end
-function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO; 
-                       basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
+function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO;
+                       basis=nothing, type="HF", energies=nothing, occupations=nothing, classes=nothing, MO="mo")
   println("Dumping orbitals ...")
   ocoefs = prepare_orb_coefficients(cMO)
   oenergies = prepare_orb_vectors(energies, is_restricted(ocoefs))
   ooccupations = prepare_orb_vectors(occupations, is_restricted(ocoefs))
-  classes = prepare_orb_classes(EC, is_restricted(ocoefs))
+  classes = isnothing(classes) ? prepare_orb_classes(EC, is_restricted(ocoefs)) : prepare_class_vectors(classes, ocoefs)
   write_trexio_system(io, EC.system)
   if isnothing(basis)
     basis = generate_basis(EC, "ao")
@@ -191,6 +191,36 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
 end
 function prepare_orb_vectors(input::Vector{Vector{ComplexF64}}, restricted)
   return prepare_orb_vectors([real.(v) for v in input], restricted)
+end
+
+"""
+    prepare_class_vectors(classes, orbitals::SpinMatrix)
+
+  Normalize explicit orbital classes for dumping into the `(classa, classb)` form
+  expected by `write_trexio_orbitals`. `classes` is either a vector of class strings
+  (restricted) or a tuple of `(alpha, beta)` vectors (unrestricted).
+"""
+function prepare_class_vectors(classes, orbitals::SpinMatrix)
+  error("Unsupported input type for explicit orbital classes: $(typeof(classes))")
+end
+function prepare_class_vectors(classes::AbstractVector{<:AbstractString}, orbitals::SpinMatrix)
+  if !is_restricted(orbitals)
+    error("For unrestricted orbitals, provide explicit classes as a tuple of alpha and beta vectors.")
+  end
+  classa = String[classes...]
+  length(classa) == size(orbitals[1], 2) || error("Alpha class count $(length(classa)) does not match the number of orbitals $(size(orbitals[1], 2)).")
+  return (classa, String[])
+end
+function prepare_class_vectors(classes::Tuple{<:AbstractVector{<:AbstractString},<:AbstractVector{<:AbstractString}}, orbitals::SpinMatrix)
+  classa = String[classes[1]...]
+  length(classa) == size(orbitals[1], 2) || error("Alpha class count $(length(classa)) does not match the number of orbitals $(size(orbitals[1], 2)).")
+  if is_restricted(orbitals)
+    isempty(classes[2]) || error("Restricted orbitals do not accept beta orbital classes.")
+    return (classa, String[])
+  end
+  classb = String[classes[2]...]
+  length(classb) == size(orbitals[2], 2) || error("Beta class count $(length(classb)) does not match the number of orbitals $(size(orbitals[2], 2)).")
+  return (classa, classb)
 end
 
 function prepare_orb_classes(EC::ECInfo, restricted; rotations=false)

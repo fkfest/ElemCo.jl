@@ -118,7 +118,11 @@ function dfccdriver(EC::ECInfo, method)
   t1 = time_ns()
   space_save = save_space(EC)
   freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
-  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
+  nredund = EC.fd.df3idx ? 0 : n_deleted_orbitals(EC)
+  if nredund > 0
+    println("Freezing $nredund deleted (linearly-dependent) orbital(s) for the correlation treatment")
+  end
+  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt + nredund)
   t1 = print_time(EC, t1, "freeze core and virt", 2)
 
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)

@@ -21,6 +21,145 @@ export show_orbitals
 export rotate_orbs, rotate_orbs!, normalize_phase!
 export try_load_starting_orbitals
 export left_from_right_rotations, project_onto_basis
+export canonical_orthogonalization, eigen_orth, n_redundant_orbitals
+export orbital_classes_with_deleted, n_deleted_orbitals
+
+"""
+    REDUNDANT_ORBITAL_ENERGY
+
+  Sentinel orbital energy assigned to the linearly-dependent (redundant) orbitals that
+  the (DF-)HF projects out (see [`eigen_orth`](@ref)). It is far above any physical
+  orbital energy and is used to identify these orbitals in the wavefunction dump,
+  distinguishing them from ordinary frozen/deleted virtuals.
+"""
+const REDUNDANT_ORBITAL_ENERGY = 1.0e20
+
+"""
+    canonical_orthogonalization(sao::AbstractMatrix, redthr; verbose=false)
+
+  Construct the canonical orthogonalization transformation from the AO overlap
+  matrix `sao`. Eigenvectors of `sao` whose eigenvalues are below `redthr` are
+  considered linearly dependent (redundant) and are removed from the orbital basis.
+  This makes the SCF robust for redundant basis sets (e.g. Cartesian basis sets with
+  6 instead of 5 `d` functions), where `sao` is (near-)singular.
+
+  Return `(X, Xredundant)` where `X` (`nAO × nMO`) fulfills `X' sao X = I` and is used
+  to solve the SCF equations in an orthonormal basis, and `Xredundant`
+  (`nAO × nredundant`) spans the removed near-null space. The latter is kept only to
+  pad the MO coefficient matrices to square shape (`nAO × nAO`).
+"""
+function canonical_orthogonalization(sao::AbstractMatrix, redthr; verbose=false)
+  sval, svec = eigen(Hermitian(Array(sao)))
+  keep = sval .> redthr
+  nredundant = count(!, keep)
+  if nredundant > 0 && verbose
+    println("Redundant basis set: removed $nredundant of $(length(sval)) linearly-dependent ",
+            "orbital(s) with AO overlap eigenvalue < $redthr")
+    println("Smallest kept overlap eigenvalue: ", minimum(sval[keep]))
+  end
+  X = svec[:, keep] * Diagonal(inv.(sqrt.(sval[keep])))
+  Xredundant = svec[:, .!keep]
+  return X, Xredundant
+end
+
+"""
+    n_redundant_orbitals(EC::ECInfo)
+
+  Return the number of linearly-dependent (redundant) orbitals of the AO basis set,
+  i.e. the number of eigenvalues of the AO overlap matrix below `scf.redthr`.
+
+  These orbitals are projected out by the (DF-)HF (see [`canonical_orthogonalization`](@ref))
+  and parked as the highest (unoccupied) orbitals. Post-HF methods freeze them out exactly
+  like [`freeze_nvirt`](@ref ECInfos.WfOptions), so they do not enter the correlation
+  treatment. Returns `0` if no molecular system is set up (e.g. for a plain FCIDump).
+"""
+function n_redundant_orbitals(EC::ECInfo)
+  isempty(EC.system) && return 0
+  sao = overlap(generate_basis(EC, "ao"))
+  _, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr)
+  return size(Xredundant, 2)
+end
+
+"""
+    orbital_classes_with_deleted(occ, norb, ndeleted)
+
+  Build a vector of TREXIO orbital classes of length `norb` for storing in the
+  wavefunction dump: `"Inactive"` for the occupied orbitals `occ`, `"Virtual"` for the
+  remaining orbitals, and `"Deleted"` for the last `ndeleted` orbitals (the
+  linearly-dependent orbitals projected out by the (DF-)HF, see
+  [`canonical_orthogonalization`](@ref)).
+"""
+function orbital_classes_with_deleted(occ, norb, ndeleted)
+  classes = fill("Virtual", norb)
+  classes[occ] .= "Inactive"
+  if ndeleted > 0
+    classes[norb-ndeleted+1:norb] .= "Deleted"
+  end
+  return classes
+end
+
+"""
+    n_deleted_orbitals(EC::ECInfo; MO="mo")
+
+  Number of orbitals marked `"Deleted"` in the wavefunction dump, i.e. the
+  linearly-dependent orbitals that the preceding (DF-)HF projected out. Post-HF methods
+  freeze these out of the correlation treatment exactly like
+  [`freeze_nvirt`](@ref ECInfos.WfOptions).
+
+  The stored count is the authoritative number actually used by the HF. It is
+  cross-checked against the present redundancy of the AO basis
+  ([`n_redundant_orbitals`](@ref)) and a warning is issued if they disagree (e.g. when
+  `scf.redthr` was changed between the HF and the correlation step). If the dump
+  contains no class/energy information, the recomputed redundancy is used as a fallback.
+
+  Redundant orbitals are identified as those both marked `"Deleted"` and parked at the
+  sentinel energy [`REDUNDANT_ORBITAL_ENERGY`](@ref); this distinguishes them from
+  ordinary frozen virtuals, which are also stored as `"Deleted"` but keep their physical
+  orbital energy.
+"""
+function n_deleted_orbitals(EC::ECInfo; MO="mo")
+  nredund = n_redundant_orbitals(EC)
+  classa, classb = fetch_orbital_classes(EC; MO=MO)
+  ea, eb = fetch_orbital_energies(EC, MO)
+  if isempty(classa) || isempty(ea) || length(ea) != length(classa)
+    # no usable class/energy information stored (e.g. older dump or imported orbitals)
+    return nredund
+  end
+  # any energy this large is the redundant-orbital sentinel, far above physical orbitals
+  thr = 1.0e10
+  count_redundant(cls, en) = count(i -> cls[i] == "Deleted" && en[i] > thr, eachindex(cls))
+  ndel = count_redundant(classa, ea)
+  if !isempty(classb) && length(eb) == length(classb)
+    ndelb = count_redundant(classb, eb)
+    ndelb == ndel || @warn "Number of deleted α ($ndel) and β ($ndelb) orbitals in the dump differ; using α."
+  end
+  if ndel != nredund
+    @warn "Number of deleted orbitals stored in the dump ($ndel) does not match the redundancy of the current AO basis ($nredund). Using the stored count; check that scf.redthr is consistent with the HF run."
+  end
+  return ndel
+end
+
+"""
+    eigen_orth(fock::AbstractMatrix, X::AbstractMatrix, Xredundant::AbstractMatrix; large=1.0e6)
+
+  Solve the generalized eigenvalue problem `fock C = sao C ϵ` in the orthonormal basis
+  defined by the canonical orthogonalization `X` (see [`canonical_orthogonalization`](@ref)),
+  i.e. diagonalize `X' fock X` and back-transform. The redundant directions `Xredundant`
+  are appended as virtual orbitals with energy `large`, so that they remain unoccupied
+  and the returned coefficient matrix stays square (`nAO × nAO`).
+
+  Return `(ϵ, cMO)` (orbital energies and coefficients).
+"""
+function eigen_orth(fock::AbstractMatrix, X::AbstractMatrix, Xredundant::AbstractMatrix; large=REDUNDANT_ORBITAL_ENERGY)
+  fock_orth = X' * Hermitian(fock) * X
+  ϵ, C = eigen(Hermitian(fock_orth))
+  cMO = X * C
+  if size(Xredundant, 2) > 0
+    cMO = hcat(cMO, Xredundant)
+    ϵ = vcat(ϵ, fill(convert(eltype(ϵ), large), size(Xredundant, 2)))
+  end
+  return ϵ, cMO
+end
 
 """
     guess_hcore(EC::ECInfo)
@@ -30,7 +169,8 @@ export left_from_right_rotations, project_onto_basis
 function guess_hcore(EC::ECInfo)
   hsmall = load(EC, "h_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
-  ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
+  X, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr)
+  ϵ, cMO = eigen_orth(hsmall, X, Xredundant)
   return SpinMatrix(cMO)
 end
 
@@ -42,7 +182,8 @@ end
 function guess_pos_hcore(EC::ECInfo)
   hsmall = load(EC, "h_positron_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
-  ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
+  X, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr)
+  ϵ, cMO = eigen_orth(hsmall, X, Xredundant)
   return SpinMatrix(cMO)
 end
   
@@ -59,7 +200,8 @@ function guess_sad(EC::ECInfo)
   eldist = electron_distribution(EC.system, bminao)
   sao = load(EC, "S_AA", Val(2))
   denao = smin2ao' * diagm(eldist./diag(smin)) * smin2ao
-  eigs, cMO = eigen(Hermitian(-denao), Hermitian(sao))
+  X, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr)
+  eigs, cMO = eigen_orth(-denao, X, Xredundant)
   return SpinMatrix(cMO)
 end
 
@@ -76,7 +218,8 @@ end
 function guess_positron(EC::ECInfo)
   hsmall = load(EC, "h_positron_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
-  ϵ, cMO = eigen(Hermitian(hsmall), Hermitian(sao))
+  X, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr)
+  ϵ, cMO = eigen_orth(hsmall, X, Xredundant)
   return SpinMatrix(cMO)
 end
 
