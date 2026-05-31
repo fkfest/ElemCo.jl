@@ -3216,18 +3216,26 @@ function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
     calc_triples_decomposition_without_triples(EC, T2)
   end
   t0 = print_time(EC, t0, "triples decomposition", 1)
+  notriples = size(load3idx(EC, "C_voX"), 3) == 0
+  if notriples
+    println("WARNING: empty triples SVD basis (no significant triples for this system).")
+    println("         Skipping triples; SVD-DC-CCSDT reduces to CCSD.")
+    println()
+  end
   diis = Diis(EC)
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
 
-  if EC.options.cc.project_voXL
+  if !notriples && EC.options.cc.project_voXL
     calc_space4project_voXL(EC, T2)
     t0 = print_time(EC, t0, "space for project_voXL", 1)
   end
   # calc intermediates for SVD-T
-  calc_intermediates4triples(EC)
-  t0 = print_time(EC, t0, "intermediates for SVD-T", 1)
-# svd-ccsd(t)  
-  if pert_svd_T
+  if !notriples
+    calc_intermediates4triples(EC)
+    t0 = print_time(EC, t0, "intermediates for SVD-T", 1)
+  end
+# svd-ccsd(t)
+  if pert_svd_T && !notriples
     t1 = time_ns()
     save_pseudodressed_3idx(EC)
     save!(EC, "df_mm", load2idx(EC,"f_mm"))
@@ -3263,22 +3271,30 @@ function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
     t1 = print_time(EC, t1, "dressed 3-idx integrals", 2)
     R1, R2 = calc_cc_resid(EC, T1, T2)
     t1 = print_time(EC, t1, "ccsd residual", 2)
-    calc_triples_residuals!(EC, R1, R2, T2)
+    if !notriples
+      calc_triples_residuals!(EC, R1, R2, T2)
+    end
     t1 = print_time(EC, t1, "triples residual", 2)
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
-    T3 = load3idx(EC, "T_XXX")
-    NormT3 = calc_deco_triples_norm(T3)
     NormR1 = calc_singles_norm(R1)
     NormR2 = calc_doubles_norm(R2)
-    R3 = load3idx(EC, "R_XXX")
-    NormR3 = calc_deco_triples_norm(R3)
     Eh = calc_hylleraas(EC, T1, T2, R1, R2)
     T1 += update_singles(EC, R1)
     T2 += update_doubles(EC, R2)
-    T3 += update_deco_triples(EC, R3)
-    perform!(diis, (T1,T2,T3), (R1,R2,R3))
-    save!(EC, "T_XXX", T3)
+    if notriples
+      NormT3 = 0.0
+      NormR3 = 0.0
+      perform!(diis, (T1,T2), (R1,R2))
+    else
+      T3 = load3idx(EC, "T_XXX")
+      NormT3 = calc_deco_triples_norm(T3)
+      R3 = load3idx(EC, "R_XXX")
+      NormR3 = calc_deco_triples_norm(R3)
+      T3 += update_deco_triples(EC, R3)
+      perform!(diis, (T1,T2,T3), (R1,R2,R3))
+      save!(EC, "T_XXX", T3)
+    end
     En1 = calc_singles_energy(EC, T1)
     En2 = calc_doubles_energy(EC, T2)
     En = En1["E"] + En2["E"]
@@ -3293,7 +3309,7 @@ function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
   println()
   output_norms("T1"=>NormT1, "T2"=>NormT2, "T3"=>NormT3)
   println()
-  if pert_svd_T
+  if pert_svd_T && !notriples
     push!(Eh, "SVD-CCSD(T)"=>Eh_init["E"])
   end
   print_time(EC, t0, "iterations", 1)
