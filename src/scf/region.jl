@@ -1036,7 +1036,7 @@ function region_orbitals(EC::ECInfo, centers)
 
   F_AO_a = nothing
   F_AO_b = nothing
-  if pseudo || pi_mode != :none
+  if pseudo
     F_AO_a = _reconstruct_fock_matrix(cMO[1], S, energies[1])
     if !restricted
       F_AO_b = _reconstruct_fock_matrix(cMO[2], S, energies[2])
