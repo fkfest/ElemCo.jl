@@ -67,6 +67,11 @@ end
   maxit::Int = 50
   """`⟨1.e-8⟩` tolerance for imaginary part of MO coefs (for biorthogonal). """
   imagtol::Float64 = 1.e-8
+  """`⟨1.e-8⟩` threshold for removing linearly-dependent (redundant) orbitals.
+  Eigenvectors of the AO overlap matrix with eigenvalues below this threshold are
+  discarded via canonical orthogonalization. This makes HF robust for redundant basis
+  sets (e.g. Cartesian basis sets with 6 instead of 5 `d` functions). """
+  redthr::Float64 = 1.e-8
   """`⟨false⟩` direct calculation without storing integrals. """
   direct::Bool = false
   """`⟨:SAD⟩` orbital guess:
