@@ -526,7 +526,13 @@ array `cMO` if it is not (i.e., it can be checked with `===`).
 """
 function project_onto_basis(cMO::SpinMatrix, old_basis::BasisSet, new_basis::BasisSet; check=false)
   SAO = overlap(new_basis)
-  proj = inv(SAO) * overlap(new_basis, old_basis)
+  S_new_old = overlap(new_basis, old_basis)
+  if size(S_new_old) == size(SAO) && S_new_old ≈ SAO
+    # same basis: the projection is the identity, so skip it. This also avoids
+    # inverting `SAO`, which is (near-)singular for redundant/linearly-dependent bases.
+    return cMO
+  end
+  proj = inv(SAO) * S_new_old
   if check && SAO*proj ≈ SAO
     return cMO
   end
