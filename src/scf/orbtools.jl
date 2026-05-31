@@ -278,7 +278,7 @@ end
 function load_orbitals(EC::ECInfo; start::Bool=false)
   cMO, type, basis = fetch_orbitals(EC; start=start)
   current_basis = generate_basis(EC, "ao")
-  return project_onto_basis(cMO, basis, current_basis; check=true)
+  return project_onto_basis(cMO, basis, current_basis; check=true, redthr=EC.options.scf.redthr)
 end
 
 """
@@ -368,7 +368,7 @@ end
 function load_positron_orbitals(EC::ECInfo)
   cMO, type, basis = fetch_orbitals(EC; MO="po")
   current_basis = generate_basis(EC, "ao")
-  return project_onto_basis(cMO, basis, current_basis; check=true)
+  return project_onto_basis(cMO, basis, current_basis; check=true, redthr=EC.options.scf.redthr)
 end
 
 """
@@ -517,22 +517,24 @@ function normalize_phase!(cMO)
 end
 
 """
-    project_onto_basis(cMO::SpinMatrix, old_basis::BasisSet, new_basis::BasisSet; check=false)
+    project_onto_basis(cMO::SpinMatrix, old_basis::BasisSet, new_basis::BasisSet; check=false, redthr=1.0e-8)
 
   Project the MO coefficients onto a new basis.
+
+  The projector ``S_{new}^{-1} S_{new,old}`` uses the Moore-Penrose pseudo-inverse of the
+  new-basis overlap, obtained from the canonical orthogonalization
+  (see [`canonical_orthogonalization`](@ref)): with `X' S_{new} X = I` after dropping
+  overlap eigenvalues below `redthr`, ``S_{new}^{-1} = X X'``. This handles redundant /
+  linearly-dependent bases (singular ``S_{new}``) and reduces to the ordinary inverse
+  when the basis is not redundant.
 
 If `check` is true, the function will check whether the projection is needed and return the same
 array `cMO` if it is not (i.e., it can be checked with `===`).
 """
-function project_onto_basis(cMO::SpinMatrix, old_basis::BasisSet, new_basis::BasisSet; check=false)
+function project_onto_basis(cMO::SpinMatrix, old_basis::BasisSet, new_basis::BasisSet; check=false, redthr=1.0e-8)
   SAO = overlap(new_basis)
-  S_new_old = overlap(new_basis, old_basis)
-  if size(S_new_old) == size(SAO) && S_new_old ≈ SAO
-    # same basis: the projection is the identity, so skip it. This also avoids
-    # inverting `SAO`, which is (near-)singular for redundant/linearly-dependent bases.
-    return cMO
-  end
-  proj = inv(SAO) * S_new_old
+  X, = canonical_orthogonalization(SAO, redthr)  # X X' is the pseudo-inverse of SAO
+  proj = (X * X') * overlap(new_basis, old_basis)
   if check && SAO*proj ≈ SAO
     return cMO
   end
