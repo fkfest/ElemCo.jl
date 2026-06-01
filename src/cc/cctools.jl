@@ -2027,6 +2027,11 @@ function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
     end
   end
 
+  if size(UaiX, 3) == 0
+    # empty SVD basis (negligible triples): nothing to diagonalize.
+    # (a 0×0 complex eigen would otherwise trip LAPACK's ZHEEVR.)
+    return eltype(UaiX)[], UaiX2
+  end
   @mtensor Fdiff[X,Y] := conj(UaiX[a,i,X]) * UaiX2[a,i,Y]
   diagFdiff = eigen(Hermitian(Fdiff))
 

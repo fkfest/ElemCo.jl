@@ -161,4 +161,22 @@ const eV2Eh = 0.036749322175638754
     @test abs(E_MP2 - E_MP2_ref) < epsilon
     @test abs(E_CCSD - E_CCSD_ref) < epsilon
   end
+
+  @testset "SVD-DC-CCSDT with gamma (empty triples basis)" begin
+    # Regression test: complex VASP integrals + svd-dc-ccsdt on a system with
+    # no significant triples (single occupied orbital) used to crash in
+    # rotate_U2pseudocanonical via a 0x0 complex eigen (LAPACK ZHEEVR param 15).
+    # The empty triples SVD basis is now detected and the triples are skipped,
+    # so the result reduces to the CCSD energy.
+    epsilon = 1.e-6
+    data = load_vasp(gamma_dir)
+    EC = ECInfo{eltype(data.coulomb_vertex)}()
+    setup_vasp!(EC, data)
+
+    energies = ElemCo.ccdriver(EC, "svd-dc-ccsdt"; fcidump="")
+    E_CCSD = real(energies["CCSDc"])
+    E_SVD = real(energies["SVD-DC-CCSDTc"])
+    @test isfinite(E_SVD)
+    @test abs(E_SVD - E_CCSD) < epsilon
+  end
 end
