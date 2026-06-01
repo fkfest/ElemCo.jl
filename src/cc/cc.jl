@@ -3275,8 +3275,8 @@ function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
     t1 = print_time(EC, t1, "ccsd residual", 2)
     if !notriples
       calc_triples_residuals!(EC, R1, R2, T2)
+      t1 = print_time(EC, t1, "triples residual", 2)
     end
-    t1 = print_time(EC, t1, "triples residual", 2)
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
     NormR1 = calc_singles_norm(R1)
