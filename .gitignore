@@ -16,3 +16,4 @@ docs/src/release-notes.md
 tasks/
 LocalPreferences.toml
 .vscode
+.claude
