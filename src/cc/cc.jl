@@ -3216,7 +3216,9 @@ function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
     calc_triples_decomposition_without_triples(EC, T2)
   end
   t0 = print_time(EC, t0, "triples decomposition", 1)
-  notriples = size(load3idx(EC, "C_voX"), 3) == 0
+  C_voXfile, C_voX = mmap3idx(EC, "C_voX")
+  notriples = size(C_voX, 3) == 0
+  close(C_voXfile)
   if notriples
     println("WARNING: empty triples SVD basis (no significant triples for this system).")
     println("         Skipping triples; SVD-DC-CCSDT reduces to CCSD.")
