@@ -47,13 +47,17 @@
 #
 # ── SVD finalization ──
 #
-#   3. Factor the stored columns via Cholesky of the column
-#      Gram matrix (rank×rank, much cheaper than full QR on
-#      m×rank):
-#        R_L = chol(C^H C)
-#      Then SVD of the rank×n matrix B = R_L D R^T:
+#   3. Factor the stored columns via thin QR (robust to rank
+#      deficiency, unlike a Cholesky of the Gram matrix, which
+#      throws when a factor is numerically singular):
+#        C = Q_C R_C
+#      Then SVD of the rank×n matrix B = R_C D R^T:
 #        B = U_B Σ V_B^H
-#      Truncate at tol:  Q = C · R_L⁻¹ · U_B[:,1:nk].
+#      Truncate at tol:  Q = Q_C · U_B[:,1:nk]  (orthonormal basis
+#      formed directly from the QR Q-factor, no R_C⁻¹ solve — robust
+#      even when C itself is numerically rank-deficient).
+#      (Fast path for real, basis-only output: QR both factors and
+#      SVD the rank×rank core R_C D R_R^T instead.)
 #
 # ── SVD-corrected residual (outer loop) ──
 #
@@ -227,12 +231,12 @@
 #             + O(n·k) for row Gram entries (via BLAS gemv).
 #   Total:    O((m+2n)·r²) ≈ O((m+n)·r²) when m ≈ n.
 #
-# Finalization (Cholesky + SVD):
-#   O(m·r²) for column Gram C^H C.  Row Gram R^H R is accumulated
-#   incrementally during the inner loop at no extra finalization cost.
-#   O(r³) for Cholesky + SVD of the rank×rank core.
+# Finalization (QR + SVD):
+#   O(m·r²) + O(n·r²) for the QR of the column/row factors (robust to
+#   rank deficiency, unlike a Cholesky of the Gram matrices).
+#   O(r³) for the SVD of the rank×rank core.
 
-using LinearAlgebra: mul!, svd, Diagonal, Hermitian, cholesky!
+using LinearAlgebra: mul!, svd, qr, Diagonal, Hermitian
 
 """
     LLAMAResult{T, R}
@@ -273,22 +277,29 @@ function _ensure_capacity!(buf::Matrix{T}, needed::Int, dim::Int) where T
 end
 
 """
-    _llama_finalize(cols_store, rows_store, pivot_diag, row_gram, rank, tol_rt, fullsvd)
+    _llama_finalize(cols_store, rows_store, pivot_diag, rank, tol_rt, fullsvd)
 
 SVD finalization of the ACA factors.
 
-**Fast path** (`fullsvd=false` and real `T`): Cholesky of both Gram
-matrices, SVD of the ``r \\times r`` core matrix.  Cost: ``O(mr^2 + r^3)``.
+Both factors are reduced via QR (`C = Q_C R_C`, `R = Q_R R_R`).  QR is
+used rather than a Cholesky of the Gram matrices because the ACA factors
+can be numerically rank-deficient: an unpivoted Cholesky then throws
+`PosDefException`, whereas QR always succeeds and yields the same
+singular values/vectors.  The orthonormal basis is formed directly from
+the QR Q-factor as `Q = Q_C U_B[:,1:nk]` (no `R_C` solve), so a singular
+`R_C` from a rank-deficient `C` cannot reintroduce a failure.
 
-**Full path** (`fullsvd=true` or complex `T`): Cholesky of the column
-Gram, SVD of the ``r \\times n`` matrix ``B = R_L D R^T``.
-Cost: ``O(mr^2 + r^2 n)``.
+**Fast path** (`fullsvd=false` and real `T`): SVD of the ``r \\times r``
+core ``R_C D R_R^T``.  Cost: ``O(mr^2 + nr^2 + r^3)``.
+
+**Full path** (`fullsvd=true` or complex `T`): SVD of the ``r \\times n``
+matrix ``B = R_C D R^T``.  Cost: ``O(mr^2 + r^2 n)``.
 
 Returns `(Q, sv, V_or_nothing, nk)` where `nk` is the number of
 singular values above `tol_rt`.
 """
 function _llama_finalize(cols_store::AbstractMatrix{T}, rows_store::AbstractMatrix{T},
-                         pivot_diag::AbstractVector{T}, row_gram::AbstractMatrix{T},
+                         pivot_diag::AbstractVector{T},
                          rank::Int, tol_rt::Real, fullsvd::Bool) where T
   RT = real(T)
   m = size(cols_store, 1)
@@ -296,32 +307,31 @@ function _llama_finalize(cols_store::AbstractMatrix{T}, rows_store::AbstractMatr
   Cv = @view cols_store[:, 1:rank]
   Rv = @view rows_store[:, 1:rank]
 
-  # Column Gram → Cholesky: C = Q_L R_L
-  CtC = Cv' * Cv                        # O(m × r²)
-  CL = cholesky!(Hermitian(CtC))
+  # Column factor → QR: C = Q_C R_C.  Keep the full factorization: R_C builds
+  # the small core, while Q_C forms the orthonormal basis directly (below).
+  FC = qr(Cv)                           # O(m × r²)
+  RC = FC.R
 
   if !fullsvd && T <: Real
     # ── Fast path: rank×rank Core SVD ──
-    # Core = R_L D R_R^T  (rank×rank, since R^T = R^H for real T)
-    RtR = @view row_gram[1:rank, 1:rank]
-    CR = cholesky(Hermitian(RtR))        # non-mutating: preserves row_gram
-    Core = Matrix(CL.U)
-    Core .*= transpose(d)               # CL.U * diag(D)
-    Core = Core * Matrix(CR.U)'         # rank × rank
+    # Core = R_C D R_R^T  (rank×rank, since R^T = R^H for real T)
+    RR = qr(Rv).R                       # O(n × r²)
+    Core = Matrix(RC)
+    Core .*= transpose(d)               # R_C * diag(D)
+    Core = Core * transpose(RR)         # rank × rank
     F = svd(Core)
 
     nk = count(s -> s > tol_rt, F.S)
     nk == 0 && return (Matrix{T}(undef, m, 0), RT[], nothing, 0)
 
     sv = F.S[1:nk]
-    W = CL.U \ @view(F.U[:, 1:nk])     # rank × nk
-    Q = Cv * W                          # m × nk
+    Q = _form_basis(FC, F.U, m, rank, nk)   # Q_C · U_B[:,1:nk]   (m × nk)
     return (Q, sv, nothing, nk)
   else
     # ── Full path: rank×n matrix B SVD ──
-    # B = R_L D R^T  (rank × n, uses transpose for complex correctness)
-    UL = Matrix(CL.U)
-    UL .*= transpose(d)                 # CL.U * diag(D)
+    # B = R_C D R^T  (rank × n, uses transpose for complex correctness)
+    UL = Matrix(RC)
+    UL .*= transpose(d)                 # R_C * diag(D)
     B = UL * transpose(Rv)              # rank × n
     F = svd(B)
 
@@ -329,11 +339,26 @@ function _llama_finalize(cols_store::AbstractMatrix{T}, rows_store::AbstractMatr
     nk == 0 && return (Matrix{T}(undef, m, 0), RT[], nothing, 0)
 
     sv = F.S[1:nk]
-    W = CL.U \ @view(F.U[:, 1:nk])     # rank × nk
-    Q = Cv * W                          # m × nk
+    Q = _form_basis(FC, F.U, m, rank, nk)   # Q_C · U_B[:,1:nk]   (m × nk)
     V_final = fullsvd ? F.V[:, 1:nk] : nothing
     return (Q, sv, V_final, nk)
   end
+end
+
+"""
+    _form_basis(FC, U, m, rank, nk)
+
+Form the orthonormal basis `Q = Q_C · U[:,1:nk]` where `Q_C` is the (thin)
+Q-factor of the column QR `FC` (`C = Q_C R_C`, `C` is `m × rank`) and `U` is the
+`rank × rank` left-singular-vector matrix of the core SVD.  The reflectors of
+`FC.Q` are applied to `U[:,1:nk]` padded with zero rows (`O(m·rank·nk)`), which
+avoids both materializing the full `m × m` Q and any triangular solve with `R_C`
+— so a rank-deficient (singular `R_C`) column factor cannot cause a failure.
+"""
+function _form_basis(FC, U::AbstractMatrix{T}, m::Int, rank::Int, nk::Int) where T
+  Upad = zeros(T, m, nk)
+  @views Upad[1:rank, :] .= U[:, 1:nk]
+  return FC.Q * Upad                    # m × nk  ==  Q_C[:,1:rank] · U[:,1:nk]
 end
 
 """
@@ -485,12 +510,15 @@ row.  Both the column and row are stored as factors of a rank-1 update
 ``A \\approx C D R^H``.  Residuals are updated incrementally using the
 Gram formula (see header comments for the mathematical derivation).
 
-**2. SVD finalization — Cholesky + truncated SVD:**
+**2. SVD finalization — QR + truncated SVD:**
 
 Once the inner loop converges (all residuals below ``\\text{tol}^2``),
 LLAMA extracts orthonormal ``Q`` from the stored factors ``C``, ``D``,
-``R`` via Cholesky factorization of the column Gram (``r \\times r``),
-followed by SVD of the ``r \\times n`` matrix ``B = R_L D R^T``.
+``R`` via a thin QR of the column factor (``C = Q_C R_C``),
+followed by SVD of the ``r \\times n`` matrix ``B = R_C D R^T``.
+QR is used rather than a Cholesky of the Gram matrices because the ACA
+factors can be numerically rank-deficient, which makes an unpivoted
+Cholesky fail; QR always succeeds and gives the same result.
 When `fullsvd=true`, the right singular vectors ``V`` from this SVD
 are also returned, yielding ``A \\approx Q \\Sigma V^H``.
 
@@ -517,8 +545,19 @@ exceeds ``\\text{tol}^2``, the inner loop re-enters with updated values.
 - `tol`: approximation tolerance.  Controls both convergence
   (``\\max_i \\text{residual}[i] < \\text{tol}^2``) and singular value
   truncation in the finalization SVD.
+- `pivotol`: element-level pivot acceptance threshold.  Defaults to
+  `NaN`, which selects an adaptive value derived from `tol` and the
+  effective dimensionality of `d_row` (see "Pivot tolerance scaling"
+  in the theory docs).  Pass a positive value to override it.
 - `max_rank`: upper bound on rank (default: `typemax(Int)`).
 - `oversample`: reserved for future robustness extensions (unused).
+- `smooth_tol`: smooth pivot scaling floor (default `0.5`).  Pivots with
+  magnitude between `pivotol * smooth_tol` and `pivotol` are smoothly
+  attenuated (Hermite smoothstep) before finalization, so that
+  borderline pivots — whose inclusion depends on BLAS/numerical noise —
+  contribute continuously rather than discontinuously, making the
+  decomposition reproducible across platforms.  Disabled (treated as
+  `0`) when `max_rank` is set explicitly.
 - `fullsvd`: if `true`, also compute the right singular vectors `V`.
   The full approximation ``A \\approx Q \\, \\Sigma \\, V^H`` is then
   available at cost ``O(n r^2)`` extra (one triangular solve + one gemm).
@@ -536,7 +575,7 @@ For an ``m \\times n`` matrix of numerical rank ``r``:
 - **Accesses**: ``r`` columns + up to ``m`` rows (at most ``r`` successful
   pivots; exhausted rows cost one row access each).
 - **Memory**: ``O(m r + n r)`` for stored factors, ``O(r^2)`` for
-  Cholesky/SVD workspace.
+  QR/SVD workspace.
 - **Arithmetic**: ``O((m+n) r^2)`` for the inner loop (BLAS-2 deflation
   + row Gram entries), ``O(m r^2 + r^3)`` for finalization (row Gram
   is accumulated incrementally during the inner loop).
@@ -776,7 +815,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
     # Incremental update of ||A[i,:]||² − ||approx[i,:]||²:
     #   Δ[i] = |d_k C[i,k]|² G_kk + 2 Re(d̄_k C̄[i,k] · Σ_{t<k} d_t C[i,t] G_tk)
     # where G_tk = ⟨R[:,t], R[:,k]⟩ (row Gram matrix entries).
-    # We also accumulate G into row_gram for use in finalization.
+    # We also accumulate G into row_gram for use in residual recomputation.
     rv_k = @view rows_store[:, rank]
     G_kk = zero(RT)
     @inbounds for j in 1:n
@@ -834,7 +873,7 @@ function llama(matrix::AbstractALPACAMatrix{T};
     _apply_smooth_pivot_scaling!(pivot_diag, rank, pivotol_rt, smooth_floor)
   end
 
-  Q_final, sv, V_final, nk = _llama_finalize(cols_store, rows_store, pivot_diag, row_gram, rank, tol_rt, fullsvd)
+  Q_final, sv, V_final, nk = _llama_finalize(cols_store, rows_store, pivot_diag, rank, tol_rt, fullsvd)
   nk == 0 && return LLAMAResult{T, RT}(Matrix{T}(undef, m, 0), RT[], col_pivots, row_pivots, nothing)
 
   rank >= max_r && return LLAMAResult{T, RT}(Q_final, sv, col_pivots, row_pivots, V_final)

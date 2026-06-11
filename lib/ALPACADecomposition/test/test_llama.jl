@@ -544,3 +544,99 @@ end
   P_exact = U0 * U0'
   @test norm(P_approx - P_exact) < 1e-6
 end
+
+@testitem "llama: _llama_finalize robust to rank-deficient ACA factors" begin
+  # Regression: an unpivoted Cholesky of the row/column Gram matrix throws
+  # PosDefException when an ACA factor is numerically rank-deficient (seen in
+  # EOM-SVD-DCSD). QR-based finalization must instead recover the exact SVD.
+  using ALPACADecomposition
+  using LinearAlgebra
+
+  # Row factor with a duplicated column => R^H R is singular.
+  Cv = [1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0;
+        1.0 1.0 0.0; 0.5 0.0 1.0; 0.0 2.0 1.0]   # 6×3, full column rank
+  Rv = [1.0 0.0 1.0; 0.0 1.0 0.0; 2.0 0.0 2.0;
+        0.0 3.0 0.0; 1.0 1.0 1.0]                # 5×3, col 3 == col 1 (rank 2)
+  d  = [2.0, 1.5, 0.7]
+  A  = Cv * Diagonal(d) * transpose(Rv)          # true rank 2
+
+  @test rank(Rv) == 2                             # old unpivoted Cholesky would throw here
+
+  for fullsvd in (false, true)
+    Q, sv, V, nk = ALPACADecomposition._llama_finalize(Cv, Rv, d, 3, 1e-10, fullsvd)
+    Aref = svd(A)
+    @test nk == 2
+    @test isapprox(sv, Aref.S[1:nk]; rtol=1e-10)
+    # Column space recovered exactly
+    @test norm(Q * Q' - Aref.U[:, 1:nk] * Aref.U[:, 1:nk]') < 1e-10
+    if fullsvd
+      @test isapprox(Q * Diagonal(sv) * V', A; atol=1e-10)
+    end
+  end
+end
+
+@testitem "llama: _llama_finalize robust to rank-deficient complex factors" begin
+  # Complex counterpart of the rank-deficiency regression above. This is the
+  # case that actually crashed in EOM-SVD-DCSD (complex integrals): for complex
+  # T the finalization always takes the full path, where transpose(Rv) (not the
+  # adjoint) must be used, and an unpivoted Cholesky of the singular Gram throws.
+  # QR finalization must recover the exact SVD here too.
+  using ALPACADecomposition
+  using LinearAlgebra
+
+  Cv = ComplexF64[1 0 0; 0 1 0; 0 0 1;
+                  1+1im 1 0; 0.5 0 1; 0 2 1im]      # 6×3, full column rank
+  c1 = ComplexF64[1, 0, 2-1im, 0, 1+1im]
+  c2 = ComplexF64[0, 1, 0, 3, 1]
+  Rv = hcat(c1, c2, 2 .* c1)                         # 5×3, col 3 == 2·col 1 (rank 2)
+  d  = ComplexF64[2+1im, 1.5-0.3im, 0.7]
+  A  = Cv * Diagonal(d) * transpose(Rv)              # stored convention A ≈ C D Rᵀ
+
+  @test rank(Rv) == 2                                # old unpivoted Cholesky would throw here
+
+  for fullsvd in (false, true)
+    Q, sv, V, nk = ALPACADecomposition._llama_finalize(Cv, Rv, d, 3, 1e-10, fullsvd)
+    Aref = svd(A)
+    @test nk == 2
+    @test isapprox(sv, Aref.S[1:nk]; rtol=1e-10)
+    # Column space recovered exactly
+    @test norm(Q * Q' - Aref.U[:, 1:nk] * Aref.U[:, 1:nk]') < 1e-10
+    if fullsvd
+      @test isapprox(Q * Diagonal(sv) * V', A; atol=1e-10)
+    end
+  end
+end
+
+@testitem "llama: _llama_finalize robust to rank-deficient COLUMN factor" begin
+  # The column factor C can also be (numerically) rank-deficient, which makes the
+  # QR R_C singular. The basis must be formed from the QR Q-factor (Q = Q_C·U_B),
+  # NOT via a triangular solve `R_C \\ U`: with a singular R_C that solve either
+  # throws SingularException (exactly-zero pivot) or silently returns a wrong,
+  # non-orthonormal basis (here ‖QᵀQ−I‖ ≈ 0.56 with the old formula).
+  using ALPACADecomposition
+  using LinearAlgebra
+
+  for T in (Float64, ComplexF64)
+    c1 = T <: Real ? T[1, 0, 2, 0, 1, 0.5] : T[1, 0, 2-1im, 0, 1+1im, 0.5]
+    c2 = T <: Real ? T[0, 1, 0, 3, 1, 0.0] : T[0, 1, 0, 3, 1, 1im]
+    Cv = hcat(c1, c2, 2 .* c1)                       # 6×3, col 3 == 2·col 1 (rank 2)
+    Rv = T <: Real ? T[1 0 0; 0 1 0; 0 0 1; 1 1 0; 0.5 0 1] :
+                     T[1 0 0; 0 1 0; 0 0 1; 1+1im 1 0; 0.5 0 1im]  # 5×3, full col rank
+    d  = T <: Real ? T[2.0, 1.5, 0.7] : T[2+1im, 1.5-0.3im, 0.7]
+    A  = Cv * Diagonal(d) * transpose(Rv)            # true rank 2
+
+    @test rank(Cv) == 2                              # singular R_C: `R_C \\ U` would throw
+
+    for fullsvd in (false, true)
+      Q, sv, V, nk = ALPACADecomposition._llama_finalize(Cv, Rv, d, 3, 1e-10, fullsvd)
+      Aref = svd(A)
+      @test nk == 2
+      @test isapprox(sv, Aref.S[1:nk]; rtol=1e-10)
+      @test norm(Q' * Q - I) < 1e-10                 # Q orthonormal despite singular R_C
+      @test norm(Q * Q' - Aref.U[:, 1:nk] * Aref.U[:, 1:nk]') < 1e-10
+      if fullsvd
+        @test isapprox(Q * Diagonal(sv) * V', A; atol=1e-10)
+      end
+    end
+  end
+end

@@ -103,7 +103,9 @@ ALPACAOptions(;
   sigma = 0.01,           # QR refinement batch-screening ratio
   qr = false,             # enable QR refinement
   symmetry = :symmetric,  # :symmetric, :hermitian, or :general
-  max_rank = typemax(Int)  # upper bound on approximation rank
+  max_rank = typemax(Int), # upper bound on approximation rank
+  smooth_tol = 0.5         # smooth attenuation floor for borderline pivots
+                           # (reproducibility across platforms; off when max_rank is set)
 )
 ```
 
@@ -179,12 +181,14 @@ modified pivot selection strategy and an iterative SVD correction:
    `c̃ = A[:,j*] − C · (D · R[j*,:])`
 5. **Store**: Scale by pivot value, update Gram-corrected residuals.
 
-**Finalization — Cholesky + SVD:**
+**Finalization — QR + SVD:**
 
-6. Cholesky of rank×rank Gram matrices (column Gram computed at finalization;
-   row Gram accumulated incrementally during the inner loop — avoids the
-   O(n·r²) recomputation), then truncated SVD of the core matrix →
-   orthonormal `Q` and approximate singular values `σ`.
+6. Thin QR of the stored rank-sized factors (`C = Q_C R_C`, and `R = Q_R R_R`
+   for the basis-only fast path), then truncated SVD of the small core matrix
+   → orthonormal `Q` and approximate singular values `σ`. QR is used instead of
+   a Cholesky of the Gram matrices `CᴴC`/`RᴴR`, because the ACA factors can be
+   numerically rank-deficient (an unpivoted Cholesky then fails); QR always
+   succeeds and gives the same result.
 
 **Iterative correction — accessed-row Gram estimate:**
 
@@ -259,7 +263,7 @@ end
 
 For an `m×n` matrix of rank `r`:
 - **Accesses**: `r` columns + up to `m` rows (successful pivots + exhausted-row overhead)
-- **Memory**: O(mr + nr) for stored factors, O(r²) for row Gram and Cholesky/SVD workspace
+- **Memory**: O(mr + nr) for stored factors, O(r²) for row Gram and QR/SVD workspace
 - **Arithmetic (row-guided, `d_row`)**: O((m+2n)r²) for ACA loop (column/row
   deflation + row Gram entries via BLAS gemv), O(mr² + r³) for finalization
 - **Arithmetic (column-guided, `d_col`)**: O((2m+n)r²) for ACA loop (internally
