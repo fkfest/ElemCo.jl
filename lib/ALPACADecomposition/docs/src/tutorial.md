@@ -219,6 +219,26 @@ result = alpaca(A; tol=1e-12, max_rank=3)
 println(length(result.pivot_indices))  # ≤ 3
 ```
 
+### Smooth Pivot Scaling (`smooth_tol`)
+
+Pivots whose magnitude sits right at the acceptance threshold are
+*borderline*: whether they are kept can flip with the BLAS
+implementation or last-bit rounding, making the rank (and the whole
+decomposition) platform-dependent.  By default (`smooth_tol = 0.5`)
+ALPACA smoothly attenuates these borderline pivots — those with
+magnitude between `pivotol * smooth_tol` and `pivotol` — via a Hermite
+smoothstep before finalization, so the retained energy varies
+continuously and the result is reproducible across platforms.  See
+[Smooth Pivot Scaling](@ref) in the theory guide for the formula.
+
+```julia
+result = alpaca(A; tol=1e-8, smooth_tol=0.5)  # default
+result = alpaca(A; tol=1e-8, smooth_tol=0.0)  # hard cut-off (no smoothing)
+```
+
+Smoothing is automatically disabled when an explicit `max_rank` is
+requested, since a fixed-rank truncation already pins the pivot set.
+
 ### Using `ALPACAOptions`
 
 For repeated calls with the same settings, pre-build an options object:
@@ -524,6 +544,7 @@ result = llama(mat; d_row, tol=1e-10)
 | `tol` | *(required)* | Convergence threshold: inner loop stops when all residuals < `tol²`; SVD truncates at `tol` |
 | `pivotol` | `NaN` (auto) | Pivot acceptance threshold. `NaN` → adaptive: `tol / √m_eff` (see below) |
 | `max_rank` | `typemax(Int)` | Upper bound on discovered rank |
+| `smooth_tol` | `0.5` | Smooth-attenuation floor for borderline pivots (reproducibility across platforms); disabled when `max_rank` is set |
 | `fullsvd` | `false` | If `true`, compute and return right singular vectors `V` |
 | `d_row` | `nothing` | Squared ℓ₂ row norms; drives row pivot selection |
 | `d_col` | `nothing` | Squared ℓ₂ column norms; triggers column-guided mode |
@@ -532,8 +553,8 @@ result = llama(mat; d_row, tol=1e-10)
 LLAMA computes the **effective dimensionality** from the row norms:
 
 ```math
-m_{\text{eff}} = \frac{\|\mathbf{d}_\text{row}\|_1}{\|\mathbf{d}_\text{row}\|_\infty}
-  = \frac{\sum_i d_i}{\max_i d_i}
+m_{\text{eff}} = \frac{\sum_i \sqrt{d_i}}{\sqrt{\max_i d_i}}
+  = \frac{\sum_i \|\mathbf{A}_{i,:}\|}{\max_i \|\mathbf{A}_{i,:}\|}
 ```
 
 and sets `pivotol = tol / √m_eff`.  For matrices with

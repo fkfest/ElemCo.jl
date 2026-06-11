@@ -182,6 +182,51 @@ pivot tolerance that better matches the actual signal concentration,
 avoiding unnecessary work on rows with negligible content while still
 reliably detecting all significant singular values.
 
+## Smooth Pivot Scaling
+
+A pivot whose magnitude lies right at the acceptance threshold is a
+*borderline* pivot: whether it is included can depend on the BLAS
+implementation, threading, or last-bit numerical noise.  A hard
+accept/reject cut on such pivots makes the resulting rank — and hence
+the whole decomposition — non-reproducible across platforms.
+
+To remove this discontinuity, ALPACA and LLAMA *smoothly attenuate*
+borderline pivots before finalization rather than cutting them.  Each
+pivot value ``d_\ell`` is scaled by a factor
+``s(|d_\ell|) \in [0,1]`` built from a Hermite smoothstep
+``\phi(t) = 3t^2 - 2t^3``:
+
+```math
+s(v) =
+\begin{cases}
+1, & v \ge \tau_{\text{piv}}, \\[2pt]
+\phi\!\left(\dfrac{v - \tau_{\text{piv}}\,\rho}{\tau_{\text{piv}}(1-\rho)}\right),
+  & \tau_{\text{piv}}\,\rho < v < \tau_{\text{piv}}, \\[6pt]
+0, & v \le \tau_{\text{piv}}\,\rho,
+\end{cases}
+```
+
+where ``\tau_{\text{piv}}`` is the pivot tolerance and
+``\rho = \texttt{smooth\_tol}`` (default ``0.5``) is the *scale floor*.
+Pivots well above the threshold (``v \ge \tau_{\text{piv}}``) are left
+untouched; pivots below ``\tau_{\text{piv}}\rho`` are driven to zero
+(dropped); those in between fade out continuously.  Because ``\phi`` and
+its first derivative vanish at the endpoints, the included energy is a
+``C^1``-continuous function of the pivot magnitude, so an infinitesimal
+change in a borderline pivot can no longer flip the outcome.
+
+Smooth scaling is controlled by the `smooth_tol` keyword and is enabled
+by default.  It is automatically **disabled** when an explicit
+`max_rank` is requested, since a fixed-rank truncation already pins the
+set of retained pivots.
+
+A complementary reproducibility safeguard makes the per-iteration pivot
+``\text{argmax}`` deterministic: when several candidates have nearly
+equal magnitude (within a small fraction of ``\tau_{\text{piv}}``), the
+one with the **lowest original index** is chosen.  This way the selected
+pivots — and hence the whole decomposition — do not depend on the order
+in which the BLAS implementation happens to scan equal elements.
+
 ## The Pivot Loop
 
 At its core, ALPACA performs an incremental rank-revealing factorization
@@ -666,28 +711,36 @@ across outer iterations.
 
 After the inner loop converges (all residuals below the tolerance
 squared), the raw cross-coupled factors are converted into an
-orthonormal column-space basis via Cholesky and SVD of small
-rank-sized matrices:
+orthonormal column-space basis via QR and SVD of small rank-sized
+matrices.  QR is used rather than a Cholesky of the Gram matrices
+``\mathbf{C}^H \mathbf{C}`` / ``\mathbf{R}^H \mathbf{R}``: the ACA
+factors can be numerically rank-deficient, in which case an unpivoted
+Cholesky throws `PosDefException`, whereas QR always succeeds and
+yields the same singular values and vectors.  (This matches the
+QR-compressed finalization used by [ALPACA](@ref decomposition_finalization).)
 
-1. **Column Gram**: compute ``\mathbf{C}^H \mathbf{C}`` and
-   Cholesky-factor it: ``\mathbf{L}_C = \text{chol}(\mathbf{C}^H \mathbf{C})``.
-2. **Row Gram**: already accumulated as ``\mathbf{R}^H \mathbf{R}``
-   during the inner loop.  Cholesky-factor:
-   ``\mathbf{L}_R = \text{chol}(\mathbf{R}^H \mathbf{R})``.
+1. **Column QR**: factor the stored column factor
+   ``\mathbf{C} = \mathbf{Q}_C \mathbf{R}_C``
+   (``\mathbf{R}_C`` is ``r \times r`` upper triangular).
+2. **Row QR** (fast path, basis-only): factor the stored row factor
+   ``\mathbf{R} = \mathbf{Q}_R \mathbf{R}_R``.
 3. **Core matrix**: form the ``r \times r`` core
-   ``\mathbf{B} = \mathbf{L}_C^{-H} \, \mathbf{D} \, \mathbf{L}_R^{-H}``.
+   ``\mathbf{B} = \mathbf{R}_C \, \mathbf{D} \, \mathbf{R}_R^T``.
+   When `fullsvd=true`, the row QR is skipped and the ``r \times n``
+   core ``\mathbf{B} = \mathbf{R}_C \, \mathbf{D} \, \mathbf{R}^T``
+   is used instead so that the right singular vectors are available.
 4. **SVD**: decompose ``\mathbf{B} = \mathbf{U}_B \boldsymbol{\Sigma} \mathbf{V}_B^H``.
 5. **Truncate**: retain only components with ``\sigma_i > \tau``,
    giving effective rank ``n_k``.
-6. **Orthonormal basis**:
-   ``\mathbf{Q} = \mathbf{C} \, \mathbf{L}_C^{-H} \, \mathbf{U}_{B}[:,1:n_k]``
-   ``\in \mathbb{R}^{m \times n_k}``.
+6. **Orthonormal basis**: formed directly from the column QR Q-factor,
+   ``\mathbf{Q} = \mathbf{Q}_C \, \mathbf{U}_{B}[:,1:n_k]``
+   ``\in \mathbb{R}^{m \times n_k}`` — no ``\mathbf{R}_C^{-1}`` solve, so a
+   rank-deficient (singular ``\mathbf{R}_C``) column factor cannot fail.
 7. **Right singular vectors** (when `fullsvd=true`):
-   ``\mathbf{V} = \mathbf{R} \, \mathbf{L}_R^{-H} \, \mathbf{V}_{B}[:,1:n_k]``
-   ``\in \mathbb{R}^{n \times n_k}``.
+   ``\mathbf{V} = \mathbf{V}_{B}[:,1:n_k] \in \mathbb{R}^{n \times n_k}``.
 
 The finalization cost is ``O(mr^2 + r^3)`` (or ``O(mr^2 + r^2 n)``
-with `fullsvd`), dominated by the column Gram computation and the
+with `fullsvd`), dominated by the QR factorizations and the
 Q formation.
 
 #### Stage 3: Iterative Correction — the ``\mathbf{P}\boldsymbol{\Sigma}^2\mathbf{P}`` Estimate
