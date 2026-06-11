@@ -75,6 +75,7 @@ using ..ElemCo.CCTools
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy, calc_posMP2 
 export calc_cc, calc_pertT
+export ao_cc_setup!
 export calc_lm_cc, calc_1RDM
 export calc_ccsd_vector_times_Jacobian, calc_intermediates4Jacobian
 
@@ -101,7 +102,7 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
     if !fock_only
-      oovv = ints2(EC,"oovv")
+      oovv = is_ao_basis(EC.fd) ? load4idx(EC,"oovv_bare") : ints2(EC,"oovv")
       @mtensor begin
         ET1d = T1[a,i] * (T1[b,j] * oovv[i,j,a,b])
         ET1ex = T1[b,i] * (T1[a,j] * oovv[i,j,a,b])
@@ -157,7 +158,7 @@ end
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2)
-  oovv = ints2(EC,"oovv")
+  oovv = is_ao_basis(EC.fd) ? load4idx(EC,"oovv_bare") : ints2(EC,"oovv")
   @mtensor begin
     ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
     ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
@@ -216,7 +217,7 @@ end
 """
 function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
-  int2 = ints2(EC,"oovv")
+  int2 = is_ao_basis(EC.fd) ? load4idx(EC,"oovv_bare") : ints2(EC,"oovv")
   ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
     @mtensor begin
@@ -1547,6 +1548,90 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 end
 
 """
+    ao_dressed_ints(EC::ECInfo, T1, cMO)
+
+  Build the T1-dressed integrals the closed-shell [`calc_cc_resid`](@ref) needs in its
+  `use_kext` path — `dh_mm`, `df_mm`, `d_oovo`, `d_oovv`, `d_oooo`, `d_voov`, `d_vovo` —
+  directly from the **AO-basis** FDump integrals and MO coefficients `cMO`, without a
+  transformed MO dump. The 4-external (`vvvv`) term is left to [`cc_kext!`](@ref), which
+  contracts the AO integrals directly with `Rot=cMO`.
+
+  The (non-unitary) T1 similarity and the AO→MO transform are folded into two dressed
+  coefficient sets — bra/particle and ket/hole:
+
+      C̃ᴸ = [ C_o | C_v − C_o·T1ᵀ ],   C̃ᴿ = [ C_o + C_v·T1 | C_v ],
+
+  giving dressed `⟨pq|rs⟩ = Σ ⟨μν|ρσ⟩ C̃ᴸ[μ,p] C̃ᴸ[ν,q] C̃ᴿ[ρ,r] C̃ᴿ[σ,s]` (bra indices
+  use `C̃ᴸ`, ket indices `C̃ᴿ`). Currently materializes the full AO `⟨μν|ρσ⟩` (fine for
+  small systems); a batched/integral-direct build is a later optimization.
+"""
+function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
+  SP = EC.space
+  nao = n_orbs(EC)
+  occ = SP['o']; virt = SP['v']
+  CL = Matrix{T}(cMO); CR = Matrix{T}(cMO)
+  if length(T1) > 0
+    Co = cMO[:, occ]; Cv = cMO[:, virt]
+    @mtensor CLv[μ,a] := Co[μ,i] * T1[a,i]
+    @mtensor CRo[μ,i] := Cv[μ,a] * T1[a,i]
+    CL[:, virt] .-= CLv
+    CR[:, occ]  .+= CRo
+  end
+  # full AO ⟨μν|ρσ⟩; transform bra indices with C̃ᴸ, ket indices with C̃ᴿ
+  Gao = detri_int2(EC.fd.int2, nao, 1:nao, 1:nao, 1:nao, 1:nao)
+  @mtensor begin
+    g1[p,ν,ρ,σ] := Gao[μ,ν,ρ,σ] * CL[μ,p]
+    g2[p,q,ρ,σ] := g1[p,ν,ρ,σ] * CL[ν,q]
+    g3[p,q,r,σ] := g2[p,q,ρ,σ] * CR[ρ,r]
+    D[p,q,r,s]  := g3[p,q,r,σ] * CR[σ,s]
+  end
+  # dressed 1-electron: h̃[p,q] = Σ h_AO[μν] C̃ᴸ[μ,p] C̃ᴿ[ν,q]
+  hao = Matrix{T}(integ1(EC.fd))
+  @mtensor dh[p,q] := (hao[μ,ν] * CL[μ,p]) * CR[ν,q]
+  save!(EC, "dh_mm", dh)
+  d_oovo = D[occ,occ,virt,occ]; save!(EC, "d_oovo", d_oovo)
+  save!(EC, "d_oovv", D[occ,occ,virt,virt])
+  d_oooo = D[occ,occ,occ,occ]; save!(EC, "d_oooo", d_oooo)
+  d_voov = D[virt,occ,occ,virt]; save!(EC, "d_voov", d_voov)
+  d_vovo = D[virt,occ,virt,occ]; save!(EC, "d_vovo", d_vovo)
+  # dressed closed-shell Fock (only o,o / o,v / v,v blocks are used downstream)
+  dfock = copy(dh)
+  @mtensor begin
+    foo[i,j] := 2.0*d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
+    fov[i,a] := 2.0*d_oovo[i,k,a,k] - d_oovo[k,i,a,k]
+    fvv[a,b] := 2.0*d_vovo[a,k,b,k] - d_voov[a,k,k,b]
+  end
+  dfock[occ,occ]   .+= foo
+  dfock[occ,virt]  .+= fov
+  dfock[virt,virt] .+= fvv
+  save!(EC, "df_mm", dfock)
+  return nothing
+end
+
+"""
+    ao_cc_setup!(EC::ECInfo) -> EHF
+
+  Set up the *bare* (undressed) MO quantities an AO-direct closed-shell CC run needs for
+  its energy/HF evaluation — the MO Fock (`f_mm`/`e_m`), one-electron Hamiltonian
+  (`h1_bare`) and `⟨ij|ab⟩` (`oovv_bare`) — built once from the AO FDump and the stored MO
+  coefficients (via [`ao_dressed_ints`](@ref) with `T1=∅`). The residual rebuilds the
+  *dressed* integrals each iteration without overwriting these. Returns the reference
+  closed-shell HF energy.
+"""
+function ao_cc_setup!(EC::ECInfo)
+  cMO = Matrix(load_orbitals(EC).α)
+  ao_dressed_ints(EC, Float64[], cMO)               # T1 empty ⇒ bare MO integrals
+  fock = load2idx(EC, "df_mm")
+  save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
+  eps = diag(fock); save!(EC, "e_m", eps); save!(EC, "e_M", eps)
+  save!(EC, "h1_bare", load2idx(EC, "dh_mm"))
+  save!(EC, "oovv_bare", load4idx(EC, "d_oovv"))
+  SP = EC.space
+  EHF = sum(eps[SP['o']]) + sum(diag(load2idx(EC,"h1_bare")[SP['o'],SP['o']])) + EC.fd.int0
+  return EHF
+end
+
+"""
     calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false, orbopt=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
@@ -1935,7 +2020,15 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   SP = EC.space
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
-  if length(T1) > 0
+  if is_ao_basis(EC.fd)
+    # AO-direct: dress integrals from the AO FDump + MO coeffs; the vvvv term is done in
+    # the AO basis by cc_kext! with Rot=cMO (so klcd is loaded as the dressed d_oovv too).
+    @assert EC.options.cc.use_kext "AO-direct CC requires cc.use_kext=true"
+    cMO = Matrix(load_orbitals(EC).α)
+    ao_dressed_ints(EC, T1, cMO)
+    Rot = cMO
+    t1 = print_time(EC,t1,"AO dressing",2)
+  elseif length(T1) > 0
     calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else

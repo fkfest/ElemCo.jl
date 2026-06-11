@@ -206,4 +206,29 @@ end
   Enuc = EC.fd.int0
   ref = ref_uhf(S, hAO, G, Enuc, 5, 4)   # 9 e⁻, ms2=1 → nα=5, nβ=4
   @test abs(e_uhf_cation["UHF"] - ref) < 1e-6
+
+  # guard: methods not yet adapted still reject AO-basis integrals
+  EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  @ints
+  @test is_ao_basis(EC.fd)
+  @test_throws ErrorException (@fci)
+  @test_throws ErrorException (@cc "ccsd(t)")   # triples not adapted
+
+  # AO-direct closed-shell CCSD/DCSD must match transform_ao2mo → standard CC
+  let transform_ao2mo = ElemCo.IntegralTools.transform_ao2mo,
+      load_orbitals = ElemCo.OrbTools.load_orbitals
+    for m in ("ccsd", "dcsd")
+      key = uppercase(m)
+      EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+      @hf
+      ao_fd = EC.fd
+      cMO = Matrix(load_orbitals(EC).α)
+      e_ao = @cc m
+      EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+      EC.fd = transform_ao2mo(ao_fd, cMO)
+      e_ref = @cc m
+      @test abs(e_ao["HF"]  - e_ref["HF"])  < 1e-9
+      @test abs(e_ao[key]   - e_ref[key])   < 1e-6
+    end
+  end
 end

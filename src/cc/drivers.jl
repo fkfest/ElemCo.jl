@@ -175,7 +175,30 @@ function fci_property_rdms(EC::ECInfo, rdm_a::AbstractMatrix, rdm_b::AbstractMat
   return dipole_rdm, storage_rdm
 end
 
-""" 
+"""
+    check_ao_basis_support(EC::ECInfo, method)
+
+  Guard correlated drivers against AO-basis FDumps. Correlated methods assume an
+  orthonormal MO basis (they contract `EC.fd.int2` as MO integrals), so running them on a
+  non-orthogonal AO-basis FDump (`is_ao_basis(EC.fd)`, built via `df=false` / `@ints` /
+  `@hf`) would give wrong results. No correlated method consumes AO integrals directly
+  yet, so this errors for all of them. (CCSD/DCSD AO-direct support is in progress.)
+"""
+function check_ao_basis_support(EC::ECInfo, method, closed_shell=true)
+  is_ao_basis(EC.fd) || return nothing
+  ecm = ECMethod(method)
+  name = uppercase(method_name(ecm))
+  # AO-direct support so far: closed-shell CCSD/DCSD (no triples/EOM/Lagrange).
+  if closed_shell && ecm.exclevel[3] == :none && !has_prefix(ecm, "EOM") &&
+     !has_prefix(ecm, "Λ") && name in ("CCSD", "DCSD")
+    return nothing
+  end
+  error("AO-basis integrals (df=false / @ints / @hf) currently support only closed-shell " *
+        "CCSD/DCSD: requested '$method'" * (closed_shell ? "" : " (open-shell)") *
+        ". Use density fitting (df=true) for other correlated methods.")
+end
+
+"""
     ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
 
   Run electronic structure calculation for `EC::ECInfo` using `method::String`.
@@ -197,15 +220,22 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   end
   setup_space_fd!(EC)
   closed_shell = is_closed_shell(EC)
+  check_ao_basis_support(EC, method, closed_shell)
 
   energies = OutDict()
-  energies = eval_hf_energy(EC, energies, closed_shell)
+  if is_ao_basis(EC.fd)
+    EHF = ao_cc_setup!(EC)   # builds bare MO f_mm/e_m/h1_bare/oovv_bare; returns HF energy
+    output_E_method(EHF, "HF", "energy:"); println(); flush_output()
+    energies = merge(energies, "HF"=>(EHF, "HF energy"))
+  else
+    energies = eval_hf_energy(EC, energies, closed_shell)
+  end
   # t1 = print_time(EC, t1, "HF energy", 1)
   ecmethod = ECMethod(method)
   unrestricted_orbs = EC.fd.uhf
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
-  # calculate MP2
-  if EC.options.cc.nomp2 == 0
+  # calculate MP2 (skipped for AO-direct CC, which has no MO-basis MP2 yet)
+  if EC.options.cc.nomp2 == 0 && !is_ao_basis(EC.fd)
     energies = eval_mp2_energy(EC, energies, closed_shell_method, has_prefix(ecmethod, "R"))
     # t1 = print_time(EC, t1, "MP2", 1)
   end
@@ -376,6 +406,7 @@ end
 function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
+  check_ao_basis_support(EC, ciphi ? "CIPHI" : "FCI")
   if EC.fd.df3idx
     contract_df_integrals!(EC)
   end
