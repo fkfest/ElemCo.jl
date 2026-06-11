@@ -1562,8 +1562,9 @@ end
       C̃ᴸ = [ C_o | C_v − C_o·T1ᵀ ],   C̃ᴿ = [ C_o + C_v·T1 | C_v ],
 
   giving dressed `⟨pq|rs⟩ = Σ ⟨μν|ρσ⟩ C̃ᴸ[μ,p] C̃ᴸ[ν,q] C̃ᴿ[ρ,r] C̃ᴿ[σ,s]` (bra indices
-  use `C̃ᴸ`, ket indices `C̃ᴿ`). Currently materializes the full AO `⟨μν|ρσ⟩` (fine for
-  small systems); a batched/integral-direct build is a later optimization.
+  use `C̃ᴸ`, ket indices `C̃ᴿ`). The bra half-transform is done one `σ`-slab at a time and
+  the bra-2 index is restricted to occupied, so the peak memory is `O(nao³·nocc)` rather
+  than the full `nao⁴` tensor.
 """
 function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
   SP = EC.space
@@ -1577,23 +1578,30 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
     CL[:, virt] .-= CLv
     CR[:, occ]  .+= CRo
   end
-  # full AO ⟨μν|ρσ⟩; transform bra indices with C̃ᴸ, ket indices with C̃ᴿ
-  Gao = detri_int2(EC.fd.int2, nao, 1:nao, 1:nao, 1:nao, 1:nao)
-  @mtensor begin
-    g1[p,ν,ρ,σ] := Gao[μ,ν,ρ,σ] * CL[μ,p]
-    g2[p,q,ρ,σ] := g1[p,ν,ρ,σ] * CL[ν,q]
-    g3[p,q,r,σ] := g2[p,q,ρ,σ] * CR[ρ,r]
-    D[p,q,r,s]  := g3[p,q,r,σ] * CR[σ,s]
+  # Transform the AO ⟨μν|ρσ⟩ into the dressed integrals (bra indices use C̃ᴸ, ket use C̃ᴿ).
+  # Every block we need has the bra-2 index (q) occupied, so q is restricted to `occ`; the
+  # bra half-transform is done one σ-slab at a time, so the peak memory is O(nao³·nocc)
+  # instead of materializing the full nao⁴ tensor.
+  nocc = length(occ)
+  CLq = CL[:, occ]
+  int2 = EC.fd.int2
+  half = zeros(T, nao, nocc, nao, nao)            # half[p, q∈occ, ρ, σ]
+  for s in 1:nao
+    braσ = reshape(detri_int2(int2, nao, 1:nao, 1:nao, 1:nao, s:s), nao, nao, nao)  # ⟨μν|ρs⟩
+    hs = @view half[:,:,:,s]
+    @mtensor hs[p,q,r] = (braσ[μ,ν,r] * CL[μ,p]) * CLq[ν,q]
   end
+  @mtensor tmp[p,q,r,s] := half[p,q,ρ,s] * CR[ρ,r]   # ket-1 transform
+  @mtensor D[p,q,r,s]   := tmp[p,q,r,σ] * CR[σ,s]     # ket-2 transform ⇒ dressed ⟨pq|rs⟩ (q∈occ)
   # dressed 1-electron: h̃[p,q] = Σ h_AO[μν] C̃ᴸ[μ,p] C̃ᴿ[ν,q]
   hao = Matrix{T}(integ1(EC.fd))
   @mtensor dh[p,q] := (hao[μ,ν] * CL[μ,p]) * CR[ν,q]
   save!(EC, "dh_mm", dh)
-  d_oovo = D[occ,occ,virt,occ]; save!(EC, "d_oovo", d_oovo)
-  save!(EC, "d_oovv", D[occ,occ,virt,virt])
-  d_oooo = D[occ,occ,occ,occ]; save!(EC, "d_oooo", d_oooo)
-  d_voov = D[virt,occ,occ,virt]; save!(EC, "d_voov", d_voov)
-  d_vovo = D[virt,occ,virt,occ]; save!(EC, "d_vovo", d_vovo)
+  d_oovo = D[occ,:,virt,occ]; save!(EC, "d_oovo", d_oovo)   # D dim-2 is the occ space (size nocc)
+  save!(EC, "d_oovv", D[occ,:,virt,virt])
+  d_oooo = D[occ,:,occ,occ]; save!(EC, "d_oooo", d_oooo)
+  d_voov = D[virt,:,occ,virt]; save!(EC, "d_voov", d_voov)
+  d_vovo = D[virt,:,virt,occ]; save!(EC, "d_vovo", d_vovo)
   # dressed closed-shell Fock (only o,o / o,v / v,v blocks are used downstream)
   dfock = copy(dh)
   @mtensor begin
