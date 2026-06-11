@@ -19,7 +19,7 @@ using ..ElemCo.OrbTools
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
 export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
 export calc_system_df_integrals
-export generate_ao_fdump
+export generate_ao_fdump, ao_integrals
 export transform_ao2mo
 
 """
@@ -355,10 +355,25 @@ function generate_ao_fdump(EC::ECInfo{T}) where T
   eri_2e4idx_tri!(int2, bao)
   flushmmap(EC, int2)
   Enuc = nuclear_repulsion(EC.system)
+  # Store the full (neutral) electron count and a parity-consistent ms2, following the
+  # FCIDUMP convention: `charge` and `ms2` from the wf options are applied later by
+  # `setup_space_fd!` (which subtracts `charge` from the stored NELEC).
   nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
-  nelec -= EC.options.wf.charge
-  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
+  ms2 = mod(nelec, 2)
   return make_ao_fdump(int2, Matrix{T}(hAO), Enuc, Matrix{T}(S), nelec; ms2)
+end
+
+"""
+    ao_integrals(EC::ECInfo) -> FDump
+
+  Build the exact (non-density-fitted) AO-basis integral dump (see
+  [`generate_ao_fdump`](@ref)) and store it in `EC.fd`. This is the non-DF analogue
+  of `dfdump`; it is the entry point behind the `@ints` macro and is called
+  automatically by `@hf`/`@uhf` when `EC.fd` does not already hold AO integrals.
+"""
+function ao_integrals(EC::ECInfo)
+  EC.fd = generate_ao_fdump(EC)
+  return EC.fd
 end
 
 """

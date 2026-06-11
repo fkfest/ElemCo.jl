@@ -19,7 +19,7 @@ using ..ElemCo.Properties
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
-export dfhf, dfhf_positron, dfuhf, ao_hf
+export dfhf, dfhf_positron, dfuhf, ao_hf, ao_uhf
 
 """
     scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver; thren)
@@ -70,6 +70,61 @@ function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, s
     ϵ_new, cMO_new = solver(fock)
     ϵ .= ϵ_new
     cMO .= cMO_new
+    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
+  end
+  return EHF, ϵ
+end
+
+"""
+    scf_open_shell!(EC, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver; thren)
+
+  Shared unrestricted (open-shell) SCF loop with a pluggable Fock builder and solver,
+  the open-shell analogue of [`scf_closed_shell!`](@ref). `cMO` (α/β coefficients) is
+  updated in place. `fockbuilder(cMO)` returns the spin Fock pair (indexable `[1]`/`[2]`,
+  e.g. a `SpinMatrix`); `solver(fock_spin)` returns `(ϵ_spin, cMO_spin)`. `h1a`/`h1b` are
+  the α/β core Hamiltonians (equal for AO-UHF). Convergence is driven by the metric
+  residual `S·D·F − F·D·S` per spin. Returns `(EHF, ϵ)` with `ϵ` an `[ϵα, ϵβ]` vector.
+"""
+function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver; thren) where {T}
+  SP = EC.space
+  norb = length(SP[':'])
+  spocc = ('o', 'O')
+  h1 = (h1a, h1b)
+  diis = Diis(EC)
+  ϵ = [zeros(real(T), norb), zeros(real(T), norb)]
+  EHF = zero(real(T))
+  previousEHF = zero(real(T))
+  println("Iter     Energy      DE          Res         Time")
+  flush_output()
+  t0 = time_ns()
+  t1 = time_ns()
+  for it=1:EC.options.scf.maxit
+    fock = fockbuilder(cMO)
+    t1 = print_time(EC, t1, "generate Fock matrix", 2)
+    efhsmall = [zero(real(T)), zero(real(T))]
+    Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
+    var = zero(real(T))
+    for ispin = 1:2
+      den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[spocc[ispin]])
+      fhsmall = fock[ispin] + h1[ispin]
+      @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
+      efhsmall[ispin] = real(efh)
+      Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
+      var += sum(abs2, Δfock[ispin])
+    end
+    EHF = efhsmall[1] + efhsmall[2] + Enuc
+    ΔE = EHF - previousEHF
+    previousEHF = EHF
+    output_iteration(it, var, time_ns() - t0, EHF, ΔE)
+    if abs(ΔE) < thren && var < EC.options.scf.thr
+      break
+    end
+    t1 = print_time(EC, t1, "HF residual", 2)
+    perform!(diis, fock, Δfock)
+    t1 = print_time(EC, t1, "DIIS", 2)
+    for ispin = 1:2
+      ϵ[ispin], cMO[ispin] = solver(fock[ispin])
+    end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
   end
   return EHF, ϵ
@@ -223,6 +278,56 @@ function ao_hf(EC::ECInfo{T}) where {T}
 end
 
 """
+    ao_uhf(EC::ECInfo)
+
+  Perform exact (non-density-fitted) unrestricted Hartree-Fock from an AO-basis
+  [`FDump`](@ref) (build it with [`ao_integrals`](@ref) / `df=false`). Uses the shared
+  open-shell loop [`scf_open_shell!`](@ref) with an AO UHF Fock builder (`gen_ufock`)
+  and canonical orthogonalization for linear-dependence handling. Returns the energy as
+  the `UHF` and `HF` keys in `OutDict`.
+"""
+function ao_uhf(EC::ECInfo{T}) where {T}
+  @assert is_ao_basis(EC.fd) "ao_uhf requires an AO-basis FDump (build it with @ints / df=false)"
+  t1 = time_ns()
+  print_info("UHF (exact AO integrals, non-DF)")
+  setup_space_fd!(EC)
+  SP = EC.space
+  norb = length(SP[':'])
+  thren = EC.options.scf.thren
+  if thren < 0.0
+    thren = sqrt(EC.options.scf.thr)*0.1
+  end
+  sao = Matrix{T}(EC.fd.overlap)
+  hsmall = Matrix{T}(EC.fd.int1)   # AO core Hamiltonian (same for α and β)
+  Enuc = EC.fd.int0
+  Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
+  @assert size(Xorth, 2) ≥ max(length(SP['o']), length(SP['O'])) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left. Lower scf.redthr."
+  # core-Hamiltonian guess (same orbitals for α/β; open shells differ via occupations)
+  _, c0 = eigen_orth(hsmall, Xorth, Xredundant)
+  cMO = SpinMatrix(copy(c0), copy(c0))
+  unrestrict!(cMO)
+  t1 = print_time(EC, t1, "guess orbitals", 2)
+  fockbuilder = cMO -> gen_ufock(EC, cMO, cMO)
+  solver = fock -> eigen_orth(fock, Xorth, Xredundant)
+  EHF, ϵ = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver; thren)
+  for ispin = 1:2
+    normalize_phase!(cMO[ispin])
+  end
+  occupationsa = [ones(length(SP['o'])); zeros(length(SP['v']))]
+  occupationsb = [ones(length(SP['O'])); zeros(length(SP['V']))]
+  nredund = size(Xredundant, 2)
+  classes = nredund > 0 ? (orbital_classes_with_deleted(SP['o'], norb, nredund),
+                           orbital_classes_with_deleted(SP['O'], norb, nredund)) : nothing
+  dump_orbitals(EC, cMO; type="AO-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
+  println("AO-UHF energy: ", EHF)
+  draw_endline()
+  delete_temporary_files!(EC)
+  return OutDict("UHF"=>(EHF, "UHF energy (exact AO integrals)"),
+                 "HF"=>(EHF, "UHF energy (exact AO integrals)"),
+                 "E"=>(EHF, "UHF energy (exact AO integrals)"))
+end
+
+"""
     dfhf_positron(EC::ECInfo)
 
   Perform closed-shell DF-HF calculation with positron.
@@ -336,7 +441,6 @@ function dfuhf(EC::ECInfo{T}) where T
   end
   SP = EC.space
   norb = length(SP[':'])
-  diis = Diis(EC)
   thren = EC.options.scf.thren
   if thren < 0.0
     thren = sqrt(EC.options.scf.thr)*0.1
@@ -380,61 +484,20 @@ function dfuhf(EC::ECInfo{T}) where T
     Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
     @assert size(Xorth, 2) ≥ max(length(SP['o']), length(SP['O'])) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left. Lower scf.redthr."
   end
-  ϵ = [zeros(real(T), norb), zeros(real(T), norb)]
-  EHF = zero(real(T))
-  previousEHF = zero(real(T))
-  println("Iter     Energy      DE          Res         Time")
-  flush_output()
-  t0 = time_ns()
-  for it=1:EC.options.scf.maxit
-    if use_df3idx
-      fock = gen_df3idx_fock(EC, h1a, h1b, mmL, MML, cMO[1][:, SP['o']], cMO[2][:, SP['O']])
-    elseif direct
-      fock = gen_dffock(EC, cMO, bao, bfit)
-    else
-      fock = gen_dffock(EC, cMO)
-    end
-    t1 = print_time(EC, t1, "generate DF-Fock matrix", 2)
-    efhsmall = [zero(real(T)), zero(real(T))]
-    Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
-    var = zero(real(T))
-    for (ispin, sp) = enumerate(['o', 'O'])
-      if use_df3idx
-        h1s = ispin == 1 ? h1a : h1b
-        cMO_occ = cMO[ispin][:, SP[sp]]
-        den = cMO_occ * cMO_occ'
-        fhsmall = fock[ispin] + h1s
-        @mtensor efh = 0.5 * (den[q,p] * fhsmall[p,q])
-        efhsmall[ispin] = real(efh)
-        Δfock[ispin] = den * fock[ispin] - fock[ispin] * den
-      else
-        den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[sp])
-        fhsmall = fock[ispin] + hsmall
-        @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
-        efhsmall[ispin] = efh
-        Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
-      end
-      var += sum(abs2, Δfock[ispin])
-    end
-    EHF = efhsmall[1] + efhsmall[2] + Enuc
-    ΔE = EHF - previousEHF 
-    previousEHF = EHF
-    output_iteration(it, var, time_ns() - t0, EHF, ΔE)
-    if abs(ΔE) < thren && var < EC.options.scf.thr
-      break
-    end
-    t1 = print_time(EC, t1, "HF residual", 2)
-    perform!(diis, fock, Δfock)
-    t1 = print_time(EC, t1, "DIIS", 2)
-    for ispin = 1:2
-      if use_df3idx
-        ϵ[ispin], cMO[ispin] = eigen(Hermitian(fock[ispin]))
-      else
-        ϵ[ispin], cMO[ispin] = eigen_orth(fock[ispin], Xorth, Xredundant)
-      end
-    end
-    t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
+  # DF-UHF Fock builder + per-spin solver for the shared open-shell loop. The df3idx
+  # path uses the MO metric (S=I, plain `eigen`) with the pretransformed 3-index Fock;
+  # the integral-direct/jkfit path uses the AO metric (`eigen_orth`). Both reduce to
+  # the same arithmetic the inline loop used (`den` is symmetric ⇒ `den'==den`, and
+  # `sao==I` collapses the metric residual to `den·F − F·den`).
+  if use_df3idx
+    fockbuilder = cMO -> gen_df3idx_fock(EC, h1a, h1b, mmL, MML, cMO[1][:, SP['o']], cMO[2][:, SP['O']])
+    solver = fock -> eigen(Hermitian(fock))
+  else
+    h1a = h1b = hsmall
+    fockbuilder = direct ? (cMO -> gen_dffock(EC, cMO, bao, bfit)) : (cMO -> gen_dffock(EC, cMO))
+    solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   end
+  EHF, ϵ = scf_open_shell!(EC, cMO, sao, h1a, h1b, Enuc, fockbuilder, solver; thren)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end

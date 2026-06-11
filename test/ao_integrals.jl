@@ -132,3 +132,78 @@ using LinearAlgebra
     rm(tmp; recursive=true)
   end
 end
+
+@testset "AO-HF/UHF flow (@ints / @hf / @uhf)" begin
+  using ElemCo
+  using ElemCo.FciDumps: is_ao_basis
+  using ElemCo.MSystems: parse_geometry
+  using ElemCo.BasisSets: generate_basis, n_ao
+  using ElemCo.Integrals: eri_2e4idx, overlap, kinetic, nuclear
+  using LinearAlgebra
+
+  geometry = "
+    O   0.000000000   0.000000000  -0.130186067
+    H1  0.000000000   1.489124508   1.033245507
+    H2  0.000000000  -1.489124508   1.033245507"
+  basis = Dict("ao"=>"sto-3g")
+  Eref = -74.96485912107553
+
+  # independent reference UHF from the dense chemists' tensor G
+  function ref_uhf(S, h, G, Enuc, na, nb; maxit=300, thr=1e-12)
+    nb_ = size(S, 1)
+    Fe = eigen(Symmetric(S)); X = Fe.vectors * Diagonal(1.0 ./ sqrt.(Fe.values)) * Fe.vectors'
+    _, C = eigen(Symmetric(X' * h * X)); Ca = X * C; Cb = X * C
+    E = 0.0
+    for _ in 1:maxit
+      Da = Ca[:, 1:na] * Ca[:, 1:na]'
+      Db = Cb[:, 1:nb] * Cb[:, 1:nb]'
+      Dt = Da + Db
+      J = zeros(nb_, nb_); Ka = zeros(nb_, nb_); Kb = zeros(nb_, nb_)
+      @inbounds for q in 1:nb_, p in 1:nb_
+        jpq = 0.0; kapq = 0.0; kbpq = 0.0
+        for s in 1:nb_, r in 1:nb_
+          jpq += G[p, q, r, s] * Dt[r, s]    # (pq|rs)
+          kapq += G[p, s, r, q] * Da[r, s]   # (ps|rq)
+          kbpq += G[p, s, r, q] * Db[r, s]
+        end
+        J[p, q] = jpq; Ka[p, q] = kapq; Kb[p, q] = kbpq
+      end
+      Fa = h + J - Ka; Fb = h + J - Kb
+      Enew = 0.5 * sum(Da .* (h + Fa)) + 0.5 * sum(Db .* (h + Fb)) + Enuc
+      _, Cc = eigen(Symmetric(X' * Fa * X)); Ca = X * Cc
+      _, Cd = eigen(Symmetric(X' * Fb * X)); Cb = X * Cd
+      if abs(Enew - E) < thr; E = Enew; break; end
+      E = Enew
+    end
+    return E
+  end
+
+  # @hf auto-generates AO integrals when EC.fd is empty
+  EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  @test isempty(EC.fd)
+  e_hf = @hf
+  @test is_ao_basis(EC.fd)
+  @test abs(e_hf["HF"] - Eref) < 1e-7
+
+  # explicit @ints, then @hf reuses the stored integrals
+  EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  @ints
+  @test is_ao_basis(EC.fd)
+  e_hf2 = @hf
+  @test abs(e_hf2["HF"] - Eref) < 1e-7
+
+  # closed-shell UHF must reduce to RHF
+  EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  e_uhf = @uhf
+  @test abs(e_uhf["UHF"] - Eref) < 1e-7
+
+  # open-shell UHF (water cation, ms2=1) vs independent reference UHF
+  bao = generate_basis(parse_geometry(geometry, basis), "ao")
+  G = eri_2e4idx(bao); S = overlap(bao); hAO = kinetic(bao) + nuclear(bao)
+  EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  @set wf charge=1 ms2=1
+  e_uhf_cation = @uhf
+  Enuc = EC.fd.int0
+  ref = ref_uhf(S, hAO, G, Enuc, 5, 4)   # 9 e⁻, ms2=1 → nα=5, nβ=4
+  @test abs(e_uhf_cation["UHF"] - ref) < 1e-6
+end

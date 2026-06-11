@@ -95,6 +95,7 @@ using .Elements
 using .MSystems
 using .BasisSets
 using .BOHF
+using .IntegralTools
 using .HF
 using .DFMCSCF
 using .DfDump
@@ -113,6 +114,7 @@ export @set_default_eltype
 # from ECInfos
 export ECInfo, ec_eltype, DEFAULT_ELTYPE, set_default_eltype!
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
+export @ints, @hf, @uhf
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @localize, @region
 export @fci, @ciphi, @sci, @ciϕ
@@ -895,7 +897,100 @@ macro dfints(opts_block=nothing)
   end
 end
 
-""" 
+"""
+    @ints(opts_block=nothing)
+
+  Generate exact (non-density-fitted) AO integrals and store them in `EC.fd`
+  (overlap `S`, core Hamiltonian `h`, and the 4-index `(μν|ρσ)` in physicists'
+  notation). This is the non-DF counterpart of [`@dfints`](@ref).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+"""
+macro ints(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        ao_integrals($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      ao_integrals($(esc(:EC)))
+    end
+  end
+end
+
+"""
+    @hf(opts_block=nothing)
+
+  Run closed-shell Hartree-Fock from exact (non-DF) AO integrals. If `EC.fd` does not
+  already hold AO integrals, they are generated first (equivalent to calling [`@ints`](@ref)).
+  The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+"""
+macro hf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
+          ao_integrals($(esc(:EC)))
+        end
+        ao_hf($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
+        ao_integrals($(esc(:EC)))
+      end
+      ao_hf($(esc(:EC)))
+    end
+  end
+end
+
+"""
+    @uhf(opts_block=nothing)
+
+  Run unrestricted Hartree-Fock from exact (non-DF) AO integrals. If `EC.fd` does not
+  already hold AO integrals, they are generated first (equivalent to calling [`@ints`](@ref)).
+  The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+"""
+macro uhf(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
+          ao_integrals($(esc(:EC)))
+        end
+        ao_uhf($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
+        ao_integrals($(esc(:EC)))
+      end
+      ao_uhf($(esc(:EC)))
+    end
+  end
+end
+
+"""
     @cc(method, args...)
 
   Run coupled cluster calculation.
