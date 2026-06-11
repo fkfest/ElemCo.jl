@@ -19,9 +19,10 @@ export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
 export is_similarity_transformed
+export is_ao_basis, make_ao_fdump
 
 # optional variables which won't be written if =0
-const FDUMP_OPTIONAL=["IUHF", "ST", "III", "ICMPLX"]
+const FDUMP_OPTIONAL=["IUHF", "ST", "III", "ICMPLX", "AOBASIS"]
 
 """prefered order of keys in fcidump header (optional keys are not included)"""
 const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
@@ -142,6 +143,11 @@ end
   epdump::Bool = false
   """`⟨false⟩` 3-index DF integrals are stored in scratch (`mmL`) and need contraction to 4-index. """
   df3idx::Bool = false
+  """`⟨false⟩` integrals are in a non-orthogonal AO basis (`(μν|ρσ)` instead of MO integrals).
+     A convenience variable, has to coincide with `head["AOBASIS"][1] > 0`. """
+  ao_basis::Bool = false
+  """ overlap matrix `S_{μν}` of the (non-orthogonal) AO basis; only stored if `ao_basis`. """
+  overlap::Matrix{T} = zeros(T, 0, 0)
 end
 
 const TFDump{T<:Number} = FDump{T,3}
@@ -168,6 +174,8 @@ function FDump{T2,N}(fd::FDump{T1,N}) where {T1<:Number,T2<:Number,N}
     modified = fd.modified,
     uhf = fd.uhf,
     df3idx = fd.df3idx,
+    ao_basis = fd.ao_basis,
+    overlap = Matrix{T2}(fd.overlap),
   )
 end
 
@@ -220,6 +228,29 @@ function FDump{T,N}(norb::Int, nelec::Int; npos::Int=0, ms2::Int=0, isym::Int=1,
   fd.head["ST"] = simtra ? [1] : [0]
   fd.head["ICMPLX"] = T <: Complex ? [1] : [0]
   fd.uhf = uhf
+  return fd
+end
+
+"""
+    make_ao_fdump(int2::Array{T,3}, int1::Matrix{T}, int0, overlap::Matrix{T}, nelec::Int; ms2=0, isym=1, orbsym=Int[])
+
+  Create an AO-basis [`FDump`](@ref) (`TFDump`) from precomputed AO integrals.
+
+  `int2[p,q,tri(r,s)] = <pq|rs> = (pr|qs)` are the AO 2-e integrals in physicists'
+  notation (triangular packing), `int1 = h_{μν}` is the AO core Hamiltonian,
+  `int0` is the nuclear repulsion energy, and `overlap = S_{μν}` is the AO overlap.
+  `norb` is taken from `size(overlap,1)`. The `AOBASIS` header flag is set.
+"""
+function make_ao_fdump(int2::Array{T,3}, int1::Matrix{T}, int0, overlap::Matrix{T}, nelec::Int;
+                       ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[]) where {T<:Number}
+  norb = size(overlap, 1)
+  fd = FDump{T,3}(norb, nelec; ms2, isym, orbsym)
+  fd.head["AOBASIS"] = [1]
+  fd.ao_basis = true
+  fd.int2 = int2
+  fd.int1 = int1
+  fd.int0 = int0
+  fd.overlap = overlap
   return fd
 end
 
@@ -280,6 +311,18 @@ end
   Return true if the fcidump is similarity transformed
 """
 is_similarity_transformed(fd::FDump) = headvar(fd, "ST", Int) > 0
+
+"""
+    is_ao_basis(fd::FDump)
+
+  Return true if the fcidump holds integrals in a (non-orthogonal) AO basis,
+  i.e. the 2-e integrals are `(μν|ρσ)`, the 1-e integrals are the AO core
+  Hamiltonian `h_{μν}`, and the overlap `S_{μν}` is available in `fd.overlap`.
+"""
+function is_ao_basis(fd::FDump)
+  aobas = headvar(fd, "AOBASIS", Int)
+  return !isnothing(aobas) && aobas > 0
+end
 
 """
     uses_reduced_permsym(fd::FDump{T}) where {T<:Number}
@@ -436,6 +479,7 @@ function read_fcidump(fcidump::String, ::Type{T}, ::Val{N}) where {T<:Number, N}
   fd.head = head
   fd.origin = fcidump
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
+  fd.ao_basis = is_ao_basis(fd)
   simtra = (headvar(fd, "ST", Int) > 0)
   positron = headvar(fd, "NPOS", Int)
   if simtra
@@ -576,6 +620,10 @@ function read_integrals!(fd::FDump, dir::AbstractString)
     fd.int1a = mmap_integrals(fd, dir, "NPY1A", fd.int1a)
     fd.int1b = mmap_integrals(fd, dir, "NPY1B", fd.int1b)
     success = length(fd.int2aa) > 0 && length(fd.int2bb) > 0 && length(fd.int2ab) > 0 && length(fd.int1a) > 0 && length(fd.int1b) > 0
+  end
+  if fd.ao_basis
+    fd.overlap = mmap_integrals(fd, dir, "NPYS", fd.overlap)
+    success &= length(fd.overlap) > 0
   end
   enuc = headvar(fd, "ENUC", Float64)
   if isnothing(enuc)
@@ -1001,6 +1049,9 @@ function write_header(fd::FDump{T}, fdf; npy=false) where T
   head = fd.head
   # set ICMPLX flag for complex integrals
   head["ICMPLX"] = T <: Complex ? [1] : [0]
+  if fd.ao_basis
+    head["AOBASIS"] = [1]
+  end
   if npy
     if !fd.uhf
       head["NPY2"] = ["int2.npy"]
@@ -1012,6 +1063,9 @@ function write_header(fd::FDump{T}, fdf; npy=false) where T
       head["NPY1A"] = ["int1a.npy"]
       head["NPY1B"] = ["int1b.npy"]
     end
+    if fd.ao_basis
+      head["NPYS"] = ["overlap.npy"]
+    end
     head["ENUC"] = [fd.int0]
   else
     delete!(head.shead, "NPY2")
@@ -1021,7 +1075,11 @@ function write_header(fd::FDump{T}, fdf; npy=false) where T
     delete!(head.shead, "NPY2AB")
     delete!(head.shead, "NPY1A")
     delete!(head.shead, "NPY1B")
+    delete!(head.shead, "NPYS")
     delete!(head.fhead, "ENUC")
+  end
+  if fd.ao_basis && !npy
+    error("AO-basis fcidumps must be written with format=:npy (the overlap matrix is stored as an npy file)")
   end
   for key in FDUMP_KEYS
     val = headvar(fd, key)
@@ -1252,6 +1310,9 @@ function copy2npy(fd::FDump, dir::AbstractString)
     npzwrite(joinpath(dir,"int2ab.npy"), fd.int2ab)
     npzwrite(joinpath(dir,"int1a.npy"), fd.int1a)
     npzwrite(joinpath(dir,"int1b.npy"), fd.int1b)
+  end
+  if fd.ao_basis
+    npzwrite(joinpath(dir,"overlap.npy"), fd.overlap)
   end
 end
 

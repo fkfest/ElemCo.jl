@@ -12,7 +12,7 @@ using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
-using ..ElemCo.DFTools
+using ..ElemCo.IntegralTools
 using ..ElemCo.Utils
 
 export dfdump

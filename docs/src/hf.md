@@ -1,13 +1,14 @@
-# Density-fitted Hartree-Fock
+# Hartree-Fock
 
 ```@meta
-CurrentModule = ElemCo.DFHF
+CurrentModule = ElemCo.HF
 ```
 
-The density-fitted Hartree-Fock (DF-HF) method is a method for computing
-the Hartree-Fock energy using density fitting. The DF-HF method is
-implemented in ElemCo.jl using the `@dfhf` macro. Here's an example of
-how you can use this macro:
+This module implements closed- and open-shell Hartree-Fock, both
+density-fitted (`dfhf`/`dfuhf`, via the `@dfhf` macro) and exact non-DF
+from AO integrals (`ao_hf`), sharing a common SCF loop with a pluggable
+Fock builder. Here's an example of computing density-fitted HF with the
+`@dfhf` macro:
 
 ```julia
 using ElemCo
@@ -32,12 +33,12 @@ basis set, and calculates the DF-HF energy.
 ## Exported functions and types
 
 ```@autodocs
-Modules = [DFHF]
+Modules = [HF]
 Private = false
 ```
 
 ## Internal functions
 ```@autodocs
-Modules = [DFHF]
+Modules = [HF]
 Public = false
 ```  

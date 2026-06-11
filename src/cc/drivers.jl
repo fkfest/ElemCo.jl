@@ -11,7 +11,7 @@ using ..ElemCo.ECMethods
 using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 using ..ElemCo.TensorTools
-using ..ElemCo.DFTools
+using ..ElemCo.IntegralTools
 using ..ElemCo.CCTools
 using ..ElemCo.CoupledCluster
 using ..ElemCo.DMRG

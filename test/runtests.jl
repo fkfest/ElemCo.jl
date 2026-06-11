@@ -28,7 +28,7 @@ TESTS = [
 ("CIPHI", ["ciphi_rhf", "ciphi_uhf", "ciphi_rhf_st", "ciphi_restart"]),
 ("QV-CC", ["h2o_qv-ccd"]),
 ("DF", ["df_hf", "redundant_hf", "basis", "df_uhf", "df_mcscf", "levenshtein", "df3idx", "localization"]),
-("System", ["dummy"]),
+("System", ["dummy", "ao_integrals"]),
 ("POS", ["pos_df_hf"]),
 ("SVD", ["svd_dc","svd_dc_ccsdt"]),
 ("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase","h2o_wf", "vasp", "df3idx_vasp"]),

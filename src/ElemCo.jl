@@ -40,7 +40,7 @@ include("scf/localization.jl")
 include("scf/region.jl")
 include("scf/fockfactory.jl")
 include("integrals/dumptools.jl")
-include("integrals/dftools.jl")
+include("integrals/integral_tools.jl")
 include("integrals/dfdump.jl")
 include("tools/decomptools.jl")
 include("fci/fci.jl")
@@ -53,7 +53,7 @@ include("cc/drivers.jl")
 
 include("scf/bohf.jl")
 
-include("scf/dfhf.jl")
+include("scf/hf.jl")
 
 include("scf/dfmcscf.jl")
 
@@ -95,7 +95,7 @@ using .Elements
 using .MSystems
 using .BasisSets
 using .BOHF
-using .DFHF
+using .HF
 using .DFMCSCF
 using .DfDump
 using .DMRG

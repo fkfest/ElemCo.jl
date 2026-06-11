@@ -1,7 +1,8 @@
 """
-This module contains various utils for density fitting.
+This module contains tools for generating integral dumps from AO integrals —
+both density-fitted and exact (non-DF) — and transforming them AO→MO.
 """
-module DFTools
+module IntegralTools
 using LinearAlgebra
 using Buffers
 using ..ElemCo.Utils
@@ -18,6 +19,8 @@ using ..ElemCo.OrbTools
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
 export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
 export calc_system_df_integrals
+export generate_ao_fdump
+export transform_ao2mo
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -326,6 +329,86 @@ function transform_3idx!(EC::ECInfo{T}, fname::String, U::AbstractMatrix) where 
   end #buffer
   flushmmap(EC, mmL)
   close(mmLfile)
+end
+
+"""
+    generate_ao_fdump(EC::ECInfo) -> FDump
+
+  Build a non-orthogonal AO-basis [`FDump`](@ref) (`TFDump`) holding the exact
+  (non-density-fitted) 2-e integrals `(μν|ρσ)` in physicists' notation, the AO core
+  Hamiltonian `h_{μν} = T_{μν} + V_{μν}`, the nuclear repulsion energy, and the AO
+  overlap `S_{μν}` (stored in `fd.overlap`, `AOBASIS` flag set).
+
+  The 2-e integrals are assembled batch-wise straight into a memory-mapped triangular
+  `int2` (see [`eri_2e4idx_tri!`](@ref)); the full `nao⁴` tensor is never materialized.
+"""
+function generate_ao_fdump(EC::ECInfo{T}) where T
+  @assert !isempty(EC.system) "EC.system is not set up!"
+  bao = generate_basis(EC, "ao")
+  S = overlap(bao)
+  nao = size(S, 1)
+  hAO = kinetic(bao) + nuclear(bao)
+  # Stream the exact AO integrals straight into a memory-mapped triangular
+  # `int2[p,q,tri(r,s)] = ⟨pq|rs⟩` — never materializing the dense `nao⁴` tensor.
+  ntri = nao*(nao+1)÷2
+  int2_file, int2 = newmmap(EC, "ao_int2", (nao, nao, ntri), T; description="int2 ao")
+  eri_2e4idx_tri!(int2, bao)
+  flushmmap(EC, int2)
+  Enuc = nuclear_repulsion(EC.system)
+  nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
+  nelec -= EC.options.wf.charge
+  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
+  return make_ao_fdump(int2, Matrix{T}(hAO), Enuc, Matrix{T}(S), nelec; ms2)
+end
+
+"""
+    transform_ao2mo(fd_ao::FDump{T,3}, cMO::AbstractMatrix) -> FDump{T,3}
+
+  Transform a non-orthogonal AO-basis [`FDump`](@ref) into a standard (orthonormal)
+  MO-basis `TFDump` using the MO coefficients `cMO[μ,p]` (`nao × norb`).
+
+  Exact (non-density-fitted) `O(N⁵)` four-index transformation. The result holds the MO
+  integrals `<pq|rs>_MO`, the MO 1-e integrals `h_{pq} = cᵀ h_{μν} c`, and the same
+  nuclear repulsion energy; it is a regular MO fcidump (`ao_basis = false`) that BOHF/CC
+  consume unchanged. No frozen-core folding is applied (full space).
+
+  Bra indices (`p,q`) are transformed with `conj(cMO)`, ket indices (`r,s`) with `cMO`,
+  so complex/non-Hermitian orbital sets are handled correctly.
+"""
+function transform_ao2mo(fd_ao::FDump{T,3}, cMO::AbstractMatrix) where {T<:Number}
+  @assert fd_ao.ao_basis "transform_ao2mo requires an AO-basis FDump"
+  @assert !fd_ao.uhf "UHF AO transform not yet implemented (use a SpinMatrix method)"
+  nao = size(cMO, 1)
+  norb = size(cMO, 2)
+  @assert size(fd_ao.overlap, 1) == nao "cMO has $nao AOs but the AO-FDump has $(size(fd_ao.overlap,1))"
+  c = Matrix{T}(cMO)
+  sp = 1:nao
+  vAO = detri_int2(fd_ao.int2, nao, sp, sp, sp, sp)   # <μν|ρσ>_AO
+  # quarter transforms; bra indices use conj(c), ket indices use c
+  @mtensor begin
+    t1[p,ν,ρ,σ] := conj(c[μ,p]) * vAO[μ,ν,ρ,σ]
+    t2[p,q,ρ,σ] := conj(c[ν,q]) * t1[p,ν,ρ,σ]
+    t3[p,q,r,σ] := c[ρ,r] * t2[p,q,ρ,σ]
+    mo[p,q,r,s] := c[σ,s] * t3[p,q,r,σ]
+  end
+  int2 = zeros(T, norb, norb, norb*(norb+1)÷2)
+  @inbounds for s in 1:norb
+    for r in 1:s
+      idx = uppertriangular_index(r, s)
+      for q in 1:norb, p in 1:norb
+        int2[p, q, idx] = mo[p, q, r, s]
+      end
+    end
+  end
+  hAO = fd_ao.int1
+  @mtensor int1[p,q] := (conj(c[μ,p]) * hAO[μ,ν]) * c[ν,q]
+  nelec = headvar(fd_ao, "NELEC", Int)
+  ms2 = headvar(fd_ao, "MS2", Int)
+  fd = FDump{T,3}(norb, nelec; ms2)
+  fd.int2 = int2
+  fd.int1 = Matrix{T}(int1)
+  fd.int0 = fd_ao.int0
+  return fd
 end
 
 end #module

@@ -2,7 +2,7 @@ using ElemCo
 using ElemCo.ECInfos
 using ElemCo.FciDumps: headvar
 using ElemCo.TensorTools: mmap3idx, closemmap
-using ElemCo.DFTools: contract_df_integrals!
+using ElemCo.IntegralTools: contract_df_integrals!
 using ElemCo.VaspInterface
 
 # cc4s reference energies (in eV) and conversion factor

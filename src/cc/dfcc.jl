@@ -16,7 +16,7 @@ using ..ElemCo.ECMethods
 using ..ElemCo.TensorTools
 using ..ElemCo.DecompTools
 using ..ElemCo.OrbTools
-using ..ElemCo.DFTools
+using ..ElemCo.IntegralTools
 using ..ElemCo.CCTools
 using ..ElemCo.DIIS
 using ..ElemCo.LaplaceQuadrature

@@ -68,7 +68,7 @@ using ..ElemCo.FciDumps
 using ..ElemCo.MSystems
 using ..ElemCo.DIIS
 using ..ElemCo.DecompTools
-using ..ElemCo.DFTools
+using ..ElemCo.IntegralTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
