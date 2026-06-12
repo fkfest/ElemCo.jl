@@ -31,6 +31,9 @@ using ReTestItems
 const runall = "all" in ARGS
 const nworkers = parse(Int, get(ENV, "ELEMCO_TEST_NWORKERS", "0"))
 
+# Never run items tagged :broken. They stay discoverable in the Test Explorer.
+notbroken(ti) = !(:broken in ti.tags)
+
 # Limit BLAS threads per worker to avoid oversubscription when running in
 # parallel (each worker would otherwise grab all cores for MKL).
 const worker_init = nworkers > 1 ? quote
@@ -40,10 +43,8 @@ end : :()
 
 if runall
   println("Running all ElemCo tests (including long-running ones); nworkers=$nworkers")
-  # Everything except the known-broken orphan `pos_mp2` (tagged :broken).
-  ReTestItems.runtests(@__DIR__; nworkers, worker_init_expr=worker_init,
-                       name = r"^(?!pos_mp2$)")
+  ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init)
 else
   println("Running quick ElemCo tests (tag :quick); nworkers=$nworkers")
-  ReTestItems.runtests(@__DIR__; nworkers, worker_init_expr=worker_init, tags=:quick)
+  ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init, tags=:quick)
 end
