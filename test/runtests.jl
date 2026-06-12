@@ -1,66 +1,50 @@
-using Test
+using ReTestItems
 
-# choose what to test with `Pkg.test("ElemCo", test_args=["h2o","df_hf","quick"])`
-# or `$ julia runtests.jl h2o df_hf quick`
-# If no arguments are given, all quick tests are run.
-# If "all" is given, all tests are run.
-# If the name of a test set is given, all tests in that set are run.
+# Run ElemCo tests via the TestItems framework (`@testitem`), using ReTestItems
+# as the runner so tests can optionally run in parallel across worker processes.
+#
+# The test-only deps (ReTestItems, TestItems, Test) live in [extras]/[targets]
+# of Project.toml, so run through Pkg.test (which builds the test environment):
+#   Pkg.test("ElemCo")                          # quick tests (items tagged :quick)
+#   Pkg.test("ElemCo"; test_args=["all"])        # all tests (incl. :long), minus :broken
+# (A bare `julia test/runtests.jl` against the package env won't see ReTestItems.)
+#
+# Parallelism (off by default to match the historical single-process behaviour):
+#   ELEMCO_TEST_NWORKERS=4 julia -e 'using Pkg; Pkg.test("ElemCo")'
+#     0 (default) -> run sequentially in this process (ElemCo loaded once)
+#     1           -> run sequentially in one fresh worker process
+#     N>1         -> run @testitems in parallel across N worker processes
+#   Each worker loads ElemCo once, so workers trade extra startup/memory for
+#   wall-clock speedup. ElemCo uses MKL; to avoid BLAS oversubscription when
+#   N is large, also lower the BLAS threads, e.g. set ELEMCO_TEST_NWORKERS and
+#   pass `worker_init_expr` below, or run with `MKL_NUM_THREADS`/`OPENBLAS_NUM_THREADS`.
+#
+# In VS Code, discovery/running of @testitems is handled by the Julia extension's
+# own test process(es) and does not go through this file. The number of those
+# processes is controlled by the `julia.numTestProcesses` setting.
+#
+# NOTE: discovery is scoped to this `test/` directory (via @__DIR__), not the
+# package root, so the nested `lib/ALPACADecomposition` test items and any
+# `.claude/worktrees/*` checkouts are not picked up. Each @testitem imports
+# `using ElemCo` itself.
 
-runall = "all" in ARGS
-runquick = length(ARGS) == 0 
+const runall = "all" in ARGS
+const nworkers = parse(Int, get(ENV, "ELEMCO_TEST_NWORKERS", "0"))
+
+# Never run items tagged :broken. They stay discoverable in the Test Explorer.
+notbroken(ti) = !(:broken in ti.tags)
+
+# Limit BLAS threads per worker to avoid oversubscription when running in
+# parallel (each worker would otherwise grab all cores for MKL).
+const worker_init = nworkers > 1 ? quote
+  using LinearAlgebra
+  BLAS.set_num_threads(max(1, Sys.CPU_THREADS ÷ $nworkers))
+end : :()
+
 if runall
-  println("Running all tests")
-elseif runquick
-  println("Running quick tests")
+  println("Running all ElemCo tests (including long-running ones); nworkers=$nworkers")
+  ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init)
 else
-  println("Running only $ARGS")
-end
-
-# quick tests
-# [(testset, tests), ...]
-# testset is the name of the test set
-# tests is a list of test file names (without the .jl extension)
-TESTS = [
-("FCIDUMP", ["h2o", "h2o_st1", "n_st1", "h2o_cation", "h2o_anion_st1", "h2o_bohf", "h2o_triplet", "2d_cc"]),
-("CC", ["h2-", "amp_restart", "noncanonical"]),
-("EOM", ["eom"]),
-("FCI", ["fci_rhf", "fci_uhf", "fci_rhf_st"]),
-("CIPHI", ["ciphi_rhf", "ciphi_uhf", "ciphi_rhf_st", "ciphi_restart"]),
-("QV-CC", ["h2o_qv-ccd"]),
-("DF", ["df_hf", "redundant_hf", "basis", "df_uhf", "df_mcscf", "levenshtein", "df3idx", "localization"]),
-("System", ["dummy"]),
-("POS", ["pos_df_hf"]),
-("SVD", ["svd_dc","svd_dc_ccsdt"]),
-("Interface", ["h2o_matrop", "h2o_molpro", "h2o_atomsbase","h2o_wf", "vasp", "df3idx_vasp"]),
-("Unit-tests", ["unit_tests", "bufvec"]),
-("Complex", ["complex_cc", "complex_eom", "complex_lambda", "complex_fci", "complex_bohf", "complex_trexio", "df3idx_complex", "complex_fcidump_roundtrip"]),
-]
-
-# long tests
-LONGTESTS = [
-("Props", ["h2o_udcsd_prop"]),
-("DMRG", ["h2o_dmrg"]),
-("High-order CC", ["uccsdt", "ccsdt"]),
-]
-
-for (testset, tests) in TESTS
-  doall = runall || runquick || testset in ARGS
-  @testset verbose = true "$testset" begin
-    for test in tests
-      if doall || test in ARGS
-        include(test*".jl")
-      end
-    end
-  end
-end
-
-for (testset, tests) in LONGTESTS
-  doall = runall || testset in ARGS
-  @testset verbose = true "$testset" begin
-    for test in tests
-      if doall || test in ARGS
-        include(test*".jl")
-      end
-    end
-  end
+  println("Running quick ElemCo tests (tag :quick); nworkers=$nworkers")
+  ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init, tags=:quick)
 end
