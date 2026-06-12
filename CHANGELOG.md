@@ -13,6 +13,14 @@
 * `@savewf` accepts orbital coefficients as matrix or tuple of matrices.
 * Use LLAMA for svd decompositions.
 * Some speedups in (T) and integrals calculations.
+* The test suite was migrated to the TestItems framework (`@testitem`), enabling
+  per-test run/debug in the VS Code Test Explorer and parallel execution. Each
+  test file in `test/` is wrapped in an `@testitem` tagged by category
+  (`:fcidump`, `:cc`, `:df`, `:complex`, …, plus `:quick` or `:long`). Run quick
+  tests with `Pkg.test()`, or all tests with `Pkg.test(test_args=["all"])`. Set
+  `ELEMCO_TEST_NWORKERS=N` to run test items in parallel across `N` worker
+  processes. The old `Pkg.test(test_args=["FCIDUMP", ...])` group selection is
+  replaced by tag/name filtering (e.g. in the VS Code Test Explorer).
 
 ### Added
 
