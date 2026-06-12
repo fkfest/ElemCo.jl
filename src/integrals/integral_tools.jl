@@ -369,7 +369,7 @@ end
   Build the exact (non-density-fitted) AO-basis integral dump (see
   [`generate_ao_fdump`](@ref)) and store it in `EC.fd`. This is the non-DF analogue
   of `dfdump`; it is the entry point behind the `@ints` macro and is called
-  automatically by `@hf`/`@uhf` when `EC.fd` does not already hold AO integrals.
+  automatically by `@hf`/`@uhf`/`@cc` when `EC.fd` does not already hold AO integrals.
 """
 function ao_integrals(EC::ECInfo)
   EC.fd = generate_ao_fdump(EC)
@@ -387,42 +387,23 @@ end
   nuclear repulsion energy; it is a regular MO fcidump (`ao_basis = false`) that BOHF/CC
   consume unchanged. No frozen-core folding is applied (full space).
 
-  Bra indices (`p,q`) are transformed with `conj(cMO)`, ket indices (`r,s`) with `cMO`,
-  so complex/non-Hermitian orbital sets are handled correctly.
+  Thin wrapper over [`transform_fcidump!`](@ref): the AO `FDump` is a non-orthogonal
+  "MO" dump, so transforming its integrals by `cMO` on both the left and the right yields
+  the MO dump. This reuses the memory-efficient `transform_int2` (σ-slab buffered) instead
+  of materializing the full `nao⁴` tensor. (Real orbitals; `transform_fcidump!` does not
+  conjugate, so a complex AO set would need the conjugated convention separately.)
 """
 function transform_ao2mo(fd_ao::FDump{T,3}, cMO::AbstractMatrix) where {T<:Number}
   @assert fd_ao.ao_basis "transform_ao2mo requires an AO-basis FDump"
   @assert !fd_ao.uhf "UHF AO transform not yet implemented (use a SpinMatrix method)"
-  nao = size(cMO, 1)
-  norb = size(cMO, 2)
-  @assert size(fd_ao.overlap, 1) == nao "cMO has $nao AOs but the AO-FDump has $(size(fd_ao.overlap,1))"
-  c = Matrix{T}(cMO)
-  sp = 1:nao
-  vAO = detri_int2(fd_ao.int2, nao, sp, sp, sp, sp)   # <μν|ρσ>_AO
-  # quarter transforms; bra indices use conj(c), ket indices use c
-  @mtensor begin
-    t1[p,ν,ρ,σ] := conj(c[μ,p]) * vAO[μ,ν,ρ,σ]
-    t2[p,q,ρ,σ] := conj(c[ν,q]) * t1[p,ν,ρ,σ]
-    t3[p,q,r,σ] := c[ρ,r] * t2[p,q,ρ,σ]
-    mo[p,q,r,s] := c[σ,s] * t3[p,q,r,σ]
-  end
-  int2 = zeros(T, norb, norb, norb*(norb+1)÷2)
-  @inbounds for s in 1:norb
-    for r in 1:s
-      idx = uppertriangular_index(r, s)
-      for q in 1:norb, p in 1:norb
-        int2[p, q, idx] = mo[p, q, r, s]
-      end
-    end
-  end
-  hAO = fd_ao.int1
-  @mtensor int1[p,q] := (conj(c[μ,p]) * hAO[μ,ν]) * c[ν,q]
-  nelec = headvar(fd_ao, "NELEC", Int)
-  ms2 = headvar(fd_ao, "MS2", Int)
-  fd = FDump{T,3}(norb, nelec; ms2)
-  fd.int2 = int2
-  fd.int1 = Matrix{T}(int1)
-  fd.int0 = fd_ao.int0
+  @assert size(fd_ao.overlap, 1) == size(cMO, 1) "cMO has $(size(cMO,1)) AOs but the AO-FDump has $(size(fd_ao.overlap,1))"
+  fd = deepcopy(fd_ao)
+  C = SpinMatrix(Matrix{T}(cMO))
+  transform_fcidump!(fd, C, C)          # exact AO→MO 4-index transform (reuses transform_int2)
+  # it is now a standard orthonormal MO fcidump — drop the AO-basis metadata
+  fd.ao_basis = false
+  fd.overlap = zeros(T, 0, 0)
+  fd.head["AOBASIS"] = [0]
   return fd
 end
 
