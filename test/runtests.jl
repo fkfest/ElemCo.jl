@@ -42,8 +42,7 @@ notbroken(ti) = !(:broken in ti.tags)
 # single-process (no worker parallelism).
 #
 # TODO(ReTestItems-1.13): once a fixed ReTestItems is registered, drop this
-# branch and the TestItemRunner test-dep and always use ReTestItems again. See
-# tasks/lessons.md.
+# branch and the TestItemRunner test-dep and always use ReTestItems again.
 # Note the `-` in `v"1.13-"`: it makes prereleases (e.g. 1.13.0-rc1) compare as
 # >= 1.13, so they take the fallback. Plain `v"1.13"` would wrongly treat the rc
 # as < 1.13 (prereleases sort before their release) and pick the broken runner.
@@ -53,7 +52,7 @@ if use_retestitems
   using ReTestItems
   # Limit BLAS threads per worker to avoid oversubscription when running in
   # parallel (each worker would otherwise grab all cores for MKL).
-  worker_init = nworkers > 1 ? quote
+  const worker_init = nworkers > 1 ? quote
     using LinearAlgebra
     BLAS.set_num_threads(max(1, Sys.CPU_THREADS ÷ $nworkers))
   end : :()
@@ -71,7 +70,7 @@ else
   # `lib/ALPACADecomposition` and `.claude/worktrees/*` items are not picked up.
   # Filtering is done via the `filter` function (no `tags=` kwarg here); the
   # filter sees a NamedTuple whose `tags` field holds the item's `@testitem` tags.
-  selector = runall ? notbroken : ti -> notbroken(ti) && :quick in ti.tags
+  const selector = runall ? notbroken : ti -> notbroken(ti) && :quick in ti.tags
   println("[Julia $VERSION] Using TestItemRunner fallback (ReTestItems is broken on 1.13).")
   println(runall ? "Running all ElemCo tests (including long-running ones); single-process." :
                    "Running quick ElemCo tests (tag :quick); single-process.")
