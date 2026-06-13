@@ -1,5 +1,3 @@
-using ReTestItems
-
 # Run ElemCo tests via the TestItems framework (`@testitem`), using ReTestItems
 # as the runner so tests can optionally run in parallel across worker processes.
 #
@@ -34,17 +32,47 @@ const nworkers = parse(Int, get(ENV, "ELEMCO_TEST_NWORKERS", "0"))
 # Never run items tagged :broken. They stay discoverable in the Test Explorer.
 notbroken(ti) = !(:broken in ti.tags)
 
-# Limit BLAS threads per worker to avoid oversubscription when running in
-# parallel (each worker would otherwise grab all cores for MKL).
-const worker_init = nworkers > 1 ? quote
-  using LinearAlgebra
-  BLAS.set_num_threads(max(1, Sys.CPU_THREADS ÷ $nworkers))
-end : :()
+# --- Runner selection -------------------------------------------------------
+# ReTestItems is our normal runner. It is broken on Julia >= 1.13 because
+# `Test.TESTSET_PRINT_ENABLE` became a `ScopedValue{Bool}` there, while
+# ReTestItems still does `TESTSET_PRINT_ENABLE[] = ...` (MethodError: no method
+# matching setindex!(::ScopedValue{Bool}, ::Bool)). Until the upstream fix is
+# released (https://github.com/JuliaTesting/ReTestItems.jl/pull/235) we fall back
+# to TestItemRunner on 1.13+, which drives the same `@testitem`s but runs them
+# single-process (no worker parallelism).
+#
+# TODO(ReTestItems-1.13): once a fixed ReTestItems is registered, drop this
+# branch and the TestItemRunner test-dep and always use ReTestItems again.
+# Note the `-` in `v"1.13-"`: it makes prereleases (e.g. 1.13.0-rc1) compare as
+# >= 1.13, so they take the fallback. Plain `v"1.13"` would wrongly treat the rc
+# as < 1.13 (prereleases sort before their release) and pick the broken runner.
+const use_retestitems = VERSION < v"1.13-"
 
-if runall
-  println("Running all ElemCo tests (including long-running ones); nworkers=$nworkers")
-  ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init)
+if use_retestitems
+  using ReTestItems
+  # Limit BLAS threads per worker to avoid oversubscription when running in
+  # parallel (each worker would otherwise grab all cores for MKL).
+  const worker_init = nworkers > 1 ? quote
+    using LinearAlgebra
+    BLAS.set_num_threads(max(1, Sys.CPU_THREADS ÷ $nworkers))
+  end : :()
+  if runall
+    println("Running all ElemCo tests (including long-running ones); nworkers=$nworkers")
+    ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init)
+  else
+    println("Running quick ElemCo tests (tag :quick); nworkers=$nworkers")
+    ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init, tags=:quick)
+  end
 else
-  println("Running quick ElemCo tests (tag :quick); nworkers=$nworkers")
-  ReTestItems.runtests(notbroken, @__DIR__; nworkers, worker_init_expr=worker_init, tags=:quick)
+  using TestItemRunner
+  nworkers != 0 && @warn "ELEMCO_TEST_NWORKERS is ignored on Julia >= 1.13: the TestItemRunner fallback runs single-process."
+  # Same discovery scope as the ReTestItems path (`@__DIR__`), so nested
+  # `lib/ALPACADecomposition` and `.claude/worktrees/*` items are not picked up.
+  # Filtering is done via the `filter` function (no `tags=` kwarg here); the
+  # filter sees a NamedTuple whose `tags` field holds the item's `@testitem` tags.
+  const selector = runall ? notbroken : ti -> notbroken(ti) && :quick in ti.tags
+  println("[Julia $VERSION] Using TestItemRunner fallback (ReTestItems is broken on 1.13).")
+  println(runall ? "Running all ElemCo tests (including long-running ones); single-process." :
+                   "Running quick ElemCo tests (tag :quick); single-process.")
+  TestItemRunner.run_tests(@__DIR__; filter=selector)
 end
