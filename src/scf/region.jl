@@ -817,6 +817,7 @@ function _build_region_spin(cMO_full::AbstractMatrix{T}, energies::Vector{Float6
                             virtual_mode::Symbol,
                             occ_charge_thr::Float64, atom_charge_thr::Float64,
                             exponent::Int, spin_label::String="",
+                            pao_centers::Vector{Int}=Int[],
                             pseudo::Bool=false, F_AO=nothing) where T
   valence_occ_range = occupied_data.occ
   virt_range = occupied_data.virt
@@ -847,6 +848,8 @@ function _build_region_spin(cMO_full::AbstractMatrix{T}, energies::Vector{Float6
   else
     error("Unknown region.virtual = $virtual_mode. Valid modes are :complement and :support_opao.")
   end
+  # add user-requested PAO centers to the virtual-space support
+  isempty(pao_centers) || (support_atoms = sort!(union(support_atoms, pao_centers)))
 
   # Now move the fragment occupied orbitals to the TOP of the occupied block (just below
   # the Fermi level); the environment orbitals below them form a contiguous block that is
@@ -918,6 +921,7 @@ function _build_region_spin_pi(cMO_full::AbstractMatrix{T}, energies::Vector{Flo
                                ao_atoms::Vector{Int}, selected_centers::Vector{Int};
                                pi_mode::Symbol, requested_occ::Int, requested_virt::Int,
                                spin_label::String="",
+                               pao_centers::Vector{Int}=Int[],
                                pseudo::Bool=false, F_AO=nothing) where T
   valence_occ_range = occupied_data.occ
   virt_range = occupied_data.virt
@@ -949,15 +953,27 @@ function _build_region_spin_pi(cMO_full::AbstractMatrix{T}, energies::Vector{Flo
     if pi_mode == :both
       requested_virt = clamp(requested_virt, 0, length(virt_range))
       requested_virt > 0 || error("No $(spin_label)virtual π orbitals requested for the chosen centers.")
-      R_virt, _ = _pi_projection_rotation(cMO_virt, PZ_AO, S)
-      nfrag_virt = requested_virt
+      R_pi, _ = _pi_projection_rotation(cMO_virt, PZ_AO, S)
+      R_frag = R_pi[:, 1:requested_virt]
+      if !isempty(pao_centers)
+        # augment the π virtual fragment with OPAOs on the requested PAO centers,
+        # orthogonalized against the already-selected π virtuals
+        C_pi = cMO_virt * R_frag
+        C_ao_target = _support_ao_targets(cMO_virt, ao_atoms, pao_centers)
+        _, R_aug = _project_virtual_targets(cMO_virt, S, C_ao_target; existing=C_pi)
+        R_frag = hcat(R_frag, R_aug)
+      end
+      nfrag_virt = size(R_frag, 2)
+      R_virt = nfrag_virt < length(virt_range) ? hcat(R_frag, Matrix{T}(nullspace(adjoint(R_frag)))) : Matrix{T}(R_frag)
+      _fix_sign_convention!(R_virt)
       cMO_region[:, virt_range] = cMO_virt * R_virt
       if !isempty(energies)
         ε_virt = energies[virt_range]
         energies[virt_range] = real.(diag(R_virt' * Diagonal(ε_virt) * R_virt))
       end
     else
-      R_virt, nfrag_virt = _fragment_opao_rotation(cMO_virt, S, ao_atoms, selected_centers)
+      virt_centers = isempty(pao_centers) ? selected_centers : sort!(union(selected_centers, pao_centers))
+      R_virt, nfrag_virt = _fragment_opao_rotation(cMO_virt, S, ao_atoms, virt_centers)
       nfrag_virt > 0 || error("No $(spin_label)fragment virtual orbitals constructed from the selected π-system atoms.")
       cMO_region[:, virt_range] = cMO_virt * R_virt
       if !isempty(energies)
@@ -988,7 +1004,11 @@ function _build_region_spin_pi(cMO_full::AbstractMatrix{T}, energies::Vector{Flo
     classes[virt_range[1:nfrag_virt]] .= "Virtual"
   end
 
-  region_info = (charges=zeros(Float64, 0, 0), support_atoms=selected_centers, scores=region_scores)
+  # :both virtuals come from the π projector (no support set) but may be augmented by
+  # pao_centers OPAOs; the OPAO (:occupied) virtuals are supported on the π centers plus pao_centers.
+  support_for_info = pi_mode == :both ? pao_centers :
+    (isempty(pao_centers) ? selected_centers : sort!(union(selected_centers, pao_centers)))
+  region_info = (charges=zeros(Float64, 0, 0), support_atoms=support_for_info, scores=region_scores)
   return cMO_region, energies, classes, nfrag_occ, nfrag_virt, region_info
 end
 
@@ -1101,6 +1121,8 @@ function region_orbitals(EC::ECInfo, centers)
   selection = _resolve_region_selection(EC, centers, mode, configured_inclusive, configured_exclusive)
   selected_global = selection.all_global
   selected_local = selection.all_local
+  # extra atom centers whose PAOs are added to the fragment virtual space
+  _, pao_centers = _resolve_region_centers(EC, EC.options.region.pao_centers; allow_empty=true)
   inclusive_labels = [atomic_centre_label(EC.system[idx]) for idx in selection.inclusive_global]
   exclusive_labels = [atomic_centre_label(EC.system[idx]) for idx in selection.exclusive_global]
   if !isempty(inclusive_labels) && !isempty(exclusive_labels)
@@ -1158,7 +1180,7 @@ function region_orbitals(EC::ECInfo, centers)
         selection.inclusive_local, selection.exclusive_local;
         virtual_mode=virtual_mode,
         occ_charge_thr=occ_charge_thr, atom_charge_thr=atom_charge_thr,
-        exponent=exponent, pseudo=pseudo, F_AO=F_AO_a)
+        exponent=exponent, pao_centers=pao_centers, pseudo=pseudo, F_AO=F_AO_a)
       region_type = isempty(alpha_space.virt) ? "Region-IBO" : "Region-IBO+OPAO"
       pseudo && (region_type *= "-Pseudo")
     else
@@ -1167,7 +1189,7 @@ function region_orbitals(EC::ECInfo, centers)
       cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a, info_a = _build_region_spin_pi(
         cMO_alpha, energies_a, alpha_space, S, PZ_AO, ao_atoms, selected_local;
         pi_mode=pi_mode, requested_occ=requested_occ_a, requested_virt=requested_virt_a,
-        pseudo=pseudo, F_AO=F_AO_a)
+        pao_centers=pao_centers, pseudo=pseudo, F_AO=F_AO_a)
       if pi_mode == :both
         region_type = "Region-PiOS"
       elseif isempty(alpha_space.virt)
@@ -1205,13 +1227,13 @@ function region_orbitals(EC::ECInfo, centers)
         selection.inclusive_local, selection.exclusive_local;
         virtual_mode=virtual_mode,
         occ_charge_thr=occ_charge_thr, atom_charge_thr=atom_charge_thr,
-        exponent=exponent, spin_label="alpha ", pseudo=pseudo, F_AO=F_AO_a)
+        exponent=exponent, spin_label="alpha ", pao_centers=pao_centers, pseudo=pseudo, F_AO=F_AO_a)
       cMO_region_b, energies_region_b, classb, nfrag_occ_b, nfrag_virt_b, info_b = _build_region_spin(
         cMO_beta, energies_b, beta_space, S, C_iao_b, iao_atoms_b, natom_b, ao_atoms,
         selection.inclusive_local, selection.exclusive_local;
         virtual_mode=virtual_mode,
         occ_charge_thr=occ_charge_thr, atom_charge_thr=atom_charge_thr,
-        exponent=exponent, spin_label="beta ", pseudo=pseudo, F_AO=F_AO_b)
+        exponent=exponent, spin_label="beta ", pao_centers=pao_centers, pseudo=pseudo, F_AO=F_AO_b)
       region_type = (!isempty(alpha_space.virt) || !isempty(beta_space.virt)) ? "Region-IBO+OPAO" : "Region-IBO"
       pseudo && (region_type *= "-Pseudo")
     else
@@ -1222,11 +1244,11 @@ function region_orbitals(EC::ECInfo, centers)
       cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a, info_a = _build_region_spin_pi(
         cMO_alpha, energies_a, alpha_space, S, PZ_AO_a, ao_atoms, selected_local;
         pi_mode=pi_mode, requested_occ=requested_occ_a, requested_virt=requested_virt_a,
-        spin_label="alpha ", pseudo=pseudo, F_AO=F_AO_a)
+        spin_label="alpha ", pao_centers=pao_centers, pseudo=pseudo, F_AO=F_AO_a)
       cMO_region_b, energies_region_b, classb, nfrag_occ_b, nfrag_virt_b, info_b = _build_region_spin_pi(
         cMO_beta, energies_b, beta_space, S, PZ_AO_b, ao_atoms, selected_local;
         pi_mode=pi_mode, requested_occ=requested_occ_b, requested_virt=requested_virt_b,
-        spin_label="beta ", pseudo=pseudo, F_AO=F_AO_b)
+        spin_label="beta ", pao_centers=pao_centers, pseudo=pseudo, F_AO=F_AO_b)
       if pi_mode == :both
         region_type = "Region-PiOS"
       elseif !isempty(alpha_space.virt) || !isempty(beta_space.virt)

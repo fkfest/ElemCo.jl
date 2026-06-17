@@ -18,8 +18,11 @@ The centers can be given as atom indices or center labels. Orbitals are read fro
 
 Center selection can also be driven directly from options:
 
-- `region.inclusive_centers`: centers that should always be treated as inclusive fragment centers.
-- `region.exclusive_centers`: centers that should always be treated as exclusive fragment centers.
+- `region.inclusive_centers`: atom indices that should always be treated as inclusive fragment centers.
+- `region.exclusive_centers`: atom indices that should always be treated as exclusive fragment centers.
+
+(The `@region [...]` macro argument also accepts center labels, but the `region.*_centers`
+options expect atom indices, e.g. `region.inclusive_centers=[1]`.)
 
 When `@region [...]` is called with an explicit center list, those centers are merged into the active selection implied by `region.mode`:
 
@@ -34,12 +37,13 @@ This also means the macro argument can be omitted entirely when the centers are 
 
 - `region.mode = :inclusive`: keep an occupied orbital if at least one selected center carries a large charge on it.
 - `region.mode = :exclusive`: keep an occupied orbital only if all of its large charges remain on the selected centers.
-- `region.inclusive_centers`: additional centers that participate in the inclusive selection regardless of how `@region` is called.
-- `region.exclusive_centers`: additional centers that participate in the exclusive selection regardless of how `@region` is called.
+- `region.inclusive_centers`: additional atom indices that participate in the inclusive selection regardless of how `@region` is called.
+- `region.exclusive_centers`: additional atom indices that participate in the exclusive selection regardless of how `@region` is called.
 - `region.occ_charge_thr`: threshold used to decide whether an occupied orbital belongs to the requested fragment.
 - `region.virtual = :complement` (default): build fragment virtuals by projecting the IAOs on the fragment-support atoms into the virtual space, then augment that antibonding-like complement with support-atom OPAOs.
 - `region.virtual = :support_opao`: keep the legacy support-atom OPAO construction directly.
 - `region.atom_charge_thr`: threshold used to add atoms to the support used for fragment virtual construction. In the default `:complement` mode this uses the accumulated fragment charge over all selected occupied IBOs.
+- `region.pao_centers`: additional atom indices whose PAOs are added to the fragment virtual space. These centers are always included (regardless of `atom_charge_thr`) and let you extend the virtual space manually. They apply to all virtual-space constructions: the OPAO/complement ones and `region.pi=:both`, where the PAO OPAOs are appended to the π-projector virtuals (orthogonalized against them).
 
 The fragment occupied orbitals are always tagged as `Inactive` and are placed at the Fermi
 level (just below the virtual space). The frozen core *and* the non-selected environment
@@ -94,7 +98,7 @@ Example: keep only the frontier HOMO/LUMO pair from a four-center π system.
 end
 
 @region begin
-  @set region mode=:exclusive inclusive_centers=[:H1] exclusive_centers=[:O]
+  @set region mode=:exclusive inclusive_centers=[2] exclusive_centers=[1]
 end
 ```
 

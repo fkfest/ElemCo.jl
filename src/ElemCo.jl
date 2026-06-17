@@ -832,7 +832,7 @@ end
   @set region pi=:both pi_occupied=1 pi_virtual=1
 end
 @region begin
-  @set region inclusive_centers=[:H1] exclusive_centers=[:O]
+  @set region inclusive_centers=[2] exclusive_centers=[1]
 end
 ```
 """

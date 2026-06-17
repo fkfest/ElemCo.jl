@@ -296,12 +296,12 @@ end
   - `:exclusive`: treat `@region(centers)` as additional exclusive centers
   """
   mode::Symbol = :inclusive
-  """`⟨Symbol[]⟩` additional center labels selected with the inclusive occupied-orbital rule, e.g. `[:O]`.
+  """`⟨Int[]⟩` additional atom indices selected with the inclusive occupied-orbital rule, e.g. `[1]`.
       The orbitals with significant contributions from these centers are added to the fragment. """
-  inclusive_centers::Vector{Symbol} = Symbol[]
-  """`⟨Symbol[]⟩` additional center labels selected with the exclusive occupied-orbital rule, e.g. `[:O, :H1]`. 
+  inclusive_centers::Vector{Int} = Int[]
+  """`⟨Int[]⟩` additional atom indices selected with the exclusive occupied-orbital rule, e.g. `[1, 2]`.
       The orbitals with significant contributions exclusively from these centers are added to the fragment. """
-  exclusive_centers::Vector{Symbol} = Symbol[]
+  exclusive_centers::Vector{Int} = Int[]
   """`⟨:none⟩` π-space selection mode.
   - `:none`: use the default IBO/PAO region selection
   - `:occupied`: select occupied π orbitals and keep PAO-defined virtuals
@@ -326,6 +326,10 @@ end
   occ_charge_thr::Float64 = 0.2
   """`⟨0.2⟩` threshold for adding atoms to the PAO support of the selected fragment. """
   atom_charge_thr::Float64 = 0.2
+  """`⟨Int[]⟩` additional atom indices whose PAOs are added to the fragment virtual space, e.g. `[3]`.
+      These centers extend the automatically determined PAO support and are always included
+      regardless of `atom_charge_thr`. """
+  pao_centers::Vector{Int} = Int[]
   """`⟨false⟩` pseudo-canonicalize the selected fragment occupied and virtual subspaces. """
   pseudo::Bool = false
 end

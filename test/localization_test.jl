@@ -461,7 +461,7 @@ end
   @set wf store=mixed_store
   @set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2
   @region begin
-    @set region inclusive_centers=[:H1] exclusive_centers=[:O]
+    @set region inclusive_centers=[2] exclusive_centers=[1]
   end
 
   _, _, _, classes_mixed = load_region_dump(joinpath(EC.scr, mixed_store))
@@ -483,6 +483,24 @@ end
   frag_virt = findall(==("Virtual"), classes_pseudo[1])
   @test offdiag_norm(cMO_pseudo[1][:, frag_occ]' * F_ref * cMO_pseudo[1][:, frag_occ]) < 1.e-10
   @test offdiag_norm(cMO_pseudo[1][:, frag_virt]' * F_ref * cMO_pseudo[1][:, frag_virt]) < 1.e-10
+
+  # region.pao_centers extends the virtual-space support: with the auto support disabled
+  # (high atom_charge_thr), adding atom 3 (H2) as a PAO center adds OPAO virtuals.
+  pao_base_store = "region_pao_base.h5"
+  @set wf store=pao_base_store
+  @set region mode=:inclusive virtual=:support_opao occ_charge_thr=0.2 atom_charge_thr=10.0 pseudo=false pao_centers=Int[]
+  @region [2]
+  _, _, _, classes_pao_base = load_region_dump(joinpath(EC.scr, pao_base_store))
+  nvirt_pao_base = count(==("Virtual"), classes_pao_base[1])
+
+  pao_ext_store = "region_pao_ext.h5"
+  @set wf store=pao_ext_store
+  @set region pao_centers=[3]
+  @region [2]
+  _, _, _, classes_pao_ext = load_region_dump(joinpath(EC.scr, pao_ext_store))
+  nvirt_pao_ext = count(==("Virtual"), classes_pao_ext[1])
+  @test nvirt_pao_ext > nvirt_pao_base
+  @set region virtual=:complement atom_charge_thr=0.2 pao_centers=Int[]
 
   basis = Dict("ao" => "cc-pVDZ",
                "jkfit" => "cc-pvtz-jkfit",
@@ -588,6 +606,18 @@ H6     3.166000000   -0.929000000    0.000000000"
   pi_virt = findall(==("Virtual"), classa_pi)
   @test offdiag_norm(cMO_pi[1][:, pi_occ]' * F_ref * cMO_pi[1][:, pi_occ]) < 1.e-10
   @test offdiag_norm(cMO_pi[1][:, pi_virt]' * F_ref * cMO_pi[1][:, pi_virt]) < 1.e-10
+
+  # region.pao_centers also augments the π=:both virtual space with OPAOs (orthogonal to the
+  # π virtuals); the occupied π space is unchanged.
+  pi_pao_store = "region_pi_both_pao.h5"
+  @set wf store=pi_pao_store
+  @set region pi=:both pseudo=false pao_centers=[5]
+  @region [1, 2, 3, 4]
+  basis_pi_pao, cMO_pi_pao, _, classes_pi_pao = load_pi_region_dump(joinpath(EC.scr, pi_pao_store))
+  @test count(==("Inactive"), classes_pi_pao[1]) == 2
+  @test count(==("Virtual"), classes_pi_pao[1]) > 2
+  @test norm(cMO_pi_pao[1]' * ElemCo.Integrals.overlap(basis_pi_pao) * cMO_pi_pao[1] - I(size(cMO_pi_pao[1], 2))) < 1.e-10
+  @set region pao_centers=Int[]
 
   pi_frontier_store = "region_pi_frontier.h5"
   @set wf store=pi_frontier_store
