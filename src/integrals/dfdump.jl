@@ -425,13 +425,23 @@ function dfdump(EC::ECInfo)
   end
   norbs = size(cMO,2)
   space_save = save_space(EC)
-  ncore_orbs = freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
+  nocc_full = length(EC.space['o'])
+  nvirt_full = length(EC.space['v'])
+  # frozen core (auto from dump classes / chemical / explicit) and dump-deleted virtuals
+  cls = freeze_orbitals!(EC)
+  (cls.occ_a == cls.occ_b && cls.virt_a == cls.virt_b) ||
+    error("FCIDUMP generation requires symmetric (restricted-like) freezing; " *
+          "run @dfmp2/@dfcc directly on the dump, or set the active space manually.")
   nredund = n_deleted_orbitals(EC)
   if nredund > 0
     EC.options.wf.npositron > 0 && error("Redundant (linearly-dependent) basis sets are not supported with positrons.")
     println("Freezing $nredund deleted (linearly-dependent) orbital(s) for the correlation treatment")
   end
-  nfrozvirt = freeze_nvirt!(EC, EC.options.wf.freeze_nvirt + nredund)
+  freeze_nvirt!(EC, max(EC.options.wf.freeze_nvirt, 0) + nredund)
+  # total per-orbital frozen counts (chemical core + class-honored core, and frozen/deleted virt);
+  # the region layout keeps frozen core at the lowest and deleted virtuals at the highest indices.
+  ncore_orbs = nocc_full - length(EC.space['o'])
+  nfrozvirt = nvirt_full - length(EC.space['v'])
 
   nelec = guess_nelec(EC.system) - 2*ncore_orbs
   npos = EC.options.wf.npositron

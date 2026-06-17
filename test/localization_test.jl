@@ -378,6 +378,15 @@ end
 
   offdiag_norm(mat) = norm(mat - Diagonal(diag(mat)))
 
+  # The region-selected (Inactive) occupied orbitals must sit at the Fermi level, i.e.
+  # the Core block is contiguous from index 1 and the Inactive block immediately follows.
+  function check_region_occ_ordering(cls)
+    core = findall(==("Core"), cls)
+    inact = findall(==("Inactive"), cls)
+    @test core == collect(1:length(core))
+    @test inact == collect(length(core)+1 : length(core)+length(inact))
+  end
+
   geometry = "bohr
        O      0.000000000    0.000000000   -0.130186067
        H1     0.000000000    1.489124508    1.033245507
@@ -398,9 +407,11 @@ end
   basis_inc, cMO_inc, type_inc, classes_inc = load_region_dump(joinpath(EC.scr, inclusive_store))
   @test type_inc == "Region-IBO+OPAO"
   classa_inc = classes_inc[1]
-  @test count(==("Core"), classa_inc) == 1
+  # water has 5 occupied orbitals; 1 is selected, the remaining 4 become Core (frozen)
+  @test count(==("Core"), classa_inc) == 4
   @test count(==("Inactive"), classa_inc) == 1
   @test count(==("Virtual"), classa_inc) > 0
+  check_region_occ_ordering(classa_inc)
   S_inc = ElemCo.Integrals.overlap(basis_inc)
   @test norm(cMO_inc[1]' * S_inc * cMO_inc[1] - I(size(cMO_inc[1], 2))) < 1.e-10
 
@@ -431,9 +442,11 @@ end
 
   _, _, _, classes_exc = load_region_dump(joinpath(EC.scr, exclusive_store))
   classa_exc = classes_exc[1]
-  @test count(==("Core"), classa_exc) == 1
+  # 3 occupied orbitals are selected; the remaining 2 of the 5 become Core (frozen)
+  @test count(==("Core"), classa_exc) == 2
   @test count(==("Inactive"), classa_exc) == 3
   @test count(==("Virtual"), classa_exc) > 0
+  check_region_occ_ordering(classa_exc)
 
   oxygen_exclusive_store = "region_exclusive_oxygen.h5"
   @set wf store=oxygen_exclusive_store
@@ -485,12 +498,15 @@ end
   basis_uhf, cMO_uhf, type_uhf, classes_uhf = load_region_dump(joinpath(EC.scr, unrestricted_store))
   @test type_uhf == "Region-IBO+OPAO"
   classa_uhf, classb_uhf = classes_uhf
-  @test count(==("Core"), classa_uhf) == 1
-  @test count(==("Core"), classb_uhf) == 1
+  # environment occupied orbitals are now frozen as Core in both spin blocks
+  @test count(==("Core"), classa_uhf) >= 1
+  @test count(==("Core"), classb_uhf) >= 1
   @test count(==("Inactive"), classa_uhf) > 0
   @test count(==("Inactive"), classb_uhf) > 0
   @test count(==("Virtual"), classa_uhf) > 0
   @test count(==("Virtual"), classb_uhf) > 0
+  check_region_occ_ordering(classa_uhf)
+  check_region_occ_ordering(classb_uhf)
   S_uhf = ElemCo.Integrals.overlap(basis_uhf)
   @test norm(cMO_uhf[1]' * S_uhf * cMO_uhf[1] - I(size(cMO_uhf[1], 2))) < 1.e-10
   @test norm(cMO_uhf[2]' * S_uhf * cMO_uhf[2] - I(size(cMO_uhf[2], 2))) < 1.e-10
@@ -638,4 +654,66 @@ H2    0.000000000   -0.922683000    1.232790000"
   @set wf store=""
   @set region pi=:none pi_electrons=-1 pi_occupied=-1 pi_virtual=-1 pseudo=false
 end
+end
+
+@testitem "region downstream class honoring" tags=[:df, :quick] begin
+using ElemCo
+using ElemCo.TrexioInterface
+using LinearAlgebra
+
+geometry = "bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao" => "cc-pVDZ",
+             "jkfit" => "cc-pvtz-jkfit",
+             "mpfit" => "cc-pvdz-mpfit")
+
+@ECinit
+@dfhf
+
+# Apply the driver's freeze logic (freeze_orbitals! + the freeze_nvirt count) to the current
+# dump and return the resulting (n_active_occ, n_active_virt); restore the space + options.
+function active_after_freeze(EC; core=:auto, freeze_nocc=-1, freeze_nvirt=-1)
+  sp = ElemCo.save_space(EC)
+  c0, fn0, fv0 = EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt
+  EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt = core, freeze_nocc, freeze_nvirt
+  ElemCo.ECInfos.setup_space_system!(EC; verbose=false)
+  ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
+  ElemCo.freeze_nvirt!(EC, max(freeze_nvirt, 0); verbose=false)   # mimic driver (nredund=0 here)
+  res = (length(EC.space['o']), length(EC.space['v']))
+  ElemCo.restore_space!(EC, sp)
+  EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt = c0, fn0, fv0
+  return res
+end
+
+# water/cc-pVDZ: 5 occupied, 19 virtual, chemical (:large) core = 1 (O 1s).
+# Ordinary dump: :auto reproduces the standard :large frozen core; explicit settings override.
+@test active_after_freeze(EC; core=:auto)[1]  == 4   # :auto -> chemical core (1 frozen)
+@test active_after_freeze(EC; core=:large)[1] == 4
+@test active_after_freeze(EC; core=:none)[1]  == 5   # override: nothing frozen
+@test active_after_freeze(EC; freeze_nocc=2)[1] == 3 # override: freeze 2 lowest
+
+# Region dump (written back to wf.dump).
+@set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2
+@region [2]
+io = open_trexio(joinpath(EC.scr, EC.options.wf.dump), "r")
+classa = try
+  read_trexio_orbital_classes(io)[1]
+finally
+  close_trexio(io)
+end
+n_inact = count(==("Inactive"), classa)
+n_virt = count(==("Virtual"), classa)
+@test n_inact == 1
+
+# :auto honors the region; user settings override the region's prescription.
+@test active_after_freeze(EC; core=:auto)       == (n_inact, n_virt)  # region active space
+@test active_after_freeze(EC; core=:none)[1]    == 5                  # override core: correlate all occ
+@test active_after_freeze(EC; freeze_nocc=2)[1] == 3                  # override core: freeze 2 lowest
+@test active_after_freeze(EC; freeze_nvirt=5)[2] == n_virt - 5        # override virt: freeze 5 highest
+
+# end-to-end: default :auto restricts @dfmp2 to the region
+energies = @dfmp2
+@test isfinite(energies["MP2"])
 end

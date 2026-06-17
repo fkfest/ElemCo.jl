@@ -22,7 +22,7 @@ export rotate_orbs, rotate_orbs!, normalize_phase!
 export try_load_starting_orbitals
 export left_from_right_rotations, project_onto_basis
 export canonical_orthogonalization, eigen_orth, n_redundant_orbitals
-export orbital_classes_with_deleted, n_deleted_orbitals
+export orbital_classes_with_deleted, n_deleted_orbitals, freeze_orbitals!
 
 """
     REDUNDANT_ORBITAL_ENERGY
@@ -137,6 +137,106 @@ function n_deleted_orbitals(EC::ECInfo; MO="mo")
     @warn "Number of deleted orbitals stored in the dump ($ndel) does not match the redundancy of the current AO basis ($nredund). Using the stored count; check that scf.redthr is consistent with the HF run."
   end
   return ndel
+end
+
+"""
+    _try_orbital_classes_energies(EC::ECInfo; MO="mo")
+
+  Best-effort fetch of `(classa, classb, ea, eb)` from the dump, returning empty vectors when
+  no class/energy information is available (e.g. an FCIDUMP-only run).
+"""
+function _try_orbital_classes_energies(EC::ECInfo; MO="mo")
+  try
+    classa, classb = fetch_orbital_classes(EC; MO=MO)
+    ea, eb = fetch_orbital_energies(EC, MO)
+    return classa, classb, ea, eb
+  catch
+    return String[], String[], Float64[], Float64[]
+  end
+end
+
+"""
+    _remove_orbitals_spin!(EC::ECInfo, occ_a, occ_b, virt_a, virt_b)
+
+  Remove the given (spin-resolved) occupied and virtual orbital indices from the active
+  subspaces and rebuild the derived spin spaces (`d`/`s`/`S`), mirroring `setup_space!`.
+"""
+function _remove_orbitals_spin!(EC::ECInfo, occ_a, occ_b, virt_a, virt_b)
+  SP = EC.space
+  setdiff!(SP['o'], occ_a); setdiff!(SP['O'], occ_b)
+  setdiff!(SP['v'], virt_a); setdiff!(SP['V'], virt_b)
+  if haskey(SP, 'a')
+    for s in (occ_a, occ_b, virt_a, virt_b)
+      setdiff!(SP['a'], s)
+    end
+  end
+  SP['d'] = intersect(SP['o'], SP['O'])
+  SP['s'] = setdiff(SP['o'], SP['d'])
+  SP['S'] = setdiff(SP['O'], SP['d'])
+  return
+end
+
+"""
+    freeze_orbitals!(EC::ECInfo; MO="mo", verbose=true) -> (; occ_a, occ_b, virt_a, virt_b)
+
+  Apply the frozen-core and deleted-virtual selection for a correlated calculation, honoring
+  the orbital classes stored in the dump (e.g. from [`@region`](@ref ElemCo.@region)) while
+  letting the user override them:
+
+  - Occupied core: if `wf.freeze_nocc ≥ 0`, freeze that many lowest orbitals; otherwise if
+    `wf.core == :auto`, freeze the orbitals tagged `"Core"` in the dump (falling back to the
+    `:large` chemical core when the dump carries no class information); otherwise freeze the
+    chemical core selected by `wf.core`.
+  - Virtual space: if `wf.freeze_nvirt < 0` (auto), drop the orbitals tagged `"Deleted"` (with
+    a physical orbital energy, i.e. not the [`REDUNDANT_ORBITAL_ENERGY`](@ref) sentinel) in the
+    dump; a value `≥ 0` overrides this and is handled by the caller via [`freeze_nvirt!`](@ref).
+
+  Linearly-dependent redundant orbitals (sentinel energy) are left to [`n_deleted_orbitals`](@ref).
+  Returns the number of occupied/virtual orbitals removed, resolved by spin.
+"""
+function freeze_orbitals!(EC::ECInfo; MO="mo", verbose=true)
+  SP = EC.space
+  no_a0, nv_a0 = length(SP['o']), length(SP['v'])
+  no_b0, nv_b0 = length(SP['O']), length(SP['V'])
+  core = EC.options.wf.core
+  freeze_nocc = EC.options.wf.freeze_nocc
+  freeze_nvirt = EC.options.wf.freeze_nvirt
+  classa, classb, ea, eb = _try_orbital_classes_energies(EC; MO=MO)
+  have_classes = !isempty(classa) && length(ea) == length(classa)
+
+  # ---- occupied frozen core ----
+  if freeze_nocc >= 0
+    freeze_core!(EC, :large, freeze_nocc; verbose=verbose)                  # explicit count
+  elseif core == :auto && have_classes && any(==("Core"), classa)
+    core_a = findall(==("Core"), classa)
+    core_b = (isempty(classb) || length(eb) != length(classb)) ? core_a : findall(==("Core"), classb)
+    _remove_orbitals_spin!(EC, core_a, core_b, Int[], Int[])
+    if verbose
+      println("Freezing ", length(core_a), " core orbital(s) from the dump's stored classes")
+      println()
+    end
+  else
+    freeze_core!(EC, core == :auto ? :large : core, -1; verbose=verbose)    # chemical core
+  end
+
+  # ---- virtual deletion (auto honors the dump's "Deleted" class) ----
+  if freeze_nvirt < 0 && have_classes
+    thr = REDUNDANT_ORBITAL_ENERGY
+    is_del(cls, en, i) = cls[i] == "Deleted" && en[i] < thr
+    del_a = [i for i in eachindex(classa) if is_del(classa, ea, i)]
+    del_b = (isempty(classb) || length(eb) != length(classb)) ? del_a :
+            [i for i in eachindex(classb) if is_del(classb, eb, i)]
+    if !isempty(del_a) || !isempty(del_b)
+      _remove_orbitals_spin!(EC, Int[], Int[], del_a, del_b)
+      if verbose
+        println("Dropping ", length(del_a), " deleted virtual orbital(s) from the dump's stored classes")
+        println()
+      end
+    end
+  end
+
+  return (; occ_a = no_a0 - length(SP['o']), occ_b = no_b0 - length(SP['O']),
+            virt_a = nv_a0 - length(SP['v']), virt_b = nv_b0 - length(SP['V']))
 end
 
 """

@@ -41,7 +41,34 @@ This also means the macro argument can be omitted entirely when the centers are 
 - `region.virtual = :support_opao`: keep the legacy support-atom OPAO construction directly.
 - `region.atom_charge_thr`: threshold used to add atoms to the support used for fragment virtual construction. In the default `:complement` mode this uses the accumulated fragment charge over all selected occupied IBOs.
 
-The fragment occupied orbitals are always tagged as `Inactive`. Frozen occupied orbitals are tagged as `Core`. Fragment virtuals are tagged as `Virtual`. All complements are tagged as `Deleted`.
+The fragment occupied orbitals are always tagged as `Inactive` and are placed at the Fermi
+level (just below the virtual space). The frozen core *and* the non-selected environment
+occupied orbitals are tagged as `Core`, forming a contiguous block below the fragment.
+Fragment virtuals are tagged as `Virtual`; the remaining (non-selected) virtuals are tagged
+as `Deleted`.
+
+## Downstream usage
+
+With the default `wf.core = :auto` and `wf.freeze_nvirt = -1`, a subsequent correlated
+calculation (`@dfmp2`, `@dfcc`, `@cc`, `@fci`, …) reads these classes from the dump and
+automatically restricts the active space to the region: `Core` orbitals are frozen and
+`Deleted` virtuals are dropped, so only the `Inactive`/`Virtual` fragment is correlated.
+
+```julia
+@dfhf
+@region [:C1, :C2, :C3, :C4]   # writes the region dump back to wf.dump
+@dfmp2                          # correlates only the region; environment is frozen as core
+```
+
+The user can override the dump's prescription at any time:
+
+- `@set wf core=:none` (or any explicit `:none`/`:small`/`:large`) or `@set wf freeze_nocc=N`
+  selects the frozen core manually instead of using the dump's `Core` orbitals;
+- `@set wf freeze_nvirt=N` freezes exactly `N` highest virtuals instead of dropping the dump's
+  `Deleted` virtuals.
+
+For an ordinary (non-region) dump, `wf.core = :auto` reproduces the standard `:large`
+frozen-core behavior, since such dumps tag only the chemical core as `Core`.
 
 ## Pi-space modes
 

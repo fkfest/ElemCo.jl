@@ -7,7 +7,9 @@ construction on top of the orbital-localization primitives from
 """
 module OrbRegion
 using LinearAlgebra
+using Printf
 using ..ElemCo.Constants: BOHR2ANGSTROM
+using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.MSystems
 using ..ElemCo.BasisSets
@@ -829,7 +831,10 @@ function _build_region_spin(cMO_full::AbstractMatrix{T}, energies::Vector{Float6
   fragment_occ = _select_region_occupied(charges, inclusive_centers, exclusive_centers, occ_charge_thr)
   isempty(fragment_occ) && error("No $(spin_label)occupied fragment orbitals selected; lower region.occ_charge_thr or adjust the requested region centers.")
 
-  occ_perm = vcat(fragment_occ, _difference_preserve_order(collect(1:size(R_occ, 2)), fragment_occ))
+  # Keep the selected fragment orbitals first while collecting the virtual-space
+  # support atoms (the charge-based helpers expect the fragment block in columns 1:nfrag_occ).
+  rest_occ = _difference_preserve_order(collect(1:size(R_occ, 2)), fragment_occ)
+  occ_perm = vcat(fragment_occ, rest_occ)
   R_occ = R_occ[:, occ_perm]
   charges = charges[:, occ_perm]
   nfrag_occ = length(fragment_occ)
@@ -842,6 +847,13 @@ function _build_region_spin(cMO_full::AbstractMatrix{T}, energies::Vector{Float6
   else
     error("Unknown region.virtual = $virtual_mode. Valid modes are :complement and :support_opao.")
   end
+
+  # Now move the fragment occupied orbitals to the TOP of the occupied block (just below
+  # the Fermi level); the environment orbitals below them form a contiguous block that is
+  # frozen as core in subsequent correlated calculations. charges columns follow along.
+  occ_to_top = vcat(collect(nfrag_occ+1:size(R_occ, 2)), collect(1:nfrag_occ))
+  R_occ = R_occ[:, occ_to_top]
+  charges = charges[:, occ_to_top]
 
   cMO_region = copy(cMO_full)
   cMO_region[:, valence_occ_range] = cMO_occ * R_occ
@@ -869,7 +881,7 @@ function _build_region_spin(cMO_full::AbstractMatrix{T}, energies::Vector{Float6
 
   if pseudo
     isnothing(F_AO) && error("Missing Fock matrix for region pseudo-canonicalization.")
-    fragment_occ_range = collect(valence_occ_range[1:nfrag_occ])
+    fragment_occ_range = collect(valence_occ_range[end-nfrag_occ+1:end])
     _pseudocanonicalize_block!(cMO_region, energies, F_AO, fragment_occ_range)
     if nfrag_virt > 0
       fragment_virt_range = collect(virt_range[1:nfrag_virt])
@@ -879,12 +891,17 @@ function _build_region_spin(cMO_full::AbstractMatrix{T}, energies::Vector{Float6
 
   classes = fill("Deleted", size(cMO_full, 2))
   classes[core_range] .= "Core"
-  classes[valence_occ_range[1:nfrag_occ]] .= "Inactive"
+  nocc = length(valence_occ_range)
+  # Environment (non-selected) occupied orbitals sit below the region and are frozen
+  # as core; the selected fragment orbitals are the active (Inactive) occupied block.
+  classes[valence_occ_range[1:nocc-nfrag_occ]] .= "Core"
+  classes[valence_occ_range[nocc-nfrag_occ+1:nocc]] .= "Inactive"
   if nfrag_virt > 0
     classes[virt_range[1:nfrag_virt]] .= "Virtual"
   end
 
-  return cMO_region, energies, classes, nfrag_occ, nfrag_virt
+  region_info = (charges=charges, support_atoms=support_atoms, scores=Float64[])
+  return cMO_region, energies, classes, nfrag_occ, nfrag_virt, region_info
 end
 
 """
@@ -911,7 +928,12 @@ function _build_region_spin_pi(cMO_full::AbstractMatrix{T}, energies::Vector{Flo
   cMO_occ = cMO_full[:, valence_occ_range]
   requested_occ = clamp(requested_occ, 0, length(valence_occ_range))
   requested_occ > 0 || error("No $(spin_label)occupied π orbitals requested for the chosen centers.")
-  R_occ, _ = _pi_projection_rotation(cMO_occ, PZ_AO, S)
+  R_occ, region_scores = _pi_projection_rotation(cMO_occ, PZ_AO, S)
+  # Move the selected (highest π-character) occupied orbitals to the top of the
+  # occupied block (just below the Fermi level); environment orbitals go below them.
+  occ_to_top = vcat(collect(requested_occ+1:length(valence_occ_range)), collect(1:requested_occ))
+  R_occ = R_occ[:, occ_to_top]
+  isempty(region_scores) || (region_scores = region_scores[occ_to_top])
 
   cMO_region = copy(cMO_full)
   cMO_region[:, valence_occ_range] = cMO_occ * R_occ
@@ -947,7 +969,7 @@ function _build_region_spin_pi(cMO_full::AbstractMatrix{T}, energies::Vector{Flo
 
   if pseudo
     isnothing(F_AO) && error("Missing Fock matrix for region pseudo-canonicalization.")
-    fragment_occ_range = collect(valence_occ_range[1:nfrag_occ])
+    fragment_occ_range = collect(valence_occ_range[end-nfrag_occ+1:end])
     _pseudocanonicalize_block!(cMO_region, energies, F_AO, fragment_occ_range)
     if nfrag_virt > 0
       fragment_virt_range = collect(virt_range[1:nfrag_virt])
@@ -957,12 +979,87 @@ function _build_region_spin_pi(cMO_full::AbstractMatrix{T}, energies::Vector{Flo
 
   classes = fill("Deleted", size(cMO_full, 2))
   classes[core_range] .= "Core"
-  classes[valence_occ_range[1:nfrag_occ]] .= "Inactive"
+  nocc = length(valence_occ_range)
+  # Environment (non-selected) occupied orbitals sit below the region and are frozen
+  # as core; the selected fragment orbitals are the active (Inactive) occupied block.
+  classes[valence_occ_range[1:nocc-nfrag_occ]] .= "Core"
+  classes[valence_occ_range[nocc-nfrag_occ+1:nocc]] .= "Inactive"
   if nfrag_virt > 0
     classes[virt_range[1:nfrag_virt]] .= "Virtual"
   end
 
-  return cMO_region, energies, classes, nfrag_occ, nfrag_virt
+  region_info = (charges=zeros(Float64, 0, 0), support_atoms=selected_centers, scores=region_scores)
+  return cMO_region, energies, classes, nfrag_occ, nfrag_virt, region_info
+end
+
+"""
+    _dominant_charges_str(col, label_of; topn=3, thr=0.05)
+
+  Format the largest atomic IAO partial charges of one occupied orbital as a compact
+  `label:charge` list, keeping at most `topn` atoms with charge at least `thr`.
+"""
+function _dominant_charges_str(col, label_of; topn::Int=3, thr::Float64=0.05)
+  isempty(col) && return "—"
+  parts = String[]
+  for a in sortperm(collect(col); rev=true)
+    (length(parts) >= topn || col[a] < thr) && break
+    push!(parts, @sprintf("%s:%.2f", label_of(a), col[a]))
+  end
+  return isempty(parts) ? "—" : join(parts, "  ")
+end
+
+"""
+    _print_region_orbitals(space, energies, occupations, nfrag_occ, nfrag_virt, info,
+                           virtual_mode, pi_mode, pseudo, real_atom_labels; spin_label="")
+
+  Print a per-spin summary of the constructed region: the selected occupied orbitals with
+  their energies, occupations and dominant IAO partial charges (plus the π-projection score
+  in π modes), the region virtual orbitals, the virtual-space support/PAO centers, and a
+  note when the fragment blocks were pseudo-canonicalized.
+"""
+function _print_region_orbitals(space, energies, occupations, nfrag_occ, nfrag_virt, info,
+                                virtual_mode, pi_mode, pseudo, real_atom_labels; spin_label::String="")
+  nfrag_occ > 0 || return nothing
+  occ_global = space.occ[end-nfrag_occ+1:end]
+  has_scores = !isempty(info.scores)
+  has_charges = size(info.charges, 1) > 0 && size(info.charges, 2) >= nfrag_occ
+  getocc(i) = (i >= 1 && i <= length(occupations)) ? occupations[i] : 0.0
+  label_of(a) = (a >= 1 && a <= length(real_atom_labels)) ? real_atom_labels[a] : "atom$a"
+
+  println()
+  println("  ", spin_label, "region occupied orbitals ($nfrag_occ):")
+  header = has_scores ? "    orbital       energy    occ.   π-score   dominant IAO charges" :
+                        "    orbital       energy    occ.   dominant IAO charges"
+  println(header)
+  println("    ", repeat("─", length(header) - 4))
+  for k in 1:nfrag_occ
+    iorb = occ_global[k]
+    chg = has_charges ? _dominant_charges_str(view(info.charges, :, size(info.charges, 2) - nfrag_occ + k), label_of) : "—"
+    if has_scores
+      sc = info.scores[length(info.scores) - nfrag_occ + k]
+      @printf("    %5i  %12.6f  %5.2f  %8.4f   %s\n", iorb, energies[iorb], getocc(iorb), sc, chg)
+    else
+      @printf("    %5i  %12.6f  %5.2f   %s\n", iorb, energies[iorb], getocc(iorb), chg)
+    end
+  end
+
+  if nfrag_virt > 0
+    vmode = pi_mode == :both ? "π" : (pi_mode != :none ? "support-OPAO" : String(virtual_mode))
+    println()
+    println("  ", spin_label, "region virtual orbitals ($nfrag_virt, $vmode):")
+    println("    orbital       energy")
+    println("    ", repeat("─", 22))
+    for iorb in space.virt[1:nfrag_virt]
+      @printf("    %5i  %12.6f\n", iorb, energies[iorb])
+    end
+  end
+
+  if !isempty(info.support_atoms)
+    println()
+    println("  ", spin_label, "virtual-space support / PAO centers: ", join(label_of.(info.support_atoms), ", "))
+  end
+  pseudo && println("  ", spin_label, "fragment occupied/virtual blocks were pseudo-canonicalized")
+  return nothing
 end
 
 """
@@ -974,8 +1071,13 @@ The occupied orbitals are localized with the IBO criterion, selected according t
 `EC.options.region`, and written with explicit TREXIO classes:
 - fragment occupied orbitals → `Inactive`
 - fragment virtual orbitals → `Virtual`
-- frozen occupied orbitals → `Core`
-- all complements → `Deleted`
+- frozen occupied orbitals and the non-selected environment occupied orbitals → `Core`
+- all remaining complements → `Deleted`
+
+The fragment (`Inactive`/`Virtual`) orbitals are placed at the Fermi level, so that the
+`Core` block sits contiguously below them and the `Deleted` virtuals above them. With the
+default `wf.core = :auto` (and `wf.freeze_nvirt = -1`), a subsequent correlated calculation
+honors these classes automatically (see [`freeze_orbitals!`](@ref)).
 
 For unrestricted references, alpha and beta spaces are treated independently.
 """
@@ -1043,12 +1145,15 @@ function region_orbitals(EC::ECInfo, centers)
     end
   end
 
+  # labels of the non-dummy atoms, in the numbering used by the IAO partial charges
+  real_atom_labels = String[atomic_centre_label(atom) for atom in EC.system if !is_dummy(atom)]
+
   if restricted
     cMO_alpha = cMO[1]
     energies_a = copy(energies[1])
     if pi_mode == :none
       C_iao, iao_atoms, natom = compute_iaos(EC, cMO_alpha[:, alpha_space.all_occ])
-      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a = _build_region_spin(
+      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a, info_a = _build_region_spin(
         cMO_alpha, energies_a, alpha_space, S, C_iao, iao_atoms, natom, ao_atoms,
         selection.inclusive_local, selection.exclusive_local;
         virtual_mode=virtual_mode,
@@ -1059,7 +1164,7 @@ function region_orbitals(EC::ECInfo, centers)
     else
       C_iao_raw = _compute_raw_iaos(EC, cMO_alpha[:, alpha_space.all_occ])
       PZ_AO = _build_pi_target_orbitals(EC, C_iao_raw, selected_global)
-      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a = _build_region_spin_pi(
+      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a, info_a = _build_region_spin_pi(
         cMO_alpha, energies_a, alpha_space, S, PZ_AO, ao_atoms, selected_local;
         pi_mode=pi_mode, requested_occ=requested_occ_a, requested_virt=requested_virt_a,
         pseudo=pseudo, F_AO=F_AO_a)
@@ -1072,6 +1177,10 @@ function region_orbitals(EC::ECInfo, centers)
       end
       pseudo && pi_mode == :occupied && (region_type *= "-Pseudo")
     end
+    println()
+    println("Region orbital construction: ", region_type)
+    _print_region_orbitals(alpha_space, energies_region_a, occupations[1], nfrag_occ_a, nfrag_virt_a,
+      info_a, virtual_mode, pi_mode, pseudo, real_atom_labels)
     dump_orbitals(EC, SpinMatrix(cMO_region_a);
       basis=basis_ao,
       type=region_type,
@@ -1079,7 +1188,9 @@ function region_orbitals(EC::ECInfo, centers)
       occupations=occupations,
       classes=(classa, String[]))
 
-    println("  Region dump written: $(nfrag_occ_a) occupied fragment orbital(s), $(nfrag_virt_a) virtual fragment orbital(s)")
+    println()
+    println("  Region dump written: $(nfrag_occ_a) active occupied / $(nfrag_virt_a) active virtual orbital(s); ",
+            "$(length(alpha_space.occ) - nfrag_occ_a) occupied frozen as core")
   else
     cMO_alpha = cMO[1]
     cMO_beta = cMO[2]
@@ -1089,13 +1200,13 @@ function region_orbitals(EC::ECInfo, centers)
     if pi_mode == :none
       C_iao_a, iao_atoms_a, natom_a = compute_iaos(EC, cMO_alpha[:, alpha_space.all_occ])
       C_iao_b, iao_atoms_b, natom_b = compute_iaos(EC, cMO_beta[:, beta_space.all_occ])
-      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a = _build_region_spin(
+      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a, info_a = _build_region_spin(
         cMO_alpha, energies_a, alpha_space, S, C_iao_a, iao_atoms_a, natom_a, ao_atoms,
         selection.inclusive_local, selection.exclusive_local;
         virtual_mode=virtual_mode,
         occ_charge_thr=occ_charge_thr, atom_charge_thr=atom_charge_thr,
         exponent=exponent, spin_label="alpha ", pseudo=pseudo, F_AO=F_AO_a)
-      cMO_region_b, energies_region_b, classb, nfrag_occ_b, nfrag_virt_b = _build_region_spin(
+      cMO_region_b, energies_region_b, classb, nfrag_occ_b, nfrag_virt_b, info_b = _build_region_spin(
         cMO_beta, energies_b, beta_space, S, C_iao_b, iao_atoms_b, natom_b, ao_atoms,
         selection.inclusive_local, selection.exclusive_local;
         virtual_mode=virtual_mode,
@@ -1108,11 +1219,11 @@ function region_orbitals(EC::ECInfo, centers)
       C_iao_raw_b = _compute_raw_iaos(EC, cMO_beta[:, beta_space.all_occ])
       PZ_AO_a = _build_pi_target_orbitals(EC, C_iao_raw_a, selected_global)
       PZ_AO_b = _build_pi_target_orbitals(EC, C_iao_raw_b, selected_global)
-      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a = _build_region_spin_pi(
+      cMO_region_a, energies_region_a, classa, nfrag_occ_a, nfrag_virt_a, info_a = _build_region_spin_pi(
         cMO_alpha, energies_a, alpha_space, S, PZ_AO_a, ao_atoms, selected_local;
         pi_mode=pi_mode, requested_occ=requested_occ_a, requested_virt=requested_virt_a,
         spin_label="alpha ", pseudo=pseudo, F_AO=F_AO_a)
-      cMO_region_b, energies_region_b, classb, nfrag_occ_b, nfrag_virt_b = _build_region_spin_pi(
+      cMO_region_b, energies_region_b, classb, nfrag_occ_b, nfrag_virt_b, info_b = _build_region_spin_pi(
         cMO_beta, energies_b, beta_space, S, PZ_AO_b, ao_atoms, selected_local;
         pi_mode=pi_mode, requested_occ=requested_occ_b, requested_virt=requested_virt_b,
         spin_label="beta ", pseudo=pseudo, F_AO=F_AO_b)
@@ -1125,6 +1236,12 @@ function region_orbitals(EC::ECInfo, centers)
       end
       pseudo && pi_mode == :occupied && (region_type *= "-Pseudo")
     end
+    println()
+    println("Region orbital construction: ", region_type)
+    _print_region_orbitals(alpha_space, energies_region_a, occupations[1], nfrag_occ_a, nfrag_virt_a,
+      info_a, virtual_mode, pi_mode, pseudo, real_atom_labels; spin_label="α ")
+    _print_region_orbitals(beta_space, energies_region_b, occupations[2], nfrag_occ_b, nfrag_virt_b,
+      info_b, virtual_mode, pi_mode, pseudo, real_atom_labels; spin_label="β ")
     dump_orbitals(EC, SpinMatrix(cMO_region_a, cMO_region_b);
       basis=basis_ao,
       type=region_type,
@@ -1132,7 +1249,9 @@ function region_orbitals(EC::ECInfo, centers)
       occupations=occupations,
       classes=(classa, classb))
 
-    println("  Region dump written: α $(nfrag_occ_a) occ / $(nfrag_virt_a) virt, β $(nfrag_occ_b) occ / $(nfrag_virt_b) virt")
+    println()
+    println("  Region dump written: α $(nfrag_occ_a) occ / $(nfrag_virt_a) virt, β $(nfrag_occ_b) occ / $(nfrag_virt_b) virt; ",
+            "frozen as core: α $(length(alpha_space.occ) - nfrag_occ_a), β $(length(beta_space.occ) - nfrag_occ_b)")
   end
 
   return nothing
