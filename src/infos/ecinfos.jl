@@ -242,9 +242,13 @@ function setup_space_system!(EC::ECInfo; verbose=true)
 end
 
 """
-    setup_space!(EC::ECInfo, norb, nelec, ms2, orbsym; verbose=true)
+    setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true, orig_orbs=Int[])
 
-  Setup EC.space from `norb`, `nelec`, `ms2`, `orbsym` or `occa`/`occb`.
+  Setup EC.space from `norb`, `nelec`, `npos`, `ms2`, `orbsym` or `occa`/`occb`.
+
+  If `orig_orbs` is non-empty (a reduced dump), the `occa`/`occb`/`active` orbital lists are
+  interpreted in the full MO space and translated to the active space (see
+  [`translate_orbs_to_active`](@ref)).
 """
 function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true, orig_orbs=Int[])
   occa = EC.options.wf.occa

@@ -445,9 +445,12 @@ function dfdump(EC::ECInfo)
   ms2 = EC.options.wf.ms2
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
   fdump = FDump{ec_eltype(EC),3}(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO), npos=npos)
-  # record the full-space orbital index of each active orbital (frozen core lowest, deleted virtuals
-  # highest), so user orbital lists given in the full MO space can be translated to this active dump
-  fdump.orig_orbs = collect((ncore_orbs+1):(full_norb-nfrozvirt))
+  # if orbitals were frozen/deleted, record the full-space orbital index of each active orbital
+  # (frozen core lowest, deleted virtuals highest) so user orbital lists given in the full MO space
+  # can be translated to this active dump; leave empty for a non-reduced (identity) dump
+  if ncore_orbs + nfrozvirt > 0
+    fdump.orig_orbs = collect((ncore_orbs+1):(full_norb-nfrozvirt))
+  end
   if fdump.uhf
     generate_integrals(EC, fdump, cMO[:,1:end-nfrozvirt], space_save)
   else
