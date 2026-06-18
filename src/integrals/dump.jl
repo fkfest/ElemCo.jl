@@ -142,6 +142,12 @@ end
   epdump::Bool = false
   """`⟨false⟩` 3-index DF integrals are stored in scratch (`mmL`) and need contraction to 4-index. """
   df3idx::Bool = false
+  """ for ElemCo-generated reduced (frozen-core/deleted-virtual) dumps: the contiguous full-space
+      (original) orbital range of the active orbitals (frozen core below it, deleted virtuals above
+      it), i.e. active orbital `k` corresponds to full orbital `orig_orbs[k]`. Empty (`1:0`) for
+      externally-read or non-reduced dumps. Used to translate user-supplied orbital lists
+      (`occa`/`occb`/`active`), which always refer to the full MO space, to the active space. """
+  orig_orbs::UnitRange{Int} = 1:0
 end
 
 const TFDump{T<:Number} = FDump{T,3}
@@ -168,6 +174,7 @@ function FDump{T2,N}(fd::FDump{T1,N}) where {T1<:Number,T2<:Number,N}
     modified = fd.modified,
     uhf = fd.uhf,
     df3idx = fd.df3idx,
+    orig_orbs = fd.orig_orbs,
   )
 end
 
