@@ -864,15 +864,28 @@ end
 """
     translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::Vector{Int})
 
-  Translate full-MO-space orbital indices `orbs` to the active-space numbering defined by
-  `orig_orbs`, where active orbital `k` corresponds to full orbital `orig_orbs[k]`. Full orbitals
-  that are not in `orig_orbs` (i.e. frozen) are dropped. If `orig_orbs` is empty (external or
-  non-reduced dump), `orbs` is returned unchanged (indices are taken as-is).
+  Translate full-MO-space orbital indices `orbs` to the active-space numbering of a reduced dump.
+  The active orbitals form the contiguous full-space range `orig_orbs` (`= lo:hi`, with the frozen
+  core below `lo` and any deleted/frozen virtuals above `hi`); active orbital `k` is full orbital
+  `lo + k - 1`. Frozen-core orbitals (`1:lo-1`) are occupied in the reference but not part of the
+  active space and are dropped; any other orbital outside `lo:hi` (a frozen virtual or an
+  out-of-range index) raises an error, since these lists are usually user input. If `orig_orbs` is
+  empty (external or non-reduced dump), `orbs` is returned unchanged (indices are taken as-is).
 """
 function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::Vector{Int})
   isempty(orig_orbs) && return orbs
-  pos = Dict(o => k for (k, o) in enumerate(orig_orbs))
-  return sort!([pos[o] for o in orbs if haskey(pos, o)])
+  lo, hi = first(orig_orbs), last(orig_orbs)
+  active = Int[]
+  for o in orbs
+    if lo <= o <= hi
+      push!(active, o - lo + 1)
+    elseif 1 <= o < lo
+      continue  # frozen core: occupied in the reference but not part of the active space
+    else
+      error("Orbital $o is not in the active space (full-space active orbital range is $lo:$hi).")
+    end
+  end
+  return sort!(active)
 end
 
 """
