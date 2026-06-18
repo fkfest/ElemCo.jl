@@ -8,10 +8,14 @@ const TREXIO_BASIS_EXT_FIELDS = [
 ]
 
 ## One-electron AO integral extensions (ao_1e_int group) - non-standard, violator
+## For dumps that store orbital rotations (no AO basis) the Fock is in the original MO basis.
 const TREXIO_AO_1E_INT_EXT_FIELDS = [
-    TrexioField("ao_1e_int", "fock", Float64, ["ao.num", "ao.num"], "AO-basis Fock matrix (restricted/closed-shell)", violator=true),
-    TrexioField("ao_1e_int", "fock_up", Float64, ["ao.num", "ao.num"], "↑-spin AO-basis Fock matrix (unrestricted)", violator=true),
-    TrexioField("ao_1e_int", "fock_dn", Float64, ["ao.num", "ao.num"], "↓-spin AO-basis Fock matrix (unrestricted)", violator=true),
+    TrexioField("ao_1e_int", "fock", Float64, ["ao.num", "ao.num"], "Fock matrix (restricted/closed-shell)", violator=true),
+    TrexioField("ao_1e_int", "fock_up", Float64, ["ao.num", "ao.num"], "↑-spin Fock matrix (unrestricted)", violator=true),
+    TrexioField("ao_1e_int", "fock_dn", Float64, ["ao.num", "ao.num"], "↓-spin Fock matrix (unrestricted)", violator=true),
+    TrexioField("ao_1e_int", "fock_im", Float64, ["ao.num", "ao.num"], "Fock matrix (imaginary part)", violator=true),
+    TrexioField("ao_1e_int", "fock_up_im", Float64, ["ao.num", "ao.num"], "↑-spin Fock matrix (imaginary part)", violator=true),
+    TrexioField("ao_1e_int", "fock_dn_im", Float64, ["ao.num", "ao.num"], "↓-spin Fock matrix (imaginary part)", violator=true),
 ]
 
 ## 4.2a Positron orbitals (po group) - non-standard, violator

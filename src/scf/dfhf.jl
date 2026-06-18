@@ -137,7 +137,8 @@ function dfhf(EC::ECInfo{T}) where T
   draw_endline()
   delete_temporary_files!(EC)
   if use_df3idx
-    dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
+    # store the MO-basis Fock (same basis the rotation is relative to) for post-processing
+    dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, fock=SpinMatrix(fock))
   else
     nredund = size(Xredundant, 2)
     classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
@@ -402,7 +403,8 @@ function dfuhf(EC::ECInfo{T}) where T
   draw_endline()
   delete_temporary_files!(EC)
   if use_df3idx
-    dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
+    # store the MO-basis Fock (same basis the rotation is relative to) for post-processing
+    dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), fock=fock)
   else
     nredund = size(Xredundant, 2)
     classes = nredund > 0 ? (orbital_classes_with_deleted(SP['o'], norb, nredund),
