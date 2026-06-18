@@ -691,6 +691,8 @@ using ElemCo
 using ElemCo.TrexioInterface
 using LinearAlgebra
 
+E_MP2 = -76.045624004869
+
 geometry = "bohr
      O      0.000000000    0.000000000   -0.130186067
      H1     0.000000000    1.489124508    1.033245507
@@ -702,15 +704,15 @@ basis = Dict("ao" => "cc-pVDZ",
 @ECinit
 @dfhf
 
-# Apply the driver's freeze logic (freeze_orbitals! + the freeze_nvirt count) to the current
-# dump and return the resulting (n_active_occ, n_active_virt); restore the space + options.
+# Apply the driver's freeze logic (freeze_orbitals! handles core, redundant, and the
+# freeze_nvirt count) to the current dump and return the resulting (n_active_occ, n_active_virt);
+# restore the space + options.
 function active_after_freeze(EC; core=:auto, freeze_nocc=-1, freeze_nvirt=-1)
   sp = ElemCo.save_space(EC)
   c0, fn0, fv0 = EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt
   EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt = core, freeze_nocc, freeze_nvirt
   ElemCo.ECInfos.setup_space_system!(EC; verbose=false)
   ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
-  ElemCo.freeze_nvirt!(EC, max(freeze_nvirt, 0); verbose=false)   # mimic driver (nredund=0 here)
   res = (length(EC.space['o']), length(EC.space['v']))
   ElemCo.restore_space!(EC, sp)
   EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt = c0, fn0, fv0
@@ -745,5 +747,49 @@ n_virt = count(==("Virtual"), classa)
 
 # end-to-end: default :auto restricts @dfmp2 to the region
 energies = @dfmp2
-@test isfinite(energies["MP2"])
+@test abs(energies["MP2"] - E_MP2) < 1e-8
+end
+
+@testitem "region redundant freezing by index" tags=[:df, :quick] begin
+using ElemCo
+using ElemCo.TrexioInterface
+using LinearAlgebra
+
+geometry = "bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao" => "cc-pVDZ", "jkfit" => "cc-pvtz-jkfit", "mpfit" => "cc-pvdz-mpfit")
+
+@ECinit
+@dfhf
+
+cMO, _, basis_ao = ElemCo.Wavefunctions.fetch_orbitals(EC)
+en = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
+occ = ElemCo.Wavefunctions.fetch_orbital_occupations(EC)
+norb = size(cMO[1], 2)
+
+# Craft a region-like dump in which two redundant (sentinel-energy) "Deleted" orbitals sit at
+# LOW virtual indices (6,7) while the active "Virtual" orbitals occupy the HIGH indices. A
+# top-index freeze (the old freeze_nvirt!(nredund) approach) would wrongly delete the
+# high-index region virtuals; freeze_orbitals! must remove the redundant orbitals by their
+# actual indices instead.
+classes = fill("Virtual", norb)
+classes[1] = "Core"
+classes[2:5] .= "Inactive"
+classes[6:7] .= "Deleted"
+en_mod = copy(en[1])
+en_mod[6:7] .= ElemCo.OrbTools.REDUNDANT_ORBITAL_ENERGY
+ElemCo.Wavefunctions.dump_orbitals(EC, ElemCo.QMTensors.SpinMatrix(cMO[1]);
+  basis=basis_ao, type="Region-test",
+  energies=(en_mod, Float64[]), occupations=occ, classes=(classes, String[]))
+
+sp = ElemCo.save_space(EC)
+ElemCo.ECInfos.setup_space_system!(EC; verbose=false)
+ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
+@test EC.space['o'] == [2, 3, 4, 5]                  # "Core" (1) frozen, region occ kept
+@test 6 ∉ EC.space['v'] && 7 ∉ EC.space['v']         # redundant removed by their actual indices
+@test issubset([8, norb], EC.space['v'])             # high-index region virtuals NOT frozen by mistake
+@test length(EC.space['v']) == norb - 7              # 1 core + 4 inactive + 2 redundant removed
+ElemCo.restore_space!(EC, sp)
 end

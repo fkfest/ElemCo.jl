@@ -27,8 +27,7 @@
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
   """`⟨:auto⟩` core type for frozen-core approximation:
-  - `:auto` freeze the orbitals tagged `Core` in the dump (e.g. from `@region`) if present,
-    otherwise fall back to `:large`,
+  - `:auto` freeze the orbitals tagged `Core` in the wf dump if present, otherwise fall back to `:large`,
   - `:none` no frozen-core approximation,
   - `:small` semi-core orbitals correlated,
   - `:large` semi-core orbitals frozen.
@@ -38,7 +37,7 @@
   """`⟨-1⟩` number of occupied (core) orbitals to freeze (overwrites core). """
   freeze_nocc::Int = -1
   """`⟨-1⟩` number of virtual (highest) orbitals to freeze. `-1` (auto) drops the orbitals
-  tagged `Deleted` in the dump (e.g. from `@region`); a value `≥ 0` overrides this and freezes
+  tagged `Deleted` in the wf dump (e.g. from `@region`); a value `≥ 0` overrides this and freezes
   exactly that many highest virtuals. """
   freeze_nvirt::Int = -1
   """`⟨0⟩` number of virtual (highest) positron orbitals to freeze. """

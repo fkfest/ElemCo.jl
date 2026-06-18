@@ -31,6 +31,12 @@ When `@region [...]` is called with an explicit center list, those centers are m
 
 This also means the macro argument can be omitted entirely when the centers are already configured through `region.inclusive_centers` and `region.exclusive_centers`.
 
+```julia
+@region ["C1"] begin
+  @set region mode=:exclusive inclusive_centers=[2] exclusive_centers=[1]
+end
+```
+
 ## Selection model
 
 `@region` localizes the occupied space with IBOs and then selects fragment orbitals from atom-resolved IAO charges.
@@ -95,10 +101,6 @@ Example: keep only the frontier HOMO/LUMO pair from a four-center π system.
 ```julia
 @region [:C1, :C2, :C3, :C4] begin
   @set region pi=:both pi_occupied=1 pi_virtual=1
-end
-
-@region begin
-  @set region mode=:exclusive inclusive_centers=[2] exclusive_centers=[1]
 end
 ```
 
