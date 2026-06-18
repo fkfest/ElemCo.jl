@@ -226,6 +226,7 @@ function bohf(EC::ECInfo{T}) where T
   hsmall = integ1(EC.fd,:α)
   EHF = 0.0
   previousEHF = 0.0
+  local fock
   if pseudo
     println("   Energy       Res         Time")
     maxit = 1
@@ -284,7 +285,8 @@ function bohf(EC::ECInfo{T}) where T
   println("BO-HF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  dump_rotations(EC, cMOr; type="BO-HF", energies=ϵ, biorthogonal=true)
+  # store the Fock in the original MO basis (the basis the rotation is relative to)
+  dump_rotations(EC, cMOr; type="BO-HF", energies=ϵ, biorthogonal=true, fock=SpinMatrix(fock))
   return OutDict("HF"=>(EHF, "closed-shell BO-HF energy"), "E"=>(EHF, "closed-shell BO-HF energy"))
 end
 
@@ -317,6 +319,7 @@ function bouhf(EC::ECInfo{T}) where T
   Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
   EHF = 0.0
   previousEHF = 0.0
+  local fock
   if pseudo
     println("   Energy       Res         Time")
     maxit = 1
@@ -380,7 +383,8 @@ function bouhf(EC::ECInfo{T}) where T
   println("BO-UHF energy: ", EHF)
   flush(stdout)
   delete_temporary_files!(EC)
-  dump_rotations(EC, cMOr; type="BO-UHF", energies=ϵ, biorthogonal=true)
+  # store the Fock in the original MO basis (the basis the rotation is relative to)
+  dump_rotations(EC, cMOr; type="BO-UHF", energies=ϵ, biorthogonal=true, fock=fock)
   return OutDict("UHF"=>(EHF, "BO-UHF energy"), "HF"=>(EHF, "BO-UHF energy"), "E"=>(EHF, "BO-UHF energy"))
 end
 

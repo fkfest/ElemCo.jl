@@ -31,6 +31,7 @@ export write_trexio_system, read_trexio_system
 export write_trexio_basis, read_trexio_basis
 export write_trexio_orbitals, read_trexio_orbitals
 export write_trexio_rotations, read_trexio_rotations
+export write_trexio_ao_fock, read_trexio_ao_fock, has_trexio_ao_fock
 export write_trexio_1rdm
 export read_trexio_orbital_classes, read_trexio_orbital_energies, read_trexio_orbital_occupations
 export write_trexio_amplitudes
@@ -423,6 +424,96 @@ function read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true, M
   end
   order = ao_order2internal(basis, order4l(basis))
   return _read_trexio_orbital_transformations(trexio, order, verbose, MO)
+end
+
+"""
+    write_trexio_ao_fock(trexio::TrexioFile, fock::SpinMatrix[, basis::BasisSet])
+
+  Write the Fock matrix to the TREXIO file (non-standard `ao_1e_int` field).
+
+  For a restricted (closed-shell) `fock` the single matrix is stored in `ao_1e_int_fock`; for an
+  unrestricted `fock` the alpha/beta matrices are stored in `ao_1e_int_fock_up`/`ao_1e_int_fock_dn`
+  (complex Focks additionally store the imaginary part in the corresponding `*_im` fields).
+
+  With a `basis`, the Fock is assumed to be in the internal (libcint) AO basis and is reordered to
+  the TREXIO AO order (matching the orbital coefficients). Without a `basis` (e.g. stored alongside
+  orbital rotations) the Fock is written as-is in its current MO basis (identity AO order).
+  `ao.num` must already be written.
+"""
+function write_trexio_ao_fock(trexio::TrexioFile, fock::SpinMatrix, basis::BasisSet)
+  write_trexio_ao_fock(trexio, fock, ao_order2internal(basis, order4l(basis), true))
+end
+function write_trexio_ao_fock(trexio::TrexioFile, fock::SpinMatrix)
+  write_trexio_ao_fock(trexio, fock, collect(1:size(fock[1], 1)))
+end
+function write_trexio_ao_fock(trexio::TrexioFile, fock::SpinMatrix, order::AbstractVector{<:Integer})
+  if is_restricted(fock)
+    _write_trexio_fock_block(trexio, fock[1], order,
+      trexio_write_ao_1e_int_fock, trexio_write_ao_1e_int_fock_im, "ao_1e_int_fock")
+  else
+    _write_trexio_fock_block(trexio, fock[1], order,
+      trexio_write_ao_1e_int_fock_up, trexio_write_ao_1e_int_fock_up_im, "ao_1e_int_fock_up")
+    _write_trexio_fock_block(trexio, fock[2], order,
+      trexio_write_ao_1e_int_fock_dn, trexio_write_ao_1e_int_fock_dn_im, "ao_1e_int_fock_dn")
+  end
+  return
+end
+function _write_trexio_fock_block(trexio::TrexioFile, F::AbstractMatrix, order, write_re, write_im, name)
+  trexio_check_write_status(write_re(trexio, Matrix{Float64}(real.(F))[order, order]), name)
+  if eltype(F) <: Complex
+    trexio_check_write_status(write_im(trexio, Matrix{Float64}(imag.(F))[order, order]), name * "_im")
+  end
+  return
+end
+
+"""
+    has_trexio_ao_fock(trexio::TrexioFile) -> Bool
+
+  Return `true` if the TREXIO file stores a Fock matrix (restricted or unrestricted).
+"""
+function has_trexio_ao_fock(trexio::TrexioFile)
+  return trexio_has_ao_1e_int_fock(trexio) ||
+         (trexio_has_ao_1e_int_fock_up(trexio) && trexio_has_ao_1e_int_fock_dn(trexio))
+end
+
+"""
+    read_trexio_ao_fock(trexio::TrexioFile[, basis::BasisSet]) -> Union{SpinMatrix,Nothing}
+
+  Read the Fock matrix from the TREXIO file. With a `basis`, reorder from the TREXIO AO order to the
+  internal (libcint) AO order; without a `basis` (rotation / MO-basis dumps) return it as stored.
+  Complex Focks are reconstructed from the `*_im` fields. Returns a restricted or unrestricted
+  `SpinMatrix`, or `nothing` if no Fock matrix is stored.
+"""
+function read_trexio_ao_fock(trexio::TrexioFile, basis::BasisSet)
+  read_trexio_ao_fock(trexio, ao_order2internal(basis, order4l(basis)))
+end
+read_trexio_ao_fock(trexio::TrexioFile) = read_trexio_ao_fock(trexio, nothing)
+function read_trexio_ao_fock(trexio::TrexioFile, order::Union{Nothing,AbstractVector{<:Integer}})
+  if trexio_has_ao_1e_int_fock(trexio)
+    Fa = _read_trexio_fock_block(trexio, order, trexio_read_ao_1e_int_fock,
+      trexio_has_ao_1e_int_fock_im, trexio_read_ao_1e_int_fock_im, "ao_1e_int_fock")
+    return SpinMatrix(Fa)
+  elseif trexio_has_ao_1e_int_fock_up(trexio) && trexio_has_ao_1e_int_fock_dn(trexio)
+    Fa = _read_trexio_fock_block(trexio, order, trexio_read_ao_1e_int_fock_up,
+      trexio_has_ao_1e_int_fock_up_im, trexio_read_ao_1e_int_fock_up_im, "ao_1e_int_fock_up")
+    Fb = _read_trexio_fock_block(trexio, order, trexio_read_ao_1e_int_fock_dn,
+      trexio_has_ao_1e_int_fock_dn_im, trexio_read_ao_1e_int_fock_dn_im, "ao_1e_int_fock_dn")
+    return SpinMatrix(Fa, Fb)
+  else
+    return nothing
+  end
+end
+function _read_trexio_fock_block(trexio::TrexioFile, order, read_re, has_im, read_im, name)
+  Fr, status = read_re(trexio)
+  trexio_check_read_status(status, name)
+  F = Fr
+  if has_im(trexio)
+    Fi, status_im = read_im(trexio)
+    trexio_check_read_status(status_im, name * "_im")
+    F = complex.(Fr, Fi)
+  end
+  ord = isnothing(order) ? (1:size(F, 1)) : order
+  return F[ord, ord]
 end
 
 """

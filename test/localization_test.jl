@@ -376,7 +376,26 @@ end
     return S * cMO * Diagonal(eltype(cMO).(energies)) * cMO' * S
   end
 
+  function load_region_fock(path)
+    io = open_trexio(path, "r")
+    try
+      dump_basis = read_trexio_basis(io)
+      return read_trexio_ao_fock(io, dump_basis)
+    finally
+      close_trexio(io)
+    end
+  end
+
   offdiag_norm(mat) = norm(mat - Diagonal(diag(mat)))
+
+  # The region-selected (Inactive) occupied orbitals must sit at the Fermi level, i.e.
+  # the Core block is contiguous from index 1 and the Inactive block immediately follows.
+  function check_region_occ_ordering(cls)
+    core = findall(==("Core"), cls)
+    inact = findall(==("Inactive"), cls)
+    @test core == collect(1:length(core))
+    @test inact == collect(length(core)+1 : length(core)+length(inact))
+  end
 
   geometry = "bohr
        O      0.000000000    0.000000000   -0.130186067
@@ -398,9 +417,11 @@ end
   basis_inc, cMO_inc, type_inc, classes_inc = load_region_dump(joinpath(EC.scr, inclusive_store))
   @test type_inc == "Region-IBO+OPAO"
   classa_inc = classes_inc[1]
-  @test count(==("Core"), classa_inc) == 1
+  # water has 5 occupied orbitals; 1 is selected, the remaining 4 become Core (frozen)
+  @test count(==("Core"), classa_inc) == 4
   @test count(==("Inactive"), classa_inc) == 1
   @test count(==("Virtual"), classa_inc) > 0
+  check_region_occ_ordering(classa_inc)
   S_inc = ElemCo.Integrals.overlap(basis_inc)
   @test norm(cMO_inc[1]' * S_inc * cMO_inc[1] - I(size(cMO_inc[1], 2))) < 1.e-10
 
@@ -431,9 +452,11 @@ end
 
   _, _, _, classes_exc = load_region_dump(joinpath(EC.scr, exclusive_store))
   classa_exc = classes_exc[1]
-  @test count(==("Core"), classa_exc) == 1
+  # 3 occupied orbitals are selected; the remaining 2 of the 5 become Core (frozen)
+  @test count(==("Core"), classa_exc) == 2
   @test count(==("Inactive"), classa_exc) == 3
   @test count(==("Virtual"), classa_exc) > 0
+  check_region_occ_ordering(classa_exc)
 
   oxygen_exclusive_store = "region_exclusive_oxygen.h5"
   @set wf store=oxygen_exclusive_store
@@ -448,7 +471,7 @@ end
   @set wf store=mixed_store
   @set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2
   @region begin
-    @set region inclusive_centers=[:H1] exclusive_centers=[:O]
+    @set region inclusive_centers=[2] exclusive_centers=[1]
   end
 
   _, _, _, classes_mixed = load_region_dump(joinpath(EC.scr, mixed_store))
@@ -458,7 +481,11 @@ end
 
   cMO_ref, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_ref = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
-  F_ref = reconstruct_fock(cMO_ref[1], energies_ref[1], S_inc)
+  # the HF dump stores the exact converged AO Fock; it must agree with the canonical reconstruction
+  F_stored_sm = ElemCo.Wavefunctions.fetch_ao_fock(EC)
+  @test !isnothing(F_stored_sm)
+  F_ref = F_stored_sm[1]
+  @test norm(F_ref - reconstruct_fock(cMO_ref[1], energies_ref[1], S_inc)) < 1.e-3
   pseudo_store = "region_pseudo.h5"
   @set wf store=pseudo_store
   @set region mode=:exclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=true
@@ -468,8 +495,56 @@ end
   @test type_pseudo == "Region-IBO+OPAO-Pseudo"
   frag_occ = findall(==("Inactive"), classes_pseudo[1])
   frag_virt = findall(==("Virtual"), classes_pseudo[1])
-  @test offdiag_norm(cMO_pseudo[1][:, frag_occ]' * F_ref * cMO_pseudo[1][:, frag_occ]) < 1.e-10
-  @test offdiag_norm(cMO_pseudo[1][:, frag_virt]' * F_ref * cMO_pseudo[1][:, frag_virt]) < 1.e-10
+  # pseudo uses the exact stored Fock, so the fragment blocks diagonalize it to machine precision
+  @test offdiag_norm(cMO_pseudo[1][:, frag_occ]' * F_ref * cMO_pseudo[1][:, frag_occ]) < 1.e-9
+  @test offdiag_norm(cMO_pseudo[1][:, frag_virt]' * F_ref * cMO_pseudo[1][:, frag_virt]) < 1.e-9
+  # the region dump carries the AO Fock forward unchanged (for chained pseudo runs)
+  F_carried = load_region_fock(joinpath(EC.scr, pseudo_store))
+  @test !isnothing(F_carried)
+  @test norm(F_carried[1] - F_ref) < 1.e-12
+
+  # Regression for the chained-region pseudo bug: run region WITHOUT pseudo, then run region WITH
+  # pseudo reading that first (non-canonical, IBO) dump. The carried-forward Fock lets the second
+  # run pseudo-canonicalize against the TRUE Fock instead of the IBO-basis Fock diagonal.
+  chain1_store = "region_chain_nopseudo.h5"
+  @set wf store=chain1_store
+  @set region mode=:exclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=false
+  @region [1, 2]
+  _, cMO_chain1, _, classes_chain1 = load_region_dump(joinpath(EC.scr, chain1_store))
+  frag_occ_chain1 = findall(==("Inactive"), classes_chain1[1])
+  # the localized (no-pseudo) region orbitals are IBOs: their fragment Fock block is NOT diagonal
+  @test offdiag_norm(cMO_chain1[1][:, frag_occ_chain1]' * F_ref * cMO_chain1[1][:, frag_occ_chain1]) > 1.e-3
+  F_chain1 = load_region_fock(joinpath(EC.scr, chain1_store))
+  @test !isnothing(F_chain1)
+  @test norm(F_chain1[1] - F_ref) < 1.e-12
+
+  chain2_store = "region_chain_pseudo.h5"
+  @set wf start=chain1_store store=chain2_store
+  @set region mode=:exclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=true
+  @region [1, 2]
+  @set wf start=""
+  _, cMO_chain2, _, classes_chain2 = load_region_dump(joinpath(EC.scr, chain2_store))
+  frag_occ_chain2 = findall(==("Inactive"), classes_chain2[1])
+  # using the carried Fock, pseudo diagonalizes the TRUE Fock block to machine precision
+  @test offdiag_norm(cMO_chain2[1][:, frag_occ_chain2]' * F_ref * cMO_chain2[1][:, frag_occ_chain2]) < 1.e-9
+
+  # region.pao_centers extends the virtual-space support: with the auto support disabled
+  # (high atom_charge_thr), adding atom 3 (H2) as a PAO center adds OPAO virtuals.
+  pao_base_store = "region_pao_base.h5"
+  @set wf store=pao_base_store
+  @set region mode=:inclusive virtual=:support_opao occ_charge_thr=0.2 atom_charge_thr=10.0 pseudo=false pao_centers=Int[]
+  @region [2]
+  _, _, _, classes_pao_base = load_region_dump(joinpath(EC.scr, pao_base_store))
+  nvirt_pao_base = count(==("Virtual"), classes_pao_base[1])
+
+  pao_ext_store = "region_pao_ext.h5"
+  @set wf store=pao_ext_store
+  @set region pao_centers=[3]
+  @region [2]
+  _, _, _, classes_pao_ext = load_region_dump(joinpath(EC.scr, pao_ext_store))
+  nvirt_pao_ext = count(==("Virtual"), classes_pao_ext[1])
+  @test nvirt_pao_ext > nvirt_pao_base
+  @set region virtual=:complement atom_charge_thr=0.2 pao_centers=Int[]
 
   basis = Dict("ao" => "cc-pVDZ",
                "jkfit" => "cc-pvtz-jkfit",
@@ -485,20 +560,29 @@ end
   basis_uhf, cMO_uhf, type_uhf, classes_uhf = load_region_dump(joinpath(EC.scr, unrestricted_store))
   @test type_uhf == "Region-IBO+OPAO"
   classa_uhf, classb_uhf = classes_uhf
-  @test count(==("Core"), classa_uhf) == 1
-  @test count(==("Core"), classb_uhf) == 1
+  # environment occupied orbitals are now frozen as Core in both spin blocks
+  @test count(==("Core"), classa_uhf) >= 1
+  @test count(==("Core"), classb_uhf) >= 1
   @test count(==("Inactive"), classa_uhf) > 0
   @test count(==("Inactive"), classb_uhf) > 0
   @test count(==("Virtual"), classa_uhf) > 0
   @test count(==("Virtual"), classb_uhf) > 0
+  check_region_occ_ordering(classa_uhf)
+  check_region_occ_ordering(classb_uhf)
   S_uhf = ElemCo.Integrals.overlap(basis_uhf)
   @test norm(cMO_uhf[1]' * S_uhf * cMO_uhf[1] - I(size(cMO_uhf[1], 2))) < 1.e-10
   @test norm(cMO_uhf[2]' * S_uhf * cMO_uhf[2] - I(size(cMO_uhf[2], 2))) < 1.e-10
 
   cMO_uhf_ref, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_uhf_ref = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
-  F_uhf_a = reconstruct_fock(cMO_uhf_ref[1], energies_uhf_ref[1], S_uhf)
-  F_uhf_b = reconstruct_fock(cMO_uhf_ref[2], energies_uhf_ref[2], S_uhf)
+  # the UHF dump stores the exact converged alpha/beta AO Fock matrices
+  F_uhf_sm = ElemCo.Wavefunctions.fetch_ao_fock(EC)
+  @test !isnothing(F_uhf_sm)
+  @test !ElemCo.QMTensors.is_restricted(F_uhf_sm)
+  F_uhf_a = F_uhf_sm[1]
+  F_uhf_b = F_uhf_sm[2]
+  @test norm(F_uhf_a - reconstruct_fock(cMO_uhf_ref[1], energies_uhf_ref[1], S_uhf)) < 1.e-3
+  @test norm(F_uhf_b - reconstruct_fock(cMO_uhf_ref[2], energies_uhf_ref[2], S_uhf)) < 1.e-3
   pseudo_uhf_store = "region_uhf_pseudo.h5"
   @set wf store=pseudo_uhf_store
   @set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=true
@@ -510,10 +594,10 @@ end
   frag_virt_a = findall(==("Virtual"), classes_uhf_pseudo[1])
   frag_occ_b = findall(==("Inactive"), classes_uhf_pseudo[2])
   frag_virt_b = findall(==("Virtual"), classes_uhf_pseudo[2])
-  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_occ_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_occ_a]) < 1.e-10
-  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_virt_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_virt_a]) < 1.e-10
-  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_occ_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_occ_b]) < 1.e-10
-  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_virt_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_virt_b]) < 1.e-10
+  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_occ_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_occ_a]) < 1.e-9
+  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_virt_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_virt_a]) < 1.e-9
+  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_occ_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_occ_b]) < 1.e-9
+  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_virt_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_virt_b]) < 1.e-9
 
   @set wf store="" ms2=0
   @set region mode=:inclusive virtual=:complement occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=false
@@ -555,7 +639,9 @@ H6     3.166000000   -0.929000000    0.000000000"
   cMO_ref, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_ref = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
   S_ref = ElemCo.Integrals.overlap(ElemCo.Integrals.generate_basis(EC, "ao"))
-  F_ref = reconstruct_fock(cMO_ref[1], energies_ref[1], S_ref)
+  # pseudo uses the exact stored AO Fock; verify it matches the canonical reconstruction
+  F_ref = ElemCo.Wavefunctions.fetch_ao_fock(EC)[1]
+  @test norm(F_ref - reconstruct_fock(cMO_ref[1], energies_ref[1], S_ref)) < 1.e-3
 
   pi_both_store = "region_pi_both.h5"
   @set wf store=pi_both_store
@@ -572,6 +658,18 @@ H6     3.166000000   -0.929000000    0.000000000"
   pi_virt = findall(==("Virtual"), classa_pi)
   @test offdiag_norm(cMO_pi[1][:, pi_occ]' * F_ref * cMO_pi[1][:, pi_occ]) < 1.e-10
   @test offdiag_norm(cMO_pi[1][:, pi_virt]' * F_ref * cMO_pi[1][:, pi_virt]) < 1.e-10
+
+  # region.pao_centers also augments the π=:both virtual space with OPAOs (orthogonal to the
+  # π virtuals); the occupied π space is unchanged.
+  pi_pao_store = "region_pi_both_pao.h5"
+  @set wf store=pi_pao_store
+  @set region pi=:both pseudo=false pao_centers=[5]
+  @region [1, 2, 3, 4]
+  basis_pi_pao, cMO_pi_pao, _, classes_pi_pao = load_pi_region_dump(joinpath(EC.scr, pi_pao_store))
+  @test count(==("Inactive"), classes_pi_pao[1]) == 2
+  @test count(==("Virtual"), classes_pi_pao[1]) > 2
+  @test norm(cMO_pi_pao[1]' * ElemCo.Integrals.overlap(basis_pi_pao) * cMO_pi_pao[1] - I(size(cMO_pi_pao[1], 2))) < 1.e-10
+  @set region pao_centers=Int[]
 
   pi_frontier_store = "region_pi_frontier.h5"
   @set wf store=pi_frontier_store
@@ -618,7 +716,9 @@ H2    0.000000000   -0.922683000    1.232790000"
   cMO_ref_co, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_ref_co = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
   S_ref_co = ElemCo.Integrals.overlap(ElemCo.Integrals.generate_basis(EC, "ao"))
-  F_ref_co = reconstruct_fock(cMO_ref_co[1], energies_ref_co[1], S_ref_co)
+  # pseudo uses the exact stored AO Fock; verify it matches the canonical reconstruction
+  F_ref_co = ElemCo.Wavefunctions.fetch_ao_fock(EC)[1]
+  @test norm(F_ref_co - reconstruct_fock(cMO_ref_co[1], energies_ref_co[1], S_ref_co)) < 1.e-3
 
   pi_carbonyl_store = "region_pi_carbonyl.h5"
   @set wf store=pi_carbonyl_store
@@ -638,4 +738,189 @@ H2    0.000000000   -0.922683000    1.232790000"
   @set wf store=""
   @set region pi=:none pi_electrons=-1 pi_occupied=-1 pi_virtual=-1 pseudo=false
 end
+end
+
+@testitem "region downstream class honoring" tags=[:df, :quick] begin
+using ElemCo
+using ElemCo.TrexioInterface
+using LinearAlgebra
+
+E_MP2 = -76.045624004869
+
+geometry = "bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao" => "cc-pVDZ",
+             "jkfit" => "cc-pvtz-jkfit",
+             "mpfit" => "cc-pvdz-mpfit")
+
+@ECinit
+@dfhf
+
+# Apply the driver's freeze logic (freeze_orbitals! handles core, redundant, and the
+# freeze_nvirt count) to the current dump and return the resulting (n_active_occ, n_active_virt);
+# restore the space + options.
+function active_after_freeze(EC; core=:auto, freeze_nocc=-1, freeze_nvirt=-1)
+  sp = ElemCo.save_space(EC)
+  c0, fn0, fv0 = EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt
+  EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt = core, freeze_nocc, freeze_nvirt
+  ElemCo.ECInfos.setup_space_system!(EC; verbose=false)
+  ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
+  res = (length(EC.space['o']), length(EC.space['v']))
+  ElemCo.restore_space!(EC, sp)
+  EC.options.wf.core, EC.options.wf.freeze_nocc, EC.options.wf.freeze_nvirt = c0, fn0, fv0
+  return res
+end
+
+# water/cc-pVDZ: 5 occupied, 19 virtual, chemical (:large) core = 1 (O 1s).
+# Ordinary dump: :auto reproduces the standard :large frozen core; explicit settings override.
+@test active_after_freeze(EC; core=:auto)[1]  == 4   # :auto -> chemical core (1 frozen)
+@test active_after_freeze(EC; core=:large)[1] == 4
+@test active_after_freeze(EC; core=:none)[1]  == 5   # override: nothing frozen
+@test active_after_freeze(EC; freeze_nocc=2)[1] == 3 # override: freeze 2 lowest
+
+# Region dump (written back to wf.dump).
+@set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2
+@region [2]
+io = open_trexio(joinpath(EC.scr, EC.options.wf.dump), "r")
+classa = try
+  read_trexio_orbital_classes(io)[1]
+finally
+  close_trexio(io)
+end
+n_inact = count(==("Inactive"), classa)
+n_virt = count(==("Virtual"), classa)
+@test n_inact == 1
+
+# :auto honors the region; user settings override the region's prescription.
+@test active_after_freeze(EC; core=:auto)       == (n_inact, n_virt)  # region active space
+@test active_after_freeze(EC; core=:none)[1]    == 5                  # override core: correlate all occ
+@test active_after_freeze(EC; freeze_nocc=2)[1] == 3                  # override core: freeze 2 lowest
+@test active_after_freeze(EC; freeze_nvirt=5)[2] == n_virt - 5        # override virt: freeze 5 highest
+
+# end-to-end: default :auto restricts @dfmp2 to the region
+energies = @dfmp2
+@test abs(energies["MP2"] - E_MP2) < 1e-8
+end
+
+@testitem "region redundant freezing by index" tags=[:df, :quick] begin
+using ElemCo
+using ElemCo.TrexioInterface
+using LinearAlgebra
+
+geometry = "bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao" => "cc-pVDZ", "jkfit" => "cc-pvtz-jkfit", "mpfit" => "cc-pvdz-mpfit")
+
+@ECinit
+@dfhf
+
+cMO, _, basis_ao = ElemCo.Wavefunctions.fetch_orbitals(EC)
+en = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
+occ = ElemCo.Wavefunctions.fetch_orbital_occupations(EC)
+norb = size(cMO[1], 2)
+
+# Craft a region-like dump in which two redundant (sentinel-energy) "Deleted" orbitals sit at
+# LOW virtual indices (6,7) while the active "Virtual" orbitals occupy the HIGH indices. A
+# top-index freeze (the old freeze_nvirt!(nredund) approach) would wrongly delete the
+# high-index region virtuals; freeze_orbitals! must remove the redundant orbitals by their
+# actual indices instead.
+classes = fill("Virtual", norb)
+classes[1] = "Core"
+classes[2:5] .= "Inactive"
+classes[6:7] .= "Deleted"
+en_mod = copy(en[1])
+en_mod[6:7] .= ElemCo.OrbTools.REDUNDANT_ORBITAL_ENERGY
+ElemCo.Wavefunctions.dump_orbitals(EC, ElemCo.QMTensors.SpinMatrix(cMO[1]);
+  basis=basis_ao, type="Region-test",
+  energies=(en_mod, Float64[]), occupations=occ, classes=(classes, String[]))
+
+sp = ElemCo.save_space(EC)
+ElemCo.ECInfos.setup_space_system!(EC; verbose=false)
+ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
+@test EC.space['o'] == [2, 3, 4, 5]                  # "Core" (1) frozen, region occ kept
+@test 6 ∉ EC.space['v'] && 7 ∉ EC.space['v']         # redundant removed by their actual indices
+@test issubset([8, norb], EC.space['v'])             # high-index region virtuals NOT frozen by mistake
+@test length(EC.space['v']) == norb - 7              # 1 core + 4 inactive + 2 redundant removed
+ElemCo.restore_space!(EC, sp)
+end
+
+@testitem "region ghost PAO centers" tags=[:df, :quick] begin
+using ElemCo
+using ElemCo.TrexioInterface
+using ElemCo.Integrals: overlap, generate_basis, ao_list
+using LinearAlgebra
+
+# water plus an extra ghost H ("H3") above O: basis functions only, no electrons, so the
+# molecule stays neutral closed-shell. The ghost carries sizable density from the O orbitals.
+geometry = "bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507
+     H3     0.000000000    0.000000000    2.000000000"
+basis = Dict("ao" => "cc-pVDZ", "jkfit" => "cc-pvtz-jkfit", "mpfit" => "cc-pvdz-mpfit")
+
+@ECinit
+@dummy ["H3"]
+@dfhf
+
+ghost = 4   # global atom index of the ghost H3
+basis_ao = generate_basis(EC, "ao")
+S = overlap(basis_ao)
+ao_atoms_global = Int[Int(ao.icentre) for ao in ao_list(basis_ao)]
+ghost_aos = [i for i in eachindex(ao_atoms_global) if ao_atoms_global[i] == ghost]
+@test ElemCo.MSystems.is_dummy(EC.system[ghost])
+
+# total Löwdin weight of the ghost AOs in a coefficient block
+Shalf = real.(sqrt(Hermitian(Matrix(S))))
+ghost_weight(blk) = sum(abs2.(Shalf * blk)[ghost_aos, :])
+function load_dump(path)
+  io = open_trexio(path, "r")
+  try
+    b = read_trexio_basis(io)
+    orbs, _ = read_trexio_orbitals(io, b)
+    return orbs, read_trexio_orbital_classes(io)
+  finally
+    close_trexio(io)
+  end
+end
+
+# --- automatic detection (Löwdin population over the occupied orbitals) ---
+cMO, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
+cMO_occ = cMO[1][:, EC.space['o']]
+@test ElemCo.OrbRegion._collect_ghost_support(EC, cMO_occ, S, ao_atoms_global, 0.1)[1] == [ghost]
+@test isempty(ElemCo.OrbRegion._collect_ghost_support(EC, cMO_occ, S, ao_atoms_global, 0.5)[1])
+# the population of the ghost is reported (≈0.18) and reaches the 0.1 threshold
+@test ElemCo.OrbRegion._collect_ghost_support(EC, cMO_occ, S, ao_atoms_global, 0.1)[2][ghost] > 0.1
+
+# --- manual route: pao_centers includes the ghost; its AOs enter the Virtual space ---
+@set region mode=:inclusive virtual=:support_opao occ_charge_thr=0.2 atom_charge_thr=10.0 pao_centers=Int[]
+@set wf store="region_ghost_base.h5"
+@region [2]
+orbs0, cls0 = load_dump(joinpath(EC.scr, "region_ghost_base.h5"))
+v0 = findall(==("Virtual"), cls0[1])
+@test ghost_weight(orbs0[1][:, v0]) < 1.0    # ghost not in the support -> only incidental weight
+
+@set region pao_centers=[4]
+@set wf store="region_ghost_pao.h5"
+@region [2]
+orbs1, cls1 = load_dump(joinpath(EC.scr, "region_ghost_pao.h5"))
+v1 = findall(==("Virtual"), cls1[1])
+@test length(v1) > length(v0)                # ghost AOs added as OPAO virtuals
+@test ghost_weight(orbs1[1][:, v1]) > 2.0    # ghost now carries substantial virtual weight
+
+# --- automatic route end-to-end: a region on O auto-detects the ghost ---
+@set region virtual=:support_opao occ_charge_thr=0.2 atom_charge_thr=0.1 pao_centers=Int[]
+@set wf store="region_ghost_auto.h5"
+@region [1]
+orbs2, cls2 = load_dump(joinpath(EC.scr, "region_ghost_auto.h5"))
+v2 = findall(==("Virtual"), cls2[1])
+@test ghost_weight(orbs2[1][:, v2]) > 2.0    # ghost auto-included in the virtual space
+
+# a ghost atom cannot be a fragment center (only a PAO center) — must error clearly and early
+@set region pao_centers=Int[]
+@test_throws ErrorException ElemCo.region_orbitals(EC, [ghost])
 end

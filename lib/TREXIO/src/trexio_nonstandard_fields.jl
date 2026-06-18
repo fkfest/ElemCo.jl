@@ -7,6 +7,17 @@ const TREXIO_BASIS_EXT_FIELDS = [
     TrexioField("basis", "name", String, SCALAR, "name of the basis set", violator=true),
 ]
 
+## One-electron AO integral extensions (ao_1e_int group) - non-standard, violator
+## For dumps that store orbital rotations (no AO basis) the Fock is in the original MO basis.
+const TREXIO_AO_1E_INT_EXT_FIELDS = [
+    TrexioField("ao_1e_int", "fock", Float64, ["ao.num", "ao.num"], "Fock matrix (restricted/closed-shell)", violator=true),
+    TrexioField("ao_1e_int", "fock_up", Float64, ["ao.num", "ao.num"], "↑-spin Fock matrix (unrestricted)", violator=true),
+    TrexioField("ao_1e_int", "fock_dn", Float64, ["ao.num", "ao.num"], "↓-spin Fock matrix (unrestricted)", violator=true),
+    TrexioField("ao_1e_int", "fock_im", Float64, ["ao.num", "ao.num"], "Fock matrix (imaginary part)", violator=true),
+    TrexioField("ao_1e_int", "fock_up_im", Float64, ["ao.num", "ao.num"], "↑-spin Fock matrix (imaginary part)", violator=true),
+    TrexioField("ao_1e_int", "fock_dn_im", Float64, ["ao.num", "ao.num"], "↓-spin Fock matrix (imaginary part)", violator=true),
+]
+
 ## 4.2a Positron orbitals (po group) - non-standard, violator
 const TREXIO_PO_FIELDS = [
     TrexioField("po", "type", String, SCALAR, "free text to identify the set of POs (HF, Natural, Local, CASSCF, etc)", violator=true),
@@ -50,6 +61,7 @@ const TREXIO_AMPLITUDE_EXT_FIELDS = [
 # Combine all non-standard field definitions
 const NONSTANDARD_TREXIO_FIELDS = vcat(
     TREXIO_BASIS_EXT_FIELDS,
+    TREXIO_AO_1E_INT_EXT_FIELDS,
     TREXIO_PO_FIELDS,
     TREXIO_DETERMINANT_EXT_FIELDS,
     TREXIO_AMPLITUDE_EXT_FIELDS,
