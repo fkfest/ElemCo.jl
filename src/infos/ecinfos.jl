@@ -204,7 +204,7 @@ function setup_space_fd!(EC::ECInfo; verbose=true)
   @assert !isnothing(orbsym)
   # for ElemCo-generated reduced dumps, user orbital lists refer to the full MO space and are
   # translated to this active dump; externally-read dumps have no such map (indices stay native)
-  orig_orbs = (length(EC.fd.orig_orbs) == norb) ? EC.fd.orig_orbs : Int[]
+  orig_orbs = (length(EC.fd.orig_orbs) == norb) ? EC.fd.orig_orbs : (1:0)
   setup_space!(EC, norb, nelec, npos, ms2, orbsym; verbose=verbose, orig_orbs=orig_orbs)
 end
 
@@ -242,7 +242,7 @@ function setup_space_system!(EC::ECInfo; verbose=true)
 end
 
 """
-    setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true, orig_orbs=Int[])
+    setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true, orig_orbs=1:0)
 
   Setup EC.space from `norb`, `nelec`, `npos`, `ms2`, `orbsym` or `occa`/`occb`.
 
@@ -250,7 +250,7 @@ end
   interpreted in the full MO space and translated to the active space (see
   [`translate_orbs_to_active`](@ref)).
 """
-function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true, orig_orbs=Int[])
+function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true, orig_orbs=1:0)
   occa = EC.options.wf.occa
   occb = EC.options.wf.occb
   # positron spaces: occupied (‘p’) and virtual (‘e’)
@@ -329,7 +329,7 @@ end
   and translated to the active space (see [`translate_orbs_to_active`](@ref)). The `(#elec, #orb)`
   format is relative to the current space and is not translated.
 """
-function active_space(EC::ECInfo; orig_orbs=Int[])
+function active_space(EC::ECInfo; orig_orbs=1:0)
   SP = EC.space
   if EC.options.wf.active == "-"
     @assert haskey(SP, 's') "EC.space is not set up!"
@@ -862,17 +862,17 @@ function symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
 end
 
 """
-    translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::Vector{Int})
+    translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::UnitRange{Int})
 
   Translate full-MO-space orbital indices `orbs` to the active-space numbering of a reduced dump.
-  The active orbitals form the contiguous full-space range `orig_orbs` (`= lo:hi`, with the frozen
+  The active orbitals are the contiguous full-space range `orig_orbs` (`= lo:hi`, with the frozen
   core below `lo` and any deleted/frozen virtuals above `hi`); active orbital `k` is full orbital
   `lo + k - 1`. Frozen-core orbitals (`1:lo-1`) are occupied in the reference but not part of the
   active space and are dropped; any other orbital outside `lo:hi` (a frozen virtual or an
   out-of-range index) raises an error, since these lists are usually user input. If `orig_orbs` is
   empty (external or non-reduced dump), `orbs` is returned unchanged (indices are taken as-is).
 """
-function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::Vector{Int})
+function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::UnitRange{Int})
   isempty(orig_orbs) && return orbs
   lo, hi = first(orig_orbs), last(orig_orbs)
   active = Int[]
@@ -889,7 +889,7 @@ function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::Vector{Int})
 end
 
 """
-    get_occvirt(occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}, ignore_error=false, verbose=true, orig_orbs=Int[])
+    get_occvirt(occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}, ignore_error=false, verbose=true, orig_orbs=1:0)
 
   Use a +/- string to specify the occupation. If `occbs`=="-", the occupation from `occas` is used (closed-shell).
   If both are "-", the occupation is deduced from `nelec` and `ms2`.
@@ -898,7 +898,7 @@ end
   translated to the active space (see [`translate_orbs_to_active`](@ref)).
 """
 function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
-                     ms2=0, orbsym=Vector{Int}(), ignore_error=false, verbose=true, orig_orbs=Int[])
+                     ms2=0, orbsym=Vector{Int}(), ignore_error=false, verbose=true, orig_orbs=1:0)
   @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   occa = Int[]
   occb = Int[]

@@ -4,11 +4,11 @@ using ElemCo.ECInfos: translate_orbs_to_active
 
 @testset "full→active orbital translation" begin
   # core orbital 1 frozen ⇒ active orbital k corresponds to full orbital k+1
-  orig = collect(2:10)
+  orig = 2:10
   @test translate_orbs_to_active([1, 2, 3, 4, 5], orig) == [1, 2, 3, 4]  # core 1 dropped, 2-5→1-4
   @test translate_orbs_to_active([2, 4, 7], orig) == [1, 3, 6]
   @test translate_orbs_to_active([1], orig) == Int[]                     # only frozen core → empty
-  @test translate_orbs_to_active([3, 5], Int[]) == [3, 5]               # no map → indices unchanged
+  @test translate_orbs_to_active([3, 5], 1:0) == [3, 5]                 # no map → indices unchanged
   # orbitals outside the active range (frozen virtual / out of range) error, not silently dropped
   @test_throws ErrorException translate_orbs_to_active([11], orig)       # > hi
   @test_throws ErrorException translate_orbs_to_active([0], orig)        # < 1

@@ -449,7 +449,7 @@ function dfdump(EC::ECInfo)
   # (frozen core lowest, deleted virtuals highest) so user orbital lists given in the full MO space
   # can be translated to this active dump; leave empty for a non-reduced (identity) dump
   if ncore_orbs + nfrozvirt > 0
-    fdump.orig_orbs = collect((ncore_orbs+1):(full_norb-nfrozvirt))
+    fdump.orig_orbs = (ncore_orbs+1):(full_norb-nfrozvirt)
   end
   if fdump.uhf
     generate_integrals(EC, fdump, cMO[:,1:end-nfrozvirt], space_save)
