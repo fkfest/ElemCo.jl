@@ -1063,7 +1063,10 @@ function localize_orbitals(EC::ECInfo)
     dump_orbitals(EC, cMO_loc; basis=basis, type=loc_type, energies=energies_loc,
                   occupations=occupations, fock=fock_carry)
   else
-    dump_rotations(EC, cMO_loc; type=loc_type, energies=energies_loc, occupations=occupations)
+    # rotation dump: the carried Fock is in the original MO basis, still valid after the
+    # within-block localization rotation, so carry it forward too
+    dump_rotations(EC, cMO_loc; type=loc_type, energies=energies_loc, occupations=occupations,
+                   fock=fock_carry)
   end
 
   return nothing

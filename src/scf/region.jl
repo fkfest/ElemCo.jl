@@ -144,6 +144,14 @@ function _resolve_region_selection(EC::ECInfo, centers, mode::Symbol,
   all_local = _merge_region_centers(inclusive_local, exclusive_local)
   isempty(all_global) && error("@region requires at least one center, either through the macro argument or region.inclusive_centers / region.exclusive_centers.")
 
+  # Dummy/ghost atoms have no occupied orbitals or IAOs, so they cannot define a fragment (and would
+  # otherwise fail later, e.g. in the π target construction). They are only meaningful as PAO centers.
+  dummy_selected = [idx for idx in all_global if is_dummy(EC.system[idx])]
+  isempty(dummy_selected) || error("Dummy/ghost atom(s) " *
+    join([atomic_centre_label(EC.system[idx]) for idx in dummy_selected], ", ") *
+    " cannot be used as region fragment centers (they have no occupied orbitals/IAOs). " *
+    "Use region.pao_centers to add their PAOs to the fragment virtual space instead.")
+
   return (; all_global, all_local, inclusive_global, inclusive_local, exclusive_global, exclusive_local)
 end
 

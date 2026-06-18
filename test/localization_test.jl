@@ -919,4 +919,8 @@ v1 = findall(==("Virtual"), cls1[1])
 orbs2, cls2 = load_dump(joinpath(EC.scr, "region_ghost_auto.h5"))
 v2 = findall(==("Virtual"), cls2[1])
 @test ghost_weight(orbs2[1][:, v2]) > 2.0    # ghost auto-included in the virtual space
+
+# a ghost atom cannot be a fragment center (only a PAO center) — must error clearly and early
+@set region pao_centers=Int[]
+@test_throws ErrorException ElemCo.region_orbitals(EC, [ghost])
 end
