@@ -1258,12 +1258,30 @@ function region_orbitals(EC::ECInfo, centers)
       pi_electrons=pi_electrons, pi_occupied=pi_occupied, pi_virtual=pi_virtual)
   end
 
+  # AO Fock matrix: HF dumps store the exact AO Fock, which (depending only on the occupied
+  # density) is invariant under any rotation within the occupied space. Reading it makes
+  # pseudo-canonicalization robust even when the input orbitals are non-canonical (e.g. localized
+  # or region orbitals from a previous run); it is also carried forward into the region dump.
+  fock_stored = fetch_ao_fock(EC; start=use_start)
+  if !isnothing(fock_stored) && size(fock_stored[1], 1) != size(S, 1)
+    # basis mismatch (e.g. orbitals projected onto a different AO basis); cannot reuse it
+    fock_stored = nothing
+  end
+
   F_AO_a = nothing
   F_AO_b = nothing
   if pseudo
-    F_AO_a = _reconstruct_fock_matrix(cMO[1], S, energies[1])
-    if !restricted
-      F_AO_b = _reconstruct_fock_matrix(cMO[2], S, energies[2])
+    if !isnothing(fock_stored)
+      F_AO_a = Matrix{eltype(cMO[1])}(fock_stored[1])
+      restricted || (F_AO_b = Matrix{eltype(cMO[2])}(fock_stored[2]))
+    else
+      println("WARNING: region.pseudo: no Fock matrix stored in the dump; reconstructing it from the")
+      println("         orbital energies. This is only valid for canonical orbitals — re-run the HF")
+      println("         step (and any @localize) so the exact Fock is stored for non-canonical input.")
+      F_AO_a = _reconstruct_fock_matrix(cMO[1], S, energies[1])
+      if !restricted
+        F_AO_b = _reconstruct_fock_matrix(cMO[2], S, energies[2])
+      end
     end
   end
 
@@ -1308,7 +1326,8 @@ function region_orbitals(EC::ECInfo, centers)
       type=region_type,
       energies=(energies_region_a, energies[2]),
       occupations=occupations,
-      classes=(classa, String[]))
+      classes=(classa, String[]),
+      fock=fock_stored)
 
     println()
     println("  Region dump written: $(nfrag_occ_a) active occupied / $(nfrag_virt_a) active virtual orbital(s); ",
@@ -1369,7 +1388,8 @@ function region_orbitals(EC::ECInfo, centers)
       type=region_type,
       energies=(energies_region_a, energies_region_b),
       occupations=occupations,
-      classes=(classa, classb))
+      classes=(classa, classb),
+      fock=fock_stored)
 
     println()
     println("  Region dump written: α $(nfrag_occ_a) occ / $(nfrag_virt_a) virt, β $(nfrag_occ_b) occ / $(nfrag_virt_b) virt; ",

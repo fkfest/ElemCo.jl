@@ -43,6 +43,7 @@ function dfhf(EC::ECInfo{T}) where T
   end
   direct = false
   local sao, hsmall, mmLfile, mmL, bao, bfit, Xorth, Xredundant
+  local fock
   Enuc = zero(real(T))
   if use_df3idx
     hsmall = EC.fd.int1
@@ -140,7 +141,9 @@ function dfhf(EC::ECInfo{T}) where T
   else
     nredund = size(Xredundant, 2)
     classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
-    dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes)
+    # persist the converged AO Fock so non-canonical post-processing (e.g. region.pseudo) can use it
+    dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations,
+                  classes=classes, fock=SpinMatrix(fock))
   end
   energies = OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
   return isnothing(dipole) ? energies : add_dipole_entries(energies, "DF-HF", dipole)
@@ -180,6 +183,7 @@ function dfhf_positron(EC::ECInfo)
   cPO = cPO.α
   ϵ = zeros(norb)
   ε_pos = zeros(norb)
+  local fock
   hsmall = load(EC, "h_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
   Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
@@ -234,7 +238,7 @@ function dfhf_positron(EC::ECInfo)
     occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
     nredund = size(Xredundant, 2)
     classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
-    dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes, MO="mo")
+    dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes, fock=SpinMatrix(fock), MO="mo")
     occupations = [1.0; zeros(length(SP['m'])-1)]
     dump_orbitals(io, EC, SpinMatrix(cPO); type="DF-HF positron", energies=ε_pos, occupations=occupations, MO="po")
   end
@@ -267,6 +271,7 @@ function dfuhf(EC::ECInfo{T}) where T
   end
   direct = false
   local sao, hsmall, h1a, h1b, mmLfile, mmL, MMLfile, MML, bao, bfit, Xorth, Xredundant
+  local fock
   has_MML = false
   Enuc = zero(real(T))
   if use_df3idx
@@ -402,7 +407,9 @@ function dfuhf(EC::ECInfo{T}) where T
     nredund = size(Xredundant, 2)
     classes = nredund > 0 ? (orbital_classes_with_deleted(SP['o'], norb, nredund),
                              orbital_classes_with_deleted(SP['O'], norb, nredund)) : nothing
-    dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
+    # persist the converged AO Fock so non-canonical post-processing (e.g. region.pseudo) can use it
+    dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb),
+                  classes=classes, fock=fock)
   end
   energies = OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
   return isnothing(dipole) ? energies : add_dipole_entries(energies, "DF-UHF", dipole)

@@ -31,6 +31,7 @@ export write_trexio_system, read_trexio_system
 export write_trexio_basis, read_trexio_basis
 export write_trexio_orbitals, read_trexio_orbitals
 export write_trexio_rotations, read_trexio_rotations
+export write_trexio_ao_fock, read_trexio_ao_fock, has_trexio_ao_fock
 export write_trexio_1rdm
 export read_trexio_orbital_classes, read_trexio_orbital_energies, read_trexio_orbital_occupations
 export write_trexio_amplitudes
@@ -423,6 +424,67 @@ function read_trexio_orbitals(trexio::TrexioFile, basis=nothing; verbose=true, M
   end
   order = ao_order2internal(basis, order4l(basis))
   return _read_trexio_orbital_transformations(trexio, order, verbose, MO)
+end
+
+"""
+    write_trexio_ao_fock(trexio::TrexioFile, fock::SpinMatrix, basis::BasisSet)
+
+  Write the AO-basis Fock matrix to the TREXIO file (non-standard `ao_1e_int` field).
+
+  For a restricted (closed-shell) `fock` the single matrix is stored in `ao_1e_int_fock`; for an
+  unrestricted `fock` the alpha/beta matrices are stored in `ao_1e_int_fock_up`/`ao_1e_int_fock_dn`.
+  The matrices are reordered from the internal (libcint) AO order to the TREXIO AO order, matching
+  the convention used for the orbital coefficients. `ao.num` must already be written.
+"""
+function write_trexio_ao_fock(trexio::TrexioFile, fock::SpinMatrix, basis::BasisSet)
+  order = ao_order2internal(basis, order4l(basis), true)
+  if is_restricted(fock)
+    Fa = Matrix{Float64}(real.(fock[1]))[order, order]
+    status = trexio_write_ao_1e_int_fock(trexio, Fa)
+    trexio_check_write_status(status, "ao_1e_int_fock")
+  else
+    Fa = Matrix{Float64}(real.(fock[1]))[order, order]
+    Fb = Matrix{Float64}(real.(fock[2]))[order, order]
+    status = trexio_write_ao_1e_int_fock_up(trexio, Fa)
+    trexio_check_write_status(status, "ao_1e_int_fock_up")
+    status = trexio_write_ao_1e_int_fock_dn(trexio, Fb)
+    trexio_check_write_status(status, "ao_1e_int_fock_dn")
+  end
+  return
+end
+
+"""
+    has_trexio_ao_fock(trexio::TrexioFile) -> Bool
+
+  Return `true` if the TREXIO file stores an AO-basis Fock matrix (restricted or unrestricted).
+"""
+function has_trexio_ao_fock(trexio::TrexioFile)
+  return trexio_has_ao_1e_int_fock(trexio) ||
+         (trexio_has_ao_1e_int_fock_up(trexio) && trexio_has_ao_1e_int_fock_dn(trexio))
+end
+
+"""
+    read_trexio_ao_fock(trexio::TrexioFile, basis::BasisSet) -> Union{SpinMatrix,Nothing}
+
+  Read the AO-basis Fock matrix from the TREXIO file, reordering from the TREXIO AO order to the
+  internal (libcint) AO order. Returns a restricted or unrestricted `SpinMatrix`, or `nothing`
+  if no Fock matrix is stored.
+"""
+function read_trexio_ao_fock(trexio::TrexioFile, basis::BasisSet)
+  order = ao_order2internal(basis, order4l(basis))
+  if trexio_has_ao_1e_int_fock(trexio)
+    Fa, status = trexio_read_ao_1e_int_fock(trexio)
+    trexio_check_read_status(status, "ao_1e_int_fock")
+    return SpinMatrix(Fa[order, order])
+  elseif trexio_has_ao_1e_int_fock_up(trexio) && trexio_has_ao_1e_int_fock_dn(trexio)
+    Fa, status = trexio_read_ao_1e_int_fock_up(trexio)
+    trexio_check_read_status(status, "ao_1e_int_fock_up")
+    Fb, status = trexio_read_ao_1e_int_fock_dn(trexio)
+    trexio_check_read_status(status, "ao_1e_int_fock_dn")
+    return SpinMatrix(Fa[order, order], Fb[order, order])
+  else
+    return nothing
+  end
 end
 
 """

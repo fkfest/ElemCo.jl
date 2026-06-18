@@ -376,6 +376,16 @@ end
     return S * cMO * Diagonal(eltype(cMO).(energies)) * cMO' * S
   end
 
+  function load_region_fock(path)
+    io = open_trexio(path, "r")
+    try
+      dump_basis = read_trexio_basis(io)
+      return read_trexio_ao_fock(io, dump_basis)
+    finally
+      close_trexio(io)
+    end
+  end
+
   offdiag_norm(mat) = norm(mat - Diagonal(diag(mat)))
 
   # The region-selected (Inactive) occupied orbitals must sit at the Fermi level, i.e.
@@ -471,7 +481,11 @@ end
 
   cMO_ref, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_ref = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
-  F_ref = reconstruct_fock(cMO_ref[1], energies_ref[1], S_inc)
+  # the HF dump stores the exact converged AO Fock; it must agree with the canonical reconstruction
+  F_stored_sm = ElemCo.Wavefunctions.fetch_ao_fock(EC)
+  @test !isnothing(F_stored_sm)
+  F_ref = F_stored_sm[1]
+  @test norm(F_ref - reconstruct_fock(cMO_ref[1], energies_ref[1], S_inc)) < 1.e-3
   pseudo_store = "region_pseudo.h5"
   @set wf store=pseudo_store
   @set region mode=:exclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=true
@@ -481,8 +495,38 @@ end
   @test type_pseudo == "Region-IBO+OPAO-Pseudo"
   frag_occ = findall(==("Inactive"), classes_pseudo[1])
   frag_virt = findall(==("Virtual"), classes_pseudo[1])
-  @test offdiag_norm(cMO_pseudo[1][:, frag_occ]' * F_ref * cMO_pseudo[1][:, frag_occ]) < 1.e-10
-  @test offdiag_norm(cMO_pseudo[1][:, frag_virt]' * F_ref * cMO_pseudo[1][:, frag_virt]) < 1.e-10
+  # pseudo uses the exact stored Fock, so the fragment blocks diagonalize it to machine precision
+  @test offdiag_norm(cMO_pseudo[1][:, frag_occ]' * F_ref * cMO_pseudo[1][:, frag_occ]) < 1.e-9
+  @test offdiag_norm(cMO_pseudo[1][:, frag_virt]' * F_ref * cMO_pseudo[1][:, frag_virt]) < 1.e-9
+  # the region dump carries the AO Fock forward unchanged (for chained pseudo runs)
+  F_carried = load_region_fock(joinpath(EC.scr, pseudo_store))
+  @test !isnothing(F_carried)
+  @test norm(F_carried[1] - F_ref) < 1.e-12
+
+  # Regression for the chained-region pseudo bug: run region WITHOUT pseudo, then run region WITH
+  # pseudo reading that first (non-canonical, IBO) dump. The carried-forward Fock lets the second
+  # run pseudo-canonicalize against the TRUE Fock instead of the IBO-basis Fock diagonal.
+  chain1_store = "region_chain_nopseudo.h5"
+  @set wf store=chain1_store
+  @set region mode=:exclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=false
+  @region [1, 2]
+  _, cMO_chain1, _, classes_chain1 = load_region_dump(joinpath(EC.scr, chain1_store))
+  frag_occ_chain1 = findall(==("Inactive"), classes_chain1[1])
+  # the localized (no-pseudo) region orbitals are IBOs: their fragment Fock block is NOT diagonal
+  @test offdiag_norm(cMO_chain1[1][:, frag_occ_chain1]' * F_ref * cMO_chain1[1][:, frag_occ_chain1]) > 1.e-3
+  F_chain1 = load_region_fock(joinpath(EC.scr, chain1_store))
+  @test !isnothing(F_chain1)
+  @test norm(F_chain1[1] - F_ref) < 1.e-12
+
+  chain2_store = "region_chain_pseudo.h5"
+  @set wf start=chain1_store store=chain2_store
+  @set region mode=:exclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=true
+  @region [1, 2]
+  @set wf start=""
+  _, cMO_chain2, _, classes_chain2 = load_region_dump(joinpath(EC.scr, chain2_store))
+  frag_occ_chain2 = findall(==("Inactive"), classes_chain2[1])
+  # using the carried Fock, pseudo diagonalizes the TRUE Fock block to machine precision
+  @test offdiag_norm(cMO_chain2[1][:, frag_occ_chain2]' * F_ref * cMO_chain2[1][:, frag_occ_chain2]) < 1.e-9
 
   # region.pao_centers extends the virtual-space support: with the auto support disabled
   # (high atom_charge_thr), adding atom 3 (H2) as a PAO center adds OPAO virtuals.
@@ -531,8 +575,14 @@ end
 
   cMO_uhf_ref, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_uhf_ref = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
-  F_uhf_a = reconstruct_fock(cMO_uhf_ref[1], energies_uhf_ref[1], S_uhf)
-  F_uhf_b = reconstruct_fock(cMO_uhf_ref[2], energies_uhf_ref[2], S_uhf)
+  # the UHF dump stores the exact converged alpha/beta AO Fock matrices
+  F_uhf_sm = ElemCo.Wavefunctions.fetch_ao_fock(EC)
+  @test !isnothing(F_uhf_sm)
+  @test !ElemCo.QMTensors.is_restricted(F_uhf_sm)
+  F_uhf_a = F_uhf_sm[1]
+  F_uhf_b = F_uhf_sm[2]
+  @test norm(F_uhf_a - reconstruct_fock(cMO_uhf_ref[1], energies_uhf_ref[1], S_uhf)) < 1.e-3
+  @test norm(F_uhf_b - reconstruct_fock(cMO_uhf_ref[2], energies_uhf_ref[2], S_uhf)) < 1.e-3
   pseudo_uhf_store = "region_uhf_pseudo.h5"
   @set wf store=pseudo_uhf_store
   @set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=true
@@ -544,10 +594,10 @@ end
   frag_virt_a = findall(==("Virtual"), classes_uhf_pseudo[1])
   frag_occ_b = findall(==("Inactive"), classes_uhf_pseudo[2])
   frag_virt_b = findall(==("Virtual"), classes_uhf_pseudo[2])
-  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_occ_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_occ_a]) < 1.e-10
-  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_virt_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_virt_a]) < 1.e-10
-  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_occ_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_occ_b]) < 1.e-10
-  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_virt_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_virt_b]) < 1.e-10
+  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_occ_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_occ_a]) < 1.e-9
+  @test offdiag_norm(cMO_uhf_pseudo[1][:, frag_virt_a]' * F_uhf_a * cMO_uhf_pseudo[1][:, frag_virt_a]) < 1.e-9
+  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_occ_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_occ_b]) < 1.e-9
+  @test offdiag_norm(cMO_uhf_pseudo[2][:, frag_virt_b]' * F_uhf_b * cMO_uhf_pseudo[2][:, frag_virt_b]) < 1.e-9
 
   @set wf store="" ms2=0
   @set region mode=:inclusive virtual=:complement occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=false
@@ -589,7 +639,9 @@ H6     3.166000000   -0.929000000    0.000000000"
   cMO_ref, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_ref = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
   S_ref = ElemCo.Integrals.overlap(ElemCo.Integrals.generate_basis(EC, "ao"))
-  F_ref = reconstruct_fock(cMO_ref[1], energies_ref[1], S_ref)
+  # pseudo uses the exact stored AO Fock; verify it matches the canonical reconstruction
+  F_ref = ElemCo.Wavefunctions.fetch_ao_fock(EC)[1]
+  @test norm(F_ref - reconstruct_fock(cMO_ref[1], energies_ref[1], S_ref)) < 1.e-3
 
   pi_both_store = "region_pi_both.h5"
   @set wf store=pi_both_store
@@ -664,7 +716,9 @@ H2    0.000000000   -0.922683000    1.232790000"
   cMO_ref_co, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
   energies_ref_co = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
   S_ref_co = ElemCo.Integrals.overlap(ElemCo.Integrals.generate_basis(EC, "ao"))
-  F_ref_co = reconstruct_fock(cMO_ref_co[1], energies_ref_co[1], S_ref_co)
+  # pseudo uses the exact stored AO Fock; verify it matches the canonical reconstruction
+  F_ref_co = ElemCo.Wavefunctions.fetch_ao_fock(EC)[1]
+  @test norm(F_ref_co - reconstruct_fock(cMO_ref_co[1], energies_ref_co[1], S_ref_co)) < 1.e-3
 
   pi_carbonyl_store = "region_pi_carbonyl.h5"
   @set wf store=pi_carbonyl_store

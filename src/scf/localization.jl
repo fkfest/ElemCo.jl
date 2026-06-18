@@ -952,6 +952,9 @@ function localize_orbitals(EC::ECInfo)
   energies = fetch_orbital_energies(EC; start=use_start)
   occupations = fetch_orbital_occupations(EC; start=use_start)
   has_basis = !isempty(basis)
+  # carry the AO Fock forward (localization only rotates within orbital blocks, so the AO Fock is
+  # unchanged) so that downstream pseudo-canonicalization can use the exact Fock
+  fock_carry = fetch_ao_fock(EC; start=use_start)
 
   if !is_restricted(cMO)
     error("Orbital localization currently only supports restricted orbitals")
@@ -1057,7 +1060,8 @@ function localize_orbitals(EC::ECInfo)
   loc_type = method_name * (localize_virtual ? "+OPAO" : "")
   cMO_loc = SpinMatrix(cMO_full_loc)
   if has_basis
-    dump_orbitals(EC, cMO_loc; basis=basis, type=loc_type, energies=energies_loc, occupations=occupations)
+    dump_orbitals(EC, cMO_loc; basis=basis, type=loc_type, energies=energies_loc,
+                  occupations=occupations, fock=fock_carry)
   else
     dump_rotations(EC, cMO_loc; type=loc_type, energies=energies_loc, occupations=occupations)
   end

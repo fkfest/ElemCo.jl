@@ -126,6 +126,16 @@ end
 
 This diagonalizes the occupied-occupied and virtual-virtual Fock subblocks in the selected fragment basis.
 
+The Fock matrix is read from the dump: HF calculations (`@dfhf`/`@dfuhf`) store the converged
+AO Fock matrix, and `@localize`/`@region` carry it forward unchanged (it depends only on the
+occupied density, which orbital rotations within the occupied space preserve). This makes
+pseudo-canonicalization exact even when the input orbitals are non-canonical — e.g. when chaining
+`@region` (without pseudo) into a second `@region pseudo=true`, or running it after `@localize`.
+
+If the dump predates Fock persistence (or was produced by a path that does not store it), `@region`
+falls back to reconstructing the Fock from the orbital energies and prints a warning; that
+reconstruction is only valid for canonical orbitals, so re-run the HF step to store the exact Fock.
+
 ## Notes And Limitations
 
 - unrestricted references are processed separately in alpha and beta space
