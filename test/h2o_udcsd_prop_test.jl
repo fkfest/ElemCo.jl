@@ -21,7 +21,9 @@ let
   @opt wf ms2=2
   @dfuhf
   @rotate_orbs 6 7 90
-  @cc λudcsd occa="-4+6" occb="-3"
+  # occa/occb refer to the full MO space (issue #191): full α=[1,2,3,4,5,7], β=[1,2,3,4];
+  # the frozen core (orbital 1) is removed and the rest renumbered to the active dump
+  @cc λudcsd occa="1-5+7" occb="1-4"
   U1a, U1b = @loadfile("cc_multipliers_1") 
   U2a, U2b, U2ab = @loadfile("cc_multipliers_2") 
   T1a, T1b = @loadfile("cc_amplitudes_1") 

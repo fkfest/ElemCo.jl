@@ -42,15 +42,21 @@
   freeze_nvirt::Int = -1
   """`⟨0⟩` number of virtual (highest) positron orbitals to freeze. """
   freeze_nvirt_pos::Int = 0
-  """`⟨"-"⟩` occupied α (or closed-shell) orbitals. 
-  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
-  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`. """
+  """`⟨"-"⟩` occupied α (or closed-shell) orbitals.
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`.
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+  Orbital indices always refer to the **full MO space** (including frozen core): for ElemCo-generated
+  dumps with frozen core/deleted virtuals the list is automatically translated to the active space.
+  (Externally-read FCIDUMP files have no frozen-orbital information, so their indices are taken as-is.) """
   occa::String = "-"
-  """`⟨"-"⟩` occupied β orbitals. 
-  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
+  """`⟨"-"⟩` occupied β orbitals.
+  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
+  Like `occa`, indices refer to the full MO space."""
   occb::String = "-"
   """`⟨"-"⟩` active space.
-  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format. """
+  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format.
+  As for `occa`, an orbital-list string refers to the full MO space and is translated to the active
+  space; the `(#elec, #orb)` format is relative to the current (post-freeze) space. """
   active::String = "-"
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false

@@ -202,7 +202,10 @@ function setup_space_fd!(EC::ECInfo; verbose=true)
   end
   orbsym = headvars(EC.fd, "ORBSYM", Int)
   @assert !isnothing(orbsym)
-  setup_space!(EC, norb, nelec, npos, ms2, orbsym; verbose=verbose)
+  # for ElemCo-generated reduced dumps, user orbital lists refer to the full MO space and are
+  # translated to this active dump; externally-read dumps have no such map (indices stay native)
+  orig_orbs = (length(EC.fd.orig_orbs) == norb) ? EC.fd.orig_orbs : Int[]
+  setup_space!(EC, norb, nelec, npos, ms2, orbsym; verbose=verbose, orig_orbs=orig_orbs)
 end
 
 """
@@ -243,7 +246,7 @@ end
 
   Setup EC.space from `norb`, `nelec`, `ms2`, `orbsym` or `occa`/`occb`.
 """
-function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true)
+function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true, orig_orbs=Int[])
   occa = EC.options.wf.occa
   occb = EC.options.wf.occb
   # positron spaces: occupied (‘p’) and virtual (‘e’)
@@ -258,14 +261,14 @@ function setup_space!(EC::ECInfo, norb, nelec, npos, ms2, orbsym; verbose=true)
   if verbose
     println("Number of orbitals: ", norb)
   end
-  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(occa, occb, norb, nelec; ms2, orbsym, EC.options.wf.ignore_error, verbose)
+  SP['o'], SP['v'], SP['O'], SP['V'] = get_occvirt(occa, occb, norb, nelec; ms2, orbsym, EC.options.wf.ignore_error, verbose, orig_orbs)
   SP['d'] = intersect(SP['o'], SP['O'])
   SP['s'] = setdiff(SP['o'], SP['d'])
   SP['S'] = setdiff(SP['O'], SP['d'])
   SP[':'] = SP['m'] = SP['M'] = [1:norb;]
   SP['p'] = occp
   SP['e'] = virp
-  SP['a'], SP['d'] = active_space(EC)
+  SP['a'], SP['d'] = active_space(EC; orig_orbs)
   return
 end
 
@@ -317,8 +320,12 @@ end
   - from the option [`wf.active`](@ref ECInfos.WfOptions), if set up.
     The format is either an occupation string, or `(#elec, #orb)`.
   - from the singly-occupied orbitals in the reference occupation (from `EC.space`).
+
+  If `orig_orbs` is non-empty, an `active` orbital-list string is interpreted in the full MO space
+  and translated to the active space (see [`translate_orbs_to_active`](@ref)). The `(#elec, #orb)`
+  format is relative to the current space and is not translated.
 """
-function active_space(EC::ECInfo)
+function active_space(EC::ECInfo; orig_orbs=Int[])
   SP = EC.space
   if EC.options.wf.active == "-"
     @assert haskey(SP, 's') "EC.space is not set up!"
@@ -336,7 +343,7 @@ function active_space(EC::ECInfo)
     @assert nclosed*2 == totnelec - nelec "Encountered single occupancy outside active space"
     active = [nclosed+1:nclosed+norb;]
   else
-    active = parse_orbstring(EC.options.wf.active)
+    active = translate_orbs_to_active(parse_orbstring(EC.options.wf.active), orig_orbs)
     norb = length(active)
     nelec = length(intersect(active, SP['o'])) + length(intersect(active, SP['O']))
   end
@@ -851,29 +858,45 @@ function symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
 end
 
 """
-    get_occvirt(occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}, ignore_error=false, verbose=true)
+    translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::Vector{Int})
+
+  Translate full-MO-space orbital indices `orbs` to the active-space numbering defined by
+  `orig_orbs`, where active orbital `k` corresponds to full orbital `orig_orbs[k]`. Full orbitals
+  that are not in `orig_orbs` (i.e. frozen) are dropped. If `orig_orbs` is empty (external or
+  non-reduced dump), `orbs` is returned unchanged (indices are taken as-is).
+"""
+function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::Vector{Int})
+  isempty(orig_orbs) && return orbs
+  pos = Dict(o => k for (k, o) in enumerate(orig_orbs))
+  return sort!([pos[o] for o in orbs if haskey(pos, o)])
+end
+
+"""
+    get_occvirt(occas::String, occbs::String, norb, nelec; ms2=0, orbsym=Vector{Int}, ignore_error=false, verbose=true, orig_orbs=Int[])
 
   Use a +/- string to specify the occupation. If `occbs`=="-", the occupation from `occas` is used (closed-shell).
   If both are "-", the occupation is deduced from `nelec` and `ms2`.
   The optional argument `orbsym` is a vector with length norb of orbital symmetries (1 to 8) for each orbital.
+  If `orig_orbs` is non-empty, the occupation strings are interpreted in the full MO space and
+  translated to the active space (see [`translate_orbs_to_active`](@ref)).
 """
-function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int; 
-                     ms2=0, orbsym=Vector{Int}(), ignore_error=false, verbose=true)
+function get_occvirt(occas::String, occbs::String, norb::Int, nelec::Int;
+                     ms2=0, orbsym=Vector{Int}(), ignore_error=false, verbose=true, orig_orbs=Int[])
   @assert(isodd(ms2) == isodd(nelec), "Inconsistency in ms2 (2*S) and number of electrons.")
   occa = Int[]
   occb = Int[]
   if occas != "-"
-    append!(occa, parse_orbstring(occas; orbsym))
+    append!(occa, translate_orbs_to_active(parse_orbstring(occas; orbsym), orig_orbs))
     if occbs == "-"
       # copy occa to occb
       append!(occb, occa)
     else
-      append!(occb, parse_orbstring(occbs; orbsym))
+      append!(occb, translate_orbs_to_active(parse_orbstring(occbs; orbsym), orig_orbs))
     end
     if length(occa)+length(occb) != nelec && !ignore_error
       error("Inconsistency in OCCA ($occas) and OCCB ($occbs) definitions and the number of electrons ($nelec). Use ignore_error wf option to ignore.")
     end
-  else 
+  else
     append!(occa, [1:(nelec+ms2)÷2;])
     append!(occb, [1:(nelec-ms2)÷2;])
   end
