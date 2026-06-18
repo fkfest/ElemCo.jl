@@ -936,15 +936,19 @@ function _build_region_spin(EC::ECInfo, cMO_full::AbstractMatrix{T}, energies::V
     energies[valence_occ_range] = real.(diag(R_occ' * Diagonal(ε_occ) * R_occ))
   end
 
+  # snapshot the localized (pre-pseudo) fragment energies for the analysis printout; the
+  # occupied table reports these localized orbitals (with their charges)
+  frag_occ_global = collect(valence_occ_range[end-nfrag_occ+1:end])
+  frag_virt_global = nfrag_virt > 0 ? collect(virt_range[1:nfrag_virt]) : Int[]
+  loc_occ_energies = isempty(energies) ? Float64[] : copy(energies[frag_occ_global])
+  loc_virt_energies = isempty(energies) ? Float64[] : copy(energies[frag_virt_global])
+
   if pseudo
     isnothing(F_AO) && error("Missing Fock matrix for region pseudo-canonicalization.")
-    fragment_occ_range = collect(valence_occ_range[end-nfrag_occ+1:end])
-    _pseudocanonicalize_block!(cMO_region, energies, F_AO, fragment_occ_range)
-    if nfrag_virt > 0
-      fragment_virt_range = collect(virt_range[1:nfrag_virt])
-      _pseudocanonicalize_block!(cMO_region, energies, F_AO, fragment_virt_range)
-    end
+    _pseudocanonicalize_block!(cMO_region, energies, F_AO, frag_occ_global)
+    nfrag_virt > 0 && _pseudocanonicalize_block!(cMO_region, energies, F_AO, frag_virt_global)
   end
+  pseudo_occ_energies = (pseudo && !isempty(energies)) ? copy(energies[frag_occ_global]) : Float64[]
 
   classes = fill("Deleted", size(cMO_full, 2))
   classes[core_range] .= "Core"
@@ -957,7 +961,10 @@ function _build_region_spin(EC::ECInfo, cMO_full::AbstractMatrix{T}, energies::V
     classes[virt_range[1:nfrag_virt]] .= "Virtual"
   end
 
-  region_info = (charges=charges, support_atoms=support_global, support_charges=support_charges, scores=Float64[])
+  region_info = (charges=charges[:, end-nfrag_occ+1:end], support_atoms=support_global,
+                 support_charges=support_charges, scores=Float64[],
+                 energies=loc_occ_energies, virt_energies=loc_virt_energies,
+                 pseudo_energies=pseudo_occ_energies)
   return cMO_region, energies, classes, nfrag_occ, nfrag_virt, region_info
 end
 
@@ -1043,15 +1050,18 @@ function _build_region_spin_pi(EC::ECInfo, cMO_full::AbstractMatrix{T}, energies
     end
   end
 
+  # snapshot the localized (pre-pseudo) fragment energies for the analysis printout
+  frag_occ_global = collect(valence_occ_range[end-nfrag_occ+1:end])
+  frag_virt_global = nfrag_virt > 0 ? collect(virt_range[1:nfrag_virt]) : Int[]
+  loc_occ_energies = isempty(energies) ? Float64[] : copy(energies[frag_occ_global])
+  loc_virt_energies = isempty(energies) ? Float64[] : copy(energies[frag_virt_global])
+
   if pseudo
     isnothing(F_AO) && error("Missing Fock matrix for region pseudo-canonicalization.")
-    fragment_occ_range = collect(valence_occ_range[end-nfrag_occ+1:end])
-    _pseudocanonicalize_block!(cMO_region, energies, F_AO, fragment_occ_range)
-    if nfrag_virt > 0
-      fragment_virt_range = collect(virt_range[1:nfrag_virt])
-      _pseudocanonicalize_block!(cMO_region, energies, F_AO, fragment_virt_range)
-    end
+    _pseudocanonicalize_block!(cMO_region, energies, F_AO, frag_occ_global)
+    nfrag_virt > 0 && _pseudocanonicalize_block!(cMO_region, energies, F_AO, frag_virt_global)
   end
+  pseudo_occ_energies = (pseudo && !isempty(energies)) ? copy(energies[frag_occ_global]) : Float64[]
 
   classes = fill("Deleted", size(cMO_full, 2))
   classes[core_range] .= "Core"
@@ -1071,8 +1081,11 @@ function _build_region_spin_pi(EC::ECInfo, cMO_full::AbstractMatrix{T}, energies
   # accumulated Löwdin population of each support center on the selected π occupied orbitals
   support_pops = _accumulated_lowdin_pops(cMO_frag_occ, S, ao_atoms_global, support_for_info)
   support_charges = Float64[get(support_pops, a, 0.0) for a in support_for_info]
+  scores_frag = isempty(region_scores) ? Float64[] : region_scores[end-nfrag_occ+1:end]
   region_info = (charges=zeros(Float64, 0, 0), support_atoms=support_for_info,
-                 support_charges=support_charges, scores=region_scores)
+                 support_charges=support_charges, scores=scores_frag,
+                 energies=loc_occ_energies, virt_energies=loc_virt_energies,
+                 pseudo_energies=pseudo_occ_energies)
   return cMO_region, energies, classes, nfrag_occ, nfrag_virt, region_info
 end
 
@@ -1109,6 +1122,10 @@ function _print_region_orbitals(EC::ECInfo, space, energies, occupations, nfrag_
   has_charges = size(info.charges, 1) > 0 && size(info.charges, 2) >= nfrag_occ
   getocc(i) = (i >= 1 && i <= length(occupations)) ? occupations[i] : 0.0
   label_of(a) = (a >= 1 && a <= length(real_atom_labels)) ? real_atom_labels[a] : "atom$a"
+  # localized (pre-pseudo) fragment energies — the table reports the localized orbitals together
+  # with their charges; the pseudo-canonical energies (if any) are listed separately below
+  occ_e = get(info, :energies, Float64[])
+  eng(k) = k <= length(occ_e) ? occ_e[k] : energies[occ_global[k]]
 
   println()
   println("  ", spin_label, "region occupied orbitals ($nfrag_occ):")
@@ -1121,21 +1138,21 @@ function _print_region_orbitals(EC::ECInfo, space, energies, occupations, nfrag_
     chg = has_charges ? _dominant_charges_str(view(info.charges, :, size(info.charges, 2) - nfrag_occ + k), label_of) : "—"
     if has_scores
       sc = info.scores[length(info.scores) - nfrag_occ + k]
-      @printf("    %5i  %12.6f  %5.2f  %8.4f   %s\n", iorb, energies[iorb], getocc(iorb), sc, chg)
+      @printf("    %5i  %12.6f  %5.2f  %8.4f   %s\n", iorb, eng(k), getocc(iorb), sc, chg)
     else
-      @printf("    %5i  %12.6f  %5.2f   %s\n", iorb, energies[iorb], getocc(iorb), chg)
+      @printf("    %5i  %12.6f  %5.2f   %s\n", iorb, eng(k), getocc(iorb), chg)
     end
   end
 
   if nfrag_virt > 0
     vmode = pi_mode == :both ? "π" : (pi_mode != :none ? "support-OPAO" : String(virtual_mode))
     println()
-    println("  ", spin_label, "region virtual orbitals ($nfrag_virt, $vmode):")
-    println("    orbital       energy")
-    println("    ", repeat("─", 22))
-    for iorb in space.virt[1:nfrag_virt]
-      @printf("    %5i  %12.6f\n", iorb, energies[iorb])
-    end
+    println("  ", spin_label, "region virtual orbitals ($nfrag_virt, $vmode)")
+    # println("    orbital       energy")
+    # println("    ", repeat("─", 22))
+    # for iorb in space.virt[1:nfrag_virt]
+    #   @printf("    %5i  %12.6f\n", iorb, energies[iorb])
+    # end
   end
 
   if !isempty(info.support_atoms)
@@ -1145,12 +1162,19 @@ function _print_region_orbitals(EC::ECInfo, space, energies, occupations, nfrag_
     entries = String[]
     for (i, a) in enumerate(info.support_atoms)
       lab = atomic_centre_label(EC.system[a])
-      push!(entries, i <= length(charges) ? @sprintf("%s:%.2f", lab, charges[i]) : lab)
+      push!(entries, i <= length(charges) ? @sprintf("%s(%.2f)", lab, charges[i]) : lab)
     end
     println()
     println("  ", spin_label, "virtual-space support / PAO centers (accumulated charge): ", join(entries, "  "))
   end
-  pseudo && println("  ", spin_label, "fragment occupied/virtual blocks were pseudo-canonicalized")
+  # after pseudo-canonicalization the dumped fragment orbitals differ from the localized ones
+  # above; list their (occupied) orbital energies
+  pseudo_e = get(info, :pseudo_energies, Float64[])
+  if !isempty(pseudo_e)
+    println()
+    println("  ", spin_label, "occupied orbital energies after pseudo-canonicalization:")
+    println("    ", join([@sprintf("%12.6f", e) for e in pseudo_e], " "))
+  end
   return nothing
 end
 
