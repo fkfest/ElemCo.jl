@@ -793,3 +793,76 @@ ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
 @test length(EC.space['v']) == norb - 7              # 1 core + 4 inactive + 2 redundant removed
 ElemCo.restore_space!(EC, sp)
 end
+
+@testitem "region ghost PAO centers" tags=[:df, :quick] begin
+using ElemCo
+using ElemCo.TrexioInterface
+using ElemCo.Integrals: overlap, generate_basis, ao_list
+using LinearAlgebra
+
+# water plus an extra ghost H ("H3") above O: basis functions only, no electrons, so the
+# molecule stays neutral closed-shell. The ghost carries sizable density from the O orbitals.
+geometry = "bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507
+     H3     0.000000000    0.000000000    2.000000000"
+basis = Dict("ao" => "cc-pVDZ", "jkfit" => "cc-pvtz-jkfit", "mpfit" => "cc-pvdz-mpfit")
+
+@ECinit
+@dummy ["H3"]
+@dfhf
+
+ghost = 4   # global atom index of the ghost H3
+basis_ao = generate_basis(EC, "ao")
+S = overlap(basis_ao)
+ao_atoms_global = Int[Int(ao.icentre) for ao in ao_list(basis_ao)]
+ghost_aos = [i for i in eachindex(ao_atoms_global) if ao_atoms_global[i] == ghost]
+@test ElemCo.MSystems.is_dummy(EC.system[ghost])
+
+# total Löwdin weight of the ghost AOs in a coefficient block
+Shalf = real.(sqrt(Hermitian(Matrix(S))))
+ghost_weight(blk) = sum(abs2.(Shalf * blk)[ghost_aos, :])
+function load_dump(path)
+  io = open_trexio(path, "r")
+  try
+    b = read_trexio_basis(io)
+    orbs, _ = read_trexio_orbitals(io, b)
+    return orbs, read_trexio_orbital_classes(io)
+  finally
+    close_trexio(io)
+  end
+end
+
+# --- automatic detection (Löwdin population over the occupied orbitals) ---
+cMO, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
+cMO_occ = cMO[1][:, EC.space['o']]
+@test ElemCo.OrbRegion._collect_ghost_support(EC, cMO_occ, S, ao_atoms_global, 0.1)[1] == [ghost]
+@test isempty(ElemCo.OrbRegion._collect_ghost_support(EC, cMO_occ, S, ao_atoms_global, 0.5)[1])
+# the population of the ghost is reported (≈0.18) and reaches the 0.1 threshold
+@test ElemCo.OrbRegion._collect_ghost_support(EC, cMO_occ, S, ao_atoms_global, 0.1)[2][ghost] > 0.1
+
+# --- manual route: pao_centers includes the ghost; its AOs enter the Virtual space ---
+@set region mode=:inclusive virtual=:support_opao occ_charge_thr=0.2 atom_charge_thr=10.0 pao_centers=Int[]
+@set wf store="region_ghost_base.h5"
+@region [2]
+orbs0, cls0 = load_dump(joinpath(EC.scr, "region_ghost_base.h5"))
+v0 = findall(==("Virtual"), cls0[1])
+@test ghost_weight(orbs0[1][:, v0]) < 1.0    # ghost not in the support -> only incidental weight
+
+@set region pao_centers=[4]
+@set wf store="region_ghost_pao.h5"
+@region [2]
+orbs1, cls1 = load_dump(joinpath(EC.scr, "region_ghost_pao.h5"))
+v1 = findall(==("Virtual"), cls1[1])
+@test length(v1) > length(v0)                # ghost AOs added as OPAO virtuals
+@test ghost_weight(orbs1[1][:, v1]) > 2.0    # ghost now carries substantial virtual weight
+
+# --- automatic route end-to-end: a region on O auto-detects the ghost ---
+@set region virtual=:support_opao occ_charge_thr=0.2 atom_charge_thr=0.1 pao_centers=Int[]
+@set wf store="region_ghost_auto.h5"
+@region [1]
+orbs2, cls2 = load_dump(joinpath(EC.scr, "region_ghost_auto.h5"))
+v2 = findall(==("Virtual"), cls2[1])
+@test ghost_weight(orbs2[1][:, v2]) > 2.0    # ghost auto-included in the virtual space
+end

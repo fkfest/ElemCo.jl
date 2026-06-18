@@ -51,6 +51,16 @@ end
 - `region.atom_charge_thr`: threshold used to add atoms to the support used for fragment virtual construction. In the default `:complement` mode this uses the accumulated fragment charge over all selected occupied IBOs.
 - `region.pao_centers`: additional atom indices whose PAOs are added to the fragment virtual space. These centers are always included (regardless of `atom_charge_thr`) and let you extend the virtual space manually. They apply to all virtual-space constructions: the OPAO/complement ones and `region.pi=:both`, where the PAO OPAOs are appended to the π-projector virtuals (orthogonalized against them).
 
+### Dummy (ghost) atoms
+
+Dummy/ghost atoms carry basis functions but no electrons, so they have no IAOs and never
+contribute to the occupied (IBO-charge) selection. They *can*, however, be used as PAO centers
+to augment the virtual space — useful for mid-bond or augmentation functions:
+
+- automatically, when a ghost atom's Löwdin population over the fragment occupied orbitals
+  reaches `atom_charge_thr` (the same threshold as for real atoms); or
+- explicitly, by listing the ghost atom indices in `region.pao_centers`.
+
 The fragment occupied orbitals are always tagged as `Inactive` and are placed at the Fermi
 level (just below the virtual space). The frozen core *and* the non-selected environment
 occupied orbitals are tagged as `Core`, forming a contiguous block below the fragment.
