@@ -99,15 +99,15 @@ function select_lowdin_orth(S::AbstractMatrix; relthr::Real=1e-5, verbose::Bool=
   n = size(S, 1)
   A = Hermitian(Array(S))
   n == 0 && return similar(A, n, 0)
-  F = eigen(A)                                  # ascending real eigenvalues
-  λmax = F.values[end]
+  λ = eigvals(A)                                # ascending real eigenvalues (no eigenvectors)
+  λmax = λ[end]
   λmax <= 0 && return similar(A, n, 0)
-  r = count(>(relthr * λmax), F.values)
+  r = count(>(relthr * λmax), λ)
   r == 0 && return similar(A, n, 0)
   # select the r most independent (atom-centered) columns via pivoted Cholesky
   keep = sort(cholesky(A, RowMaximum(), check=false).p[1:r])
-  # symmetric Löwdin on the clean r×r block
-  Fs = eigen(Hermitian(Array(A)[keep, keep]))
+  # symmetric Löwdin on the clean r×r block (sub-block taken directly from A)
+  Fs = eigen(Hermitian(A[keep, keep]))
   Msub = Fs.vectors * Diagonal(inv.(sqrt.(Fs.values))) * Fs.vectors'
   M = zeros(eltype(Msub), n, r)
   M[keep, :] = Msub

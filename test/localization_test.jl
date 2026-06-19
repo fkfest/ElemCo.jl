@@ -888,7 +888,7 @@ o_aos = findall(==(1), ao_atoms)                # O is atom 1
 
 # PAO overlap of the O fragment: there is a clean ~1000x gap above one redundancy
 S_PAO = Hermitian(transpose(cv * (transpose(cv) * S[:, o_aos])) * S * (cv * (transpose(cv) * S[:, o_aos])))
-ev = sort(eigen(S_PAO).values)
+ev = eigvals(S_PAO)                              # sorted ascending for a Hermitian matrix
 @test count(>(1e-5 * ev[end]), ev) == 22        # eigen rank at the default threshold
 @test count(>(1e-7 * ev[end]), ev) == 23        # one near-redundant direction sits in (1e-7,1e-5)*λmax
 
