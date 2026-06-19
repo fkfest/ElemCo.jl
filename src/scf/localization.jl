@@ -805,20 +805,21 @@ function localize_boys(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
 end
 
 """
-    compute_opao_rotation(cMO_virt::AbstractMatrix, S::AbstractMatrix; tol=1e-8)
+    compute_opao_rotation(cMO_virt::AbstractMatrix, S::AbstractMatrix; relthr=1e-5)
 
 Compute the rotation matrix for virtual orbitals based on orthogonalized PAOs.
 
 PAOs (Projected Atomic Orbitals) are constructed by projecting AO basis functions
 onto the virtual space: ``C_{\\text{PAO}} = C_{\\text{virt}} C_{\\text{virt}}^T S``.
-The PAO overlap matrix is decomposed via ALPACA (pivoted Cholesky with rank control)
-to get orthogonal PAOs, which define a rotation of the virtual space.
+The PAO overlap matrix is orthogonalized via [`select_lowdin_orth`](@ref) (relative-
+threshold rank detection + atom-centered pivot selection + symmetric Löwdin), which
+removes redundant PAOs while keeping the OPAOs local. `relthr` is the
+[`loc.opaothr`](@ref ECInfos.LocOptions) option.
 
 Returns `R_virt` (nvirt × nvirt) such that `C_virt_loc = C_virt * R_virt`.
 """
 function compute_opao_rotation(cMO_virt::AbstractMatrix{T},
-                               S::AbstractMatrix; tol::Float64=1e-8) where T
-  nao = size(S, 1)
+                               S::AbstractMatrix; relthr::Real=1e-5) where T
   nvirt = size(cMO_virt, 2)
 
   # PAO coefficients: project AO basis functions onto virtual space
@@ -829,19 +830,19 @@ function compute_opao_rotation(cMO_virt::AbstractMatrix{T},
   # PAO overlap: S_PAO = C_PAO^T S C_PAO  (nAO × nAO, rank = nvirt)
   S_PAO = Hermitian(C_PAO' * S * C_PAO)
 
-  # Orthogonalize PAOs using ALPACA with explicit rank control
-  M = sqrtinvchol(S_PAO; tol=tol, max_rank=nvirt)  # nAO × nvirt
-  n_opao = size(M, 2)
-  if n_opao != nvirt
-    @warn "OPAO dimension ($n_opao) differs from virtual dimension ($nvirt)"
-  end
+  # Locality-preserving orthogonalization with relative redundancy detection
+  M = select_lowdin_orth(S_PAO; relthr=relthr)
 
-  # Orthogonal PAOs: C_OPAO = C_PAO * M  (nAO × nvirt, orthonormal under S)
+  # Orthogonal PAOs: C_OPAO = C_PAO * M  (nAO × n_opao, orthonormal under S)
   C_OPAO = C_PAO * M
 
-  # Virtual rotation: express canonical virtuals in OPAO basis
-  # R_virt = C_virt^T S C_OPAO  (nvirt × nvirt)
-  R_virt = cMO_virt' * S * C_OPAO
+  # Virtual rotation: express canonical virtuals in OPAO basis  (nvirt × n_opao)
+  R_virt = Matrix{T}(cMO_virt' * S * C_OPAO)
+  if size(R_virt, 2) < nvirt
+    # Genuinely redundant virtual space: complete with the orthogonal complement so the
+    # rotation stays square (nvirt × nvirt) and still spans the whole virtual space.
+    R_virt = hcat(R_virt, Matrix{T}(nullspace(adjoint(R_virt))))
+  end
 
   # Fix sign ambiguity: ensure largest element in each column is positive
   _fix_sign_convention!(R_virt)
@@ -892,7 +893,7 @@ function compute_localization_rotations(EC::ECInfo; exponent::Int=4)
 
   # OPAO for virtual orbitals
   println("  Computing orthogonal PAO rotation for virtual orbitals...")
-  R_virt = compute_opao_rotation(cMO_virt, S)
+  R_virt = compute_opao_rotation(cMO_virt, S; relthr=EC.options.loc.opaothr)
 
   nocc = size(R_occ, 1)
   nvirt = size(R_virt, 1)
@@ -1042,7 +1043,7 @@ function localize_orbitals(EC::ECInfo)
   if localize_virtual
     # OPAO for virtual orbitals
     println("  Computing orthogonal PAO rotation for virtual orbitals...")
-    R_virt = compute_opao_rotation(cMO_virt, S)
+    R_virt = compute_opao_rotation(cMO_virt, S; relthr=EC.options.loc.opaothr)
     cMO_full_loc[:, virt_range] = cMO_virt * R_virt
     if !isempty(energies_a)
       ε_virt = energies_a[virt_range]

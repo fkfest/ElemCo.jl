@@ -51,6 +51,13 @@ end
 - `region.atom_charge_thr`: threshold used to add atoms to the support used for fragment virtual construction. In the default `:complement` mode this uses the accumulated fragment charge over all selected occupied IBOs.
 - `region.pao_centers`: additional atom indices whose PAOs are added to the fragment virtual space. These centers are always included (regardless of `atom_charge_thr`) and let you extend the virtual space manually. They apply to all virtual-space constructions: the OPAO/complement ones and `region.pi=:both`, where the PAO OPAOs are appended to the π-projector virtuals (orthogonalized against them).
 
+All fragment virtual constructions orthogonalize the projected PAOs with the
+locality-preserving, redundancy-removing scheme described under Orthogonal PAOs in
+[Orbital Localization](localization.md). The `loc.opaothr`
+threshold (default `1e-5`) controls how aggressively redundant PAOs are pruned.
+When a redundant PAO is dropped, the corresponding virtual
+direction moves into the frozen (`Deleted`) complement instead of the active fragment.
+
 ### Dummy (ghost) atoms
 
 Dummy/ghost atoms carry basis functions but no electrons, so they have no IAOs and never

@@ -42,6 +42,7 @@
 
 * Fix a situation when an fcidump was deleted immediately after creation if dummy atoms are present. Now the fcidump is deleted in the `@dummy` macro directly and not in `@setupEC`.
 * Fix `freeze_nvirt` option (which was apparently not working at all before).
+* Fix redundancy detection in the orthogonal-PAO (OPAO) construction used by `@localize` and `@region`. The projected-PAO overlap was orthogonalized with an *absolute* (ALPACA) rank threshold that failed to detect the near-linear-dependencies that appear with diffuse/augmented basis sets (e.g. aug-cc-pVDZ), leaving numerically amplified junk orbitals in the (active) virtual space. The OPAOs are now built by detecting the rank from a *relative* eigenvalue threshold of the PAO overlap, selecting that many atom-centered PAOs by pivoted Cholesky, and orthogonalizing them with a symmetric Löwdin transformation — removing redundancies while keeping the OPAOs local. The relative threshold is the new `loc.opaothr` option (default `1e-5`).
 
 ## Version [v0.15.0] - 2026.02.05
 
