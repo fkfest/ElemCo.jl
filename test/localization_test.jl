@@ -439,7 +439,11 @@ end
     overlap_diag = abs.(diag(cMO_inc[1][:, virt_inc]' * S_inc_legacy * cMO_inc_legacy[1][:, virt_inc_legacy]))
     @test minimum(overlap_diag) < 0.95
   else
-    @test count(==("Virtual"), classa_inc) < count(==("Virtual"), classa_inc_legacy)
+    # support_opao prunes the redundant fragment PAO (a clean ~1e-8 eigenvalue of the
+    # O+H support-PAO overlap that the old absolute-threshold orthogonalization kept),
+    # so it yields one fewer active virtual than the complement construction, which
+    # spans the full virtual space via its IAO-antibonding targets.
+    @test count(==("Virtual"), classa_inc) > count(==("Virtual"), classa_inc_legacy)
   end
 
   basis = Dict("ao" => "cc-pVDZ",
@@ -745,7 +749,11 @@ using ElemCo
 using ElemCo.TrexioInterface
 using LinearAlgebra
 
-E_MP2 = -76.045624004869
+# Pseudo-canonicalized region MP2: the region active occupied/virtual blocks are
+# semicanonicalized, so the MP2 is well defined (a raw localized/OPAO active space has
+# no meaningful orbital energies for the MP2 denominators) and invariant to the OPAO
+# orthogonalization scheme.
+E_MP2 = -76.0441333320342
 
 geometry = "bohr
      O      0.000000000    0.000000000   -0.130186067
@@ -780,8 +788,9 @@ end
 @test active_after_freeze(EC; core=:none)[1]  == 5   # override: nothing frozen
 @test active_after_freeze(EC; freeze_nocc=2)[1] == 3 # override: freeze 2 lowest
 
-# Region dump (written back to wf.dump).
-@set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2
+# Region dump (written back to wf.dump). pseudo-canonicalize so the downstream MP2 has
+# well-defined orbital energies (see E_MP2 note above).
+@set region mode=:inclusive occ_charge_thr=0.2 atom_charge_thr=0.2 pseudo=true
 @region [2]
 io = open_trexio(joinpath(EC.scr, EC.options.wf.dump), "r")
 classa = try
@@ -846,6 +855,62 @@ ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
 @test issubset([8, norb], EC.space['v'])             # high-index region virtuals NOT frozen by mistake
 @test length(EC.space['v']) == norb - 7              # 1 core + 4 inactive + 2 redundant removed
 ElemCo.restore_space!(EC, sp)
+end
+
+@testitem "OPAO redundancy removal (diffuse basis)" tags=[:df, :quick] begin
+using ElemCo
+using ElemCo.Integrals: overlap, generate_basis
+using ElemCo.OrbTools: select_lowdin_orth
+using ElemCo.OrbLocalization: compute_ao_atoms
+using ElemCo.OrbRegion: _fragment_opao_rotation
+using LinearAlgebra
+
+# With a diffuse/augmented basis the O-centered PAOs projected onto the virtual space
+# carry a near-linear-dependency (eigenvalue ~1e-7*λmax). The old absolute-threshold
+# ALPACA orthogonalization kept it and amplified it ~1000x into a junk active virtual.
+# select_lowdin_orth detects it with a RELATIVE threshold (loc.opaothr) and drops it,
+# while keeping the OPAOs atom-centered (symmetric Löwdin on the selected pivots).
+geometry = "bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+basis = Dict("ao" => "avdz")
+
+@ECinit
+@dfhf
+
+cMO, _, _ = ElemCo.Wavefunctions.fetch_orbitals(EC)
+S = overlap(generate_basis(EC, "ao"))
+cv = cMO[1][:, EC.space['v']]
+nvirt = size(cv, 2)
+ao_atoms, natom = compute_ao_atoms(EC)
+o_aos = findall(==(1), ao_atoms)                # O is atom 1
+
+# PAO overlap of the O fragment: there is a clean ~1000x gap above one redundancy
+S_PAO = Hermitian(transpose(cv * (transpose(cv) * S[:, o_aos])) * S * (cv * (transpose(cv) * S[:, o_aos])))
+ev = eigvals(S_PAO)                              # sorted ascending for a Hermitian matrix
+@test count(>(1e-5 * ev[end]), ev) == 22        # eigen rank at the default threshold
+@test count(>(1e-7 * ev[end]), ev) == 23        # one near-redundant direction sits in (1e-7,1e-5)*λmax
+
+# select_lowdin_orth returns exactly the non-redundant, S-orthonormal set
+M = select_lowdin_orth(S_PAO; relthr=EC.options.loc.opaothr)
+@test size(M, 2) == 22
+COPAO = (cv * (transpose(cv) * S[:, o_aos])) * M
+@test maximum(abs.(transpose(COPAO) * S * COPAO - I)) < 1e-8   # well-conditioned, unlike the kept-23 case
+
+# the real fragment-OPAO rotation drops the redundancy and stays a square, orthogonal rotation
+R, nfrag = _fragment_opao_rotation(cv, S, ao_atoms, [1]; relthr=EC.options.loc.opaothr)
+@test nfrag == 22
+@test size(R) == (nvirt, nvirt)
+@test maximum(abs.(transpose(R) * R - I)) < 1e-8
+# a looser threshold keeps the junk orbital (documents the behaviour being fixed)
+@test _fragment_opao_rotation(cv, S, ao_atoms, [1]; relthr=1e-12)[2] == 23
+
+# the 22 active OPAOs stay local (predominantly O-centered)
+Cact = cv * R[:, 1:nfrag]
+SC = S * Cact
+maxpop = [maximum([sum(real(Cact[mu, j] * SC[mu, j]) for mu in findall(==(a), ao_atoms)) for a in 1:natom]) for j in 1:nfrag]
+@test sum(maxpop) / nfrag > 0.9                  # mean dominant-atom population (~0.97)
 end
 
 @testitem "region ghost PAO centers" tags=[:df, :quick] begin

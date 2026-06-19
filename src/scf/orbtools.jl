@@ -21,7 +21,7 @@ export show_orbitals
 export rotate_orbs, rotate_orbs!, normalize_phase!
 export try_load_starting_orbitals
 export left_from_right_rotations, project_onto_basis
-export canonical_orthogonalization, eigen_orth, n_redundant_orbitals
+export canonical_orthogonalization, select_lowdin_orth, eigen_orth, n_redundant_orbitals
 export orbital_classes_with_deleted, n_deleted_orbitals, freeze_orbitals!
 
 """
@@ -69,6 +69,50 @@ function canonical_orthogonalization(sao::AbstractMatrix, redthr; verbose=false)
   X = svec[:, keep] * Diagonal(inv.(sqrt.(sval[keep])))
   Xredundant = svec[:, .!keep]
   return X, Xredundant
+end
+
+"""
+    select_lowdin_orth(S::AbstractMatrix; relthr=1e-5, verbose=false)
+
+  Locality-preserving orthogonalizer of a Hermitian metric `S` (typically a projected
+  atomic-orbital (PAO) overlap `S_PAO = C_PAO' S C_PAO`), used to build orthogonal PAOs
+  (OPAOs) for the virtual space without redundancies and without delocalizing them.
+
+  Three decoupled steps, each using the right tool:
+  1. **Rank** `r` from the eigenvalues of `S` with a *relative* threshold: directions
+     with eigenvalue `> relthr * λmax` are kept. A relative cutoff is scale-invariant
+     and reliably separates genuine PAOs from near-linear-dependencies (which collapse
+     to `~1e-7 λmax` for diffuse/augmented basis sets), unlike an absolute threshold.
+  2. **Selection** of exactly `r` *actual* (atom-centered) PAOs via the top-`r` pivots
+     of a pivoted Cholesky of `S` — the `r` most linearly-independent columns. Pinning
+     the count to `r` from step 1 avoids relying on a fragile pivot threshold.
+  3. **Symmetric Löwdin** orthogonalization `S_sub^{-1/2}` of the selected (clean,
+     well-conditioned) `r×r` block, which keeps each OPAO as close as possible to its
+     parent PAO (maximally local; cf. [`canonical_orthogonalization`](@ref), which
+     instead rotates into overlap eigenvectors and delocalizes).
+
+  Returns `M` (`size(S,1) × r`) with `M' S M = I`, a drop-in for
+  `sqrtinvchol(S; max_rank=...)` in `C_OPAO = C_PAO * M`. `relthr` is the
+  [`loc.opaothr`](@ref ECInfos.LocOptions) option.
+"""
+function select_lowdin_orth(S::AbstractMatrix; relthr::Real=1e-5, verbose::Bool=false)
+  n = size(S, 1)
+  A = Hermitian(Array(S))
+  n == 0 && return similar(A, n, 0)
+  λ = eigvals(A)                                # ascending real eigenvalues (no eigenvectors)
+  λmax = λ[end]
+  λmax <= 0 && return similar(A, n, 0)
+  r = count(>(relthr * λmax), λ)
+  r == 0 && return similar(A, n, 0)
+  # select the r most independent (atom-centered) columns via pivoted Cholesky
+  keep = sort(cholesky(A, RowMaximum(), check=false).p[1:r])
+  # symmetric Löwdin on the clean r×r block (sub-block taken directly from A)
+  Fs = eigen(Hermitian(A[keep, keep]))
+  Msub = Fs.vectors * Diagonal(inv.(sqrt.(Fs.values))) * Fs.vectors'
+  M = zeros(eltype(Msub), n, r)
+  M[keep, :] = Msub
+  verbose && r < n && println("select_lowdin_orth: dropped $(n - r) redundant PAO(s) (relthr=$relthr)")
+  return M
 end
 
 """
