@@ -26,26 +26,37 @@
   start::String = ""
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
-  """`⟨:large⟩` core type for frozen-core approximation: 
-  - `:none` no frozen-core approximation, 
-  - `:small` semi-core orbitals correlated, 
-  - `:large` semi-core orbitals frozen. """
-  core::Symbol = :large
+  """`⟨:auto⟩` core type for frozen-core approximation:
+  - `:auto` freeze the orbitals tagged `Core` in the wf dump if present, otherwise fall back to `:large`,
+  - `:none` no frozen-core approximation,
+  - `:small` semi-core orbitals correlated,
+  - `:large` semi-core orbitals frozen.
+  Setting `core` to anything other than `:auto` (or setting `freeze_nocc`) overrides the
+  dump-derived core. """
+  core::Symbol = :auto
   """`⟨-1⟩` number of occupied (core) orbitals to freeze (overwrites core). """
   freeze_nocc::Int = -1
-  """`⟨0⟩` number of virtual (highest) orbitals to freeze. """
-  freeze_nvirt::Int = 0
+  """`⟨-1⟩` number of virtual (highest) orbitals to freeze. `-1` (auto) drops the orbitals
+  tagged `Deleted` in the wf dump (e.g. from `@region`); a value `≥ 0` overrides this and freezes
+  exactly that many highest virtuals. """
+  freeze_nvirt::Int = -1
   """`⟨0⟩` number of virtual (highest) positron orbitals to freeze. """
   freeze_nvirt_pos::Int = 0
-  """`⟨"-"⟩` occupied α (or closed-shell) orbitals. 
-  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
-  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`. """
+  """`⟨"-"⟩` occupied α (or closed-shell) orbitals.
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`.
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+  Orbital indices always refer to the **full MO space** (including frozen core): for ElemCo-generated
+  dumps with frozen core/deleted virtuals the list is automatically translated to the active space.
+  (Externally-read FCIDUMP files have no frozen-orbital information, so their indices are taken as-is.) """
   occa::String = "-"
-  """`⟨"-"⟩` occupied β orbitals. 
-  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
+  """`⟨"-"⟩` occupied β orbitals.
+  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
+  Like `occa`, indices refer to the full MO space."""
   occb::String = "-"
   """`⟨"-"⟩` active space.
-  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format. """
+  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format.
+  As for `occa`, an orbital-list string refers to the full MO space and is translated to the active
+  space; the `(#elec, #orb)` format is relative to the current (post-freeze) space. """
   active::String = "-"
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
@@ -273,6 +284,12 @@ end
   exponent::Int = 0
   """`⟨"ibo"⟩` Localization method: `"ibo"` (Intrinsic Bond Orbitals), `"pm"` (Pipek-Mezey with Mulliken charges), or `"boys"` (Foster-Boys). """
   method::String = "ibo"
+  """`⟨1e-5⟩` Relative eigenvalue threshold for detecting redundant PAOs in the
+  orthogonalized-PAO (OPAO) construction (`@localize`, `@region`). Eigenvectors of the
+  PAO overlap with eigenvalue below `opaothr * λmax` are treated as redundant and the
+  corresponding (least independent) PAO is dropped. Larger values prune more
+  aggressively; relevant for diffuse/augmented basis sets (e.g. aug-cc-pVDZ). """
+  opaothr::Float64 = 1e-5
   """`⟨""⟩` Minimal basis set for IAO construction. If empty, use `"minao"` type from basis Dict, or `"minao"` basis as fallback. """
   minao::String = ""
   """`⟨false⟩` Localize core orbitals among themselves (separately from valence). """
@@ -290,12 +307,12 @@ end
   - `:exclusive`: treat `@region(centers)` as additional exclusive centers
   """
   mode::Symbol = :inclusive
-  """`⟨Symbol[]⟩` additional center labels selected with the inclusive occupied-orbital rule, e.g. `[:O]`.
+  """`⟨Int[]⟩` additional atom indices selected with the inclusive occupied-orbital rule, e.g. `[1]`.
       The orbitals with significant contributions from these centers are added to the fragment. """
-  inclusive_centers::Vector{Symbol} = Symbol[]
-  """`⟨Symbol[]⟩` additional center labels selected with the exclusive occupied-orbital rule, e.g. `[:O, :H1]`. 
+  inclusive_centers::Vector{Int} = Int[]
+  """`⟨Int[]⟩` additional atom indices selected with the exclusive occupied-orbital rule, e.g. `[1, 2]`.
       The orbitals with significant contributions exclusively from these centers are added to the fragment. """
-  exclusive_centers::Vector{Symbol} = Symbol[]
+  exclusive_centers::Vector{Int} = Int[]
   """`⟨:none⟩` π-space selection mode.
   - `:none`: use the default IBO/PAO region selection
   - `:occupied`: select occupied π orbitals and keep PAO-defined virtuals
@@ -320,6 +337,10 @@ end
   occ_charge_thr::Float64 = 0.2
   """`⟨0.2⟩` threshold for adding atoms to the PAO support of the selected fragment. """
   atom_charge_thr::Float64 = 0.2
+  """`⟨Int[]⟩` additional atom indices whose PAOs are added to the fragment virtual space, e.g. `[3]`.
+      These centers extend the automatically determined PAO support and are always included
+      regardless of `atom_charge_thr`. """
+  pao_centers::Vector{Int} = Int[]
   """`⟨false⟩` pseudo-canonicalize the selected fragment occupied and virtual subspaces. """
   pseudo::Bool = false
 end

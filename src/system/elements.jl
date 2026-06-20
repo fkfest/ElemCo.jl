@@ -229,7 +229,9 @@ end
   - `:none` - no core
 """
 function ncoreorbs(elem::AbstractString, coretype::Symbol=:large)
-  if coretype == :large
+  if coretype == :large || coretype == :auto
+    # :auto falls back to the standard (:large) chemical core when no dump-derived
+    # core information is available (see freeze_orbitals!)
     ic = 5
   elseif coretype == :small
     ic = 6

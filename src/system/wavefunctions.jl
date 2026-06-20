@@ -12,7 +12,7 @@ using ..ElemCo.TrexioInterface
 using ..ElemCo.Properties
 
 export open_dump, close_dump
-export dump_orbitals, fetch_orbitals, fetch_orbital_classes
+export dump_orbitals, fetch_orbitals, fetch_orbital_classes, fetch_ao_fock
 export dump_rotations, fetch_rotations, is_rotation, is_biorthogonal
 export fetch_orbital_energies, fetch_orbital_occupations
 export load_wavefunction, save_wavefunction, copy_wavefunction
@@ -124,16 +124,16 @@ end
 function dump_orbitals end
 function dump_orbitals(EC::ECInfo, cMO;
                        basis=nothing, type="HF", energies=nothing, occupations=nothing,
-                       classes=nothing, MO="mo")
+                       classes=nothing, fock=nothing, MO="mo")
   open_dump(EC, "w") do io
     dump_orbitals(io, EC, cMO; basis=basis, type=type, energies=energies,
-      occupations=occupations, classes=classes, MO=MO)
+      occupations=occupations, classes=classes, fock=fock, MO=MO)
   end
   return
 end
 function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO;
                        basis=nothing, type="HF", energies=nothing, occupations=nothing,
-                       classes=nothing, MO="mo")
+                       classes=nothing, fock=nothing, MO="mo")
   println("Dumping orbitals ...")
   ocoefs = prepare_orb_coefficients(cMO)
   oenergies = prepare_orb_vectors(energies, is_restricted(ocoefs))
@@ -144,28 +144,34 @@ function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO;
     basis = generate_basis(EC, "ao")
   end
   write_trexio_orbitals(io, ocoefs, basis; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
+  # optionally persist the AO-basis Fock matrix (only meaningful for "mo" orbitals in an AO basis)
+  if !isnothing(fock) && MO == "mo"
+    write_trexio_ao_fock(io, fock isa SpinMatrix ? fock : SpinMatrix(fock), basis)
+  end
   return
 end
 
-""" 
+"""
     dump_rotations([io::TrexioFile,] EC::ECInfo, cRot::SpinMatrix; type="Rotation", energies=nothing, occupations=nothing,
-                   MO="mo", biorthogonal=false)
+                   fock=nothing, MO="mo", biorthogonal=false)
 
   Dump orbital rotations to TREXIO file.
 
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+`fock` (optional) is the Fock matrix in the original MO basis (the basis the rotation is relative
+to); it is stored as-is (no AO reordering, since rotations carry no AO basis).
 """
 function dump_rotations end
 function dump_rotations(EC::ECInfo, cRot::SpinMatrix;
-                        type="", energies=nothing, occupations=nothing, MO="mo", biorthogonal=false)
+                        type="", energies=nothing, occupations=nothing, fock=nothing, MO="mo", biorthogonal=false)
   open_dump(EC, "w") do io
     dump_rotations(io, EC, cRot; type=type, energies=energies, occupations=occupations,
-                   MO=MO, biorthogonal=biorthogonal)
+                   fock=fock, MO=MO, biorthogonal=biorthogonal)
   end
   return
 end
 function dump_rotations(io::TrexioFile, EC::ECInfo, cRot::SpinMatrix;
-                        type="", energies=nothing, occupations=nothing, MO="mo", biorthogonal=false)
+                        type="", energies=nothing, occupations=nothing, fock=nothing, MO="mo", biorthogonal=false)
   println("Dumping orbital rotations ...")
   oenergies = prepare_orb_vectors(energies, is_restricted(cRot))
   ooccupations = prepare_orb_vectors(occupations, is_restricted(cRot))
@@ -178,6 +184,10 @@ function dump_rotations(io::TrexioFile, EC::ECInfo, cRot::SpinMatrix;
   end
   write_trexio_rotations(io, cRot; type, classes=classes, energies=oenergies,
                          occupations=ooccupations, MO=MO)
+  # optionally persist the Fock matrix in the original MO basis (identity AO order)
+  if !isnothing(fock) && MO == "mo"
+    write_trexio_ao_fock(io, fock isa SpinMatrix ? fock : SpinMatrix(fock))
+  end
   return
 end
 
@@ -324,6 +334,31 @@ function fetch_orbitals(io::TrexioFile, EC::ECInfo; MO="mo")
   else
     return read_trexio_orbitals(io, basis; MO=MO)..., basis
   end
+end
+
+"""
+    fetch_ao_fock([io::TrexioFile,] EC::ECInfo; start=false) -> Union{SpinMatrix,Nothing}
+
+  Fetch the Fock matrix stored in the trexio dump (if present). For orbital dumps it is returned in
+  the internal (libcint) AO order; for rotation dumps it is returned in the original MO basis (as
+  stored). Returns a restricted or unrestricted `SpinMatrix`, or `nothing` if the dump does not
+  store a Fock matrix (e.g. dumps written before Fock persistence).
+
+  If `start=true`, reads from the start file (`wf.start`) instead of the current dump file.
+"""
+function fetch_ao_fock end
+function fetch_ao_fock(EC::ECInfo; start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_ao_fock(io, EC)
+  end
+end
+function fetch_ao_fock(io::TrexioFile, EC::ECInfo)
+  has_trexio_ao_fock(io) || return nothing
+  println("Fetching Fock matrix ...")
+  basis = read_trexio_basis(io)
+  # orbital dumps carry an AO basis (reorder to internal order); rotation dumps do not (the Fock is
+  # stored in the original MO basis and returned as-is)
+  return isempty(basis) ? read_trexio_ao_fock(io) : read_trexio_ao_fock(io, basis)
 end
 
 """

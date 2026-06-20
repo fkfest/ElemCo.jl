@@ -148,6 +148,12 @@ end
   ao_basis::Bool = false
   """ overlap matrix `S_{μν}` of the (non-orthogonal) AO basis; only stored if `ao_basis`. """
   overlap::Matrix{T} = zeros(T, 0, 0)
+  """ for ElemCo-generated reduced (frozen-core/deleted-virtual) dumps: the contiguous full-space
+      (original) orbital range of the active orbitals (frozen core below it, deleted virtuals above
+      it), i.e. active orbital `k` corresponds to full orbital `orig_orbs[k]`. Empty (`1:0`) for
+      externally-read or non-reduced dumps. Used to translate user-supplied orbital lists
+      (`occa`/`occb`/`active`), which always refer to the full MO space, to the active space. """
+  orig_orbs::UnitRange{Int} = 1:0
 end
 
 const TFDump{T<:Number} = FDump{T,3}
@@ -176,6 +182,7 @@ function FDump{T2,N}(fd::FDump{T1,N}) where {T1<:Number,T2<:Number,N}
     df3idx = fd.df3idx,
     ao_basis = fd.ao_basis,
     overlap = Matrix{T2}(fd.overlap),
+    orig_orbs = fd.orig_orbs,
   )
 end
 

@@ -103,7 +103,7 @@ end
   - `fockbuilder(cMO) -> fock` builds the Fock matrix from the current orbitals.
   - `solver(fock) -> (ϵ, cMO_new)` solves the (generalized) eigenvalue problem.
 
-  Returns `(EHF, ϵ)`.
+  Returns `(EHF, ϵ, fock)` (the converged Fock matrix is returned for orbital dumps).
 """
 function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, solver) where {T}
   SP = EC.space
@@ -117,6 +117,7 @@ function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, s
   flush_output()
   t0 = time_ns()
   t1 = time_ns()
+  local fock
   for it=1:EC.options.scf.maxit
     cMO2 = cMO[:,SP['o']]
     fock = fockbuilder(cMO)
@@ -142,7 +143,7 @@ function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, s
     cMO .= cMO_new
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
   end
-  return EHF, ϵ
+  return EHF, ϵ, fock
 end
 
 """
@@ -153,7 +154,8 @@ end
   updated in place. `fockbuilder(cMO)` returns the spin Fock pair (indexable `[1]`/`[2]`,
   e.g. a `SpinMatrix`); `solver(fock_spin)` returns `(ϵ_spin, cMO_spin)`. `h1a`/`h1b` are
   the α/β core Hamiltonians (equal for UHF). Convergence is driven by the metric
-  residual `S·D·F − F·D·S` per spin. Returns `(EHF, ϵ)` with `ϵ` an `[ϵα, ϵβ]` vector.
+  residual `S·D·F − F·D·S` per spin. Returns `(EHF, ϵ, fock)` with `ϵ` an `[ϵα, ϵβ]` vector
+  and `fock` the converged spin Fock pair.
 """
 function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver) where {T}
   SP = EC.space
@@ -169,6 +171,7 @@ function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fo
   flush_output()
   t0 = time_ns()
   t1 = time_ns()
+  local fock
   for it=1:EC.options.scf.maxit
     fock = fockbuilder(cMO)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
@@ -200,7 +203,7 @@ function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fo
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
   end
-  return EHF, ϵ
+  return EHF, ϵ, fock
 end
 
 """
@@ -225,6 +228,7 @@ function dfhf(EC::ECInfo{T}) where T
   @assert SP['o'] == SP['O'] "DF-HF only for closed-shell"
   direct = false
   local sao, hsmall, mmLfile, mmL, bao, bfit, Xorth, Xredundant
+  local fock
   Enuc = zero(real(T))
   if use_df3idx
     hsmall = EC.fd.int1
@@ -257,7 +261,7 @@ function dfhf(EC::ECInfo{T}) where T
     cMO -> gen_dffock(EC, cMO)
   end
   solver = use_df3idx ? (fock -> eigen(Hermitian(fock))) : (fock -> eigen_orth(fock, Xorth, Xredundant))
-  EHF, ϵ = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
+  EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
   normalize_phase!(cMO)
   if use_df3idx
     close(mmLfile)
@@ -281,10 +285,13 @@ function dfhf(EC::ECInfo{T}) where T
   draw_endline()
   delete_temporary_files!(EC)
   if use_df3idx
-    dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
+    # store the MO-basis Fock (same basis the rotation is relative to) for post-processing
+    dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, fock=SpinMatrix(fock))
   else
     classes = redundant_orbital_classes(EC, Xredundant)
-    dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes)
+    # persist the converged AO Fock so non-canonical post-processing (e.g. region.pseudo) can use it
+    dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations,
+                  classes=classes, fock=SpinMatrix(fock))
   end
   energies = OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
   return isnothing(dipole) ? energies : add_dipole_entries(energies, "DF-HF", dipole)
@@ -322,11 +329,11 @@ function hf(EC::ECInfo{T}) where {T}
   t1 = print_time(EC, t1, "guess orbitals", 2)
   fockbuilder = cMO -> gen_fock(EC, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
-  EHF, ϵ = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
+  EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
   normalize_phase!(cMO)
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
   classes = redundant_orbital_classes(EC, Xredundant)
-  dump_orbitals(EC, SpinMatrix(cMO); type="HF", energies=ϵ, occupations=occupations, classes=classes)
+  dump_orbitals(EC, SpinMatrix(cMO); type="HF", energies=ϵ, occupations=occupations, classes=classes, fock=SpinMatrix(fock))
   println("HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
@@ -359,14 +366,14 @@ function uhf(EC::ECInfo{T}) where {T}
   t1 = print_time(EC, t1, "guess orbitals", 2)
   fockbuilder = cMO -> gen_ufock(EC, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
-  EHF, ϵ = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)
+  EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end
   occupationsa = [ones(length(SP['o'])); zeros(length(SP['v']))]
   occupationsb = [ones(length(SP['O'])); zeros(length(SP['V']))]
   classes = redundant_orbital_classes_uhf(EC, Xredundant)
-  dump_orbitals(EC, cMO; type="UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
+  dump_orbitals(EC, cMO; type="UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes, fock=fock)
   println("UHF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
@@ -406,6 +413,7 @@ function dfhf_positron(EC::ECInfo)
   cPO = cPO.α
   ϵ = zeros(norb)
   ε_pos = zeros(norb)
+  local fock
   hsmall = load(EC, "h_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
   Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=false)
@@ -458,7 +466,7 @@ function dfhf_positron(EC::ECInfo)
   open_dump(EC, "w") do io
     occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
     classes = redundant_orbital_classes(EC, Xredundant)
-    dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes, MO="mo")
+    dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes, fock=SpinMatrix(fock), MO="mo")
     occupations = [1.0; zeros(length(SP['m'])-1)]
     dump_orbitals(io, EC, SpinMatrix(cPO); type="DF-HF positron", energies=ε_pos, occupations=occupations, MO="po")
   end
@@ -486,6 +494,7 @@ function dfuhf(EC::ECInfo{T}) where T
   norb = length(SP[':'])
   direct = false
   local sao, hsmall, h1a, h1b, mmLfile, mmL, MMLfile, MML, bao, bfit, Xorth, Xredundant
+  local fock
   has_MML = false
   Enuc = zero(real(T))
   if use_df3idx
@@ -531,7 +540,7 @@ function dfuhf(EC::ECInfo{T}) where T
     fockbuilder = direct ? (cMO -> gen_dffock(EC, cMO, bao, bfit)) : (cMO -> gen_dffock(EC, cMO))
     solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   end
-  EHF, ϵ = scf_open_shell!(EC, cMO, sao, h1a, h1b, Enuc, fockbuilder, solver)
+  EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, h1a, h1b, Enuc, fockbuilder, solver)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end
@@ -570,10 +579,13 @@ function dfuhf(EC::ECInfo{T}) where T
   draw_endline()
   delete_temporary_files!(EC)
   if use_df3idx
-    dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
+    # store the MO-basis Fock (same basis the rotation is relative to) for post-processing
+    dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), fock=fock)
   else
     classes = redundant_orbital_classes_uhf(EC, Xredundant)
-    dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
+    # persist the converged AO Fock so non-canonical post-processing (e.g. region.pseudo) can use it
+    dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb),
+                  classes=classes, fock=fock)
   end
   energies = OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))
   return isnothing(dipole) ? energies : add_dipole_entries(energies, "DF-UHF", dipole)

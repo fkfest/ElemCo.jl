@@ -584,7 +584,9 @@ function alpaca_pivots!(cache::ALPACACache{T,R,S},
   n = length(cache.cbuf)
   tol = resolve_pivotol(options, n)
   cache.pivotol = tol
-  smooth_floor = R(options.smooth_tol)
+  # Smooth pivot scaling: disable when max_rank is explicitly set — a fixed-rank
+  # truncation already pins the set of retained pivots (matches LLAMA's behavior).
+  smooth_floor = (options.max_rank < typemax(Int)) ? zero(R) : R(options.smooth_tol)
   use_smooth = smooth_floor > 0
   # Extended threshold: accept pivots down to tol * smooth_floor (they will be attenuated)
   tol_ext = use_smooth ? tol * smooth_floor : tol
@@ -714,7 +716,9 @@ function alpaca_pivots_general!(cache::ALPACACache{T},
   ncols = length(cache.rbuf)   # number of columns in the matrix
   tol = resolve_pivotol(options, m)
   cache.pivotol = tol
-  smooth_floor = R(options.smooth_tol)
+  # Smooth pivot scaling: disable when max_rank is explicitly set — a fixed-rank
+  # truncation already pins the set of retained pivots (matches LLAMA's behavior).
+  smooth_floor = (options.max_rank < typemax(Int)) ? zero(R) : R(options.smooth_tol)
   use_smooth = smooth_floor > 0
   tol_ext = use_smooth ? tol * smooth_floor : tol
   tol2 = abs2(tol_ext)

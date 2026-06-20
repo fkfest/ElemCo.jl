@@ -394,12 +394,10 @@ function dfccdriver(EC::ECInfo, method)
   end
   t1 = time_ns()
   space_save = save_space(EC)
-  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
-  nredund = EC.fd.df3idx ? 0 : n_deleted_orbitals(EC)
-  if nredund > 0
-    println("Freezing $nredund deleted (linearly-dependent) orbital(s) for the correlation treatment")
-  end
-  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt + nredund)
+  # frozen core, redundant orbitals, and (dump-deleted / explicit) virtuals — all selected by
+  # class/index, so a region's active orbitals are never frozen by mistake. For the df3idx path
+  # the redundant orbitals are already excluded from the integrals.
+  freeze_orbitals!(EC; redundant=!EC.fd.df3idx)
   t1 = print_time(EC, t1, "freeze core and virt", 2)
 
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)

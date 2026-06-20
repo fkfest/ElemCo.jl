@@ -18,8 +18,11 @@ The centers can be given as atom indices or center labels. Orbitals are read fro
 
 Center selection can also be driven directly from options:
 
-- `region.inclusive_centers`: centers that should always be treated as inclusive fragment centers.
-- `region.exclusive_centers`: centers that should always be treated as exclusive fragment centers.
+- `region.inclusive_centers`: atom indices that should always be treated as inclusive fragment centers.
+- `region.exclusive_centers`: atom indices that should always be treated as exclusive fragment centers.
+
+(The `@region [...]` macro argument also accepts center labels, but the `region.*_centers`
+options expect atom indices, e.g. `region.inclusive_centers=[1]`.)
 
 When `@region [...]` is called with an explicit center list, those centers are merged into the active selection implied by `region.mode`:
 
@@ -28,20 +31,71 @@ When `@region [...]` is called with an explicit center list, those centers are m
 
 This also means the macro argument can be omitted entirely when the centers are already configured through `region.inclusive_centers` and `region.exclusive_centers`.
 
+```julia
+@region ["C1"] begin
+  @set region mode=:exclusive inclusive_centers=[2] exclusive_centers=[1]
+end
+```
+
 ## Selection model
 
 `@region` localizes the occupied space with IBOs and then selects fragment orbitals from atom-resolved IAO charges.
 
 - `region.mode = :inclusive`: keep an occupied orbital if at least one selected center carries a large charge on it.
 - `region.mode = :exclusive`: keep an occupied orbital only if all of its large charges remain on the selected centers.
-- `region.inclusive_centers`: additional centers that participate in the inclusive selection regardless of how `@region` is called.
-- `region.exclusive_centers`: additional centers that participate in the exclusive selection regardless of how `@region` is called.
+- `region.inclusive_centers`: additional atom indices that participate in the inclusive selection regardless of how `@region` is called.
+- `region.exclusive_centers`: additional atom indices that participate in the exclusive selection regardless of how `@region` is called.
 - `region.occ_charge_thr`: threshold used to decide whether an occupied orbital belongs to the requested fragment.
 - `region.virtual = :complement` (default): build fragment virtuals by projecting the IAOs on the fragment-support atoms into the virtual space, then augment that antibonding-like complement with support-atom OPAOs.
 - `region.virtual = :support_opao`: keep the legacy support-atom OPAO construction directly.
 - `region.atom_charge_thr`: threshold used to add atoms to the support used for fragment virtual construction. In the default `:complement` mode this uses the accumulated fragment charge over all selected occupied IBOs.
+- `region.pao_centers`: additional atom indices whose PAOs are added to the fragment virtual space. These centers are always included (regardless of `atom_charge_thr`) and let you extend the virtual space manually. They apply to all virtual-space constructions: the OPAO/complement ones and `region.pi=:both`, where the PAO OPAOs are appended to the π-projector virtuals (orthogonalized against them).
 
-The fragment occupied orbitals are always tagged as `Inactive`. Frozen occupied orbitals are tagged as `Core`. Fragment virtuals are tagged as `Virtual`. All complements are tagged as `Deleted`.
+All fragment virtual constructions orthogonalize the projected PAOs with the
+locality-preserving, redundancy-removing scheme described under Orthogonal PAOs in
+[Orbital Localization](localization.md). The `loc.opaothr`
+threshold (default `1e-5`) controls how aggressively redundant PAOs are pruned.
+When a redundant PAO is dropped, the corresponding virtual
+direction moves into the frozen (`Deleted`) complement instead of the active fragment.
+
+### Dummy (ghost) atoms
+
+Dummy/ghost atoms carry basis functions but no electrons, so they have no IAOs and never
+contribute to the occupied (IBO-charge) selection. They *can*, however, be used as PAO centers
+to augment the virtual space — useful for mid-bond or augmentation functions:
+
+- automatically, when a ghost atom's Löwdin population over the fragment occupied orbitals
+  reaches `atom_charge_thr` (the same threshold as for real atoms); or
+- explicitly, by listing the ghost atom indices in `region.pao_centers`.
+
+The fragment occupied orbitals are always tagged as `Inactive` and are placed at the Fermi
+level (just below the virtual space). The frozen core *and* the non-selected environment
+occupied orbitals are tagged as `Core`, forming a contiguous block below the fragment.
+Fragment virtuals are tagged as `Virtual`; the remaining (non-selected) virtuals are tagged
+as `Deleted`.
+
+## Downstream usage
+
+With the default `wf.core = :auto` and `wf.freeze_nvirt = -1`, a subsequent correlated
+calculation (`@dfmp2`, `@dfcc`, `@cc`, `@fci`, …) reads these classes from the dump and
+automatically restricts the active space to the region: `Core` orbitals are frozen and
+`Deleted` virtuals are dropped, so only the `Inactive`/`Virtual` fragment is correlated.
+
+```julia
+@dfhf
+@region [:C1, :C2, :C3, :C4]   # writes the region dump back to wf.dump
+@dfmp2                          # correlates only the region; environment is frozen as core
+```
+
+The user can override the dump's prescription at any time:
+
+- `@set wf core=:none` (or any explicit `:none`/`:small`/`:large`) or `@set wf freeze_nocc=N`
+  selects the frozen core manually instead of using the dump's `Core` orbitals;
+- `@set wf freeze_nvirt=N` freezes exactly `N` highest virtuals instead of dropping the dump's
+  `Deleted` virtuals.
+
+For an ordinary (non-region) dump, `wf.core = :auto` reproduces the standard `:large`
+frozen-core behavior, since such dumps tag only the chemical core as `Core`.
 
 ## Pi-space modes
 
@@ -65,10 +119,6 @@ Example: keep only the frontier HOMO/LUMO pair from a four-center π system.
 @region [:C1, :C2, :C3, :C4] begin
   @set region pi=:both pi_occupied=1 pi_virtual=1
 end
-
-@region begin
-  @set region mode=:exclusive inclusive_centers=[:H1] exclusive_centers=[:O]
-end
 ```
 
 ## Pseudo-canonicalization
@@ -82,6 +132,16 @@ end
 ```
 
 This diagonalizes the occupied-occupied and virtual-virtual Fock subblocks in the selected fragment basis.
+
+The Fock matrix is read from the dump: HF calculations (`@dfhf`/`@dfuhf`) store the converged
+AO Fock matrix, and `@localize`/`@region` carry it forward unchanged (it depends only on the
+occupied density, which orbital rotations within the occupied space preserve). This makes
+pseudo-canonicalization exact even when the input orbitals are non-canonical — e.g. when chaining
+`@region` (without pseudo) into a second `@region pseudo=true`, or running it after `@localize`.
+
+If the dump predates Fock persistence (or was produced by a path that does not store it), `@region`
+falls back to reconstructing the Fock from the orbital energies and prints a warning; that
+reconstruction is only valid for canonical orbitals, so re-run the HF step to store the exact Fock.
 
 ## Notes And Limitations
 
