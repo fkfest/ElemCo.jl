@@ -1,3 +1,4 @@
+@testitem "ao_integrals" tags=[:system, :quick] begin
 using ElemCo
 using ElemCo.ECInfos
 using ElemCo.MSystems: parse_geometry
@@ -144,13 +145,6 @@ using LinearAlgebra
 end
 
 @testset "HF/UHF on AO integrals (@ints / @hf / @uhf)" begin
-  using ElemCo
-  using ElemCo.FciDumps: is_ao_basis
-  using ElemCo.MSystems: parse_geometry
-  using ElemCo.BasisSets: generate_basis, n_ao
-  using ElemCo.Integrals: eri_2e4idx, overlap, kinetic, nuclear
-  using LinearAlgebra
-
   geometry = "
     O   0.000000000   0.000000000  -0.130186067
     H1  0.000000000   1.489124508   1.033245507
@@ -299,4 +293,5 @@ end
     e_ref = @fci
     @test abs(e_ao["FCI"] - e_ref["FCI"]) < 1e-7
   end
+end
 end
