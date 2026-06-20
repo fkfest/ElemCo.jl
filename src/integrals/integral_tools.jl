@@ -19,8 +19,8 @@ using ..ElemCo.OrbTools
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
 export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
 export calc_system_df_integrals
-export generate_ao_fdump, ao_integrals
-export transform_ao2mo
+export generate_ao_fdump, ao_integrals, ensure_ao_integrals!
+export ao_to_mo!, set_mo_basis!, set_ao_basis!, mmap_int2_allocator
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -348,6 +348,11 @@ function generate_ao_fdump(EC::ECInfo{T}) where T
   S = overlap(bao)
   nao = size(S, 1)
   hAO = kinetic(bao) + nuclear(bao)
+  # Store the AO core Hamiltonian and overlap under the standard "h_AA"/"S_AA" keys (as the DF
+  # path does), so the SCF starting-orbital guesses — `guess_hcore`/`guess_sad`, which read them
+  # via `load(EC, "h_AA"/"S_AA")` — work for the non-DF AO-FDump path too.
+  save!(EC, "h_AA", Matrix{T}(hAO))
+  save!(EC, "S_AA", Matrix{T}(S))
   # Stream the exact AO integrals straight into a memory-mapped triangular
   # `int2[p,q,tri(r,s)] = ⟨pq|rs⟩` — never materializing the dense `nao⁴` tensor.
   ntri = nao*(nao+1)÷2
@@ -377,33 +382,127 @@ function ao_integrals(EC::ECInfo)
 end
 
 """
-    transform_ao2mo(fd_ao::FDump{T,3}, cMO::AbstractMatrix) -> FDump{T,3}
+    ensure_ao_integrals!(EC::ECInfo; method="@hf", alternative="@bohf") -> FDump
 
-  Transform a non-orthogonal AO-basis [`FDump`](@ref) into a standard (orthonormal)
-  MO-basis `TFDump` using the MO coefficients `cMO[μ,p]` (`nao × norb`).
+  Make sure `EC.fd` holds exact AO integrals for the current system, (re)generating them
+  with [`ao_integrals`](@ref) when it is empty or does not already hold AO integrals.
 
-  Exact (non-density-fitted) `O(N⁵)` four-index transformation. The result holds the MO
-  integrals `<pq|rs>_MO`, the MO 1-e integrals `h_{pq} = cᵀ h_{μν} c`, and the same
-  nuclear repulsion energy; it is a regular MO fcidump (`ao_basis = false`) that BOHF/CC
-  consume unchanged. No frozen-core folding is applied (full space).
-
-  Thin wrapper over [`transform_fcidump!`](@ref): the AO `FDump` is a non-orthogonal
-  "MO" dump, so transforming its integrals by `cMO` on both the left and the right yields
-  the MO dump. This reuses the memory-efficient `transform_int2` (σ-slab buffered) instead
-  of materializing the full `nao⁴` tensor. (Real orbitals; `transform_fcidump!` does not
-  conjugate, so a complex AO set would need the conjugated convention separately.)
+  If `EC.fd` currently holds **non-AO** integrals (e.g. an FCIDUMP / MO dump), they are
+  **discarded** and a warning is issued: `method` (`@hf`/`@uhf`) always builds HF from
+  freshly computed exact AO integrals, never from a loaded FCIDUMP. To run HF directly on
+  existing FCIDUMP integrals, use `alternative` (`@bohf`/`@bouhf`) instead.
 """
-function transform_ao2mo(fd_ao::FDump{T,3}, cMO::AbstractMatrix) where {T<:Number}
-  @assert fd_ao.ao_basis "transform_ao2mo requires an AO-basis FDump"
-  @assert !fd_ao.uhf "UHF AO transform not yet implemented (use a SpinMatrix method)"
-  @assert size(fd_ao.overlap, 1) == size(cMO, 1) "cMO has $(size(cMO,1)) AOs but the AO-FDump has $(size(fd_ao.overlap,1))"
-  fd = deepcopy(fd_ao)
+function ensure_ao_integrals!(EC::ECInfo; method="@hf", alternative="@bohf")
+  if isempty(EC.fd)
+    ao_integrals(EC)
+  elseif !is_ao_basis(EC.fd)
+    @warn "$method discards the non-AO integrals currently in EC.fd and builds HF from " *
+          "freshly generated exact AO integrals. To run HF on the existing FCIDUMP " *
+          "integrals instead, use $alternative."
+    ao_integrals(EC)
+  end
+  return EC.fd
+end
+
+"""
+    ao_to_mo!(fd::FDump{T,3}, cMO::AbstractMatrix) -> FDump{T,3}
+
+  Transform a non-orthogonal AO-basis [`FDump`](@ref) **in place** into a standard
+  (orthonormal) MO-basis `TFDump` using the MO coefficients `cMO[μ,p]` (`nao × norb`).
+
+  Exact (non-density-fitted) `O(N⁵)` four-index transformation: the AO `FDump` is a
+  non-orthogonal "MO" dump, so transforming its integrals by `cMO` on both the left and
+  the right yields the MO dump. Afterwards `fd` holds the MO integrals `<pq|rs>_MO`, the
+  MO 1-e integrals `h_{pq} = cᵀ h_{μν} c` and the same nuclear repulsion energy; it is a
+  regular MO fcidump (`ao_basis = false`, AO `overlap`/`AOBASIS` dropped) that BOHF/CC
+  consume unchanged.
+
+  `cMO` may be rectangular (`nao × nout` with `nout ≤ nao`): only those `nout` orbitals are
+  kept, `NORB`/`ORBSYM` are updated accordingly, and the transform cost scales with `nout`
+  (not `nao`). This is how deleted virtual orbitals are excluded — they carry
+  no electrons, so no core-energy folding is needed. Frozen-core *occupied* orbitals are
+  kept and frozen later by the correlated driver (`freeze_core!`).
+
+  By default the MO `fd.int2` is allocated in memory; pass `alloc` 
+  (e.g. [`mmap_int2_allocator`](@ref)) to write it straight onto a memory-mapped scratch file.
+  [`set_mo_basis!`](@ref) does exactly that for the production swap.
+"""
+function ao_to_mo!(fd::FDump{T,3}, cMO::AbstractMatrix; alloc=dims->zeros(T, dims)) where {T<:Number}
+  @assert fd.ao_basis "ao_to_mo! requires an AO-basis FDump"
+  @assert !fd.uhf "open-shell AO→MO transform not yet implemented (closed-shell only)"
+  @assert size(fd.overlap, 1) == size(cMO, 1) "cMO has $(size(cMO,1)) AOs but the AO-FDump has $(size(fd.overlap,1))"
+  # the orbitals must be orthonormal in the AO basis for the transform to yield correct MO integrals
+  @assert isapprox(cMO' * fd.overlap * cMO, I, atol=1e-8) "cMO are not orthonormal in the AO basis defined by fd.overlap"
   C = SpinMatrix(Matrix{T}(cMO))
-  transform_fcidump!(fd, C, C)          # exact AO→MO 4-index transform (reuses transform_int2)
-  # it is now a standard orthonormal MO fcidump — drop the AO-basis metadata
+  transform_fcidump!(fd, C, C; alloc=(key, dims)->alloc(dims))  # exact AO→MO 4-index transform
+  # it is now a standard orthonormal MO fcidump — drop the AO-basis metadata and record the
+  # (possibly reduced) orbital count, so passing a subset of `cMO` columns yields a smaller dump
+  nout = size(cMO, 2)
+  fd.head["NORB"] = [nout]
+  osym = get(fd.head, "ORBSYM", Int[])
+  fd.head["ORBSYM"] = length(osym) >= nout ? osym[1:nout] : ones(Int, nout)
   fd.ao_basis = false
   fd.overlap = zeros(T, 0, 0)
   fd.head["AOBASIS"] = [0]
+  return fd
+end
+
+"""
+    set_mo_basis!(EC::ECInfo, cMO::AbstractMatrix) -> FDump
+
+  Switch `EC.fd` in place from the AO basis to the MO basis defined by `cMO[μ,p]`,
+  overwriting the integrals exactly as `transform_fcidump!` does for a regular fcidump.
+
+  The exact AO→MO transform is applied to `EC.fd` (see [`ao_to_mo!`](@ref)) and the
+  resulting MO 2-e integrals are written **directly** onto a fresh memory-mapped scratch file
+  (`"mo_int2"`, registered in `EC.files` with description `"int2 mo"`) — the transform fills the
+  mmap in place, so the full `nout²·tri` MO tensor is never materialized in memory. The AO 2-e
+  integrals stay on disk in their own scratch file (`"ao_int2"`, written by
+  [`generate_ao_fdump`](@ref)), so the dump can be switched back with [`set_ao_basis!`](@ref).
+  After this call `EC.fd` is an ordinary orthonormal MO fcidump that every correlated
+  driver consumes unchanged; frozen-core / redundant-orbital handling is left to the
+  driver (`freeze_core!` / `n_deleted_orbitals`).
+"""
+function set_mo_basis!(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
+  # transform straight into the registered "mo_int2" scratch mmap (no intermediate in-memory copy)
+  ao_to_mo!(EC.fd, cMO; alloc=dims->newmmap(EC, "mo_int2", dims, T; description="int2 mo")[2])
+  flushmmap(EC, EC.fd.int2)
+  return EC.fd
+end
+
+"""
+    mmap_int2_allocator(EC::ECInfo) -> Function
+
+  Build an output allocator for [`transform_fcidump!`](@ref) that parks each transformed 2-e
+  integral block on its own fresh memory-mapped scratch file instead of an in-memory array.
+  The returned closure `(key, dims) -> mmap` creates (and registers in `EC.files`) a scratch
+  file named after the integral block (`key` ∈ `"int2"`, `"int2aa"`, `"int2bb"`, `"int2ab"`)
+  and returns the (zero-initialized) mmaped array to be filled in place. Use it to transform
+  large integrals without ever materializing the full result in memory.
+"""
+function mmap_int2_allocator(EC::ECInfo{T}) where {T<:Number}
+  return (key, dims) -> newmmap(EC, key, dims, T; description=key)[2]
+end
+
+"""
+    set_ao_basis!(EC::ECInfo) -> FDump
+
+  Switch `EC.fd` back to the non-orthogonal AO basis, the inverse of
+  [`set_mo_basis!`](@ref). The AO 2-e integrals are re-mmapped from their scratch file
+  (`"ao_int2"`, written by [`generate_ao_fdump`](@ref)); the AO core Hamiltonian and
+  overlap are rebuilt from the AO basis. No-op if `EC.fd` is already an AO dump.
+"""
+function set_ao_basis!(EC::ECInfo{T}) where {T<:Number}
+  fd = EC.fd
+  is_ao_basis(fd) && return fd
+  @assert haskey(EC.files, "ao_int2") "no AO integrals on file (\"ao_int2\"); call ao_integrals(EC) first"
+  _, aoint2 = mmap(EC, "ao_int2")       # dims + type recovered from the mmap header
+  fd.int2 = aoint2
+  bao = generate_basis(EC, "ao")
+  fd.int1 = Matrix{T}(kinetic(bao) + nuclear(bao))
+  fd.overlap = Matrix{T}(overlap(bao))
+  fd.ao_basis = true
+  fd.head["AOBASIS"] = [1]
   return fd
 end
 

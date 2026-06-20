@@ -102,7 +102,7 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
     if !fock_only
-      oovv = is_ao_basis(EC.fd) ? load4idx(EC,"oovv_bare") : ints2(EC,"oovv")
+      oovv = is_ao_basis(EC.fd) ? load4idx(EC,"d_oovv") : ints2(EC,"oovv")
       @mtensor begin
         ET1d = T1[a,i] * (T1[b,j] * oovv[i,j,a,b])
         ET1ex = T1[b,i] * (T1[a,j] * oovv[i,j,a,b])
@@ -158,7 +158,7 @@ end
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2)
-  oovv = is_ao_basis(EC.fd) ? load4idx(EC,"oovv_bare") : ints2(EC,"oovv")
+  oovv = is_ao_basis(EC.fd) ? load4idx(EC,"d_oovv") : ints2(EC,"oovv")
   @mtensor begin
     ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
     ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
@@ -217,7 +217,7 @@ end
 """
 function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
-  int2 = is_ao_basis(EC.fd) ? load4idx(EC,"oovv_bare") : ints2(EC,"oovv")
+  int2 = is_ao_basis(EC.fd) ? load4idx(EC,"d_oovv") : ints2(EC,"oovv")
   ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
     @mtensor begin
@@ -1562,9 +1562,22 @@ end
       C̃ᴸ = [ C_o | C_v − C_o·T1ᵀ ],   C̃ᴿ = [ C_o + C_v·T1 | C_v ],
 
   giving dressed `⟨pq|rs⟩ = Σ ⟨μν|ρσ⟩ C̃ᴸ[μ,p] C̃ᴸ[ν,q] C̃ᴿ[ρ,r] C̃ᴿ[σ,s]` (bra indices
-  use `C̃ᴸ`, ket indices `C̃ᴿ`). The bra half-transform is done one `σ`-slab at a time and
-  the bra-2 index is restricted to occupied, so the peak memory is `O(nao³·nocc)` rather
-  than the full `nao⁴` tensor.
+  use `C̃ᴸ`, ket indices `C̃ᴿ`).
+
+  Every block needed has at least two occupied indices, so the transform goes to the
+  occupied space as early as possible. Looping once over the AO integrals (one `σ` = ket-2
+  slab at a time, read straight from the triangular storage — no `detri_int2`), we build
+  three intermediates that each carry exactly two occupied indices and the retained `σ`:
+
+      ooAA ← G_oo[i,j,ρ,σ]  = Σ ⟨μν|ρσ⟩ C̃ᴸ_o[μ,i] C̃ᴸ_o[ν,j]     → d_oooo / d_oovo / d_oovv
+      AooA ← G_Aoo[μ,i,j,σ] = Σ ⟨μν|ρσ⟩ C̃ᴸ_o[ν,i] C̃ᴿ_o[ρ,j]     → d_voov
+      oAoA ← G_oAo[i,ν,j,σ] = Σ ⟨μν|ρσ⟩ C̃ᴸ_o[μ,i] C̃ᴿ_o[ρ,j]     → d_vovo
+
+  `d_vovo[a,i,b,j] = ⟨ai|bj⟩ = ⟨ia|jb⟩` is obtained from `oAoA` by electron-exchange
+  symmetry (so it, like the others, keeps `σ` and avoids a separate ket-2 contraction). The
+  remaining two AO indices of each intermediate are transformed last, only to the spaces
+  the blocks need — the full `nao⁴` tensor, the full MO integrals, and every all-virtual
+  block are never formed. Occupied-restricted indices use `i,j,k,l,m,n`.
 """
 function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
   SP = EC.space
@@ -1573,35 +1586,48 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
   CL = Matrix{T}(cMO); CR = Matrix{T}(cMO)
   if length(T1) > 0
     Co = cMO[:, occ]; Cv = cMO[:, virt]
-    @mtensor CLv[μ,a] := Co[μ,i] * T1[a,i]
-    @mtensor CRo[μ,i] := Cv[μ,a] * T1[a,i]
-    CL[:, virt] .-= CLv
-    CR[:, occ]  .+= CRo
+    @mtensor cl_corr[μ,a] := Co[μ,i] * T1[a,i]
+    @mtensor cr_corr[μ,i] := Cv[μ,a] * T1[a,i]
+    CL[:, virt] .-= cl_corr
+    CR[:, occ]  .+= cr_corr
   end
-  # Transform the AO ⟨μν|ρσ⟩ into the dressed integrals (bra indices use C̃ᴸ, ket use C̃ᴿ).
-  # Every block we need has the bra-2 index (q) occupied, so q is restricted to `occ`; the
-  # bra half-transform is done one σ-slab at a time, so the peak memory is O(nao³·nocc)
-  # instead of materializing the full nao⁴ tensor.
   nocc = length(occ)
-  CLq = CL[:, occ]
+  # dressed coefficients split into occupied/virtual columns (bra uses C̃ᴸ, ket uses C̃ᴿ)
+  CLo = CL[:, occ]; CLv = CL[:, virt]
+  CRo = CR[:, occ]; CRv = CR[:, virt]
   int2 = EC.fd.int2
-  half = zeros(T, nao, nocc, nao, nao)            # half[p, q∈occ, ρ, σ]
+  # One pass over the AO integrals: for each ket-2 index σ=s read the bra slab straight from
+  # the triangular storage (ρ≤s is a contiguous block; ρ>s uses ⟨μν|ρs⟩ = ⟨νμ|sρ⟩), then
+  # contract the two occupied indices of each intermediate immediately.
+  G_oo  = zeros(T, nocc, nocc, nao, nao)   # ooAA half: [i,j,ρ,σ]
+  G_Aoo = zeros(T, nao,  nocc, nocc, nao)  # AooA half: [μ,i,j,σ]
+  G_oAo = zeros(T, nocc, nao,  nocc, nao)  # oAoA half: [i,ν,j,σ]
+  braσ = zeros(T, nao, nao, nao)           # [μ,ν,ρ] = ⟨μν|ρσ⟩ for the current σ
   for s in 1:nao
-    braσ = reshape(detri_int2(int2, nao, 1:nao, 1:nao, 1:nao, s:s), nao, nao, nao)  # ⟨μν|ρs⟩
-    hs = @view half[:,:,:,s]
-    @mtensor hs[p,q,r] = (braσ[μ,ν,r] * CL[μ,p]) * CLq[ν,q]
+    braσ[:, :, 1:s] .= @view int2[:, :, uppertriangular_range(s)]        # ρ ≤ s
+    for ρ in s+1:nao
+      braσ[:, :, ρ] .= transpose(@view int2[:, :, uppertriangular_index(s, ρ)])  # ρ > s
+    end
+    goo = @view G_oo[:,:,:,s]; gAoo = @view G_Aoo[:,:,:,s]; goAo = @view G_oAo[:,:,:,s]
+    @mtensor goo[i,j,ρ]  = (braσ[μ,ν,ρ] * CLo[μ,i]) * CLo[ν,j]
+    @mtensor gAoo[μ,i,j] = (braσ[μ,ν,ρ] * CLo[ν,i]) * CRo[ρ,j]
+    @mtensor goAo[i,ν,j] = (braσ[μ,ν,ρ] * CLo[μ,i]) * CRo[ρ,j]
   end
-  @mtensor tmp[p,q,r,s] := half[p,q,ρ,s] * CR[ρ,r]   # ket-1 transform
-  @mtensor D[p,q,r,s]   := tmp[p,q,r,σ] * CR[σ,s]     # ket-2 transform ⇒ dressed ⟨pq|rs⟩ (q∈occ)
+  # Transform the two remaining AO indices of each intermediate, only into the needed spaces.
+  @mtensor Goo_o[i,j,k,σ] := G_oo[i,j,ρ,σ] * CRo[ρ,k]
+  @mtensor Goo_v[i,j,a,σ] := G_oo[i,j,ρ,σ] * CRv[ρ,a]
+  @mtensor d_oooo[i,j,k,l] := Goo_o[i,j,k,σ] * CRo[σ,l]
+  @mtensor d_oovo[i,j,a,k] := Goo_v[i,j,a,σ] * CRo[σ,k]
+  @mtensor d_oovv[i,j,a,b] := Goo_v[i,j,a,σ] * CRv[σ,b]
+  @mtensor d_voov[a,i,j,b] := (G_Aoo[μ,i,j,σ] * CLv[μ,a]) * CRv[σ,b]
+  @mtensor oVoV[i,a,j,b]   := (G_oAo[i,ν,j,σ] * CLv[ν,a]) * CRv[σ,b]
+  @mtensor d_vovo[a,i,b,j] := oVoV[i,a,j,b]   # electron exchange: ⟨ai|bj⟩ = ⟨ia|jb⟩
+  save!(EC, "d_oooo", d_oooo); save!(EC, "d_oovo", d_oovo); save!(EC, "d_oovv", d_oovv)
+  save!(EC, "d_voov", d_voov); save!(EC, "d_vovo", d_vovo)
   # dressed 1-electron: h̃[p,q] = Σ h_AO[μν] C̃ᴸ[μ,p] C̃ᴿ[ν,q]
   hao = Matrix{T}(integ1(EC.fd))
   @mtensor dh[p,q] := (hao[μ,ν] * CL[μ,p]) * CR[ν,q]
   save!(EC, "dh_mm", dh)
-  d_oovo = D[occ,:,virt,occ]; save!(EC, "d_oovo", d_oovo)   # D dim-2 is the occ space (size nocc)
-  save!(EC, "d_oovv", D[occ,:,virt,virt])
-  d_oooo = D[occ,:,occ,occ]; save!(EC, "d_oooo", d_oooo)
-  d_voov = D[virt,:,occ,virt]; save!(EC, "d_voov", d_voov)
-  d_vovo = D[virt,:,virt,occ]; save!(EC, "d_vovo", d_vovo)
   # dressed closed-shell Fock (only o,o / o,v / v,v blocks are used downstream)
   dfock = copy(dh)
   @mtensor begin
@@ -1621,7 +1647,7 @@ end
 
   Set up the *bare* (undressed) MO quantities an AO-direct closed-shell CC run needs for
   its energy/HF evaluation — the MO Fock (`f_mm`/`e_m`), one-electron Hamiltonian
-  (`h1_bare`) and `⟨ij|ab⟩` (`oovv_bare`) — built once from the AO FDump and the stored MO
+  (`h_mm`) and `⟨ij|ab⟩` (`d_oovv`) — built once from the AO FDump and the stored MO
   coefficients (via [`ao_dressed_ints`](@ref) with `T1=∅`). The residual rebuilds the
   *dressed* integrals each iteration without overwriting these. Returns the reference
   closed-shell HF energy.
@@ -1632,10 +1658,10 @@ function ao_cc_setup!(EC::ECInfo)
   fock = load2idx(EC, "df_mm")
   save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
   eps = diag(fock); save!(EC, "e_m", eps); save!(EC, "e_M", eps)
-  save!(EC, "h1_bare", load2idx(EC, "dh_mm"))
-  save!(EC, "oovv_bare", load4idx(EC, "d_oovv"))
+  h_mm = load2idx(EC, "dh_mm")
+  save!(EC, "h_mm", h_mm)
   SP = EC.space
-  EHF = sum(eps[SP['o']]) + sum(diag(load2idx(EC,"h1_bare")[SP['o'],SP['o']])) + EC.fd.int0
+  EHF = sum(eps[SP['o']]) + sum(diag(h_mm[SP['o'],SP['o']])) + EC.fd.int0
   return EHF
 end
 
@@ -3248,7 +3274,8 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   if orbopt && qv
     Rpq = rotation_matrix(EC, Amps1[1])
     if EC.options.cc.keepOQVorbitals
-      transform_fcidump!(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
+      # park the rotated 2-e integrals on scratch mmaps instead of materializing them in memory
+      transform_fcidump!(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq); alloc=mmap_int2_allocator(EC))
     else
       rotate_ints(EC, Rpq)
       @mtensor int1_r[p,q] := EC.fd.int1[p',q'] * Rpq[p',p] * Rpq[q',q]

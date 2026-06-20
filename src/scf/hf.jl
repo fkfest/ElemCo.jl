@@ -1,6 +1,6 @@
 """
 Closed- and open-shell Hartree-Fock, both density-fitted (`dfhf`/`dfuhf`) and
-exact non-DF AO (`ao_hf`), sharing a common SCF loop with a pluggable Fock builder.
+exact non-DF AO (`hf`), sharing a common SCF loop with a pluggable Fock builder.
 """
 module HF
 using LinearAlgebra
@@ -19,14 +19,83 @@ using ..ElemCo.Properties
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 
-export dfhf, dfhf_positron, dfuhf, ao_hf, ao_uhf
+export dfhf, dfhf_positron, dfuhf, hf, uhf
 
 """
-    scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver; thren)
+    scf_thren(EC)
+
+  Energy-convergence threshold for the SCF: the user-set `scf.thren` if non-negative,
+  otherwise a default derived from the residual threshold (`sqrt(scf.thr)*0.1`).
+"""
+function scf_thren(EC::ECInfo)
+  thren = EC.options.scf.thren
+  return thren < 0.0 ? sqrt(EC.options.scf.thr)*0.1 : thren
+end
+
+"""
+    canonical_orth_for_occ(EC, sao; open_shell)
+
+  Canonical orthogonalization of the AO overlap `sao` (handling linearly-dependent basis
+  sets) together with the guard that enough orbitals survive to host the occupied space.
+  Returns `(Xorth, Xredundant)`.
+"""
+function canonical_orth_for_occ(EC::ECInfo, sao; open_shell::Bool)
+  SP = EC.space
+  Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
+  nocc = open_shell ? max(length(SP['o']), length(SP['O'])) : length(SP['o'])
+  @assert size(Xorth, 2) ≥ nocc "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left for $nocc occupied. Lower scf.redthr."
+  return Xorth, Xredundant
+end
+
+"""
+    redundant_orbital_classes(EC, Xredundant)
+
+  Closed-shell orbital classes (with deleted/redundant orbitals flagged) for
+  `dump_orbitals`, or `nothing` when no orbitals were removed.
+"""
+function redundant_orbital_classes(EC::ECInfo, Xredundant)
+  nredund = size(Xredundant, 2)
+  nredund > 0 || return nothing
+  SP = EC.space
+  return orbital_classes_with_deleted(SP['o'], length(SP[':']), nredund)
+end
+
+"""
+    redundant_orbital_classes_uhf(EC, Xredundant)
+
+  Open-shell analogue of [`redundant_orbital_classes`](@ref): a per-spin `(α, β)` tuple of
+  orbital classes, or `nothing` when no orbitals were removed.
+"""
+function redundant_orbital_classes_uhf(EC::ECInfo, Xredundant)
+  nredund = size(Xredundant, 2)
+  nredund > 0 || return nothing
+  SP = EC.space
+  norb = length(SP[':'])
+  return (orbital_classes_with_deleted(SP['o'], norb, nredund),
+          orbital_classes_with_deleted(SP['O'], norb, nredund))
+end
+
+"""
+    starting_orbitals(EC)
+
+  Starting orbitals for the DF SCF (`dfhf`/`dfuhf`): previously saved orbitals if present,
+  otherwise the configured `scf.guess`. Always returns a `SpinMatrix`; the caller reduces it
+  to the closed-shell α block or unrestricts it as needed.
+"""
+function starting_orbitals(EC::ECInfo)
+  cMO, loaded = try_load_starting_orbitals(EC)
+  if !loaded
+    cMO = guess_orb(EC, EC.options.scf.guess)
+  end
+  return cMO
+end
+
+"""
+    scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
 
   Shared closed-shell SCF iteration loop, parameterized by a pluggable Fock builder
   and eigensolver. Used by both the density-fitted HF (`dfhf`) and the exact
-  non-density-fitted AO-HF (`ao_hf`).
+  non-density-fitted HF (`hf`).
 
   - `cMO` (`nAO × nMO`) holds the orbital coefficients and is updated *in place*.
   - `sao` is the AO overlap (`I` for already-orthonormal MO integrals).
@@ -36,9 +105,10 @@ export dfhf, dfhf_positron, dfuhf, ao_hf, ao_uhf
 
   Returns `(EHF, ϵ)`.
 """
-function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, solver; thren) where {T}
+function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, solver) where {T}
   SP = EC.space
   norb = length(SP[':'])
+  thren = scf_thren(EC)
   diis = Diis(EC)
   ϵ = zeros(real(T), norb)
   EHF = zero(real(T))
@@ -76,18 +146,19 @@ function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, s
 end
 
 """
-    scf_open_shell!(EC, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver; thren)
+    scf_open_shell!(EC, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver)
 
   Shared unrestricted (open-shell) SCF loop with a pluggable Fock builder and solver,
   the open-shell analogue of [`scf_closed_shell!`](@ref). `cMO` (α/β coefficients) is
   updated in place. `fockbuilder(cMO)` returns the spin Fock pair (indexable `[1]`/`[2]`,
   e.g. a `SpinMatrix`); `solver(fock_spin)` returns `(ϵ_spin, cMO_spin)`. `h1a`/`h1b` are
-  the α/β core Hamiltonians (equal for AO-UHF). Convergence is driven by the metric
+  the α/β core Hamiltonians (equal for UHF). Convergence is driven by the metric
   residual `S·D·F − F·D·S` per spin. Returns `(EHF, ϵ)` with `ϵ` an `[ϵα, ϵβ]` vector.
 """
-function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver; thren) where {T}
+function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver) where {T}
   SP = EC.space
   norb = length(SP[':'])
+  thren = scf_thren(EC)
   spocc = ('o', 'O')
   h1 = (h1a, h1b)
   diis = Diis(EC)
@@ -105,11 +176,13 @@ function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fo
     Δfock = [zeros(T, norb, norb), zeros(T, norb, norb)]
     var = zero(real(T))
     for ispin = 1:2
-      den = gen_density_matrix(EC, cMO[ispin], cMO[ispin], SP[spocc[ispin]])
+      cMOo = cMO[ispin][:, SP[spocc[ispin]]]
+      den = cMOo * cMOo'                       # Hermitian density C·Cᵀ (complex: C·C†)
       fhsmall = fock[ispin] + h1[ispin]
-      @mtensor efh = 0.5 * (den[p,q] * fhsmall[p,q])
+      @mtensor efh = 0.5 * (conj(cMOo[p,i]) * fhsmall[p,q]) * cMOo[q,i]
       efhsmall[ispin] = real(efh)
-      Δfock[ispin] = sao*den'*fock[ispin] - fock[ispin]*den'*sao
+      sdf = sao*den*fock[ispin]
+      Δfock[ispin] = sdf - sdf'                # S·D·F − F·D·S
       var += sum(abs2, Δfock[ispin])
     end
     EHF = efhsmall[1] + efhsmall[2] + Enuc
@@ -150,10 +223,6 @@ function dfhf(EC::ECInfo{T}) where T
   SP = EC.space
   norb = length(SP[':'])
   @assert SP['o'] == SP['O'] "DF-HF only for closed-shell"
-  thren = EC.options.scf.thren
-  if thren < 0.0
-    thren = sqrt(EC.options.scf.thr)*0.1
-  end
   direct = false
   local sao, hsmall, mmLfile, mmL, bao, bfit, Xorth, Xredundant
   Enuc = zero(real(T))
@@ -166,24 +235,19 @@ function dfhf(EC::ECInfo{T}) where T
   else
     @assert T == Float64 "DF-HF with 3-index integrals only implemented for real case"
     direct = EC.options.scf.direct
-    guess = EC.options.scf.guess
     Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
     if direct
       bao = generate_basis(EC, "ao")
       bfit = generate_basis(EC, "jkfit")
     end
     t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-    cMO_sm, loaded = try_load_starting_orbitals(EC)
-    if !loaded
-      cMO_sm = guess_orb(EC, guess)
-    end
-    t1 = print_time(EC, t1, "guess orbitals", 2)
+    cMO_sm = starting_orbitals(EC)
     @assert is_restricted(cMO_sm) "DF-HF only implemented for closed-shell"
     cMO = cMO_sm.α
+    t1 = print_time(EC, t1, "guess orbitals", 2)
     hsmall = load(EC, "h_AA", Val(2))
     sao = load(EC, "S_AA", Val(2))
-    Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
-    @assert size(Xorth, 2) ≥ length(SP['o']) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left for $(length(SP['o'])) occupied. Lower scf.redthr."
+    Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=false)
   end
   fockbuilder = if use_df3idx
     cMO -> gen_df3idx_fock(EC, hsmall, mmL, cMO[:,SP['o']])
@@ -193,7 +257,7 @@ function dfhf(EC::ECInfo{T}) where T
     cMO -> gen_dffock(EC, cMO)
   end
   solver = use_df3idx ? (fock -> eigen(Hermitian(fock))) : (fock -> eigen_orth(fock, Xorth, Xredundant))
-  EHF, ϵ = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver; thren)
+  EHF, ϵ = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
   normalize_phase!(cMO)
   if use_df3idx
     close(mmLfile)
@@ -219,8 +283,7 @@ function dfhf(EC::ECInfo{T}) where T
   if use_df3idx
     dump_rotations(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations)
   else
-    nredund = size(Xredundant, 2)
-    classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
+    classes = redundant_orbital_classes(EC, Xredundant)
     dump_orbitals(EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes)
   end
   energies = OutDict("HF"=>(EHF, "closed-shell DF-HF energy"), "E"=>(EHF, "closed-shell DF-HF energy"))
@@ -228,7 +291,7 @@ function dfhf(EC::ECInfo{T}) where T
 end
 
 """
-    ao_hf(EC::ECInfo)
+    hf(EC::ECInfo)
 
   Perform a closed-shell Hartree-Fock calculation directly from exact (non-density-fitted)
   AO integrals stored in an AO-basis [`FDump`](@ref) (`is_ao_basis(EC.fd) == true`).
@@ -241,90 +304,75 @@ end
   Returns the energy as the `HF` key in `OutDict`. The converged MO coefficients are
   written to the wavefunction dump for subsequent (AO→MO) correlation steps.
 """
-function ao_hf(EC::ECInfo{T}) where {T}
-  @assert is_ao_basis(EC.fd) "ao_hf requires an AO-basis FDump (build it with generate_ao_fdump / df=false)"
-  @assert !EC.fd.uhf "ao_hf is closed-shell only"
+function hf(EC::ECInfo{T}) where {T}
+  @assert is_ao_basis(EC.fd) "hf requires an AO-basis FDump (build it with generate_ao_fdump / df=false)"
+  @assert !EC.fd.uhf "hf is closed-shell only"
   t1 = time_ns()
-  print_info("HF (exact AO integrals, non-DF)")
+  print_info("HF")
   setup_space_fd!(EC)
   SP = EC.space
-  norb = length(SP[':'])
-  @assert SP['o'] == SP['O'] "ao_hf only for closed-shell"
-  thren = EC.options.scf.thren
-  if thren < 0.0
-    thren = sqrt(EC.options.scf.thr)*0.1
-  end
+  @assert SP['o'] == SP['O'] "hf only for closed-shell"
   sao = Matrix{T}(EC.fd.overlap)
   hsmall = EC.fd.int1
   Enuc = EC.fd.int0
-  Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
-  @assert size(Xorth, 2) ≥ length(SP['o']) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left for $(length(SP['o'])) occupied. Lower scf.redthr."
-  # core-Hamiltonian guess
-  _, cMO = eigen_orth(Matrix{T}(hsmall), Xorth, Xredundant)
+  Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=false)
+  cMO_sm = starting_orbitals(EC)
+  @assert is_restricted(cMO_sm) "hf only for closed-shell"
+  cMO = cMO_sm.α
   t1 = print_time(EC, t1, "guess orbitals", 2)
   fockbuilder = cMO -> gen_fock(EC, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
-  EHF, ϵ = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver; thren)
+  EHF, ϵ = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
   normalize_phase!(cMO)
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
-  nredund = size(Xredundant, 2)
-  classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
-  dump_orbitals(EC, SpinMatrix(cMO); type="AO-HF", energies=ϵ, occupations=occupations, classes=classes)
-  println("AO-HF energy: ", EHF)
+  classes = redundant_orbital_classes(EC, Xredundant)
+  dump_orbitals(EC, SpinMatrix(cMO); type="HF", energies=ϵ, occupations=occupations, classes=classes)
+  println("HF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
-  return OutDict("HF"=>(EHF, "closed-shell HF energy (exact AO integrals)"),
-                 "E"=>(EHF, "closed-shell HF energy (exact AO integrals)"))
+  return OutDict("HF"=>(EHF, "closed-shell HF energy"),
+                 "E"=>(EHF, "closed-shell HF energy"))
 end
 
 """
-    ao_uhf(EC::ECInfo)
+    uhf(EC::ECInfo)
 
   Perform exact (non-density-fitted) unrestricted Hartree-Fock from an AO-basis
-  [`FDump`](@ref) (build it with [`ao_integrals`](@ref) / `df=false`). Uses the shared
-  open-shell loop [`scf_open_shell!`](@ref) with an AO UHF Fock builder (`gen_ufock`)
+  [`FDump`](@ref). Uses the shared
+  open-shell loop [`scf_open_shell!`](@ref) with a UHF Fock builder over the AO integrals (`gen_ufock`)
   and canonical orthogonalization for linear-dependence handling. Returns the energy as
   the `UHF` and `HF` keys in `OutDict`.
 """
-function ao_uhf(EC::ECInfo{T}) where {T}
-  @assert is_ao_basis(EC.fd) "ao_uhf requires an AO-basis FDump (build it with @ints / df=false)"
+function uhf(EC::ECInfo{T}) where {T}
+  @assert is_ao_basis(EC.fd) "uhf requires an AO-basis FDump (build it with @ints)"
   t1 = time_ns()
-  print_info("UHF (exact AO integrals, non-DF)")
+  print_info("UHF")
   setup_space_fd!(EC)
   SP = EC.space
-  norb = length(SP[':'])
-  thren = EC.options.scf.thren
-  if thren < 0.0
-    thren = sqrt(EC.options.scf.thr)*0.1
-  end
   sao = Matrix{T}(EC.fd.overlap)
   hsmall = Matrix{T}(EC.fd.int1)   # AO core Hamiltonian (same for α and β)
   Enuc = EC.fd.int0
-  Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
-  @assert size(Xorth, 2) ≥ max(length(SP['o']), length(SP['O'])) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left. Lower scf.redthr."
+  Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=true)
   # core-Hamiltonian guess (same orbitals for α/β; open shells differ via occupations)
-  _, c0 = eigen_orth(hsmall, Xorth, Xredundant)
-  cMO = SpinMatrix(copy(c0), copy(c0))
+  cMO = starting_orbitals(EC)
   unrestrict!(cMO)
   t1 = print_time(EC, t1, "guess orbitals", 2)
   fockbuilder = cMO -> gen_ufock(EC, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
-  EHF, ϵ = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver; thren)
+  EHF, ϵ = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end
   occupationsa = [ones(length(SP['o'])); zeros(length(SP['v']))]
   occupationsb = [ones(length(SP['O'])); zeros(length(SP['V']))]
-  nredund = size(Xredundant, 2)
-  classes = nredund > 0 ? (orbital_classes_with_deleted(SP['o'], norb, nredund),
-                           orbital_classes_with_deleted(SP['O'], norb, nredund)) : nothing
-  dump_orbitals(EC, cMO; type="AO-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
-  println("AO-UHF energy: ", EHF)
+  classes = redundant_orbital_classes_uhf(EC, Xredundant)
+  dump_orbitals(EC, cMO; type="UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
+  println("UHF energy: ", EHF)
   draw_endline()
   delete_temporary_files!(EC)
-  return OutDict("UHF"=>(EHF, "UHF energy (exact AO integrals)"),
-                 "HF"=>(EHF, "UHF energy (exact AO integrals)"),
-                 "E"=>(EHF, "UHF energy (exact AO integrals)"))
+  return OutDict("UHF"=>(EHF, "UHF energy"),
+                 "HF"=>(EHF, "UHF energy"),
+                 "E"=>(EHF, "UHF energy"))
 end
 
 """
@@ -340,10 +388,7 @@ function dfhf_positron(EC::ECInfo)
   SP = EC.space
   norb = length(SP[':'])
   diis = Diis(EC)
-  thren = EC.options.scf.thren
-  if thren < 0.0
-    thren = sqrt(EC.options.scf.thr)*0.1
-  end
+  thren = scf_thren(EC)
   direct = EC.options.scf.direct
   guess = EC.options.scf.guess
   guess_pos = EC.options.scf.guess_pos
@@ -363,8 +408,7 @@ function dfhf_positron(EC::ECInfo)
   ε_pos = zeros(norb)
   hsmall = load(EC, "h_AA", Val(2))
   sao = load(EC, "S_AA", Val(2))
-  Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
-  @assert size(Xorth, 2) ≥ length(SP['o']) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left for $(length(SP['o'])) occupied. Lower scf.redthr."
+  Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=false)
   # display(sao)
   EHF = 0.0
   previousEHF = 0.0
@@ -413,8 +457,7 @@ function dfhf_positron(EC::ECInfo)
   delete_temporary_files!(EC)
   open_dump(EC, "w") do io
     occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
-    nredund = size(Xredundant, 2)
-    classes = nredund > 0 ? orbital_classes_with_deleted(SP['o'], norb, nredund) : nothing
+    classes = redundant_orbital_classes(EC, Xredundant)
     dump_orbitals(io, EC, SpinMatrix(cMO); type="DF-HF", energies=ϵ, occupations=occupations, classes=classes, MO="mo")
     occupations = [1.0; zeros(length(SP['m'])-1)]
     dump_orbitals(io, EC, SpinMatrix(cPO); type="DF-HF positron", energies=ε_pos, occupations=occupations, MO="po")
@@ -441,10 +484,6 @@ function dfuhf(EC::ECInfo{T}) where T
   end
   SP = EC.space
   norb = length(SP[':'])
-  thren = EC.options.scf.thren
-  if thren < 0.0
-    thren = sqrt(EC.options.scf.thr)*0.1
-  end
   direct = false
   local sao, hsmall, h1a, h1b, mmLfile, mmL, MMLfile, MML, bao, bfit, Xorth, Xredundant
   has_MML = false
@@ -466,23 +505,18 @@ function dfuhf(EC::ECInfo{T}) where T
   else
     @assert T == Float64 "DF-UHF with 3-index integrals only implemented for real case"
     direct = EC.options.scf.direct
-    guess = EC.options.scf.guess
     Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=!direct)
     if direct
       bao = generate_basis(EC, "ao")
       bfit = generate_basis(EC, "jkfit")
     end
     t1 = print_time(EC, t1, "generate AO-DF integrals", 2)
-    cMO, loaded = try_load_starting_orbitals(EC)
-    if !loaded
-      cMO = guess_orb(EC, guess)
-    end
-    t1 = print_time(EC, t1, "guess orbitals", 2)
+    cMO = starting_orbitals(EC)
     unrestrict!(cMO)
+    t1 = print_time(EC, t1, "guess orbitals", 2)
     hsmall = load2idx(EC, "h_AA")
     sao = load2idx(EC, "S_AA")
-    Xorth, Xredundant = canonical_orthogonalization(sao, EC.options.scf.redthr; verbose=true)
-    @assert size(Xorth, 2) ≥ max(length(SP['o']), length(SP['O'])) "Too many linearly-dependent orbitals removed: only $(size(Xorth,2)) orbitals left. Lower scf.redthr."
+    Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=true)
   end
   # DF-UHF Fock builder + per-spin solver for the shared open-shell loop. The df3idx
   # path uses the MO metric (S=I, plain `eigen`) with the pretransformed 3-index Fock;
@@ -497,7 +531,7 @@ function dfuhf(EC::ECInfo{T}) where T
     fockbuilder = direct ? (cMO -> gen_dffock(EC, cMO, bao, bfit)) : (cMO -> gen_dffock(EC, cMO))
     solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   end
-  EHF, ϵ = scf_open_shell!(EC, cMO, sao, h1a, h1b, Enuc, fockbuilder, solver; thren)
+  EHF, ϵ = scf_open_shell!(EC, cMO, sao, h1a, h1b, Enuc, fockbuilder, solver)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end
@@ -538,9 +572,7 @@ function dfuhf(EC::ECInfo{T}) where T
   if use_df3idx
     dump_rotations(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb))
   else
-    nredund = size(Xredundant, 2)
-    classes = nredund > 0 ? (orbital_classes_with_deleted(SP['o'], norb, nredund),
-                             orbital_classes_with_deleted(SP['O'], norb, nredund)) : nothing
+    classes = redundant_orbital_classes_uhf(EC, Xredundant)
     dump_orbitals(EC, cMO; type="DF-UHF", energies=ϵ, occupations=(occupationsa, occupationsb), classes=classes)
   end
   energies = OutDict("UHF"=>(EHF,"DF-UHF energy"), "HF"=>(EHF,"DF-UHF energy"), "E"=>(EHF,"DF-UHF energy"))

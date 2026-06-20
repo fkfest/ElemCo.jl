@@ -6,7 +6,7 @@ CurrentModule = ElemCo.HF
 
 This module implements closed- and open-shell Hartree-Fock, both
 density-fitted (`dfhf`/`dfuhf`, via the `@dfhf` macro) and exact non-DF
-from AO integrals (`ao_hf`), sharing a common SCF loop with a pluggable
+from AO integrals (`hf`/`uhf`, via the `@hf`/`@uhf` macros), sharing a common SCF loop with a pluggable
 Fock builder. Here's an example of computing density-fitted HF with the
 `@dfhf` macro:
 

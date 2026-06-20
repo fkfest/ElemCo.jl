@@ -17,6 +17,7 @@ using ..ElemCo.CoupledCluster
 using ..ElemCo.DMRG
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.FciDumps
+using ..ElemCo.DumpTools
 using ..ElemCo.OrbTools
 using ..ElemCo.Properties
 using ..ElemCo.FockFactory
@@ -176,26 +177,90 @@ function fci_property_rdms(EC::ECInfo, rdm_a::AbstractMatrix, rdm_b::AbstractMat
 end
 
 """
-    check_ao_basis_support(EC::ECInfo, method)
+    ao_direct_method(ecm::ECMethod, closed_shell) -> Bool
 
-  Guard correlated drivers against AO-basis FDumps. Correlated methods assume an
-  orthonormal MO basis (they contract `EC.fd.int2` as MO integrals), so running them on a
-  non-orthogonal AO-basis FDump (`is_ao_basis(EC.fd)`, built via `df=false` / `@ints` /
-  `@hf`) would give wrong results. No correlated method consumes AO integrals directly
-  yet, so this errors for all of them. (CCSD/DCSD AO-direct support is in progress.)
+  Whether `ecm` runs directly on AO-basis integrals without a preceding MO transform:
+  closed-shell CCSD/DCSD with no triples and no EOM/Lagrange prefix. Everything else on
+  an AO-basis FDump is transformed to the MO basis on the fly (see [`set_mo_basis!`](@ref)).
 """
-function check_ao_basis_support(EC::ECInfo, method, closed_shell=true)
-  is_ao_basis(EC.fd) || return nothing
-  ecm = ECMethod(method)
+function ao_direct_method(ecm::ECMethod, closed_shell)
   name = uppercase(method_name(ecm))
-  # AO-direct support so far: closed-shell CCSD/DCSD (no triples/EOM/Lagrange).
-  if closed_shell && ecm.exclevel[3] == :none && !has_prefix(ecm, "EOM") &&
-     !has_prefix(ecm, "Λ") && name in ("CCSD", "DCSD")
-    return nothing
+  return closed_shell && ecm.exclevel[3] == :none && !has_prefix(ecm, "EOM") &&
+         !has_prefix(ecm, "Λ") && name in ("CCSD", "DCSD")
+end
+
+"""
+    check_ao_basis_support(EC::ECInfo, closed_shell)
+
+  Guard correlated drivers against AO-basis FDumps that cannot be handled yet. Closed-shell
+  AO dumps are fully supported: CCSD/DCSD run AO-direct (see [`ao_direct_method`](@ref)) and
+  every other method is transformed to the MO basis on the fly (see [`set_mo_basis!`](@ref)).
+  Open-shell AO→MO transformation is not implemented yet, so this errors for open-shell /
+  UHF AO dumps.
+"""
+function check_ao_basis_support(EC::ECInfo, closed_shell)
+  is_ao_basis(EC.fd) || return nothing
+  (closed_shell && !EC.fd.uhf) && return nothing
+  error("Open-shell AO-basis integrals (df=false / @ints / @uhf) are not yet supported " *
+        "for correlated methods. Use density fitting (df=true).")
+end
+
+"""
+    switch_fd_to_mo_basis!(EC::ECInfo)
+
+  Transform the AO-basis `EC.fd` to the MO basis in place (see [`set_mo_basis!`](@ref)) using
+  the orbitals from the preceding HF, reducing the dump to the active space so that the MO
+  integrals (and all downstream methods) scale with the active space rather than `nao`:
+
+  - **Deleted orbitals** (the last `n_deleted_orbitals(EC)` linearly-dependent columns
+    appended by `eigen_orth`) and **frozen virtuals** (`freeze_nvirt`) are excluded from the
+    transform — they carry no electrons, so no folding is needed and there is no reason to pay
+    the O(N⁵) transform / store them.
+  - **Frozen occupied** orbitals (core / `freeze_nocc`) must be transformed (they enter the core
+    energy/Fock), then are physically folded out of the MO dump via [`freeze_orbs_in_dump`](@ref)
+    (core energy + core Fock into `int0`/`int1`, `int2` reindexed, `NORB`/`NELEC` reduced). The
+    reduced `int2` is written straight onto a fresh scratch mmap (no in-memory copy).
+
+  The freeze options are then cleared so the driver does not freeze them again.
+"""
+function switch_fd_to_mo_basis!(EC::ECInfo{T}) where {T}
+  cMO = Matrix(load_orbitals(EC).α)
+  ndel = n_deleted_orbitals(EC)
+  nf = size(cMO, 2) - ndel   # non-deleted orbitals (the last `ndel` columns are deleted)
+  # Determine the frozen orbitals in the nf-orbital MO space *before* transforming, so that
+  # frozen virtuals — which carry no electrons and would otherwise just be reorder-dropped after
+  # a full transform — can be excluded from the O(N⁵) transform entirely, like deleted orbitals.
+  setup_space_fd!(EC; norb=nf, verbose=false)
+  space_full = save_space(EC)
+  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=false)
+  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=false)
+  frozen_occ  = sort!(setdiff(space_full['o'], EC.space['o']))
+  frozen_virt = sort!(setdiff(space_full['v'], EC.space['v']))
+  restore_space!(EC, space_full)
+  any_frozen = !isempty(frozen_occ) || !isempty(frozen_virt)
+  # Transform only the kept orbitals: active + frozen-occupied (the frozen-occ are needed to fold
+  # the core energy/Fock); deleted and frozen-virtual orbitals are dropped from the transform.
+  keep = sort!(setdiff(1:nf, frozen_virt))
+  set_mo_basis!(EC, cMO[:, keep])
+  setup_space_fd!(EC)
+  if !isempty(frozen_occ)
+    # Fold the frozen-occupied orbitals, writing the reduced (active) int2 straight onto a fresh
+    # scratch mmap — no in-memory active block and no extra copy. Frozen-occ indices are
+    # unchanged by dropping the higher (virtual) columns.
+    freeze_orbs_in_dump(EC, frozen_occ;
+        int2alloc=(key, dims) -> newmmap(EC, "mo_int2_act", dims, T; description="int2 mo")[2])
+    flushmmap(EC, EC.fd.int2)
+    # the full pre-fold "mo_int2" mmap is now orphaned; its scratch file is reclaimed by the
+    # end-of-run `delete_temporary_files!` (don't rm it here while its mapping may still be live)
   end
-  error("AO-basis integrals (df=false / @ints / @hf) currently support only closed-shell " *
-        "CCSD/DCSD: requested '$method'" * (closed_shell ? "" : " (open-shell)") *
-        ". Use density fitting (df=true) for other correlated methods.")
+  if any_frozen
+    # the frozen orbitals are now physically out of the dump — don't let the driver freeze again
+    EC.options.wf.core = :none
+    EC.options.wf.freeze_nocc = 0
+    EC.options.wf.freeze_nvirt = 0
+    setup_space_fd!(EC)
+  end
+  return EC.fd
 end
 
 """
@@ -220,7 +285,14 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   end
   setup_space_fd!(EC)
   closed_shell = is_closed_shell(EC)
-  check_ao_basis_support(EC, method, closed_shell)
+  check_ao_basis_support(EC, closed_shell)
+  # AO-basis routing: closed-shell CCSD/DCSD run AO-direct; every other method is
+  # transformed to the MO basis on the fly using the orbitals from the preceding HF.
+  # Linearly-dependent (deleted) orbitals are excluded from the transform, so the MO dump
+  # shrinks with the active space instead of staying nao-sized.
+  if is_ao_basis(EC.fd) && !ao_direct_method(ECMethod(method), closed_shell)
+    switch_fd_to_mo_basis!(EC)
+  end
 
   energies = OutDict()
   if is_ao_basis(EC.fd)
@@ -406,12 +478,16 @@ end
 function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
-  check_ao_basis_support(EC, ciphi ? "CIPHI" : "FCI")
   if EC.fd.df3idx
     contract_df_integrals!(EC)
   end
   setup_space_fd!(EC)
   closed_shell = is_closed_shell(EC)
+  check_ao_basis_support(EC, closed_shell)
+  # FCI always needs MO integrals: transform an AO-basis dump on the fly.
+  if is_ao_basis(EC.fd)
+    switch_fd_to_mo_basis!(EC)
+  end
 
   energies = OutDict()
   energies = eval_hf_energy(EC, energies, closed_shell)

@@ -902,7 +902,7 @@ end
 
   Generate exact (non-density-fitted) AO integrals and store them in `EC.fd`
   (overlap `S`, core Hamiltonian `h`, and the 4-index `(μν|ρσ)` in physicists'
-  notation). This is the non-DF counterpart of [`@dfints`](@ref).
+  notation). This is the non-DF AO counterpart of [`@dfints`](@ref).
 
   Optionally, a `begin...end` block can be provided to set local options for this call.
   The options are reset after the call completes.
@@ -931,6 +931,10 @@ end
   already hold AO integrals, they are generated first (equivalent to calling [`@ints`](@ref)).
   The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
 
+  Note: if `EC.fd` holds non-AO (FCIDUMP) integrals they are discarded (with a warning) and
+  replaced by freshly generated AO integrals — `@hf` always builds HF from exact AO integrals.
+  To run HF on existing FCIDUMP integrals, use [`@bohf`](@ref) instead.
+
   Optionally, a `begin...end` block can be provided to set local options for this call.
   The options are reset after the call completes.
 """
@@ -940,19 +944,15 @@ macro hf(opts_block=nothing)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts) do
-        if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
-          ao_integrals($(esc(:EC)))
-        end
-        ao_hf($(esc(:EC)))
+        ensure_ao_integrals!($(esc(:EC)); method="@hf", alternative="@bohf")
+        hf($(esc(:EC)))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
-        ao_integrals($(esc(:EC)))
-      end
-      ao_hf($(esc(:EC)))
+      ensure_ao_integrals!($(esc(:EC)); method="@hf", alternative="@bohf")
+      hf($(esc(:EC)))
     end
   end
 end
@@ -964,6 +964,10 @@ end
   already hold AO integrals, they are generated first (equivalent to calling [`@ints`](@ref)).
   The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
 
+  Note: if `EC.fd` holds non-AO (FCIDUMP) integrals they are discarded (with a warning) and
+  replaced by freshly generated AO integrals — `@uhf` always builds UHF from exact AO integrals.
+  To run UHF on existing FCIDUMP integrals, use [`@bouhf`](@ref) instead.
+
   Optionally, a `begin...end` block can be provided to set local options for this call.
   The options are reset after the call completes.
 """
@@ -973,19 +977,15 @@ macro uhf(opts_block=nothing)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts) do
-        if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
-          ao_integrals($(esc(:EC)))
-        end
-        ao_uhf($(esc(:EC)))
+        ensure_ao_integrals!($(esc(:EC)); method="@uhf", alternative="@bouhf")
+        uhf($(esc(:EC)))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      if isempty($(esc(:EC)).fd) || !is_ao_basis($(esc(:EC)).fd)
-        ao_integrals($(esc(:EC)))
-      end
-      ao_uhf($(esc(:EC)))
+      ensure_ao_integrals!($(esc(:EC)); method="@uhf", alternative="@bouhf")
+      uhf($(esc(:EC)))
     end
   end
 end

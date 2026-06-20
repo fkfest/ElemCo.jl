@@ -3,7 +3,7 @@ using ElemCo.ECInfos
 using ElemCo.MSystems: parse_geometry
 using ElemCo.BasisSets: generate_basis, n_ao
 using ElemCo.Integrals: eri_2e4idx, overlap, kinetic, nuclear
-using ElemCo.IntegralTools: generate_ao_fdump, transform_ao2mo
+using ElemCo.IntegralTools: generate_ao_fdump, ao_to_mo!
 using ElemCo.FciDumps
 using ElemCo.FciDumps: headvar
 using ElemCo.TensorTools: detri_int2
@@ -59,7 +59,7 @@ using LinearAlgebra
     # symmetric orthogonalization: X' S X = I  (use X as MO coefficients)
     F = eigen(Symmetric(S))
     X = F.vectors * Diagonal(1.0 ./ sqrt.(F.values)) * F.vectors'
-    fd_mo = transform_ao2mo(fd, X)
+    fd_mo = ao_to_mo!(deepcopy(fd), X)
 
     # independent reference: naive chemist-basis 4-index transform, then -> physicist
     Gmo = reduce_index(reduce_index(reduce_index(reduce_index(G, X, 1), X, 2), X, 3), X, 4)
@@ -75,9 +75,19 @@ using LinearAlgebra
     # not flagged AO any more
     @test !fd_mo.ao_basis
     @test abs(fd_mo.int0 - fd.int0) < 1e-12
+
+    # rectangular transform: keep only the first m MOs (drop the rest, e.g. deleted orbitals)
+    m = nao - 2
+    fd_red = ao_to_mo!(deepcopy(fd), X[:, 1:m])
+    @test size(fd_red.int2, 1) == m
+    @test headvar(fd_red, "NORB", Int) == m
+    @test length(fd_red.head["ORBSYM"]) == m
+    vred = detri_int2(fd_red.int2, m, 1:m, 1:m, 1:m, 1:m)
+    @test maximum(abs.(vred .- vmo_ref[1:m, 1:m, 1:m, 1:m])) < 1e-10
+    @test maximum(abs.(fd_red.int1 .- X[:, 1:m]' * hAO * X[:, 1:m])) < 1e-10
   end
 
-  @testset "exact AO-HF vs reference RHF" begin
+  @testset "exact HF (AO integrals) vs reference RHF" begin
     # independent closed-shell RHF from S, h, and the exact chemist tensor G
     function ref_rhf(S, h, G, Enuc, nocc; maxit=200, thr=1e-11)
       nb = size(S, 1)
@@ -114,7 +124,7 @@ using LinearAlgebra
     EC2 = ECInfo{Float64}()
     EC2.system = parse_geometry(geometry, Dict("ao"=>"sto-3g"))
     EC2.fd = generate_ao_fdump(EC2)
-    res = ElemCo.ao_hf(EC2)
+    res = ElemCo.hf(EC2)
     @test abs(res["HF"] - Eref) < 1e-7
   end
 
@@ -133,7 +143,7 @@ using LinearAlgebra
   end
 end
 
-@testset "AO-HF/UHF flow (@ints / @hf / @uhf)" begin
+@testset "HF/UHF on AO integrals (@ints / @hf / @uhf)" begin
   using ElemCo
   using ElemCo.FciDumps: is_ao_basis
   using ElemCo.MSystems: parse_geometry
@@ -207,16 +217,15 @@ end
   ref = ref_uhf(S, hAO, G, Enuc, 5, 4)   # 9 e⁻, ms2=1 → nα=5, nβ=4
   @test abs(e_uhf_cation["UHF"] - ref) < 1e-6
 
-  # guard: methods not yet adapted still reject AO-basis integrals
-  EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
-  @ints
-  @test is_ao_basis(EC.fd)
-  @test_throws ErrorException (@fci)
-  @test_throws ErrorException (@cc "ccsd(t)")   # triples not adapted
+  # guard: open-shell AO integrals are not yet supported for correlated methods
+  # (EC still holds the open-shell water cation built by the @uhf above)
+  @test_throws ErrorException (@cc "ccsd")
 
-  # AO-direct closed-shell CCSD/DCSD must match transform_ao2mo → standard CC
-  let transform_ao2mo = ElemCo.IntegralTools.transform_ao2mo,
-      load_orbitals = ElemCo.OrbTools.load_orbitals
+  # closed-shell: AO-direct CCSD/DCSD and the auto AO→MO switch (CCSD(T), FCI) must all
+  # agree with the explicit AO→MO transform reference (ao_to_mo!).
+  let load_orbitals = ElemCo.OrbTools.load_orbitals,
+      ao_to_mo! = ElemCo.IntegralTools.ao_to_mo!
+    # AO-direct CCSD/DCSD: EC.fd stays in the AO basis
     for m in ("ccsd", "dcsd")
       key = uppercase(m)
       EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
@@ -224,11 +233,70 @@ end
       ao_fd = EC.fd
       cMO = Matrix(load_orbitals(EC).α)
       e_ao = @cc m
+      @test is_ao_basis(EC.fd)
       EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
-      EC.fd = transform_ao2mo(ao_fd, cMO)
+      EC.fd = ao_to_mo!(deepcopy(ao_fd), cMO)
       e_ref = @cc m
       @test abs(e_ao["HF"]  - e_ref["HF"])  < 1e-9
       @test abs(e_ao[key]   - e_ref[key])   < 1e-6
     end
+    nao_ref = size(S, 1)   # AOs in this sto-3g water (== orbitals when nothing is dropped)
+    # each EC gets its own orbital dump in its (unique) scratch dir, so differently-sized
+    # systems below don't clash over the shared default "wf.h5" in the working directory
+    fresh(b=basis) = (e = ElemCo.ECInfo(system=parse_geometry(geometry, b));
+                      e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+
+    # all-electron FCI: the auto AO→MO switch matches FCI on the explicit MO dump (pure
+    # basis switch — no orbitals dropped, so it isolates the transform from any folding)
+    EC = fresh()
+    EC.options.wf.freeze_nocc = 0
+    @hf
+    cMO = Matrix(load_orbitals(EC).α)
+    ref_fd = ao_to_mo!(deepcopy(EC.fd), cMO)        # snapshot AO→MO before the in-place switch
+    e_ao_fci = @fci                                 # @fci switches EC.fd to the MO basis in place
+    @test !is_ao_basis(EC.fd)
+    @test headvar(EC.fd, "NORB", Int) == nao_ref    # nothing dropped
+    EC = fresh()
+    EC.options.wf.freeze_nocc = 0
+    EC.fd = ref_fd
+    e_ref_fci = @fci
+    @test abs(e_ao_fci["FCI"] - e_ref_fci["FCI"]) < 1e-7
+
+    # frozen-core folding: the auto switch folds the core out of the MO dump (NORB shrinks);
+    # the result must match an explicit fold (freeze_orbs_in_dump) of the same orbital.
+    EC = fresh()
+    EC.options.wf.freeze_nocc = 1
+    @hf
+    cMO = Matrix(load_orbitals(EC).α)
+    fold_ref = ao_to_mo!(deepcopy(EC.fd), cMO)
+    e_fold = @cc "ccsd(t)"                           # auto switch folds 1 core orbital into the dump
+    @test headvar(EC.fd, "NORB", Int) == nao_ref - 1
+    EC = fresh()
+    EC.fd = fold_ref
+    ElemCo.DumpTools.freeze_orbs_in_dump(EC, [1])    # explicit fold of the lowest orbital
+    EC.options.wf.freeze_nocc = 0                    # already folded — don't freeze again
+    e_ref = @cc "ccsd(t)"
+    @test headvar(EC.fd, "NORB", Int) == nao_ref - 1
+    @test abs(e_fold["HF"]      - e_ref["HF"])      < 1e-9
+    @test abs(e_fold["CCSD(T)"] - e_ref["CCSD(T)"]) < 1e-8
+
+    # redundant (linearly-dependent) orbitals: a high redthr forces an orbital to be deleted.
+    # The auto switch drops it from the transform (NORB shrinks); FCI must match the explicit
+    # transform with the same orbital dropped. (ccsd/dcsd stay AO-direct and don't drop yet.)
+    EC = fresh()
+    EC.options.wf.freeze_nocc = 0
+    EC.options.scf.redthr = 0.4                     # delete the most linearly-dependent orbital
+    @hf
+    cMO = Matrix(load_orbitals(EC).α)
+    ndel = ElemCo.OrbTools.n_deleted_orbitals(EC)
+    @test ndel == 1
+    red_ref = ao_to_mo!(deepcopy(EC.fd), cMO[:, 1:nao_ref-ndel])   # explicit drop of the same orbital
+    e_ao = @fci                                     # auto switch drops the deleted orbital
+    @test headvar(EC.fd, "NORB", Int) == nao_ref - ndel
+    EC = fresh()
+    EC.options.wf.freeze_nocc = 0
+    EC.fd = red_ref
+    e_ref = @fci
+    @test abs(e_ao["FCI"] - e_ref["FCI"]) < 1e-7
   end
 end

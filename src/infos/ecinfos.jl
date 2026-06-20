@@ -173,18 +173,24 @@ function reset_wf_info!(EC::ECInfo)
 end
 
 """
-    setup_space_fd!(EC::ECInfo; verbose=true)
+    setup_space_fd!(EC::ECInfo; norb=nothing, verbose=true)
 
   Setup EC.space from fcidump EC.fd.
+
+  If `norb` is given it overrides the dump's `NORB` (and `ORBSYM` is truncated to `norb`); this
+  is used to set up the space for a reduced orbital count (e.g. the non-deleted MO space) before
+  the integrals are actually transformed/reindexed.
 """
-function setup_space_fd!(EC::ECInfo; verbose=true)
+function setup_space_fd!(EC::ECInfo; norb=nothing, verbose=true)
   @assert !isempty(EC.fd) "EC.fd is not set up!"
   nelec = EC.options.wf.nelec
   npos = EC.options.wf.npositron
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
-  norb = headvar(EC.fd, "NORB", Int)
+  if isnothing(norb)
+    norb = headvar(EC.fd, "NORB", Int)
+  end
   @assert !isnothing(norb)
   nelec_from_fcidump = headvar(EC.fd, "NELEC", Int)
   @assert !isnothing(nelec_from_fcidump)
@@ -202,6 +208,9 @@ function setup_space_fd!(EC::ECInfo; verbose=true)
   end
   orbsym = headvars(EC.fd, "ORBSYM", Int)
   @assert !isnothing(orbsym)
+  if length(orbsym) > norb
+    orbsym = orbsym[1:norb]
+  end
   setup_space!(EC, norb, nelec, npos, ms2, orbsym; verbose=verbose)
 end
 
