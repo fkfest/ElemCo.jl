@@ -19,8 +19,10 @@
   (`:fcidump`, `:cc`, `:df`, `:complex`, …, plus `:quick` or `:long`). Run quick
   tests with `Pkg.test()`, or all tests with `Pkg.test(test_args=["all"])`. Set
   `ELEMCO_TEST_NWORKERS=N` to run test items in parallel across `N` worker
-  processes. The old `Pkg.test(test_args=["FCIDUMP", ...])` group selection is
-  replaced by tag/name filtering (e.g. in the VS Code Test Explorer).
+  processes. Subsets can be selected from the REPL by passing tags and/or item
+  names, e.g. `Pkg.test(test_args=["df"])` or `Pkg.test(test_args=["h2o","complex"])`;
+  the old group names map to tags (`FCIDUMP`→`:fcidump`, `DF`→`:df`, …). The same
+  tag/name filtering is also available in the VS Code Test Explorer.
 
 ### Added
 
