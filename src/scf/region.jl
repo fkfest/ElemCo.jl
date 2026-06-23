@@ -705,7 +705,7 @@ end
 
 """
     _project_virtual_targets(cMO_virt::AbstractMatrix, S::AbstractMatrix,
-                             C_target::AbstractMatrix; existing=nothing, relthr=1e-5)
+                             C_target::AbstractMatrix; existing=nothing, relthr=3e-8)
 
   Project arbitrary AO-space target vectors into the canonical virtual space,
   optionally removing components already spanned by the orthonormal AO-space
@@ -715,7 +715,7 @@ end
 function _project_virtual_targets(cMO_virt::AbstractMatrix{Tc}, S::AbstractMatrix,
                                   C_target::AbstractMatrix{Tt};
                                   existing=nothing,
-                                  relthr::Float64=1e-5) where {Tc,Tt}
+                                  relthr::Float64=3e-8) where {Tc,Tt}
   T = promote_type(Tc, Tt, eltype(S))
   nvirt = size(cMO_virt, 2)
   ntarget = size(C_target, 2)
@@ -740,7 +740,7 @@ end
 """
     _fragment_complement_virtual_rotation(cMO_virt::AbstractMatrix, S::AbstractMatrix,
                                           C_iao::AbstractMatrix, iao_atoms::Vector{Int},
-                                          ao_atoms::Vector{Int}, support_atoms::Vector{Int}; relthr=1e-5)
+                                          ao_atoms::Vector{Int}, support_atoms::Vector{Int}; relthr=3e-8)
 
   Build the default fragment virtual-space rotation by first projecting the
   fragment IAOs into the virtual space to obtain antibonding-like complement
@@ -749,7 +749,7 @@ end
 function _fragment_complement_virtual_rotation(cMO_virt::AbstractMatrix{T}, S::AbstractMatrix,
                                                C_iao::AbstractMatrix, iao_atoms::Vector{Int},
                                                ao_atoms::Vector{Int}, support_atoms::Vector{Int};
-                                               relthr::Float64=1e-5) where T
+                                               relthr::Float64=3e-8) where T
   nvirt = size(cMO_virt, 2)
   nvirt == 0 && return Matrix{T}(I, 0, 0), 0
   isempty(support_atoms) && return Matrix{T}(I, nvirt, nvirt), 0
@@ -777,7 +777,7 @@ end
 
 """
     _fragment_opao_rotation(cMO_virt::AbstractMatrix, S::AbstractMatrix,
-                            ao_atoms::Vector{Int}, support_atoms::Vector{Int}; relthr=1e-5)
+                            ao_atoms::Vector{Int}, support_atoms::Vector{Int}; relthr=3e-8)
 
   Build the orthogonal PAO rotation that places fragment-supported virtual
   orbitals first, followed by an orthogonal complement for the remaining
@@ -785,7 +785,7 @@ end
 """
 function _fragment_opao_rotation(cMO_virt::AbstractMatrix{T}, S::AbstractMatrix,
                                  ao_atoms::Vector{Int}, support_atoms::Vector{Int};
-                                 relthr::Float64=1e-5) where T
+                                 relthr::Float64=3e-8) where T
   nvirt = size(cMO_virt, 2)
   nvirt == 0 && return Matrix{T}(I, 0, 0), 0
   isempty(support_atoms) && return Matrix{T}(I, nvirt, nvirt), 0
@@ -927,9 +927,9 @@ function _build_region_spin(EC::ECInfo, cMO_full::AbstractMatrix{T}, energies::V
   if !isempty(virt_range)
     cMO_virt = cMO_full[:, virt_range]
     if virtual_mode == :complement
-      R_virt, nfrag_virt = _fragment_complement_virtual_rotation(cMO_virt, S, C_iao, iao_atoms_global, ao_atoms_global, support_global; relthr=EC.options.loc.opaothr)
+      R_virt, nfrag_virt = _fragment_complement_virtual_rotation(cMO_virt, S, C_iao, iao_atoms_global, ao_atoms_global, support_global; relthr=opao_relthr(EC))
     else
-      R_virt, nfrag_virt = _fragment_opao_rotation(cMO_virt, S, ao_atoms_global, support_global; relthr=EC.options.loc.opaothr)
+      R_virt, nfrag_virt = _fragment_opao_rotation(cMO_virt, S, ao_atoms_global, support_global; relthr=opao_relthr(EC))
     end
     nfrag_virt > 0 || error("No $(spin_label)fragment virtual orbitals constructed; lower region.atom_charge_thr.")
     cMO_region[:, virt_range] = cMO_virt * R_virt
@@ -1035,7 +1035,7 @@ function _build_region_spin_pi(EC::ECInfo, cMO_full::AbstractMatrix{T}, energies
         # orthogonalized against the already-selected π virtuals
         C_pi = cMO_virt * R_frag
         C_ao_target = _support_ao_targets(cMO_virt, ao_atoms_global, extra_support)
-        _, R_aug = _project_virtual_targets(cMO_virt, S, C_ao_target; existing=C_pi, relthr=EC.options.loc.opaothr)
+        _, R_aug = _project_virtual_targets(cMO_virt, S, C_ao_target; existing=C_pi, relthr=opao_relthr(EC))
         R_frag = hcat(R_frag, R_aug)
       end
       nfrag_virt = size(R_frag, 2)
@@ -1048,7 +1048,7 @@ function _build_region_spin_pi(EC::ECInfo, cMO_full::AbstractMatrix{T}, energies
       end
     else
       virt_centers = sort!(union(Int[real_globals[k] for k in selected_centers], extra_support))
-      R_virt, nfrag_virt = _fragment_opao_rotation(cMO_virt, S, ao_atoms_global, virt_centers; relthr=EC.options.loc.opaothr)
+      R_virt, nfrag_virt = _fragment_opao_rotation(cMO_virt, S, ao_atoms_global, virt_centers; relthr=opao_relthr(EC))
       nfrag_virt > 0 || error("No $(spin_label)fragment virtual orbitals constructed from the selected π-system atoms.")
       cMO_region[:, virt_range] = cMO_virt * R_virt
       if !isempty(energies)

@@ -2941,11 +2941,16 @@ Their overlap matrix is
 \begin{equation}
   S_{\mathrm{PAO}} = C_{\mathrm{PAO}}^\dagger S C_{\mathrm{PAO}}.
 \end{equation}
-An inverse square root factor $M$ is built such that
+A locality-preserving factor $M$ is built such that
 \begin{equation}
-  M^\dagger S_{\mathrm{PAO}} M = I,
+  M^\dagger S_{\mathrm{PAO}} M = I.
 \end{equation}
-which yields orthogonal PAOs
+Near-redundant directions of $S_{\mathrm{PAO}}$ --- those with eigenvalue below
+$\mathtt{opaofac}\cdot\mathtt{redthr}\cdot\lambda_{\max}$ (\cmd{loc.opaofac} times the AO basis
+redundancy threshold \cmd{scf.redthr}) --- are dropped, so $M$ has fewer columns than
+$C_{\mathrm{PAO}}$ when the support PAOs are linearly dependent in the virtual space. The retained
+PAOs are selected by a pivoted Cholesky of $S_{\mathrm{PAO}}$ and orthogonalized by a symmetric
+L\"owdin transformation, keeping the OPAOs local. This yields orthogonal PAOs
 \begin{equation}
   C_{\mathrm{OPAO}} = C_{\mathrm{PAO}} M.
 \end{equation}

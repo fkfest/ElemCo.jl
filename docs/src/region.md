@@ -53,8 +53,8 @@ end
 
 All fragment virtual constructions orthogonalize the projected PAOs with the
 locality-preserving, redundancy-removing scheme described under Orthogonal PAOs in
-[Orbital Localization](localization.md). The `loc.opaothr`
-threshold (default `1e-5`) controls how aggressively redundant PAOs are pruned.
+[Orbital Localization](localization.md). The threshold `loc.opaofac * scf.redthr`
+(with `loc.opaofac` default `3`) controls how aggressively redundant PAOs are pruned.
 When a redundant PAO is dropped, the corresponding virtual
 direction moves into the frozen (`Deleted`) complement instead of the active fragment.
 

@@ -744,19 +744,24 @@ H2    0.000000000   -0.922683000    1.232790000"
 end
 end
 
-@testitem "OPAO redundancy removal (diffuse basis)" tags=[:df, :quick] begin
+@testitem "OPAO redundancy threshold tied to redthr (diffuse basis)" tags=[:df, :quick] begin
 using ElemCo
 using ElemCo.Integrals: overlap, generate_basis
-using ElemCo.OrbTools: select_lowdin_orth
+using ElemCo.OrbTools: select_lowdin_orth, opao_relthr
 using ElemCo.OrbLocalization: compute_ao_atoms
 using ElemCo.OrbRegion: _fragment_opao_rotation
 using LinearAlgebra
 
-# With a diffuse/augmented basis the O-centered PAOs projected onto the virtual space
-# carry a near-linear-dependency (eigenvalue ~1e-7*λmax). The old absolute-threshold
-# ALPACA orthogonalization kept it and amplified it ~1000x into a junk active virtual.
-# select_lowdin_orth detects it with a RELATIVE threshold (loc.opaothr) and drops it,
-# while keeping the OPAOs atom-centered (symmetric Löwdin on the selected pivots).
+# The O-fragment PAOs projected onto the virtual space carry one low-presence direction at
+# ~3.7e-7*λmax (the virtual residual of the O 1s CORE AO -- it is ~99.9998% inside the
+# occupied space but not 100%, so it keeps a small real virtual tail; present in cc-pVDZ too,
+# so it is the core, not a diffuse-basis artifact). It sits *above* the AO basis redundancy
+# threshold scf.redthr=1e-8, so it is a genuine virtual degree of freedom, NOT a true
+# redundancy. The default threshold opao_relthr = loc.opaofac * scf.redthr (a few x redthr),
+# so this direction is KEPT (only
+# (near-)exact redundancies, which collapse below redthr / to machine zero, are removed).
+# Symmetric Loewdin keeps the kept set well-conditioned despite the ~1000x amplification --
+# unlike the old ALPACA sqrtinvchol, which turned it into junk.
 geometry = "bohr
      O      0.000000000    0.000000000   -0.130186067
      H1     0.000000000    1.489124508    1.033245507
@@ -773,29 +778,31 @@ nvirt = size(cv, 2)
 ao_atoms, natom = compute_ao_atoms(EC)
 o_aos = findall(==(1), ao_atoms)                # O is atom 1
 
-# PAO overlap of the O fragment: there is a clean ~1000x gap above one redundancy
+# PAO overlap of the O fragment: the lone low-presence direction sits above redthr (1e-8)
 S_PAO = Hermitian(transpose(cv * (transpose(cv) * S[:, o_aos])) * S * (cv * (transpose(cv) * S[:, o_aos])))
 ev = eigvals(S_PAO)                              # sorted ascending for a Hermitian matrix
-@test count(>(1e-5 * ev[end]), ev) == 22        # eigen rank at the default threshold
-@test count(>(1e-7 * ev[end]), ev) == 23        # one near-redundant direction sits in (1e-7,1e-5)*λmax
+@test count(>(1e-8 * ev[end]), ev) == 23        # above redthr -> a real degree of freedom
+@test count(>(1e-5 * ev[end]), ev) == 22        # only a coarse (old) threshold would prune it
+@test ev[1] / ev[end] > 1e-8                     # it is NOT a (near-)exact / basis redundancy
 
-# select_lowdin_orth returns exactly the non-redundant, S-orthonormal set
-M = select_lowdin_orth(S_PAO; relthr=EC.options.loc.opaothr)
-@test size(M, 2) == 22
+# select_lowdin_orth at the default (redthr-tied) threshold KEEPS it, S-orthonormally
+M = select_lowdin_orth(S_PAO; relthr=opao_relthr(EC))
+@test size(M, 2) == 23
 COPAO = (cv * (transpose(cv) * S[:, o_aos])) * M
-@test maximum(abs.(transpose(COPAO) * S * COPAO - I)) < 1e-8   # well-conditioned, unlike the kept-23 case
+@test maximum(abs.(transpose(COPAO) * S * COPAO - I)) < 1e-8   # well-conditioned despite ~1000x amplification
+# a coarse threshold (the old default) prunes the core-leakage direction
+@test size(select_lowdin_orth(S_PAO; relthr=1e-5), 2) == 22
 
-# the real fragment-OPAO rotation drops the redundancy and stays a square, orthogonal rotation
-R, nfrag = _fragment_opao_rotation(cv, S, ao_atoms, [1]; relthr=EC.options.loc.opaothr)
-@test nfrag == 22
+# the fragment-OPAO rotation keeps all 23 and stays a square, orthogonal rotation
+R, nfrag = _fragment_opao_rotation(cv, S, ao_atoms, [1]; relthr=opao_relthr(EC))
+@test nfrag == 23
 @test size(R) == (nvirt, nvirt)
 @test maximum(abs.(transpose(R) * R - I)) < 1e-8
-# a looser threshold keeps the junk orbital (documents the behaviour being fixed)
-@test _fragment_opao_rotation(cv, S, ao_atoms, [1]; relthr=1e-12)[2] == 23
+@test _fragment_opao_rotation(cv, S, ao_atoms, [1]; relthr=1e-5)[2] == 22   # coarse prune
 
-# the 22 active OPAOs stay local (predominantly O-centered)
+# the active OPAOs stay local (predominantly O-centered)
 Cact = cv * R[:, 1:nfrag]
 SC = S * Cact
 maxpop = [maximum([sum(real(Cact[mu, j] * SC[mu, j]) for mu in findall(==(a), ao_atoms)) for a in 1:natom]) for j in 1:nfrag]
-@test sum(maxpop) / nfrag > 0.9                  # mean dominant-atom population (~0.97)
+@test sum(maxpop) / nfrag > 0.9                  # mean dominant-atom population
 end

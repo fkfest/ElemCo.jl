@@ -40,9 +40,13 @@ PAOs are selected by a pivoted Cholesky decomposition, and these are orthogonali
 symmetric Löwdin transformation. Redundant PAOs are dropped, and the kept OPAOs span the
 virtual space without redundancies.
 
-The relative threshold is the `loc.opaothr` option (default `1e-5`): eigenvectors of the PAO
-overlap with eigenvalue below `opaothr * λmax` are treated as redundant. Larger values prune
-more aggressively. The same option governs the fragment OPAOs built by [`@region`](region.md).
+The relative threshold is `loc.opaofac * scf.redthr` (with `loc.opaofac` default `3`):
+eigenvectors of the PAO overlap with eigenvalue below `opaofac * scf.redthr * λmax` are treated
+as redundant. Tying the threshold to the AO basis redundancy threshold `scf.redthr` keeps the
+two consistent — only directions that are (near-)redundant by the same standard the basis uses
+are removed, while small-but-real directions (e.g. the virtual residual of a frozen core AO) are
+kept. Larger `opaofac` prunes more aggressively. The same option governs the fragment OPAOs
+built by [`@region`](region.md).
 
 ## Minimal basis for SAD and IAO construction
 
