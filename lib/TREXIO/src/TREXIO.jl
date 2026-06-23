@@ -215,6 +215,11 @@ function _has_attribute(trexio::TrexioFile, group_name, attr_name; is_scalar=fal
     end
 end
 
+# TREXIO format version targeted by this writer. It must be a parseable
+# `MAJOR.MINOR.PATCH` string: the official TREXIO library parses
+# `metadata_package_version` when opening a file and refuses files it cannot parse.
+const TREXIO_FORMAT_VERSION = "2.6.1"
+
 # Helper function to write basic metadata for new TREXIO files
 function _write_basic_metadata(trexio_file::HDF5.File)
     # Create metadata group at root level
@@ -223,13 +228,21 @@ function _write_basic_metadata(trexio_file::HDF5.File)
     else
         metadata_group = trexio_file["metadata"]
     end
-    
-    # Write unsafe flag in metadata following TREXIO specification
-    # TREXIO stores scalar numerical values as HDF5 attributes, not datasets
-    if _has_hdf5_attribute(metadata_group, "unsafe")
-        delete_attribute(metadata_group, "unsafe")
+
+    # Write unsafe flag in metadata following TREXIO specification.
+    # TREXIO stores scalar numerical values as HDF5 attributes, not datasets, and
+    # names every object <group>_<attribute> (here: "metadata_unsafe").
+    if _has_hdf5_attribute(metadata_group, "metadata_unsafe")
+        delete_attribute(metadata_group, "metadata_unsafe")
     end
-    HDF5.write_attribute(metadata_group, "unsafe", Int64(1))
+    HDF5.write_attribute(metadata_group, "metadata_unsafe", Int64(1))
+
+    # Stamp a parseable package version (ASCII, fixed-length) unless one is already
+    # present, so the file can be opened by the official TREXIO library. An explicit
+    # `trexio_write_metadata_package_version` call later overrides this default.
+    if !_has_hdf5_attribute(metadata_group, "metadata_package_version")
+        _write_string_attribute(metadata_group, "metadata_package_version", TREXIO_FORMAT_VERSION)
+    end
 end
 
 # ============================================================================
@@ -330,6 +343,97 @@ Check if sparse array exists (checks for _values dataset).
 """
 function _has_sparse_array(group::HDF5.Group, name::String)
     return haskey(group, name * "_values")
+end
+
+# ============================================================================
+# TREXIO-compatible string storage
+# ============================================================================
+# The official TREXIO HDF5 back end stores strings as **ASCII** (not UTF-8):
+# scalar strings as fixed-length, NUL-terminated HDF5 attributes and string
+# arrays as variable-length datasets. HDF5.jl writes UTF-8 by default, which the
+# TREXIO C reader cannot convert ("no appropriate function for conversion path"),
+# so we build the ASCII datatypes explicitly to remain interoperable.
+
+"""
+    _check_trexio_string(s, name)
+
+Validate a string destined for an ASCII TREXIO field. Throws on an embedded NUL
+byte (which a NUL-terminated field would silently truncate) and warns on
+non-ASCII content. TREXIO is an ASCII format — the official library cannot even
+write non-ASCII strings — but the UTF-8 bytes we store round-trip losslessly
+through the official reader, so this is a warning rather than a hard error.
+"""
+function _check_trexio_string(s::AbstractString, name::AbstractString)
+    if '\0' in s
+        error("TREXIO string \"$name\" contains an embedded NUL byte, which cannot be stored in a NUL-terminated TREXIO string.")
+    end
+    if !isascii(s)
+        @warn "TREXIO string \"$name\" contains non-ASCII characters; TREXIO is an ASCII format. The bytes are stored as-is and round-trip through the official reader, but strictly ASCII-only consumers may not expect them." maxlog=1
+    end
+    return nothing
+end
+
+"""
+    _ascii_string_dtype(nbytes) -> HDF5.Datatype
+
+Build a NUL-terminated, ASCII HDF5 string datatype. `nbytes` is the storage size
+in bytes (including the terminating NUL), or `HDF5.API.H5T_VARIABLE` for a
+variable-length string.
+"""
+function _ascii_string_dtype(nbytes)
+    dt = HDF5.Datatype(HDF5.API.h5t_copy(HDF5.API.H5T_C_S1))
+    HDF5.API.h5t_set_size(dt, nbytes)
+    HDF5.API.h5t_set_strpad(dt, HDF5.API.H5T_STR_NULLTERM)
+    HDF5.API.h5t_set_cset(dt, HDF5.API.H5T_CSET_ASCII)
+    return dt
+end
+
+"""
+    _write_string_attribute(group, name, s)
+
+Write `s` as a fixed-length, NUL-terminated, ASCII HDF5 attribute (TREXIO scalar
+string convention).
+"""
+function _write_string_attribute(group::HDF5.Group, name::AbstractString, s::AbstractString)
+    str = String(s)
+    _check_trexio_string(str, name)
+    if _has_hdf5_attribute(group, name)
+        delete_attribute(group, name)
+    end
+    n = ncodeunits(str) + 1   # include terminating NUL
+    dt = _ascii_string_dtype(n)
+    buf = zeros(UInt8, n)
+    copyto!(buf, codeunits(str))
+    dspace = HDF5.Dataspace(HDF5.API.h5s_create(HDF5.API.H5S_SCALAR))
+    attr = HDF5.create_attribute(group, name, dt, dspace)
+    GC.@preserve buf HDF5.API.h5a_write(attr, dt, pointer(buf))
+    close(attr); close(dspace); close(dt)
+    return nothing
+end
+
+"""
+    _write_string_dataset(group, name, v)
+
+Write `v` as a variable-length, ASCII HDF5 string dataset (TREXIO string-array
+convention).
+"""
+function _write_string_dataset(group::HDF5.Group, name::AbstractString, v::AbstractVector{<:AbstractString})
+    if haskey(group, name)
+        delete_object(group, name)
+    end
+    for s in v
+        _check_trexio_string(String(s), name)
+    end
+    dt = _ascii_string_dtype(HDF5.API.H5T_VARIABLE)
+    dspace = HDF5.dataspace((length(v),))
+    dset = HDF5.create_dataset(group, name, dt, dspace)
+    owners = [Base.cconvert(Cstring, String(s)) for s in v]
+    GC.@preserve owners begin
+        buf = Cstring[Base.unsafe_convert(Cstring, o) for o in owners]
+        HDF5.API.h5d_write(dset, dt, HDF5.API.H5S_ALL, HDF5.API.H5S_ALL, HDF5.API.H5P_DEFAULT, buf)
+    end
+    close(dset); close(dspace); close(dt)
+    return nothing
 end
 
 # ============================================================================
@@ -512,8 +616,19 @@ Includes type and size validation.
 """
 function generate_write_function(field::TrexioField)
     ndim = length(field.dimensions)
+    # Official TREXIO names every HDF5 object <group>_<attribute> (e.g. "nucleus_charge").
+    objname = field.group * "_" * field.attribute
     if ndim == 0
-        # Scalar values - stored as HDF5 attributes (TREXIO standard)
+        # Scalar values - stored as HDF5 attributes (TREXIO standard).
+        # Strings must be written as ASCII to stay readable by the TREXIO C library.
+        write_scalar = field.type == String ?
+            :(_write_string_attribute(group, $(objname), value)) :
+            quote
+                if _has_hdf5_attribute(group, $(objname))
+                    delete_attribute(group, $(objname))
+                end
+                HDF5.write_attribute(group, $(objname), value)
+            end
         return quote
             # Type validation for scalar values
             if !(value isa $(field.type))
@@ -523,19 +638,14 @@ function generate_write_function(field::TrexioField)
                     return TREXIO_INVALID_ARG_2
                 end
             end
-            
+
             group, status = _get_or_create_group(trexio, $(field.group))
             if isnothing(group) || status != TREXIO_SUCCESS
                 return status
             end
-             
+
             try
-                # Delete existing attribute if present (for unsafe mode updates)
-                if _has_hdf5_attribute(group, $(field.attribute))
-                    delete_attribute(group, $(field.attribute))
-                end
-                # Write as HDF5 attribute (TREXIO standard for scalars)
-                HDF5.write_attribute(group, $(field.attribute), value)
+                $(write_scalar)
                 return TREXIO_SUCCESS
             catch e
                 @warn "$e"
@@ -554,7 +664,8 @@ function generate_write_function(field::TrexioField)
                 # Need runtime validation by reading the referenced field
                 parts = split(dim_str, ".")
                 ref_group = parts[1]
-                ref_attr = parts[2]
+                # store the full HDF5 object name (<group>_<attribute>) for the referenced field
+                ref_attr = ref_group * "_" * parts[2]
                 push!(runtime_size_checks, (i, ref_group, ref_attr))
             else
                 # fixed dimensions
@@ -595,7 +706,7 @@ function generate_write_function(field::TrexioField)
                 end
                 
                 try
-                    _write_sparse_array(group, $(field.attribute), indices, Vector{Float64}(values))
+                    _write_sparse_array(group, $(objname), indices, Vector{Float64}(values))
                     return TREXIO_SUCCESS
                 catch e
                     @warn "$e"
@@ -603,7 +714,18 @@ function generate_write_function(field::TrexioField)
                 end
             end
         else
-            # Dense arrays
+            # Dense arrays. String arrays need explicit ASCII storage for TREXIO.
+            # `convert(Array, value)` materialises adjoints / transposes / strided
+            # views into a contiguous Array (no-op for a plain Array); HDF5.jl cannot
+            # write arrays with a non-`Array` stride.
+            write_array = field.type == String ?
+                :(_write_string_dataset(group, $(objname), value)) :
+                quote
+                    if haskey(group, $(objname))
+                        delete_object(group, $(objname))
+                    end
+                    group[$(objname)] = convert(Array, value)
+                end
             return quote
                 # Type validation
                 if !(value isa AbstractArray{$(field.type), $ndim})
@@ -662,10 +784,7 @@ function generate_write_function(field::TrexioField)
                 end
                 
                 try
-                    if haskey(group, $(field.attribute))
-                        delete_object(group, $(field.attribute))
-                    end
-                    group[$(field.attribute)] = value
+                    $(write_array)
                     return TREXIO_SUCCESS
                 catch e
                     @warn "$e"
@@ -684,6 +803,8 @@ Sparse fields use _indices/_values format.
 """
 function generate_read_function(field::TrexioField)
     ndim = length(field.dimensions)
+    # Official TREXIO names every HDF5 object <group>_<attribute> (e.g. "nucleus_charge").
+    objname = field.group * "_" * field.attribute
     if ndim == 0
         # Scalar values stored as HDF5 attributes (TREXIO standard)
         # Handle all numeric types explicitly for type stability
@@ -698,18 +819,18 @@ function generate_read_function(field::TrexioField)
         end
         
         return quote
-            if !_has_attribute(trexio, $(field.group), $(field.attribute), is_scalar=true)
+            if !_has_attribute(trexio, $(field.group), $(objname), is_scalar=true)
                 return $(default_val), TREXIO_HAS_NOT
             end
-            
+
             group, status = _get_or_create_group(trexio, $(field.group))
             if isnothing(group) || status != TREXIO_SUCCESS
                 return $(default_val), status
             end
-            
+
             try
                 # Read from HDF5 attribute (TREXIO standard for scalars)
-                value = HDF5.read_attribute(group, $(field.attribute))
+                value = HDF5.read_attribute(group, $(objname))
                 val = convert($(field.type), value)::$(field.type)
                 return val, TREXIO_SUCCESS
             catch e
@@ -721,17 +842,17 @@ function generate_read_function(field::TrexioField)
         if field.sparse
             # Sparse arrays: return (indices, values) tuple
             return quote
-                if !_has_attribute(trexio, $(field.group), $(field.attribute), is_sparse=true)
+                if !_has_attribute(trexio, $(field.group), $(objname), is_sparse=true)
                     return (zeros(Int32, $(ndim), 0), zeros(Float64, 0)), TREXIO_HAS_NOT
                 end
-                
+
                 group, status = _get_or_create_group(trexio, $(field.group))
                 if isnothing(group) || status != TREXIO_SUCCESS
                     return (zeros(Int32, $(ndim), 0), zeros(Float64, 0)), status
                 end
-                
+
                 try
-                    indices, values = _read_sparse_array(group, $(field.attribute), $(ndim))
+                    indices, values = _read_sparse_array(group, $(objname), $(ndim))
                     return (indices, values), TREXIO_SUCCESS
                 catch e
                     return (zeros(Int32, $(ndim), 0), zeros(Float64, 0)), TREXIO_FAILURE
@@ -746,17 +867,17 @@ function generate_read_function(field::TrexioField)
                 default_val = zeros(field.type, ntuple(d->0, ndim))
             end
             return quote
-                if !_has_attribute(trexio, $(field.group), $(field.attribute))
+                if !_has_attribute(trexio, $(field.group), $(objname))
                     return $(default_val), TREXIO_HAS_NOT
                 end
-                
+
                 group, status = _get_or_create_group(trexio, $(field.group))
                 if isnothing(group) || status != TREXIO_SUCCESS
                     return $(default_val), status
                 end
-                
+
                 try
-                    data = read(group[$(field.attribute)])::Array{$(field.type), $(ndim)}
+                    data = read(group[$(objname)])::Array{$(field.type), $(ndim)}
                     return data, TREXIO_SUCCESS
                 catch e
                     return $(default_val), TREXIO_FAILURE
@@ -773,8 +894,10 @@ function generate_has_function(field::TrexioField)
     ndim = length(field.dimensions)
     is_scalar = ndim == 0
     is_sparse = field.sparse
+    # Official TREXIO names every HDF5 object <group>_<attribute> (e.g. "nucleus_charge").
+    objname = field.group * "_" * field.attribute
     return quote
-        _has_attribute(trexio, $(field.group), $(field.attribute), is_scalar=$(is_scalar), is_sparse=$(is_sparse))
+        _has_attribute(trexio, $(field.group), $(objname), is_scalar=$(is_scalar), is_sparse=$(is_sparse))
     end
 end
 
