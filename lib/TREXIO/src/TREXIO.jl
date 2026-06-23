@@ -355,6 +355,25 @@ end
 # so we build the ASCII datatypes explicitly to remain interoperable.
 
 """
+    _check_trexio_string(s, name)
+
+Validate a string destined for an ASCII TREXIO field. Throws on an embedded NUL
+byte (which a NUL-terminated field would silently truncate) and warns on
+non-ASCII content. TREXIO is an ASCII format — the official library cannot even
+write non-ASCII strings — but the UTF-8 bytes we store round-trip losslessly
+through the official reader, so this is a warning rather than a hard error.
+"""
+function _check_trexio_string(s::AbstractString, name::AbstractString)
+    if '\0' in s
+        error("TREXIO string \"$name\" contains an embedded NUL byte, which cannot be stored in a NUL-terminated TREXIO string.")
+    end
+    if !isascii(s)
+        @warn "TREXIO string \"$name\" contains non-ASCII characters; TREXIO is an ASCII format. The bytes are stored as-is and round-trip through the official reader, but strictly ASCII-only consumers may not expect them." maxlog=1
+    end
+    return nothing
+end
+
+"""
     _ascii_string_dtype(nbytes) -> HDF5.Datatype
 
 Build a NUL-terminated, ASCII HDF5 string datatype. `nbytes` is the storage size
@@ -376,10 +395,11 @@ Write `s` as a fixed-length, NUL-terminated, ASCII HDF5 attribute (TREXIO scalar
 string convention).
 """
 function _write_string_attribute(group::HDF5.Group, name::AbstractString, s::AbstractString)
+    str = String(s)
+    _check_trexio_string(str, name)
     if _has_hdf5_attribute(group, name)
         delete_attribute(group, name)
     end
-    str = String(s)
     n = ncodeunits(str) + 1   # include terminating NUL
     dt = _ascii_string_dtype(n)
     buf = zeros(UInt8, n)
@@ -400,6 +420,9 @@ convention).
 function _write_string_dataset(group::HDF5.Group, name::AbstractString, v::AbstractVector{<:AbstractString})
     if haskey(group, name)
         delete_object(group, name)
+    end
+    for s in v
+        _check_trexio_string(String(s), name)
     end
     dt = _ascii_string_dtype(HDF5.API.H5T_VARIABLE)
     dspace = HDF5.dataspace((length(v),))
