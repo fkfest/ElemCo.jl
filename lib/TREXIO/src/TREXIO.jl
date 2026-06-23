@@ -692,13 +692,16 @@ function generate_write_function(field::TrexioField)
             end
         else
             # Dense arrays. String arrays need explicit ASCII storage for TREXIO.
+            # `convert(Array, value)` materialises adjoints / transposes / strided
+            # views into a contiguous Array (no-op for a plain Array); HDF5.jl cannot
+            # write arrays with a non-`Array` stride.
             write_array = field.type == String ?
                 :(_write_string_dataset(group, $(objname), value)) :
                 quote
                     if haskey(group, $(objname))
                         delete_object(group, $(objname))
                     end
-                    group[$(objname)] = value
+                    group[$(objname)] = convert(Array, value)
                 end
             return quote
                 # Type validation
