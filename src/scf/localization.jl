@@ -805,7 +805,7 @@ function localize_boys(cMO_occ::AbstractMatrix{T}, S::AbstractMatrix,
 end
 
 """
-    compute_opao_rotation(cMO_virt::AbstractMatrix, S::AbstractMatrix; relthr=1e-5)
+    compute_opao_rotation(cMO_virt::AbstractMatrix, S::AbstractMatrix; relthr=3e-8)
 
 Compute the rotation matrix for virtual orbitals based on orthogonalized PAOs.
 
@@ -813,13 +813,13 @@ PAOs (Projected Atomic Orbitals) are constructed by projecting AO basis function
 onto the virtual space: ``C_{\\text{PAO}} = C_{\\text{virt}} C_{\\text{virt}}^T S``.
 The PAO overlap matrix is orthogonalized via [`select_lowdin_orth`](@ref) (relative-
 threshold rank detection + atom-centered pivot selection + symmetric Löwdin), which
-removes redundant PAOs while keeping the OPAOs local. `relthr` is the
-[`loc.opaothr`](@ref ECInfos.LocOptions) option.
+removes redundant PAOs while keeping the OPAOs local. `relthr` is the OPAO redundancy
+threshold, usually `loc.opaofac * scf.redthr`.
 
 Returns `R_virt` (nvirt × nvirt) such that `C_virt_loc = C_virt * R_virt`.
 """
 function compute_opao_rotation(cMO_virt::AbstractMatrix{T},
-                               S::AbstractMatrix; relthr::Real=1e-5) where T
+                               S::AbstractMatrix; relthr::Real=3e-8) where T
   nvirt = size(cMO_virt, 2)
 
   # PAO coefficients: project AO basis functions onto virtual space
@@ -893,7 +893,7 @@ function compute_localization_rotations(EC::ECInfo; exponent::Int=4)
 
   # OPAO for virtual orbitals
   println("  Computing orthogonal PAO rotation for virtual orbitals...")
-  R_virt = compute_opao_rotation(cMO_virt, S; relthr=EC.options.loc.opaothr)
+  R_virt = compute_opao_rotation(cMO_virt, S; relthr=opao_relthr(EC))
 
   nocc = size(R_occ, 1)
   nvirt = size(R_virt, 1)
@@ -1043,7 +1043,7 @@ function localize_orbitals(EC::ECInfo)
   if localize_virtual
     # OPAO for virtual orbitals
     println("  Computing orthogonal PAO rotation for virtual orbitals...")
-    R_virt = compute_opao_rotation(cMO_virt, S; relthr=EC.options.loc.opaothr)
+    R_virt = compute_opao_rotation(cMO_virt, S; relthr=opao_relthr(EC))
     cMO_full_loc[:, virt_range] = cMO_virt * R_virt
     if !isempty(energies_a)
       ε_virt = energies_a[virt_range]
