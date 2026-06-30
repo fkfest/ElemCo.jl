@@ -288,11 +288,7 @@ end
   ECInfos.ScfOptions) to form the relative eigenvalue threshold for detecting redundant PAOs
   in the orthogonalized-PAO (OPAO) construction (`@localize`, `@region`). Eigenvectors of the
   PAO overlap with eigenvalue below `opaofac * scf.redthr * λmax` are treated as redundant and
-  the corresponding (least independent) PAO is dropped. Tying the threshold to `redthr` keeps
-  the two consistent and basis-adaptive:
-  only (near-)exact redundancies are removed, while small-but-real directions above `redthr` —
-  e.g. the virtual residual of a frozen core AO (`~1e-7 λmax`) — are kept as genuine degrees of
-  freedom, and lowering `redthr` (a more complete basis) automatically loosens the PAO pruning.
+  the corresponding (least independent) PAO is dropped.
   Larger values prune more aggressively. """
   opaofac::Float64 = 3.0
   """`⟨""⟩` Minimal basis set for IAO construction. If empty, use `"minao"` type from basis Dict, or `"minao"` basis as fallback. """

@@ -78,21 +78,25 @@ end
   atomic-orbital (PAO) overlap `S_PAO = C_PAO' S C_PAO`), used to build orthogonal PAOs
   (OPAOs) for the virtual space without redundancies and without delocalizing them.
 
-  Three decoupled steps, each using the right tool:
+  A single Hermitian eigendecomposition drives both the rank and the column selection:
   1. **Rank** `r` from the eigenvalues of `S` with a *relative* threshold: directions with
      eigenvalue `> relthr * λmax` are kept. With `relthr` tied to the basis redundancy
      threshold (`relthr = loc.opaofac * scf.redthr`, a conservative `~1e-8`) only directions
      that are (near-)redundant by the same standard the basis uses are dropped; small-but-real
      directions (e.g. the virtual residual of a frozen core AO, which sits at `~1e-7 λmax`,
      well above `redthr`) are kept as genuine degrees of freedom.
-  2. **Selection** of exactly `r` *actual* (atom-centered) PAOs via the top-`r` pivots
-     of a pivoted Cholesky of `S` — the `r` most linearly-independent columns. Pinning
-     the count to `r` from step 1 avoids relying on a fragile pivot threshold.
+  2. **Selection** of exactly `r` *actual* (atom-centered) PAOs spanning the retained
+     subspace, via a rank-revealing column-pivoted QR of the `r` kept eigenvectors `Vₖ`
+     (the `r` most linearly-independent rows of `Vₖ`). Working on the clean, orthonormal kept
+     subspace — instead of a pivoted Cholesky of the rank-deficient metric `S` — keeps the
+     selection well-conditioned; pinning the count to `r` from step 1 avoids relying on a
+     fragile pivot threshold.
   3. **Symmetric Löwdin** orthogonalization `S_sub^{-1/2}` of the selected (clean,
      well-conditioned) `r×r` block, which keeps each OPAO as close as possible to its
      parent PAO (maximally local; cf. [`canonical_orthogonalization`](@ref), which
-     instead rotates into overlap eigenvectors and delocalizes). Löwdin handles the
-     amplification of low-presence directions gracefully (unlike ALPACA's `sqrtinvchol`).
+     instead rotates into overlap eigenvectors and delocalizes), followed by one symmetric
+     Löwdin refinement on the (≈ identity) residual metric `M' S M` to restore
+     machine-precision orthonormality when a low-presence direction is amplified.
 
   Returns `M` (`size(S,1) × r`) with `M' S M = I`, a drop-in for
   `sqrtinvchol(S; max_rank=...)` in `C_OPAO = C_PAO * M`. `relthr` is the OPAO redundancy
@@ -102,29 +106,31 @@ function select_lowdin_orth(S::AbstractMatrix; relthr::Real=3e-8, verbose::Bool=
   n = size(S, 1)
   A = Hermitian(Array(S))
   n == 0 && return similar(A, n, 0)
-  λ = eigvals(A)                                # ascending real eigenvalues (no eigenvectors)
-  λmax = λ[end]
+  # one Hermitian eigendecomposition serves both the rank and the column selection
+  F = eigen(A)                                  # ascending eigenvalues; eigenvectors in columns
+  λmax = F.values[end]
   λmax <= 0 && return similar(A, n, 0)
-  r = count(>(relthr * λmax), λ)
+  r = count(>(relthr * λmax), F.values)
   r == 0 && return similar(A, n, 0)
-  # No gap/cliff heuristic is needed: because `relthr` is tied to the conservative basis
-  # redundancy threshold (`opaofac * scf.redthr`, ~1e-8), the cut sits below the real (even
-  # diffuse) virtual directions but above genuine near-/exact redundancies. Extending the rank
-  # down a smooth tail would instead risk pulling in sub-`redthr`, heavily amplified junk.
-  # select the r most independent (atom-centered) columns via pivoted Cholesky
-  keep = sort(cholesky(A, RowMaximum(), check=false).p[1:r])
-  # symmetric Löwdin on the clean r×r block (sub-block taken directly from A)
-  Fs = eigen(Hermitian(A[keep, keep]))
-  Msub = Fs.vectors * Diagonal(inv.(sqrt.(Fs.values))) * Fs.vectors'
+  # select the r most independent (atom-centered) PAOs spanning the retained subspace via a
+  # rank-revealing column-pivoted QR of the r kept (largest-eigenvalue) eigenvectors. Operating
+  # on the clean orthonormal subspace — not a pivoted Cholesky of the rank-deficient A — keeps
+  # the selection well-conditioned; the count is pinned to r from the eigenvalue threshold.
+  Vk = F.vectors[:, n-r+1:n]
+  keep = sort(qr(Matrix(Vk'), ColumnNorm()).p[1:r])
+  # symmetric Löwdin B^{-1/2} of a Hermitian (sub-)metric B
+  lowdin(B) = (E = eigen(B); E.vectors * Diagonal(inv.(sqrt.(E.values))) * E.vectors')
+  # orthogonalize the clean r×r block, then refine once. A kept low-presence direction (e.g. a
+  # frozen-core virtual residual at ~1e-7·λmax) is amplified ~1/√λ, leaving the block ill-
+  # conditioned so the first Löwdin is off identity by ~cond·ε (a few × 1e-9); the residual
+  # metric is ≈ I, so re-Löwdin-ing it is well-conditioned and restores machine-precision
+  # orthonormality. M is zero outside `keep`, so `M' S M == Msub' Asub Msub` exactly — the
+  # refinement (and the whole construction) only ever touches the r×r block, never the full A.
+  Asub = Hermitian(A[keep, keep])
+  Msub = lowdin(Asub)
+  Msub = Msub * lowdin(Hermitian(Msub' * Asub * Msub))
   M = zeros(eltype(Msub), n, r)
   M[keep, :] = Msub
-  # One Löwdin refinement: when a kept low-presence direction is amplified (~1/√λ, e.g. the
-  # virtual residual of a frozen core AO at ~1e-7·λmax) the r×r block is ill-conditioned, so
-  # `M' A M` is off identity by ~√cond·ε (≈1e-10). That residual metric is ≈ I, so a second
-  # symmetric orthonormalization is well-conditioned and restores machine-precision
-  # `M' S_PAO M = I` without changing the rank or the (atom-centered) support of M.
-  Fg = eigen(Hermitian(M' * A * M))
-  M = M * (Fg.vectors * Diagonal(inv.(sqrt.(Fg.values))) * Fg.vectors')
   verbose && r < n && println("select_lowdin_orth: dropped $(n - r) redundant PAO(s) (relthr=$relthr)")
   return M
 end

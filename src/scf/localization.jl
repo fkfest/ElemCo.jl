@@ -814,7 +814,7 @@ onto the virtual space: ``C_{\\text{PAO}} = C_{\\text{virt}} C_{\\text{virt}}^T 
 The PAO overlap matrix is orthogonalized via [`select_lowdin_orth`](@ref) (relative-
 threshold rank detection + atom-centered pivot selection + symmetric Löwdin), which
 removes redundant PAOs while keeping the OPAOs local. `relthr` is the OPAO redundancy
-threshold [`opao_relthr`](@ref)`(EC) = loc.opaofac * scf.redthr`.
+threshold, usually `loc.opaofac * scf.redthr`.
 
 Returns `R_virt` (nvirt × nvirt) such that `C_virt_loc = C_virt * R_virt`.
 """

@@ -34,10 +34,11 @@ By default, `@localize` localizes occupied orbitals and also builds OPAOs for th
 OPAOs are built by projecting the AO basis onto the virtual space and orthogonalizing the
 resulting projected atomic orbitals. To keep the OPAOs atom-centered (local) while removing
 the linear dependencies, the
-projected-PAO overlap is handled in three steps: its numerical rank is determined from a
-*relative* eigenvalue threshold, exactly that many of the most independent (atom-centered)
-PAOs are selected by a pivoted Cholesky decomposition, and these are orthogonalized with a
-symmetric Löwdin transformation. Redundant PAOs are dropped, and the kept OPAOs span the
+projected-PAO overlap is handled in three steps, driven by a single Hermitian eigendecomposition:
+its numerical rank is determined from a *relative* eigenvalue threshold, exactly that many of the
+most independent (atom-centered) PAOs are selected by a rank-revealing column-pivoted QR of the
+retained eigenvectors, and these are orthogonalized with a symmetric Löwdin transformation
+(followed by one refinement step). Redundant PAOs are dropped, and the kept OPAOs span the
 virtual space without redundancies.
 
 The relative threshold is `loc.opaofac * scf.redthr` (with `loc.opaofac` default `3`):

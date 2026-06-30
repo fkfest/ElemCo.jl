@@ -2949,8 +2949,9 @@ Near-redundant directions of $S_{\mathrm{PAO}}$ --- those with eigenvalue below
 $\mathtt{opaofac}\cdot\mathtt{redthr}\cdot\lambda_{\max}$ (\cmd{loc.opaofac} times the AO basis
 redundancy threshold \cmd{scf.redthr}) --- are dropped, so $M$ has fewer columns than
 $C_{\mathrm{PAO}}$ when the support PAOs are linearly dependent in the virtual space. The retained
-PAOs are selected by a pivoted Cholesky of $S_{\mathrm{PAO}}$ and orthogonalized by a symmetric
-L\"owdin transformation, keeping the OPAOs local. This yields orthogonal PAOs
+PAOs are selected by a rank-revealing column-pivoted QR of the kept eigenvectors of
+$S_{\mathrm{PAO}}$ and orthogonalized by a symmetric L\"owdin transformation (with one refinement
+step), keeping the OPAOs local. This yields orthogonal PAOs
 \begin{equation}
   C_{\mathrm{OPAO}} = C_{\mathrm{PAO}} M.
 \end{equation}
