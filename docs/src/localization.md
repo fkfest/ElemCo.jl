@@ -34,15 +34,20 @@ By default, `@localize` localizes occupied orbitals and also builds OPAOs for th
 OPAOs are built by projecting the AO basis onto the virtual space and orthogonalizing the
 resulting projected atomic orbitals. To keep the OPAOs atom-centered (local) while removing
 the linear dependencies, the
-projected-PAO overlap is handled in three steps: its numerical rank is determined from a
-*relative* eigenvalue threshold, exactly that many of the most independent (atom-centered)
-PAOs are selected by a pivoted Cholesky decomposition, and these are orthogonalized with a
-symmetric Löwdin transformation. Redundant PAOs are dropped, and the kept OPAOs span the
+projected-PAO overlap is handled in three steps, driven by a single Hermitian eigendecomposition:
+its numerical rank is determined from a *relative* eigenvalue threshold, exactly that many of the
+most independent (atom-centered) PAOs are selected by a rank-revealing column-pivoted QR of the
+retained eigenvectors, and these are orthogonalized with a symmetric Löwdin transformation
+(followed by one refinement step). Redundant PAOs are dropped, and the kept OPAOs span the
 virtual space without redundancies.
 
-The relative threshold is the `loc.opaothr` option (default `1e-5`): eigenvectors of the PAO
-overlap with eigenvalue below `opaothr * λmax` are treated as redundant. Larger values prune
-more aggressively. The same option governs the fragment OPAOs built by [`@region`](region.md).
+The relative threshold is `loc.opaofac * scf.redthr` (with `loc.opaofac` default `3`):
+eigenvectors of the PAO overlap with eigenvalue below `opaofac * scf.redthr * λmax` are treated
+as redundant. Tying the threshold to the AO basis redundancy threshold `scf.redthr` keeps the
+two consistent — only directions that are (near-)redundant by the same standard the basis uses
+are removed, while small-but-real directions (e.g. the virtual residual of a frozen core AO) are
+kept. Larger `opaofac` prunes more aggressively. The same option governs the fragment OPAOs
+built by [`@region`](region.md).
 
 ## Minimal basis for SAD and IAO construction
 
