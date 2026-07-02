@@ -15,7 +15,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.DFTools
 using ..ElemCo.Utils
 
-export dfdump
+export dfdump, setup_fcidump_if_needed!
 
 """
     prepare_mpfit(EC, bao, bfit)
@@ -403,7 +403,27 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::SpinMatrix, full
   println("Reference energy: ", eRef)
 end
 
-""" 
+"""
+    setup_fcidump_if_needed!(EC::ECInfo)
+
+  (Re)generate the MO-integral FCIDUMP (`EC.fd`) with [`dfdump`](@ref) when it is missing, or when a
+  same-session restart must rebuild it from the `start` orbitals.
+
+  The latter is the `wf.dump==""` + `wf.start` reuse case: the cached `EC.fd` from an earlier call was
+  built from different (e.g. pre-optimization) orbitals, so it must not be reused — otherwise the
+  restarted amplitudes (in the stored, optimized basis) would be used with stale integrals and the
+  calculation would re-optimize instead of resuming at the stored solution. Skipped when there is no
+  molecular system (FCIDUMP-only), where the integrals come from a fixed file.
+"""
+function setup_fcidump_if_needed!(EC::ECInfo)
+  if isempty(EC.fd) ||
+     (EC.options.wf.dump == "" && EC.options.wf.start != "" && !isempty(EC.system))
+    dfdump(EC)
+  end
+  return
+end
+
+"""
     dfdump(EC::ECInfo)
 
   Generate fcidump using df integrals and store in `IntOptions.fcidump`.

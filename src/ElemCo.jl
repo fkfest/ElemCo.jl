@@ -958,9 +958,7 @@ macro cc(method, args...)
       return quote
         $(esc(:@tryECinit))
         with_local_options($(esc(:EC)), $local_opts_expr) do
-          if isempty($(esc(:EC)).fd)
-            dfdump($(esc(:EC)))
-          end
+          setup_fcidump_if_needed!($(esc(:EC)))
           strmethod = @var2string($(esc(method)), $(esc(strmethod)))
           ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
         end
@@ -977,9 +975,7 @@ macro cc(method, args...)
     else
       return quote
         $(esc(:@tryECinit))
-        if isempty($(esc(:EC)).fd)
-          $(esc(:@dfints))
-        end
+        setup_fcidump_if_needed!($(esc(:EC)))
         strmethod = @var2string($(esc(method)), $(esc(strmethod)))
         ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
       end
