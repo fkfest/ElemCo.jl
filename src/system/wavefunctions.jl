@@ -45,8 +45,9 @@ function dumpfile(EC::ECInfo, intent; start::Bool=false)
   if filename == ""
     filename = EC.options.wf.dump
   end
-  if filename == "" && intent != "w"
-    # no dump file (dump=""): the start file is the reference for reads
+  if filename == "" && intent == "r"
+    # no dump file (dump=""): the start file is the read reference (orbitals/classes/amplitudes).
+    # Only for pure reads — an update ("u") must not silently fall back to and modify the start file.
     filename = EC.options.wf.start
   end
   full_filename = joinpath(EC.scr, filename)

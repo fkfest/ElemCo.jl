@@ -297,15 +297,18 @@ function freeze_orbitals!(EC::ECInfo; MO="mo", redundant::Bool=true, verbose=tru
   # with the current space, so a single findall(Core)/findall(Deleted) freezes the right orbitals.
   if isnothing(classes)
     classa, classb, ea, eb = _try_orbital_classes_energies(EC; MO=MO)
-    have_classes = !isempty(classa) && length(ea) == length(classa)
-    has_beta = !isempty(classb) && length(eb) == length(classb)
   else
     classa, classb = classes
     ea, eb = Float64[], Float64[]
-    have_classes = !isempty(classa)
-    has_beta = !isempty(classb)
   end
-  have_energies = !isempty(ea) && length(ea) == length(classa)
+  # classes are stored independently of (optional) orbital energies, so class-driven freezing keys off
+  # class presence — but only when the classes actually describe the current orbital set (a length
+  # mismatch, e.g. classes from a smaller stored basis, means they cannot classify every orbital, so
+  # they are ignored and freezing falls back to the chemical core / recomputed redundancy). The
+  # energies (when present) only refine the redundant-orbital count below.
+  have_classes = !isempty(classa) && length(classa) == no_a0 + nv_a0
+  has_beta = !isempty(classb) && length(classb) == no_b0 + nv_b0
+  have_energies = have_classes && length(ea) == length(classa)
 
   # ---- occupied frozen core ----
   if freeze_nocc >= 0
@@ -324,10 +327,11 @@ function freeze_orbitals!(EC::ECInfo; MO="mo", redundant::Bool=true, verbose=tru
 
   # ---- virtual freezing ----
   # The linearly-dependent (redundant) orbitals and the (e.g. @region) deleted virtuals are both
-  # stored as class "Deleted". Number of redundant ones, for the override warning below.
+  # stored as class "Deleted". Number of *redundant* ones (for the override warning below): the
+  # high-energy "Deleted" when energies are available, else the actual AO linear dependency count
+  # (counting all "Deleted" would wrongly include region-deleted virtuals).
   nredundant = !redundant ? 0 :
     have_energies ? count(i -> classa[i] == "Deleted" && ea[i] > REDUNDANT_ENERGY_THR, eachindex(classa)) :
-    have_classes ? count(==("Deleted"), classa) :
     n_redundant_orbitals(EC)
   if freeze_nvirt < 0
     # auto: freeze every "Deleted" orbital (redundant + deleted) by its actual index, so a
