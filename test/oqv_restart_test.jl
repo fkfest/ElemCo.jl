@@ -24,8 +24,12 @@ basis = Dict("ao"=>"sto-3g", "jkfit"=>"cc-pvdz-jkfit", "mpfit"=>"cc-pvdz-mpfit")
 
   # Reuse the optimized orbitals: no separate reference dump, read orbitals+amplitudes
   # from cc.h5. Without the fix this crashed in dfdump (TREXIO_OPEN_ERROR on empty dump).
+  # `maxit=2` verifies the restart *resumes at the stored solution* (a true 1-iteration restart):
+  # if the FCIDUMP were not rebuilt from the stored optimized orbitals (a stale same-session
+  # EC.fd), the amplitudes would sit in the wrong basis and 2 iterations would not reconverge.
   e2 = @cc oqv-dcd begin
     @set wf start=ccfile dump=""
+    @set cc maxit=2
   end
 
   @test abs(e1["OQV-DCD"] - e2["OQV-DCD"]) < 1.e-6
