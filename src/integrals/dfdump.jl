@@ -416,12 +416,16 @@ function dfdump(EC::ECInfo)
   if !EC.options.int.df
     error("Only density-fitted integrals implemented")
   end
+  # classes describing the loaded orbital set; `nothing` means "use the dump's own classes". For a
+  # basis-change restart the orbitals are completed to the full new basis and matching classes are
+  # returned, so freezing operates on classes that describe the actual (completed) orbital set.
+  completed_classes = nothing
   if EC.options.wf.npositron > 0
     cMO = load_orbitals(EC)
     cPO = load_positron_orbitals(EC)
     norbs_pos = size(cPO,2)
   else
-    cMO = load_orbitals(EC)
+    cMO, completed_classes = load_orbitals_for_correlation(EC)
   end
   norbs = size(cMO,2)
   space_save = save_space(EC)
@@ -430,7 +434,7 @@ function dfdump(EC::ECInfo)
   EC.options.wf.npositron > 0 && n_redundant_orbitals(EC) > 0 &&
     error("Redundant (linearly-dependent) basis sets are not supported with positrons.")
   # frozen core, redundant orbitals, and (dump-deleted / explicit) virtuals, all by class/index
-  cls = freeze_orbitals!(EC)
+  cls = freeze_orbitals!(EC; classes=completed_classes)
   (cls.occ_a == cls.occ_b && cls.virt_a == cls.virt_b) ||
     error("FCIDUMP generation requires symmetric (restricted-like) freezing!")
   # total per-orbital frozen counts (chemical core + class-honored core, and frozen/deleted virt);

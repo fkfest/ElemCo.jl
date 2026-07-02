@@ -1365,31 +1365,20 @@ function project_amplitudes(EC::ECInfo, T1_old::AbstractMatrix, T2_old::Abstract
     virt_old_indices = collect((nocc_old+1):(nocc_old+nvirt_old))
   end
   
-  # Calculate overlap between bases
-  if isempty(basis_old) || isempty(basis_new)
-    # Assume same basis, just orbital rotation
-    SAO = I
-    S_old_new = I
-  else
-    SAO = overlap(basis_new)
-    S_old_new = overlap(basis_new, basis_old)
-  end
-  
-  # Build projection matrix in AO basis: P = S_new^{-1} * S_new_old
-  if SAO isa UniformScaling
-    proj_ao = I
-  else
-    proj_ao = inv(SAO) * S_old_new
-  end
-  
-  # Project to MO basis
-  # P_MO = C_new^T * S_new * proj_ao * C_old = C_new^T * S_old_new * C_old
-  if proj_ao isa UniformScaling
+  # MO-MO overlap between the new and old orbital sets. With the AO overlap between the two bases,
+  # P_MO = C_new^T S_new (S_new^{-1} S_new_old) C_old = C_new^T S_new_old C_old — the S_new^{-1}
+  # cancels, so no inverse of the new-basis overlap is needed (robust to a singular/redundant basis).
+  if isempty(basis_old) && isempty(basis_new)
+    # no AO basis at all: the coefficients are orbital rotations in an orthonormal MO space, so the
+    # metric is the identity (e.g. an FCIDUMP-only restart, where rotation matrices are stored)
     P_full = cMO_new[1]' * cMO_old[1]
+  elseif isempty(basis_old) || isempty(basis_new)
+    error("project_amplitudes: only one of the old/new orbital sets carries an AO basis; cannot form "
+          * "an MO overlap between an orbital set and a basis-less rotation.")
   else
-    P_full = cMO_new[1]' * S_old_new * cMO_old[1]
+    P_full = cMO_new[1]' * overlap(basis_new, basis_old) * cMO_old[1]
   end
-  
+
   # Extract occupied and virtual blocks using orbital class information
   # P_full is (norb_new × norb_old)
   # We need occ_new ← occ_old and virt_new ← virt_old projections
@@ -1499,35 +1488,20 @@ function project_amplitudes(EC::ECInfo,
             zeros(nvirt_a_new, nvirt_b_new, nocc_a_new, nocc_b_new))
   end
   
-  # Calculate overlap between bases
-  if isempty(basis_old) || isempty(basis_new)
-    S_old_new = I
+  # Projection matrices
+  # AO overlap between the two bases. With no basis at all the coefficients are orbital rotations in
+  # an orthonormal MO space (e.g. an FCIDUMP-only restart), so the metric is the identity; a mix of
+  # one basis present and one absent is inconsistent and cannot form an MO overlap.
+  if isempty(basis_old) && isempty(basis_new)
+    P_full_a = cMO_new[1]' * cMO_old[1]
+    P_full_b = cMO_new[2]' * cMO_old[2]
+  elseif isempty(basis_old) || isempty(basis_new)
+    error("project_amplitudes: only one of the old/new orbital sets carries an AO basis; cannot form "
+          * "an MO overlap between an orbital set and a basis-less rotation.")
   else
     S_old_new = overlap(basis_new, basis_old)
-  end
-  
-  # Alpha projection matrices
-  if is_restricted(cMO_old) 
-    cMO_old_a = cMO_old[1]
-    cMO_old_b = cMO_old[1]
-  else
-    cMO_old_a = cMO_old[1]
-    cMO_old_b = cMO_old[2]
-  end
-  if is_restricted(cMO_new)
-    cMO_new_a = cMO_new[1]
-    cMO_new_b = cMO_new[1]
-  else
-    cMO_new_a = cMO_new[1]
-    cMO_new_b = cMO_new[2]
-  end
-  
-  if S_old_new isa UniformScaling
-    P_full_a = cMO_new_a' * cMO_old_a
-    P_full_b = cMO_new_b' * cMO_old_b
-  else
-    P_full_a = cMO_new_a' * S_old_new * cMO_old_a
-    P_full_b = cMO_new_b' * S_old_new * cMO_old_b
+    P_full_a = cMO_new[1]' * S_old_new * cMO_old[1]
+    P_full_b = cMO_new[2]' * S_old_new * cMO_old[2]
   end
   
   # Determine old orbital indices
@@ -1856,22 +1830,27 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo{T}) where T
   
   # Get target orbitals and classes from dump file (or same file if not using start)
   use_projection = false
-  if use_start && EC.options.wf.dump != EC.options.wf.start
+  if use_start && EC.options.wf.dump != "" && EC.options.wf.dump != EC.options.wf.start
     if has_dumpfile(EC)
       cMO_new, type_new, current_basis = fetch_orbitals(EC)
       classes_new = fetch_orbital_classes(EC)
       use_projection = true
     end
   else
-    # Same file - project onto current basis (in case orbitals were modified)
+    # Same file / dump=""+start: reuse the start orbitals as the reference. `load_orbitals_for_correlation`
+    # gives the same orbital set (and matching classes) the FCIDUMP was built from: for a same-size
+    # basis the start orbitals re-expressed unchanged (keeping classes_old, a clean identity projection
+    # essential with a frozen core), and for a size change the completed full new-basis set with its
+    # classes, embedding the amplitudes into the new (e.g. larger) correlation space.
+    classes_new = classes_old
     if !isempty(EC.system)
       current_basis = generate_basis(EC, "ao")
-      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true, redthr=EC.options.scf.redthr)
+      cMO_new, completed_classes = load_orbitals_for_correlation(EC; start=use_start)
+      isnothing(completed_classes) || (classes_new = completed_classes)
       use_projection = true
     end
-    classes_new = (String[], String[])
   end
-  
+
   # Fetch amplitudes
   T1_old, T2_old = fetch_restricted_amplitudes(EC; start=use_start)
   
@@ -1920,7 +1899,7 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo{T}) where T
   # Get target orbitals, classes, and occupations from dump file (or same file if not using start)
   use_projection = false
   occupations_new = (Float64[], Float64[])
-  if use_start
+  if use_start && EC.options.wf.dump != "" && EC.options.wf.dump != EC.options.wf.start
     if has_dumpfile(EC)
       cMO_new, type_new, current_basis = fetch_orbitals(EC)
       classes_new = fetch_orbital_classes(EC)
@@ -1928,15 +1907,19 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo{T}) where T
       use_projection = true
     end
   else
-    # Same file - project onto current basis (in case orbitals were modified)
+    # Same file / dump=""+start: reuse the start orbitals as the reference (see the restricted
+    # version). `load_orbitals_for_correlation` returns the same orbital set the FCIDUMP was built
+    # from, with matching classes (unchanged classes_old for a same-size basis, or the completed
+    # new-basis classes for a size change).
+    classes_new = classes_old
     if !isempty(EC.system)
       current_basis = generate_basis(EC, "ao")
-      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true, redthr=EC.options.scf.redthr)
+      cMO_new, completed_classes = load_orbitals_for_correlation(EC; start=use_start)
+      isnothing(completed_classes) || (classes_new = completed_classes)
       use_projection = true
     end
-    classes_new = (String[], String[])
   end
-  
+
   # Fetch amplitudes
   T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old = fetch_unrestricted_amplitudes(EC; start=use_start)
   
