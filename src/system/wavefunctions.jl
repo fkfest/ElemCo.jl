@@ -31,6 +31,8 @@ export dump_determinants_multistate, state_filename
 
 If `intent="w"`, the dump file for writing is returned. Otherwise, the dump file for reading is returned.
 If `start=true` and `intent != "w"`, the start file (`wf.start`) is returned.
+For reads, an empty `wf.dump` falls back to the start file (`wf.start`), so a restart that
+deliberately omits a separate dump (`dump=""`) reads orbitals/classes/amplitudes from `start`.
 Returns `(filename::String, full_path_filename::String)`.
 """
 function dumpfile(EC::ECInfo, intent; start::Bool=false)
@@ -42,6 +44,11 @@ function dumpfile(EC::ECInfo, intent; start::Bool=false)
   end
   if filename == ""
     filename = EC.options.wf.dump
+  end
+  if filename == "" && intent == "r"
+    # no dump file (dump=""): the start file is the read reference (orbitals/classes/amplitudes).
+    # Only for pure reads — an update ("u") must not silently fall back to and modify the start file.
+    filename = EC.options.wf.start
   end
   full_filename = joinpath(EC.scr, filename)
   return filename, full_filename
