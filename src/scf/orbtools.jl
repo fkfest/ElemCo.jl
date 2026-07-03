@@ -504,25 +504,34 @@ end
 """
     load_orbitals_for_correlation(EC::ECInfo; start::Bool=false) -> (cMO::SpinMatrix, classes)
 
-  Load orbitals for building a correlation FCIDUMP, honoring a basis change.
+  Load orbitals for building a correlation FCIDUMP, honoring a geometry and/or basis change.
 
-  When the AO basis changed size relative to the stored orbitals (a `dump=""`+`start` restart into a
-  different basis), the stored orbitals are completed to the **full** new basis (see
-  [`project_onto_basis_complete`](@ref)) and the matching orbital `classes` for the completed set are
-  returned, so freezing (frozen core / linearly-dependent orbitals) uses classes that describe the
-  *actual* orbital set. Otherwise the projected orbitals and `nothing` are returned (freezing then
-  uses the dump's own, already-matching, classes).
+  When the AO basis is genuinely unchanged (same geometry *and* basis), the stored orbitals are reused
+  verbatim and `classes = nothing` is returned (freezing then uses the dump's own, already-matching
+  classes). Otherwise — a geometry displacement and/or a different/larger/smaller basis, as in a
+  `dump=""`+`start` restart — the stored orbitals are projected onto the current basis and
+  Löwdin-orthonormalized (and completed for a size change) via [`project_onto_basis_complete`](@ref),
+  and the matching orbital `classes` for the resulting set are returned so freezing (frozen core /
+  linearly-dependent orbitals) uses classes that describe the *actual* orbital set.
 """
 function load_orbitals_for_correlation(EC::ECInfo; start::Bool=false)
   cMO, _, basis = fetch_orbitals(EC; start=start)
   current_basis = generate_basis(EC, "ao")
-  if size(cMO[1], 1) != n_ao(current_basis)
-    cMO_new, kept, nredundant = project_onto_basis_complete(cMO, basis, current_basis; redthr=EC.options.scf.redthr)
-    classes_new = extend_classes_to_completed(fetch_orbital_classes(EC; start=start), kept,
-                                              size(cMO_new[1], 2), nredundant)
-    return cMO_new, classes_new
+  if size(cMO[1], 1) == n_ao(current_basis)
+    # same-size AO basis — but the geometry may still have moved. `project_onto_basis(check=true)`
+    # returns the input verbatim only when the basis is genuinely unchanged (same geometry & basis).
+    projected = project_onto_basis(cMO, basis, current_basis; check=true, redthr=EC.options.scf.redthr)
+    projected === cMO && return cMO, nothing
   end
-  return project_onto_basis(cMO, basis, current_basis; check=true, redthr=EC.options.scf.redthr), nothing
+  # The AO basis changed — a geometry displacement and/or a different/larger/smaller basis. A plain
+  # `project_onto_basis` does NOT re-orthonormalize, so a geometry change would leave a non-orthonormal
+  # reference (e.g. reusing optimized orbitals across a displacement gave a wrong OQV energy).
+  # `project_onto_basis_complete` Löwdin-orthonormalizes the projected orbitals (and fills/drops for a
+  # size change), yielding a valid new-basis reference and matching classes.
+  cMO_new, kept, nredundant = project_onto_basis_complete(cMO, basis, current_basis; redthr=EC.options.scf.redthr)
+  classes_new = extend_classes_to_completed(fetch_orbital_classes(EC; start=start), kept,
+                                            size(cMO_new[1], 2), nredundant)
+  return cMO_new, classes_new
 end
 
 """
