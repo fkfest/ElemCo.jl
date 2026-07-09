@@ -1609,6 +1609,44 @@ function project_amplitudes(EC::ECInfo,
 end
 
 """
+    correlation_reference_orbital_data(EC::ECInfo)
+
+  Pre-fetch the orbital data to store with a restarted wavefunction, using the *correlation
+  reference* orbitals — the ones the FCIDUMP was actually built from
+  ([`load_orbitals_for_correlation`](@ref)) — rather than the raw orbitals on file.
+
+  For a plain restart (the dump already holds the reference in the current AO basis) the two
+  coincide. But for a `dump=""`+`start` restart across a geometry (or basis) change, the reference
+  is the *projected* and re-orthonormalized orbital set expressed in the *current* AO basis, while
+  the raw orbitals on file are still in the old basis. Storing the raw orbitals then writes
+  old-basis coefficients tagged with the new AO basis — inconsistent with both the current geometry
+  and the stored (reference-basis) amplitudes — so a subsequent same-geometry restart cannot resume
+  at the stored solution and re-optimizes over several iterations. Storing the correlation reference
+  keeps the orbitals, amplitudes, and AO basis mutually consistent, so the restart resumes in one
+  iteration.
+
+  Returns the raw data unchanged for an FCIDUMP-only run (no molecular system) or a rotation-only
+  dump (no AO basis stored), where there are no orbital coefficients to re-express — the caller then
+  stores a rotation as before. Must be called before opening the store file for writing (dump ==
+  store case).
+"""
+function correlation_reference_orbital_data(EC::ECInfo)
+  orbital_data = fetch_orbital_data(EC)
+  # nothing / no system: FCIDUMP-only; empty basis: a rotation dump (see `fetch_orbitals`), which has
+  # no orbital coefficients to project — reusing it as-is preserves the pre-fix rotation-dump behavior.
+  (isnothing(orbital_data) || isempty(EC.system) || isempty(orbital_data.basis)) && return orbital_data
+  cMO_ref, _ = load_orbitals_for_correlation(EC)
+  # keep the fetched orbital energies/occupations only when the reference has the same number of
+  # orbitals (a same-size / geometry-change restart, where they still line up); drop them if a
+  # basis-size change altered the orbital count.
+  aligned = size(cMO_ref[1], 2) == size(orbital_data.cMO[1], 2) &&
+            is_restricted(cMO_ref) == is_restricted(orbital_data.cMO)
+  energies = aligned ? orbital_data.energies : (Float64[], Float64[])
+  occupations = aligned ? orbital_data.occupations : (Float64[], Float64[])
+  return OrbitalData(cMO_ref, orbital_data.mo_type, orbital_data.basis, energies, occupations)
+end
+
+"""
     dump_wavefunction_with_amplitudes!(EC::ECInfo, T1, T2; orbopt=false)
 
   Dump orbitals and CC amplitudes to the TREXIO file specified in `wf.store`.
@@ -1626,9 +1664,9 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::
     return
   end
   println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
-  # Pre-fetch orbital data BEFORE opening store file for writing
-  # This is crucial when dump and store are the same file
-  orbital_data = fetch_orbital_data(EC)
+  # Pre-fetch orbital data BEFORE opening store file for writing (crucial when dump and store are
+  # the same file). Use the correlation reference so the stored orbitals match the FCIDUMP/amplitudes.
+  orbital_data = correlation_reference_orbital_data(EC)
   if orbopt
     # Rotation matrix from T1 amplitudes
     Rpq = rotation_matrix(EC, T1; full=true)
@@ -1670,10 +1708,10 @@ function dump_wavefunction_with_amplitudes!(EC::ECInfo,
     return
   end
   println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
-  # Pre-fetch orbital data BEFORE opening store file for writing
-  # This is crucial when dump and store are the same file
-  orbital_data = fetch_orbital_data(EC)
-  if orbopt 
+  # Pre-fetch orbital data BEFORE opening store file for writing (crucial when dump and store are
+  # the same file). Use the correlation reference so the stored orbitals match the FCIDUMP/amplitudes.
+  orbital_data = correlation_reference_orbital_data(EC)
+  if orbopt
     # Rotation matrices from T1 amplitudes
     Rpq_a = rotation_matrix(EC, T1a; full=true)
     Rpq_b = rotation_matrix(EC, T1b; full=true, beta=true)
