@@ -338,22 +338,23 @@ function update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=fal
 end
 
 """
-    update_singles!(EC::ECInfo, T1, R1)
+    update_singles!(EC::ECInfo, T1, R1; damp=1.0)
 
-  Update singles amplitudes in `T1` with `R1`.
+  Update singles amplitudes in `T1` with `R1`. The update is scaled by `damp`
+  (`1.0` = full step; used e.g. as the orbital-rotation damping in OQV methods).
 """
-function update_singles!(EC::ECInfo, T1, R1)
-  T1 .+= update_singles(EC, R1)
+function update_singles!(EC::ECInfo, T1, R1; damp=1.0)
+  T1 .+= damp .* update_singles(EC, R1)
 end
 
 """
-    update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
+    update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b; damp=1.0)
 
-  Update singles amplitudes in `T1a`, `T1b` with `R1a`, `R1b`.
+  Update singles amplitudes in `T1a`, `T1b` with `R1a`, `R1b`, scaled by `damp`.
 """
-function update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
-  T1a .+= update_singles(EC, R1a)
-  T1b .+= update_singles(EC, R1b; spincase=:β)
+function update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b; damp=1.0)
+  T1a .+= damp .* update_singles(EC, R1a)
+  T1b .+= damp .* update_singles(EC, R1b; spincase=:β)
 end
 
 """

@@ -161,6 +161,13 @@ end
   shiftp::Float64 = 0.2
   """`⟨0.2⟩` level shift for triples. """
   shiftt::Float64 = 0.2
+  """`⟨1.0⟩` damping factor for the orbital-rotation step in orbital-optimized
+  QV methods (OQV-CCD/DCD). The orbital update is scaled by `orbdamp`; `1.0`
+  is the undamped step. Values `< 1` (e.g. `0.15`) stabilise the coupled
+  orbital+amplitude iteration near strong correlation / instabilities (stretched
+  bonds), at the cost of slower orbital convergence. Does not bias the solution:
+  the fixed point (gradient `= 0`) is unchanged by the damping. """
+  orbdamp::Float64 = 1.0
   """`⟨false⟩` calculate properties. """
   properties::Bool = false
   """`⟨1.e-5⟩` amplitude decomposition threshold. """
