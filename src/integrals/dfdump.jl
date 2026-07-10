@@ -409,15 +409,17 @@ end
   (Re)generate the MO-integral FCIDUMP (`EC.fd`) with [`dfdump`](@ref) when it is missing, or when a
   same-session restart must rebuild it from the `start` orbitals.
 
-  The latter is the `wf.dump==""` + `wf.start` reuse case: the cached `EC.fd` from an earlier call was
-  built from different (e.g. pre-optimization) orbitals, so it must not be reused — otherwise the
-  restarted amplitudes (in the stored, optimized basis) would be used with stale integrals and the
-  calculation would re-optimize instead of resuming at the stored solution. Skipped when there is no
-  molecular system (FCIDUMP-only), where the integrals come from a fixed file.
+  The latter is the `wf.dump==""` + `wf.start` reuse case (and the `dump4core_only` + `wf.start` core
+  swap): the cached `EC.fd` from an earlier call was built from different (e.g. pre-optimization)
+  orbitals, so it must not be reused — otherwise the restarted amplitudes (in the stored, optimized
+  basis) would be used with stale integrals and the calculation would re-optimize instead of resuming
+  at the stored solution. Skipped when there is no molecular system (FCIDUMP-only), where the
+  integrals come from a fixed file.
 """
 function setup_fcidump_if_needed!(EC::ECInfo)
   if isempty(EC.fd) ||
-     (EC.options.wf.dump == "" && EC.options.wf.start != "" && !isempty(EC.system))
+     ((EC.options.wf.dump == "" || EC.options.wf.dump4core_only) &&
+      EC.options.wf.start != "" && !isempty(EC.system))
     dfdump(EC)
   end
   return
@@ -445,7 +447,9 @@ function dfdump(EC::ECInfo)
     cPO = load_positron_orbitals(EC)
     norbs_pos = size(cPO,2)
   else
-    cMO, completed_classes = load_orbitals_for_correlation(EC)
+    # `dump4core_only`: correlating orbitals come from `start` (the frozen core from `dump` is spliced
+    # in below); otherwise the usual source (dump, or start via a dump="" restart).
+    cMO, completed_classes = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
   end
   norbs = size(cMO,2)
   space_save = save_space(EC)
@@ -461,6 +465,12 @@ function dfdump(EC::ECInfo)
   # the region layout keeps frozen core at the lowest and deleted virtuals at the highest indices.
   ncore_orbs = nocc_full - length(EC.space['o'])
   nfrozvirt = nvirt_full - length(EC.space['v'])
+  # on a geometry-change restart the frozen core reused from `start` is stale (stuck at the
+  # previous geometry). With `dump4core_only`, take the frozen core (the leading `ncore_orbs` columns,
+  # cf. the `core_orbs == 1:ncore_orbs` assertion in generate_integrals) from the fresh-HF `dump`.
+  if EC.options.wf.dump4core_only && !isempty(EC.system) && ncore_orbs > 0
+    cMO = replace_core_from_dump!(EC, cMO, ncore_orbs)
+  end
 
   full_norb = length(space_save[':'])
   nelec = guess_nelec(EC.system) - 2*ncore_orbs

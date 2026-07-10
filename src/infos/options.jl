@@ -24,6 +24,14 @@
   If empty, amplitudes are read from `dump`. If provided, amplitudes (and MOs/basis) 
   are read from this file and projected to the current MO basis. """
   start::String = ""
+  """`⟨false⟩` in a geometry-change restart of orbital-optimized methods, use the `dump` file for the
+  *frozen-core orbitals only* and take the correlating orbitals from `start`. The reused orbitals in
+  `start` carry the frozen core from the *previous* geometry; with `dump4core_only=true`
+  the frozen core is instead taken from `dump` — a fresh HF at the *current* geometry — while the
+  correlating orbitals come from `start` (projected and orthogonalized against the new core).
+  Typical use: run `@dfhf` at the new geometry (writes `dump`), then
+  `@set wf start="cc.h5" dump4core_only=true` (no need to set `dump=""`). """
+  dump4core_only::Bool = false
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
   """`⟨:auto⟩` core type for frozen-core approximation:

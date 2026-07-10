@@ -16,6 +16,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.Wavefunctions
 
 export guess_orb, guess_pos_orb, load_orbitals, load_orbitals_for_correlation, load_rotations, load_left_right_rotations
+export replace_core_from_dump!
 export extend_classes_to_completed
 export orbital_energies, load_positron_orbitals 
 export show_orbitals
@@ -532,6 +533,47 @@ function load_orbitals_for_correlation(EC::ECInfo; start::Bool=false)
   classes_new = extend_classes_to_completed(fetch_orbital_classes(EC; start=start), kept,
                                             size(cMO_new[1], 2), nredundant)
   return cMO_new, classes_new
+end
+
+"""
+    replace_core_from_dump!(EC::ECInfo, cMO::SpinMatrix, ncore::Int) -> SpinMatrix
+
+  Replace the `ncore` frozen-core orbitals (the leading columns) of `cMO` with the corresponding core
+  orbitals read from the `WfOptions.dump` file (e.g., a fresh HF at the *current* geometry), and orthonormalize
+  the remaining (correlating) orbitals against the new core (and each other) by projection — modified
+  Gram–Schmidt in the current AO overlap metric, seeded with the fixed core. Used for the
+  `dump4core_only` geometry-change restart: the correlating orbitals in `cMO` come from
+  `start`, but their frozen core is stale (stuck at the previous geometry); this swaps in the correct
+  new-geometry core.
+  Returns the modified `cMO`.
+"""
+function replace_core_from_dump!(EC::ECInfo, cMO::SpinMatrix, ncore::Int)
+  ncore == 0 && return cMO
+  dumpMO = load_orbitals(EC)                                 # `dump` = fresh HF at the current geometry
+  S = overlap(generate_basis(EC, "ao"))
+  nspin = is_restricted(cMO) ? 1 : 2
+  for isp in 1:nspin
+    C = cMO[isp]
+    Cd = dumpMO[isp]
+    size(Cd, 2) >= ncore || error("dump has fewer orbitals ($(size(Cd,2))) than the frozen core ($ncore)")
+    C[:, 1:ncore] = Cd[:, 1:ncore]
+    # Keep the new core exactly and orthonormalize the correlating orbitals against it (and each other)
+    # by projection — modified Gram–Schmidt in the AO S-metric. The already-orthonormalized leading
+    # columns of `C` (the fixed core + the correlating orbitals done so far) are the running basis, used
+    # in place via a view, so nothing is reallocated. Unlike a symmetric Löwdin of the whole set this
+    # never rotates the core.
+    for j in (ncore+1):size(C, 2)
+      Q = @view C[:, 1:j-1]                                  # S-orthonormal: core + already-done columns
+      v = C[:, j]
+      for _ in 1:2                                           # twice for numerical stability
+        v .-= Q * (Q' * (S * v))
+      end
+      nrm = sqrt(real(dot(v, S * v)))
+      nrm > 1.0e-8 || error("correlating orbital $j collapsed onto the core during orthogonalization")
+      C[:, j] = v ./ nrm
+    end
+  end
+  return cMO
 end
 
 """
