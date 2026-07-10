@@ -3105,7 +3105,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
     if do_sing || orbopt
       NormT1 = calc_singles_norm(Amps1...)
       NormR1 = calc_singles_norm(Res1...)
-      update_singles!(EC, Amps1..., Res1...)
+      # `cc.orbdamp` (default 1.0) damps the orbital-rotation step in OQV methods (convergence aid
+      # near strong correlation); it does not change the fixed point, only the path to it.
+      update_singles!(EC, Amps1..., Res1...; damp=EC.options.cc.orbdamp)
     end
     if length(Amps1) == 2 && restrict
       # spin_project!(EC, Amps...)
@@ -3146,6 +3148,12 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   end
   if orbopt && qv
     Rpq = rotation_matrix(EC, Amps1[1])
+    Rfilename = "orbitals_rotation_matrix"
+    description = "orbital rotation OQV"
+    println("Save orbital rotation matrix to file orbitals_rotation_matrix")
+    Rfile, R = newmmap(EC, Rfilename, size(Rpq);description)
+    R .= Rpq
+    closemmap(EC, Rfile, R)
     if EC.options.cc.keepOQVorbitals
       transform_fcidump!(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
     else
