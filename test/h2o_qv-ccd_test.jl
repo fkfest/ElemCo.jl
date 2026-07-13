@@ -7,6 +7,7 @@ EQV_CCD_test = -75.01962475218
 EOQV_CCD_test = -75.01992436712
 EQV_DCD = -75.02007638053
 EOQV_DCD_test = -75.02038234810
+EBQV_DCD_test = -75.020381183886
 
 
 geometry="bohr
@@ -31,6 +32,9 @@ energies = @cc qv-dcd
 
 energies = @cc oqv-dcd
 @test abs(energies["OQV-DCD"]-EOQV_DCD_test) < epsilon
+
+energies = @cc bqv-dcd
+@test abs(energies["BQV-DCD"]-EBQV_DCD_test) < epsilon
 
 end
 end
