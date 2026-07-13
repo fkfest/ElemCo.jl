@@ -674,7 +674,7 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   t1 = time_ns()
   main_name = method_name(ecmethod)
   ECC = calc_cc(EC, ECMethod(main_name))
-  if has_prefix(ecmethod, "O") && has_prefix(ecmethod, "QV")
+  if (has_prefix(ecmethod, "O") || has_prefix(ecmethod, "B")) && has_prefix(ecmethod, "QV")
     closed_shell = is_closed_shell(EC)
     if EC.options.cc.keepOQVorbitals
       push!(energies, "HF(original)"=>(energies["HF"], "HF energy"))

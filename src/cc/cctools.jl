@@ -117,8 +117,8 @@ function calc_rotated_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
     ϵo = load1idx(EC,"e_m")[SP['o']]
-    int1_r = load2idx(EC,"int1_r")[SP['o'],SP['o']]
-    EHF = sum(ϵo) + sum(diag(int1_r)) + EC.fd.int0
+    dh_oo = load2idx(EC,"dh_mm")[SP['o'],SP['o']]
+    EHF = sum(ϵo) + sum(diag(dh_oo)) + EC.fd.int0
   else
     # TODO
   end

@@ -1516,6 +1516,8 @@ function rotate_ints(EC::ECInfo, R::Matrix)
   save!(EC, "f_mm", fock)
   save!(EC, "df_mm", fock)
   save!(EC, "f_MM", fock)
+  @mtensor hrot[p,q] := integ1(EC.fd,:α)[p',q'] * R[p',p] * R[q',q]
+  save!(EC, "dh_mm", hrot)
   eps = diag(fock)
   save!(EC, "e_m", eps)
   save!(EC, "e_M", eps)
@@ -1551,7 +1553,7 @@ end
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
-function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
+function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false, brueckner=false)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   I_ab = Matrix{eltype(T2)}(I,nvirt,nvirt)
@@ -1612,18 +1614,22 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
     q2T = calc_qT_cc(AU2, BU2, CU2, Y2, W2, T2, T2t)
   end
 
-  # orbital optimization -- gradients calculation
-  if orbopt
-    G1 = calc_oqv_gradient(EC, q1T, q2T, Rpq)
-  else
-    G1 = T1
-  end
-
   #load the integrals
   T1_0 = zeros(eltype(T1),0,0)
   # q2VD = ints2(EC, "vvoo")
   q2VD = load4idx(EC,"d_vvoo")
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, Rot=Rpq, linearized=true)[2]
+  # singles_resid=brueckner extracts the (Brueckner) singles residual from the same H·T2 call
+  q1VS, q1VD = calc_cc_resid(EC, T1_0, q1T; dc, Rot=Rpq, linearized=true, singles_resid=brueckner)
+
+  # orbital optimization -- gradient (OQV) or Brueckner singles residual (BQV)
+  if brueckner
+    # rotate orbitals to zero the singles residual of the q1T channel (Knowles' Brueckner condition)
+    G1 = q1VS
+  elseif orbopt
+    G1 = calc_oqv_gradient(EC, q1T, q2T, Rpq)
+  else
+    G1 = T1
+  end
 
   q1VD .-= q2VD
   @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
@@ -1662,7 +1668,7 @@ end
   `T1` and `T2` are the singles and doubles amplitudes.
   `Rot` is the rotation matrix for orbital optimization (if any).
 """
-function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
+function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot; singles_resid=false)
   t1 = time_ns()
   SP = EC.space
   norb = n_orbs(EC)
@@ -1688,13 +1694,14 @@ function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
       R2[a,b,i,j] -= K2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
       R2[a,b,i,j] -= K2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
       R2[a,b,i,j] += (K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k]) * T1[b,l]
-      # singles residual contributions
-      R1[a,i] +=  2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
       x1[k,i] := 2.0 * K2pq[SP['o'],SP['o'],:,:][k,l,i,l] - K2pq[SP['o'],SP['o'],:,:][k,l,l,i]
       R1[a,i] -= x1[k,i] * T1[a,k]
     end
   end
-  x1 = nothing
+  if length(T1) > 0 || singles_resid
+    # singles residual, 4-external contribution (T1-independent; needed for Brueckner residual at T1≡0)
+    @mtensor R1[a,i] += 2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
+  end
   K2pq = nothing
   return
 end
@@ -1930,7 +1937,7 @@ end
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, Rot=zeros(Float64,0,0))
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, Rot=zeros(Float64,0,0), singles_resid=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1945,7 +1952,9 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   end
   @mtensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   dfock = load2idx(EC,"df_mm")
-  if length(T1) > 0
+  if length(T1) > 0 || singles_resid
+    # `singles_resid` forces the singles (Brueckner) residual even for empty T1 (T1≡0);
+    # the terms below only depend on T2t and the (rotated/dressed) integrals, not on T1.
     if EC.options.cc.use_kext
       dint1 = load2idx(EC,"dh_mm")
       R1 = dint1[SP['v'],SP['o']]
@@ -1993,7 +2002,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   @mtensor R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
   t1 = print_time(EC,t1,"I_klij T^kl_ab",2)
   if EC.options.cc.use_kext
-    cc_kext!(EC, R1, R2, T1, T2, Rot)
+    cc_kext!(EC, R1, R2, T1, T2, Rot; singles_resid)
     t1 = print_time(EC,t1,"kext",2)
   else
     if !EC.options.cc.calc_d_vvvv
@@ -2057,7 +2066,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   end
   t1 = print_time(EC,t1,"P(ia;jb)",2)
 
-  return R1,R2
+  return R1, R2
 end
 
 """
@@ -2940,7 +2949,8 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   if highest_full_exc > 3
     error("only implemented upto triples")
   end
-  orbopt = has_prefix(method, "O")
+  # Brueckner (B) reuses the orbital-optimization code paths (singles hold the orbital rotation)
+  orbopt = has_prefix(method, "O") || has_prefix(method, "B")
   if is_unrestricted(method) || has_prefix(method, "R")
     # Try to restart from dump file first
     T1a_start, T1b_start, T2a_start, T2b_start, T2ab_start, from_dump = try_fetch_unrestricted_starting_amplitudes(EC)
@@ -3038,7 +3048,10 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
   qv = has_prefix(method, "QV")
-  orbopt = has_prefix(method, "O")
+  brueckner = has_prefix(method, "B")
+  # Brueckner (BQV) reuses the orbital-rotation machinery of the orbital optimization (O),
+  # only the rotation is driven by the singles residual instead of the energy gradient
+  orbopt = has_prefix(method, "O") || brueckner
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
@@ -3063,7 +3076,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if qv
-      Res, E = calc_qvcc_resid(EC, it, Amps...; dc, orbopt)
+      Res, E = calc_qvcc_resid(EC, it, Amps...; dc, orbopt, brueckner)
       Eh = OutDict("E"=>E)
     else
       Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
@@ -3158,8 +3171,6 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
       transform_fcidump!(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
     else
       rotate_ints(EC, Rpq)
-      @mtensor int1_r[p,q] := EC.fd.int1[p',q'] * Rpq[p',p] * Rpq[q',q]
-      save!(EC, "int1_r", int1_r)
     end
   end
   if !converged
