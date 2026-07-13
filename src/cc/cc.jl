@@ -1549,7 +1549,7 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 end
 
 """
-    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false, orbopt=false)
+    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false, orbopt=false, brueckner=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
@@ -1933,7 +1933,7 @@ function calc_K2ab(int2::AbstractArray{T,4}, D2::AbstractArray{T,4}) where T <: 
 end
 
 """
-    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, qv=false, R=zeros(Float64,0,0))
+    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, Rot=zeros(Float64,0,0), singles_resid=false)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
