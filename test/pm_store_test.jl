@@ -13,6 +13,7 @@ using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
 using ElemCo.TensorTools: detri_int2, @tensor, newmmap, closemmap, mmap3idx
 using ElemCo.PMStore
 using ElemCo.FockFactory: ao_JK!, ao_J2K!
+using ElemCo.ECInfos: delete_file!, file_exists
 using ElemCo.MSystems: parse_geometry
 using LinearAlgebra
 using Random
@@ -213,6 +214,21 @@ end
     close_pm_store!(EC, pm)
     Kref = calc_pm_K2!(int2, D2, tripp)
     @test maximum(abs.(Kpm .- Kref)) < 1e-11
+  end
+end
+
+# Phase-4 gate: pm_to_joint! reconstructs the joint "ao_int2" file exactly from the ± store
+# (serves joint-format consumers — the AO→MO transform — once ao_int2 is retired).
+@testset "pm_to_joint! (inverse builder)" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((10, 12), (13, 300))
+    EC, int2 = build_store(n, T, maxcols)
+    delete_file!(EC, "ao_int2")                            # only the ± store remains
+    @test !file_exists(EC, "ao_int2")
+    ElemCo.PMStore.pm_to_joint!(EC)
+    @test file_exists(EC, "ao_int2")
+    f, rec = mmap3idx(EC, "ao_int2", T)
+    @test maximum(abs.(rec .- int2)) < 1e-13
+    close(f)
   end
 end
 

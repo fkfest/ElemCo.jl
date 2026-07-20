@@ -25,9 +25,9 @@ using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
 using ..ElemCo.Utils
 
-export PMSupermatrices, pm_from_joint!, open_pm_store, close_pm_store!, pm_exists,
-       delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel, pm_matmul!,
-       pm_JK!, pm_J2K!
+export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
+       pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
+       pm_matmul!, pm_JK!, pm_J2K!
 
 const PM_S_FILE = "ao_pm_s"
 const PM_A_FILE = "ao_pm_a"
@@ -200,6 +200,45 @@ function pm_from_joint!(EC::ECInfo{T}; maxcols::Int=0) where T
   closemmap(EC, sio, smap); closemmap(EC, aio, amap)
   close(aofile)
   save!(EC, PM_META_FILE, breakpoints; description="PM store σ-block breakpoints")
+  return
+end
+
+"""
+    pm_to_joint!(EC)
+
+Inverse of [`pm_from_joint!`](@ref): reconstruct the joint triangular `"ao_int2"` file
+(`int2[μ,ν,tri(ρσ)] = ⟨μν|ρσ⟩`) from the ± supermatrix store. One panel-major pass; each
+stored element writes its two native slab positions (± inversion) and — sub-panel rows —
+its two Hermitian-mirror positions (`conj`; the mirrors of diagonal-tile elements are
+their own stored partners). Used to serve joint-format consumers (e.g. the AO→MO
+transform) when only the ± store is on disk.
+"""
+function pm_to_joint!(EC::ECInfo{T}) where T
+  pm = open_pm_store(EC)
+  n = pm.nao
+  lutμ, lutν = pair_luts(n)
+  jfile, jint2 = newmmap(EC, "ao_int2", (n, n, pm.npp), T; description="int2 ao")
+  @inbounds for Jb in 1:pm_nblocks(pm)
+    cJ = pm.pairblocks[Jb]; r0 = first(cJ); lc = last(cJ)
+    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
+    for (jc, c) in enumerate(cJ)
+      ρ = lutμ[c]; σ = lutν[c]
+      for k in 1:size(Ps, 1)
+        r = r0 + k - 1
+        x = lutμ[r]; y = lutν[r]
+        g1 = (Ps[k,jc] + Pa[k,jc]) / 2       # ⟨xy|ρσ⟩
+        g2 = (Ps[k,jc] - Pa[k,jc]) / 2       # ⟨yx|ρσ⟩
+        jint2[x, y, c] = g1
+        jint2[y, x, c] = g2
+        if r > lc                            # Hermitian mirror → slab of ket pair r
+          jint2[ρ, σ, r] = conj(g1)          # ⟨ρσ|xy⟩
+          jint2[σ, ρ, r] = conj(g2)          # ⟨σρ|xy⟩ = ⟨ρσ|yx⟩
+        end
+      end
+    end
+  end
+  closemmap(EC, jfile, jint2)
+  close_pm_store!(EC, pm)
   return
 end
 

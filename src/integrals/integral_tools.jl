@@ -799,6 +799,8 @@ end
   (`freeze_orbs_in_dump`), exactly as for a `dfdump`-generated dump.
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
+  # joint-format consumer: reconstruct "ao_int2" from the ± supermatrix store if needed
+  !file_exists(EC, "ao_int2") && pm_exists(EC) && pm_to_joint!(EC)
   @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
@@ -838,6 +840,8 @@ end
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   is_restricted(cMO) && return generate_mo_dump(EC, cMO.α)
+  # joint-format consumer: reconstruct "ao_int2" from the ± supermatrix store if needed
+  !file_exists(EC, "ao_int2") && pm_exists(EC) && pm_to_joint!(EC)
   @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
