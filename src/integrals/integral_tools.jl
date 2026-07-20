@@ -13,6 +13,7 @@ using ..ElemCo.Integrals
 using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.PMStore
+using ..ElemCo.BasisSets: n_ao
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
@@ -378,17 +379,48 @@ function ao_integrals(EC::ECInfo{T}) where T
   bao = save_ao_1e_integrals!(EC)
   nao = size(load2idx(EC, "S_AA"), 1)
   ntri = nao*(nao+1)÷2
-  int2_file, int2 = newmmap(EC, "ao_int2", (nao, nao, ntri), T; description="int2 ao")
-  eri_2e4idx_tri!(int2, bao)
-  closemmap(EC, int2_file, int2)
   if EC.options.int.ao_pm
-    # persisted ± supermatrix store (kext/Fock/dressing consumers at halved flops/streaming);
-    # the joint intermediate is retired afterwards — steady-state disk ≈ n⁴/4 (transient
-    # peak 3n⁴/4 during the build). Joint-format consumers reconstruct it on demand.
-    pm_from_joint!(EC)
-    delete_file!(EC, "ao_int2")
+    # fused generation of the persisted ± supermatrix store straight from the ERI generator
+    # (kext/Fock/dressing consumers at halved flops/streaming) — the joint ao_int2 is never
+    # created, disk ≈ n⁴/4 throughout. Joint-format consumers reconstruct it on demand.
+    pm_integrals!(EC, bao)
+  else
+    int2_file, int2 = newmmap(EC, "ao_int2", (nao, nao, ntri), T; description="int2 ao")
+    eri_2e4idx_tri!(int2, bao)
+    closemmap(EC, int2_file, int2)
   end
   return nuclear_repulsion(EC.system)
+end
+
+"""
+    pm_integrals!(EC::ECInfo, bao; maxcols=0)
+
+  Fused generation of the ± supermatrix store straight from the ERI generator: the
+  triangular ket-column blocks are assembled in a bounded RAM slab (shell-aligned
+  `σ`-blocks, batches within a block generated in parallel), ±-folded with
+  `calc_tri_sym_antisym!` and written as PM panels — the joint `ao_int2` intermediate is
+  never created (disk ≈ n⁴/4 throughout, no transient peak). `maxcols` bounds the block
+  width (`0` = from the memory budget).
+"""
+function pm_integrals!(EC::ECInfo{T}, bao; maxcols::Int=0) where T
+  nao = n_ao(bao)
+  npp = nao*(nao+1)÷2
+  maxcols == 0 && (maxcols = PMStore.pm_default_maxcols(EC, nao, T))
+  # size the s-batches so a batch's column count (≈ target_length·s) stays within the block
+  tlen = clamp(fld(maxcols, nao), 1, EC.options.int.target_batch_length)
+  groups = ket_shell_blocks(bao; maxcols=maxcols, target_length=tlen)
+  breakpoints = Int[last(last(g).range) for g in groups]
+  w = pm_writer(EC, nao, breakpoints)
+  colcap = maximum(length, w.pairblocks)
+  fullS = zeros(T, npp, colcap); fullA = zeros(T, npp, colcap)   # reused full-height ± buffers
+  calc_2e4idx_tri_blockwise!(bao, groups) do J, slab
+    ncol = size(slab, 3)
+    Ssub = @view fullS[:, 1:ncol]; Asub = @view fullA[:, 1:ncol]
+    calc_tri_sym_antisym!(Ssub, Asub, slab)
+    pm_write_block!(w, J, Ssub, Asub)
+  end
+  pm_close_writer!(EC, w)
+  return
 end
 
 """

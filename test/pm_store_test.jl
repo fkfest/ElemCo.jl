@@ -330,6 +330,42 @@ end
   end
 end
 
+# Fused ± generation: ao_integrals with ao_pm builds the store straight from the ERI
+# generator (shell-aligned blocks, no joint ao_int2 intermediate at any point). Validate the
+# store contents against a joint-generated reference via pm_to_joint!, incl. a forced
+# multi-block blocking.
+@testset "fused ± generation ≡ joint generation" begin
+  geometry = "
+    O   0.000000000   0.000000000  -0.130186067
+    H1  0.000000000   1.489124508   1.033245507
+    H2  0.000000000  -1.489124508   1.033245507"
+  mk() = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")))
+  # reference: joint generation
+  EC2 = mk(); EC2.options.int.ao_pm = false
+  ElemCo.IntegralTools.ao_integrals(EC2)
+  f2, j2 = mmap3idx(EC2, "ao_int2"); ref = copy(j2); close(f2)
+  # fused, default blocking
+  EC1 = mk()
+  ElemCo.IntegralTools.ao_integrals(EC1)
+  @test pm_exists(EC1)
+  @test !file_exists(EC1, "ao_int2")                       # never created
+  ElemCo.PMStore.pm_to_joint!(EC1)
+  f1, j1 = mmap3idx(EC1, "ao_int2")
+  @test maximum(abs.(j1 .- ref)) < 1e-13
+  close(f1)
+  # fused, forced small blocks (multi-block + single-shell batches)
+  EC3 = mk()
+  bao = ElemCo.IntegralTools.save_ao_1e_integrals!(EC3)
+  ElemCo.IntegralTools.pm_integrals!(EC3, bao; maxcols=8)  # nao=7, npp=28 ⇒ several blocks
+  pm3 = open_pm_store(EC3)
+  @test pm_nblocks(pm3) > 1
+  close_pm_store!(EC3, pm3)
+  ElemCo.PMStore.pm_to_joint!(EC3)
+  f3, j3 = mmap3idx(EC3, "ao_int2")
+  @test maximum(abs.(j3 .- ref)) < 1e-13
+  close(f3)
+end
+
 # Phase-2 acceptance: AO-direct energies through the PM-store kext match the standard GEMM
 # kext, closed shell (CCSD/DCSD) and open shell (UCCSD, same-spin via PM + αβ raw).
 # After Phase 5 these runs also exercise the PM-native dressing sweeps end-to-end.

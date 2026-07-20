@@ -27,7 +27,8 @@ using ..ElemCo.Utils
 
 export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
        pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
-       pm_matmul!, pm_JK!, pm_J2K!, band_htrans!, pair_luts
+       pm_matmul!, pm_JK!, pm_J2K!, band_htrans!, pair_luts,
+       PMWriter, pm_writer, pm_write_block!, pm_close_writer!
 
 const PM_S_FILE = "ao_pm_s"
 const PM_A_FILE = "ao_pm_a"
@@ -164,7 +165,60 @@ function delete_pm_store!(EC::ECInfo)
   return
 end
 
-# ---- builder --------------------------------------------------------------------------
+# ---- builder / writer API -------------------------------------------------------------
+
+"""
+    PMWriter{T}
+
+Write handle for building a ± store block by block: the panel layout (from the `σ`-block
+`breakpoints`) plus the two open output mmaps. Fill with [`pm_write_block!`](@ref) (any
+block order), finalize with [`pm_close_writer!`](@ref).
+"""
+struct PMWriter{T}
+  nao::Int
+  npp::Int
+  breakpoints::Vector{Int}
+  pairblocks::Vector{UnitRange{Int}}
+  offsets::Vector{Int}
+  sio::IOStream
+  smap::Vector{T}
+  aio::IOStream
+  amap::Vector{T}
+end
+
+"Open a ± store for writing with the given `σ`-block `breakpoints` (any valid blocking)."
+function pm_writer(EC::ECInfo{T}, nao::Int, breakpoints::Vector{Int}) where T
+  _, pairblocks, offsets, totlen = pm_layout(nao, breakpoints)
+  sio, smap = newmmap(EC, PM_S_FILE, (totlen,), T; description="PM ± AO ints (symmetric)")
+  aio, amap = newmmap(EC, PM_A_FILE, (totlen,), T; description="PM ± AO ints (antisymmetric)")
+  return PMWriter{T}(nao, nao*(nao+1)÷2, breakpoints, pairblocks, offsets, sio, smap, aio, amap)
+end
+
+"""
+    pm_write_block!(w::PMWriter, J, S, A)
+
+Write the ±-folded block `J`: `S`/`A` hold the **full-height** `npp × |c_J|` symmetric/
+antisymmetric combinations for the ket columns `c_J`; only the lower rows `≥ first(c_J)`
+are stored (the upper rows are the Hermitian mirror owned by earlier panels).
+"""
+function pm_write_block!(w::PMWriter, J::Int, S::AbstractMatrix, A::AbstractMatrix)
+  cJ = w.pairblocks[J]; ncol = length(cJ); r0 = first(cJ); nrow = w.npp - r0 + 1
+  off = w.offsets[J]
+  for j in 1:ncol                                               # write lower rows column-major
+    dst = off + (j-1)*nrow
+    copyto!(view(w.smap, dst:dst+nrow-1), @view S[r0:w.npp, j])
+    copyto!(view(w.amap, dst:dst+nrow-1), @view A[r0:w.npp, j])
+  end
+  return
+end
+
+"Flush both files and store the layout metadata (`ao_pm_meta`)."
+function pm_close_writer!(EC::ECInfo, w::PMWriter)
+  closemmap(EC, w.sio, w.smap)
+  closemmap(EC, w.aio, w.amap)
+  save!(EC, PM_META_FILE, w.breakpoints; description="PM store σ-block breakpoints")
+  return
+end
 
 """
     pm_from_joint!(EC; maxcols=pm_default_maxcols(...))
@@ -172,34 +226,25 @@ end
 One-time build of the ± store from the joint triangular `ao_int2`. Streams the packed ket
 columns block by block (each `c_J` is a contiguous packed range ⇒ sequential mmap read),
 folds each `nao×nao` slab into its ±-symmetrized bra pairs with `calc_tri_sym_antisym!`, and
-writes only the lower rows `≥ first(c_J)` (the upper rows are the Hermitian mirror already
-owned by earlier panels). Sequential read, sequential write, one pass.
+writes the panels via a [`PMWriter`](@ref). Sequential read, sequential write, one pass.
+(For generation *without* a joint intermediate see `IntegralTools.pm_integrals!`.)
 """
 function pm_from_joint!(EC::ECInfo{T}; maxcols::Int=0) where T
   @assert file_exists(EC, "ao_int2") "no ao_int2 to build the PM store from"
   aofile, int2 = mmap3idx(EC, "ao_int2")
   nao = size(int2, 1); npp = nao*(nao+1)÷2
   maxcols == 0 && (maxcols = pm_default_maxcols(EC, nao, T))
-  breakpoints = pm_breakpoints(nao; maxcols=maxcols)
-  σblocks, pairblocks, offsets, totlen = pm_layout(nao, breakpoints)
-  sio, smap = newmmap(EC, PM_S_FILE, (totlen,), T; description="PM ± AO ints (symmetric)")
-  aio, amap = newmmap(EC, PM_A_FILE, (totlen,), T; description="PM ± AO ints (antisymmetric)")
-  colcap = maximum(length, pairblocks)
+  w = pm_writer(EC, nao, pm_breakpoints(nao; maxcols=maxcols))
+  colcap = maximum(length, w.pairblocks)
   fullS = zeros(T, npp, colcap); fullA = zeros(T, npp, colcap)   # reused full-height ± buffers
-  for J in eachindex(σblocks)
-    cJ = pairblocks[J]; ncol = length(cJ); r0 = first(cJ); nrow = npp - r0 + 1
+  for J in eachindex(w.pairblocks)
+    cJ = w.pairblocks[J]; ncol = length(cJ)
     Ssub = @view fullS[:, 1:ncol]; Asub = @view fullA[:, 1:ncol]
     calc_tri_sym_antisym!(Ssub, Asub, @view int2[:, :, cJ])     # full-height ± for these ket columns
-    off = offsets[J]
-    for j in 1:ncol                                             # write lower rows column-major
-      dst = off + (j-1)*nrow
-      copyto!(view(smap, dst:dst+nrow-1), @view Ssub[r0:npp, j])
-      copyto!(view(amap, dst:dst+nrow-1), @view Asub[r0:npp, j])
-    end
+    pm_write_block!(w, J, Ssub, Asub)
   end
-  closemmap(EC, sio, smap); closemmap(EC, aio, amap)
   close(aofile)
-  save!(EC, PM_META_FILE, breakpoints; description="PM store σ-block breakpoints")
+  pm_close_writer!(EC, w)
   return
 end
 

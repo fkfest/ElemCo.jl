@@ -193,6 +193,70 @@ function calc_2e4idx_tri!(int2::AbstractArray{T,3}, callback::Function, ao_basis
 end
 
 """
+    ket_shell_blocks(ao_basis::BasisSet; maxcols, target_length=100) -> Vector{Vector{BasisBatch}}
+
+  Group the ket-2 (`s`) batches of a single-basis [`BasisBatcher`](@ref) into consecutive
+  blocks of at most `maxcols` triangular `tri(r,s)` columns (each block keeps ≥ 1 batch, so
+  a single oversized batch stands alone). Each block owns a contiguous, shell-aligned run of
+  ket columns — a valid `σ`-blocking for the ± supermatrix store.
+"""
+function ket_shell_blocks(ao_basis::BasisSet; maxcols::Int, target_length::Int=100)
+  bb = BasisBatcher(ao_basis, target_length)
+  groups = Vector{BasisBatch}[]
+  curcols = 0
+  for batch in bb
+    s_lo, s_hi = first(batch.range), last(batch.range)
+    bcols = s_hi*(s_hi+1)÷2 - s_lo*(s_lo-1)÷2
+    if isempty(groups) || (curcols + bcols > maxcols && curcols > 0)
+      push!(groups, BasisBatch[]); curcols = 0
+    end
+    push!(groups[end], batch)
+    curcols += bcols
+  end
+  return groups
+end
+
+"""
+    calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet, groups)
+
+  Generate the physicist-triangular AO integrals **block by block**: for each group of
+  `s`-batches (from [`ket_shell_blocks`](@ref)) the contiguous ket-column slab
+  `slab[p, q, tri(r,s) − col_offset] = ⟨pq|rs⟩` is assembled in a reusable RAM buffer —
+  batches within a block run in parallel over disjoint columns, exactly like
+  [`calc_2e4idx_tri!`](@ref) — and handed to `consume!(J, slab)`. The full triangular
+  array is never stored; e.g. the ± supermatrix store is folded directly from the slabs.
+"""
+function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
+                                    groups::Vector{Vector{BasisBatch}})
+  callback = is_cartesian(ao_basis) ? eri_2e4idx_cart! : eri_2e4idx_sph!
+  nao = n_ao(ao_basis)
+  maxblockcols = maximum(groups) do g
+    s_lo = first(first(g).range); s_hi = last(last(g).range)
+    s_hi*(s_hi+1)÷2 - s_lo*(s_lo-1)÷2
+  end
+  slab = zeros(Cdouble, nao, nao, maxblockcols)
+  bb = first(first(groups)).bb
+  @threadsbuffer tbufs(Cdouble, buffer_size_4idx(bb)) begin
+  for (J, group) in enumerate(groups)
+    s_lo = first(first(group).range); s_hi = last(last(group).range)
+    col_lo = s_lo*(s_lo-1)÷2 + 1
+    ncols = s_hi*(s_hi+1)÷2 - col_lo + 1
+    @sync for batch in group
+      Threads.@spawn begin
+        b_lo = first(batch.range); b_hi = last(batch.range)
+        bcol_lo = b_lo*(b_lo-1)÷2 + 1
+        bcol_hi = b_hi*(b_hi+1)÷2
+        sl = @view slab[:, :, (bcol_lo - col_lo + 1):(bcol_hi - col_lo + 1)]
+        eri_2e4idx_tri_batch!(sl, tbufs, callback, batch)
+      end
+    end
+    consume!(J, @view slab[:, :, 1:ncols])
+  end
+  end #threadsbuffer
+  return
+end
+
+"""
     eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatch)
 
   Fill one `s`-batch of the physicist-triangular AO integrals into the slab `out`,
