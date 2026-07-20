@@ -21,11 +21,13 @@ occupied orbitals).
 | | flops (kext) | streamed/iter (kext) | disk | Fock build | dressing | MO transform |
 |---|---|---|---|---|---|---|
 | now (`ao_int2`) | n⁴nocc² | n⁴/2 | n⁴/2 | n⁴/2 read | n⁴/2 read | n⁵ compute |
-| PM store | **n⁴nocc²/2** | **n⁴/4** | **n⁴/4** | **n⁴/4 read (~2×)** | = (adapter) or n⁴/4 (native) | = (adapter) |
+| PM store | **n⁴nocc²/2** | **n⁴/4** | **n⁴/4** | **n⁴/4 read (~2×)** | **n⁴/4 read (native)** | = (adapter) |
 
-The two supermatrices are symmetric matrices over the packed pair space; only their
-lower **block**-triangles are stored as dense column panels, so every kernel is a plain
-zero-copy GEMM (`'N'`/`'T'` flags), never a packed-format special case.
+The two supermatrices are symmetric (real) / Hermitian (complex) matrices over the
+packed pair space; only their lower **block**-triangles are stored as dense column
+panels, so every kernel is a plain zero-copy GEMM (`'N'`/adjoint flags), never a
+packed-format special case. All consumers except the (n⁵-compute-bound) MO transform
+go PM-native; the transform reads through a thin adapter.
 
 ## 2. Format specification (normative)
 
@@ -49,8 +51,18 @@ Va[tri(μμ), ·] = 0,   Va[·, tri(ρρ)] = 0
 
 By exchange `⟨νμ|ρσ⟩ = ⟨μν|σρ⟩`, the bra-symmetrization equals the ket-symmetrization —
 the convention is self-consistent on both index sides (both diagonals carry the factor 2
-automatically). **Both matrices are symmetric**: `V[r,c] = V[c,r]` (hermiticity + exchange;
-real orbitals — the store is real-only, assert it).
+automatically). **Both matrices are symmetric for real `T` and Hermitian for complex
+`T`**: `V[r,c] = conj(V[c,r])` (from `⟨μν|ρσ⟩ = ⟨ρσ|μν⟩*` + exchange; proof is a
+Phase-0 test). The store is `T <: Number` generic.
+
+**The conjugation rule** (memorize; the complex story reduces to this one line):
+
+> *Pair-internal* swaps (`μν↔νμ`, `ρσ↔σρ`) come from **exchange** symmetry — they are
+> the ± signs of Vs/Va and **never conjugate**. The *block mirror* (bra-pair↔ket-pair,
+> the unstored triangle) comes from **hermiticity** — it **conjugates and has no sign**.
+> In code: mirror-role GEMMs use `adjoint` (`B'`, BLAS `'C'` — full speed), mirror-role
+> unpack scatters use `conj(x)`. For real `T` both are no-ops, so there is exactly ONE
+> code path; never write `transpose` for a mirror role.
 
 Inversion (the unpack used by every pair-splitting consumer):
 
@@ -79,6 +91,10 @@ and `K[μ,ν] := Σ_{ρσ} ⟨μν|ρσ⟩ D[ρ,σ]` (full sums). Then **exactly
 
 No stray ½ anywhere — the weights are absorbed by the conventions above. Every kernel
 in this plan is an instance of this identity; Phase 0 encodes it as a unit test.
+The identity holds over ℂ **verbatim** (its derivation uses only exchange symmetry;
+`Ds`/`Da` are transpose-based folds with no conjugation — this is also why the existing
+`calc_pm_K2!` is already complex-valid). Conjugation enters only through the block
+mirror per the §2.2 rule.
 
 Consistency with existing code: `calc_D2(...; scalepp=true)` (cc.jl:1192–1195) already
 produces the `/2` rs-diagonal; `calc_pm_K2!`'s `D2s/D2a = 0.5·(D2[:,trioo] ± D2[:,trioo_swap])`
@@ -159,23 +175,29 @@ pm_from_joint!(EC)                          # one-time build from "ao_int2"
 pm_K2!(pm, D2, tripp) -> K2pq               # kext (replaces per-iteration calc_pm_K2!)
 pm_JK!(J, K, pm, Dj, Dk); pm_J2K!(...)      # Fock kernels
 gen_fock(EC, pm::PMSupermatrices, h1, CMOl, CMOr); gen_ufock(...)   # dispatch overloads
-pm_joint_slabs!(dest, pm, σrange)           # adapter: reconstruct ao_int2-format slabs
+pm_occ_early(pm, Lo, Ro; membytes)          # dressing: closed/same-spin tile sweep (Phase 5)
+pm_os_blocks(pm, La_o,…,Rb_v; membytes)     # dressing: opposite-spin tile sweep  (Phase 5)
+unpack_pm_rect!(S⁺, A⁻, pm, I, J; mirror)   # shared bra-side unpack: ± vertical rectangles
+pm_joint_slabs!(dest, pm, σrange)           # adapter (MO transform only)
 ```
 
-Style requirement: every kernel ≤ ~60 lines, one comment per GEMM stating which term of
-the §2.3 identity it computes, no packed-index arithmetic inside inner loops (views +
-precomputed ranges only).
+Style requirements: `T <: Number` generic throughout; every kernel ≤ ~60 lines, one
+comment per GEMM stating which term of the §2.3 identity it computes; mirror roles via
+`adjoint`/`conj` per the §2.2 rule (never `transpose`); no packed-index arithmetic
+inside inner loops (views + precomputed ranges only).
 
 ## 4. Phases
 
 ### Phase 0 — convention pinning + dense harness *(small, do first)*
 
 1. New testitem `test/pm_store_test.jl` (tag it into the existing runner scheme):
-   build a random **joint-symmetric** packed `int2` (symmetrize diagonal slabs;
-   see test/ao_integrals_test.jl for the dense-reference style), form Vs/Va with
-   `calc_tri_sym_antisym!`, and assert: symmetry `V[r,c]=V[c,r]`, the inversion
-   formulas, and the §2.3 contraction identity vs a dense `detri_int2` reference
-   (random nonsymmetric D), at n ∈ {6, 9, 13}, to 1e-13.
+   build a random packed `int2` with the required symmetries — **run every check for
+   both `Float64` and `ComplexF64`** (real: joint-symmetrize; complex: symmetrize over
+   exchange *and* hermiticity `⟨μν|ρσ⟩=⟨ρσ|μν⟩*` — the two symmetrizations commute).
+   Form Vs/Va with `calc_tri_sym_antisym!` and assert: hermitian symmetry
+   `V[r,c]=conj(V[c,r])`, the inversion formulas, and the §2.3 contraction identity vs
+   a dense `detri_int2` reference (random *nonsymmetric*, complex-when-complex D),
+   at n ∈ {6, 9, 13}, to 1e-13.
 2. Baseline check: run one AO-direct CCSD with `cc.use_pm_kext=true` vs `false` —
    energies must agree (documents that the current pm path is correct before reuse).
 
@@ -205,7 +227,7 @@ precomputed ranges only).
    for J: (three GEMMs per matrix, all zero-copy on the mmap)
      sK2[c_J,:]    += T_J  · Ds[c_J,:]        # diagonal tile — once, 'N' only
      sK2[below,:]  += B_J  · Ds[c_J,:]        # 'N'
-     sK2[c_J,:]    += B_Jᵀ · Ds[below,:]      # 'T' (transpose FLAG, no copy)
+     sK2[c_J,:]    += B_J' · Ds[below,:]      # adjoint FLAG ('T' real / 'C' complex), no copy
    ```
    (Va: identical with aK2/Da. Panels streamed in file order — each element read once.)
 2. Wire in `cc_kext!` (cc.jl:2258/2316/2346): if `pm_exists(EC)` use `pm_K2!`; the old
@@ -237,12 +259,13 @@ precomputed ranges only).
 
 **Gate 3**: HF/UHF energies identical to 1e-11 vs joint-store path; suite green.
 
-### Phase 4 — MO transform (adapter)
+### Phase 4 — MO transform (the only adapter consumer)
 
 1. `pm_joint_slabs!(dest, pm, σrange)`: reconstruct `ao_int2`-format slabs for a σ-chunk.
    Access pattern: native panel columns + row-slices of earlier panels (regular strided
-   reads — contiguous runs of |c_J| per column; total I/O n⁴/2 per full sweep, same as
-   today — irrelevant here, the transform is n⁵ compute-bound).
+   reads — contiguous runs of |c_J| per column; conjugate the mirror-role elements per
+   §2.2; total I/O n⁴/2 per full sweep, same as today — irrelevant here, the transform
+   is n⁵ compute-bound).
 2. Feed `generate_mo_dump`'s use of the `transform_int2` family (integral_tools.jl:463–642)
    through the adapter — either refactor their int2 access to chunk iteration, or (zero-risk
    fallback) materialize a temporary joint file for the transform and delete it after.
@@ -251,22 +274,47 @@ precomputed ranges only).
 **Gate 4**: derive-path tests (UCCSD(T)/λ/EOM routes in ao_integrals testitem) green,
 energies identical to 1e-10.
 
-### Phase 5 — dressing sweeps (decision gate, then maybe native)
+### Phase 5 — dressing sweeps, PM-native (mandatory)
 
-1. **Ship first with the adapter**: `ao_occ_early`/`ao_ss_blocks`/`ao_os_blocks` read
-   per-σ chunks from `pm_joint_slabs!` instead of the raw mmap (their loop structure
-   already processes per-σ slabs — the change is the input source only). I/O = today's
-   n⁴/2; flops unchanged; the freshly verified sweeps stay intact.
-2. Profile a representative AO-direct CCSD (nao ≥ 100): if the dressing is I/O-bound,
-   implement the native tile-driven sweep (n⁴/4): per panel, unpack the ± pieces,
-   half-transform, and accumulate contributions in both hermiticity roles into the
-   in-RAM `v_ooAA/v_AooA/v_oAoA` accumulators (they are unordered sums — the
-   deferred-contribution pattern already used for the ρ>σ batch). This is the most
-   intricate step of the whole plan; **dense-reference-first is mandatory**
-   (template: the ao_os_blocks rewrite validated every intermediate against
-   `detri_int2` before touching cc.jl).
+Replace the internals of the occ-early sweeps with tile-driven PM-native versions —
+`pm_occ_early` (shared closed-shell/same-spin kernel behind `ao_dressed_ints`/
+`ao_ss_blocks`) and `pm_os_blocks`. The old σ-sweep + batched-ρ>σ-transpose machinery
+is **replaced**, not wrapped (the two-role tile processing subsumes it). Design:
 
-**Gate 5**: suite green; document the profile numbers and the Option-A/B decision.
+1. **Loop over stored tiles** [I ≥ J] (panel `J`, row sub-block `I`), streamed in file
+   order. Off-diagonal tiles are processed in **two hermiticity roles** (bra-block↔
+   ket-block swapped; mirror role conjugates per §2.2); diagonal tiles once.
+2. **Bra-side unpack only** (`unpack_pm_rect!`): per tile build two dense *vertical
+   rectangles* over the bra square, `S⁺[μ∈1:last(σ_I), ν∈σ_I]` (symmetric fill: both
+   `(μ,ν)` and `(ν,μ)` positions get `Vs`) and `A⁻` (antisymmetric fill: `+Va`/`−Va`).
+   Coverage argument (verify in the harness): the full vertical rectangle is exactly
+   the block-I pair set; the horizontal band `[σ_I × 1:first(σ_I)−1]` is its
+   symmetric/antisymmetric image — reached by *transposed reads*, never stored twice.
+3. **One GEMM pair per coefficient set serves both bra half-transforms**: with
+   `hS[i,·] = Σ S⁺·L[·,i]` and `hA[i,·] = Σ A⁻·L[·,i]` (each rectangle contracted along
+   both directions — row-contraction for the in-range free index, column-contraction for
+   the below-range free index), the recombinations `½(hS±hA)` yield the A-type and
+   B-type half-transforms of the current code. For `pm_os_blocks` (asymmetric αβ bra):
+   the same with two coefficient sets (`La_o`, `Lb_o`) → 4 GEMM pairs per tile,
+   matching the current 4 half-transforms. **Flop parity with today is exact** (each
+   stored element: 2 roles × its unpack positions × 2nocc — same total as the current
+   sweeps); the win is I/O (n⁴/4, each element read once) — verify both claims.
+4. **Ket side stays packed through the bra stage** — the half-transformed arrays carry
+   the packed ket-pair index and its ± content; the ket `(ρσ)`/`(σρ)` split is a ±
+   recombination **after** contraction, on n-times-smaller `[nocc × n × ketpairs]` data
+   (cheap). Routing into the σ-keyed in-RAM accumulators (`v_ooAA/v_AooA/v_oAoA`, os
+   analogues) is unordered accumulation — the deferred-contribution pattern the current
+   batched machinery already uses.
+5. **Dense-reference-first is mandatory** — this is the most intricate step of the plan.
+   Standalone harness before touching cc.jl: every intermediate vs `detri_int2` dense
+   einsum, real *and* complex, multiple blockings, asymmetric nocca≠noccb (template:
+   the ao_os_blocks rewrite, which caught real bugs this way). Coverage invariant to
+   assert: every stored element contributes each of its unpack positions exactly once
+   per role.
+
+**Gate 5**: dense harness 1e-13 (both eltypes); ao_integrals 74/74; full suite green;
+dressing wall-time and I/O measured vs the joint-store baseline (expect: flops equal,
+read volume halved).
 
 ### Phase 6 — retire the joint store
 
@@ -302,8 +350,10 @@ energies identical to 1e-10.
    large before fixing the default (measured: oversized blocks lose).
 7. **Threading**: GEMMs are BLAS-threaded; unpack kernels Julia-threaded (pattern:
    `calc_tri_sym_antisym!`); never nest both. The test runner pins BLAS threads.
-8. **Real-only**: `@assert T <: Real` at create with a clear message. (Complex would
-   need a conjugate fold: 'C' roles + conj in unpack — out of scope, leave a comment.)
+8. **The conjugation rule (§2.2)**: pair-internal swaps = ± signs, never `conj`; block
+   mirror = `conj`, no sign. Writing `transpose` where a mirror role needs `adjoint`
+   is invisible on every real test and wrong on every complex one — which is why the
+   Phase-0 harness runs everything for `ComplexF64` too. All kernels `T <: Number`.
 9. **mmap lifecycle**: mirror `cc_kext!`'s open/close discipline; two consumers must
    not double-close; `closemmap` on create, plain `close` on read (see ao_int2 usage).
 10. **σ-aligned blocking edge cases**: single-σ blocks, first block (σ=1 has one pair,
@@ -333,8 +383,11 @@ energies identical to 1e-10.
 
 ## 7. Success criteria (overall)
 
-- Full suite 811/811 (+ new pm_store testitem) at every gate.
+- Full suite 811/811 (+ new pm_store testitem, real **and** complex instantiations)
+  at every gate.
 - kext: PM ≥ standard wall time at **all** benchmarked sizes; ≥1.5× at nocc ≥ 10.
 - AO-HF iteration: measurably faster at nao ≥ 100 (bandwidth ÷2).
+- Dressing: flops equal, read volume halved vs joint store (measure both).
 - Disk after Phase 6: ≈ half of today's `ao_int2`.
-- No performance or accuracy regression on any non-AO path (FCIDUMP/DF suites).
+- No performance or accuracy regression on any non-AO path (FCIDUMP/DF suites —
+  incl. the complex_cc/complex_lambda/complex_eom testitems).
