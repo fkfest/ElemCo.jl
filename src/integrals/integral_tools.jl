@@ -12,6 +12,7 @@ using ..ElemCo.Wavefunctions
 using ..ElemCo.Integrals
 using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
+using ..ElemCo.PMStore
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDumps
 using ..ElemCo.OrbTools
@@ -424,6 +425,7 @@ function delete_ao_integrals!(EC::ECInfo)
   for f in ("ao_int2", "S_AA", "h_AA")
     file_exists(EC, f) && delete_file!(EC, f)
   end
+  delete_pm_store!(EC)   # the ± supermatrices derive from ao_int2 — invalidate together
   return
 end
 

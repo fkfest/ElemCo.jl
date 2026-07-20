@@ -38,6 +38,7 @@ include("cc/laplace.jl")
 include("scf/orbtools.jl")
 include("scf/localization.jl")
 include("scf/region.jl")
+include("integrals/pm_store.jl")
 include("scf/fockfactory.jl")
 include("integrals/dumptools.jl")
 include("integrals/integral_tools.jl")
@@ -81,6 +82,7 @@ using .Properties
 using .Wavefunctions
 using .ECMethods
 using .TensorTools
+using .PMStore
 using .FockFactory
 using .CCTools
 using .CoupledCluster

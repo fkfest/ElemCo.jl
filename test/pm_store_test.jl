@@ -10,7 +10,8 @@
 # conjugation-free exchange symmetry, so the identity holds verbatim over ℂ).
 using ElemCo
 using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
-using ElemCo.TensorTools: detri_int2, @tensor
+using ElemCo.TensorTools: detri_int2, @tensor, newmmap, closemmap, mmap3idx
+using ElemCo.PMStore
 using ElemCo.MSystems: parse_geometry
 using LinearAlgebra
 using Random
@@ -125,6 +126,68 @@ end
   EC = fresh(); @ints; @hf; @set cc use_pm_kext=true
   e_pm = @cc ccsd
   @test abs(e_std["CCSD"] - e_pm["CCSD"]) < 1e-10
+end
+
+# Phase-1 gate: the persisted ± store round-trips exactly. Build a physical (exchange +
+# hermitian) int2, write it as "ao_int2", pm_from_joint!, reopen, reconstruct the full
+# supermatrices from the stored lower block-triangle (+ Hermitian mirror) and compare to
+# calc_tri_sym_antisym! of the joint tensor. Real AND complex; several block sizes.
+@testset "PM store round-trip (build ↔ reconstruct)" begin
+  # place a synthetic physical ao_int2 into EC's scratch and build the ± store from it
+  function build_store(n, ::Type{T}, maxcols) where T
+    EC = ElemCo.ECInfo{T}()
+    int2 = herm_int2(exch_int2(n, T))                      # exchange + hermitian
+    f, arr = newmmap(EC, "ao_int2", (n, n, n*(n+1)÷2), T; description="int2 ao")
+    arr .= int2; closemmap(EC, f, arr)
+    pm_from_joint!(EC; maxcols=maxcols)
+    return EC, int2
+  end
+  # reconstruct the full npp×npp Vs/Va from the stored panels (+ Hermitian mirror)
+  function reconstruct(pm, ::Type{T}) where T
+    Vs = zeros(T, pm.npp, pm.npp); Va = zeros(T, pm.npp, pm.npp)
+    for J in 1:pm_nblocks(pm)
+      cJ = pm.pairblocks[J]; r0 = first(cJ); lc = last(cJ)
+      Ps = spanel(pm, J); Pa = apanel(pm, J)
+      for (jj, c) in enumerate(cJ), (ii, r) in enumerate(r0:pm.npp)
+        Vs[r,c] = Ps[ii,jj]; Va[r,c] = Pa[ii,jj]
+        if r > lc                                          # sub-diagonal → fill upper mirror
+          Vs[c,r] = conj(Ps[ii,jj]); Va[c,r] = conj(Pa[ii,jj])
+        end
+      end
+    end
+    return Vs, Va
+  end
+
+  # multi-block configs (real n⁴/4 saving) + one single-block edge (nb=1 ⇒ full square)
+  for T in (Float64, ComplexF64), (n, maxcols) in ((8, 8), (12, 30), (15, 40), (10, 400))
+    EC, int2 = build_store(n, T, maxcols)
+    ntri = n*(n+1)÷2
+    Vsr = zeros(T, ntri, ntri); Var = zeros(T, ntri, ntri)
+    calc_tri_sym_antisym!(Vsr, Var, int2)                  # joint reference
+    pm = open_pm_store(EC)
+    @test pm.nao == n && pm.npp == ntri
+    if pm_nblocks(pm) > 1
+      @test length(pm.smap) < ntri^2                       # lower block-triangle saves storage
+    else
+      @test length(pm.smap) == ntri^2                      # single block = full square (correct)
+    end
+    Vs, Va = reconstruct(pm, T)
+    @test maximum(abs.(Vs .- Vsr)) < 1e-13
+    @test maximum(abs.(Va .- Var)) < 1e-13
+    # physicist spot-check: unpack ⟨μν|ρσ⟩ from the store vs detri_int2
+    G = detri_int2(int2, n, 1:n, 1:n, 1:n, 1:n)
+    maxg = 0.0
+    for σ in 1:n, ρ in 1:σ, ν in 1:n, μ in 1:ν
+      col = uppertriangular_index(ρ,σ); row = uppertriangular_index(μ,ν)
+      if μ == ν
+        maxg = max(maxg, abs(Vs[row,col]/2 - G[μ,μ,ρ,σ]))
+      else
+        maxg = max(maxg, abs((Vs[row,col]+Va[row,col])/2 - G[μ,ν,ρ,σ]))
+      end
+    end
+    @test maxg < 1e-13
+    close_pm_store!(EC, pm)
+  end
 end
 
 end # @testitem
