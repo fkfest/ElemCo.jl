@@ -25,9 +25,9 @@
 #     1           -> run sequentially in one fresh worker process
 #     N>1         -> run @testitems in parallel across N worker processes
 #   Each worker loads ElemCo once, so workers trade extra startup/memory for
-#   wall-clock speedup. ElemCo uses MKL; to avoid BLAS oversubscription when
-#   N is large, also lower the BLAS threads, e.g. set ELEMCO_TEST_NWORKERS and
-#   pass `worker_init_expr` below, or run with `MKL_NUM_THREADS`/`OPENBLAS_NUM_THREADS`.
+#   wall-clock speedup. To avoid oversubscribing a shared machine, each worker's
+#   BLAS thread count is auto-capped (see `blas_per_worker` below): at most 2, and
+#   never more than (physical cores ÷ nworkers) — physical cores, not hyperthreads.
 #
 # In VS Code, discovery/running of @testitems is handled by the Julia extension's
 # own test process(es) and does not go through this file. The number of those
@@ -85,12 +85,31 @@ const use_retestitems = VERSION < v"1.13-"
 
 if use_retestitems
   using ReTestItems
-  # Limit BLAS threads per worker to avoid oversubscription when running in
-  # parallel (each worker would otherwise grab all cores for MKL).
+  # BLAS threads per worker: at most 2 (extra threads/hyperthreads don't speed up these dense BLAS
+  # calls, and a parallel test run shouldn't hog a shared machine), and never oversubscribe the
+  # PHYSICAL cores — i.e. capped by (physical cores ÷ nworkers). "Physical cores" = distinct
+  # (physical id, core id) pairs in /proc/cpuinfo, NOT the SMT/hyperthread count (`Sys.CPU_THREADS`).
+  function physical_cores()
+    try
+      seen = Set{Tuple{String,String}}(); pid = ""
+      for ln in eachline("/proc/cpuinfo")
+        p = split(ln, ':'); length(p) == 2 || continue
+        k, v = strip(p[1]), strip(p[2])
+        k == "physical id" && (pid = v)
+        k == "core id"     && push!(seen, (pid, v))
+      end
+      return isempty(seen) ? max(Sys.CPU_THREADS ÷ 2, 1) : length(seen)  # fallback: assume 2-way SMT
+    catch
+      return max(Sys.CPU_THREADS ÷ 2, 1)
+    end
+  end
+  const ncores = physical_cores()
+  const blas_per_worker = clamp(ncores ÷ max(nworkers, 1), 1, 2)
   const worker_init = nworkers > 1 ? quote
     using LinearAlgebra
-    BLAS.set_num_threads(max(1, Sys.CPU_THREADS ÷ $nworkers))
+    BLAS.set_num_threads($blas_per_worker)
   end : :()
+  nworkers > 1 && println("Parallel: $nworkers workers × $blas_per_worker BLAS threads ($ncores physical cores)")
   println("Running $selection_msg; nworkers=$nworkers")
   ReTestItems.runtests(selector, @__DIR__; nworkers, worker_init_expr=worker_init)
 else

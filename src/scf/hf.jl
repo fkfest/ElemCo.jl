@@ -301,35 +301,37 @@ end
     hf(EC::ECInfo)
 
   Perform a closed-shell Hartree-Fock calculation directly from exact (non-density-fitted)
-  AO integrals stored in an AO-basis [`FDump`](@ref) (`is_ao_basis(EC.fd) == true`).
+  AO integrals stored as scratch files (`"ao_int2"`/`"S_AA"`/`"h_AA"`, generated on demand
+  via [`ensure_ao_integrals!`](@ref)); electron count etc. come from the molecular system.
 
-  The SCF is solved in the non-orthogonal AO basis using the overlap `EC.fd.overlap`:
+  The SCF is solved in the non-orthogonal AO basis using the overlap `S_AA`:
   canonical orthogonalization handles linearly-dependent basis sets, the Fock matrix is
-  built exactly from the 4-index AO integrals (`gen_fock`), and the metric residual
-  `S·D·F − F·D·S` drives convergence (shared loop [`scf_closed_shell!`](@ref)).
+  built exactly from the memory-mapped 4-index AO integrals (`gen_fock`), and the metric
+  residual `S·D·F − F·D·S` drives convergence (shared loop [`scf_closed_shell!`](@ref)).
 
   Returns the energy as the `HF` key in `OutDict`. The converged MO coefficients are
   written to the wavefunction dump for subsequent (AO→MO) correlation steps.
 """
 function hf(EC::ECInfo{T}) where {T}
-  @assert is_ao_basis(EC.fd) "hf requires an AO-basis FDump (build it with generate_ao_fdump / df=false)"
-  @assert !EC.fd.uhf "hf is closed-shell only"
+  ensure_ao_integrals!(EC; method="@hf", alternative="@bohf")
   t1 = time_ns()
   print_info("HF")
-  setup_space_fd!(EC)
+  setup_space_system!(EC)
   SP = EC.space
   @assert SP['o'] == SP['O'] "hf only for closed-shell"
-  sao = Matrix{T}(EC.fd.overlap)
-  hsmall = EC.fd.int1
-  Enuc = EC.fd.int0
+  sao = load2idx(EC, "S_AA")
+  hsmall = load2idx(EC, "h_AA")
+  Enuc = nuclear_repulsion(EC.system)
   Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=false)
   cMO_sm = starting_orbitals(EC)
   @assert is_restricted(cMO_sm) "hf only for closed-shell"
   cMO = cMO_sm.α
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  fockbuilder = cMO -> gen_fock(EC, cMO, cMO)
+  aofile, aoint2 = mmap3idx(EC, "ao_int2")
+  fockbuilder = cMO -> gen_fock(EC, aoint2, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
+  close(aofile)
   normalize_phase!(cMO)
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
   classes = redundant_orbital_classes(EC, Xredundant)
@@ -344,29 +346,32 @@ end
 """
     uhf(EC::ECInfo)
 
-  Perform exact (non-density-fitted) unrestricted Hartree-Fock from an AO-basis
-  [`FDump`](@ref). Uses the shared
+  Perform exact (non-density-fitted) unrestricted Hartree-Fock from AO integrals stored
+  as scratch files (`"ao_int2"`/`"S_AA"`/`"h_AA"`, generated on demand via
+  [`ensure_ao_integrals!`](@ref)). Uses the shared
   open-shell loop [`scf_open_shell!`](@ref) with a UHF Fock builder over the AO integrals (`gen_ufock`)
   and canonical orthogonalization for linear-dependence handling. Returns the energy as
   the `UHF` and `HF` keys in `OutDict`.
 """
 function uhf(EC::ECInfo{T}) where {T}
-  @assert is_ao_basis(EC.fd) "uhf requires an AO-basis FDump (build it with @ints)"
+  ensure_ao_integrals!(EC; method="@uhf", alternative="@bouhf")
   t1 = time_ns()
   print_info("UHF")
-  setup_space_fd!(EC)
+  setup_space_system!(EC)
   SP = EC.space
-  sao = Matrix{T}(EC.fd.overlap)
-  hsmall = Matrix{T}(EC.fd.int1)   # AO core Hamiltonian (same for α and β)
-  Enuc = EC.fd.int0
+  sao = load2idx(EC, "S_AA")
+  hsmall = load2idx(EC, "h_AA")   # AO core Hamiltonian (same for α and β)
+  Enuc = nuclear_repulsion(EC.system)
   Xorth, Xredundant = canonical_orth_for_occ(EC, sao; open_shell=true)
   # core-Hamiltonian guess (same orbitals for α/β; open shells differ via occupations)
   cMO = starting_orbitals(EC)
   unrestrict!(cMO)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  fockbuilder = cMO -> gen_ufock(EC, cMO, cMO)
+  aofile, aoint2 = mmap3idx(EC, "ao_int2")
+  fockbuilder = cMO -> gen_ufock(EC, aoint2, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)
+  close(aofile)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end

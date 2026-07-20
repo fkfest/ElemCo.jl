@@ -282,7 +282,7 @@ function miommap(fname::String)
   for idim in 1:ndim
     append!(dims, read(io, Int))
   end
-  return io, mmap(io, Array{T,ndim}, dims)
+  return io, mmap(io, Array{T,ndim}, (dims...,))
 end
 
 function miommap(fname::String, ::Val{N}, T::Type=Float64; writable::Bool=false) where {N}

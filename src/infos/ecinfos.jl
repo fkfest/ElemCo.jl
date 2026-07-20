@@ -20,7 +20,7 @@ export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 export get_options, with_local_options
-export FCIOptions, CIPHIOptions, RegionOptions
+export FCIOptions, CIPHIOptions, RegionOptions, MemoryOptions
 export DEFAULT_ELTYPE, set_default_eltype!, ec_eltype
 
 include("options.jl")
@@ -88,7 +88,11 @@ mutable struct ECInfo{T<:Number} <: AbstractECInfo
   system::MSystem
   """ fcidump. """
   fd::FDump{T,3}
-  """ information about (temporary) files. 
+  """`⟨false⟩` the current correlated calculation runs AO-direct (integrals are read from the
+  `ao_int2`/`h_AA` scratch files instead of an MO fcidump). Set by the drivers for the duration
+  of an AO-direct run and reset afterwards. """
+  ao_direct::Bool
+  """ information about (temporary) files.
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
     - `d` for dressed integrals 
@@ -143,10 +147,11 @@ function ECInfo{T}(;
     options::Options = Options(),
     system::MSystem = MSystem(),
     fd::FDump{T,3} = FDump{T,3}(),
+    ao_direct::Bool = false,
     files::Dict{String,String} = Dict{String,String}(),
     space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}(),
   ) where {T<:Number}
-  ECInfo{T}(scr, ext, verbosity, options, system, fd, files, space)
+  ECInfo{T}(scr, ext, verbosity, options, system, fd, ao_direct, files, space)
 end
 
 """

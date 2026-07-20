@@ -19,8 +19,9 @@ using ..ElemCo.OrbTools
 export generate_AO_DF_integrals, generate_DF_integrals, generate_DF_Fock
 export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
 export calc_system_df_integrals
-export generate_ao_fdump, ao_integrals, ensure_ao_integrals!
-export ao_to_mo!, set_mo_basis!, set_ao_basis!, mmap_int2_allocator
+export ao_integrals, ensure_ao_integrals!, save_ao_1e_integrals!, generate_mo_dump
+export delete_ao_integrals!, invalidate_ao_1e_integrals!
+export transform_int2, transform_int2_Q, transform_fcidump!
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -332,177 +333,531 @@ function transform_3idx!(EC::ECInfo{T}, fname::String, U::AbstractMatrix) where 
 end
 
 """
-    generate_ao_fdump(EC::ECInfo) -> FDump
+    save_ao_1e_integrals!(EC::ECInfo) -> BasisSet
 
-  Build a non-orthogonal AO-basis [`FDump`](@ref) (`TFDump`) holding the exact
-  (non-density-fitted) 2-e integrals `(μν|ρσ)` in physicists' notation, the AO core
-  Hamiltonian `h_{μν} = T_{μν} + V_{μν}`, the nuclear repulsion energy, and the AO
-  overlap `S_{μν}` (stored in `fd.overlap`, `AOBASIS` flag set).
-
-  The 2-e integrals are assembled batch-wise straight into a memory-mapped triangular
-  `int2` (see [`eri_2e4idx_tri!`](@ref)); the full `nao⁴` tensor is never materialized.
+  Compute and store the 1-e integrals of the current system in the AO basis: the overlap
+  ``S_{μν}`` and the core Hamiltonian ``h_{μν} = T_{μν} + V_{μν}`` under the standard
+  `"S_AA"`/`"h_AA"` scratch keys.
+  Cheap (2-index); (re)computed on demand by every consumer of the AO integral files.
+  Return the AO basis.
 """
-function generate_ao_fdump(EC::ECInfo{T}) where T
+function save_ao_1e_integrals!(EC::ECInfo{T}) where T
   @assert !isempty(EC.system) "EC.system is not set up!"
   bao = generate_basis(EC, "ao")
-  S = overlap(bao)
-  nao = size(S, 1)
-  hAO = kinetic(bao) + nuclear(bao)
-  # Store the AO core Hamiltonian and overlap under the standard "h_AA"/"S_AA" keys (as the DF
-  # path does), so the SCF starting-orbital guesses — `guess_hcore`/`guess_sad`, which read them
-  # via `load(EC, "h_AA"/"S_AA")` — work for the non-DF AO-FDump path too.
-  save!(EC, "h_AA", Matrix{T}(hAO))
-  save!(EC, "S_AA", Matrix{T}(S))
-  # Stream the exact AO integrals straight into a memory-mapped triangular
-  # `int2[p,q,tri(r,s)] = ⟨pq|rs⟩` — never materializing the dense `nao⁴` tensor.
+  save!(EC, "S_AA", Matrix{T}(overlap(bao)))
+  save!(EC, "h_AA", Matrix{T}(kinetic(bao) + nuclear(bao)))
+  return bao
+end
+
+"""
+    ao_integrals(EC::ECInfo) -> Float64
+
+  Generate the exact (non-density-fitted) AO integrals of the current system and store
+  them as files: the 2-e integrals `<μν|ρσ>` (physicists' notation,
+  triangular `(ρ,σ)` packing) on the memory-mapped file `"ao_int2"`, and the 1-e
+  integrals `"S_AA"`/`"h_AA"` (see [`save_ao_1e_integrals!`](@ref)).
+  This is the entry point behind the `@ints` macro.
+
+  The 2-e integrals are assembled batch-wise straight into the memory-mapped triangular
+  `int2[μ,ν,tri(ρ,σ)] = ⟨μν|ρσ⟩` (see [`eri_2e4idx_tri!`](@ref)); the full `nao⁴`
+  tensor is never materialized.
+
+  If `EC.fd` currently holds (MO/FCIDUMP) integrals, they are discarded with a warning —
+  a fresh AO integral generation supersedes any previously loaded/generated MO dump.
+
+  Return the nuclear repulsion energy.
+"""
+function ao_integrals(EC::ECInfo{T}) where T
+  @assert EC.options.wf.npositron == 0 "positrons are not supported with exact AO integrals (use density fitting)"
+  if !isempty(EC.fd)
+    @warn "ao_integrals (@ints) discards the MO/FCIDUMP integrals currently in EC.fd; " *
+          "subsequent calculations will use the freshly generated AO integrals."
+    EC.fd = FDump{T,3}()
+  end
+  bao = save_ao_1e_integrals!(EC)
+  nao = size(load2idx(EC, "S_AA"), 1)
   ntri = nao*(nao+1)÷2
   int2_file, int2 = newmmap(EC, "ao_int2", (nao, nao, ntri), T; description="int2 ao")
   eri_2e4idx_tri!(int2, bao)
-  flushmmap(EC, int2)
-  Enuc = nuclear_repulsion(EC.system)
-  # Store the full (neutral) electron count and a parity-consistent ms2, following the
-  # FCIDUMP convention: `charge` and `ms2` from the wf options are applied later by
-  # `setup_space_fd!` (which subtracts `charge` from the stored NELEC).
-  nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
-  ms2 = mod(nelec, 2)
-  return make_ao_fdump(int2, Matrix{T}(hAO), Enuc, Matrix{T}(S), nelec; ms2)
+  closemmap(EC, int2_file, int2)
+  return nuclear_repulsion(EC.system)
 end
 
 """
-    ao_integrals(EC::ECInfo) -> FDump
+    ensure_ao_integrals!(EC::ECInfo; method="@hf", alternative="@bohf")
 
-  Build the exact (non-density-fitted) AO-basis integral dump (see
-  [`generate_ao_fdump`](@ref)) and store it in `EC.fd`. This is the non-DF analogue
-  of `dfdump`; it is the entry point behind the `@ints` macro and is called
-  automatically by `@hf`/`@uhf`/`@cc` when `EC.fd` does not already hold AO integrals.
+  Make sure the exact AO integral files for the current system exist: the 2-e integrals
+  (`"ao_int2"`) are generated with [`ao_integrals`](@ref) when the file is missing, and
+  the cheap 1-e integrals (`"S_AA"`/`"h_AA"`) are always refreshed. The files are
+  invalidated on geometry/basis changes by `@setupEC`.
+
+  If `EC.fd` holds (MO/FCIDUMP) integrals, they are **discarded** with a warning:
+  `method` (`@hf`/`@uhf`) runs on exact AO integrals, and a leftover MO dump would
+  shadow the AO flow in subsequent correlated calculations. To run HF directly on
+  FCIDUMP integrals, use `alternative` (`@bohf`/`@bouhf`) instead.
 """
-function ao_integrals(EC::ECInfo)
-  EC.fd = generate_ao_fdump(EC)
-  return EC.fd
-end
-
-"""
-    ensure_ao_integrals!(EC::ECInfo; method="@hf", alternative="@bohf") -> FDump
-
-  Make sure `EC.fd` holds exact AO integrals for the current system, (re)generating them
-  with [`ao_integrals`](@ref) when it is empty or does not already hold AO integrals.
-
-  If `EC.fd` currently holds **non-AO** integrals (e.g. an FCIDUMP / MO dump), they are
-  **discarded** and a warning is issued: `method` (`@hf`/`@uhf`) always builds HF from
-  freshly computed exact AO integrals, never from a loaded FCIDUMP. To run HF directly on
-  existing FCIDUMP integrals, use `alternative` (`@bohf`/`@bouhf`) instead.
-"""
-function ensure_ao_integrals!(EC::ECInfo; method="@hf", alternative="@bohf")
-  if isempty(EC.fd)
-    ao_integrals(EC)
-  elseif !is_ao_basis(EC.fd)
-    @warn "$method discards the non-AO integrals currently in EC.fd and builds HF from " *
-          "freshly generated exact AO integrals. To run HF on the existing FCIDUMP " *
-          "integrals instead, use $alternative."
-    ao_integrals(EC)
+function ensure_ao_integrals!(EC::ECInfo{T}; method="@hf", alternative="@bohf") where T
+  if !isempty(EC.fd)
+    @warn "$method runs on exact AO integrals and ignores the MO/FCIDUMP integrals " *
+          "currently in EC.fd; EC.fd is cleared so that subsequent correlated " *
+          "calculations use the AO integrals. To run HF on FCIDUMP integrals, " *
+          "use $alternative instead."
+    EC.fd = FDump{T,3}()
   end
-  return EC.fd
+  if !file_exists(EC, "ao_int2")
+    ao_integrals(EC)
+  else
+    save_ao_1e_integrals!(EC)
+  end
+  return
 end
 
 """
-    ao_to_mo!(fd::FDump{T,3}, cMO::AbstractMatrix) -> FDump{T,3}
+    delete_ao_integrals!(EC::ECInfo)
 
-  Transform a non-orthogonal AO-basis [`FDump`](@ref) **in place** into a standard
-  (orthonormal) MO-basis `TFDump` using the MO coefficients `cMO[μ,p]` (`nao × norb`).
-
-  Exact (non-density-fitted) `O(N⁵)` four-index transformation: the AO `FDump` is a
-  non-orthogonal "MO" dump, so transforming its integrals by `cMO` on both the left and
-  the right yields the MO dump. Afterwards `fd` holds the MO integrals `<pq|rs>_MO`, the
-  MO 1-e integrals `h_{pq} = cᵀ h_{μν} c` and the same nuclear repulsion energy; it is a
-  regular MO fcidump (`ao_basis = false`, AO `overlap`/`AOBASIS` dropped) that BOHF/CC
-  consume unchanged.
-
-  `cMO` may be rectangular (`nao × nout` with `nout ≤ nao`): only those `nout` orbitals are
-  kept, `NORB`/`ORBSYM` are updated accordingly, and the transform cost scales with `nout`
-  (not `nao`). This is how deleted virtual orbitals are excluded — they carry
-  no electrons, so no core-energy folding is needed. Frozen-core *occupied* orbitals are
-  kept and frozen later by the correlated driver (`freeze_core!`).
-
-  By default the MO `fd.int2` is allocated in memory; pass `alloc` 
-  (e.g. [`mmap_int2_allocator`](@ref)) to write it straight onto a memory-mapped scratch file.
-  [`set_mo_basis!`](@ref) does exactly that for the production swap.
+  Delete all exact AO integral scratch files (`"ao_int2"`, `"S_AA"`, `"h_AA"`) if present.
+  Called when the geometry or basis changes — then even the 2-e AO integrals `(μν|ρσ)` and the
+  overlap are invalid. For a pure nuclear charge/dummy change use [`invalidate_ao_1e_integrals!`](@ref),
+  which keeps the (unchanged) 2-e integrals.
 """
-function ao_to_mo!(fd::FDump{T,3}, cMO::AbstractMatrix; alloc=dims->zeros(T, dims)) where {T<:Number}
-  @assert fd.ao_basis "ao_to_mo! requires an AO-basis FDump"
-  @assert !fd.uhf "open-shell AO→MO transform not yet implemented (closed-shell only)"
-  @assert size(fd.overlap, 1) == size(cMO, 1) "cMO has $(size(cMO,1)) AOs but the AO-FDump has $(size(fd.overlap,1))"
+function delete_ao_integrals!(EC::ECInfo)
+  for f in ("ao_int2", "S_AA", "h_AA")
+    file_exists(EC, f) && delete_file!(EC, f)
+  end
+  return
+end
+
+"""
+    invalidate_ao_1e_integrals!(EC::ECInfo)
+
+  Invalidate only the 1-electron AO integral file `"h_AA"` (the core Hamiltonian `T + V`),
+  which depends on the nuclear charges, so it is recomputed for the current system on demand.
+  The exact 2-e integrals `"ao_int2"` and the overlap `"S_AA"` depend only on the basis
+  functions (positions + basis), so they are **kept** — e.g. across a `charge`/`@dummy` change,
+  where ghost atoms retain their basis functions and the ERIs are unchanged.
+"""
+function invalidate_ao_1e_integrals!(EC::ECInfo)
+  file_exists(EC, "h_AA") && delete_file!(EC, "h_AA")
+  return
+end
+
+# ==================================================================================================
+#  4-index 2-electron integral transformation  v_{pq}^{rs} = v_{p'q'}^{r's'} Tl[p'p] Tl2[q'q] Tr[r'r] Tr2[s's]
+#
+#  Pure kernels (EC-free: plain arrays + a `membudget` byte budget — directly unit-testable) plus
+#  EC-aware wrappers that memory-map the output and derive the budget from the machine/options. Lives
+#  here (not in FciDumps) so the EC-aware entry points can call `newmmap`/`available_memory(EC)`
+#  directly instead of threading allocator closures and budgets through every call site.
+# ==================================================================================================
+
+"""
+    transform_int2_blocksize(ns, nin, np, nq, elsize; membudget)
+
+  Choose the width of the output-4th-index block for the streaming 4-index integral transform so the
+  per-block working set (the co-live intermediates `Z(nin³) + W(np·nin²) + Z2(np·nq·nin)`, each of
+  `elsize` bytes) stays within `membudget` bytes. Capped at `ns` (a single block ⇒ the input is read
+  once) and floored at 1. Blocking only tiles a loop, so the numerical result is independent of the
+  choice — this purely trades peak memory against the number of passes over the input: small blocks
+  (many passes) on a memory-starved node, a single pass when `membudget` is ample (e.g. a fat node).
+"""
+function transform_int2_blocksize(ns::Int, nin::Int, np::Int, nq::Int, elsize::Int; membudget::Int)
+  per_unit = (nin*nin*nin + np*nin*nin + np*nq*nin) * elsize
+  return clamp(membudget ÷ max(1, per_unit), 1, ns)
+end
+
+"""
+    transform_int2_pqs_block!(buf, int2::Array{T,3}, Tl, Tl2, Tr2, tb) -> Z2
+
+  Shared kernel for the streaming 4-index transform from the **triangular** input
+  `int2[p',q',tri(r',s')] = <p'q'|r's'>` (r'≤s'). For the output-4th-index block `tb` (via `Tr2`),
+  narrow the packed partner index `s'` into the block (correctly desymmetrizing the joint packing
+  `<p'q'|r's'> = <q'p'|s'r'>`) and transform the two bra indices `p'→p`, `q'→q`, leaving the third
+  input index `r'` untransformed. Returns `Z2[p,q,r',u]` (allocated from the buffer arena `buf`);
+  the caller applies `Tr` to the remaining `r'` index. All heavy steps are BLAS-3 gemms.
+"""
+function transform_int2_pqs_block!(buf, int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
+                                   Tr2::AbstractArray, tb) where T
+  nin = size(int2, 1); np = size(Tl, 2); nq = size(Tl2, 2); lent = length(tb)
+  Z = alloc!(buf, nin, nin, nin, lent)
+  fill!(Z, zero(T))
+  for s = 1:nin
+    off = strict_uppertriangular_range(s)          # packed columns (r',s), r' = 1:s-1
+    if !isempty(off)
+      Vc = @mview int2[:,:,off]                     # v_{p'q'}^{r',s}, r' = 1:s-1
+      Tr2_s   = @mview Tr2[s, tb]                    # [u]
+      Tr2_off = @mview Tr2[1:s-1, tb]               # [r', u]
+      Zoff = @mview Z[:,:,1:s-1,:]
+      @mtensor Zoff[p',q',r',u] += Vc[p',q',r'] * Tr2_s[u]     # partner s'=s  (r'<s', keep p',q')
+      Zs = @mview Z[:,:,s,:]
+      @mtensor Zs[p',q',u] += Vc[q',p',r'] * Tr2_off[r',u]     # partner s'=r'<s (r'>s', p'↔q' swap)
+    end
+    Vd = @mview int2[:,:, uppertriangular_index(s,s)]
+    Tr2_d = @mview Tr2[s, tb]
+    Zs = @mview Z[:,:,s,:]
+    @mtensor Zs[p',q',u] += 0.5 * Vd[p',q'] * Tr2_d[u]          # diagonal, symmetrized 0.5(V+Vᵀ)
+    @mtensor Zs[p',q',u] += 0.5 * Vd[q',p'] * Tr2_d[u]
+  end
+  W = alloc!(buf, np, nin, nin, lent)
+  @mtensor W[p,q',r',u] = Z[p',q',r',u] * Tl[p',p]
+  Z2 = alloc!(buf, np, nq, nin, lent)
+  @mtensor Z2[p,q,r',u] = W[p,q',r',u] * Tl2[q',q]
+  return Z2
+end
+
+"""
+    transform_int2!(int2t, int2::Array{T,3}, Tl, Tl2, Tr, Tr2; membudget) -> int2t
+
+  In-place triangular-output transform: write the transformed 2-e integrals into the preallocated
+  `int2t` of size `(nout, nout, nout*(nout+1)÷2)` (in-memory or memory-mapped). Each packed output
+  column is written exactly once, so `int2t` need not be zero-initialized. Streams the triangular
+  integrals in blocks of the output partner index (via [`transform_int2_pqs_block!`](@ref)) and
+  finishes with a matrix multiplication of the remaining index restricted to `r ≤ s` (so the
+  triangular symmetry is exploited — only `r ≤ s` is formed). Requires the same-spin pattern
+  `Tl≡Tl2`, `Tr≡Tr2` (implicit in triangular storage).
+"""
+function transform_int2!(int2t::AbstractArray{T,3}, int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
+                         Tr::AbstractArray, Tr2::AbstractArray; membudget::Int = available_memory()) where T
+  # General rectangular transform: input orbitals (`nin`, primed indices) → output orbitals (`nout`).
+  nin = size(int2, 1)
+  nout = size(Tl, 2)
+  @assert size(Tl2,2) == nout && size(Tr,2) == nout && size(Tr2,2) == nout "transform_int2: all four transformation matrices must map onto the same number of output orbitals"
+  @assert size(Tl,1) == nin && size(Tl2,1) == nin && size(Tr,1) == nin && size(Tr2,1) == nin "transform_int2: transformation matrices must have $nin rows (input orbitals)"
+  @assert size(int2t) == (nout, nout, nout*(nout+1)÷2) "transform_int2!: output array must have size ($nout, $nout, $(nout*(nout+1)÷2))"
+  bsz = transform_int2_blocksize(nout, nin, nout, nout, sizeof(T); membudget)
+  oblks = get_spaceblocks(1:nout, bsz)
+  maxlen = maximum(length, oblks; init=0)   # init=0 -> no-op for a reduce-to-empty (nout=0) transform
+  @buffer buf(T, (nin*nin*nin + nout*nin*nin + nout*nout*nin)*maxlen) begin
+  for tb in oblks
+    Z2 = transform_int2_pqs_block!(buf, int2, Tl, Tl2, Tr2, tb)   # Z2[p,q,r',u]
+    for (u, s) in enumerate(tb)
+      v!int2t = @mview int2t[:,:,uppertriangular_range(s)]         # [nout,nout,s] = columns tri(1:s,s)
+      Z2s = @mview Z2[:,:,:,u]                                     # [nout,nout,nin]
+      v!Tr = @mview Tr[:,1:s]                                      # keep only r ≤ s (triangular)
+      @mtensor v!int2t[p,q,r] = Z2s[p,q,r'] * v!Tr[r',r]           # BLAS-3, write column once
+    end
+    reset!(buf)
+  end
+  end #buffer
+  return int2t
+end
+
+"""
+    transform_int2_Q!(int2t, int2::Array{T,3}, Tl, Tl2, Tr, Tr2; membudget) -> int2t
+
+  In-place full 4-index (dense) output transform from a **triangular** input. `int2t` must have size
+  `(size(Tl,2), size(Tl2,2), size(Tr,2), size(Tr2,2))` (may be rectangular / spin-mixed, e.g. the
+  `int2ab` block). `nin == size(int2,1)` must match the rows of all four matrices.
+"""
+function transform_int2_Q!(int2t::AbstractArray{T,4}, int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
+                           Tr::AbstractArray, Tr2::AbstractArray; membudget::Int = available_memory()) where T
+  nin = size(int2,1)
+  np, nq, nr, ns = size(Tl,2), size(Tl2,2), size(Tr,2), size(Tr2,2)
+  @assert size(Tl,1)==nin && size(Tl2,1)==nin && size(Tr,1)==nin && size(Tr2,1)==nin "transform_int2_Q!: transformation matrices must have $nin rows (input orbitals)"
+  @assert size(int2t) == (np, nq, nr, ns) "transform_int2_Q!: output array must have size ($np, $nq, $nr, $ns)"
+  bsz = transform_int2_blocksize(ns, nin, np, nq, sizeof(T); membudget)
+  oblks = get_spaceblocks(1:ns, bsz)                # blocks of the 4th output index (via Tr2)
+  maxlen = maximum(length, oblks; init=0)   # init=0 -> no-op for a reduce-to-empty (nout=0) transform
+  # peak co-live intermediates per unit block: Z(nin³) + W(np·nin²) + Z2(np·nq·nin)
+  @buffer buf(T, (nin*nin*nin + np*nin*nin + np*nq*nin)*maxlen) begin
+  for tb in oblks
+    Z2 = transform_int2_pqs_block!(buf, int2, Tl, Tl2, Tr2, tb)   # Z2[p,q,r',u]
+    v!int2t = @mview int2t[:,:,:,tb]
+    @mtensor v!int2t[p,q,r,u] = Z2[p,q,r',u] * Tr[r',r]           # write int2t[:,:,:,tb] ONCE
+    reset!(buf)
+  end
+  end #buffer
+  return int2t
+end
+
+"""
+    transform_int2_Q!(int2t, int2::Array{T,4}, Tl, Tl2, Tr, Tr2; membudget) -> int2t
+
+  In-place full 4-index (dense) output transform from a **dense** 4-index input (`int2t` of size
+  `(norb, norb, norb, norb)`).
+"""
+function transform_int2_Q!(int2t::AbstractArray{T,4}, int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray,
+                        Tr::AbstractArray, Tr2::AbstractArray; membudget::Int = available_memory()) where T
+  norb = size(int2,1)
+  @assert size(int2t) == (norb, norb, norb, norb) "transform_int2_Q!: output array must have size ($norb, $norb, $norb, $norb)"
+  bsz = transform_int2_blocksize(norb, norb, norb, norb, sizeof(T); membudget)
+  oblks = get_spaceblocks(1:norb, bsz)
+  maxlen = maximum(length, oblks; init=0)   # init=0 -> no-op for a reduce-to-empty (nout=0) transform
+  @buffer buf(T, 2*norb*norb*norb*maxlen) begin
+  for tb in oblks
+    lent = length(tb)
+    Tr2b = @mview Tr2[:, tb]                                # [t', u]
+    Z = alloc!(buf, norb, norb, norb, lent)
+    first = true
+    for tpb in oblks
+      v!int2 = @mview int2[:,:,:,tpb]
+      v!Tr2b = @mview Tr2b[tpb,:]
+      if first
+        @mtensor Z[p',q',r',u] = v!int2[p',q',r',t'] * v!Tr2b[t',u]   # narrow t' into the output block
+        first = false
+      else
+        @mtensor Z[p',q',r',u] += v!int2[p',q',r',t'] * v!Tr2b[t',u]   # narrow t' into the output block
+      end
+    end
+    W = alloc!(buf, norb, norb, norb, lent)
+    @mtensor W[p,q',r',u] = Z[p',q',r',u] * Tl[p',p]
+    @mtensor Z[p,q,r',u] = W[p,q',r',u] * Tl2[q',q]          # reuse Z
+    v!int2t = @mview int2t[:,:,:,tb]
+    @mtensor v!int2t[p,q,r,u] = Z[p,q,r',u] * Tr[r',r]       # write int2t[:,:,:,tb] ONCE
+    reset!(buf)
+  end
+  end #buffer
+  return int2t
+end
+
+# --- in-memory convenience wrappers (EC-free; allocate a plain `zeros` output) --------------------
+
+"""
+    transform_int2(int2, Tl, Tl2, Tr, Tr2; membudget=available_memory()) -> int2t
+
+  In-memory triangular-output transform (allocates a `zeros` output and calls
+  [`transform_int2!`](@ref)). For large integrals prefer the memory-mapped `transform_int2(EC, …, key)`.
+"""
+function transform_int2(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
+                        Tr::AbstractArray, Tr2::AbstractArray; membudget::Int = available_memory()) where T
+  nout = size(Tl, 2)
+  int2t = zeros(T, nout, nout, nout*(nout+1)÷2)
+  return transform_int2!(int2t, int2, Tl, Tl2, Tr, Tr2; membudget)
+end
+function transform_int2(int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray,
+                        Tr::AbstractArray, Tr2::AbstractArray; membudget::Int = available_memory()) where T
+  return transform_int2_Q(int2, Tl, Tl2, Tr, Tr2; membudget)
+end
+
+"""
+    transform_int2_Q(int2, Tl, Tl2, Tr, Tr2; membudget=available_memory()) -> int2t
+
+  In-memory full 4-index (dense) transform (allocates a `zeros` output). For large integrals prefer
+  the memory-mapped `transform_int2_Q(EC, …, key)`.
+"""
+function transform_int2_Q(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
+                          Tr::AbstractArray, Tr2::AbstractArray; membudget::Int = available_memory()) where T
+  int2t = zeros(T, size(Tl,2), size(Tl2,2), size(Tr,2), size(Tr2,2))
+  return transform_int2_Q!(int2t, int2, Tl, Tl2, Tr, Tr2; membudget)
+end
+function transform_int2_Q(int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray,
+                          Tr::AbstractArray, Tr2::AbstractArray; membudget::Int = available_memory()) where T
+  norb = size(int2,1)
+  int2t = zeros(T, norb, norb, norb, norb)
+  return transform_int2_Q!(int2t, int2, Tl, Tl2, Tr, Tr2; membudget)
+end
+
+# --- EC-aware wrappers: always memory-map the output under `key`; budget from available_memory(EC) -
+
+"""
+    transform_int2(EC::ECInfo, int2, Tl, Tl2, Tr, Tr2, key) -> int2t
+
+  Triangular-output transform writing the result to a fresh memory-mapped scratch file named `key`
+  ([`newmmap`](@ref)); the memory budget comes from [`available_memory`](@ref)`(EC)` (honoring
+  `@set mem budget/fraction`). `key` must not name the scratch file currently backing `int2`.
+"""
+function transform_int2(EC::ECInfo, int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
+                        Tr::AbstractArray, Tr2::AbstractArray, key::AbstractString; description::AbstractString=key) where T
+  nout = size(Tl, 2)
+  int2t = newmmap(EC, key, (nout, nout, nout*(nout+1)÷2), T; description)[2]
+  transform_int2!(int2t, int2, Tl, Tl2, Tr, Tr2; membudget=available_memory(EC))
+  flushmmap(EC, int2t)
+  return int2t
+end
+
+"""
+    transform_int2_Q(EC::ECInfo, int2, Tl, Tl2, Tr, Tr2, key) -> int2t
+
+  Full 4-index (dense) transform writing the result to a fresh memory-mapped scratch file named
+  `key`; budget from [`available_memory`](@ref)`(EC)`. Accepts a triangular (`Array{T,3}`) or dense
+  (`Array{T,4}`) input.
+"""
+function transform_int2_Q(EC::ECInfo, int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
+                          Tr::AbstractArray, Tr2::AbstractArray, key::AbstractString; description::AbstractString=key) where T
+  int2t = newmmap(EC, key, (size(Tl,2), size(Tl2,2), size(Tr,2), size(Tr2,2)), T; description)[2]
+  transform_int2_Q!(int2t, int2, Tl, Tl2, Tr, Tr2; membudget=available_memory(EC))
+  flushmmap(EC, int2t)
+  return int2t
+end
+function transform_int2_Q(EC::ECInfo, int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray,
+                          Tr::AbstractArray, Tr2::AbstractArray, key::AbstractString; description::AbstractString=key) where T
+  norb = size(int2,1)
+  int2t = newmmap(EC, key, (norb, norb, norb, norb), T; description)[2]
+  transform_int2_Q!(int2t, int2, Tl, Tl2, Tr, Tr2; membudget=available_memory(EC))
+  flushmmap(EC, int2t)
+  return int2t
+end
+
+"""
+    transform_int1(int1::AbstractArray, Tl::AbstractArray, Tr::AbstractArray) -> int1t
+
+  Transform 1-e integrals to a new basis: `int1t[p,q] = int1[p',q'] Tl[p',p] Tr[q',q]`.
+"""
+function transform_int1(int1::AbstractArray, Tl::AbstractArray, Tr::AbstractArray)
+  @mtensor int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
+  return int1t
+end
+
+"""
+    transform_fcidump!(EC::ECInfo, fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
+
+  Transform the integrals of `fd` in place to a new basis using `Tl`, `Tr`. If `Tl`/`Tr` are
+  unrestricted, an RHF dump is turned into a UHF dump. The transformed 2-e integrals are written to
+  memory-mapped scratch files (their size bounded by [`available_memory`](@ref)`(EC)`); the 1-e
+  integrals are transformed in memory. Intended as a **one-shot** rotation — the scratch keys are
+  the block names, which must not already back `fd`'s current integrals (they never do for the
+  in-memory / `mo_*`-backed dumps this is called on).
+"""
+function transform_fcidump!(EC::ECInfo, fd::FDump{T,N}, Tl::SpinMatrix, Tr::SpinMatrix) where {T<:Number,N}
+  println("Transform integrals...")
+  if !is_restricted(Tl) || !is_restricted(Tr)
+    genuhfdump = true
+  else
+    genuhfdump = false
+    @assert !fd.uhf # from uhf fcidump can generate only uhf fcidump
+  end
+  if fd.uhf
+    fd.int2aa = transform_int2(EC, fd.int2aa, Tl[1], Tl[1], Tr[1], Tr[1], "int2aa")
+    fd.int2bb = transform_int2(EC, fd.int2bb, Tl[2], Tl[2], Tr[2], Tr[2], "int2bb")
+    fd.int2ab = transform_int2_Q(EC, fd.int2ab, Tl[1], Tl[2], Tr[1], Tr[2], "int2ab")
+    fd.int1a = transform_int1(fd.int1a, Tl[1], Tr[1])
+    fd.int1b = transform_int1(fd.int1b, Tl[2], Tr[2])
+  elseif genuhfdump
+    # change fcidump from rhf to uhf format
+    fd.int2aa = transform_int2(EC, fd.int2, Tl[1], Tl[1], Tr[1], Tr[1], "int2aa")
+    fd.int2bb = transform_int2(EC, fd.int2, Tl[2], Tl[2], Tr[2], Tr[2], "int2bb")
+    fd.int2ab = transform_int2_Q(EC, fd.int2, Tl[1], Tl[2], Tr[1], Tr[2], "int2ab")
+    fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
+    fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
+    fd.int2 = zeros(T, ntuple(i->0, Val(N)))
+    fd.int1 = zeros(T, 0, 0)
+    fd.head["IUHF"] = [1]
+    fd.uhf = true
+  else
+    fd.int2 = transform_int2(EC, fd.int2, Tl[1], Tl[1], Tr[1], Tr[1], "int2")
+    fd.int1 = transform_int1(fd.int1, Tl[1], Tr[1])
+  end
+  fd.modified = true
+end
+
+"""
+    transform_fcidump!(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix)
+
+  Like [`transform_fcidump!(EC, fd, Tl, Tr)`](@ref) but keeps the transformed 2-e integrals **in
+  memory** (no `EC` / scratch files needed) — convenient for ad-hoc FDump manipulation. For large
+  dumps prefer the `EC` method, which memory-maps the result.
+"""
+function transform_fcidump!(fd::FDump{T,N}, Tl::SpinMatrix, Tr::SpinMatrix) where {T<:Number,N}
+  println("Transform integrals...")
+  if !is_restricted(Tl) || !is_restricted(Tr)
+    genuhfdump = true
+  else
+    genuhfdump = false
+    @assert !fd.uhf # from uhf fcidump can generate only uhf fcidump
+  end
+  if fd.uhf
+    fd.int2aa = transform_int2(fd.int2aa, Tl[1], Tl[1], Tr[1], Tr[1])
+    fd.int2bb = transform_int2(fd.int2bb, Tl[2], Tl[2], Tr[2], Tr[2])
+    fd.int2ab = transform_int2_Q(fd.int2ab, Tl[1], Tl[2], Tr[1], Tr[2])
+    fd.int1a = transform_int1(fd.int1a, Tl[1], Tr[1])
+    fd.int1b = transform_int1(fd.int1b, Tl[2], Tr[2])
+  elseif genuhfdump
+    # change fcidump from rhf to uhf format
+    fd.int2aa = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1])
+    fd.int2bb = transform_int2(fd.int2, Tl[2], Tl[2], Tr[2], Tr[2])
+    fd.int2ab = transform_int2_Q(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2])
+    fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
+    fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
+    fd.int2 = zeros(T, ntuple(i->0, Val(N)))
+    fd.int1 = zeros(T, 0, 0)
+    fd.head["IUHF"] = [1]
+    fd.uhf = true
+  else
+    fd.int2 = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1])
+    fd.int1 = transform_int1(fd.int1, Tl[1], Tr[1])
+  end
+  fd.modified = true
+end
+
+"""
+    generate_mo_dump(EC::ECInfo, cMO::AbstractMatrix) -> FDump
+
+  Build an MO-basis [`FDump`](@ref) in `EC.fd` from the exact AO integral files
+  (`"ao_int2"`/`"h_AA"`, see [`ao_integrals`](@ref)) and the (restricted/closed-shell)
+  MO coefficients `cMO[μ,p]`. This is the non-DF analogue of `dfdump`.
+
+  Exact (non-density-fitted) `O(N⁵)` four-index transformation, written straight onto a
+  fresh memory-mapped scratch file (`"mo_int2"`, temporary — the dump is transient and
+  re-derived on demand): the full MO tensor is never materialized in memory. `cMO` may
+  be rectangular (`nao × nout` with `nout ≤ nao`): only those `nout` orbitals are kept
+  (e.g. deleted virtuals and frozen virtuals excluded).
+
+  `NELEC` is stored as the full (neutral) electron count — `charge` is applied later by
+  `setup_space_fd!` — and frozen-core folding is left to the caller
+  (`freeze_orbs_in_dump`), exactly as for a `dfdump`-generated dump.
+"""
+function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
+  @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
+  save_ao_1e_integrals!(EC)
+  S = load2idx(EC, "S_AA")
+  hAO = load2idx(EC, "h_AA")
+  @assert size(cMO, 1) == size(S, 1) "cMO has $(size(cMO,1)) AOs but the system has $(size(S,1))"
   # the orbitals must be orthonormal in the AO basis for the transform to yield correct MO integrals
-  @assert isapprox(cMO' * fd.overlap * cMO, I, atol=1e-8) "cMO are not orthonormal in the AO basis defined by fd.overlap"
-  C = SpinMatrix(Matrix{T}(cMO))
-  transform_fcidump!(fd, C, C; alloc=(key, dims)->alloc(dims))  # exact AO→MO 4-index transform
-  # it is now a standard orthonormal MO fcidump — drop the AO-basis metadata and record the
-  # (possibly reduced) orbital count, so passing a subset of `cMO` columns yields a smaller dump
-  nout = size(cMO, 2)
-  fd.head["NORB"] = [nout]
-  osym = get(fd.head, "ORBSYM", Int[])
-  fd.head["ORBSYM"] = length(osym) >= nout ? osym[1:nout] : ones(Int, nout)
-  fd.ao_basis = false
-  fd.overlap = zeros(T, 0, 0)
-  fd.head["AOBASIS"] = [0]
+  @assert isapprox(cMO' * S * cMO, I, atol=1e-8) "cMO are not orthonormal in the AO basis"
+  println("Transform AO integrals to MO basis...")
+  C = Matrix{T}(cMO)
+  nout = size(C, 2)
+  aofile, aoint2 = mmap3idx(EC, "ao_int2")
+  int2 = transform_int2(EC, aoint2, C, C, C, C, "mo_int2"; description="tmp")
+  close(aofile)
+  # NELEC/MS2 conventions follow `dfdump`: neutral electron count, `charge`/`ms2` from the
+  # wf options are applied later by `setup_space_fd!`.
+  nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
+  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
+  fd = FDump{T,3}(nout, nelec; ms2)
+  fd.int2 = int2
+  fd.int1 = Matrix{T}(C' * hAO * C)
+  fd.int0 = nuclear_repulsion(EC.system)
+  EC.fd = fd
   return fd
 end
 
 """
-    set_mo_basis!(EC::ECInfo, cMO::AbstractMatrix) -> FDump
+    generate_mo_dump(EC::ECInfo, cMO::SpinMatrix) -> FDump
 
-  Switch `EC.fd` in place from the AO basis to the MO basis defined by `cMO[μ,p]`,
-  overwriting the integrals exactly as `transform_fcidump!` does for a regular fcidump.
-
-  The exact AO→MO transform is applied to `EC.fd` (see [`ao_to_mo!`](@ref)) and the
-  resulting MO 2-e integrals are written **directly** onto a fresh memory-mapped scratch file
-  (`"mo_int2"`, registered in `EC.files` with description `"int2 mo"`) — the transform fills the
-  mmap in place, so the full `nout²·tri` MO tensor is never materialized in memory. The AO 2-e
-  integrals stay on disk in their own scratch file (`"ao_int2"`, written by
-  [`generate_ao_fdump`](@ref)), so the dump can be switched back with [`set_ao_basis!`](@ref).
-  After this call `EC.fd` is an ordinary orthonormal MO fcidump that every correlated
-  driver consumes unchanged; frozen-core / redundant-orbital handling is left to the
-  driver (`freeze_core!` / `n_deleted_orbitals`).
+  Build an MO-basis [`FDump`](@ref) in `EC.fd` from the exact AO integral files and the MO
+  coefficients `cMO`. For a restricted `cMO` this builds a closed-shell (RHF) dump (see the
+  matrix method); for an unrestricted `cMO` it builds an unrestricted (UHF) dump with the
+  spin blocks `int2aa`/`int2bb` (`v_{pq}^{rs}` in each spin, triangular) and `int2ab`
+  (`v_{pQ}^{rS}`, full 4-index), and per-spin 1-e integrals — the exact-AO analogue of the
+  `rhf→uhf` branch of [`transform_fcidump!`](@ref). Both spins must have the same orbital
+  count (a single `NORB`); each block may be rectangular (deleted / frozen-virtual orbitals
+  dropped). Frozen-core folding is left to the caller ([`freeze_orbs_in_dump`](@ref)).
 """
-function set_mo_basis!(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
-  # transform straight into the registered "mo_int2" scratch mmap (no intermediate in-memory copy)
-  ao_to_mo!(EC.fd, cMO; alloc=dims->newmmap(EC, "mo_int2", dims, T; description="int2 mo")[2])
-  flushmmap(EC, EC.fd.int2)
-  return EC.fd
-end
-
-"""
-    mmap_int2_allocator(EC::ECInfo) -> Function
-
-  Build an output allocator for [`transform_fcidump!`](@ref) that parks each transformed 2-e
-  integral block on its own fresh memory-mapped scratch file instead of an in-memory array.
-  The returned closure `(key, dims) -> mmap` creates (and registers in `EC.files`) a scratch
-  file named after the integral block (`key` ∈ `"int2"`, `"int2aa"`, `"int2bb"`, `"int2ab"`)
-  and returns the (zero-initialized) mmaped array to be filled in place. Use it to transform
-  large integrals without ever materializing the full result in memory.
-"""
-function mmap_int2_allocator(EC::ECInfo{T}) where {T<:Number}
-  return (key, dims) -> newmmap(EC, key, dims, T; description=key)[2]
-end
-
-"""
-    set_ao_basis!(EC::ECInfo) -> FDump
-
-  Switch `EC.fd` back to the non-orthogonal AO basis, the inverse of
-  [`set_mo_basis!`](@ref). The AO 2-e integrals are re-mmapped from their scratch file
-  (`"ao_int2"`, written by [`generate_ao_fdump`](@ref)); the AO core Hamiltonian and
-  overlap are rebuilt from the AO basis. No-op if `EC.fd` is already an AO dump.
-"""
-function set_ao_basis!(EC::ECInfo{T}) where {T<:Number}
-  fd = EC.fd
-  is_ao_basis(fd) && return fd
-  @assert haskey(EC.files, "ao_int2") "no AO integrals on file (\"ao_int2\"); call ao_integrals(EC) first"
-  _, aoint2 = mmap(EC, "ao_int2")       # dims + type recovered from the mmap header
-  fd.int2 = aoint2
-  bao = generate_basis(EC, "ao")
-  fd.int1 = Matrix{T}(kinetic(bao) + nuclear(bao))
-  fd.overlap = Matrix{T}(overlap(bao))
-  fd.ao_basis = true
-  fd.head["AOBASIS"] = [1]
+function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
+  is_restricted(cMO) && return generate_mo_dump(EC, cMO.α)
+  @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
+  save_ao_1e_integrals!(EC)
+  S = load2idx(EC, "S_AA")
+  hAO = load2idx(EC, "h_AA")
+  Ca = Matrix{T}(cMO.α); Cb = Matrix{T}(cMO.β)
+  nout = size(Ca, 2)
+  @assert size(Cb, 2) == nout "α and β must keep the same number of MOs (single NORB), got $(size(Ca,2)) and $(size(Cb,2))"
+  @assert size(Ca, 1) == size(S, 1) && size(Cb, 1) == size(S, 1) "cMO AO dimension does not match the system"
+  @assert isapprox(Ca' * S * Ca, I, atol=1e-8) && isapprox(Cb' * S * Cb, I, atol=1e-8) "cMO are not orthonormal in the AO basis"
+  println("Transform AO integrals to UHF MO basis...")
+  aofile, aoint2 = mmap3idx(EC, "ao_int2")
+  int2aa = transform_int2(EC, aoint2, Ca, Ca, Ca, Ca, "mo_int2aa"; description="tmp")
+  int2bb = transform_int2(EC, aoint2, Cb, Cb, Cb, Cb, "mo_int2bb"; description="tmp")
+  int2ab = transform_int2_Q(EC, aoint2, Ca, Cb, Ca, Cb, "mo_int2ab"; description="tmp")
+  close(aofile)
+  nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
+  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
+  fd = FDump{T,3}(nout, nelec; ms2, uhf=true)
+  fd.int2aa = int2aa; fd.int2bb = int2bb; fd.int2ab = int2ab
+  fd.int1a = Matrix{T}(Ca' * hAO * Ca)
+  fd.int1b = Matrix{T}(Cb' * hAO * Cb)
+  fd.int0 = nuclear_repulsion(EC.system)
+  EC.fd = fd
   return fd
 end
 

@@ -143,11 +143,116 @@ function gen_fock(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
   return fock
 end
 
-""" 
+"""
+    ao_JK!(J, K, int2, Dj, Dk)
+
+  Accumulate (added to `J`/`K`) the Coulomb and exchange AO matrices
+  ``J_{pq} \\mathrel{+}= \\sum_{rs} \\langle pr|qs\\rangle D^J_{rs}`` and
+  ``K_{pq} \\mathrel{+}= \\sum_{rs} \\langle pr|sq\\rangle D^K_{rs}`` directly from the
+  **triangular** spin-free 2-e integrals `int2[p,q,tri(r,s)] = <pq|rs>` (`r ≤ s`, e.g. the
+  memory-mapped exact AO integrals `"ao_int2"`). One `nao×nao` integral slab
+  `slab = int2[:,:,tri(r,s)]` is streamed at a time via BLAS `mul!` (GEMV, no allocation): the
+  full `nao⁴` tensor is never materialized, no large intermediate is formed, and the `r ≤ s`
+  packing is exploited — each off-diagonal slab also serves its transposed `(s,r)` partner
+  through the joint symmetry `<pq|rs> = <qp|sr>`. `Dj`, `Dk` need not be symmetric. `O(nao²)`
+  working memory. Slab identities: `J[:,r] += slab·Dj[:,s]`, `K[:,s] += slab·Dk[:,r]`, and for
+  `r < s` also `J[:,s] += slabᵀ·Dj[:,r]`, `K[:,r] += slabᵀ·Dk[:,s]`.
+"""
+function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, int2::AbstractArray{<:Number,3},
+                Dj::AbstractMatrix, Dk::AbstractMatrix)
+  nao = size(int2, 1)
+  @inbounds for s in 1:nao
+    rng = uppertriangular_range(s)                 # packed indices of (r=1:s, s), contiguous
+    for r in 1:s
+      slab = @view int2[:, :, rng[r]]              # slab[p,q] = <pq|rs>
+      mul!(view(J,:,r), slab, view(Dj,:,s), true, true)   # J[:,r] += slab · Dj[:,s]
+      mul!(view(K,:,s), slab, view(Dk,:,r), true, true)   # K[:,s] += slab · Dk[:,r]
+      if r < s
+        slabT = transpose(slab)
+        mul!(view(J,:,s), slabT, view(Dj,:,r), true, true)  # J[:,s] += slabᵀ · Dj[:,r]
+        mul!(view(K,:,r), slabT, view(Dk,:,s), true, true)  # K[:,r] += slabᵀ · Dk[:,s]
+      end
+    end
+  end
+  return J, K
+end
+
+"""
+    ao_J2K!(J, Ka, Kb, int2, Dt, Da, Db)
+
+  Like [`ao_JK!`](@ref) but builds the **shared** Coulomb `J` from the total density `Dt` once
+  and both same-spin exchange matrices `Ka`,`Kb` (from `Da`,`Db`) in a single streaming pass
+  over the AO integral slabs — the Coulomb slab products are not repeated per spin.
+"""
+function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
+                 int2::AbstractArray{<:Number,3}, Dt::AbstractMatrix,
+                 Da::AbstractMatrix, Db::AbstractMatrix)
+  nao = size(int2, 1)
+  @inbounds for s in 1:nao
+    rng = uppertriangular_range(s)
+    for r in 1:s
+      slab = @view int2[:, :, rng[r]]
+      mul!(view(J,:,r),  slab, view(Dt,:,s), true, true)
+      mul!(view(Ka,:,s), slab, view(Da,:,r), true, true)
+      mul!(view(Kb,:,s), slab, view(Db,:,r), true, true)
+      if r < s
+        slabT = transpose(slab)
+        mul!(view(J,:,s),  slabT, view(Dt,:,r), true, true)
+        mul!(view(Ka,:,r), slabT, view(Da,:,s), true, true)
+        mul!(view(Kb,:,r), slabT, view(Db,:,s), true, true)
+      end
+    end
+  end
+  return J, Ka, Kb
+end
+
+"""
+    gen_fock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
+
+  Calculate the closed-shell fock matrix from explicitly given spin-free 2-e integrals
+  `int2[p,q,tri(r,s)] = <pq|rs>` (triangular packing, e.g. the memory-mapped exact AO
+  integrals `"ao_int2"`), 1-e integrals `h1`, and orbitals `CMOl`, `CMOr`.
+  The contraction is basis-agnostic (physicists' notation), so it yields the AO Fock
+  matrix when fed AO integrals and AO density. Streams the triangular integrals slab by slab
+  ([`ao_JK!`](@ref)) — no dense `nao⁴` tensor is formed.
+"""
+function gen_fock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix,
+                  CMOl::AbstractMatrix, CMOr::AbstractMatrix) where {T<:Number}
+  @assert EC.space['o'] == EC.space['O'] # closed-shell
+  den = gen_density_matrix(EC, CMOl, CMOr, EC.space['o'])
+  nao = size(int2, 1)
+  TF = promote_type(T, eltype(den))
+  J = zeros(TF, nao, nao); K = zeros(TF, nao, nao)
+  ao_JK!(J, K, int2, den, den)
+  return h1 .+ 2 .* J .- K
+end
+
+"""
+    gen_ufock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix, cMOl::SpinMatrix, cMOr::SpinMatrix)
+
+  Calculate the UHF fock matrix from explicitly given spin-free 2-e integrals
+  `int2[p,q,tri(r,s)] = <pq|rs>` (e.g. the memory-mapped exact AO integrals) and 1-e
+  integrals `h1` (same for both spins). The shared Coulomb term (total density) is built once
+  and the two same-spin exchange terms in a single streaming pass ([`ao_J2K!`](@ref)) — no
+  dense `nao⁴` tensor is formed.
+"""
+function gen_ufock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix,
+                   cMOl::SpinMatrix, cMOr::SpinMatrix) where {T<:Number}
+  Da = gen_density_matrix(EC, cMOl.α, cMOr.α, EC.space['o'])
+  Db = gen_density_matrix(EC, cMOl.β, cMOr.β, EC.space['O'])
+  Dt = Da .+ Db
+  nao = size(int2, 1)
+  TF = promote_type(T, eltype(Da))
+  J = zeros(TF, nao, nao); Ka = zeros(TF, nao, nao); Kb = zeros(TF, nao, nao)
+  ao_J2K!(J, Ka, Kb, int2, Dt, Da, Db)
+  return SpinMatrix(h1 .+ J .- Ka, h1 .+ J .- Kb)
+end
+
+"""
     gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
 
   Calculate UHF fock matrix from FCIDump integrals for `spincase`∈{`:α`,`:β`} and orbitals `CMOl`, `CMOr` and
-  orbitals for the opposite-spin `CMOlOS` and `CMOrOS`. 
+  orbitals for the opposite-spin `CMOlOS` and `CMOrOS`.
 """
 function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractMatrix, CMOr::AbstractMatrix,
                   CMOlOS::AbstractMatrix, CMOrOS::AbstractMatrix)

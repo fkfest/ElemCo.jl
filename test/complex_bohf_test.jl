@@ -1,6 +1,7 @@
 @testitem "complex_bohf" tags=[:complex, :quick] begin
 using Test
 using ElemCo
+using ElemCo.IntegralTools: transform_fcidump!
 using ElemCo.ECInfos
 using ElemCo.FciDumps
 using ElemCo.FciDumps: headvar

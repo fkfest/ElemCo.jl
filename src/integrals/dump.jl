@@ -14,15 +14,14 @@ using ..ElemCo.MTensorOperations
 using ..ElemCo.QMTensors
 
 export FDump, TFDump, QFDump 
-export fd_origin, fd_ismodified, read_fcidump, write_fcidump, transform_fcidump!
+export fd_origin, fd_ismodified, read_fcidump, write_fcidump
 export headvar, headvars, integ1, integ2, integ2_ss, integ2_os, triang
 export reorder_orbs_int2, modify_header!
 export int1_npy_filename, int2_npy_filename
 export is_similarity_transformed
-export is_ao_basis, make_ao_fdump
 
 # optional variables which won't be written if =0
-const FDUMP_OPTIONAL=["IUHF", "ST", "III", "ICMPLX", "AOBASIS"]
+const FDUMP_OPTIONAL=["IUHF", "ST", "III", "ICMPLX"]
 
 """prefered order of keys in fcidump header (optional keys are not included)"""
 const FDUMP_KEYS=["NORB", "NELEC", "MS2", "ISYM", "ORBSYM" ]
@@ -143,11 +142,6 @@ end
   epdump::Bool = false
   """`⟨false⟩` 3-index DF integrals are stored in scratch (`mmL`) and need contraction to 4-index. """
   df3idx::Bool = false
-  """`⟨false⟩` integrals are in a non-orthogonal AO basis (`(μν|ρσ)` instead of MO integrals).
-     A convenience variable, has to coincide with `head["AOBASIS"][1] > 0`. """
-  ao_basis::Bool = false
-  """ overlap matrix `S_{μν}` of the (non-orthogonal) AO basis; only stored if `ao_basis`. """
-  overlap::Matrix{T} = zeros(T, 0, 0)
   """ for ElemCo-generated reduced (frozen-core/deleted-virtual) dumps: the contiguous full-space
       (original) orbital range of the active orbitals (frozen core below it, deleted virtuals above
       it), i.e. active orbital `k` corresponds to full orbital `orig_orbs[k]`. Empty (`1:0`) for
@@ -180,8 +174,6 @@ function FDump{T2,N}(fd::FDump{T1,N}) where {T1<:Number,T2<:Number,N}
     modified = fd.modified,
     uhf = fd.uhf,
     df3idx = fd.df3idx,
-    ao_basis = fd.ao_basis,
-    overlap = Matrix{T2}(fd.overlap),
     orig_orbs = fd.orig_orbs,
   )
 end
@@ -235,29 +227,6 @@ function FDump{T,N}(norb::Int, nelec::Int; npos::Int=0, ms2::Int=0, isym::Int=1,
   fd.head["ST"] = simtra ? [1] : [0]
   fd.head["ICMPLX"] = T <: Complex ? [1] : [0]
   fd.uhf = uhf
-  return fd
-end
-
-"""
-    make_ao_fdump(int2::Array{T,3}, int1::Matrix{T}, int0, overlap::Matrix{T}, nelec::Int; ms2=0, isym=1, orbsym=Int[])
-
-  Create an AO-basis [`FDump`](@ref) (`TFDump`) from precomputed AO integrals.
-
-  `int2[p,q,tri(r,s)] = <pq|rs> = (pr|qs)` are the AO 2-e integrals in physicists'
-  notation (triangular packing), `int1 = h_{μν}` is the AO core Hamiltonian,
-  `int0` is the nuclear repulsion energy, and `overlap = S_{μν}` is the AO overlap.
-  `norb` is taken from `size(overlap,1)`. The `AOBASIS` header flag is set.
-"""
-function make_ao_fdump(int2::Array{T,3}, int1::Matrix{T}, int0, overlap::Matrix{T}, nelec::Int;
-                       ms2::Int=0, isym::Int=1, orbsym::Vector{Int}=Int[]) where {T<:Number}
-  norb = size(overlap, 1)
-  fd = FDump{T,3}(norb, nelec; ms2, isym, orbsym)
-  fd.head["AOBASIS"] = [1]
-  fd.ao_basis = true
-  fd.int2 = int2
-  fd.int1 = int1
-  fd.int0 = int0
-  fd.overlap = overlap
   return fd
 end
 
@@ -318,18 +287,6 @@ end
   Return true if the fcidump is similarity transformed
 """
 is_similarity_transformed(fd::FDump) = headvar(fd, "ST", Int) > 0
-
-"""
-    is_ao_basis(fd::FDump)
-
-  Return true if the fcidump holds integrals in a (non-orthogonal) AO basis,
-  i.e. the 2-e integrals are `(μν|ρσ)`, the 1-e integrals are the AO core
-  Hamiltonian `h_{μν}`, and the overlap `S_{μν}` is available in `fd.overlap`.
-"""
-function is_ao_basis(fd::FDump)
-  aobas = headvar(fd, "AOBASIS", Int)
-  return !isnothing(aobas) && aobas > 0
-end
 
 """
     uses_reduced_permsym(fd::FDump{T}) where {T<:Number}
@@ -486,7 +443,6 @@ function read_fcidump(fcidump::String, ::Type{T}, ::Val{N}) where {T<:Number, N}
   fd.head = head
   fd.origin = fcidump
   fd.uhf = (headvar(fd, "IUHF", Int) > 0)
-  fd.ao_basis = is_ao_basis(fd)
   simtra = (headvar(fd, "ST", Int) > 0)
   positron = headvar(fd, "NPOS", Int)
   if simtra
@@ -627,10 +583,6 @@ function read_integrals!(fd::FDump, dir::AbstractString)
     fd.int1a = mmap_integrals(fd, dir, "NPY1A", fd.int1a)
     fd.int1b = mmap_integrals(fd, dir, "NPY1B", fd.int1b)
     success = length(fd.int2aa) > 0 && length(fd.int2bb) > 0 && length(fd.int2ab) > 0 && length(fd.int1a) > 0 && length(fd.int1b) > 0
-  end
-  if fd.ao_basis
-    fd.overlap = mmap_integrals(fd, dir, "NPYS", fd.overlap)
-    success &= length(fd.overlap) > 0
   end
   enuc = headvar(fd, "ENUC", Float64)
   if isnothing(enuc)
@@ -1056,9 +1008,6 @@ function write_header(fd::FDump{T}, fdf; npy=false) where T
   head = fd.head
   # set ICMPLX flag for complex integrals
   head["ICMPLX"] = T <: Complex ? [1] : [0]
-  if fd.ao_basis
-    head["AOBASIS"] = [1]
-  end
   if npy
     if !fd.uhf
       head["NPY2"] = ["int2.npy"]
@@ -1070,9 +1019,6 @@ function write_header(fd::FDump{T}, fdf; npy=false) where T
       head["NPY1A"] = ["int1a.npy"]
       head["NPY1B"] = ["int1b.npy"]
     end
-    if fd.ao_basis
-      head["NPYS"] = ["overlap.npy"]
-    end
     head["ENUC"] = [fd.int0]
   else
     delete!(head.shead, "NPY2")
@@ -1082,11 +1028,7 @@ function write_header(fd::FDump{T}, fdf; npy=false) where T
     delete!(head.shead, "NPY2AB")
     delete!(head.shead, "NPY1A")
     delete!(head.shead, "NPY1B")
-    delete!(head.shead, "NPYS")
     delete!(head.fhead, "ENUC")
-  end
-  if fd.ao_basis && !npy
-    error("AO-basis fcidumps must be written with format=:npy (the overlap matrix is stored as an npy file)")
   end
   for key in FDUMP_KEYS
     val = headvar(fd, key)
@@ -1318,259 +1260,6 @@ function copy2npy(fd::FDump, dir::AbstractString)
     npzwrite(joinpath(dir,"int1a.npy"), fd.int1a)
     npzwrite(joinpath(dir,"int1b.npy"), fd.int1b)
   end
-  if fd.ao_basis
-    npzwrite(joinpath(dir,"overlap.npy"), fd.overlap)
-  end
-end
-
-"""
-    transform_fcidump!(fd::FDump, Tl::SpinMatrix, Tr::SpinMatrix; alloc=(key,dims)->zeros(eltype,dims))
-
-  Transform integrals to new basis using Tl and Tr transformation matrices.
-  If Tl and Tr are unrestricted, then the function transforms rhf fcidump to uhf fcidump.
-
-  The transformed 2-e integrals are written into output arrays obtained from `alloc(key, dims)`,
-  where `key` names the integral block (`"int2"`, `"int2aa"`, `"int2bb"`, `"int2ab"`). The
-  default allocates plain in-memory arrays; pass an allocator backed by a memory-mapped scratch
-  file (e.g. `IntegralTools.mmap_int2_allocator(EC)`) to keep large transformed integrals on
-  disk instead of materializing them fully in memory.
-"""
-function transform_fcidump!(fd::FDump{T,N}, Tl::SpinMatrix, Tr::SpinMatrix;
-                            alloc=(key, dims)->zeros(T, dims)) where {T<:Number,N}
-  println("Transform integrals...")
-  if !is_restricted(Tl) || !is_restricted(Tr)
-    genuhfdump = true
-  else
-    genuhfdump = false
-    @assert !fd.uhf # from uhf fcidump can generate only uhf fcidump
-  end
-  if fd.uhf
-    fd.int2aa = transform_int2(fd.int2aa, Tl[1], Tl[1], Tr[1], Tr[1]; alloc=dims->alloc("int2aa", dims))
-    fd.int2bb = transform_int2(fd.int2bb, Tl[2], Tl[2], Tr[2], Tr[2]; alloc=dims->alloc("int2bb", dims))
-    fd.int2ab = transform_int2_Q(fd.int2ab, Tl[1], Tl[2], Tr[1], Tr[2]; alloc=dims->alloc("int2ab", dims))
-    fd.int1a = transform_int1(fd.int1a, Tl[1], Tr[1])
-    fd.int1b = transform_int1(fd.int1b, Tl[2], Tr[2])
-  elseif genuhfdump
-    # change fcidump from rhf to uhf format
-    fd.int2aa = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1]; alloc=dims->alloc("int2aa", dims))
-    fd.int2bb = transform_int2(fd.int2, Tl[2], Tl[2], Tr[2], Tr[2]; alloc=dims->alloc("int2bb", dims))
-    fd.int2ab = transform_int2_Q(fd.int2, Tl[1], Tl[2], Tr[1], Tr[2]; alloc=dims->alloc("int2ab", dims))
-    fd.int1a = transform_int1(fd.int1, Tl[1], Tr[1])
-    fd.int1b = transform_int1(fd.int1, Tl[2], Tr[2])
-    fd.int2 = zeros(T, ntuple(i->0, Val(N)))
-    fd.int1 = zeros(T, 0,0)
-    fd.head["IUHF"] = [1]
-    fd.uhf = true
-  else
-    fd.int2 = transform_int2(fd.int2, Tl[1], Tl[1], Tr[1], Tr[1]; alloc=dims->alloc("int2", dims))
-    fd.int1 = transform_int1(fd.int1, Tl[1], Tr[1])
-  end
-  fd.modified = true
-end
-
-"""
-    transform_int2(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
-                   Tr::AbstractArray, Tr2::AbstractArray; alloc=dims->zeros(T, dims)) where T
-
-  Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
-
-  ``v_{pq}^{rs} = v_{p'q'}^{r's'}``* `Tl`[p',p] * `Tl2`[q',q] * `Tr`[r',r] * `Tr2`[s',s]
-
-  The last two indices are stored as a single uppertriangular index. The result array is
-  obtained from `alloc(dims)` (in-memory `zeros` by default; pass a memory-mapped allocator
-  for large integrals) and filled by [`transform_int2!`](@ref).
-"""
-function transform_int2(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
-                        Tr::AbstractArray, Tr2::AbstractArray; alloc=dims->zeros(T, dims)) where T
-  nout = size(Tl, 2)
-  int2t = alloc((nout, nout, nout*(nout+1)÷2))
-  return transform_int2!(int2t, int2, Tl, Tl2, Tr, Tr2)
-end
-
-"""
-    transform_int2!(int2t, int2::Array{T,3}, Tl, Tl2, Tr, Tr2) where T
-
-  In-place [`transform_int2`](@ref): write the transformed 2-e integrals into the
-  preallocated, **zero-initialized** `int2t` of size `(nout, nout, nout*(nout+1)÷2)`. `int2t`
-  may be an in-memory array or a memory-mapped scratch array (it is accumulated into, so it
-  must start at zero — both `zeros` and a freshly created `newmmap` satisfy this). Returns `int2t`.
-"""
-function transform_int2!(int2t::AbstractArray{T,3}, int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
-                         Tr::AbstractArray, Tr2::AbstractArray) where T
-  # General rectangular transform: input orbitals (`nin`, primed indices) → output
-  # orbitals (`nout`).
-  nin = size(int2, 1)
-  nout = size(Tl, 2)
-  @assert size(Tl2,2) == nout && size(Tr,2) == nout && size(Tr2,2) == nout "transform_int2: all four transformation matrices must map onto the same number of output orbitals"
-  @assert size(Tl,1) == nin && size(Tl2,1) == nin && size(Tr,1) == nin && size(Tr2,1) == nin "transform_int2: transformation matrices must have $nin rows (input orbitals)"
-  @assert size(int2t) == (nout, nout, nout*(nout+1)÷2) "transform_int2!: output array must have size ($nout, $nout, $(nout*(nout+1)÷2))"
-  int_3i = zeros(T, nout,nout,nout)
-  @buffer buf(T, nout*nin*(nin+nout)) begin
-  for s = 1:nin
-    rs = strict_uppertriangular_range(s)
-    rrange = 1:s-1
-    lenrs = length(rs)
-    if lenrs > 0
-      v!int2 = @mview int2[:,:,rs]
-      v!Tr = @mview Tr[rrange,:]
-      intb1 = alloc!(buf, nout, nin, lenrs)
-      intb2 = alloc!(buf, nout, nout, lenrs)
-      @mtensor intb1[p,q',r'] = v!int2[p',q',r'] * Tl[p',p]
-      @mtensor intb2[p,q,r'] = intb1[p,q',r'] * Tl2[q',q]
-      @mtensor int_3i[p,q,r] = intb2[p,q,r'] * v!Tr[r',r]
-      reset!(buf)
-    end
-    # contribution from the diagonal <p'q'|s's'>
-    ss = uppertriangular_index(s, s)
-    v!int2 = @mview int2[:,:,ss]
-    intb1 = alloc!(buf, nout, nin)
-    intb2 = alloc!(buf, nout, nout)
-    @mtensor intb1[p,q'] = 0.5 * v!int2[p',q'] * Tl[p',p]
-    @mtensor intb2[p,q] = intb1[p,q'] * Tl2[q',q]
-    @mtensor int_3i[p,q,r] += intb2[p,q] * Tr[s,:][r]
-    reset!(buf)
-    Tr2s = Tr2[s,:]
-    for s1 = 1:nout
-      rs1 = uppertriangular_range(s1)
-      rrange = 1:s1
-      Tr2ss1 = Tr2s[s1]
-      v!Tr2s = @mview Tr2s[rrange]
-      v!int2t = @mview int2t[:,:,rs1]
-      v!int_3i_r = @mview int_3i[:,:,rrange]
-      v!int_3i_s1 = @mview int_3i[:,:,s1]
-      @mtensor v!int2t[p,q,r] += v!int_3i_r[p,q,r] * Tr2ss1
-      @mtensor v!int2t[p,q,r] += v!int_3i_s1[q,p] * v!Tr2s[r]
-    end
-  end
-  end #buffer
-  return int2t
-end
-function transform_int2(int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray,
-                        Tr::AbstractArray, Tr2::AbstractArray; alloc=dims->zeros(T, dims)) where T
-  return transform_int2_Q(int2, Tl, Tl2, Tr, Tr2; alloc)
-end
-
-"""
-    transform_int2_Q(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
-                   Tr::AbstractArray, Tr2::AbstractArray; alloc=dims->zeros(T, dims)) where T
-
-  Transform 2-e integrals to new basis using `Tl`/`Tl2` and `Tr`/`Tr2` transformation matrices.
-
-  ``v_{pq}^{rs} = v_{p'q'}^{r's'}``* `Tl`[p',p] * `Tl2`[q',q] * `Tr`[r',r] * `Tr2`[s',s]
-
-  The result is a full 4-index tensor, obtained from `alloc(dims)` (in-memory `zeros` by
-  default; pass a memory-mapped allocator for large integrals) and filled by
-  [`transform_int2_Q!`](@ref).
-"""
-function transform_int2_Q(int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
-                        Tr::AbstractArray, Tr2::AbstractArray; alloc=dims->zeros(T, dims)) where T
-  norb = size(int2,1)
-  int2t = alloc((norb, norb, norb, norb))
-  return transform_int2_Q!(int2t, int2, Tl, Tl2, Tr, Tr2)
-end
-
-"""
-    transform_int2_Q!(int2t, int2::Array{T,3}, Tl, Tl2, Tr, Tr2) where T
-
-  In-place [`transform_int2_Q`](@ref): write the full 4-index transformed integrals into the
-  preallocated `int2t` of size `(norb, norb, norb, norb)`, which may be an in-memory or a
-  memory-mapped array.
-"""
-function transform_int2_Q!(int2t::AbstractArray{T,4}, int2::Array{T,3}, Tl::AbstractArray, Tl2::AbstractArray,
-                           Tr::AbstractArray, Tr2::AbstractArray) where T
-  norb = size(int2,1)
-  @assert size(int2t) == (norb, norb, norb, norb) "transform_int2_Q!: output array must have size ($norb, $norb, $norb, $norb)"
-  oblks = get_spaceblocks(1:norb) 
-  maxlen = maximum(length, oblks)
-  @buffer buf(T, 2*norb*norb*norb*maxlen) begin
-  for tb in oblks
-    lent = length(tb)
-    # Z[p',q',r',u] = sum_{t'} v_{p'q'}^{r't'} * Tr2[t', tb[u]]  (partner t' narrowed into the block)
-    Z = alloc!(buf, norb, norb, norb, lent)
-    fill!(Z, zero(T))
-    for s = 1:norb
-      off = strict_uppertriangular_range(s)          # packed columns (r',s), r' = 1:s-1
-      if !isempty(off)
-        Vc = @mview int2[:,:,off]                     # v_{p'q'}^{r',s}, r' = 1:s-1
-        Tr2_s   = @mview Tr2[s, tb]                   # [u]
-        Tr2_off = @mview Tr2[1:s-1, tb]               # [r', u]
-        Zoff = @mview Z[:,:,1:s-1,:]
-        @mtensor Zoff[p',q',r',u] += Vc[p',q',r'] * Tr2_s[u]      # partner t'=s  (r'<t', keep p',q')
-        Zs = @mview Z[:,:,s,:]
-        @mtensor Zs[p',q',u] += Vc[q',p',r'] * Tr2_off[r',u]      # partner t'=r'<s  (r'>t', p'↔q' swap)
-      end
-      Vd = @mview int2[:,:, uppertriangular_index(s,s)]
-      Tr2_d = @mview Tr2[s, tb]
-      Zs = @mview Z[:,:,s,:]
-      @mtensor Zs[p',q',u] += 0.5 * Vd[p',q'] * Tr2_d[u]          # diagonal, symmetrized 0.5(V+Vᵀ)
-      @mtensor Zs[p',q',u] += 0.5 * Vd[q',p'] * Tr2_d[u]
-    end
-    # transform the remaining three indices, then write the slab once
-    W = alloc!(buf, norb, norb, norb, lent)
-    @mtensor W[p,q',r',u] = Z[p',q',r',u] * Tl[p',p]
-    @mtensor Z[p,q,r',u] = W[p,q',r',u] * Tl2[q',q]               # reuse Z (input copy consumed)
-    v!int2t = @mview int2t[:,:,:,tb]
-    @mtensor v!int2t[p,q,r,u] = Z[p,q,r',u] * Tr[r',r]            # write int2t[:,:,:,tb] ONCE
-    reset!(buf)
-  end
-  end #buffer
-  return int2t
-end
-function transform_int2_Q(int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray,
-                        Tr::AbstractArray, Tr2::AbstractArray; alloc=dims->zeros(T, dims)) where T
-  norb = size(int2,1)
-  int2t = alloc((norb, norb, norb, norb))
-  return transform_int2_Q!(int2t, int2, Tl, Tl2, Tr, Tr2)
-end
-
-"""
-    transform_int2_Q!(int2t, int2::Array{T,4}, Tl, Tl2, Tr, Tr2) where T
-
-  In-place [`transform_int2_Q`](@ref) for a full 4-index input: write the transformed
-  integrals into the preallocated `int2t` of size `(norb, norb, norb, norb)`, in-memory or
-  memory-mapped.
-"""
-function transform_int2_Q!(int2t::AbstractArray{T,4}, int2::Array{T,4}, Tl::AbstractArray, Tl2::AbstractArray,
-                        Tr::AbstractArray, Tr2::AbstractArray) where T
-  norb = size(int2,1)
-  @assert size(int2t) == (norb, norb, norb, norb) "transform_int2_Q!: output array must have size ($norb, $norb, $norb, $norb)"
-  oblks = get_spaceblocks(1:norb)
-  maxlen = maximum(length, oblks)
-  @buffer buf(T, 2*norb*norb*norb*maxlen) begin
-  for tb in oblks
-    lent = length(tb)
-    Tr2b = @mview Tr2[:, tb]                                # [t', u]
-    Z = alloc!(buf, norb, norb, norb, lent)
-    first = true
-    for tpb in oblks
-      v!int2 = @mview int2[:,:,:,tpb]
-      v!Tr2b = @mview Tr2b[tpb,:]
-      if first
-        @mtensor Z[p',q',r',u] = v!int2[p',q',r',t'] * v!Tr2b[t',u]   # narrow t' into the output block
-        first = false
-      else
-        @mtensor Z[p',q',r',u] += v!int2[p',q',r',t'] * v!Tr2b[t',u]   # narrow t' into the output block
-      end
-    end
-    W = alloc!(buf, norb, norb, norb, lent)
-    @mtensor W[p,q',r',u] = Z[p',q',r',u] * Tl[p',p]
-    @mtensor Z[p,q,r',u] = W[p,q',r',u] * Tl2[q',q]          # reuse Z
-    v!int2t = @mview int2t[:,:,:,tb]
-    @mtensor v!int2t[p,q,r,u] = Z[p,q,r',u] * Tr[r',r]       # write int2t[:,:,:,tb] ONCE
-    reset!(buf)
-  end
-  end #buffer
-  return int2t
-end
-
-""" 
-    transform_int1(int1::AbstractArray, Tl::AbstractArray,  Tr::AbstractArray)
-
-  Transform 1-e integrals to new basis using `Tl` and `Tr` transformation matrices.
-"""
-function transform_int1(int1::AbstractArray, Tl::AbstractArray,  Tr::AbstractArray)
-  @mtensor int1t[p,q] := int1[p',q'] * Tl[p',p] * Tr[q',q]
-  return int1t
 end
 
 """

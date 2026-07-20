@@ -545,6 +545,8 @@ macro setupEC()
         println("Geometry: ",$(esc(:geometry)))
         println("Basis: ",$(esc(:basis)))
         $(esc(:EC)).system = system
+        # positions/basis changed — the exact AO integral files are invalid
+        delete_ao_integrals!($(esc(:EC)))
       end
     catch err
       isa(err, UndefVarError) || rethrow(err)
@@ -872,6 +874,26 @@ macro region(args...)
 end
 
 """
+    default_integrals!(EC::ECInfo)
+
+  Generate the default integrals for correlated calculations when no integrals are
+  present yet — neither an MO dump in `EC.fd` nor exact AO integral files on scratch:
+  density-fitted MO integrals ([`@dfints`](@ref)/`dfdump`) when
+  [`IntOptions.df`](@ref ECInfos.IntOptions) is `true` (default), exact AO integrals
+  ([`@ints`](@ref)/`ao_integrals`) when `int.df=false`.
+"""
+function default_integrals!(EC::ECInfo)
+  if isempty(EC.fd) && !file_exists(EC, "ao_int2")
+    if EC.options.int.df
+      dfdump(EC)
+    else
+      ao_integrals(EC)
+    end
+  end
+  return
+end
+
+"""
     @dfints(opts_block=nothing)
 
   Generate 2 and 4-idx MO integrals using density fitting.
@@ -900,9 +922,10 @@ end
 """
     @ints(opts_block=nothing)
 
-  Generate exact (non-density-fitted) AO integrals and store them in `EC.fd`
-  (overlap `S`, core Hamiltonian `h`, and the 4-index `(μν|ρσ)` in physicists'
-  notation). This is the non-DF AO counterpart of [`@dfints`](@ref).
+  Generate exact (non-density-fitted) AO integrals and store them as scratch files
+  (overlap `S_AA`, core Hamiltonian `h_AA`, and the memory-mapped 4-index `⟨μν|ρσ⟩`
+  `ao_int2`). `EC.fd` is not used — it holds MO integrals only; MO dumps are derived
+  from the AO files on demand. This is the non-DF AO counterpart of [`@dfints`](@ref).
 
   Optionally, a `begin...end` block can be provided to set local options for this call.
   The options are reset after the call completes.
@@ -927,13 +950,14 @@ end
 """
     @hf(opts_block=nothing)
 
-  Run closed-shell Hartree-Fock from exact (non-DF) AO integrals. If `EC.fd` does not
-  already hold AO integrals, they are generated first (equivalent to calling [`@ints`](@ref)).
-  The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+  Run closed-shell Hartree-Fock from exact (non-DF) AO integrals. If the AO integral
+  files are not on file yet, they are generated first (equivalent to calling
+  [`@ints`](@ref)). The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
 
-  Note: if `EC.fd` holds non-AO (FCIDUMP) integrals they are discarded (with a warning) and
-  replaced by freshly generated AO integrals — `@hf` always builds HF from exact AO integrals.
-  To run HF on existing FCIDUMP integrals, use [`@bohf`](@ref) instead.
+  Note: if `EC.fd` holds (MO/FCIDUMP) integrals they are discarded (with a warning) —
+  `@hf` runs on exact AO integrals, and a leftover MO dump would shadow the AO flow in
+  subsequent correlated calculations. To run HF on existing FCIDUMP integrals, use
+  [`@bohf`](@ref) instead.
 
   Optionally, a `begin...end` block can be provided to set local options for this call.
   The options are reset after the call completes.
@@ -944,14 +968,12 @@ macro hf(opts_block=nothing)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts) do
-        ensure_ao_integrals!($(esc(:EC)); method="@hf", alternative="@bohf")
         hf($(esc(:EC)))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      ensure_ao_integrals!($(esc(:EC)); method="@hf", alternative="@bohf")
       hf($(esc(:EC)))
     end
   end
@@ -960,13 +982,14 @@ end
 """
     @uhf(opts_block=nothing)
 
-  Run unrestricted Hartree-Fock from exact (non-DF) AO integrals. If `EC.fd` does not
-  already hold AO integrals, they are generated first (equivalent to calling [`@ints`](@ref)).
-  The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
+  Run unrestricted Hartree-Fock from exact (non-DF) AO integrals. If the AO integral
+  files are not on file yet, they are generated first (equivalent to calling
+  [`@ints`](@ref)). The orbitals are stored to [`WfOptions.dump`](@ref ECInfos.WfOptions).
 
-  Note: if `EC.fd` holds non-AO (FCIDUMP) integrals they are discarded (with a warning) and
-  replaced by freshly generated AO integrals — `@uhf` always builds UHF from exact AO integrals.
-  To run UHF on existing FCIDUMP integrals, use [`@bouhf`](@ref) instead.
+  Note: if `EC.fd` holds (MO/FCIDUMP) integrals they are discarded (with a warning) —
+  `@uhf` runs on exact AO integrals, and a leftover MO dump would shadow the AO flow in
+  subsequent correlated calculations. To run UHF on existing FCIDUMP integrals, use
+  [`@bouhf`](@ref) instead.
 
   Optionally, a `begin...end` block can be provided to set local options for this call.
   The options are reset after the call completes.
@@ -977,14 +1000,12 @@ macro uhf(opts_block=nothing)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts) do
-        ensure_ao_integrals!($(esc(:EC)); method="@uhf", alternative="@bouhf")
         uhf($(esc(:EC)))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      ensure_ao_integrals!($(esc(:EC)); method="@uhf", alternative="@bouhf")
       uhf($(esc(:EC)))
     end
   end
@@ -1053,9 +1074,7 @@ macro cc(method, args...)
       return quote
         $(esc(:@tryECinit))
         with_local_options($(esc(:EC)), $local_opts_expr) do
-          if isempty($(esc(:EC)).fd)
-            dfdump($(esc(:EC)))
-          end
+          default_integrals!($(esc(:EC)))
           strmethod = @var2string($(esc(method)), $(esc(strmethod)))
           ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
         end
@@ -1072,9 +1091,7 @@ macro cc(method, args...)
     else
       return quote
         $(esc(:@tryECinit))
-        if isempty($(esc(:EC)).fd)
-          $(esc(:@dfints))
-        end
+        default_integrals!($(esc(:EC)))
         strmethod = @var2string($(esc(method)), $(esc(strmethod)))
         ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
       end
@@ -1211,18 +1228,14 @@ macro fci(args...)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts_expr) do
-        if isempty($(esc(:EC)).fd)
-          dfdump($(esc(:EC)))
-        end
+        default_integrals!($(esc(:EC)))
         fcidriver($(esc(:EC)); $(ekwa...))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      if isempty($(esc(:EC)).fd)
-        $(esc(:@dfints))
-      end
+      default_integrals!($(esc(:EC)))
       fcidriver($(esc(:EC)); $(ekwa...))
     end
   end
@@ -1275,18 +1288,14 @@ macro ciphi(args...)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts_expr) do
-        if isempty($(esc(:EC)).fd)
-          dfdump($(esc(:EC)))
-        end
+        default_integrals!($(esc(:EC)))
         fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      if isempty($(esc(:EC)).fd)
-        $(esc(:@dfints))
-      end
+      default_integrals!($(esc(:EC)))
       fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
     end
   end
@@ -1416,7 +1425,7 @@ macro transform_ints()
       error("No FCIDump found.")
     end
     CMOl, CMOr = load_left_right_rotations($(esc(:EC)))
-    transform_fcidump!($(esc(:EC)).fd, CMOl, CMOr)
+    transform_fcidump!($(esc(:EC)), $(esc(:EC)).fd, CMOl, CMOr)
   end
 end
 
@@ -1465,6 +1474,10 @@ macro dummy(atoms)
       println("The integrals will be recalculated.")
       $(esc(:EC)).fd = FDump{ec_eltype($(esc(:EC))),3}() # reset fcidump
     end
+    # ghosting changes the nuclear charges → the 1-e core Hamiltonian (and Enuc) change, but the
+    # 2-e AO integrals and overlap are unchanged (ghost atoms keep their basis functions), so keep
+    # the (expensive) `ao_int2` and only invalidate the 1-e integrals so they are recomputed.
+    invalidate_ao_1e_integrals!($(esc(:EC)))
   end
 end
 
