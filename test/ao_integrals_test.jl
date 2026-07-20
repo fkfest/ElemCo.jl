@@ -17,6 +17,7 @@ using LinearAlgebra
     H2  0.000000000  -1.489124508   1.033245507"
 
   EC = ECInfo{Float64}()
+  EC.options.int.ao_pm = false   # this testitem regression-tests the joint (ao_int2) flow
   EC.system = parse_geometry(geometry, Dict("ao"=>"sto-3g"))
 
   bao = generate_basis(EC, "ao")
@@ -124,6 +125,7 @@ using LinearAlgebra
     Eref = ref_rhf(S, hAO, G, Enuc, 5)   # water: 10 e⁻ → 5 doubly occupied
 
     EC2 = ECInfo{Float64}()
+    EC2.options.int.ao_pm = false
     EC2.system = parse_geometry(geometry, Dict("ao"=>"sto-3g"))
     res = ElemCo.hf(EC2)                 # generates the AO integral files itself
     @test abs(res["HF"] - Eref) < 1e-7
@@ -171,6 +173,7 @@ end
 
   # @hf auto-generates the AO integral files when they are missing
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  EC.options.int.ao_pm = false
   @test isempty(EC.fd)
   e_hf = @hf
   @test isempty(EC.fd)                       # EC.fd is MO-only; AO integrals live on files
@@ -179,6 +182,7 @@ end
 
   # explicit @ints, then @hf reuses the stored integrals
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  EC.options.int.ao_pm = false
   @ints
   @test file_exists(EC, "ao_int2")
   e_hf2 = @hf
@@ -188,6 +192,7 @@ end
   # but the 2-e AO integrals (ao_int2) are unchanged (ghost atoms keep their basis functions)
   # and must be KEPT (they are the expensive part).
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  EC.options.int.ao_pm = false
   @ints
   @test file_exists(EC, "ao_int2")
   @test file_exists(EC, "h_AA")
@@ -197,6 +202,7 @@ end
 
   # closed-shell UHF must reduce to RHF
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  EC.options.int.ao_pm = false
   e_uhf = @uhf
   @test abs(e_uhf["UHF"] - Eref) < 1e-7
 
@@ -204,6 +210,7 @@ end
   bao = generate_basis(parse_geometry(geometry, basis), "ao")
   G = eri_2e4idx(bao); S = overlap(bao); hAO = kinetic(bao) + nuclear(bao)
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
+  EC.options.int.ao_pm = false
   @set wf charge=1 ms2=1
   e_uhf_cation = @uhf
   Enuc = nuclear_repulsion(EC.system)
@@ -217,6 +224,7 @@ end
     # each EC gets its own orbital dump in its (unique) scratch dir, so differently-sized
     # systems below don't clash over the shared default "wf.h5" in the working directory
     fresh(b=basis) = (e = ElemCo.ECInfo(system=parse_geometry(geometry, b));
+                      e.options.int.ao_pm = false;   # joint-flow regression testitem
                       e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
 
     # OPEN-SHELL AO→MO derivation: correlated methods on an AO-source open-shell reference derive

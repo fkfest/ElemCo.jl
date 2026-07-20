@@ -236,6 +236,7 @@ Random.seed!(42)
 for basis in ("sto-3g", "cc-pVDZ")
   EC = ECInfo{Float64}()
   EC.system = parse_geometry(geometry, Dict("ao"=>basis))
+  EC.options.int.ao_pm = false   # this testset unit-tests the JOINT streaming kernels
   ao_integrals(EC)
   aofile, int2 = mmap3idx(EC, "ao_int2")
   nao = size(int2, 1)

@@ -885,7 +885,7 @@ end
   ([`@ints`](@ref)/`ao_integrals`) when `int.df=false`.
 """
 function default_integrals!(EC::ECInfo)
-  if isempty(EC.fd) && !file_exists(EC, "ao_int2")
+  if isempty(EC.fd) && !file_exists(EC, "ao_int2") && !pm_exists(EC)
     if EC.options.int.df
       dfdump(EC)
     else

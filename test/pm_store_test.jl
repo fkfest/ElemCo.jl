@@ -123,9 +123,9 @@ end
   fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
              e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
 
-  EC = fresh(); @ints; @hf; @set cc use_pm_kext=false
+  EC = fresh(); @set int ao_pm=false; @ints; @hf; @set cc use_pm_kext=false
   e_std = @cc ccsd
-  EC = fresh(); @ints; @hf; @set cc use_pm_kext=true
+  EC = fresh(); @set int ao_pm=false; @ints; @hf; @set cc use_pm_kext=true
   e_pm = @cc ccsd
   @test abs(e_std["CCSD"] - e_pm["CCSD"]) < 1e-10
 end
@@ -342,18 +342,20 @@ end
              e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
   for m in ("ccsd", "dcsd")
     key = uppercase(m)
-    EC = fresh(); @ints; ehf_std = @hf; e_std = @cc m
-    EC = fresh(); @set int ao_pm=true; @ints; ehf_pm = @hf; e_pm = @cc m
+    EC = fresh(); @set int ao_pm=false; @ints; ehf_std = @hf; e_std = @cc m
+    EC = fresh(); @ints; ehf_pm = @hf; e_pm = @cc m        # default: ± store, joint retired
     @test pm_exists(EC)                                    # the ± store was built by @ints
+    @test !file_exists(EC, "ao_int2")                      # joint intermediate retired (disk ≈ n⁴/4)
     @test isempty(EC.fd)                                   # still AO-direct
     # AO-HF via the PM Fock builder (gen_fock dispatch) == joint-store HF
     @test abs(ehf_std["HF"] - ehf_pm["HF"]) < 1e-11
     @test abs(e_std[key] - e_pm[key]) < 1e-10
   end
   # open-shell cation (ms2=1): UHF via pm_J2K! + frozen-core ao_core_ufock via the PM path
-  EC = fresh(); @set wf charge=1 ms2=1; ehf_std = @uhf; e_std = @cc ccsd
-  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=true; ehf_pm = @uhf; e_pm = @cc ccsd
+  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=false; ehf_std = @uhf; e_std = @cc ccsd
+  EC = fresh(); @set wf charge=1 ms2=1; ehf_pm = @uhf; e_pm = @cc ccsd   # default PM flow
   @test pm_exists(EC)
+  @test !file_exists(EC, "ao_int2")                        # αβ kext ran via pm_K2ab! (no joint file)
   @test abs(ehf_std["UHF"] - ehf_pm["UHF"]) < 1e-11
   @test abs(e_std["UCCSD"] - e_pm["UCCSD"]) < 1e-10
 end

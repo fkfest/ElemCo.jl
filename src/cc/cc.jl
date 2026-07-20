@@ -2487,21 +2487,22 @@ function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab
   t1 = time_ns()
   SP = EC.space
   ao = EC.ao_direct
-  if ao
-    # AO-direct: the 4-external contraction runs over the memory-mapped (spin-free) AO integrals;
-    # `Rota`/`Rotb` (= cMOα/cMOβ) fold each spin block's result back to the MO basis below.
+  # AO-direct: the 4-external contractions run over the persisted ± supermatrix store when
+  # present (all spin blocks — the αβ block via the explicit rs-± fold), else the memory-mapped
+  # (spin-free) AO integrals; `Rota`/`Rotb` (= cMOα/cMOβ) fold each spin block back to MO below.
+  use_pm = ao && pm_exists(EC)
+  pm = use_pm ? open_pm_store(EC) : nothing
+  aoint2file = nothing; int2ao = nothing
+  if use_pm
+    norb = pm.nao
+  elseif ao
     aoint2file, int2ao = mmap3idx(EC, "ao_int2")
     norb = size(int2ao, 1)
   else
-    aoint2file = nothing
     norb = n_orbs(EC)
   end
   # last two indices of integrals (apart from αβ) are stored as upper triangular
   tripp = uppertriangular_cut(norb)
-  # same-spin (αα/ββ) blocks use the persisted ± store when present (spin-free, shared);
-  # the αβ block has no same-spin ±/ij symmetry, so it stays on the raw AO integrals.
-  use_pm = ao && pm_exists(EC)
-  pm = use_pm ? open_pm_store(EC) : nothing
   # αα
   int2a = ao ? int2ao : integ2_ss(EC.fd, :α)
   D2a = calc_D2(EC, T1a, T2a, :α; Rot=Rota)[tripp,:,:]
@@ -2575,17 +2576,22 @@ function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab
       int2ab = nothing
       @views R2ab .+= K2pqab[SP['v'],SP['V'],:,:]
     else
-      int2 = ao ? int2ao : integ2_ss(EC.fd)
       D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true; Rota, Rotb)
-      D2ab = D2ab_full[tripp,:,:]
-      K2pqab = calc_K2(int2, D2ab, tripp; symmetrize=false)
       tripp_swap = swapped_uppertriangular_cut(norb)
-      @views D2ab .= D2ab_full[tripp_swap,:,:]
-      D2ab_full = nothing
-      K2pqabT = calc_K2(int2, D2ab, tripp_swap; symmetrize=false)
-      D2ab = nothing
-      @mtensor K2pqab[p,r,i,j] += K2pqabT[r,p,i,j]
-      K2pqabT = nothing
+      if use_pm
+        K2pqab = pm_K2ab!(pm, D2ab_full, tripp, tripp_swap)
+        D2ab_full = nothing
+      else
+        int2 = ao ? int2ao : integ2_ss(EC.fd)
+        D2ab = D2ab_full[tripp,:,:]
+        K2pqab = calc_K2(int2, D2ab, tripp; symmetrize=false)
+        @views D2ab .= D2ab_full[tripp_swap,:,:]
+        D2ab_full = nothing
+        K2pqabT = calc_K2(int2, D2ab, tripp_swap; symmetrize=false)
+        D2ab = nothing
+        @mtensor K2pqab[p,r,i,j] += K2pqabT[r,p,i,j]
+        K2pqabT = nothing
+      end
       if ao
         # fold the two AO externals back to the MO basis: index 1 → α (Rota), index 2 → β (Rotb)
         @mtensor tmpK2ab[p,r,i,j] := K2pqab[p',r',i,j] * Rota[p',p] * Rotb[r',r]
@@ -2695,6 +2701,32 @@ function pm_K2!(pm::PMSupermatrices{T}, D2::AbstractArray{T,3}, tripp) where {T<
   @views K2pq[tripp, trioo_swap] .= sK2 .- aK2
   @views K2pq[tripp_swap, trioo] .= sK2 .- aK2
   return K2pq
+end
+
+"""
+    pm_K2ab!(pm, D2ab_full, tripp, tripp_swap)
+
+  αβ kext from the persisted ± store: the full contraction
+  ``K2ab_{pq}^{iJ} = Σ_{rs} ⟨pq|rs⟩ D^{iJ}_{rs}`` for the (non-`rs`-symmetric) αβ density.
+  The `rs`-± fold is explicit — `Ds/Da = ½(D[tripp] ± D[tripp_swap])`, with the ½
+  `rs`-diagonal already carried by `calc_D2ab(...; scalepp=true)` — then two
+  [`pm_matmul!`](@ref PMStore.pm_matmul!) panel GEMMs and the ± unscatter to both `pq`
+  orders. Halved flops and streaming vs the two joint-store `calc_K2` passes.
+"""
+function pm_K2ab!(pm::PMSupermatrices{T}, D2ab_full::AbstractArray{T,4}, tripp, tripp_swap) where {T<:Number}
+  norb = pm.nao
+  na = size(D2ab_full, 3); nb = size(D2ab_full, 4)
+  ntri = length(tripp)
+  @assert pm.npp == ntri "PM store nao ($(pm.nao)) inconsistent with kext norb"
+  Ds = 0.5 .* (D2ab_full[tripp,:,:] .+ D2ab_full[tripp_swap,:,:])
+  Da = 0.5 .* (D2ab_full[tripp,:,:] .- D2ab_full[tripp_swap,:,:])
+  sK = zeros(T, ntri, na*nb); aK = zeros(T, ntri, na*nb)
+  pm_matmul!(sK, pm, :s, reshape(Ds, ntri, na*nb))
+  pm_matmul!(aK, pm, :a, reshape(Da, ntri, na*nb))
+  K2 = Array{T,4}(undef, norb, norb, na, nb)
+  @views K2[tripp, :, :] .= reshape(sK .+ aK, ntri, na, nb)
+  @views K2[tripp_swap, :, :] .= reshape(sK .- aK, ntri, na, nb)   # pq-diagonal consistent: aK diag rows = 0
+  return K2
 end
 
 """

@@ -21,6 +21,7 @@ using ..ElemCo.DumpTools
 using ..ElemCo.OrbTools
 using ..ElemCo.Properties
 using ..ElemCo.FockFactory
+using ..ElemCo.PMStore
 using ..ElemCo.FCI
 using ..ElemCo.EOM
 using ..ElemCo.DfDump: dfdump
@@ -296,7 +297,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   # (joint-symmetry of the rotated density) — a follow-up; the derive path is exact meanwhile.
   ao_source = isempty(EC.fd)
   if ao_source
-    file_exists(EC, "ao_int2") ||
+    (file_exists(EC, "ao_int2") || pm_exists(EC)) ||
       error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
             "Generate integrals first (@ints/@hf/@dfints) or provide an fcidump.")
     setup_space_system!(EC)
@@ -518,7 +519,7 @@ function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   # from the exact AO integral files (deleted orbitals dropped, frozen core folded).
   ao_source = isempty(EC.fd)
   if ao_source
-    file_exists(EC, "ao_int2") ||
+    (file_exists(EC, "ao_int2") || pm_exists(EC)) ||
       error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
             "Generate integrals first (@ints/@hf/@dfints) or provide an fcidump.")
     derive_mo_basis!(EC)

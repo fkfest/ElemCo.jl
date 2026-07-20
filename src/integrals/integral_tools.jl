@@ -381,7 +381,13 @@ function ao_integrals(EC::ECInfo{T}) where T
   int2_file, int2 = newmmap(EC, "ao_int2", (nao, nao, ntri), T; description="int2 ao")
   eri_2e4idx_tri!(int2, bao)
   closemmap(EC, int2_file, int2)
-  EC.options.int.ao_pm && pm_from_joint!(EC)   # also build the persisted ± supermatrix store
+  if EC.options.int.ao_pm
+    # persisted ± supermatrix store (kext/Fock/dressing consumers at halved flops/streaming);
+    # the joint intermediate is retired afterwards — steady-state disk ≈ n⁴/4 (transient
+    # peak 3n⁴/4 during the build). Joint-format consumers reconstruct it on demand.
+    pm_from_joint!(EC)
+    delete_file!(EC, "ao_int2")
+  end
   return nuclear_repulsion(EC.system)
 end
 
@@ -406,7 +412,7 @@ function ensure_ao_integrals!(EC::ECInfo{T}; method="@hf", alternative="@bohf") 
           "use $alternative instead."
     EC.fd = FDump{T,3}()
   end
-  if !file_exists(EC, "ao_int2")
+  if !(file_exists(EC, "ao_int2") || pm_exists(EC))
     ao_integrals(EC)
   else
     save_ao_1e_integrals!(EC)
@@ -800,7 +806,8 @@ end
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
   # joint-format consumer: reconstruct "ao_int2" from the ± supermatrix store if needed
-  !file_exists(EC, "ao_int2") && pm_exists(EC) && pm_to_joint!(EC)
+  reconstructed_joint = !file_exists(EC, "ao_int2") && pm_exists(EC)
+  reconstructed_joint && pm_to_joint!(EC)
   @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
@@ -814,6 +821,7 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
   aofile, aoint2 = mmap3idx(EC, "ao_int2")
   int2 = transform_int2(EC, aoint2, C, C, C, C, "mo_int2"; description="tmp")
   close(aofile)
+  reconstructed_joint && delete_file!(EC, "ao_int2")   # the joint file was a transient reconstruction
   # NELEC/MS2 conventions follow `dfdump`: neutral electron count, `charge`/`ms2` from the
   # wf options are applied later by `setup_space_fd!`.
   nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
@@ -841,7 +849,8 @@ end
 function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   is_restricted(cMO) && return generate_mo_dump(EC, cMO.α)
   # joint-format consumer: reconstruct "ao_int2" from the ± supermatrix store if needed
-  !file_exists(EC, "ao_int2") && pm_exists(EC) && pm_to_joint!(EC)
+  reconstructed_joint = !file_exists(EC, "ao_int2") && pm_exists(EC)
+  reconstructed_joint && pm_to_joint!(EC)
   @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
@@ -857,6 +866,7 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   int2bb = transform_int2(EC, aoint2, Cb, Cb, Cb, Cb, "mo_int2bb"; description="tmp")
   int2ab = transform_int2_Q(EC, aoint2, Ca, Cb, Ca, Cb, "mo_int2ab"; description="tmp")
   close(aofile)
+  reconstructed_joint && delete_file!(EC, "ao_int2")   # the joint file was a transient reconstruction
   nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
   ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
   fd = FDump{T,3}(nout, nelec; ms2, uhf=true)
