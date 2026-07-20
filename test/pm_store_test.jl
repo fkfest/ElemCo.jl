@@ -132,16 +132,17 @@ end
 # hermitian) int2, write it as "ao_int2", pm_from_joint!, reopen, reconstruct the full
 # supermatrices from the stored lower block-triangle (+ Hermitian mirror) and compare to
 # calc_tri_sym_antisym! of the joint tensor. Real AND complex; several block sizes.
+# place a synthetic physical ao_int2 into a fresh EC's scratch and build the ± store from it
+function build_store(n, ::Type{T}, maxcols) where T
+  EC = ElemCo.ECInfo{T}()
+  int2 = herm_int2(exch_int2(n, T))                        # exchange + hermitian
+  f, arr = newmmap(EC, "ao_int2", (n, n, n*(n+1)÷2), T; description="int2 ao")
+  arr .= int2; closemmap(EC, f, arr)
+  pm_from_joint!(EC; maxcols=maxcols)
+  return EC, int2
+end
+
 @testset "PM store round-trip (build ↔ reconstruct)" begin
-  # place a synthetic physical ao_int2 into EC's scratch and build the ± store from it
-  function build_store(n, ::Type{T}, maxcols) where T
-    EC = ElemCo.ECInfo{T}()
-    int2 = herm_int2(exch_int2(n, T))                      # exchange + hermitian
-    f, arr = newmmap(EC, "ao_int2", (n, n, n*(n+1)÷2), T; description="int2 ao")
-    arr .= int2; closemmap(EC, f, arr)
-    pm_from_joint!(EC; maxcols=maxcols)
-    return EC, int2
-  end
   # reconstruct the full npp×npp Vs/Va from the stored panels (+ Hermitian mirror)
   function reconstruct(pm, ::Type{T}) where T
     Vs = zeros(T, pm.npp, pm.npp); Va = zeros(T, pm.npp, pm.npp)
@@ -186,8 +187,56 @@ end
       end
     end
     @test maxg < 1e-13
+    # pm_matmul! primitive: V·X panel-loop == dense reference (both ± matrices)
+    Xr = randn(T, ntri, 4)
+    outs = zeros(T, ntri, 4); outa = zeros(T, ntri, 4)
+    pm_matmul!(outs, pm, :s, Xr); pm_matmul!(outa, pm, :a, Xr)
+    @test maximum(abs.(outs .- Vsr*Xr)) < 1e-12
+    @test maximum(abs.(outa .- Var*Xr)) < 1e-12
     close_pm_store!(EC, pm)
   end
+end
+
+# Phase-2 kernel gate: the persisted kext pm_K2! reproduces the streaming ± kext
+# calc_pm_K2! bit-for-bit (both apply the same ij-fold + 4-quadrant scatter to the same
+# Vs/Va — persisted vs re-folded). Holds for ANY D2. Real and complex.
+@testset "pm_K2! ↔ calc_pm_K2!" begin
+  pm_K2! = ElemCo.CoupledCluster.pm_K2!
+  calc_pm_K2! = ElemCo.CoupledCluster.calc_pm_K2!
+  for T in (Float64, ComplexF64), (n, nocc, maxcols) in ((9, 3, 12), (12, 4, 30))
+    EC, int2 = build_store(n, T, maxcols)
+    tripp = ElemCo.QMTensors.uppertriangular_cut(n); ntri = length(tripp)
+    D2 = randn(T, ntri, nocc, nocc)                        # arbitrary density (kernel identity is D-agnostic)
+    pm = open_pm_store(EC)
+    Kpm = pm_K2!(pm, D2, tripp)
+    close_pm_store!(EC, pm)
+    Kref = calc_pm_K2!(int2, D2, tripp)
+    @test maximum(abs.(Kpm .- Kref)) < 1e-11
+  end
+end
+
+# Phase-2 acceptance: AO-direct energies through the PM-store kext match the standard GEMM
+# kext, closed shell (CCSD/DCSD) and open shell (UCCSD, same-spin via PM + αβ raw).
+@testset "AO-direct kext via PM store ↔ standard" begin
+  geometry = "
+    O   0.000000000   0.000000000  -0.130186067
+    H1  0.000000000   1.489124508   1.033245507
+    H2  0.000000000  -1.489124508   1.033245507"
+  fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+  for m in ("ccsd", "dcsd")
+    key = uppercase(m)
+    EC = fresh(); @ints; @hf; e_std = @cc m
+    EC = fresh(); @set int ao_pm=true; @ints; @hf; e_pm = @cc m
+    @test pm_exists(EC)                                    # the ± store was built by @ints
+    @test isempty(EC.fd)                                   # still AO-direct
+    @test abs(e_std[key] - e_pm[key]) < 1e-10
+  end
+  # open-shell cation (ms2=1)
+  EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_std = @cc ccsd
+  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=true; @uhf; e_pm = @cc ccsd
+  @test pm_exists(EC)
+  @test abs(e_std["UCCSD"] - e_pm["UCCSD"]) < 1e-10
 end
 
 end # @testitem

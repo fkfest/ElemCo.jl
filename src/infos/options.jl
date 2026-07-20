@@ -517,6 +517,10 @@ end
   effective 1-electron Hamiltonian). Set to `false` to instead derive a transient MO integral
   dump from the AO integrals (as for CCSDT/FCI). No effect on DF integrals. """
   ao_direct::Bool = true
+  """`⟨false⟩` for exact AO integrals: also build the persisted ± (plus/minus) supermatrix
+  store (`ao_pm_s`/`ao_pm_a`, ≈ half the disk of `ao_int2`) and use it for the AO-direct kext
+  (halved flops + streaming). Off by default while the PM store is being rolled out. """
+  ao_pm::Bool = false
   """`⟨""⟩` store integrals in FCIDump format. """
   fcidump::String = ""
   """`⟨false⟩` use Cartesian subshells instead of Spherical. """

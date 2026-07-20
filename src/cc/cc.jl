@@ -73,6 +73,7 @@ using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
 using ..ElemCo.FockFactory: ao_JK!, ao_J2K!
+using ..ElemCo.PMStore
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy, calc_posMP2 
 export calc_cc, calc_pertT
@@ -2243,19 +2244,25 @@ function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
   t1 = time_ns()
   SP = EC.space
   norb = n_orbs(EC)
-  if EC.ao_direct
-    # AO-direct: the 4-external contraction runs over the memory-mapped AO integrals;
-    # `Rot` (= cMO) folds the result back to the MO basis below.
+  # AO-direct: the 4-external contraction runs over the persisted ± supermatrix store when
+  # present (halved flops+streaming), else the memory-mapped AO integrals; `Rot` (= cMO)
+  # folds the result back to the MO basis below.
+  use_pm = EC.ao_direct && pm_exists(EC)
+  aoint2file = nothing
+  if EC.ao_direct && !use_pm
     aoint2file, int2 = mmap3idx(EC, "ao_int2")
-  else
-    aoint2file = nothing
+  elseif !EC.ao_direct
     int2 = integ2_ss(EC.fd)
   end
   # last two indices of integrals are stored as upper triangular
   tripp = uppertriangular_cut(norb)
   D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
   t1 = print_time(EC, t1, "calc D2", 2)
-  if EC.options.cc.use_pm_kext
+  if use_pm
+    pm = open_pm_store(EC)
+    K2pq = pm_K2!(pm, D2, tripp)
+    close_pm_store!(EC, pm)
+  elseif EC.options.cc.use_pm_kext
     K2pq = calc_pm_K2!(int2, D2, tripp)
   else
     K2pq = calc_K2(int2, D2, tripp)
@@ -2309,11 +2316,17 @@ function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab
   end
   # last two indices of integrals (apart from αβ) are stored as upper triangular
   tripp = uppertriangular_cut(norb)
+  # same-spin (αα/ββ) blocks use the persisted ± store when present (spin-free, shared);
+  # the αβ block has no same-spin ±/ij symmetry, so it stays on the raw AO integrals.
+  use_pm = ao && pm_exists(EC)
+  pm = use_pm ? open_pm_store(EC) : nothing
   # αα
   int2a = ao ? int2ao : integ2_ss(EC.fd, :α)
   D2a = calc_D2(EC, T1a, T2a, :α; Rot=Rota)[tripp,:,:]
   t1 = print_time(EC, t1, "calc D2a", 2)
-  if EC.options.cc.use_pm_kext
+  if use_pm
+    K2pqa = pm_K2!(pm, D2a, tripp)
+  elseif EC.options.cc.use_pm_kext
     K2pqa = calc_pm_K2!(int2a, D2a, tripp)
   else
     K2pqa = calc_K2(int2a, D2a, tripp)
@@ -2343,7 +2356,9 @@ function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab
     int2b = ao ? int2ao : integ2_ss(EC.fd, :β)
     D2b = calc_D2(EC, T1b, T2b, :β; Rot=Rotb)[tripp,:,:]
     t1 = print_time(EC, t1, "calc D2b", 2)
-    if EC.options.cc.use_pm_kext
+    if use_pm
+      K2pqb = pm_K2!(pm, D2b, tripp)
+    elseif EC.options.cc.use_pm_kext
       K2pqb = calc_pm_K2!(int2b, D2b, tripp)
     else
       K2pqb = calc_K2(int2b, D2b, tripp)
@@ -2398,6 +2413,7 @@ function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab
     end
   end
   isnothing(aoint2file) || close(aoint2file)
+  use_pm && close_pm_store!(EC, pm)
   if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
     @mtensor begin
       R2ab[a,b,i,j] -= K2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
@@ -2461,6 +2477,41 @@ function calc_pm_K2!(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp) wh
   @views K2pq[tripp_swap,trioo_swap] .= sK2pq .+ aK2pq
   @views K2pq[tripp,trioo_swap] .= sK2pq .- aK2pq
   @views K2pq[tripp_swap,trioo] .= sK2pq .- aK2pq
+  return K2pq
+end
+
+"""
+    pm_K2!(pm, D2, tripp)
+
+  kext K2 from the persisted ± supermatrix store — the amortized replacement for the
+  per-iteration [`calc_pm_K2!`](@ref). Reuses the same ij/rs ±-fold of the density and
+  4-quadrant output scatter, but obtains the ± integral action as zero-copy panel GEMMs
+  ``s\\!K2 = V_s·D_s`` / ``a\\!K2 = V_a·D_a`` ([`pm_matmul!`](@ref)) over the stored lower
+  block-triangle — halved flops and streaming, no per-iteration ± build. `D2[tri(pq),i,j]`
+  must already carry the ½ rs-diagonal (`calc_D2(...; scalepp=true)`, as `cc_kext!` passes).
+
+  ``K^{ij}_{pq} = v_{pq}^{rs} D^{ij}_{rs}``
+
+  Return K2pq::Array{4}.
+"""
+function pm_K2!(pm::PMSupermatrices{T}, D2::AbstractArray{T,3}, tripp) where {T<:Number}
+  norb = pm.nao; nocc = size(D2, 2)
+  @assert pm.npp == length(tripp) "PM store nao ($(pm.nao)) inconsistent with kext norb"
+  trioo = uppertriangular_cut(nocc)
+  trioo_swap = swapped_uppertriangular_cut(nocc)
+  tripp_swap = swapped_uppertriangular_cut(norb)
+  # ij-±-folded density, ket rs kept raw (½ rs-diagonal already in D2 via scalepp): [npp × ntri_oo]
+  Ds = 0.5 .* (D2[:, trioo] .+ D2[:, trioo_swap])
+  Da = 0.5 .* (D2[:, trioo] .- D2[:, trioo_swap])
+  ntri_oo = size(Ds, 2)
+  sK2 = zeros(T, pm.npp, ntri_oo); aK2 = zeros(T, pm.npp, ntri_oo)
+  pm_matmul!(sK2, pm, :s, Ds)     # sK2[pq,ij] = Σ_rs V_s[pq,rs] D_s[rs,ij]
+  pm_matmul!(aK2, pm, :a, Da)     # aK2[pq,ij] = Σ_rs V_a[pq,rs] D_a[rs,ij]
+  K2pq = Array{T,4}(undef, norb, norb, nocc, nocc)
+  @views K2pq[tripp, trioo] .= sK2 .+ aK2
+  @views K2pq[tripp_swap, trioo_swap] .= sK2 .+ aK2
+  @views K2pq[tripp, trioo_swap] .= sK2 .- aK2
+  @views K2pq[tripp_swap, trioo] .= sK2 .- aK2
   return K2pq
 end
 

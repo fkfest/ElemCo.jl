@@ -381,6 +381,7 @@ function ao_integrals(EC::ECInfo{T}) where T
   int2_file, int2 = newmmap(EC, "ao_int2", (nao, nao, ntri), T; description="int2 ao")
   eri_2e4idx_tri!(int2, bao)
   closemmap(EC, int2_file, int2)
+  EC.options.int.ao_pm && pm_from_joint!(EC)   # also build the persisted ± supermatrix store
   return nuclear_repulsion(EC.system)
 end
 

@@ -26,7 +26,7 @@ using ..ElemCo.TensorTools
 using ..ElemCo.Utils
 
 export PMSupermatrices, pm_from_joint!, open_pm_store, close_pm_store!, pm_exists,
-       delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel
+       delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel, pm_matmul!
 
 const PM_S_FILE = "ao_pm_s"
 const PM_A_FILE = "ao_pm_a"
@@ -200,6 +200,37 @@ function pm_from_joint!(EC::ECInfo{T}; maxcols::Int=0) where T
   close(aofile)
   save!(EC, PM_META_FILE, breakpoints; description="PM store σ-block breakpoints")
   return
+end
+
+# ---- contraction primitive ------------------------------------------------------------
+
+"""
+    pm_matmul!(out, pm, which, X) -> out
+
+Left-multiply by a stored ± supermatrix: `out .= V · X`, `V = Vs` (`which===:s`) or `Va`
+(`which===:a`), reconstructed on the fly from its lower block-triangle. `X`, `out` are
+`npp × m`. Per panel: the diagonal tile once, the sub-diagonal in its own role (`'N'`) and —
+by hermiticity — its mirror role via `adjoint` (BLAS `'C'`/`'T'`, no copy; a no-op transpose
+for real `T`). Every stored element fuels exactly its own and (sub-diagonal) its mirror
+product, so `out = V·X` for the full Hermitian `V`. Zero-copy panel GEMMs.
+"""
+function pm_matmul!(out::AbstractMatrix{T}, pm::PMSupermatrices{T}, which::Symbol,
+                    X::AbstractMatrix{T}) where T
+  @assert size(out, 1) == pm.npp && size(X, 1) == pm.npp "row dims must equal npp=$(pm.npp)"
+  fill!(out, zero(T))
+  for J in 1:pm_nblocks(pm)
+    cJ = pm.pairblocks[J]; lc = last(cJ)
+    P = which === :s ? spanel(pm, J) : apanel(pm, J)
+    Pd = diagtile(P, pm, J); Pb = subpanel(P, pm, J)
+    Xc = @view X[cJ, :]; outc = @view out[cJ, :]
+    mul!(outc, Pd, Xc, one(T), one(T))                       # V[c_J,c_J] · X[c_J]  (diagonal tile)
+    if lc < pm.npp
+      Xb = @view X[lc+1:pm.npp, :]; outb = @view out[lc+1:pm.npp, :]
+      mul!(outb, Pb, Xc, one(T), one(T))                     # V[below,c_J] · X[c_J]        ('N')
+      mul!(outc, Pb', Xb, one(T), one(T))                    # V[c_J,below] · X[below]  (mirror, adjoint)
+    end
+  end
+  return out
 end
 
 end # module PMStore
