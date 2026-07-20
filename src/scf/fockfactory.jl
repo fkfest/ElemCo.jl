@@ -16,6 +16,7 @@ using ..ElemCo.Wavefunctions
 using ..ElemCo.FciDumps
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
+using ..ElemCo.PMStore
 
 export gen_fock, gen_ufock, gen_dffock, gen_pfock, gen_df3idx_fock
 export gen_density_matrix, gen_frac_density_matrix
@@ -245,6 +246,41 @@ function gen_ufock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix,
   TF = promote_type(T, eltype(Da))
   J = zeros(TF, nao, nao); Ka = zeros(TF, nao, nao); Kb = zeros(TF, nao, nao)
   ao_J2K!(J, Ka, Kb, int2, Dt, Da, Db)
+  return SpinMatrix(h1 .+ J .- Ka, h1 .+ J .- Kb)
+end
+
+"""
+    gen_fock(EC::ECInfo, pm::PMSupermatrices, h1::AbstractMatrix, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
+
+  Closed-shell Fock matrix from the persisted ± supermatrix AO-integral store
+  ([`pm_JK!`](@ref PMStore.pm_JK!)) — same contraction as the joint-store method above at
+  half the integral streaming.
+"""
+function gen_fock(EC::ECInfo, pm::PMSupermatrices{T}, h1::AbstractMatrix,
+                  CMOl::AbstractMatrix, CMOr::AbstractMatrix) where {T<:Number}
+  @assert EC.space['o'] == EC.space['O'] # closed-shell
+  den = gen_density_matrix(EC, CMOl, CMOr, EC.space['o'])
+  TF = promote_type(T, eltype(den))
+  J = zeros(TF, pm.nao, pm.nao); K = zeros(TF, pm.nao, pm.nao)
+  pm_JK!(J, K, pm, den, den)
+  return h1 .+ 2 .* J .- K
+end
+
+"""
+    gen_ufock(EC::ECInfo, pm::PMSupermatrices, h1::AbstractMatrix, cMOl::SpinMatrix, cMOr::SpinMatrix)
+
+  UHF Fock matrix from the persisted ± supermatrix AO-integral store
+  ([`pm_J2K!`](@ref PMStore.pm_J2K!)) — shared Coulomb + both exchanges in one streaming
+  pass at half the integral I/O.
+"""
+function gen_ufock(EC::ECInfo, pm::PMSupermatrices{T}, h1::AbstractMatrix,
+                   cMOl::SpinMatrix, cMOr::SpinMatrix) where {T<:Number}
+  Da = gen_density_matrix(EC, cMOl.α, cMOr.α, EC.space['o'])
+  Db = gen_density_matrix(EC, cMOl.β, cMOr.β, EC.space['O'])
+  Dt = Da .+ Db
+  TF = promote_type(T, eltype(Da))
+  J = zeros(TF, pm.nao, pm.nao); Ka = zeros(TF, pm.nao, pm.nao); Kb = zeros(TF, pm.nao, pm.nao)
+  pm_J2K!(J, Ka, Kb, pm, Dt, Da, Db)
   return SpinMatrix(h1 .+ J .- Ka, h1 .+ J .- Kb)
 end
 

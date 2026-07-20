@@ -12,6 +12,7 @@ using ElemCo
 using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
 using ElemCo.TensorTools: detri_int2, @tensor, newmmap, closemmap, mmap3idx
 using ElemCo.PMStore
+using ElemCo.FockFactory: ao_JK!, ao_J2K!
 using ElemCo.MSystems: parse_geometry
 using LinearAlgebra
 using Random
@@ -133,9 +134,9 @@ end
 # supermatrices from the stored lower block-triangle (+ Hermitian mirror) and compare to
 # calc_tri_sym_antisym! of the joint tensor. Real AND complex; several block sizes.
 # place a synthetic physical ao_int2 into a fresh EC's scratch and build the ± store from it
-function build_store(n, ::Type{T}, maxcols) where T
+function build_store(n, ::Type{T}, maxcols; int2=nothing) where T
   EC = ElemCo.ECInfo{T}()
-  int2 = herm_int2(exch_int2(n, T))                        # exchange + hermitian
+  int2 === nothing && (int2 = herm_int2(exch_int2(n, T)))  # default: exchange + hermitian
   f, arr = newmmap(EC, "ao_int2", (n, n, n*(n+1)÷2), T; description="int2 ao")
   arr .= int2; closemmap(EC, f, arr)
   pm_from_joint!(EC; maxcols=maxcols)
@@ -215,6 +216,69 @@ end
   end
 end
 
+# Phase-3 kernel gate: the PM Fock kernels reproduce the streaming joint-store kernels for
+# ARBITRARY (nonsymmetric!) densities — pins the elementwise two-role sweep incl. the
+# uniform ½-degeneracy weights and the conj mirror role. Real and complex, several blockings.
+@testset "pm_JK!/pm_J2K! ↔ ao_JK!/ao_J2K!" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (13, 30), (11, 200))
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    Dj = randn(T, n, n); Dk = randn(T, n, n)               # nonsymmetric on purpose
+    J1 = zeros(T, n, n); K1 = zeros(T, n, n)
+    ao_JK!(J1, K1, int2, Dj, Dk)                           # joint-store reference
+    J2 = zeros(T, n, n); K2 = zeros(T, n, n)
+    pm_JK!(J2, K2, pm, Dj, Dk)
+    @test maximum(abs.(J2 .- J1)) < 1e-12
+    @test maximum(abs.(K2 .- K1)) < 1e-12
+    # UHF variant: shared Coulomb + two exchanges in one pass
+    Da = randn(T, n, n); Db = randn(T, n, n); Dt = Da .+ Db
+    J1 .= 0; Ka1 = zeros(T, n, n); Kb1 = zeros(T, n, n)
+    ao_J2K!(J1, Ka1, Kb1, int2, Dt, Da, Db)
+    J2 .= 0; Ka2 = zeros(T, n, n); Kb2 = zeros(T, n, n)
+    pm_J2K!(J2, Ka2, Kb2, pm, Dt, Da, Db)
+    @test maximum(abs.(J2 .- J1)) < 1e-12
+    @test maximum(abs.(Ka2 .- Ka1)) < 1e-12
+    @test maximum(abs.(Kb2 .- Kb1)) < 1e-12
+    close_pm_store!(EC, pm)
+  end
+
+  # theory pin: K_Fock = Σᵢ kext(Cᵢ⊗Cᵢ). The derivation uses T₁ (the real-orbital
+  # e1-bra↔ket swap) — an INDEPENDENT symmetry beyond exchange+hermiticity — so it needs a
+  # FULLY 8-fold-symmetric integral: build one from a chemist-form (μρ|νσ) with symmetric
+  # pairs (as every real physical AO integral is). Complex integrals lack T₁ — the identity
+  # is real-only (pm_JK! itself never relies on it; see the general checks above).
+  begin
+    n = 8; ntri = n*(n+1)÷2
+    Gc = randn(n, n, n, n)
+    Gc .+= permutedims(Gc, (2,1,3,4)); Gc .+= permutedims(Gc, (1,2,4,3))
+    Gc .+= permutedims(Gc, (3,4,1,2))                      # (ab|cd): a↔b, c↔d, (ab)↔(cd)
+    int8 = zeros(n, n, ntri)
+    for σq in 1:n, ρq in 1:σq, νq in 1:n, μq in 1:n
+      int8[μq, νq, uppertriangular_index(ρq, σq)] = Gc[μq, ρq, νq, σq]   # ⟨μν|ρσ⟩ = (μρ|νσ)
+    end
+    EC, _ = build_store(8, Float64, 12; int2=int8)
+    pm = open_pm_store(EC)
+    nocc = 3; C = randn(n, nocc); D = C*C'
+    Jd = zeros(n, n); Kd = zeros(n, n)
+    pm_JK!(Jd, Kd, pm, D, D)
+    Es = zeros(pm.npp, nocc)                               # ±-fold of each Cᵢ⊗Cᵢ (Ds only)
+    for i in 1:nocc, σq in 1:n, ρq in 1:σq
+      idx = uppertriangular_index(ρq, σq)
+      Es[idx, i] = ρq == σq ? C[ρq,i]*C[ρq,i]/2 : C[ρq,i]*C[σq,i]
+    end
+    W = zeros(pm.npp, nocc)
+    pm_matmul!(W, pm, :s, Es)
+    Kkext = zeros(n, n)
+    for i in 1:nocc, νq in 1:n, μq in 1:νq
+      row = uppertriangular_index(μq, νq)
+      Kkext[μq,νq] += W[row,i]
+      μq < νq && (Kkext[νq,μq] += W[row,i])
+    end
+    @test maximum(abs.(Kkext .- Kd)) < 1e-10
+    close_pm_store!(EC, pm)
+  end
+end
+
 # Phase-2 acceptance: AO-direct energies through the PM-store kext match the standard GEMM
 # kext, closed shell (CCSD/DCSD) and open shell (UCCSD, same-spin via PM + αβ raw).
 @testset "AO-direct kext via PM store ↔ standard" begin
@@ -226,16 +290,19 @@ end
              e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
   for m in ("ccsd", "dcsd")
     key = uppercase(m)
-    EC = fresh(); @ints; @hf; e_std = @cc m
-    EC = fresh(); @set int ao_pm=true; @ints; @hf; e_pm = @cc m
+    EC = fresh(); @ints; ehf_std = @hf; e_std = @cc m
+    EC = fresh(); @set int ao_pm=true; @ints; ehf_pm = @hf; e_pm = @cc m
     @test pm_exists(EC)                                    # the ± store was built by @ints
     @test isempty(EC.fd)                                   # still AO-direct
+    # AO-HF via the PM Fock builder (gen_fock dispatch) == joint-store HF
+    @test abs(ehf_std["HF"] - ehf_pm["HF"]) < 1e-11
     @test abs(e_std[key] - e_pm[key]) < 1e-10
   end
-  # open-shell cation (ms2=1)
-  EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_std = @cc ccsd
-  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=true; @uhf; e_pm = @cc ccsd
+  # open-shell cation (ms2=1): UHF via pm_J2K! + frozen-core ao_core_ufock via the PM path
+  EC = fresh(); @set wf charge=1 ms2=1; ehf_std = @uhf; e_std = @cc ccsd
+  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=true; ehf_pm = @uhf; e_pm = @cc ccsd
   @test pm_exists(EC)
+  @test abs(ehf_std["UHF"] - ehf_pm["UHF"]) < 1e-11
   @test abs(e_std["UCCSD"] - e_pm["UCCSD"]) < 1e-10
 end
 

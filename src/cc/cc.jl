@@ -1803,12 +1803,19 @@ end
   effective one-electron Hamiltonian in [`ao_cc_setup!`](@ref).
 """
 function ao_core_fock(EC::ECInfo{T}, Dcore::AbstractMatrix) where T
-  aofile, int2 = mmap3idx(EC, "ao_int2")
-  nao = size(int2, 1)
-  TF = promote_type(eltype(int2), eltype(Dcore))
-  J = zeros(TF, nao, nao); K = zeros(TF, nao, nao)
-  ao_JK!(J, K, int2, Dcore, Dcore)
-  close(aofile)
+  TF = promote_type(T, eltype(Dcore))
+  if pm_exists(EC)                   # ± supermatrix store: half the integral streaming
+    pm = open_pm_store(EC)
+    J = zeros(TF, pm.nao, pm.nao); K = zeros(TF, pm.nao, pm.nao)
+    pm_JK!(J, K, pm, Dcore, Dcore)
+    close_pm_store!(EC, pm)
+  else
+    aofile, int2 = mmap3idx(EC, "ao_int2")
+    nao = size(int2, 1)
+    J = zeros(TF, nao, nao); K = zeros(TF, nao, nao)
+    ao_JK!(J, K, int2, Dcore, Dcore)
+    close(aofile)
+  end
   return 2 .* J .- K                 # F = 2J − K
 end
 
@@ -2044,13 +2051,20 @@ end
   frozen core into effective one-electron Hamiltonians in [`ao_cc_setup!`](@ref).
 """
 function ao_core_ufock(EC::ECInfo{T}, Da::AbstractMatrix, Db::AbstractMatrix) where T
-  aofile, int2 = mmap3idx(EC, "ao_int2")
-  nao = size(int2, 1)
-  TF = promote_type(eltype(int2), eltype(Da), eltype(Db))
+  TF = promote_type(T, eltype(Da), eltype(Db))
   Dt = Da .+ Db
-  J = zeros(TF, nao, nao); Ka = zeros(TF, nao, nao); Kb = zeros(TF, nao, nao)
-  ao_J2K!(J, Ka, Kb, int2, Dt, Da, Db)   # shared Coulomb + both same-spin exchanges, one streaming pass
-  close(aofile)
+  if pm_exists(EC)                   # ± supermatrix store: half the integral streaming
+    pm = open_pm_store(EC)
+    J = zeros(TF, pm.nao, pm.nao); Ka = zeros(TF, pm.nao, pm.nao); Kb = zeros(TF, pm.nao, pm.nao)
+    pm_J2K!(J, Ka, Kb, pm, Dt, Da, Db)
+    close_pm_store!(EC, pm)
+  else
+    aofile, int2 = mmap3idx(EC, "ao_int2")
+    nao = size(int2, 1)
+    J = zeros(TF, nao, nao); Ka = zeros(TF, nao, nao); Kb = zeros(TF, nao, nao)
+    ao_J2K!(J, Ka, Kb, int2, Dt, Da, Db) # shared Coulomb + both same-spin exchanges, one streaming pass
+    close(aofile)
+  end
   return J .- Ka, J .- Kb                 # F^α = J − K_α, F^β = J − K_β
 end
 

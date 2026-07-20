@@ -259,6 +259,24 @@ inside inner loops (views + precomputed ranges only).
 
 **Gate 3**: HF/UHF energies identical to 1e-11 vs joint-store path; suite green.
 
+**Phase-3 outcome notes (measured 2026-07-20):**
+- The exchange matrix IS a kext-shape contraction for real orbitals (`K_Fock = Σᵢ
+  kext(Cᵢ⊗Cᵢ)` via T₁+hermiticity — pinned as a harness test); J is slot-orthogonal to the
+  pairing (no group element maps the electron-slot partition to the bra/ket partition), so
+  J has **no flop saving** — the Fock's PM dividend is I/O only.
+- Implementation: per-column ± unpack to a dense slab + `ao_JK!`-style band-restricted
+  GEMVs (`band_mul!`/`band_tmul!` cover the stored L-band exactly — no zero-padding flops,
+  no buffer zeroing; mirror role conj-wrapped, sub-panel band only). Flop parity with
+  `ao_JK!`; reads halve.
+- Measured (in-page-cache, serial): pm_JK! 0.3–0.7× of ao_JK! — the unpack tax is real
+  when the joint store is cache-resident; ao_JK!'s zero-copy GEMVs win there. The PM Fock
+  wins in the streaming-bound regime (large nao, store ≫ cache: half the bytes). T₁ gotcha
+  for synthetic tests: exchange+hermiticity does NOT imply the full real 8-fold — the
+  identity test needs a chemist-symmetrized tensor.
+- ⇒ **Phase-6 decision point**: retiring `ao_int2` makes small/in-cache AO-HF Fock builds
+  ~2× slower while halving disk and speeding the large/streaming cases; alternatives are
+  keeping both stores (1.5× disk) or a size-based choice. Decide with the user at Phase 6.
+
 ### Phase 4 — MO transform (the only adapter consumer)
 
 1. `pm_joint_slabs!(dest, pm, σrange)`: reconstruct `ao_int2`-format slabs for a σ-chunk.

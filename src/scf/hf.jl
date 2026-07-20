@@ -13,6 +13,7 @@ using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 using ..ElemCo.OrbTools
 using ..ElemCo.IntegralTools
+using ..ElemCo.PMStore
 using ..ElemCo.FciDumps
 using ..ElemCo.FockFactory
 using ..ElemCo.Properties
@@ -327,11 +328,18 @@ function hf(EC::ECInfo{T}) where {T}
   @assert is_restricted(cMO_sm) "hf only for closed-shell"
   cMO = cMO_sm.α
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  aofile, aoint2 = mmap3idx(EC, "ao_int2")
-  fockbuilder = cMO -> gen_fock(EC, aoint2, hsmall, cMO, cMO)
+  # integral source: the persisted ± supermatrix store (half the streaming per iteration)
+  # when present, else the joint triangular mmap — gen_fock dispatches on the handle type
+  use_pm = pm_exists(EC)
+  ints = use_pm ? open_pm_store(EC) : nothing
+  aofile = nothing
+  if !use_pm
+    aofile, ints = mmap3idx(EC, "ao_int2")
+  end
+  fockbuilder = cMO -> gen_fock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
-  close(aofile)
+  use_pm ? close_pm_store!(EC, ints) : close(aofile)
   normalize_phase!(cMO)
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
   classes = redundant_orbital_classes(EC, Xredundant)
@@ -367,11 +375,17 @@ function uhf(EC::ECInfo{T}) where {T}
   cMO = starting_orbitals(EC)
   unrestrict!(cMO)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  aofile, aoint2 = mmap3idx(EC, "ao_int2")
-  fockbuilder = cMO -> gen_ufock(EC, aoint2, hsmall, cMO, cMO)
+  # integral source: ± supermatrix store when present, else the joint mmap (see `hf`)
+  use_pm = pm_exists(EC)
+  ints = use_pm ? open_pm_store(EC) : nothing
+  aofile = nothing
+  if !use_pm
+    aofile, ints = mmap3idx(EC, "ao_int2")
+  end
+  fockbuilder = cMO -> gen_ufock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)
-  close(aofile)
+  use_pm ? close_pm_store!(EC, ints) : close(aofile)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end
