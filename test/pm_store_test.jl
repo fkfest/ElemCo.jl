@@ -295,8 +295,44 @@ end
   end
 end
 
+# Phase-5 gate: the PM-native dressing sweeps reproduce the dense einsum references —
+# all 8 occ-early intermediates (3 closed/same-spin + 5 opposite-spin), real+complex,
+# single/multi-block, Lo ≠ Ro (dressed) and nocca ≠ noccb (asymmetric).
+@testset "pm_occ_early / pm_os_sweep ↔ dense" begin
+  pm_occ_early = ElemCo.CoupledCluster.pm_occ_early
+  pm_os_sweep = ElemCo.CoupledCluster.pm_os_sweep
+  for T in (Float64, ComplexF64), (n, maxcols) in ((8, 8), (12, 30), (14, 300))
+    nocc = 3; na = 3; nb = 2
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    G = detri_int2(int2, n, 1:n, 1:n, 1:n, 1:n)
+    Lo = randn(T, n, nocc); Ro = randn(T, n, nocc)
+    @tensor r_ooAA[i,j,ρ,σ] := G[μ,ν,ρ,σ] * Lo[μ,i] * Lo[ν,j]
+    @tensor r_AooA[μ,i,j,σ] := G[μ,ν,ρ,σ] * Lo[ν,i] * Ro[ρ,j]
+    @tensor r_oAoA[i,ν,j,σ] := G[μ,ν,ρ,σ] * Lo[μ,i] * Ro[ρ,j]
+    a, b, c = pm_occ_early(pm, Lo, Ro)
+    @test maximum(abs.(a .- r_ooAA)) < 1e-13
+    @test maximum(abs.(b .- r_AooA)) < 1e-13
+    @test maximum(abs.(c .- r_oAoA)) < 1e-13
+    La = randn(T, n, na); Ra = randn(T, n, na); Lb = randn(T, n, nb); Rb = randn(T, n, nb)
+    @tensor r_oOAA[i,J,ρ,σ] := G[μ,ν,ρ,σ] * La[μ,i] * Lb[ν,J]
+    @tensor r_AOoA[μ,I,k,σ] := G[μ,ν,ρ,σ] * Lb[ν,I] * Ra[ρ,k]
+    @tensor r_oAoA2[i,ν,k,σ] := G[μ,ν,ρ,σ] * La[μ,i] * Ra[ρ,k]
+    @tensor r_oAAO[i,ν,ρ,J] := G[μ,ν,ρ,σ] * La[μ,i] * Rb[σ,J]
+    @tensor r_AOAO[μ,I,ρ,J] := G[μ,ν,ρ,σ] * Lb[ν,I] * Rb[σ,J]
+    o1, o2, o3, o4, o5 = pm_os_sweep(pm, La, Ra, Lb, Rb)
+    @test maximum(abs.(o1 .- r_oOAA)) < 1e-13
+    @test maximum(abs.(o2 .- r_AOoA)) < 1e-13
+    @test maximum(abs.(o3 .- r_oAoA2)) < 1e-13
+    @test maximum(abs.(o4 .- r_oAAO)) < 1e-13
+    @test maximum(abs.(o5 .- r_AOAO)) < 1e-13
+    close_pm_store!(EC, pm)
+  end
+end
+
 # Phase-2 acceptance: AO-direct energies through the PM-store kext match the standard GEMM
 # kext, closed shell (CCSD/DCSD) and open shell (UCCSD, same-spin via PM + αβ raw).
+# After Phase 5 these runs also exercise the PM-native dressing sweeps end-to-end.
 @testset "AO-direct kext via PM store ↔ standard" begin
   geometry = "
     O   0.000000000   0.000000000  -0.130186067

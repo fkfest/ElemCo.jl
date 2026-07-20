@@ -27,7 +27,7 @@ using ..ElemCo.Utils
 
 export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
        pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
-       pm_matmul!, pm_JK!, pm_J2K!
+       pm_matmul!, pm_JK!, pm_J2K!, band_htrans!, pair_luts
 
 const PM_S_FILE = "ao_pm_s"
 const PM_A_FILE = "ao_pm_a"
@@ -323,6 +323,21 @@ end
   @views mul!(y[1:hi], transpose(G[lo+1:hi, 1:hi]), x[lo+1:hi], true, true)
   lo > 0 && @views mul!(y[lo+1:hi], transpose(G[1:lo, lo+1:hi]), x[1:lo], true, true)
   return
+end
+
+"""
+    band_htrans!(H, L, G, lo, hi)
+
+Half-transform over the L-band: `H[i,y] = Σ_x G[x,y] L[x,i]` restricted to
+`max(x,y) ∈ (lo,hi]` (two rectangle GEMMs, no zero-padding flops; columns `> hi` of `H`
+are zeroed). Plain contraction — no conjugation of `L` (the coefficient convention of the
+dressing half-transforms).
+"""
+function band_htrans!(H, L, G, lo::Int, hi::Int)
+  fill!(H, zero(eltype(H)))
+  @views mul!(H[:, 1:hi], transpose(L[lo+1:hi, :]), G[lo+1:hi, 1:hi], true, true)
+  lo > 0 && @views mul!(H[:, lo+1:hi], transpose(L[1:lo, :]), G[1:lo, lo+1:hi], true, true)
+  return H
 end
 
 """
