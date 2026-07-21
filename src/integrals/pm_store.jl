@@ -339,7 +339,7 @@ Half-transform over the L-band: `H[i,y] = Σ_x G[x,y] L[x,i]` restricted to
 `max(x,y) ∈ (lo,hi]` (two rectangle GEMMs, no zero-padding flops; columns `> hi` of `H`
 are zeroed). Plain contraction — no conjugation of `L` (the coefficient convention of the
 dressing half-transforms). The reconstructed slab `G` over the panel's L-band (via
-the Fock builders' `unpack_pm_column!`) is the input.
+the Fock builders' `reconstruct_slab!`) is the input.
 """
 function band_htrans!(H, L, G, lo::Int, hi::Int)
   fill!(H, zero(eltype(H)))

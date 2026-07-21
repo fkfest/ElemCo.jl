@@ -208,21 +208,43 @@ function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
 end
 
 # ---- ao_JK!/ao_J2K! on the persisted ± supermatrix store ------------------------------
-# Same J/K contractions, dispatched on the integral handle, so `gen_fock`/`gen_ufock` are a
-# single method each. Per stored ket-pair column the ± inversion reconstructs the dense slab
-# over the panel's L-band, then the SAME `ao_JK!` slab identities run — flop parity, but each
-# stored element read once (≈ n⁴/4). Requires the physical hermiticity `⟨μν|ρσ⟩=conj(⟨ρσ|μν⟩)`.
+#
+# The joint-store `ao_JK!` above streams one FULL slab `G[μ,ν]=⟨μν|ρσ⟩` per ket pair (ρσ) and
+# applies the slab identities  `J[:,ρ] += G·Dj[:,σ]`,  `K[:,σ] += G·Dk[:,ρ]`  (plus the ket-swap
+# `Gᵀ` for `ρ<σ`). The ± store keeps only the lower block-triangle, so each stored ket column
+# holds just the slab's **L-band** (bra pairs `max(μ,ν) > native_lo`); the slab's upper bra pairs
+# are the Hermitian mirrors owned by earlier panels. So we visit every stored column ONCE and let
+# it play two roles — this is what keeps the read at n⁴/4, half the joint store:
+#
+#   • NATIVE  — the column IS the ket ⟨··|ρσ⟩: the joint slab identities, but on the L-band;
+#   • MIRROR  — by hermiticity the same column is the bra ⟨ρσ|··⟩ (the slab of ket (μν) at bra
+#               (ρσ)), for the SUB-PANEL bra pairs only (`max(μ,ν) > mirror_lo`; the diagonal
+#               tile's mirrors are already stored as its own elements). It feeds J/K ROWS.
+#
+# `add_coulomb!` / `add_exchange!` each perform both roles for one density. A closed-shell Fock
+# is `add_coulomb! + add_exchange!`; the UHF `ao_J2K!` is `add_coulomb!` once (shared Coulomb from
+# the total density) + `add_exchange!` twice (the two same-spin exchanges) in the same sweep.
+# Requires the physical hermiticity `⟨μν|ρσ⟩ = conj(⟨ρσ|μν⟩)` the store presumes; `Dj`,`Dk` need
+# not be symmetric. `O(nao²)` working memory.
+
+"Per-sweep scratch: the reconstructed slab `G` and two length-nao buffers for the mirror GEMVs."
+struct SlabWork{TF}
+  G::Matrix{TF}
+  tv::Vector{TF}
+  tw::Vector{TF}
+end
+SlabWork{TF}(n::Int) where {TF} = SlabWork{TF}(zeros(TF, n, n), zeros(TF, n), zeros(TF, n))
 
 """
-    unpack_pm_column!(G, Ps, Pa, jc, r0, lutμ, lutν)
+    reconstruct_slab!(w, Ps, Pa, jc, r0, lutμ, lutν)
 
-  Reconstruct column `jc` (fixed ket pair) of a ± panel into the dense slab `G[μ,ν]=⟨μν|ρσ⟩`
-  via the ± inversion `⟨μν|ρσ⟩=(Vs+Va)/2`, `⟨νμ|ρσ⟩=(Vs−Va)/2` (the stored ×2 row diagonals
-  make `μ=ν` come out right with no special-casing). Only the panel's stored bra pairs — the
-  **L-band** `max(μ,ν) ∈ (σ₀,n]` — are written; the untouched corner is never read by the
-  band-restricted kernels. The missing bra pairs are the Hermitian mirrors of earlier panels.
+  Fill `w.G[μ,ν] = ⟨μν|ρσ⟩` for stored column `jc` of a ± panel via the inversion
+  `⟨μν|ρσ⟩=(Vs+Va)/2`, `⟨νμ|ρσ⟩=(Vs−Va)/2` (the stored ×2 row diagonals make `μ=ν` come out
+  right with no special-casing). Only the panel's L-band bra pairs are written; the untouched
+  corner is never read by the band-restricted GEMVs below.
 """
-@inline function unpack_pm_column!(G, Ps, Pa, jc::Int, r0::Int, lutμ::Vector{Int}, lutν::Vector{Int})
+@inline function reconstruct_slab!(w::SlabWork, Ps, Pa, jc::Int, r0::Int, lutμ::Vector{Int}, lutν::Vector{Int})
+  G = w.G
   @inbounds for k in 1:size(Ps,1)
     x = lutμ[r0+k-1]; y = lutν[r0+k-1]
     s = Ps[k,jc]; a = Pa[k,jc]
@@ -250,100 +272,117 @@ end
 end
 
 """
-    ao_JK!(J, K, pm::PMSupermatrices, Dj, Dk)
+    add_mirror_row!(out, i, w, D, j, lo, transposed)
 
-  The [`ao_JK!`](@ref) contraction from the persisted ± supermatrix store at **half the
-  streaming I/O**. Per stored ket-pair column: the **native role** (this column as ket
-  `⟨··|ρσ⟩`) does `J[:,ρ] += G·Dj[:,σ]`, `K[:,σ] += G·Dk[:,ρ]` and, for `ρ<σ`, the
-  `transpose(G)` (ket-swap) partner; the **Hermitian mirror role** (this column as bra
-  `⟨ρσ|··⟩`, sub-panel band only — the diagonal tile's mirrors are their own stored elements)
-  does the `conj`-wrapped GEMVs. `Dj`, `Dk` need not be symmetric. `O(nao²)` working memory.
+  The mirror-role GEMV: `out[i,:] += Σ conj(G)·D[j,·]` over the L-band `(lo, nao]`, i.e. this
+  column read as the bra `⟨ρσ|··⟩`. Implemented as `conj(band · conj(D[j,:]))` so the actual
+  BLAS runs between the `conj`s (both no-ops for real `T`); `transposed` selects `band_tmul!`.
 """
-function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, pm::PMSupermatrices{T},
-                Dj::AbstractMatrix, Dk::AbstractMatrix) where T
-  n = pm.nao
-  lutμ, lutν = pair_luts(n)
-  TF = promote_type(T, eltype(Dj), eltype(Dk))
-  G = zeros(TF, n, n)
-  tv = zeros(TF, n); tw = zeros(TF, n)                     # scratch for the conj-wrapped mirror GEMVs
-  # mirror-role GEMV: out[i,:] += conj(L·conj(D[j,:])) (tmul: transpose(L)) — plain BLAS between conj's
-  function mirror!(out, i, D, j, lo, tra::Bool)
-    @views tv .= conj.(D[j, :])
-    fill!(tw, zero(TF))
-    tra ? band_tmul!(tw, G, lo, n, tv) : band_mul!(tw, G, lo, n, tv)
-    @views out[i, :] .+= conj.(tw)
-    return
+@inline function add_mirror_row!(out, i::Int, w::SlabWork, D, j::Int, lo::Int, transposed::Bool)
+  n = size(w.G, 1)
+  @views w.tv .= conj.(D[j, :])
+  fill!(w.tw, zero(eltype(w.tw)))
+  transposed ? band_tmul!(w.tw, w.G, lo, n, w.tv) : band_mul!(w.tw, w.G, lo, n, w.tv)
+  @views out[i, :] .+= conj.(w.tw)
+  return
+end
+
+"""
+    add_coulomb!(J, w, ρ, σ, D, native_lo, mirror_lo)
+
+  Add the Coulomb contribution of the reconstructed slab `w.G = ⟨μν|ρσ⟩` (ket pair `(ρ,σ)`):
+  the native role `J[:,ρ] += ⟨··|ρσ⟩·D[:,σ]` (+ ket-swap `⟨··|σρ⟩ = Gᵀ` for `ρ<σ`) and the
+  Hermitian mirror role into the rows `J[ρ,:]` / `J[σ,:]`.
+"""
+function add_coulomb!(J, w::SlabWork, ρ::Int, σ::Int, D, native_lo::Int, mirror_lo::Int)
+  n = size(w.G, 1)
+  @views begin
+    band_mul!(J[:,ρ], w.G, native_lo, n, D[:,σ])           # J[:,ρ] += ⟨··|ρσ⟩ · D[:,σ]
+    ρ < σ && band_tmul!(J[:,σ], w.G, native_lo, n, D[:,ρ]) # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
   end
+  add_mirror_row!(J, ρ, w, D, σ, mirror_lo, false)         # J[ρ,x] += Σ_y ⟨ρσ|xy⟩ D[σ,y]
+  ρ < σ && add_mirror_row!(J, σ, w, D, ρ, mirror_lo, true) # J[σ,x] += Σ_y ⟨σρ|xy⟩ D[ρ,y]
+  return
+end
+
+"""
+    add_exchange!(K, w, ρ, σ, D, native_lo, mirror_lo)
+
+  Add the exchange contribution of the slab `w.G = ⟨μν|ρσ⟩`. Same two roles as [`add_coulomb!`](@ref)
+  but with the `(ρ,σ)` output/density roles swapped (and the mirror transpose flag flipped):
+  native `K[:,σ] += ⟨··|ρσ⟩·D[:,ρ]` (+ `Gᵀ` for `ρ<σ`), plus the mirror into rows `K[ρ,:]`/`K[σ,:]`.
+"""
+function add_exchange!(K, w::SlabWork, ρ::Int, σ::Int, D, native_lo::Int, mirror_lo::Int)
+  n = size(w.G, 1)
+  @views begin
+    band_mul!(K[:,σ], w.G, native_lo, n, D[:,ρ])           # K[:,σ] += ⟨··|ρσ⟩ · D[:,ρ]
+    ρ < σ && band_tmul!(K[:,ρ], w.G, native_lo, n, D[:,σ])
+  end
+  add_mirror_row!(K, ρ, w, D, σ, mirror_lo, true)          # K[ρ,y] += Σ_x ⟨ρσ|xy⟩ D[σ,x]
+  ρ < σ && add_mirror_row!(K, σ, w, D, ρ, mirror_lo, false)
+  return
+end
+
+"""
+    pm_fock_sweep!(f, pm, w, lutμ, lutν)
+
+  Visit each stored ket-pair column of the ± store exactly once: reconstruct its slab into `w.G`
+  and call `f(ρ, σ, native_lo, mirror_lo)`, where `(ρ,σ)` is the ket pair and `native_lo` /
+  `mirror_lo` are the L-band lower bounds for the native / mirror roles (see the block comment).
+  `f` adds this column's Fock contributions via [`add_coulomb!`](@ref) / [`add_exchange!`](@ref).
+"""
+function pm_fock_sweep!(f, pm::PMSupermatrices, w::SlabWork, lutμ::Vector{Int}, lutν::Vector{Int})
   @inbounds for Jb in 1:pm_nblocks(pm)
     cJ = pm.pairblocks[Jb]; r0 = first(cJ)
-    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1])              # native band = (σ0, n]; mirror band = (σend, n]
-    σend = last(pm.σblocks[Jb])
+    native_lo = Jb == 1 ? 0 : last(pm.σblocks[Jb-1])       # native band = (native_lo, nao]
+    mirror_lo = last(pm.σblocks[Jb])                        # mirror band = (mirror_lo, nao] (sub-panel)
     Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
     for (jc, c) in enumerate(cJ)
       ρ = lutμ[c]; σ = lutν[c]
-      unpack_pm_column!(G, Ps, Pa, jc, r0, lutμ, lutν)
-      @views begin
-        band_mul!(J[:,ρ], G, σ0, n, Dj[:,σ])               # J[:,ρ] += ⟨··|ρσ⟩ · Dj[:,σ]
-        band_mul!(K[:,σ], G, σ0, n, Dk[:,ρ])               # K[:,σ] += ⟨··|ρσ⟩ · Dk[:,ρ]
-        if ρ < σ
-          band_tmul!(J[:,σ], G, σ0, n, Dj[:,ρ])            # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
-          band_tmul!(K[:,ρ], G, σ0, n, Dk[:,σ])
-        end
-      end
-      mirror!(J, ρ, Dj, σ, σend, false)                    # J[ρ,x] += Σ_y ⟨ρσ|xy⟩ Dj[σ,y]
-      mirror!(K, ρ, Dk, σ, σend, true)                     # K[ρ,y] += Σ_x ⟨ρσ|xy⟩ Dk[σ,x]
-      if ρ < σ
-        mirror!(J, σ, Dj, ρ, σend, true)                   # J[σ,x] += Σ_y ⟨σρ|xy⟩ Dj[ρ,y]
-        mirror!(K, σ, Dk, ρ, σend, false)                  # K[σ,y] += Σ_x ⟨σρ|xy⟩ Dk[ρ,x]
-      end
+      reconstruct_slab!(w, Ps, Pa, jc, r0, lutμ, lutν)
+      f(ρ, σ, native_lo, mirror_lo)
     end
+  end
+  return
+end
+
+"""
+    ao_JK!(J, K, pm::PMSupermatrices, Dj, Dk)
+
+  The [`ao_JK!`](@ref) Coulomb/exchange contraction from the persisted ± supermatrix store at
+  **half the streaming I/O** (each stored element read once, ≈ n⁴/4). One sweep of the store; per
+  ket column, add its Coulomb and exchange contributions. See the block comment above for the
+  native/mirror two-role scheme. `Dj`, `Dk` need not be symmetric.
+"""
+function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, pm::PMSupermatrices{T},
+                Dj::AbstractMatrix, Dk::AbstractMatrix) where T
+  TF = promote_type(T, eltype(Dj), eltype(Dk))
+  w = SlabWork{TF}(pm.nao)
+  lutμ, lutν = pair_luts(pm.nao)
+  pm_fock_sweep!(pm, w, lutμ, lutν) do ρ, σ, native_lo, mirror_lo
+    add_coulomb!(J,  w, ρ, σ, Dj, native_lo, mirror_lo)
+    add_exchange!(K, w, ρ, σ, Dk, native_lo, mirror_lo)
   end
   return J, K
 end
 
-"[`ao_J2K!`](@ref) from the persisted ± store (the [`ao_JK!`](@ref)-on-`pm` twin: shared Coulomb + both exchanges in one pass)."
+"""
+    ao_J2K!(J, Ka, Kb, pm::PMSupermatrices, Dt, Da, Db)
+
+  The UHF [`ao_J2K!`](@ref) from the ± store: the shared Coulomb `J` (from the total density
+  `Dt`) and both same-spin exchanges `Ka`,`Kb` (from `Da`,`Db`) in a single sweep — [`ao_JK!`](@ref)'s
+  twin, one `add_coulomb!` + two `add_exchange!` per ket column.
+"""
 function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
                  pm::PMSupermatrices{T}, Dt::AbstractMatrix,
                  Da::AbstractMatrix, Db::AbstractMatrix) where T
-  n = pm.nao
-  lutμ, lutν = pair_luts(n)
   TF = promote_type(T, eltype(Dt), eltype(Da), eltype(Db))
-  G = zeros(TF, n, n)
-  tv = zeros(TF, n); tw = zeros(TF, n)
-  function mirror!(out, i, D, j, lo, tra::Bool)
-    @views tv .= conj.(D[j, :])
-    fill!(tw, zero(TF))
-    tra ? band_tmul!(tw, G, lo, n, tv) : band_mul!(tw, G, lo, n, tv)
-    @views out[i, :] .+= conj.(tw)
-    return
-  end
-  @inbounds for Jb in 1:pm_nblocks(pm)
-    cJ = pm.pairblocks[Jb]; r0 = first(cJ)
-    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1])
-    σend = last(pm.σblocks[Jb])
-    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
-    for (jc, c) in enumerate(cJ)
-      ρ = lutμ[c]; σ = lutν[c]
-      unpack_pm_column!(G, Ps, Pa, jc, r0, lutμ, lutν)
-      @views begin
-        band_mul!(J[:,ρ],  G, σ0, n, Dt[:,σ])
-        band_mul!(Ka[:,σ], G, σ0, n, Da[:,ρ])
-        band_mul!(Kb[:,σ], G, σ0, n, Db[:,ρ])
-        if ρ < σ
-          band_tmul!(J[:,σ],  G, σ0, n, Dt[:,ρ])
-          band_tmul!(Ka[:,ρ], G, σ0, n, Da[:,σ])
-          band_tmul!(Kb[:,ρ], G, σ0, n, Db[:,σ])
-        end
-      end
-      mirror!(J, ρ, Dt, σ, σend, false)
-      mirror!(Ka, ρ, Da, σ, σend, true)
-      mirror!(Kb, ρ, Db, σ, σend, true)
-      if ρ < σ
-        mirror!(J, σ, Dt, ρ, σend, true)
-        mirror!(Ka, σ, Da, ρ, σend, false)
-        mirror!(Kb, σ, Db, ρ, σend, false)
-      end
-    end
+  w = SlabWork{TF}(pm.nao)
+  lutμ, lutν = pair_luts(pm.nao)
+  pm_fock_sweep!(pm, w, lutμ, lutν) do ρ, σ, native_lo, mirror_lo
+    add_coulomb!(J,  w, ρ, σ, Dt, native_lo, mirror_lo)    # shared Coulomb from the total density
+    add_exchange!(Ka, w, ρ, σ, Da, native_lo, mirror_lo)   # same-spin exchange α
+    add_exchange!(Kb, w, ρ, σ, Db, native_lo, mirror_lo)   # same-spin exchange β
   end
   return J, Ka, Kb
 end
