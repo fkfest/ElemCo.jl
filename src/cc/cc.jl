@@ -1945,7 +1945,7 @@ function ao_core_fock(EC::ECInfo{T}, Dcore::AbstractMatrix) where T
   if pm_exists(EC)                   # ± supermatrix store: half the integral streaming
     pm = open_pm_store(EC)
     J = zeros(TF, pm.nao, pm.nao); K = zeros(TF, pm.nao, pm.nao)
-    pm_JK!(J, K, pm, Dcore, Dcore)
+    ao_JK!(J, K, pm, Dcore, Dcore)
     close_pm_store!(EC, pm)
   else
     aofile, int2 = mmap3idx(EC, "ao_int2")
@@ -2224,7 +2224,7 @@ function ao_core_ufock(EC::ECInfo{T}, Da::AbstractMatrix, Db::AbstractMatrix) wh
   if pm_exists(EC)                   # ± supermatrix store: half the integral streaming
     pm = open_pm_store(EC)
     J = zeros(TF, pm.nao, pm.nao); Ka = zeros(TF, pm.nao, pm.nao); Kb = zeros(TF, pm.nao, pm.nao)
-    pm_J2K!(J, Ka, Kb, pm, Dt, Da, Db)
+    ao_J2K!(J, Ka, Kb, pm, Dt, Da, Db)
     close_pm_store!(EC, pm)
   else
     aofile, int2 = mmap3idx(EC, "ao_int2")

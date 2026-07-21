@@ -518,9 +518,7 @@ end
   dump from the AO integrals (as for CCSDT/FCI). No effect on DF integrals. """
   ao_direct::Bool = true
   """`⟨true⟩` for exact AO integrals: store them as the persisted ± (plus/minus) supermatrix
-  store (`ao_pm_s`/`ao_pm_a`, ≈ half the disk of the joint `ao_int2`, which is retired after
-  the build) — the AO-direct kext/Fock/dressing consumers then run at halved flops and/or
-  streaming. Joint-format consumers (the AO→MO transform) reconstruct `ao_int2` transiently.
+  store (`ao_pm_s`/`ao_pm_a`, ≈ half the disk of the joint `ao_int2`).
   Set to `false` to keep the joint-only flow. """
   ao_pm::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """

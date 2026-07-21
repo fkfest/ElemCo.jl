@@ -207,80 +207,188 @@ function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
   return J, Ka, Kb
 end
 
-"""
-    gen_fock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
+# ---- ao_JK!/ao_J2K! on the persisted ± supermatrix store ------------------------------
+# Same J/K contractions, dispatched on the integral handle, so `gen_fock`/`gen_ufock` are a
+# single method each. Per stored ket-pair column the ± inversion reconstructs the dense slab
+# over the panel's L-band, then the SAME `ao_JK!` slab identities run — flop parity, but each
+# stored element read once (≈ n⁴/4). Requires the physical hermiticity `⟨μν|ρσ⟩=conj(⟨ρσ|μν⟩)`.
 
-  Calculate the closed-shell fock matrix from explicitly given spin-free 2-e integrals
-  `int2[p,q,tri(r,s)] = <pq|rs>` (triangular packing, e.g. the memory-mapped exact AO
-  integrals `"ao_int2"`), 1-e integrals `h1`, and orbitals `CMOl`, `CMOr`.
-  The contraction is basis-agnostic (physicists' notation), so it yields the AO Fock
-  matrix when fed AO integrals and AO density. Streams the triangular integrals slab by slab
-  ([`ao_JK!`](@ref)) — no dense `nao⁴` tensor is formed.
 """
-function gen_fock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix,
-                  CMOl::AbstractMatrix, CMOr::AbstractMatrix) where {T<:Number}
+    unpack_pm_column!(G, Ps, Pa, jc, r0, lutμ, lutν)
+
+  Reconstruct column `jc` (fixed ket pair) of a ± panel into the dense slab `G[μ,ν]=⟨μν|ρσ⟩`
+  via the ± inversion `⟨μν|ρσ⟩=(Vs+Va)/2`, `⟨νμ|ρσ⟩=(Vs−Va)/2` (the stored ×2 row diagonals
+  make `μ=ν` come out right with no special-casing). Only the panel's stored bra pairs — the
+  **L-band** `max(μ,ν) ∈ (σ₀,n]` — are written; the untouched corner is never read by the
+  band-restricted kernels. The missing bra pairs are the Hermitian mirrors of earlier panels.
+"""
+@inline function unpack_pm_column!(G, Ps, Pa, jc::Int, r0::Int, lutμ::Vector{Int}, lutν::Vector{Int})
+  @inbounds for k in 1:size(Ps,1)
+    x = lutμ[r0+k-1]; y = lutν[r0+k-1]
+    s = Ps[k,jc]; a = Pa[k,jc]
+    G[x,y] = (s+a)/2; G[y,x] = (s-a)/2
+  end
+  return
+end
+
+"""
+    band_mul!(y, G, lo, hi, x)   /   band_tmul!(y, G, lo, hi, x)
+
+  `y += L·x` (resp. `transpose(L)·x`) where `L` is the L-band `max(row,col) ∈ (lo,hi]` of
+  `G`: two rectangle GEMVs (bottom band + right band) covering the band exactly — no
+  zero-padding flops. `transpose` (not `adjoint`): the ket-swap is exchange, conjugation-free.
+"""
+@inline function band_mul!(y, G, lo::Int, hi::Int, x)
+  @views mul!(y[lo+1:hi], G[lo+1:hi, 1:hi], x[1:hi], true, true)
+  lo > 0 && @views mul!(y[1:lo], G[1:lo, lo+1:hi], x[lo+1:hi], true, true)
+  return
+end
+@inline function band_tmul!(y, G, lo::Int, hi::Int, x)
+  @views mul!(y[1:hi], transpose(G[lo+1:hi, 1:hi]), x[lo+1:hi], true, true)
+  lo > 0 && @views mul!(y[lo+1:hi], transpose(G[1:lo, lo+1:hi]), x[1:lo], true, true)
+  return
+end
+
+"""
+    ao_JK!(J, K, pm::PMSupermatrices, Dj, Dk)
+
+  The [`ao_JK!`](@ref) contraction from the persisted ± supermatrix store at **half the
+  streaming I/O**. Per stored ket-pair column: the **native role** (this column as ket
+  `⟨··|ρσ⟩`) does `J[:,ρ] += G·Dj[:,σ]`, `K[:,σ] += G·Dk[:,ρ]` and, for `ρ<σ`, the
+  `transpose(G)` (ket-swap) partner; the **Hermitian mirror role** (this column as bra
+  `⟨ρσ|··⟩`, sub-panel band only — the diagonal tile's mirrors are their own stored elements)
+  does the `conj`-wrapped GEMVs. `Dj`, `Dk` need not be symmetric. `O(nao²)` working memory.
+"""
+function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, pm::PMSupermatrices{T},
+                Dj::AbstractMatrix, Dk::AbstractMatrix) where T
+  n = pm.nao
+  lutμ, lutν = pair_luts(n)
+  TF = promote_type(T, eltype(Dj), eltype(Dk))
+  G = zeros(TF, n, n)
+  tv = zeros(TF, n); tw = zeros(TF, n)                     # scratch for the conj-wrapped mirror GEMVs
+  # mirror-role GEMV: out[i,:] += conj(L·conj(D[j,:])) (tmul: transpose(L)) — plain BLAS between conj's
+  function mirror!(out, i, D, j, lo, tra::Bool)
+    @views tv .= conj.(D[j, :])
+    fill!(tw, zero(TF))
+    tra ? band_tmul!(tw, G, lo, n, tv) : band_mul!(tw, G, lo, n, tv)
+    @views out[i, :] .+= conj.(tw)
+    return
+  end
+  @inbounds for Jb in 1:pm_nblocks(pm)
+    cJ = pm.pairblocks[Jb]; r0 = first(cJ)
+    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1])              # native band = (σ0, n]; mirror band = (σend, n]
+    σend = last(pm.σblocks[Jb])
+    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
+    for (jc, c) in enumerate(cJ)
+      ρ = lutμ[c]; σ = lutν[c]
+      unpack_pm_column!(G, Ps, Pa, jc, r0, lutμ, lutν)
+      @views begin
+        band_mul!(J[:,ρ], G, σ0, n, Dj[:,σ])               # J[:,ρ] += ⟨··|ρσ⟩ · Dj[:,σ]
+        band_mul!(K[:,σ], G, σ0, n, Dk[:,ρ])               # K[:,σ] += ⟨··|ρσ⟩ · Dk[:,ρ]
+        if ρ < σ
+          band_tmul!(J[:,σ], G, σ0, n, Dj[:,ρ])            # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
+          band_tmul!(K[:,ρ], G, σ0, n, Dk[:,σ])
+        end
+      end
+      mirror!(J, ρ, Dj, σ, σend, false)                    # J[ρ,x] += Σ_y ⟨ρσ|xy⟩ Dj[σ,y]
+      mirror!(K, ρ, Dk, σ, σend, true)                     # K[ρ,y] += Σ_x ⟨ρσ|xy⟩ Dk[σ,x]
+      if ρ < σ
+        mirror!(J, σ, Dj, ρ, σend, true)                   # J[σ,x] += Σ_y ⟨σρ|xy⟩ Dj[ρ,y]
+        mirror!(K, σ, Dk, ρ, σend, false)                  # K[σ,y] += Σ_x ⟨σρ|xy⟩ Dk[ρ,x]
+      end
+    end
+  end
+  return J, K
+end
+
+"[`ao_J2K!`](@ref) from the persisted ± store (the [`ao_JK!`](@ref)-on-`pm` twin: shared Coulomb + both exchanges in one pass)."
+function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
+                 pm::PMSupermatrices{T}, Dt::AbstractMatrix,
+                 Da::AbstractMatrix, Db::AbstractMatrix) where T
+  n = pm.nao
+  lutμ, lutν = pair_luts(n)
+  TF = promote_type(T, eltype(Dt), eltype(Da), eltype(Db))
+  G = zeros(TF, n, n)
+  tv = zeros(TF, n); tw = zeros(TF, n)
+  function mirror!(out, i, D, j, lo, tra::Bool)
+    @views tv .= conj.(D[j, :])
+    fill!(tw, zero(TF))
+    tra ? band_tmul!(tw, G, lo, n, tv) : band_mul!(tw, G, lo, n, tv)
+    @views out[i, :] .+= conj.(tw)
+    return
+  end
+  @inbounds for Jb in 1:pm_nblocks(pm)
+    cJ = pm.pairblocks[Jb]; r0 = first(cJ)
+    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1])
+    σend = last(pm.σblocks[Jb])
+    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
+    for (jc, c) in enumerate(cJ)
+      ρ = lutμ[c]; σ = lutν[c]
+      unpack_pm_column!(G, Ps, Pa, jc, r0, lutμ, lutν)
+      @views begin
+        band_mul!(J[:,ρ],  G, σ0, n, Dt[:,σ])
+        band_mul!(Ka[:,σ], G, σ0, n, Da[:,ρ])
+        band_mul!(Kb[:,σ], G, σ0, n, Db[:,ρ])
+        if ρ < σ
+          band_tmul!(J[:,σ],  G, σ0, n, Dt[:,ρ])
+          band_tmul!(Ka[:,ρ], G, σ0, n, Da[:,σ])
+          band_tmul!(Kb[:,ρ], G, σ0, n, Db[:,σ])
+        end
+      end
+      mirror!(J, ρ, Dt, σ, σend, false)
+      mirror!(Ka, ρ, Da, σ, σend, true)
+      mirror!(Kb, ρ, Db, σ, σend, true)
+      if ρ < σ
+        mirror!(J, σ, Dt, ρ, σend, true)
+        mirror!(Ka, σ, Da, ρ, σend, false)
+        mirror!(Kb, σ, Db, ρ, σend, false)
+      end
+    end
+  end
+  return J, Ka, Kb
+end
+
+# Integral handle accepted by the AO Fock builders: the joint triangular array or the ± store.
+const AOIntegrals = Union{AbstractArray{<:Number,3}, PMSupermatrices}
+
+"""
+    gen_fock(EC::ECInfo, ints, h1::AbstractMatrix, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
+
+  Closed-shell AO Fock matrix `h1 + 2J − K` from explicitly given spin-free 2-e integrals
+  `ints` and orbitals `CMOl`, `CMOr`. `ints` is either the joint triangular array
+  `int2[p,q,tri(r,s)] = ⟨pq|rs⟩` or the persisted ± supermatrix store ([`PMSupermatrices`](@ref
+  PMStore.PMSupermatrices)) — [`ao_JK!`](@ref) dispatches on it (the ± store halves the integral
+  I/O). The contraction is basis-agnostic (physicists' notation), so feeding AO integrals + AO
+  density yields the AO Fock; no dense `nao⁴` tensor is formed. `nao` is taken from the orbitals.
+"""
+function gen_fock(EC::ECInfo, ints::AOIntegrals, h1::AbstractMatrix,
+                  CMOl::AbstractMatrix, CMOr::AbstractMatrix)
   @assert EC.space['o'] == EC.space['O'] # closed-shell
   den = gen_density_matrix(EC, CMOl, CMOr, EC.space['o'])
-  nao = size(int2, 1)
-  TF = promote_type(T, eltype(den))
+  nao = size(CMOl, 1)
+  TF = promote_type(eltype(ints), eltype(den))
   J = zeros(TF, nao, nao); K = zeros(TF, nao, nao)
-  ao_JK!(J, K, int2, den, den)
+  ao_JK!(J, K, ints, den, den)
   return h1 .+ 2 .* J .- K
 end
 
 """
-    gen_ufock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix, cMOl::SpinMatrix, cMOr::SpinMatrix)
+    gen_ufock(EC::ECInfo, ints, h1::AbstractMatrix, cMOl::SpinMatrix, cMOr::SpinMatrix)
 
-  Calculate the UHF fock matrix from explicitly given spin-free 2-e integrals
-  `int2[p,q,tri(r,s)] = <pq|rs>` (e.g. the memory-mapped exact AO integrals) and 1-e
-  integrals `h1` (same for both spins). The shared Coulomb term (total density) is built once
-  and the two same-spin exchange terms in a single streaming pass ([`ao_J2K!`](@ref)) — no
-  dense `nao⁴` tensor is formed.
+  UHF AO Fock matrix from explicitly given spin-free 2-e integrals `ints` (joint array or ±
+  store; [`ao_J2K!`](@ref) dispatches) and 1-e integrals `h1` (same for both spins). The shared
+  Coulomb term (total density) is built once and both same-spin exchange terms in a single
+  streaming pass; no dense `nao⁴` tensor is formed. `nao` is taken from the orbitals.
 """
-function gen_ufock(EC::ECInfo, int2::AbstractArray{T,3}, h1::AbstractMatrix,
-                   cMOl::SpinMatrix, cMOr::SpinMatrix) where {T<:Number}
+function gen_ufock(EC::ECInfo, ints::AOIntegrals, h1::AbstractMatrix,
+                   cMOl::SpinMatrix, cMOr::SpinMatrix)
   Da = gen_density_matrix(EC, cMOl.α, cMOr.α, EC.space['o'])
   Db = gen_density_matrix(EC, cMOl.β, cMOr.β, EC.space['O'])
   Dt = Da .+ Db
-  nao = size(int2, 1)
-  TF = promote_type(T, eltype(Da))
+  nao = size(cMOl.α, 1)
+  TF = promote_type(eltype(ints), eltype(Da))
   J = zeros(TF, nao, nao); Ka = zeros(TF, nao, nao); Kb = zeros(TF, nao, nao)
-  ao_J2K!(J, Ka, Kb, int2, Dt, Da, Db)
-  return SpinMatrix(h1 .+ J .- Ka, h1 .+ J .- Kb)
-end
-
-"""
-    gen_fock(EC::ECInfo, pm::PMSupermatrices, h1::AbstractMatrix, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
-
-  Closed-shell Fock matrix from the persisted ± supermatrix AO-integral store
-  ([`pm_JK!`](@ref PMStore.pm_JK!)) — same contraction as the joint-store method above at
-  half the integral streaming.
-"""
-function gen_fock(EC::ECInfo, pm::PMSupermatrices{T}, h1::AbstractMatrix,
-                  CMOl::AbstractMatrix, CMOr::AbstractMatrix) where {T<:Number}
-  @assert EC.space['o'] == EC.space['O'] # closed-shell
-  den = gen_density_matrix(EC, CMOl, CMOr, EC.space['o'])
-  TF = promote_type(T, eltype(den))
-  J = zeros(TF, pm.nao, pm.nao); K = zeros(TF, pm.nao, pm.nao)
-  pm_JK!(J, K, pm, den, den)
-  return h1 .+ 2 .* J .- K
-end
-
-"""
-    gen_ufock(EC::ECInfo, pm::PMSupermatrices, h1::AbstractMatrix, cMOl::SpinMatrix, cMOr::SpinMatrix)
-
-  UHF Fock matrix from the persisted ± supermatrix AO-integral store
-  ([`pm_J2K!`](@ref PMStore.pm_J2K!)) — shared Coulomb + both exchanges in one streaming
-  pass at half the integral I/O.
-"""
-function gen_ufock(EC::ECInfo, pm::PMSupermatrices{T}, h1::AbstractMatrix,
-                   cMOl::SpinMatrix, cMOr::SpinMatrix) where {T<:Number}
-  Da = gen_density_matrix(EC, cMOl.α, cMOr.α, EC.space['o'])
-  Db = gen_density_matrix(EC, cMOl.β, cMOr.β, EC.space['O'])
-  Dt = Da .+ Db
-  TF = promote_type(T, eltype(Da))
-  J = zeros(TF, pm.nao, pm.nao); Ka = zeros(TF, pm.nao, pm.nao); Kb = zeros(TF, pm.nao, pm.nao)
-  pm_J2K!(J, Ka, Kb, pm, Dt, Da, Db)
+  ao_J2K!(J, Ka, Kb, ints, Dt, Da, Db)
   return SpinMatrix(h1 .+ J .- Ka, h1 .+ J .- Kb)
 end
 

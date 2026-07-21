@@ -235,7 +235,9 @@ end
 # Phase-3 kernel gate: the PM Fock kernels reproduce the streaming joint-store kernels for
 # ARBITRARY (nonsymmetric!) densities — pins the elementwise two-role sweep incl. the
 # uniform ½-degeneracy weights and the conj mirror role. Real and complex, several blockings.
-@testset "pm_JK!/pm_J2K! ↔ ao_JK!/ao_J2K!" begin
+# ao_JK!/ao_J2K! dispatch on the ± store handle == the joint-store methods, for arbitrary
+# (nonsymmetric!) densities — pins the two-role band sweep + conj mirror. Real and complex.
+@testset "ao_JK!/ao_J2K! (± store dispatch) ↔ joint" begin
   for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (13, 30), (11, 200))
     EC, int2 = build_store(n, T, maxcols)
     pm = open_pm_store(EC)
@@ -243,7 +245,7 @@ end
     J1 = zeros(T, n, n); K1 = zeros(T, n, n)
     ao_JK!(J1, K1, int2, Dj, Dk)                           # joint-store reference
     J2 = zeros(T, n, n); K2 = zeros(T, n, n)
-    pm_JK!(J2, K2, pm, Dj, Dk)
+    ao_JK!(J2, K2, pm, Dj, Dk)             # dispatch on PMSupermatrices
     @test maximum(abs.(J2 .- J1)) < 1e-12
     @test maximum(abs.(K2 .- K1)) < 1e-12
     # UHF variant: shared Coulomb + two exchanges in one pass
@@ -251,7 +253,7 @@ end
     J1 .= 0; Ka1 = zeros(T, n, n); Kb1 = zeros(T, n, n)
     ao_J2K!(J1, Ka1, Kb1, int2, Dt, Da, Db)
     J2 .= 0; Ka2 = zeros(T, n, n); Kb2 = zeros(T, n, n)
-    pm_J2K!(J2, Ka2, Kb2, pm, Dt, Da, Db)
+    ao_J2K!(J2, Ka2, Kb2, pm, Dt, Da, Db)
     @test maximum(abs.(J2 .- J1)) < 1e-12
     @test maximum(abs.(Ka2 .- Ka1)) < 1e-12
     @test maximum(abs.(Kb2 .- Kb1)) < 1e-12
@@ -262,7 +264,7 @@ end
   # e1-bra↔ket swap) — an INDEPENDENT symmetry beyond exchange+hermiticity — so it needs a
   # FULLY 8-fold-symmetric integral: build one from a chemist-form (μρ|νσ) with symmetric
   # pairs (as every real physical AO integral is). Complex integrals lack T₁ — the identity
-  # is real-only (pm_JK! itself never relies on it; see the general checks above).
+  # is real-only (ao_JK! itself never relies on it; see the general checks above).
   begin
     n = 8; ntri = n*(n+1)÷2
     Gc = randn(n, n, n, n)
@@ -276,7 +278,7 @@ end
     pm = open_pm_store(EC)
     nocc = 3; C = randn(n, nocc); D = C*C'
     Jd = zeros(n, n); Kd = zeros(n, n)
-    pm_JK!(Jd, Kd, pm, D, D)
+    ao_JK!(Jd, Kd, pm, D, D)
     Es = zeros(pm.npp, nocc)                               # ±-fold of each Cᵢ⊗Cᵢ (Ds only)
     for i in 1:nocc, σq in 1:n, ρq in 1:σq
       idx = uppertriangular_index(ρq, σq)
@@ -387,7 +389,7 @@ end
     @test abs(ehf_std["HF"] - ehf_pm["HF"]) < 1e-11
     @test abs(e_std[key] - e_pm[key]) < 1e-10
   end
-  # open-shell cation (ms2=1): UHF via pm_J2K! + frozen-core ao_core_ufock via the PM path
+  # open-shell cation (ms2=1): UHF via ao_J2K!(pm,…) + frozen-core ao_core_ufock via the PM path
   EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=false; ehf_std = @uhf; e_std = @cc ccsd
   EC = fresh(); @set wf charge=1 ms2=1; ehf_pm = @uhf; e_pm = @cc ccsd   # default PM flow
   @test pm_exists(EC)
