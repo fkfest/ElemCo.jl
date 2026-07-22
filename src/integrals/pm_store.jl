@@ -1,22 +1,32 @@
 """
-Persisted ± (plus/minus) supermatrix store for the exact AO integrals — see
-`dev/pm_ao_store_plan.md`. The two symmetric-pair-space supermatrices
+Persisted ± (plus/minus) supermatrix store for the exact AO integrals.
+
+The two symmetric-pair-space supermatrices
 
     Vs[tri(μν),tri(ρσ)] = ⟨μν|ρσ⟩ + ⟨νμ|ρσ⟩      (row/col diagonal μ=ν carries ×2)
     Va[tri(μν),tri(ρσ)] = ⟨μν|ρσ⟩ − ⟨νμ|ρσ⟩      (row/col diagonals = 0)
 
 (exactly the `QMTensors.calc_tri_sym_antisym!` convention) are each symmetric for real
 integrals and Hermitian for complex ones. Only the lower **block**-triangle is stored, as
-dense column panels — so every consumer is a plain zero-copy GEMM (`'N'` + adjoint flag),
-never a packed-format special case. Total on disk ≈ n⁴/4, half of the joint `ao_int2`.
+dense column panels — so kext consumer is a plain zero-copy GEMM (`'N'` + adjoint flag),
+never a packed-format special case. Total on disk ≈ n⁴/4.
+
+Dimensions: `μ,ν,ρ,σ` are AO indices running `1:nao`; `tri(μν)` packs an AO pair `μ≤ν` into
+`1:npp` with `npp = nao·(nao+1)/2`. So each supermatrix is `npp × npp` in pair space, and the
+`n⁴/4` size estimates use `n = nao` (`npp² ≈ n⁴/4`).
 
 Files: `ao_pm_s`, `ao_pm_a` (1-D panel concatenations, ket-2-orbital `σ`-aligned blocks) and
 `ao_pm_meta` (the `σ` block breakpoints, so reader and writer never disagree on the layout).
 
-THE CONJUGATION RULE (plan §2.2): pair-internal swaps (μ↔ν, ρ↔σ) are the ± signs and NEVER
+THE CONJUGATION RULE: pair-internal swaps (μ↔ν, ρ↔σ) are the ± signs and NEVER
 conjugate; the block mirror (bra-pair↔ket-pair, the unstored triangle) conjugates with no
 sign. In code: mirror-role GEMMs use `adjoint`, mirror-role scatters use `conj` — both no-ops
 for real `T` (one code path).
+
+Entry points: build with [`pm_from_joint!`](@ref) (or `IntegralTools.pm_integrals!` for the
+fused, no-joint build); open a built store with [`open_pm_store`](@ref); contract with
+[`pm_matmul!`](@ref) or the `FockFactory.ao_JK!(…, ::PMSupermatrices, …)` methods. See
+[`PMSupermatrices`](@ref) for the handle type, its fields, and usage examples.
 """
 module PMStore
 using LinearAlgebra
@@ -37,22 +47,64 @@ const PM_META_FILE = "ao_pm_meta"
 """
     PMSupermatrices{T}
 
-Handle to an open ± supermatrix store (both files memory-mapped). Panels are indexed by
-block `J`; `σblocks[J]` is the ket-2 orbital range, `pairblocks[J]` the (contiguous) packed
-bra/ket pair range `c_J` it owns as columns, and `offsets[J]` the 1-based element start of
-panel `J` in each flat map. Panel `J` is the dense `(npp − first(c_J) + 1) × |c_J|` block
-`V[first(c_J):npp, c_J]` (column-major): its top `|c_J|` rows are the diagonal tile
-`V[c_J,c_J]`, the rest the sub-diagonal `V[last(c_J)+1:npp, c_J]`.
+Open handle to a memory-mapped ± supermatrix AO-integral store (see the module docstring for
+the on-disk format). In the usual flow you never touch this directly — `ao_integrals(EC)`
+builds the store and the consumers (`FockFactory.ao_JK!`, `cc.pm_K2!`, the dressing sweeps)
+dispatch on it. To use it by hand: [`open_pm_store`](@ref) it, contract, [`close_pm_store!`](@ref).
+
+# Notation
+- `nao` — number of AOs (basis size); AO indices `μ,ν,ρ,σ` run `1:nao`.
+- `npp` — number of packed AO pairs, `nao·(nao+1)÷2`. This is the **pair-space** dimension:
+  each supermatrix `Vs`,`Va` is conceptually `npp × npp`, its rows/cols indexed by packed pairs.
+- `tri(μν)` — the packed index of AO pair `(μ,ν)`, `μ≤ν` (`QMTensors.uppertriangular_index`);
+  runs `1:npp`. [`pair_luts`](@ref)`(nao)` gives the inverse (packed index → `μ`, `ν`).
+- **panel / block `J`** — the store keeps only the lower block-triangle of `Vs`/`Va`, cut into
+  column blocks. Panel `J` is a dense matrix: the columns `c_J` (a contiguous ket-pair range)
+  for every bra-pair row `≥ first(c_J)` (the rows above are the unstored Hermitian mirror).
+
+# Fields
+- `nao`, `npp` — as above.
+- `σblocks[J]` — the ket-2 orbital (`σ`) range that defines block `J`.
+- `pairblocks[J]` — `c_J`, the contiguous packed **pair** range panel `J` owns as its columns.
+- `offsets[J]` — 1-based start of panel `J` inside each flat memory map.
+- `sio,smap` / `aio,amap` — open `IOStream` + mmapped flat vector for `Vs` / `Va`; the panels
+  are reshaped views into these (via [`spanel`](@ref) / [`apanel`](@ref)).
+
+Panel `J` has shape `(npp − first(c_J) + 1) × |c_J|` (column-major): its top `|c_J|` rows are
+the diagonal tile `V[c_J, c_J]` ([`diagtile`](@ref)), the rest the sub-diagonal
+`V[last(c_J)+1:npp, c_J]` ([`subpanel`](@ref)).
+
+# Example — kext contraction `K2[tri(pq)] = Σ_rs ⟨pq|rs⟩ D2[rs]`
+Its pair-space form is `K2 = Vs·Ds + Va·Da`, where `Ds`,`Da` are the ± fold of the density
+over ket pairs (both `npp × m`, `m` right-hand sides — e.g. `nocc²` for the CC 4-external term):
+```julia
+pm = open_pm_store(EC)                        # T inferred from the stored files
+Ks = zeros(eltype(pm), pm.npp, m)             # eltype(pm) === T
+Ka = zeros(eltype(pm), pm.npp, m)
+pm_matmul!(Ks, pm, :s, Ds)                    # Ks = Vs · Ds   (zero-copy panel GEMMs)
+pm_matmul!(Ka, pm, :a, Da)                    # Ka = Va · Da
+K2 = Ks .+ Ka                                 # unpack tri(pq) → K2[p,q] with pair_luts(pm.nao)
+close_pm_store!(EC, pm)
+```
+
+# Example — low-level panel access (zero-copy views into the mmap)
+```julia
+for J in 1:pm_nblocks(pm)
+  S = spanel(pm, J)                           # Vs panel: (npp-first(c_J)+1) × |c_J|
+  Sdiag = diagtile(S, pm, J)                  #   top |c_J| rows = Vs[c_J, c_J]
+  Ssub  = subpanel(S, pm, J)                  #   remaining rows = Vs[below, c_J]
+end
+```
 """
 struct PMSupermatrices{T}
-  nao::Int
-  npp::Int
-  σblocks::Vector{UnitRange{Int}}
-  pairblocks::Vector{UnitRange{Int}}
-  offsets::Vector{Int}
-  sio::IOStream
+  nao::Int                      # number of AOs (basis size)
+  npp::Int                      # number of packed AO pairs = nao*(nao+1)÷2 (pair-space dimension)
+  σblocks::Vector{UnitRange{Int}}     # σblocks[J] = ket-2 orbital range defining block J
+  pairblocks::Vector{UnitRange{Int}}  # pairblocks[J] = c_J, the packed pair columns of panel J
+  offsets::Vector{Int}          # offsets[J] = 1-based start of panel J in each flat map
+  sio::IOStream                 # open handle + mmapped flat vector of the Vs (symmetric) panels
   smap::Vector{T}
-  aio::IOStream
+  aio::IOStream                 # open handle + mmapped flat vector of the Va (antisymmetric) panels
   amap::Vector{T}
 end
 
