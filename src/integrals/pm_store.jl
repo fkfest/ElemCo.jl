@@ -38,6 +38,7 @@ using ..ElemCo.Utils
 export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
        pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
        pm_matmul!, band_htrans!, pair_luts,
+       SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
        PMWriter, pm_writer, pm_write_block!, pm_close_writer!
 
 const PM_S_FILE = "ao_pm_s"
@@ -398,6 +399,134 @@ function band_htrans!(H, L, G, lo::Int, hi::Int)
   @views mul!(H[:, 1:hi], transpose(L[lo+1:hi, :]), G[lo+1:hi, 1:hi], true, true)
   lo > 0 && @views mul!(H[:, lo+1:hi], transpose(L[1:lo, :]), G[1:lo, lo+1:hi], true, true)
   return H
+end
+
+# ---- per-column slab reconstruction sweep ---------------------------------------------
+#
+# Any consumer that needs the dense AO slabs `G[μ,ν] = ⟨μν|ρσ⟩` back from the ± store (the Fock
+# builders, and any other per-slab AO transform) drives it through this sweep. A stored ket
+# column `(ρσ)` holds, over its panel's **L-band** bra pairs, the ± combinations
+# `Vs,Va = ⟨μν|ρσ⟩ ± ⟨νμ|ρσ⟩`. `reconstruct_slab!` inverts them to `G[μ,ν]` on that band;
+# `band_mul!`/`band_tmul!` contract the band with a vector without touching the unstored corner.
+# `pm_slab_sweep!` walks the whole store, reconstructs each column's slab, and hands it to a
+# consumer callback. Because only the lower block-triangle is stored, each column is used in TWO
+# roles (this keeps the read at n⁴/4, half the joint store):
+#   • NATIVE  — the column IS the ket `⟨··|ρσ⟩`: contract `G`'s L-band `(native_lo, nao]`.
+#   • MIRROR  — by hermiticity the same column is the bra `⟨ρσ|··⟩`: contract the SUB-PANEL band
+#               `(mirror_lo, nao]` (the diagonal tile's mirrors are its own stored elements).
+# `FockFactory.ao_JK!`/`ao_J2K!` are the worked reference consumers.
+
+"""
+    SlabWork{TF}(pm::PMSupermatrices) -> SlabWork{TF}
+
+Reusable scratch for a [`pm_slab_sweep!`](@ref): the reconstructed `nao×nao` slab `G`, two
+length-`nao` buffers for the mirror-role GEMVs, and the packed-pair lookup tables. `TF` is the
+working element type — take `TF = promote_type(eltype(pm), eltype(data))` so a real store still
+contracts against complex data (a real store gives `TF = eltype(pm) = T`).
+"""
+struct SlabWork{TF}
+  G::Matrix{TF}
+  tv::Vector{TF}
+  tw::Vector{TF}
+  lutμ::Vector{Int}
+  lutν::Vector{Int}
+end
+function SlabWork{TF}(pm::PMSupermatrices) where {TF}
+  n = pm.nao
+  lutμ, lutν = pair_luts(n)
+  return SlabWork{TF}(zeros(TF, n, n), zeros(TF, n), zeros(TF, n), lutμ, lutν)
+end
+
+"""
+    reconstruct_slab!(w, Ps, Pa, jc, r0)
+
+Fill `w.G[μ,ν] = ⟨μν|ρσ⟩` for stored column `jc` (ket pair `(ρ,σ)`) of the ± panels
+`Ps = spanel(pm,J)`, `Pa = apanel(pm,J)` (`r0 = first(pairblocks[J])`), via the inversion
+`⟨μν|ρσ⟩=(Vs+Va)/2`, `⟨νμ|ρσ⟩=(Vs−Va)/2` (the stored ×2 row diagonals make `μ=ν` come out right
+with no special-casing). Only the panel's L-band bra pairs are written; the untouched corner is
+never read by the band GEMVs. Normally called for you by [`pm_slab_sweep!`](@ref).
+"""
+@inline function reconstruct_slab!(w::SlabWork, Ps, Pa, jc::Int, r0::Int)
+  G = w.G; lutμ = w.lutμ; lutν = w.lutν
+  @inbounds for k in 1:size(Ps,1)
+    x = lutμ[r0+k-1]; y = lutν[r0+k-1]
+    s = Ps[k,jc]; a = Pa[k,jc]
+    G[x,y] = (s+a)/2; G[y,x] = (s-a)/2
+  end
+  return
+end
+
+"""
+    band_mul!(y, G, lo, hi, x)   /   band_tmul!(y, G, lo, hi, x)
+
+`y += L·x` (resp. `transpose(L)·x`) where `L` is the **L-band** `max(row,col) ∈ (lo,hi]` of the
+reconstructed slab `G`: two rectangle GEMVs (bottom band + right band) covering the band exactly
+— no zero-padding flops, and the unstored corner (`row,col ≤ lo`) is never read. `transpose`
+(not `adjoint`): swapping the ket pair is exchange, conjugation-free.
+"""
+@inline function band_mul!(y, G, lo::Int, hi::Int, x)
+  @views mul!(y[lo+1:hi], G[lo+1:hi, 1:hi], x[1:hi], true, true)
+  lo > 0 && @views mul!(y[1:lo], G[1:lo, lo+1:hi], x[lo+1:hi], true, true)
+  return
+end
+@inline function band_tmul!(y, G, lo::Int, hi::Int, x)
+  @views mul!(y[1:hi], transpose(G[lo+1:hi, 1:hi]), x[lo+1:hi], true, true)
+  lo > 0 && @views mul!(y[lo+1:hi], transpose(G[1:lo, lo+1:hi]), x[1:lo], true, true)
+  return
+end
+
+"""
+    add_mirror_row!(out, i, w, D, j, lo, transposed)
+
+Mirror-role GEMV: `out[i,:] += Σ conj(G)·D[j,·]` over the L-band `(lo, nao]` — the current slab
+read as the bra `⟨ρσ|··⟩`. Runs as `conj(band · conj(D[j,:]))` so the BLAS happens between the
+`conj`s (both no-ops for real `TF`); `transposed` selects [`band_tmul!`](@ref) over
+[`band_mul!`](@ref). Uses the `w.tv`/`w.tw` scratch of the [`SlabWork`](@ref).
+"""
+@inline function add_mirror_row!(out, i::Int, w::SlabWork, D, j::Int, lo::Int, transposed::Bool)
+  n = size(w.G, 1)
+  @views w.tv .= conj.(D[j, :])
+  fill!(w.tw, zero(eltype(w.tw)))
+  transposed ? band_tmul!(w.tw, w.G, lo, n, w.tv) : band_mul!(w.tw, w.G, lo, n, w.tv)
+  @views out[i, :] .+= conj.(w.tw)
+  return
+end
+
+"""
+    pm_slab_sweep!(f, pm, w)
+
+Visit each stored ket-pair column of the ± store `pm` exactly once: reconstruct its dense slab
+`⟨μν|ρσ⟩` into `w.G` (a [`SlabWork`](@ref)) and call `f(ρ, σ, native_lo, mirror_lo)`. `(ρ,σ)` is
+the ket pair; `native_lo`/`mirror_lo` are the L-band lower bounds for the native/mirror roles
+(see the section comment above). `f` contracts `w.G` with [`band_mul!`](@ref)/[`band_tmul!`](@ref)
+(native role) and/or [`add_mirror_row!`](@ref) (mirror role).
+
+# Example — an AO Coulomb build `J[μ,ρ] = Σ_νσ ⟨μν|ρσ⟩ D[ν,σ]`
+```julia
+w = SlabWork{eltype(pm)}(pm)                 # real store: TF = eltype(pm) = T
+J = zeros(eltype(pm), pm.nao, pm.nao)
+pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
+  band_mul!(view(J,:,ρ), w.G, native_lo, pm.nao, view(D,:,σ))   # native: ⟨··|ρσ⟩ · D[:,σ]
+  ρ < σ && band_tmul!(view(J,:,σ), w.G, native_lo, pm.nao, view(D,:,ρ))
+  add_mirror_row!(J, ρ, w, D, σ, mirror_lo, false)              # mirror: ⟨ρσ|··⟩ · D[σ,:]
+  ρ < σ && add_mirror_row!(J, σ, w, D, ρ, mirror_lo, true)
+end
+```
+(`FockFactory.ao_JK!` wraps exactly this — Coulomb + exchange — into `add_coulomb!`/`add_exchange!`.)
+"""
+function pm_slab_sweep!(f, pm::PMSupermatrices, w::SlabWork)
+  @inbounds for Jb in 1:pm_nblocks(pm)
+    cJ = pm.pairblocks[Jb]; r0 = first(cJ)
+    native_lo = Jb == 1 ? 0 : last(pm.σblocks[Jb-1])       # native band = (native_lo, nao]
+    mirror_lo = last(pm.σblocks[Jb])                        # mirror band = (mirror_lo, nao] (sub-panel)
+    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
+    for (jc, c) in enumerate(cJ)
+      ρ = w.lutμ[c]; σ = w.lutν[c]
+      reconstruct_slab!(w, Ps, Pa, jc, r0)
+      f(ρ, σ, native_lo, mirror_lo)
+    end
+  end
+  return
 end
 
 end # module PMStore
