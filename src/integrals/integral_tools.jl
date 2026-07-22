@@ -400,12 +400,12 @@ end
   `σ`-blocks, batches within a block generated in parallel), ±-folded with
   `calc_tri_sym_antisym!` and written as PM panels — the joint `ao_int2` intermediate is
   never created (disk ≈ n⁴/4 throughout, no transient peak). `maxcols` bounds the block
-  width (`0` = from the memory budget).
+  width (`0` = the deterministic [`PMStore.pm_default_maxcols`](@ref) default).
 """
 function pm_integrals!(EC::ECInfo{T}, bao; maxcols::Int=0) where T
   nao = n_ao(bao)
   npp = nao*(nao+1)÷2
-  maxcols == 0 && (maxcols = PMStore.pm_default_maxcols(EC, nao, T))
+  maxcols == 0 && (maxcols = PMStore.pm_default_maxcols(nao))
   # size the s-batches so a batch's column count (≈ target_length·s) stays within the block
   tlen = clamp(fld(maxcols, nao), 1, EC.options.int.target_batch_length)
   groups = ket_shell_blocks(bao; maxcols=maxcols, target_length=tlen)

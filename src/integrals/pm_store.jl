@@ -158,17 +158,25 @@ function pm_breakpoints(nao::Int; maxcols::Int)
   return bp
 end
 
-"""
-    pm_default_maxcols(EC, nao, ::Type{T}) -> Int
+"GEMM-friendly σ-block column width (see [`pm_default_maxcols`](@ref))."
+const PM_BLOCK_COLS = 512
 
-Column ceiling for a block: the build buffer is `2·npp·maxcols·sizeof(T)`; keep it within a
-fraction of the memory budget, but never below `nao` (a single σ) and cap for cache/GEMM.
 """
-function pm_default_maxcols(EC::ECInfo, nao::Int, ::Type{T}) where T
-  npp = nao*(nao+1)÷2
-  cap = fld(available_memory(EC), 4 * npp * sizeof(T))
-  return clamp(cap, nao, 2048)
-end
+    pm_default_maxcols(nao) -> Int
+
+Default σ-block column ceiling for the ± store layout: `clamp(PM_BLOCK_COLS, nao, npp)`.
+
+**Deterministic — a function of `nao` only, NOT of available memory.** The layout is persisted
+in `ao_pm_meta` and rebuilt from it by every reader ([`open_pm_store`](@ref)), so a
+memory-dependent width would make the on-disk block structure non-reproducible (it would differ
+between the writing machine/run and any other) and size the build buffer to volatile free memory.
+A fixed width is reproducible and keeps the build buffer (`2·npp·maxcols·sizeof(T)`) predictable.
+The clamp bounds: `≥ nao` is required (a single σ contributes up to `nao` columns), and `≤ npp`
+means a tiny store (`npp < PM_BLOCK_COLS`, i.e. `nao ≤ 31`) is a single block (the full square) —
+the block-triangle saving needs ≥2 blocks anyway. Between the two, `PM_BLOCK_COLS` batches enough
+columns per panel for efficient BLAS-3.
+"""
+pm_default_maxcols(nao::Int) = clamp(PM_BLOCK_COLS, nao, nao*(nao+1)÷2)
 
 # ---- panel accessors (zero-copy views) ------------------------------------------------
 
@@ -275,7 +283,7 @@ function pm_close_writer!(EC::ECInfo, w::PMWriter)
 end
 
 """
-    pm_from_joint!(EC; maxcols=pm_default_maxcols(...))
+    pm_from_joint!(EC; maxcols=pm_default_maxcols(nao))
 
 One-time build of the ± store from the joint triangular `ao_int2`. Streams the packed ket
 columns block by block (each `c_J` is a contiguous packed range ⇒ sequential mmap read),
@@ -287,7 +295,7 @@ function pm_from_joint!(EC::ECInfo{T}; maxcols::Int=0) where T
   @assert file_exists(EC, "ao_int2") "no ao_int2 to build the PM store from"
   aofile, int2 = mmap3idx(EC, "ao_int2")
   nao = size(int2, 1); npp = nao*(nao+1)÷2
-  maxcols == 0 && (maxcols = pm_default_maxcols(EC, nao, T))
+  maxcols == 0 && (maxcols = pm_default_maxcols(nao))
   w = pm_writer(EC, nao, pm_breakpoints(nao; maxcols=maxcols))
   colcap = maximum(length, w.pairblocks)
   fullS = zeros(T, npp, colcap); fullA = zeros(T, npp, colcap)   # reused full-height ± buffers
