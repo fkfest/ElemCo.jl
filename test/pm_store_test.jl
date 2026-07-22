@@ -297,6 +297,38 @@ end
   end
 end
 
+# symmetric-density (HF) fast path: for a real symmetric density the mirror role is redundant,
+# so ao_JK!/ao_J2K! with `hermitian=true` (mirror-free sweep + symmetrize, with the diagonal-tile
+# split) must reproduce the general two-role path exactly. Several blockings incl. single-block;
+# also pins that the guard falls through to the general path for a complex (Hermitian) density.
+@testset "ao_JK!/ao_J2K! symmetric-D fast path" begin
+  for (n, maxcols) in ((9, 9), (13, 30), (12, 16), (11, 200))
+    EC, _ = build_store(n, Float64, maxcols)
+    pm = open_pm_store(EC)
+    D = (C = randn(n, 4); C*C')                            # real symmetric (HF-like) density
+    Jg = zeros(n,n); Kg = zeros(n,n); ao_JK!(Jg, Kg, pm, D, D)                  # general
+    Jf = zeros(n,n); Kf = zeros(n,n); ao_JK!(Jf, Kf, pm, D, D; hermitian=true)  # fast
+    @test maximum(abs.(Jf .- Jg)) < 1e-11
+    @test maximum(abs.(Kf .- Kg)) < 1e-11
+    Da = (C = randn(n,3); C*C'); Db = (C = randn(n,2); C*C'); Dt = Da .+ Db
+    Jg2 = zeros(n,n); Kag = zeros(n,n); Kbg = zeros(n,n); ao_J2K!(Jg2, Kag, Kbg, pm, Dt, Da, Db)
+    Jf2 = zeros(n,n); Kaf = zeros(n,n); Kbf = zeros(n,n); ao_J2K!(Jf2, Kaf, Kbf, pm, Dt, Da, Db; hermitian=true)
+    @test maximum(abs.(Jf2 .- Jg2)) < 1e-11
+    @test maximum(abs.(Kaf .- Kag)) < 1e-11
+    @test maximum(abs.(Kbf .- Kbg)) < 1e-11
+    close_pm_store!(EC, pm)
+  end
+  # complex Hermitian density: the real-only fast path must fall through → identical to general
+  EC, _ = build_store(9, ComplexF64, 30)
+  pm = open_pm_store(EC)
+  D = (C = randn(ComplexF64, 9, 4); C*C')                 # Hermitian
+  Jg = zeros(ComplexF64,9,9); Kg = zeros(ComplexF64,9,9); ao_JK!(Jg, Kg, pm, D, D)
+  Jf = zeros(ComplexF64,9,9); Kf = zeros(ComplexF64,9,9); ao_JK!(Jf, Kf, pm, D, D; hermitian=true)
+  @test maximum(abs.(Jf .- Jg)) < 1e-11
+  @test maximum(abs.(Kf .- Kg)) < 1e-11
+  close_pm_store!(EC, pm)
+end
+
 # Phase-5 gate: the PM-native dressing sweeps reproduce the dense einsum references —
 # all 8 occ-early intermediates (3 closed/same-spin + 5 opposite-spin), real+complex,
 # single/multi-block, Lo ≠ Ro (dressed) and nocca ≠ noccb (asymmetric).
