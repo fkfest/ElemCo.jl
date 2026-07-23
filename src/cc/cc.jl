@@ -1706,63 +1706,32 @@ end
 """
     pm_occ_early(pm::PMSupermatrices, Lo, Ro) -> (v_ooAA, v_AooA, v_oAoA)
 
-  [`ao_occ_early`](@ref) on the persisted ± supermatrix store — same three intermediates at
-  half the integral streaming (each stored element read once, ≈ n⁴/4; flop parity). Per
-  stored column the ± fill `S⁺ = G+Gᵀ`, `A⁻ = G−Gᵀ` (`G[x,y] = ⟨xy|ρσ⟩`) yields, via ONE
-  band-GEMM pair ([`band_htrans!`](@ref PMStore.band_htrans!)),
-  `t⁺ = (hS+hA)/2` and `t⁻ = (hS−hA)/2` — simultaneously the bra-1/bra-2 half-transforms
-  AND the ket-(ρσ)/(σρ) readings (exchange: the ket-swapped slab is the transpose). The
-  second stage is cheap rank-1/small-GEMM accumulation into the σ-keyed outputs. Off-panel
-  bra pairs are covered by the **Hermitian mirror role**: the same column processor runs on
-  the conj'd panel *rows* (ket pair = sub-panel pair, band = the panel's ket range).
+  [`ao_occ_early`](@ref) on the persisted ± supermatrix store — same three intermediates at half the
+  integral streaming (each stored element read once, ≈ n⁴/4; flop parity), written as a
+  [`eachslab`](@ref PMStore.eachslab)`(pm; roles=:both)` sweep. [`pm_bra_half!`](@ref PMStore.pm_bra_half!)
+  does the one shared band-GEMM pair per slab → `hν[i,ν] = Σ_μ ⟨μν|ρσ⟩ Lo[μ,i]` (μ→occ) and
+  `hμ[i,μ] = Σ_ν ⟨μν|ρσ⟩ Lo[ν,i]` (ν→occ); the three outputs are cheap `@mtensor` second-stage
+  contractions that REUSE `hν`,`hμ` (so the expensive half-transform is done once, not per output).
+  `roles=:both` supplies every ket pair (native columns + the Hermitian-mirror sub-panel rows);
+  `hνT`/`hμT` are the transposes the `v_AooA` outer product needs (keeps `@mtensor` on its fast path).
 """
 function pm_occ_early(pm::PMSupermatrices{Te}, Lo, Ro) where Te
   n = pm.nao; nocc = size(Lo, 2)
   v_ooAA = zeros(Te, nocc,nocc,n,n); v_AooA = zeros(Te, n,nocc,nocc,n); v_oAoA = zeros(Te, nocc,n,nocc,n)
-  lutμ, lutν = pair_luts(n)
-  Sp = zeros(Te,n,n); Am = zeros(Te,n,n)                   # ± band buffers (corner never read)
-  hS = zeros(Te,nocc,n); hA = zeros(Te,nocc,n)
-  tp = zeros(Te,nocc,n); tm = zeros(Te,nocc,n)
-  tpT = zeros(Te,n,nocc); tmT = zeros(Te,n,nocc)
-  # shared column processor: ket pair (ρ,σ), bra band (lo,hi] already unpacked in Sp/Am
-  function process_column!(ρ, σ, lo, hi)
-    band_htrans!(hS, Lo, Sp, lo, hi)
-    band_htrans!(hA, Lo, Am, lo, hi)
-    tp .= (hS .+ hA)./2                                    # t⁺[i,y] = Σ_x ⟨xy|ρσ⟩ Lo[x,i]
-    tm .= (hS .- hA)./2                                    # t⁻[i,x] = Σ_y ⟨xy|ρσ⟩ Lo[y,i]
-    permutedims!(tpT, tp, (2,1)); permutedims!(tmT, tm, (2,1))
-    @views begin
-      mul!(v_ooAA[:,:,ρ,σ], tp, Lo, true, true)            # v_ooAA[i,j,ρ,σ] += Σ_y t⁺[i,y] Lo[y,j]
-      v_AooA[:,:,:,σ] .+= reshape(tmT,n,nocc,1) .* reshape(Ro[ρ,:],1,1,nocc)  # += t⁻[i,μ]·Ro[ρ,j]
-      v_oAoA[:,:,:,σ] .+= reshape(tp,nocc,n,1) .* reshape(Ro[ρ,:],1,1,nocc)   # += t⁺[i,ν]·Ro[ρ,j]
-      if ρ < σ                                             # ket order (σ,ρ)
-        mul!(v_ooAA[:,:,σ,ρ], tm, Lo, true, true)
-        v_AooA[:,:,:,ρ] .+= reshape(tpT,n,nocc,1) .* reshape(Ro[σ,:],1,1,nocc)
-        v_oAoA[:,:,:,ρ] .+= reshape(tm,nocc,n,1) .* reshape(Ro[σ,:],1,1,nocc)
-      end
-    end
-    return
-  end
-  for Jb in 1:pm_nblocks(pm)
-    cJ = pm.pairblocks[Jb]; r0 = first(cJ); ntile = length(cJ)
-    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1]); σend = last(pm.σblocks[Jb])
-    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
-    @inbounds for (jc, c) in enumerate(cJ)                 # native columns: bra band (σ0, n]
-      for k in 1:size(Ps,1)
-        x = lutμ[r0+k-1]; y = lutν[r0+k-1]
-        s = Ps[k,jc]; a = Pa[k,jc]
-        Sp[x,y] = s; Sp[y,x] = s; Am[x,y] = a; Am[y,x] = -a
-      end
-      process_column!(lutμ[c], lutν[c], σ0, n)
-    end
-    @inbounds for k in ntile+1:size(Ps,1)                  # mirror columns: band (σ0, σend], conj
-      r = r0 + k - 1
-      for (jc, c) in enumerate(cJ)
-        u = lutμ[c]; v = lutν[c]
-        s = conj(Ps[k,jc]); a = conj(Pa[k,jc])
-        Sp[u,v] = s; Sp[v,u] = s; Am[u,v] = a; Am[v,u] = -a
-      end
-      process_column!(lutμ[r], lutν[r], σ0, σend)
+  hν = zeros(Te, nocc, n); hμ = zeros(Te, nocc, n)         # shared bra half-transforms (μ→occ / ν→occ)
+  hνT = zeros(Te, n, nocc); hμT = zeros(Te, n, nocc)        # their transposes (for the v_AooA outer product)
+  for s in eachslab(pm; roles=:both)
+    pm_bra_half!(hν, hμ, s, Lo)                            # ONE band-GEMM pair, reused by all outputs
+    ρ, σ = s.ρ, s.σ; Roρ = @view Ro[ρ,:]
+    permutedims!(hνT, hν, (2,1)); permutedims!(hμT, hμ, (2,1))
+    o1 = @view v_ooAA[:,:,ρ,σ]; @mtensor o1[i,j]   += hν[i,ν]  * Lo[ν,j]     # both bra → occ
+    a1 = @view v_AooA[:,:,:,σ]; @mtensor a1[μ,i,j] += hμT[μ,i] * Roρ[j]      # ν→occ, μ AO, ket ρ→occ
+    x1 = @view v_oAoA[:,:,:,σ]; @mtensor x1[i,ν,j] += hν[i,ν]  * Roρ[j]      # μ→occ, ν AO, ket ρ→occ
+    if ρ < σ                                              # ket order (σ,ρ)
+      Roσ = @view Ro[σ,:]
+      o2 = @view v_ooAA[:,:,σ,ρ]; @mtensor o2[i,j]   += hμ[i,ν]  * Lo[ν,j]
+      a2 = @view v_AooA[:,:,:,ρ]; @mtensor a2[μ,i,j] += hνT[μ,i] * Roσ[j]
+      x2 = @view v_oAoA[:,:,:,ρ]; @mtensor x2[i,ν,j] += hμ[i,ν]  * Roσ[j]
     end
   end
   return v_ooAA, v_AooA, v_oAoA
@@ -1771,63 +1740,36 @@ end
 """
     pm_os_sweep(pm::PMSupermatrices, La_o, Ra_o, Lb_o, Rb_o) -> (v_oOAA, v_AOoA, v_oAoA, v_oAAO, v_AOAO)
 
-  The opposite-spin occ-early sweep on the ± store (the five intermediates of
-  [`ao_os_blocks`](@ref) at half the streaming). Same structure as [`pm_occ_early`](@ref)
-  with two coefficient sets: `t±_a` (`La_o` on slot-1/slot-2) and `t±_b` (`Lb_o`) from two
-  band-GEMM pairs per column; the ket-2-contracted intermediates (`v_oAAO`/`v_AOAO`) take
-  the `Rb_o` row of the kept ket order.
+  The opposite-spin occ-early sweep on the ± store (the five intermediates of [`ao_os_blocks`](@ref)
+  at half the streaming), as a [`eachslab`](@ref PMStore.eachslab)`(pm; roles=:both)` sweep like
+  [`pm_occ_early`](@ref) but with TWO coefficient sets: [`pm_bra_half!`](@ref PMStore.pm_bra_half!)
+  gives the shared half-transforms of `La_o` (`hνa`/`hμa`) and `Lb_o` (`hνb`/`hμb`), reused by the
+  five `@mtensor` outputs (the ket-contracted `v_oAAO`/`v_AOAO` take the `Rb_o` row of the kept ket
+  order). `hνbT`/`hμbT` are the `b` transposes the AO-first outputs (`v_AOoA`/`v_AOAO`) need.
 """
 function pm_os_sweep(pm::PMSupermatrices{Te}, La_o, Ra_o, Lb_o, Rb_o) where Te
   n = pm.nao; na = size(La_o,2); nb = size(Lb_o,2)
   v_oOAA = zeros(Te, na,nb,n,n); v_AOoA = zeros(Te, n,nb,na,n); v_oAoA = zeros(Te, na,n,na,n)
   v_oAAO = zeros(Te, na,n,n,nb); v_AOAO = zeros(Te, n,nb,n,nb)
-  lutμ, lutν = pair_luts(n)
-  Sp = zeros(Te,n,n); Am = zeros(Te,n,n)
-  hSa = zeros(Te,na,n); hAa = zeros(Te,na,n); hSb = zeros(Te,nb,n); hAb = zeros(Te,nb,n)
-  tpa = zeros(Te,na,n); tma = zeros(Te,na,n); tpb = zeros(Te,nb,n); tmb = zeros(Te,nb,n)
-  tpbT = zeros(Te,n,nb); tmbT = zeros(Te,n,nb)
-  function process_column!(ρ, σ, lo, hi)
-    band_htrans!(hSa, La_o, Sp, lo, hi); band_htrans!(hAa, La_o, Am, lo, hi)
-    band_htrans!(hSb, Lb_o, Sp, lo, hi); band_htrans!(hAb, Lb_o, Am, lo, hi)
-    tpa .= (hSa .+ hAa)./2; tma .= (hSa .- hAa)./2         # t±_a: La on slot-1 / slot-2
-    tpb .= (hSb .+ hAb)./2; tmb .= (hSb .- hAb)./2         # t±_b: Lb on slot-1 / slot-2
-    permutedims!(tpbT, tpb, (2,1)); permutedims!(tmbT, tmb, (2,1))
-    @views begin
-      mul!(v_oOAA[:,:,ρ,σ], tpa, Lb_o, true, true)         # Σ_y t⁺a[i,y] Lb[y,J]
-      v_AOoA[:,:,:,σ] .+= reshape(tmbT,n,nb,1) .* reshape(Ra_o[ρ,:],1,1,na)  # t⁻b[I,μ]·Ra[ρ,k]
-      v_oAoA[:,:,:,σ] .+= reshape(tpa,na,n,1) .* reshape(Ra_o[ρ,:],1,1,na)   # t⁺a[i,ν]·Ra[ρ,k]
-      v_oAAO[:,:,ρ,:] .+= reshape(tpa,na,n,1) .* reshape(Rb_o[σ,:],1,1,nb)   # t⁺a[i,ν]·Rb[σ,J]
-      v_AOAO[:,:,ρ,:] .+= reshape(tmbT,n,nb,1) .* reshape(Rb_o[σ,:],1,1,nb)  # t⁻b[I,μ]·Rb[σ,J]
-      if ρ < σ                                             # ket order (σ,ρ)
-        mul!(v_oOAA[:,:,σ,ρ], tma, Lb_o, true, true)
-        v_AOoA[:,:,:,ρ] .+= reshape(tpbT,n,nb,1) .* reshape(Ra_o[σ,:],1,1,na)
-        v_oAoA[:,:,:,ρ] .+= reshape(tma,na,n,1) .* reshape(Ra_o[σ,:],1,1,na)
-        v_oAAO[:,:,σ,:] .+= reshape(tma,na,n,1) .* reshape(Rb_o[ρ,:],1,1,nb)
-        v_AOAO[:,:,σ,:] .+= reshape(tpbT,n,nb,1) .* reshape(Rb_o[ρ,:],1,1,nb)
-      end
-    end
-    return
-  end
-  for Jb in 1:pm_nblocks(pm)
-    cJ = pm.pairblocks[Jb]; r0 = first(cJ); ntile = length(cJ)
-    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1]); σend = last(pm.σblocks[Jb])
-    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
-    @inbounds for (jc, c) in enumerate(cJ)
-      for k in 1:size(Ps,1)
-        x = lutμ[r0+k-1]; y = lutν[r0+k-1]
-        s = Ps[k,jc]; a = Pa[k,jc]
-        Sp[x,y] = s; Sp[y,x] = s; Am[x,y] = a; Am[y,x] = -a
-      end
-      process_column!(lutμ[c], lutν[c], σ0, n)
-    end
-    @inbounds for k in ntile+1:size(Ps,1)
-      r = r0 + k - 1
-      for (jc, c) in enumerate(cJ)
-        u = lutμ[c]; v = lutν[c]
-        s = conj(Ps[k,jc]); a = conj(Pa[k,jc])
-        Sp[u,v] = s; Sp[v,u] = s; Am[u,v] = a; Am[v,u] = -a
-      end
-      process_column!(lutμ[r], lutν[r], σ0, σend)
+  hνa = zeros(Te,na,n); hμa = zeros(Te,na,n)               # La half-transforms (μ→a / ν→a)
+  hνb = zeros(Te,nb,n); hμb = zeros(Te,nb,n)               # Lb half-transforms
+  hνbT = zeros(Te,n,nb); hμbT = zeros(Te,n,nb)             # b transposes (for the AO-first outputs)
+  for s in eachslab(pm; roles=:both)
+    pm_bra_half!(hνa, hμa, s, La_o); pm_bra_half!(hνb, hμb, s, Lb_o)
+    ρ, σ = s.ρ, s.σ; Raρ = @view Ra_o[ρ,:]; Rbσ = @view Rb_o[σ,:]
+    permutedims!(hνbT, hνb, (2,1)); permutedims!(hμbT, hμb, (2,1))
+    o1 = @view v_oOAA[:,:,ρ,σ]; @mtensor o1[i,J]   += hνa[i,ν]  * Lb_o[ν,J]
+    a1 = @view v_AOoA[:,:,:,σ]; @mtensor a1[μ,I,k] += hμbT[μ,I] * Raρ[k]
+    x1 = @view v_oAoA[:,:,:,σ]; @mtensor x1[i,ν,k] += hνa[i,ν]  * Raρ[k]
+    y1 = @view v_oAAO[:,:,ρ,:]; @mtensor y1[i,ν,J] += hνa[i,ν]  * Rbσ[J]
+    z1 = @view v_AOAO[:,:,ρ,:]; @mtensor z1[μ,I,J] += hμbT[μ,I] * Rbσ[J]
+    if ρ < σ                                              # ket order (σ,ρ)
+      Raσ = @view Ra_o[σ,:]; Rbρ = @view Rb_o[ρ,:]
+      o2 = @view v_oOAA[:,:,σ,ρ]; @mtensor o2[i,J]   += hμa[i,ν]  * Lb_o[ν,J]
+      a2 = @view v_AOoA[:,:,:,ρ]; @mtensor a2[μ,I,k] += hνbT[μ,I] * Raσ[k]
+      x2 = @view v_oAoA[:,:,:,ρ]; @mtensor x2[i,ν,k] += hμa[i,ν]  * Raσ[k]
+      y2 = @view v_oAAO[:,:,σ,:]; @mtensor y2[i,ν,J] += hμa[i,ν]  * Rbρ[J]
+      z2 = @view v_AOAO[:,:,σ,:]; @mtensor z2[μ,I,J] += hνbT[μ,I] * Rbρ[J]
     end
   end
   return v_oOAA, v_AOoA, v_oAoA, v_oAAO, v_AOAO

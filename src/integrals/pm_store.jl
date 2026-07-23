@@ -40,6 +40,7 @@ export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_st
        pm_matmul!, pm_matvec!, band_htrans!, pair_luts,
        SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
        PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!, @pmslab,
+       BothSlab, pm_bra_half!,
        PMWriter, pm_writer, pm_write_block!, pm_close_writer!
 
 const PM_S_FILE = "ao_pm_s"
@@ -435,6 +436,7 @@ contracts against complex data (a real store gives `TF = eltype(pm) = T`).
 """
 struct SlabWork{TF}
   G::Matrix{TF}
+  Gt::Matrix{TF}          # transpose of the slab; filled only by the roles=:both reconstruction
   tv::Vector{TF}
   tw::Vector{TF}
   lutμ::Vector{Int}
@@ -443,7 +445,7 @@ end
 function SlabWork{TF}(pm::PMSupermatrices) where {TF}
   n = pm.nao
   lutμ, lutν = pair_luts(n)
-  return SlabWork{TF}(zeros(TF, n, n), zeros(TF, n), zeros(TF, n), lutμ, lutν)
+  return SlabWork{TF}(zeros(TF, n, n), zeros(TF, n, n), zeros(TF, n), zeros(TF, n), lutμ, lutν)
 end
 
 """
@@ -586,6 +588,9 @@ end
   written as an ordinary loop with the band helpers ([`slab_bandmul!`](@ref) etc.) instead of a
   `pm_slab_sweep!` callback. The yielded slab aliases one reusable buffer — single pass, do not retain.
 
+  `roles=:both` instead yields ALL ket pairs (native columns + the Hermitian-mirror sub-panel rows)
+  as [`BothSlab`](@ref)s carrying `G` and `Gt`, for [`pm_bra_half!`](@ref) — the dressing sweep.
+
 # Example — AO Coulomb build `J[μ,ρ] = Σ_νσ ⟨μν|ρσ⟩ D[ν,σ]`
 ```julia
 J = zeros(eltype(pm), pm.nao, pm.nao)
@@ -597,7 +602,10 @@ for s in eachslab(pm)
 end
 ```
 """
-eachslab(pm::PMSupermatrices; TF=eltype(pm)) = SlabIterator{TF}(pm, SlabWork{TF}(pm))
+eachslab(pm::PMSupermatrices; TF=eltype(pm), roles::Symbol=:native) =
+  roles === :both   ? BothSlabIterator{TF}(pm, SlabWork{TF}(pm)) :
+  roles === :native ? SlabIterator{TF}(pm, SlabWork{TF}(pm)) :
+  error("eachslab: roles must be :native or :both, got :$roles")
 
 Base.IteratorSize(::Type{<:SlabIterator}) = Base.SizeUnknown()
 Base.eltype(::Type{SlabIterator{TF}}) where {TF} = PMSlab{TF}
@@ -629,6 +637,92 @@ end
 @inline slab_mirror!(out, i::Int, s::PMSlab, D, j::Int)  = add_mirror_row!(out, i, s.w, D, j, s.mirror_lo, false)
 """    slab_mirrort!(out, i, s::PMSlab, D, j) — Hermitian mirror role, transposed band."""
 @inline slab_mirrort!(out, i::Int, s::PMSlab, D, j::Int) = add_mirror_row!(out, i, s.w, D, j, s.mirror_lo, true)
+
+# ---- eachslab(pm; roles=:both) + pm_bra_half!: bra half-transforms (the dressing) -----------
+# roles=:both yields ALL ket pairs (native columns AND the Hermitian-mirror sub-panel rows), each
+# as a BothSlab carrying the reconstructed slab `G` AND its transpose `Gt` over the band `(lo,hi]`,
+# so `pm_bra_half!` gets BOTH bra half-transforms (one from G, one from Gt) from one coeff set — the
+# shared expensive step the fused dressing outputs reuse (compute it once, not once per output).
+
+# native column jc: fill G/Gt for the panel's L-band bra pairs, ket pair = column jc
+@inline function reconstruct_slab_both!(w::SlabWork, Ps, Pa, jc::Int, r0::Int)
+  G = w.G; Gt = w.Gt; lutμ = w.lutμ; lutν = w.lutν
+  @inbounds for k in 1:size(Ps,1)
+    x = lutμ[r0+k-1]; y = lutν[r0+k-1]; s = Ps[k,jc]; a = Pa[k,jc]
+    G[x,y] = (s+a)/2; G[y,x] = (s-a)/2; Gt[x,y] = (s-a)/2; Gt[y,x] = (s+a)/2
+  end
+end
+# mirror sub-panel row k: the tile's ket pairs are the bra pairs (conj); ket pair = row k's pair
+@inline function reconstruct_mirror_both!(w::SlabWork, Ps, Pa, k::Int, cJ, ntile::Int)
+  G = w.G; Gt = w.Gt; lutμ = w.lutμ; lutν = w.lutν
+  @inbounds for jc in 1:ntile
+    c = cJ[jc]; u = lutμ[c]; v = lutν[c]; s = conj(Ps[k,jc]); a = conj(Pa[k,jc])
+    G[u,v] = (s+a)/2; G[v,u] = (s-a)/2; Gt[u,v] = (s-a)/2; Gt[v,u] = (s+a)/2
+  end
+end
+
+"""
+    BothSlab{TF}
+
+  One ket-pair slab yielded by [`eachslab`](@ref)`(pm; roles=:both)`: the reconstructed `⟨μν|ρσ⟩`
+  (`s.w.G`) and its transpose (`s.w.Gt`) over the band `(s.lo, s.hi]`, for ket pair `(s.ρ, s.σ)`.
+  Aliases the iterator scratch — valid only until the next iteration. Contract with [`pm_bra_half!`](@ref).
+"""
+struct BothSlab{TF}
+  w::SlabWork{TF}
+  ρ::Int
+  σ::Int
+  lo::Int
+  hi::Int
+end
+
+struct BothSlabIterator{TF}
+  pm::PMSupermatrices
+  w::SlabWork{TF}
+end
+Base.IteratorSize(::Type{<:BothSlabIterator}) = Base.SizeUnknown()
+Base.eltype(::Type{BothSlabIterator{TF}}) where {TF} = BothSlab{TF}
+Base.iterate(it::BothSlabIterator) = _both_step(it, 1, 1, 1)
+Base.iterate(it::BothSlabIterator, st) = _both_step(it, st[1], st[2], st[3])
+# state = (Jb, phase, idx): phase 1 = native columns (band (σ0,nao]), phase 2 = mirror rows (band (σ0,σend])
+@inline function _both_step(it::BothSlabIterator{TF}, Jb::Int, phase::Int, idx::Int) where {TF}
+  pm = it.pm; w = it.w
+  @inbounds while Jb <= pm_nblocks(pm)
+    cJ = pm.pairblocks[Jb]; r0 = first(cJ); ntile = length(cJ)
+    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1]); σend = last(pm.σblocks[Jb])
+    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
+    if phase == 1
+      if idx <= ntile
+        c = cJ[idx]
+        reconstruct_slab_both!(w, Ps, Pa, idx, r0)
+        return BothSlab{TF}(w, w.lutμ[c], w.lutν[c], σ0, pm.nao), (Jb, 1, idx + 1)
+      end
+      phase = 2; idx = ntile + 1
+    end
+    if idx <= size(Ps, 1)
+      r = r0 + idx - 1
+      reconstruct_mirror_both!(w, Ps, Pa, idx, cJ, ntile)
+      return BothSlab{TF}(w, w.lutμ[r], w.lutν[r], σ0, σend), (Jb, 2, idx + 1)
+    end
+    Jb += 1; phase = 1; idx = 1
+  end
+  return nothing
+end
+
+"""
+    pm_bra_half!(hν, hμ, s::BothSlab, C) -> (hν, hμ)
+
+  Half-transform the bra pair of slab `s` with coefficients `C` (`[nao, m]`), filling
+  `hν[i,ν] = Σ_μ ⟨μν|ρσ⟩ C[μ,i]` (μ→i, ν kept AO) and `hμ[i,μ] = Σ_ν ⟨μν|ρσ⟩ C[ν,i]` (ν→i, μ kept AO)
+  — the two band GEMMs (`band_htrans!` on `G` and `Gt`) that the fused dressing outputs SHARE (compute
+  once, reuse for every output). `hν`,`hμ` are caller-owned `[m, nao]` buffers (allocate once outside
+  the loop). Cheap second-stage contractions (`hν`/`hμ` with the remaining coeffs) then form the outputs.
+"""
+@inline function pm_bra_half!(hν, hμ, s::BothSlab, C)
+  band_htrans!(hν, C, s.w.G,  s.lo, s.hi)
+  band_htrans!(hμ, C, s.w.Gt, s.lo, s.hi)
+  return hν, hμ
+end
 
 # ---- @pmslab: a per-slab einsum, the workhorse inside an `eachslab` loop --------------------
 # `@pmslab out[…] += s[μ,ν,ρ,σ] * D[…]` where `s` is the current PMSlab. Emits the native band GEMV
