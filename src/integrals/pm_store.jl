@@ -39,7 +39,7 @@ export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_st
        pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
        pm_matmul!, pm_matvec!, band_htrans!, pair_luts,
        SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
-       PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!, @pmslab,
+       PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!, @pmtensor,
        BothSlab, pm_bra_half!,
        PMWriter, pm_writer, pm_write_block!, pm_close_writer!
 
@@ -541,10 +541,9 @@ function pm_slab_sweep!(f, pm::PMSupermatrices, w::SlabWork)
 end
 
 # ======================= high-level "PM tensor" verbs / streaming ============================
-# A thin, tensor-like API over the primitives above (the substrate a future @pmtensor macro would
-# lower to). Verbs for the closed-form contractions live with their primitives (pm_transform in
-# IntegralTools, pm_exchange near the kext, pm_fock! in FockFactory); the two below — the pair-space
-# matvec and the slab iterator — belong here because they ARE the low-level engine.
+# A thin, tensor-like API over the primitives above: the pair-space matvec `pm_matvec!`, the slab
+# iterator `eachslab` + `pm_bra_half!`, and the per-slab einsum macro `@pmtensor` (below). The
+# full 4-index AO→MO transform is the `pm_transform` verb in IntegralTools.
 
 """
     pm_matvec!(out, pm, which, X) -> out
@@ -724,33 +723,33 @@ end
   return hν, hμ
 end
 
-# ---- @pmslab: a per-slab einsum, the workhorse inside an `eachslab` loop --------------------
-# `@pmslab out[…] += s[μ,ν,ρ,σ] * D[…]` where `s` is the current PMSlab. Emits the native band GEMV
+# ---- @pmtensor: a per-slab einsum, the workhorse inside an `eachslab` loop --------------------
+# `@pmtensor out[…] += s[μ,ν,ρ,σ] * D[…]` where `s` is the current PMSlab. Emits the native band GEMV
 # + the ket-swap + the two Hermitian-mirror rows automatically (exactly add_coulomb!/add_exchange!),
 # so the caller writes the physics per slab and fuses as many terms as it likes in one sweep. `D`
 # contracting the bra index ν with ket label σ is Coulomb; with ket label ρ is exchange.
-function _pmslab_gen(ex)
-  (ex isa Expr && ex.head === :(+=)) || error("@pmslab: expected `out[…] += s[μ,ν,ρ,σ] * D[…]`")
+function _pmtensor_gen(ex)
+  (ex isa Expr && ex.head === :(+=)) || error("@pmtensor: expected `out[…] += s[μ,ν,ρ,σ] * D[…]`")
   lhs, rhs = ex.args
-  (lhs isa Expr && lhs.head === :ref) || error("@pmslab: the output must be indexed, got `$lhs`")
+  (lhs isa Expr && lhs.head === :ref) || error("@pmtensor: the output must be indexed, got `$lhs`")
   factors = (rhs isa Expr && rhs.head === :call && rhs.args[1] === :*) ? rhs.args[2:end] : Any[rhs]
   slabv = nothing; sidx = nothing; dens = nothing; didx = nothing
   for f in factors
-    (f isa Expr && f.head === :ref) || error("@pmslab: factors must be indexed, got `$f`")
+    (f isa Expr && f.head === :ref) || error("@pmtensor: factors must be indexed, got `$f`")
     idx = f.args[2:end]
     if length(idx) == 4 && slabv === nothing
       slabv = f.args[1]; sidx = idx
     elseif length(idx) == 2
       dens = f.args[1]; didx = idx
     else
-      error("@pmslab: expected a 4-index slab `s[μ,ν,ρ,σ]` and one 2-index density `D[·,·]`")
+      error("@pmtensor: expected a 4-index slab `s[μ,ν,ρ,σ]` and one 2-index density `D[·,·]`")
     end
   end
-  (slabv !== nothing && dens !== nothing) || error("@pmslab: need `s[μ,ν,ρ,σ] * D[·,·]`")
+  (slabv !== nothing && dens !== nothing) || error("@pmtensor: need `s[μ,ν,ρ,σ] * D[·,·]`")
   μ, ν, ρ, σ = sidx
   coulomb = didx[1] === ν && didx[2] === σ                # out[μ,ρ] += Σ_ν ⟨μν|ρσ⟩ D[ν,σ]
   exch    = didx[1] === ν && didx[2] === ρ                # out[μ,σ] += Σ_ν ⟨μν|ρσ⟩ D[ν,ρ]
-  (coulomb || exch) || error("@pmslab: density $didx must be [$ν,$σ] (Coulomb) or [$ν,$ρ] (exchange)")
+  (coulomb || exch) || error("@pmtensor: density $didx must be [$ν,$σ] (Coulomb) or [$ν,$ρ] (exchange)")
   s = esc(slabv); D = esc(dens); O = esc(lhs.args[1])
   coulomb ? quote
       slab_bandmul!(view($O,:,$s.ρ), $s, view($D,:,$s.σ))
@@ -764,18 +763,18 @@ function _pmslab_gen(ex)
 end
 
 """
-    @pmslab out[…] += s[μ,ν,ρ,σ] * D[…]
+    @pmtensor out[…] += s[μ,ν,ρ,σ] * D[…]
 
   A per-slab einsum for use inside `for s in eachslab(pm) … end`: contract the current slab
   (`s[μ,ν,ρ,σ]` = `⟨μν|ρσ⟩`) with a density `D`, accumulating into `out`. The macro emits the
   native band GEMV, the ket-swap, and both Hermitian-mirror rows (i.e. [`slab_bandmul!`](@ref) /
   [`slab_bandtmul!`](@ref) / [`slab_mirror!`](@ref) / [`slab_mirrort!`](@ref)) — the full two-role
   contribution of that slab, identical to `FockFactory`'s `add_coulomb!`/`add_exchange!`. Stack
-  several `@pmslab` lines in one loop to fuse them over a single reconstruction (as `ao_JK!` does).
+  several `@pmtensor` lines in one loop to fuse them over a single reconstruction (as `ao_JK!` does).
   `D[ν,σ]` (ket label σ) ⇒ Coulomb `out[μ,ρ]`; `D[ν,ρ]` (ket label ρ) ⇒ exchange `out[μ,σ]`.
 """
-macro pmslab(ex)
-  return _pmslab_gen(ex)
+macro pmtensor(ex)
+  return _pmtensor_gen(ex)
 end
 
 end # module PMStore

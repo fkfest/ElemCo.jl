@@ -23,7 +23,7 @@ export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
 export calc_system_df_integrals
 export ao_integrals, ensure_ao_integrals!, save_ao_1e_integrals!, generate_mo_dump
 export delete_ao_integrals!, invalidate_ao_1e_integrals!
-export transform_int2, transform_int2_Q, transform_fcidump!, pm_transform, pm_bra_transform, @pmtensor
+export transform_int2, transform_int2_Q, transform_fcidump!, pm_transform
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -906,58 +906,6 @@ function pm_transform_int2_n5(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMa
 end
 
 """
-    pm_bra_transform(pm, Cl, Cr; chunk=256) -> Y
-
-  Half-transform the ± store on the **bra** pair only, keeping the ket AO indices:
-  `Y[p,q,ρ,σ] = Σ_μν ⟨μν|ρσ⟩ Cl[μ,p] Cr[ν,q]` — the dense intermediate the dressing routines build
-  (`v_ooAA` etc. = `pm_bra_transform(pm, Cocc, Cocc)`). This is exactly the bra stage of
-  [`pm_transform_int2_n5`](@ref) (the chunked two-role slab sweep, `[x,c,y]` layout so both bra
-  contractions are permutation-free `mul!`), returned in full rather than fed on to the ket transform.
-  Intended for a MODEST transformed dimension (`size(Cl,2)`,`size(Cr,2)` — e.g. occupied): the result
-  is a dense `[p,q,nao,nao]` array (no output blocking). Pass an identity `Cr` to transform only `μ`.
-"""
-function pm_bra_transform(pm::PMSupermatrices{T}, Cl::AbstractMatrix, Cr::AbstractMatrix; chunk::Int=256) where T
-  n = pm.nao; np = size(Cl,2); nq = size(Cr,2)
-  @assert size(Cl,1) == n && size(Cr,1) == n "coeff AO dimension must be pm.nao=$n"
-  lutμ, lutν = pair_luts(n); chunk = clamp(chunk, 1, pm.npp)
-  Clm = Matrix{T}(Cl); Crm = Matrix{T}(Cr)
-  H2 = zeros(T, np, nq, n, n)
-  Gs = zeros(T,n,chunk,n); Ga = zeros(T,n,chunk,n)                          # [x, c, y]
-  Gs2 = reshape(Gs,n,chunk*n); Ga2 = reshape(Ga,n,chunk*n)
-  hS = zeros(T,np,chunk,n); hA = zeros(T,np,chunk,n)                        # [p, c, y]
-  tp = zeros(T,np,chunk,n); tm = zeros(T,np,chunk,n)
-  H2n = zeros(T,np,chunk,nq); H2s = zeros(T,np,chunk,nq)                    # [p, c, q]
-  hS2=reshape(hS,np,chunk*n); hA2=reshape(hA,np,chunk*n)
-  tp2=reshape(tp,np*chunk,n); tm2=reshape(tm,np*chunk,n)
-  H2n2=reshape(H2n,np*chunk,nq); H2s2=reshape(H2s,np*chunk,nq)
-  kets = zeros(Int,chunk); m = 0
-  flush! = mm -> begin
-    mul!(hS2, transpose(Clm), Gs2); mul!(hA2, transpose(Clm), Ga2)         # bra-1 (μ→p)
-    @. tp = (hS+hA)/2; @. tm = (hS-hA)/2
-    mul!(H2n2, tp2, Crm); mul!(H2s2, tm2, Crm)                             # bra-2 (ν→q)
-    @inbounds for c in 1:mm; ρ=lutμ[kets[c]]; σ=lutν[kets[c]]
-      @views H2[:,:,ρ,σ] .+= H2n[:,c,:]; ρ<σ && (@views H2[:,:,σ,ρ] .+= H2s[:,c,:]); end
-  end
-  for Jb in 1:pm_nblocks(pm)
-    cJ=pm.pairblocks[Jb]; r0=first(cJ); ntile=length(cJ); Ps=spanel(pm,Jb); Pa=apanel(pm,Jb)
-    for jc in 1:length(cJ)
-      m+=1; kets[m]=cJ[jc]; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
-      @inbounds for k in 1:size(Ps,1); x=lutμ[r0+k-1]; y=lutν[r0+k-1]; s=Ps[k,jc]; a=Pa[k,jc]
-        Gs[x,m,y]=s; Gs[y,m,x]=s; Ga[x,m,y]=a; Ga[y,m,x]=-a; end
-      m==chunk && (flush!(m); m=0)
-    end
-    @inbounds for k in ntile+1:size(Ps,1)
-      m+=1; kets[m]=r0+k-1; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
-      for jc in 1:length(cJ); u=lutμ[cJ[jc]]; v=lutν[cJ[jc]]; s=conj(Ps[k,jc]); a=conj(Pa[k,jc])
-        Gs[u,m,v]=s; Gs[v,m,u]=s; Ga[u,m,v]=a; Ga[v,m,u]=-a; end
-      m==chunk && (flush!(m); m=0)
-    end
-  end
-  m>0 && flush!(m)
-  return H2
-end
-
-"""
     pm_transform(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular=true) -> int2t
     pm_transform(EC, pm, C, key; kw...) -> int2t                      # RHF shorthand (C,C,C,C)
 
@@ -981,134 +929,6 @@ function pm_transform(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl
 end
 pm_transform(EC::ECInfo, pm::PMSupermatrices, C::AbstractMatrix, key::AbstractString; kw...) =
   pm_transform(EC, pm, C, C, C, C, key; kw...)
-
-# ---- @pmtensor: an einsum surface over the ± store, lowering to the verbs by index pattern -----
-# Parse helpers run at macro-expansion time on the einsum Expr.
-_pmt_factors(ex) = (ex isa Expr && ex.head === :call && ex.args[1] === :*) ?
-                   reduce(vcat, _pmt_factors.(ex.args[2:end])) : Any[ex]
-function _pmt_ref(f)
-  (f isa Expr && f.head === :ref) || error("@pmtensor: expected an indexed factor like `V[μ,ν,ρ,σ]`, got `$f`")
-  return f.args[1], collect(f.args[2:end])
-end
-# split `out[…] := V[…] * factors…` into (out symbol, out indices, store, store indices, [(coeff, idx)…])
-function _pmt_split(ex)
-  (ex isa Expr && ex.head in (:(:=), :(=))) ||
-    error("@pmtensor: expected `out[…] := V[…] * …`, got `$ex`")
-  outsym, outidx = _pmt_ref(ex.args[1])
-  store = nothing; storeidx = nothing; others = Tuple{Any,Vector{Any}}[]
-  for f in _pmt_factors(ex.args[2])
-    a, idx = _pmt_ref(f)
-    if length(idx) == 4 && store === nothing
-      store = a; storeidx = idx
-    else
-      push!(others, (a, idx))
-    end
-  end
-  store === nothing && error("@pmtensor: no 4-index ± store factor `V[μ,ν,ρ,σ]` in `$(ex.args[2])`")
-  return outsym, outidx, store, storeidx, others
-end
-_pmt_perm(outidx, produced, what) =
-  let p = [something(findfirst(isequal(o), produced), 0) for o in outidx]
-    (length(outidx) == length(produced) && all(>(0), p) && length(unique(p)) == length(p)) ||
-      error("@pmtensor: output indices $outidx are not a permutation of the $what indices $produced")
-    p
-  end
-
-function _pmt_transform(EC, ex)                       # V[μ,ν,ρ,σ] * 4 coeff matrices → pm_transform
-  outsym, outidx, store, sidx, others = _pmt_split(ex)
-  length(others) == 4 || error("@pmtensor transform: expected 4 coeff matrices, got $(length(others))")
-  function coeff(si)
-    for o in others
-      length(o[2]) == 2 && o[2][1] === si && return o
-    end
-    error("@pmtensor transform: no coeff `C[$si, ·]` for store index $si")
-  end
-  cs = [coeff(si) for si in sidx]                     # (Tl,Tl2,Tr,Tr2) matched to (μ,ν,ρ,σ)
-  produced = [c[2][2] for c in cs]                    # their output indices, in (bra1,bra2,ket1,ket2) order
-  perm = _pmt_perm(outidx, produced, "coeff-target")
-  key = string(outsym)
-  call = :( pm_transform($(esc(EC)), $(esc(store)), $(esc(cs[1][1])), $(esc(cs[2][1])),
-                         $(esc(cs[3][1])), $(esc(cs[4][1])), $key; triangular=false) )
-  return :( $(esc(outsym)) = $(perm == [1,2,3,4] ? call : :(permutedims($call, $perm))) )
-end
-
-# 1-arg forms (no EC): a partial BRA transform (coeffs on μ/ν, ket AO kept) or Coulomb/exchange
-# (one 2-index density). Distinguished by how many store indices each non-store factor carries.
-function _pmt_contract(ex)
-  outsym, outidx, store, sidx, others = _pmt_split(ex)
-  storeset = Set{Any}(sidx)
-  nstore(o) = count(i -> i in storeset, o[2])
-  if length(others) == 1 && length(others[1][2]) == 2 && nstore(others[1]) == 2
-    return _pmt_JK(outsym, outidx, sidx, store, others[1])
-  elseif !isempty(others) && all(o -> length(o[2]) == 2 && nstore(o) == 1, others)
-    return _pmt_bra(outsym, outidx, store, sidx, others)
-  end
-  error("@pmtensor: unrecognized pattern — expected coeff matrices on the bra indices " *
-        "(partial transform) or one 2-index density (Coulomb/exchange)")
-end
-
-function _pmt_JK(outsym, outidx, sidx, store, densf)  # V[μ,ν,ρ,σ] * D → Coulomb / exchange
-  dens, didx = densf; μ, ν, ρ, σ = sidx
-  coulomb = didx[1] === ν && didx[2] === σ            # J[μ,ρ] = Σ ⟨μν|ρσ⟩ D[ν,σ]
-  exch    = didx[1] === ν && didx[2] === ρ            # K[μ,σ] = Σ ⟨μν|ρσ⟩ D[ν,ρ]
-  (coulomb || exch) ||
-    error("@pmtensor: density indices $didx must be [$ν,$σ] (Coulomb) or [$ν,$ρ] (exchange)")
-  perm = _pmt_perm(outidx, coulomb ? Any[μ, ρ] : Any[μ, σ], "output")
-  V = esc(store); D = esc(dens); M = gensym(:M); s = gensym(:s)
-  # native band GEMVs + Hermitian mirror rows — the add_coulomb!/add_exchange! contraction exactly
-  body = coulomb ? quote
-      slab_bandmul!(view($M,:,$s.ρ), $s, view($D,:,$s.σ))
-      $s.ρ < $s.σ && slab_bandtmul!(view($M,:,$s.σ), $s, view($D,:,$s.ρ))
-      slab_mirror!($M, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirrort!($M, $s.σ, $s, $D, $s.ρ)
-    end : quote
-      slab_bandmul!(view($M,:,$s.σ), $s, view($D,:,$s.ρ))
-      $s.ρ < $s.σ && slab_bandtmul!(view($M,:,$s.ρ), $s, view($D,:,$s.σ))
-      slab_mirrort!($M, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirror!($M, $s.σ, $s, $D, $s.ρ)
-    end
-  return quote
-    local $M = zeros(promote_type(eltype($V), eltype($D)), $V.nao, $V.nao)
-    for $s in eachslab($V)
-      $body
-    end
-    $(esc(outsym)) = $(perm == [1,2] ? M : :(permutedims($M, $perm)))
-  end
-end
-
-function _pmt_bra(outsym, outidx, store, sidx, coeffs)  # V[μ,ν,ρ,σ] * (coeffs on μ/ν) → pm_bra_transform
-  μ, ν, ρ, σ = sidx
-  Cl = nothing; Clo = μ; Cr = nothing; Cro = ν        # default: untransformed bra index kept as AO
-  for (a, idx) in coeffs
-    (idx[1] === μ || idx[1] === ν) ||
-      error("@pmtensor: partial transform only supports the BRA indices $μ,$ν (as C[$μ,·] / C[$ν,·]); got $idx")
-    idx[1] === μ ? (Cl = a; Clo = idx[2]) : (Cr = a; Cro = idx[2])
-  end
-  perm = _pmt_perm(outidx, Any[Clo, Cro, ρ, σ], "output")
-  V = esc(store)
-  ident = :(Matrix{eltype($V)}(I, $V.nao, $V.nao))     # keep an un-transformed bra index (identity coeff)
-  call = :( pm_bra_transform($V, $(Cl === nothing ? ident : esc(Cl)), $(Cr === nothing ? ident : esc(Cr))) )
-  return :( $(esc(outsym)) = $(perm == [1,2,3,4] ? call : :(permutedims($call, $perm))) )
-end
-
-"""
-    @pmtensor [EC] out[…] := V[μ,ν,ρ,σ] * …
-
-  einsum-style contraction over a ± store `V` (`PMSupermatrices`), lowered to the right routine by
-  the index pattern — so the code shows *what* is contracted, not which verb to call:
-  - **AO→MO transform** (pass `EC`): `@pmtensor EC int2[p,q,r,s] := V[μ,ν,ρ,σ]*Tl[μ,p]*Tl2[ν,q]*Tr[ρ,r]*Tr2[σ,s]`
-    → [`pm_transform`](@ref) (mmap, full dense `[p,q,r,s]`).
-  - **Partial bra transform** (one or two coeffs on the bra pair, ket kept AO — the dressing pattern):
-    `@pmtensor voo[i,j,ρ,σ] := V[μ,ν,ρ,σ]*Co[μ,i]*Co[ν,j]` or `@pmtensor vAo[μ,j,ρ,σ] := V[μ,ν,ρ,σ]*Co[ν,j]`
-    → [`pm_bra_transform`](@ref) (dense). Only the bra indices `μ,ν` are transformable this way.
-  - **Coulomb** `@pmtensor J[μ,ρ] := V[μ,ν,ρ,σ]*D[ν,σ]` / **exchange** `@pmtensor K[μ,σ] := V[μ,ν,ρ,σ]*D[ν,ρ]`
-    → a dense `nao×nao` build over [`eachslab`](@ref) (the `add_coulomb!`/`add_exchange!` contraction).
-  Output indices may be permuted relative to the natural order (a `permutedims` is inserted).
-"""
-macro pmtensor(args...)
-  length(args) == 2 && return _pmt_transform(args[1], args[2])
-  length(args) == 1 && return _pmt_contract(args[1])
-  error("@pmtensor: use `@pmtensor EC out[…] := …` (full transform) or `@pmtensor out[…] := …` " *
-        "(partial bra transform / Coulomb / exchange)")
-end
 
 """
     transform_int1(int1::AbstractArray, Tl::AbstractArray, Tr::AbstractArray) -> int1t

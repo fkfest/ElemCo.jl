@@ -13,7 +13,7 @@ using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
 using ElemCo.TensorTools: detri_int2, @tensor, newmmap, closemmap, mmap3idx
 using ElemCo.PMStore
 using ElemCo.FockFactory: ao_JK!, ao_J2K!
-using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform, pm_bra_transform, @pmtensor
+using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform
 using ElemCo.ECInfos: delete_file!, file_exists
 using ElemCo.MSystems: parse_geometry
 using LinearAlgebra
@@ -454,36 +454,21 @@ end
   end
 end
 
-# @pmtensor einsum surface: lowers by index pattern to pm_transform / eachslab. Checked against
-# the dense @tensor reference on the reconstructed ⟨μν|ρσ⟩.
-@testset "@pmtensor einsum macro" begin
+# @pmtensor: a per-slab einsum inside an `eachslab` loop (emits native band GEMV + ket-swap +
+# Hermitian mirror). Fuse Coulomb J and exchange K over one sweep; check vs the dense @tensor reference.
+@testset "@pmtensor per-slab einsum" begin
   for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
     EC, int2 = build_store(n, T, maxcols); pm = open_pm_store(EC)
     G = detri_int2(Array{T,3}(int2), n, 1:n, 1:n, 1:n, 1:n)
-    Tl = randn(T,n,4); Tl2 = randn(T,n,3); Tr = randn(T,n,4); Tr2 = randn(T,n,3); D = randn(T,n,n)
-    @tensor tref[p,q,r,s] := G[μ,ν,ρ,σ]*Tl[μ,p]*Tl2[ν,q]*Tr[ρ,r]*Tr2[σ,s]   # AO→MO transform
-    @pmtensor EC tmac[p,q,r,s] := pm[μ,ν,ρ,σ]*Tl[μ,p]*Tl2[ν,q]*Tr[ρ,r]*Tr2[σ,s]
-    @test maximum(abs.(Array(tmac) .- tref)) < 1e-11
-    @tensor Jref[μ,ρ] := G[μ,ν,ρ,σ]*D[ν,σ]                                   # Coulomb
-    @pmtensor Jmac[μ,ρ] := pm[μ,ν,ρ,σ]*D[ν,σ]
-    @test maximum(abs.(Jmac .- Jref)) < 1e-11
-    @tensor Kref[μ,σ] := G[μ,ν,ρ,σ]*D[ν,ρ]                                   # exchange
-    @pmtensor Kmac[μ,σ] := pm[μ,ν,ρ,σ]*D[ν,ρ]
-    @test maximum(abs.(Kmac .- Kref)) < 1e-11
-    @pmtensor Jt[ρ,μ] := pm[μ,ν,ρ,σ]*D[ν,σ]                                  # permuted output
-    @test maximum(abs.(Jt .- transpose(Jref))) < 1e-11
-    # partial BRA transform (the dressing pattern) — 2-index, 1-index (μ), 1-index (ν)
-    Co = randn(T,n,3); Cv = randn(T,n,4)
-    @tensor b2ref[i,j,ρ,σ] := G[μ,ν,ρ,σ]*Co[μ,i]*Cv[ν,j]
-    @pmtensor b2[i,j,ρ,σ] := pm[μ,ν,ρ,σ]*Co[μ,i]*Cv[ν,j]
-    @test maximum(abs.(b2 .- b2ref)) < 1e-11
-    @test maximum(abs.(pm_bra_transform(pm, Co, Cv) .- b2ref)) < 1e-11        # verb directly
-    @tensor b1ref[i,ν,ρ,σ] := G[μ,ν,ρ,σ]*Co[μ,i]
-    @pmtensor b1[i,ν,ρ,σ] := pm[μ,ν,ρ,σ]*Co[μ,i]
-    @test maximum(abs.(b1 .- b1ref)) < 1e-11
-    @tensor b1νref[μ,j,ρ,σ] := G[μ,ν,ρ,σ]*Cv[ν,j]
-    @pmtensor b1ν[μ,j,ρ,σ] := pm[μ,ν,ρ,σ]*Cv[ν,j]
-    @test maximum(abs.(b1ν .- b1νref)) < 1e-11
+    D = randn(T, n, n); J = zeros(T, n, n); K = zeros(T, n, n)
+    for s in eachslab(pm)                        # one reconstruction per slab, J + K fused
+      @pmtensor J[μ,ρ] += s[μ,ν,ρ,σ] * D[ν,σ]    # Coulomb
+      @pmtensor K[μ,σ] += s[μ,ν,ρ,σ] * D[ν,ρ]    # exchange
+    end
+    @tensor Jref[μ,ρ] := G[μ,ν,ρ,σ]*D[ν,σ]
+    @tensor Kref[μ,σ] := G[μ,ν,ρ,σ]*D[ν,ρ]
+    @test maximum(abs.(J .- Jref)) < 1e-11
+    @test maximum(abs.(K .- Kref)) < 1e-11
     close_pm_store!(EC, pm)
   end
 end

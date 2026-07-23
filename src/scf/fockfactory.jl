@@ -346,8 +346,8 @@ function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, pm::PMSupermatrices{T},
   hermitian && T <: Real && eltype(Dj) <: Real && return ao_JK_sym!(J, K, pm, Dj)
   TF = promote_type(T, eltype(Dj), eltype(Dk))
   for s in eachslab(pm; TF=TF)                             # one reconstruction per slab, J + K fused
-    @pmslab J[μ,ρ] += s[μ,ν,ρ,σ] * Dj[ν,σ]                # Coulomb
-    @pmslab K[μ,σ] += s[μ,ν,ρ,σ] * Dk[ν,ρ]                # exchange
+    @pmtensor J[μ,ρ] += s[μ,ν,ρ,σ] * Dj[ν,σ]                # Coulomb
+    @pmtensor K[μ,σ] += s[μ,ν,ρ,σ] * Dk[ν,ρ]                # exchange
   end
   return J, K
 end
@@ -366,9 +366,9 @@ function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
   hermitian && T <: Real && eltype(Dt) <: Real && return ao_J2K_sym!(J, Ka, Kb, pm, Dt, Da, Db)
   TF = promote_type(T, eltype(Dt), eltype(Da), eltype(Db))
   for s in eachslab(pm; TF=TF)                             # shared Coulomb + two same-spin K, one sweep
-    @pmslab J[μ,ρ]  += s[μ,ν,ρ,σ] * Dt[ν,σ]               # shared Coulomb from the total density
-    @pmslab Ka[μ,σ] += s[μ,ν,ρ,σ] * Da[ν,ρ]               # same-spin exchange α
-    @pmslab Kb[μ,σ] += s[μ,ν,ρ,σ] * Db[ν,ρ]               # same-spin exchange β
+    @pmtensor J[μ,ρ]  += s[μ,ν,ρ,σ] * Dt[ν,σ]               # shared Coulomb from the total density
+    @pmtensor Ka[μ,σ] += s[μ,ν,ρ,σ] * Da[ν,ρ]               # same-spin exchange α
+    @pmtensor Kb[μ,σ] += s[μ,ν,ρ,σ] * Db[ν,ρ]               # same-spin exchange β
   end
   return J, Ka, Kb
 end
