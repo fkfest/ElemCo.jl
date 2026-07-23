@@ -345,10 +345,9 @@ function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, pm::PMSupermatrices{T},
                 Dj::AbstractMatrix, Dk::AbstractMatrix; hermitian::Bool=false) where T
   hermitian && T <: Real && eltype(Dj) <: Real && return ao_JK_sym!(J, K, pm, Dj)
   TF = promote_type(T, eltype(Dj), eltype(Dk))
-  w = SlabWork{TF}(pm)
-  pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
-    add_coulomb!(J,  w, ρ, σ, Dj, native_lo, mirror_lo)
-    add_exchange!(K, w, ρ, σ, Dk, native_lo, mirror_lo)
+  for s in eachslab(pm; TF=TF)                             # one reconstruction per slab, J + K fused
+    @pmslab J[μ,ρ] += s[μ,ν,ρ,σ] * Dj[ν,σ]                # Coulomb
+    @pmslab K[μ,σ] += s[μ,ν,ρ,σ] * Dk[ν,ρ]                # exchange
   end
   return J, K
 end
@@ -366,11 +365,10 @@ function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
                  Da::AbstractMatrix, Db::AbstractMatrix; hermitian::Bool=false) where T
   hermitian && T <: Real && eltype(Dt) <: Real && return ao_J2K_sym!(J, Ka, Kb, pm, Dt, Da, Db)
   TF = promote_type(T, eltype(Dt), eltype(Da), eltype(Db))
-  w = SlabWork{TF}(pm)
-  pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
-    add_coulomb!(J,  w, ρ, σ, Dt, native_lo, mirror_lo)    # shared Coulomb from the total density
-    add_exchange!(Ka, w, ρ, σ, Da, native_lo, mirror_lo)   # same-spin exchange α
-    add_exchange!(Kb, w, ρ, σ, Db, native_lo, mirror_lo)   # same-spin exchange β
+  for s in eachslab(pm; TF=TF)                             # shared Coulomb + two same-spin K, one sweep
+    @pmslab J[μ,ρ]  += s[μ,ν,ρ,σ] * Dt[ν,σ]               # shared Coulomb from the total density
+    @pmslab Ka[μ,σ] += s[μ,ν,ρ,σ] * Da[ν,ρ]               # same-spin exchange α
+    @pmslab Kb[μ,σ] += s[μ,ν,ρ,σ] * Db[ν,ρ]               # same-spin exchange β
   end
   return J, Ka, Kb
 end

@@ -37,8 +37,9 @@ using ..ElemCo.Utils
 
 export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
        pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
-       pm_matmul!, band_htrans!, pair_luts,
+       pm_matmul!, pm_matvec!, band_htrans!, pair_luts,
        SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
+       PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!, @pmslab,
        PMWriter, pm_writer, pm_write_block!, pm_close_writer!
 
 const PM_S_FILE = "ao_pm_s"
@@ -535,6 +536,152 @@ function pm_slab_sweep!(f, pm::PMSupermatrices, w::SlabWork)
     end
   end
   return
+end
+
+# ======================= high-level "PM tensor" verbs / streaming ============================
+# A thin, tensor-like API over the primitives above (the substrate a future @pmtensor macro would
+# lower to). Verbs for the closed-form contractions live with their primitives (pm_transform in
+# IntegralTools, pm_exchange near the kext, pm_fock! in FockFactory); the two below — the pair-space
+# matvec and the slab iterator — belong here because they ARE the low-level engine.
+
+"""
+    pm_matvec!(out, pm, which, X) -> out
+
+  Pair-space matvec `out = Vs·X` (`which=:s`) or `out = Va·X` (`which=:a`) over packed AO pairs —
+  the verb name for the primitive [`pm_matmul!`](@ref).
+"""
+@inline pm_matvec!(out, pm::PMSupermatrices, which::Symbol, X) = pm_matmul!(out, pm, which, X)
+
+"""
+    PMSlab{TF}
+
+  One reconstructed ket-pair slab yielded by [`eachslab`](@ref): `Gslab(s)[μ,ν] = ⟨μν|ρσ⟩` for the
+  ket pair `(s.ρ, s.σ)`, with the native/mirror L-band lower bounds `s.native_lo`/`s.mirror_lo`
+  (band = `(lo, s.nao]`). The slab aliases the iterator's single reusable scratch — it is valid
+  ONLY until the next iteration; do not `collect`/retain it. Contract it with [`slab_bandmul!`](@ref)
+  / [`slab_bandtmul!`](@ref) (native role) and [`slab_mirror!`](@ref) / [`slab_mirrort!`](@ref)
+  (Hermitian mirror role).
+"""
+struct PMSlab{TF}
+  w::SlabWork{TF}
+  ρ::Int
+  σ::Int
+  native_lo::Int
+  mirror_lo::Int
+  nao::Int
+end
+"""    Gslab(s::PMSlab) -> Matrix — the reconstructed dense slab `⟨μν|ρσ⟩` (aliases scratch)."""
+@inline Gslab(s::PMSlab) = s.w.G
+
+struct SlabIterator{TF}
+  pm::PMSupermatrices
+  w::SlabWork{TF}
+end
+"""
+    eachslab(pm; TF=eltype(pm)) -> iterator of PMSlab
+
+  The iterator form of [`pm_slab_sweep!`](@ref): `for slab in eachslab(pm) …` reconstructs each
+  stored ket-pair slab `⟨μν|ρσ⟩` into shared scratch and yields a [`PMSlab`](@ref), in the exact
+  same visit order (native columns of a σ-block in turn). Lets a custom AO-store contraction be
+  written as an ordinary loop with the band helpers ([`slab_bandmul!`](@ref) etc.) instead of a
+  `pm_slab_sweep!` callback. The yielded slab aliases one reusable buffer — single pass, do not retain.
+
+# Example — AO Coulomb build `J[μ,ρ] = Σ_νσ ⟨μν|ρσ⟩ D[ν,σ]`
+```julia
+J = zeros(eltype(pm), pm.nao, pm.nao)
+for s in eachslab(pm)
+  slab_bandmul!(view(J,:,s.ρ), s, view(D,:,s.σ))            # native: ⟨··|ρσ⟩ · D[:,σ]
+  s.ρ < s.σ && slab_bandtmul!(view(J,:,s.σ), s, view(D,:,s.ρ))
+  slab_mirror!(J, s.ρ, s, D, s.σ)                           # mirror: ⟨ρσ|··⟩ · D[σ,:]
+  s.ρ < s.σ && slab_mirrort!(J, s.σ, s, D, s.ρ)
+end
+```
+"""
+eachslab(pm::PMSupermatrices; TF=eltype(pm)) = SlabIterator{TF}(pm, SlabWork{TF}(pm))
+
+Base.IteratorSize(::Type{<:SlabIterator}) = Base.SizeUnknown()
+Base.eltype(::Type{SlabIterator{TF}}) where {TF} = PMSlab{TF}
+Base.iterate(it::SlabIterator) = _slab_step(it, 1, 1)
+Base.iterate(it::SlabIterator, state) = _slab_step(it, state[1], state[2])
+@inline function _slab_step(it::SlabIterator{TF}, Jb::Int, jc::Int) where {TF}
+  pm = it.pm; w = it.w
+  @inbounds while Jb <= pm_nblocks(pm)
+    cJ = pm.pairblocks[Jb]
+    if jc <= length(cJ)
+      native_lo = Jb == 1 ? 0 : last(pm.σblocks[Jb-1])
+      mirror_lo = last(pm.σblocks[Jb])
+      c = cJ[jc]
+      reconstruct_slab!(w, spanel(pm, Jb), apanel(pm, Jb), jc, first(cJ))
+      return PMSlab{TF}(w, w.lutμ[c], w.lutν[c], native_lo, mirror_lo, pm.nao), (Jb, jc + 1)
+    end
+    Jb += 1; jc = 1
+  end
+  return nothing
+end
+
+# band helpers reading the band bounds off the slab (native role = this column as ket ⟨··|ρσ⟩;
+# mirror role = the Hermitian mirror ⟨ρσ|··⟩, conj-wrapped). `x`/`D` are the density operands.
+"""    slab_bandmul!(y, s::PMSlab, x) — native role: `y += band(⟨··|ρσ⟩)·x` (ket order ρσ)."""
+@inline slab_bandmul!(y, s::PMSlab, x)  = band_mul!(y, s.w.G, s.native_lo, s.nao, x)
+"""    slab_bandtmul!(y, s::PMSlab, x) — native role, transposed: `y += band(⟨··|ρσ⟩)ᵀ·x` (ket order σρ)."""
+@inline slab_bandtmul!(y, s::PMSlab, x) = band_tmul!(y, s.w.G, s.native_lo, s.nao, x)
+"""    slab_mirror!(out, i, s::PMSlab, D, j) — Hermitian mirror role: `out[i,:] += conj(band)·conj(D[j,:])`."""
+@inline slab_mirror!(out, i::Int, s::PMSlab, D, j::Int)  = add_mirror_row!(out, i, s.w, D, j, s.mirror_lo, false)
+"""    slab_mirrort!(out, i, s::PMSlab, D, j) — Hermitian mirror role, transposed band."""
+@inline slab_mirrort!(out, i::Int, s::PMSlab, D, j::Int) = add_mirror_row!(out, i, s.w, D, j, s.mirror_lo, true)
+
+# ---- @pmslab: a per-slab einsum, the workhorse inside an `eachslab` loop --------------------
+# `@pmslab out[…] += s[μ,ν,ρ,σ] * D[…]` where `s` is the current PMSlab. Emits the native band GEMV
+# + the ket-swap + the two Hermitian-mirror rows automatically (exactly add_coulomb!/add_exchange!),
+# so the caller writes the physics per slab and fuses as many terms as it likes in one sweep. `D`
+# contracting the bra index ν with ket label σ is Coulomb; with ket label ρ is exchange.
+function _pmslab_gen(ex)
+  (ex isa Expr && ex.head === :(+=)) || error("@pmslab: expected `out[…] += s[μ,ν,ρ,σ] * D[…]`")
+  lhs, rhs = ex.args
+  (lhs isa Expr && lhs.head === :ref) || error("@pmslab: the output must be indexed, got `$lhs`")
+  factors = (rhs isa Expr && rhs.head === :call && rhs.args[1] === :*) ? rhs.args[2:end] : Any[rhs]
+  slabv = nothing; sidx = nothing; dens = nothing; didx = nothing
+  for f in factors
+    (f isa Expr && f.head === :ref) || error("@pmslab: factors must be indexed, got `$f`")
+    idx = f.args[2:end]
+    if length(idx) == 4 && slabv === nothing
+      slabv = f.args[1]; sidx = idx
+    elseif length(idx) == 2
+      dens = f.args[1]; didx = idx
+    else
+      error("@pmslab: expected a 4-index slab `s[μ,ν,ρ,σ]` and one 2-index density `D[·,·]`")
+    end
+  end
+  (slabv !== nothing && dens !== nothing) || error("@pmslab: need `s[μ,ν,ρ,σ] * D[·,·]`")
+  μ, ν, ρ, σ = sidx
+  coulomb = didx[1] === ν && didx[2] === σ                # out[μ,ρ] += Σ_ν ⟨μν|ρσ⟩ D[ν,σ]
+  exch    = didx[1] === ν && didx[2] === ρ                # out[μ,σ] += Σ_ν ⟨μν|ρσ⟩ D[ν,ρ]
+  (coulomb || exch) || error("@pmslab: density $didx must be [$ν,$σ] (Coulomb) or [$ν,$ρ] (exchange)")
+  s = esc(slabv); D = esc(dens); O = esc(lhs.args[1])
+  coulomb ? quote
+      slab_bandmul!(view($O,:,$s.ρ), $s, view($D,:,$s.σ))
+      $s.ρ < $s.σ && slab_bandtmul!(view($O,:,$s.σ), $s, view($D,:,$s.ρ))
+      slab_mirror!($O, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirrort!($O, $s.σ, $s, $D, $s.ρ)
+    end : quote
+      slab_bandmul!(view($O,:,$s.σ), $s, view($D,:,$s.ρ))
+      $s.ρ < $s.σ && slab_bandtmul!(view($O,:,$s.ρ), $s, view($D,:,$s.σ))
+      slab_mirrort!($O, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirror!($O, $s.σ, $s, $D, $s.ρ)
+    end
+end
+
+"""
+    @pmslab out[…] += s[μ,ν,ρ,σ] * D[…]
+
+  A per-slab einsum for use inside `for s in eachslab(pm) … end`: contract the current slab
+  (`s[μ,ν,ρ,σ]` = `⟨μν|ρσ⟩`) with a density `D`, accumulating into `out`. The macro emits the
+  native band GEMV, the ket-swap, and both Hermitian-mirror rows (i.e. [`slab_bandmul!`](@ref) /
+  [`slab_bandtmul!`](@ref) / [`slab_mirror!`](@ref) / [`slab_mirrort!`](@ref)) — the full two-role
+  contribution of that slab, identical to `FockFactory`'s `add_coulomb!`/`add_exchange!`. Stack
+  several `@pmslab` lines in one loop to fuse them over a single reconstruction (as `ao_JK!` does).
+  `D[ν,σ]` (ket label σ) ⇒ Coulomb `out[μ,ρ]`; `D[ν,ρ]` (ket label ρ) ⇒ exchange `out[μ,σ]`.
+"""
+macro pmslab(ex)
+  return _pmslab_gen(ex)
 end
 
 end # module PMStore

@@ -13,7 +13,7 @@ using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
 using ElemCo.TensorTools: detri_int2, @tensor, newmmap, closemmap, mmap3idx
 using ElemCo.PMStore
 using ElemCo.FockFactory: ao_JK!, ao_J2K!
-using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2
+using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform, pm_bra_transform, @pmtensor
 using ElemCo.ECInfos: delete_file!, file_exists
 using ElemCo.MSystems: parse_geometry
 using LinearAlgebra
@@ -382,11 +382,108 @@ end
     ref_ab = transform_int2_Q(intmem, Ca, Cb, Ca, Cb)                            # UHF αβ (full dense)
     new_ab = pm_transform_int2(EC, pm, Ca, Cb, Ca, Cb, "t_ab"; triangular=false)
     @test maximum(abs.(collect(new_ab) .- ref_ab)) < 1e-11
-    # output p-blocking (membudget=1 ⇒ one p per pass) must give the identical result
+    # ket-output blocking (membudget=1 ⇒ one ket pair per pm_matmul! pass) must be identical
     blk_aa = pm_transform_int2(EC, pm, Ca, Ca, Ca, Ca, "t_aab"; triangular=true, membudget=1)
     blk_ab = pm_transform_int2(EC, pm, Ca, Cb, Ca, Cb, "t_abb"; triangular=false, membudget=1)
     @test maximum(abs.(collect(blk_aa) .- ref_aa)) < 1e-11
     @test maximum(abs.(collect(blk_ab) .- ref_ab)) < 1e-11
+    close_pm_store!(EC, pm)
+  end
+end
+
+@testset "pm_transform_int2_n5 (batched direct-from-± N⁵) ↔ joint transform" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    intmem = Array{T,3}(int2)
+    na, nb = 4, 3
+    Ca = randn(T, n, na); Cb = randn(T, n, nb)
+    ref_aa = transform_int2(intmem, Ca, Ca, Ca, Ca)                              # RHF (triangular)
+    new_aa = pm_transform_int2_n5(EC, pm, Ca, Ca, Ca, Ca, "n_aa"; triangular=true)
+    @test maximum(abs.(collect(new_aa) .- ref_aa)) < 1e-11
+    ref_ab = transform_int2_Q(intmem, Ca, Cb, Ca, Cb)                            # UHF αβ (full dense)
+    new_ab = pm_transform_int2_n5(EC, pm, Ca, Cb, Ca, Cb, "n_ab"; triangular=false)
+    @test maximum(abs.(collect(new_ab) .- ref_ab)) < 1e-11
+    # p-block + slab-chunk blocking (tiny membudget ⇒ |pb|=1, chunk=1) must be identical
+    blk_aa = pm_transform_int2_n5(EC, pm, Ca, Ca, Ca, Ca, "n_aab"; triangular=true, membudget=1)
+    blk_ab = pm_transform_int2_n5(EC, pm, Ca, Cb, Ca, Cb, "n_abb"; triangular=false, membudget=1)
+    @test maximum(abs.(collect(blk_aa) .- ref_aa)) < 1e-11
+    @test maximum(abs.(collect(blk_ab) .- ref_ab)) < 1e-11
+    close_pm_store!(EC, pm)
+  end
+end
+
+# High-level ± "tensor" API: the pm_transform verb (routes pair-space vs N⁵), the eachslab
+# streaming iterator (must reproduce pm_slab_sweep! exactly), and the pm_matvec! alias.
+@testset "PM tensor verbs (pm_transform / eachslab / pm_matvec!)" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    intmem = Array{T,3}(int2)
+    C = randn(T, n, 4)
+    # pm_transform ≡ transform_int2 (RHF triangular) and ≡ transform_int2_Q (full)
+    @test maximum(abs.(collect(pm_transform(EC, pm, C, "v_aa"; triangular=true)) .-
+                       transform_int2(intmem, C, C, C, C))) < 1e-11
+    Cb = randn(T, n, 3)
+    @test maximum(abs.(collect(pm_transform(EC, pm, C, Cb, C, Cb, "v_ab"; triangular=false)) .-
+                       transform_int2_Q(intmem, C, Cb, C, Cb))) < 1e-11
+    # eachslab must reproduce pm_slab_sweep! bit-for-bit (an AO Coulomb build), and visit npp columns
+    D = randn(T, n, n)
+    Jsweep = zeros(T, n, n); w = SlabWork{T}(pm)
+    pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
+      band_mul!(view(Jsweep,:,ρ), w.G, native_lo, n, view(D,:,σ))
+      ρ < σ && band_tmul!(view(Jsweep,:,σ), w.G, native_lo, n, view(D,:,ρ))
+      add_mirror_row!(Jsweep, ρ, w, D, σ, mirror_lo, false)
+      ρ < σ && add_mirror_row!(Jsweep, σ, w, D, ρ, mirror_lo, true)
+    end
+    Jiter = zeros(T, n, n); nslab = 0
+    for s in eachslab(pm)
+      nslab += 1
+      slab_bandmul!(view(Jiter,:,s.ρ), s, view(D,:,s.σ))
+      s.ρ < s.σ && slab_bandtmul!(view(Jiter,:,s.σ), s, view(D,:,s.ρ))
+      slab_mirror!(Jiter, s.ρ, s, D, s.σ)
+      s.ρ < s.σ && slab_mirrort!(Jiter, s.σ, s, D, s.ρ)
+    end
+    @test nslab == pm.npp
+    @test Jiter == Jsweep                      # bit-for-bit
+    # pm_matvec! ≡ pm_matmul!
+    X = randn(T, pm.npp, 3); o1 = zeros(T, pm.npp, 3); o2 = zeros(T, pm.npp, 3)
+    pm_matvec!(o1, pm, :s, X); pm_matmul!(o2, pm, :s, X)
+    @test o1 == o2
+    close_pm_store!(EC, pm)
+  end
+end
+
+# @pmtensor einsum surface: lowers by index pattern to pm_transform / eachslab. Checked against
+# the dense @tensor reference on the reconstructed ⟨μν|ρσ⟩.
+@testset "@pmtensor einsum macro" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
+    EC, int2 = build_store(n, T, maxcols); pm = open_pm_store(EC)
+    G = detri_int2(Array{T,3}(int2), n, 1:n, 1:n, 1:n, 1:n)
+    Tl = randn(T,n,4); Tl2 = randn(T,n,3); Tr = randn(T,n,4); Tr2 = randn(T,n,3); D = randn(T,n,n)
+    @tensor tref[p,q,r,s] := G[μ,ν,ρ,σ]*Tl[μ,p]*Tl2[ν,q]*Tr[ρ,r]*Tr2[σ,s]   # AO→MO transform
+    @pmtensor EC tmac[p,q,r,s] := pm[μ,ν,ρ,σ]*Tl[μ,p]*Tl2[ν,q]*Tr[ρ,r]*Tr2[σ,s]
+    @test maximum(abs.(Array(tmac) .- tref)) < 1e-11
+    @tensor Jref[μ,ρ] := G[μ,ν,ρ,σ]*D[ν,σ]                                   # Coulomb
+    @pmtensor Jmac[μ,ρ] := pm[μ,ν,ρ,σ]*D[ν,σ]
+    @test maximum(abs.(Jmac .- Jref)) < 1e-11
+    @tensor Kref[μ,σ] := G[μ,ν,ρ,σ]*D[ν,ρ]                                   # exchange
+    @pmtensor Kmac[μ,σ] := pm[μ,ν,ρ,σ]*D[ν,ρ]
+    @test maximum(abs.(Kmac .- Kref)) < 1e-11
+    @pmtensor Jt[ρ,μ] := pm[μ,ν,ρ,σ]*D[ν,σ]                                  # permuted output
+    @test maximum(abs.(Jt .- transpose(Jref))) < 1e-11
+    # partial BRA transform (the dressing pattern) — 2-index, 1-index (μ), 1-index (ν)
+    Co = randn(T,n,3); Cv = randn(T,n,4)
+    @tensor b2ref[i,j,ρ,σ] := G[μ,ν,ρ,σ]*Co[μ,i]*Cv[ν,j]
+    @pmtensor b2[i,j,ρ,σ] := pm[μ,ν,ρ,σ]*Co[μ,i]*Cv[ν,j]
+    @test maximum(abs.(b2 .- b2ref)) < 1e-11
+    @test maximum(abs.(pm_bra_transform(pm, Co, Cv) .- b2ref)) < 1e-11        # verb directly
+    @tensor b1ref[i,ν,ρ,σ] := G[μ,ν,ρ,σ]*Co[μ,i]
+    @pmtensor b1[i,ν,ρ,σ] := pm[μ,ν,ρ,σ]*Co[μ,i]
+    @test maximum(abs.(b1 .- b1ref)) < 1e-11
+    @tensor b1νref[μ,j,ρ,σ] := G[μ,ν,ρ,σ]*Cv[ν,j]
+    @pmtensor b1ν[μ,j,ρ,σ] := pm[μ,ν,ρ,σ]*Cv[ν,j]
+    @test maximum(abs.(b1ν .- b1νref)) < 1e-11
     close_pm_store!(EC, pm)
   end
 end

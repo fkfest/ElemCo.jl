@@ -23,7 +23,7 @@ export generate_3idx_integrals, contract_df_integrals!, transform_3idx!
 export calc_system_df_integrals
 export ao_integrals, ensure_ao_integrals!, save_ao_1e_integrals!, generate_mo_dump
 export delete_ao_integrals!, invalidate_ao_1e_integrals!
-export transform_int2, transform_int2_Q, transform_fcidump!
+export transform_int2, transform_int2_Q, transform_fcidump!, pm_transform, pm_bra_transform, @pmtensor
 
 """
     generate_AO_DF_integrals(EC::ECInfo, fitbasis="mpfit"; save3idx=true)
@@ -729,109 +729,385 @@ function transform_int2_Q(EC::ECInfo, int2::Array{T,4}, Tl::AbstractArray, Tl2::
 end
 
 # --- on-the-fly AO→MO transform directly from the ± supermatrix store ------------------
-# Avoids reconstructing the full joint `ao_int2` (nao⁴/2). Two stages, streaming the ± store once:
-#   1. `pm_bra_ket2_sweep` — bra transform (both μν → MO via `pm_occ_early`'s band_htrans!+±-fold
-#      core) with the ket-2 contraction FUSED in, giving `Y[p,q,ρ,s]` (nmo³·nao — never the full
-#      `Hbra[p,q,ρσ]` of nmo²·nao²);
-#   2. the final ket-1 contraction `Σ_ρ Y[p,q,ρ,s] Tr[ρ,r]` → `⟨pq|rs⟩` (triangular or dense).
-# Footprint ≈ Y — orders of magnitude below the joint int2 when nmo ≪ nao (active spaces).
+# Entirely BLAS-3, and never reconstructs the joint `ao_int2` (nao⁴/2). ±-fold the coefficient
+# outer products into pair-space transform matrices, then contract the AO ket pair with the panels
+# via `pm_matmul!` (Stage 1, big panel GEMMs) and the AO bra pair with a dense GEMM (Stage 2):
+#     ⟨pq|rs⟩ = 2·( Lsᵀ·(Vs·Rs) + Laᵀ·(Va·Ra) )
+# where Rs,Ra (Ls,La) are the ±-folds of Tr⊗Tr2 (Tl⊗Tl2) over packed AO pairs. Contracting the ket
+# PAIR at once costs O(nao⁴·nmo²): for a fixed active space (nmo ≪ nao) that is O(nao⁴) and the large
+# square panel GEMMs make it far faster than an index-by-index sweep (no slab reconstruction at all);
+# but for nmo → nao it is N⁶, so `generate_mo_dump` routes near-full transforms to the joint N⁵ path
+# ([`pm_transform_worthwhile`](@ref)). The ket-output pairs are blocked to bound the working set.
 
 """
-    pm_bra_ket2_sweep(pm, Tl, Tl2, Tr2) -> Y
+    pm_pairfold(pm, Ca, Cb, pairs) -> (Ds, Da)
 
-  Half-transform the ± AO store on the fly, contracting BOTH bra indices with `Tl`,`Tl2` and the
-  ket-2 index with `Tr2` in a single n⁴/4 two-role sweep (the [`pm_occ_early`](@ref) core
-  generalized to arbitrary rectangular coefficients):
-  `Y[p,q,ρ,s] = Σ_μνσ ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q] Tr2[σ,s]`. Neither the full AO int2 nor the full
-  bra-transform `Hbra[p,q,ρσ]` is formed — only `Y` and `O(nmo·nao)` band buffers.
+  ±-fold of the coefficient outer products `Ca[:,p]⊗Cb[:,q]` over packed AO pairs, for the list of
+  MO pairs `pairs`: `Ds[tri(μν),j] = ½(Ca[μ,p]Cb[ν,q] + Ca[ν,p]Cb[μ,q])`, `Da = ½(… − …)` (½ on the
+  `μ=ν` diagonal, `Da` diagonal 0) — the pair-space transform matrix (the `pm_matmul!` "density"
+  convention). Each is `npp × length(pairs)`.
 """
-function pm_bra_ket2_sweep(pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl2::AbstractMatrix,
-                           Tr2::AbstractMatrix) where T
-  n = pm.nao; np = size(Tl,2); nq = size(Tl2,2); ns = size(Tr2,2)
-  Y = zeros(T, np, nq, n, ns)
-  lutμ, lutν = pair_luts(n)
-  Sp = zeros(T, n, n); Am = zeros(T, n, n)                  # reconstructed Vs / Va band slabs
-  hS = zeros(T, np, n); hA = zeros(T, np, n)
-  tp = zeros(T, np, n); tm = zeros(T, np, n); Hc = zeros(T, np, nq)
-  # bra transform of the reconstructed ± slab for ket pair (ρ,σ), then fuse the ket-2 contraction
-  function accumulate!(ρ::Int, σ::Int, lo::Int, hi::Int)
-    band_htrans!(hS, Tl, Sp, lo, hi); band_htrans!(hA, Tl, Am, lo, hi)   # bra-1 (μ→p)
-    tp .= (hS .+ hA) ./ 2; tm .= (hS .- hA) ./ 2            # tp: ket (ρ,σ);  tm: ket (σ,ρ)
-    mul!(Hc, tp, Tl2)                                       # bra-2 (ν→q): Hc[p,q] = Σ_μν ⟨μν|ρσ⟩ Tl Tl2
-    @views Y[:,:,ρ,:] .+= reshape(Hc, np, nq, 1) .* reshape(Tr2[σ,:], 1, 1, ns)   # fuse ket-2 σ→s
-    if ρ < σ
-      mul!(Hc, tm, Tl2)
-      @views Y[:,:,σ,:] .+= reshape(Hc, np, nq, 1) .* reshape(Tr2[ρ,:], 1, 1, ns)
-    end
-    return
-  end
-  @inbounds for Jb in 1:pm_nblocks(pm)
-    cJ = pm.pairblocks[Jb]; r0 = first(cJ); ntile = length(cJ)
-    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1]); σend = last(pm.σblocks[Jb])
-    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
-    for (jc, c) in enumerate(cJ)                            # native role: stored columns as ket pairs
-      for k in 1:size(Ps,1)
-        x = lutμ[r0+k-1]; y = lutν[r0+k-1]; s = Ps[k,jc]; a = Pa[k,jc]
-        Sp[x,y] = s; Sp[y,x] = s; Am[x,y] = a; Am[y,x] = -a
+function pm_pairfold(pm::PMSupermatrices{T}, Ca::AbstractMatrix, Cb::AbstractMatrix,
+                     pairs::AbstractVector{Tuple{Int,Int}}) where T
+  npp = pm.npp; lutμ, lutν = pair_luts(pm.nao)
+  Ds = zeros(T, npp, length(pairs)); Da = zeros(T, npp, length(pairs))
+  @inbounds for (j, pq) in enumerate(pairs)
+    p = pq[1]; q = pq[2]
+    for c in 1:npp
+      μ = lutμ[c]; ν = lutν[c]
+      if μ == ν
+        Ds[c,j] = Ca[μ,p]*Cb[μ,q]/2
+      else
+        Ds[c,j] = (Ca[μ,p]*Cb[ν,q] + Ca[ν,p]*Cb[μ,q])/2
+        Da[c,j] = (Ca[μ,p]*Cb[ν,q] - Ca[ν,p]*Cb[μ,q])/2
       end
-      accumulate!(lutμ[c], lutν[c], σ0, n)                  # native band (σ0, nao]
-    end
-    for k in ntile+1:size(Ps,1)                             # mirror role: sub-panel rows as conj ket pairs
-      r = r0 + k - 1
-      for (jc, c) in enumerate(cJ)
-        u = lutμ[c]; v = lutν[c]; s = conj(Ps[k,jc]); a = conj(Pa[k,jc])
-        Sp[u,v] = s; Sp[v,u] = s; Am[u,v] = a; Am[v,u] = -a
-      end
-      accumulate!(lutμ[r], lutν[r], σ0, σend)               # mirror band (σ0, σend]
     end
   end
-  return Y
+  return Ds, Da
 end
+
+"""
+    pm_transform_worthwhile(nout, nao, T, membudget) -> Bool
+
+  Whether the pair-space [`pm_transform_int2`](@ref) is the right choice over the batched N⁵
+  [`pm_transform_int2_n5`](@ref) (both transform directly from the ± store — neither materializes
+  the joint int2). Two conditions:
+  - **speed** — `2·nout ≤ nao`: the pair-space is `O(nao⁴·nmo²)`, so it wins comfortably only while
+    the target space is a fraction of the basis (an active space); as `nout → nao` it becomes N⁶
+    and the N⁵ slab transform is faster, so route near-full transforms there.
+  - **memory** — the bra-fold `Ls,La` (`2·npp·nout²`) must fit comfortably in `membudget`.
+"""
+pm_transform_worthwhile(nout::Int, nao::Int, ::Type{T}, membudget::Int) where {T} =
+  2 * nout <= nao && 2 * (nao*(nao+1)÷2) * nout^2 * sizeof(T) < membudget ÷ 4
 
 """
     pm_transform_int2(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular=true) -> int2t
 
-  On-the-fly AO→MO 4-index transform directly from the ± supermatrix store `pm` — the analog of
-  [`transform_int2`](@ref) / [`transform_int2_Q`](@ref) that NEVER reconstructs the full joint AO
-  integrals. Writes `int2t[p,q,rs] = Σ_μνρσ ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q] Tr[ρ,r] Tr2[σ,s]` to a fresh
-  mmap `key`. `triangular=true` packs the ket pair as `tri(r,s)` (`r≤s`, requires
-  `size(Tr,2)==size(Tr2,2)`); `false` writes the full dense `[p,q,r,s]` (the UHF αβ block). The
-  first bra output index is blocked to keep the peak RAM (the `Y[p,q,ρ,s]` intermediate, `nmo³·nao`)
-  within `membudget` — a single pass for `nmo ≪ nao` (active spaces), more passes (repeating only
-  the store read, not the transform GEMMs) for a large target space. See [`pm_bra_ket2_sweep`](@ref).
+  On-the-fly AO→MO 4-index transform directly from the ± supermatrix store `pm`, entirely in
+  BLAS-3 and without ever reconstructing the joint AO integrals — the analog of
+  [`transform_int2`](@ref) / [`transform_int2_Q`](@ref). Writes
+  `int2t[p,q,rs] = Σ_μνρσ ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q] Tr[ρ,r] Tr2[σ,s]` to a fresh mmap `key` via the
+  pair-space identity `⟨pq|rs⟩ = 2·(Lsᵀ·Vs·Rs + Laᵀ·Va·Ra)` (see the section comment).
+  `triangular=true` packs the ket pair `tri(r,s)` (`r≤s`, requires `size(Tr,2)==size(Tr2,2)`);
+  `false` writes the full dense `[p,q,r,s]` (the UHF αβ block). Cost O(nao⁴·nmo²) — intended for
+  `nmo ≪ nao` (see [`pm_transform_worthwhile`](@ref)). The ket-output pairs are blocked to keep the
+  working set within `membudget` (the bra-fold `Ls,La` is held once).
 """
 function pm_transform_int2(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl2::AbstractMatrix,
                            Tr::AbstractMatrix, Tr2::AbstractMatrix, key::AbstractString;
                            triangular::Bool=true, description::AbstractString=key,
                            membudget::Int=available_memory(EC)) where T
+  npp = pm.npp; np = size(Tl,2); nq = size(Tl2,2); nr = size(Tr,2); ns = size(Tr2,2)
+  brapairs = Tuple{Int,Int}[(p,q) for q in 1:nq for p in 1:np]     # column-major (p fastest)
+  Ls, La = pm_pairfold(pm, Tl, Tl2, brapairs)                       # npp × (np·nq), built once
+  if triangular
+    @assert nr == ns "triangular output requires size(Tr,2) == size(Tr2,2)"
+    ketpairs = Tuple{Int,Int}[(r,s) for s in 1:ns for r in 1:s]     # packed r≤s → tri(r,s)
+    int2t = newmmap(EC, key, (np, nq, nr*(nr+1)÷2), T; description)[2]
+  else
+    ketpairs = Tuple{Int,Int}[(r,s) for s in 1:ns for r in 1:nr]    # full, column-major (r fastest)
+    int2t = newmmap(EC, key, (np, nq, nr, ns), T; description)[2]
+  end
+  out = reshape(int2t, np, nq, length(ketpairs))                    # 3rd axis = ket pair (tri or flat)
+  maxk = clamp(fld(membudget, 8 * npp * sizeof(T)), 1, length(ketpairs))   # Rs,Ra,Ws,Wa per block
+  for kb in get_spaceblocks(1:length(ketpairs), maxk)
+    Rs, Ra = pm_pairfold(pm, Tr, Tr2, ketpairs[kb])                 # npp × |kb|
+    Ws = zeros(T, npp, length(kb)); Wa = zeros(T, npp, length(kb))
+    pm_matmul!(Ws, pm, :s, Rs); pm_matmul!(Wa, pm, :a, Ra)          # Stage 1: ket transform (panel GEMMs)
+    Mb = transpose(Ls)*Ws; mul!(Mb, transpose(La), Wa, one(T), one(T))   # Stage 2: bra transform (dense GEMM)
+    @views out[:, :, kb] .= reshape(2 .* Mb, np, nq, length(kb))
+  end
+  flushmmap(EC, int2t)
+  return int2t
+end
+
+"""
+    pm_transform_int2_n5(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular=true) -> int2t
+
+  N⁵ AO→MO 4-index transform directly from the ± store, for a NEAR-FULL target space (where the
+  pair-space [`pm_transform_int2`](@ref) would be N⁶) — and, crucially, WITHOUT ever materializing
+  the joint `nao⁴/2` int2 on disk (the whole point of the ± store for large systems). Batched
+  index-by-index quarter-transforms, all BLAS-3. Per p-block: a chunked two-role sweep reconstructs
+  the ± slabs into a bounded buffer and bra-transforms them into `H2[p,q,ρ,σ] = Σ_μν ⟨μν|ρσ⟩
+  Tl[μ,p] Tl2[ν,q]`, then the ket pair is transformed `Σ_ρσ H2 Tr[ρ,r] Tr2[σ,s]`. Peak memory
+  ≈ `H2` (`|pb|·nq·nao²`) + the `O(nao²·chunk)` slab buffer; both blocked to `membudget`.
+"""
+function pm_transform_int2_n5(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl2::AbstractMatrix,
+                              Tr::AbstractMatrix, Tr2::AbstractMatrix, key::AbstractString;
+                              triangular::Bool=true, description::AbstractString=key,
+                              membudget::Int=available_memory(EC)) where T
   n = pm.nao; np = size(Tl,2); nq = size(Tl2,2); nr = size(Tr,2); ns = size(Tr2,2)
+  lutμ, lutν = pair_luts(n)
   if triangular
     @assert nr == ns "triangular output requires size(Tr,2) == size(Tr2,2)"
     int2t = newmmap(EC, key, (np, nq, nr*(nr+1)÷2), T; description)[2]
   else
     int2t = newmmap(EC, key, (np, nq, nr, ns), T; description)[2]
   end
-  # Block the FIRST bra output index p to bound the peak RAM (the Y[p,q,ρ,s] intermediate,
-  # ≈ |pb|·nq·nao·ns). Blocking p splits every transform GEMM (the per-block work sums to the full
-  # transform) and only repeats the store read + slab reconstruction — whereas blocking the ket-2
-  # output s would redo the O(nao⁴·nmo) bra transform per block. For nmo ≪ nao the whole Y fits and
-  # this is a single pass. Half the budget is reserved for the O(nao²) sweep buffers + output write.
-  maxp = clamp(fld(membudget, 2 * nq * n * ns * sizeof(T)), 1, np)
+  chunk = clamp(fld(membudget, 16 * n * n * sizeof(T)), 1, pm.npp)          # slab buffers
+  maxp  = clamp(fld(membudget, 2 * nq * n * n * sizeof(T)), 1, np)          # so H2 (|pb|·nq·nao²) fits
+  # slab buffers laid out [x, c, y] (ket-column c in the MIDDLE) so both bra half-transforms are
+  # permutation-free GEMMs: bra-1 contracts the leading x, bra-2 the trailing y (plain `mul!` — a
+  # middle-index contraction via `@tensor` would dominate the whole transform through a transpose
+  # copy). Full-`chunk` reshapes stay contiguous; the last partial flush transforms a few unused
+  # columns but never scatters them. NB the coefficient contractions must NOT conjugate (index
+  # transform, not inner product) → `transpose(Tlp)`, never the adjoint `Tlp'` (wrong for complex).
+  Gs = zeros(T,n,chunk,n); Ga = zeros(T,n,chunk,n)
+  Gs2 = reshape(Gs,n,chunk*n); Ga2 = reshape(Ga,n,chunk*n)                  # bra-1 operands (contract x)
+  kets = zeros(Int,chunk)
   for pb in get_spaceblocks(1:np, maxp)
-    Y = pm_bra_ket2_sweep(pm, (@view Tl[:, pb]), Tl2, Tr2)   # Y[|pb|, nq, ρ, s]
+    npb = length(pb); Tlp = Matrix{T}(@view Tl[:, pb])                      # [nao, |pb|]
+    hS = zeros(T,npb,chunk,n); hA = zeros(T,npb,chunk,n)                    # [p, c, y]
+    tp = zeros(T,npb,chunk,n); tm = zeros(T,npb,chunk,n)
+    H2n = zeros(T,npb,chunk,nq); H2s = zeros(T,npb,chunk,nq)                # [p, c, q]
+    H2 = zeros(T,npb,nq,n,n); m = 0
+    hS2=reshape(hS,npb,chunk*n); hA2=reshape(hA,npb,chunk*n)                # bra-1 outputs
+    tp2=reshape(tp,npb*chunk,n); tm2=reshape(tm,npb*chunk,n)                # bra-2 operands (contract y)
+    H2n2=reshape(H2n,npb*chunk,nq); H2s2=reshape(H2s,npb*chunk,nq)
+    # bra-transform the reconstructed slabs into H2[p,q,ρ,σ] (mm valid ket pairs in `kets`)
+    flush! = mm -> begin
+      mul!(hS2, transpose(Tlp), Gs2); mul!(hA2, transpose(Tlp), Ga2)       # bra-1 (μ→p): h[p,c,y]
+      @. tp = (hS+hA)/2; @. tm = (hS-hA)/2                                  # tp: ket (ρσ);  tm: ket (σρ)
+      mul!(H2n2, tp2, Tl2); mul!(H2s2, tm2, Tl2)                           # bra-2 (ν→q): H2n[p,c,q]
+      @inbounds for c in 1:mm; ρ=lutμ[kets[c]]; σ=lutν[kets[c]]
+        @views H2[:,:,ρ,σ] .+= H2n[:,c,:]; ρ<σ && (@views H2[:,:,σ,ρ] .+= H2s[:,c,:]); end
+    end
+    for Jb in 1:pm_nblocks(pm)
+      cJ=pm.pairblocks[Jb]; r0=first(cJ); ntile=length(cJ); Ps=spanel(pm,Jb); Pa=apanel(pm,Jb)
+      for jc in 1:length(cJ)                             # native: stored columns as ket pairs
+        m+=1; kets[m]=cJ[jc]; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
+        @inbounds for k in 1:size(Ps,1); x=lutμ[r0+k-1]; y=lutν[r0+k-1]; s=Ps[k,jc]; a=Pa[k,jc]
+          Gs[x,m,y]=s; Gs[y,m,x]=s; Ga[x,m,y]=a; Ga[y,m,x]=-a; end
+        m==chunk && (flush!(m); m=0)
+      end
+      @inbounds for k in ntile+1:size(Ps,1)              # mirror: sub-panel rows as conj ket pairs
+        m+=1; kets[m]=r0+k-1; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
+        for jc in 1:length(cJ); u=lutμ[cJ[jc]]; v=lutν[cJ[jc]]; s=conj(Ps[k,jc]); a=conj(Pa[k,jc])
+          Gs[u,m,v]=s; Gs[v,m,u]=s; Ga[u,m,v]=a; Ga[v,m,u]=-a; end
+        m==chunk && (flush!(m); m=0)
+      end
+    end
+    m>0 && flush!(m)
+    vH2 = H2                                             # ket transform (ρ→r, σ→s)
+    @tensor H3[p,q,r,σ] := vH2[p,q,ρ,σ]*Tr[ρ,r]
     if triangular
-      for s in 1:ns                                          # ket-1 (ρ→r), packed r ≤ s
-        Ys = @mview Y[:,:,:,s]; Trs = @mview Tr[:,1:s]
-        v!int2t = @mview int2t[pb, :, uppertriangular_range(s)]
-        @mtensor v!int2t[p,q,r] = Ys[p,q,ρ] * Trs[ρ,r]
+      for s in 1:ns
+        H3s = @view H3[:,:,1:s,:]; Tr2s = @view Tr2[:,s]
+        vout = @view int2t[pb, :, uppertriangular_range(s)]
+        @tensor vout[p,q,r] = H3s[p,q,r,σ]*Tr2s[σ]
       end
     else
-      v!int2t = @mview int2t[pb, :, :, :]
-      @mtensor v!int2t[p,q,r,s] = Y[p,q,ρ,s] * Tr[ρ,r]
+      vout = @view int2t[pb, :, :, :]
+      @tensor vout[p,q,r,s] = H3[p,q,r,σ]*Tr2[σ,s]
     end
   end
   flushmmap(EC, int2t)
   return int2t
+end
+
+"""
+    pm_bra_transform(pm, Cl, Cr; chunk=256) -> Y
+
+  Half-transform the ± store on the **bra** pair only, keeping the ket AO indices:
+  `Y[p,q,ρ,σ] = Σ_μν ⟨μν|ρσ⟩ Cl[μ,p] Cr[ν,q]` — the dense intermediate the dressing routines build
+  (`v_ooAA` etc. = `pm_bra_transform(pm, Cocc, Cocc)`). This is exactly the bra stage of
+  [`pm_transform_int2_n5`](@ref) (the chunked two-role slab sweep, `[x,c,y]` layout so both bra
+  contractions are permutation-free `mul!`), returned in full rather than fed on to the ket transform.
+  Intended for a MODEST transformed dimension (`size(Cl,2)`,`size(Cr,2)` — e.g. occupied): the result
+  is a dense `[p,q,nao,nao]` array (no output blocking). Pass an identity `Cr` to transform only `μ`.
+"""
+function pm_bra_transform(pm::PMSupermatrices{T}, Cl::AbstractMatrix, Cr::AbstractMatrix; chunk::Int=256) where T
+  n = pm.nao; np = size(Cl,2); nq = size(Cr,2)
+  @assert size(Cl,1) == n && size(Cr,1) == n "coeff AO dimension must be pm.nao=$n"
+  lutμ, lutν = pair_luts(n); chunk = clamp(chunk, 1, pm.npp)
+  Clm = Matrix{T}(Cl); Crm = Matrix{T}(Cr)
+  H2 = zeros(T, np, nq, n, n)
+  Gs = zeros(T,n,chunk,n); Ga = zeros(T,n,chunk,n)                          # [x, c, y]
+  Gs2 = reshape(Gs,n,chunk*n); Ga2 = reshape(Ga,n,chunk*n)
+  hS = zeros(T,np,chunk,n); hA = zeros(T,np,chunk,n)                        # [p, c, y]
+  tp = zeros(T,np,chunk,n); tm = zeros(T,np,chunk,n)
+  H2n = zeros(T,np,chunk,nq); H2s = zeros(T,np,chunk,nq)                    # [p, c, q]
+  hS2=reshape(hS,np,chunk*n); hA2=reshape(hA,np,chunk*n)
+  tp2=reshape(tp,np*chunk,n); tm2=reshape(tm,np*chunk,n)
+  H2n2=reshape(H2n,np*chunk,nq); H2s2=reshape(H2s,np*chunk,nq)
+  kets = zeros(Int,chunk); m = 0
+  flush! = mm -> begin
+    mul!(hS2, transpose(Clm), Gs2); mul!(hA2, transpose(Clm), Ga2)         # bra-1 (μ→p)
+    @. tp = (hS+hA)/2; @. tm = (hS-hA)/2
+    mul!(H2n2, tp2, Crm); mul!(H2s2, tm2, Crm)                             # bra-2 (ν→q)
+    @inbounds for c in 1:mm; ρ=lutμ[kets[c]]; σ=lutν[kets[c]]
+      @views H2[:,:,ρ,σ] .+= H2n[:,c,:]; ρ<σ && (@views H2[:,:,σ,ρ] .+= H2s[:,c,:]); end
+  end
+  for Jb in 1:pm_nblocks(pm)
+    cJ=pm.pairblocks[Jb]; r0=first(cJ); ntile=length(cJ); Ps=spanel(pm,Jb); Pa=apanel(pm,Jb)
+    for jc in 1:length(cJ)
+      m+=1; kets[m]=cJ[jc]; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
+      @inbounds for k in 1:size(Ps,1); x=lutμ[r0+k-1]; y=lutν[r0+k-1]; s=Ps[k,jc]; a=Pa[k,jc]
+        Gs[x,m,y]=s; Gs[y,m,x]=s; Ga[x,m,y]=a; Ga[y,m,x]=-a; end
+      m==chunk && (flush!(m); m=0)
+    end
+    @inbounds for k in ntile+1:size(Ps,1)
+      m+=1; kets[m]=r0+k-1; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
+      for jc in 1:length(cJ); u=lutμ[cJ[jc]]; v=lutν[cJ[jc]]; s=conj(Ps[k,jc]); a=conj(Pa[k,jc])
+        Gs[u,m,v]=s; Gs[v,m,u]=s; Ga[u,m,v]=a; Ga[v,m,u]=-a; end
+      m==chunk && (flush!(m); m=0)
+    end
+  end
+  m>0 && flush!(m)
+  return H2
+end
+
+"""
+    pm_transform(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular=true) -> int2t
+    pm_transform(EC, pm, C, key; kw...) -> int2t                      # RHF shorthand (C,C,C,C)
+
+  Transform the ± AO store to the MO basis, `int2t[p,q,rs] = Σ_μνρσ ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q]
+  Tr[ρ,r] Tr2[σ,s]`, **without ever reconstructing the joint `nao⁴/2` int2** — the high-level verb
+  that hides the pair-space-vs-N⁵ choice callers used to make by hand. Dispatches to the all-BLAS-3
+  pair-space [`pm_transform_int2`](@ref) for a small target space and the batched N⁵
+  [`pm_transform_int2_n5`](@ref) for a near-full one ([`pm_transform_worthwhile`](@ref)). `triangular`
+  packs the ket pair `tri(r,s)` (needs `size(Tr,2)==size(Tr2,2)`); `false` writes the full dense
+  `[p,q,r,s]` (the UHF αβ block).
+"""
+function pm_transform(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl2::AbstractMatrix,
+                      Tr::AbstractMatrix, Tr2::AbstractMatrix, key::AbstractString;
+                      triangular::Bool=true, description::AbstractString=key,
+                      membudget::Int=available_memory(EC)) where T
+  if pm_transform_worthwhile(size(Tr,2), pm.nao, T, membudget)
+    return pm_transform_int2(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular, description, membudget)
+  else
+    return pm_transform_int2_n5(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular, description, membudget)
+  end
+end
+pm_transform(EC::ECInfo, pm::PMSupermatrices, C::AbstractMatrix, key::AbstractString; kw...) =
+  pm_transform(EC, pm, C, C, C, C, key; kw...)
+
+# ---- @pmtensor: an einsum surface over the ± store, lowering to the verbs by index pattern -----
+# Parse helpers run at macro-expansion time on the einsum Expr.
+_pmt_factors(ex) = (ex isa Expr && ex.head === :call && ex.args[1] === :*) ?
+                   reduce(vcat, _pmt_factors.(ex.args[2:end])) : Any[ex]
+function _pmt_ref(f)
+  (f isa Expr && f.head === :ref) || error("@pmtensor: expected an indexed factor like `V[μ,ν,ρ,σ]`, got `$f`")
+  return f.args[1], collect(f.args[2:end])
+end
+# split `out[…] := V[…] * factors…` into (out symbol, out indices, store, store indices, [(coeff, idx)…])
+function _pmt_split(ex)
+  (ex isa Expr && ex.head in (:(:=), :(=))) ||
+    error("@pmtensor: expected `out[…] := V[…] * …`, got `$ex`")
+  outsym, outidx = _pmt_ref(ex.args[1])
+  store = nothing; storeidx = nothing; others = Tuple{Any,Vector{Any}}[]
+  for f in _pmt_factors(ex.args[2])
+    a, idx = _pmt_ref(f)
+    if length(idx) == 4 && store === nothing
+      store = a; storeidx = idx
+    else
+      push!(others, (a, idx))
+    end
+  end
+  store === nothing && error("@pmtensor: no 4-index ± store factor `V[μ,ν,ρ,σ]` in `$(ex.args[2])`")
+  return outsym, outidx, store, storeidx, others
+end
+_pmt_perm(outidx, produced, what) =
+  let p = [something(findfirst(isequal(o), produced), 0) for o in outidx]
+    (length(outidx) == length(produced) && all(>(0), p) && length(unique(p)) == length(p)) ||
+      error("@pmtensor: output indices $outidx are not a permutation of the $what indices $produced")
+    p
+  end
+
+function _pmt_transform(EC, ex)                       # V[μ,ν,ρ,σ] * 4 coeff matrices → pm_transform
+  outsym, outidx, store, sidx, others = _pmt_split(ex)
+  length(others) == 4 || error("@pmtensor transform: expected 4 coeff matrices, got $(length(others))")
+  function coeff(si)
+    for o in others
+      length(o[2]) == 2 && o[2][1] === si && return o
+    end
+    error("@pmtensor transform: no coeff `C[$si, ·]` for store index $si")
+  end
+  cs = [coeff(si) for si in sidx]                     # (Tl,Tl2,Tr,Tr2) matched to (μ,ν,ρ,σ)
+  produced = [c[2][2] for c in cs]                    # their output indices, in (bra1,bra2,ket1,ket2) order
+  perm = _pmt_perm(outidx, produced, "coeff-target")
+  key = string(outsym)
+  call = :( pm_transform($(esc(EC)), $(esc(store)), $(esc(cs[1][1])), $(esc(cs[2][1])),
+                         $(esc(cs[3][1])), $(esc(cs[4][1])), $key; triangular=false) )
+  return :( $(esc(outsym)) = $(perm == [1,2,3,4] ? call : :(permutedims($call, $perm))) )
+end
+
+# 1-arg forms (no EC): a partial BRA transform (coeffs on μ/ν, ket AO kept) or Coulomb/exchange
+# (one 2-index density). Distinguished by how many store indices each non-store factor carries.
+function _pmt_contract(ex)
+  outsym, outidx, store, sidx, others = _pmt_split(ex)
+  storeset = Set{Any}(sidx)
+  nstore(o) = count(i -> i in storeset, o[2])
+  if length(others) == 1 && length(others[1][2]) == 2 && nstore(others[1]) == 2
+    return _pmt_JK(outsym, outidx, sidx, store, others[1])
+  elseif !isempty(others) && all(o -> length(o[2]) == 2 && nstore(o) == 1, others)
+    return _pmt_bra(outsym, outidx, store, sidx, others)
+  end
+  error("@pmtensor: unrecognized pattern — expected coeff matrices on the bra indices " *
+        "(partial transform) or one 2-index density (Coulomb/exchange)")
+end
+
+function _pmt_JK(outsym, outidx, sidx, store, densf)  # V[μ,ν,ρ,σ] * D → Coulomb / exchange
+  dens, didx = densf; μ, ν, ρ, σ = sidx
+  coulomb = didx[1] === ν && didx[2] === σ            # J[μ,ρ] = Σ ⟨μν|ρσ⟩ D[ν,σ]
+  exch    = didx[1] === ν && didx[2] === ρ            # K[μ,σ] = Σ ⟨μν|ρσ⟩ D[ν,ρ]
+  (coulomb || exch) ||
+    error("@pmtensor: density indices $didx must be [$ν,$σ] (Coulomb) or [$ν,$ρ] (exchange)")
+  perm = _pmt_perm(outidx, coulomb ? Any[μ, ρ] : Any[μ, σ], "output")
+  V = esc(store); D = esc(dens); M = gensym(:M); s = gensym(:s)
+  # native band GEMVs + Hermitian mirror rows — the add_coulomb!/add_exchange! contraction exactly
+  body = coulomb ? quote
+      slab_bandmul!(view($M,:,$s.ρ), $s, view($D,:,$s.σ))
+      $s.ρ < $s.σ && slab_bandtmul!(view($M,:,$s.σ), $s, view($D,:,$s.ρ))
+      slab_mirror!($M, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirrort!($M, $s.σ, $s, $D, $s.ρ)
+    end : quote
+      slab_bandmul!(view($M,:,$s.σ), $s, view($D,:,$s.ρ))
+      $s.ρ < $s.σ && slab_bandtmul!(view($M,:,$s.ρ), $s, view($D,:,$s.σ))
+      slab_mirrort!($M, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirror!($M, $s.σ, $s, $D, $s.ρ)
+    end
+  return quote
+    local $M = zeros(promote_type(eltype($V), eltype($D)), $V.nao, $V.nao)
+    for $s in eachslab($V)
+      $body
+    end
+    $(esc(outsym)) = $(perm == [1,2] ? M : :(permutedims($M, $perm)))
+  end
+end
+
+function _pmt_bra(outsym, outidx, store, sidx, coeffs)  # V[μ,ν,ρ,σ] * (coeffs on μ/ν) → pm_bra_transform
+  μ, ν, ρ, σ = sidx
+  Cl = nothing; Clo = μ; Cr = nothing; Cro = ν        # default: untransformed bra index kept as AO
+  for (a, idx) in coeffs
+    (idx[1] === μ || idx[1] === ν) ||
+      error("@pmtensor: partial transform only supports the BRA indices $μ,$ν (as C[$μ,·] / C[$ν,·]); got $idx")
+    idx[1] === μ ? (Cl = a; Clo = idx[2]) : (Cr = a; Cro = idx[2])
+  end
+  perm = _pmt_perm(outidx, Any[Clo, Cro, ρ, σ], "output")
+  V = esc(store)
+  ident = :(Matrix{eltype($V)}(I, $V.nao, $V.nao))     # keep an un-transformed bra index (identity coeff)
+  call = :( pm_bra_transform($V, $(Cl === nothing ? ident : esc(Cl)), $(Cr === nothing ? ident : esc(Cr))) )
+  return :( $(esc(outsym)) = $(perm == [1,2,3,4] ? call : :(permutedims($call, $perm))) )
+end
+
+"""
+    @pmtensor [EC] out[…] := V[μ,ν,ρ,σ] * …
+
+  einsum-style contraction over a ± store `V` (`PMSupermatrices`), lowered to the right routine by
+  the index pattern — so the code shows *what* is contracted, not which verb to call:
+  - **AO→MO transform** (pass `EC`): `@pmtensor EC int2[p,q,r,s] := V[μ,ν,ρ,σ]*Tl[μ,p]*Tl2[ν,q]*Tr[ρ,r]*Tr2[σ,s]`
+    → [`pm_transform`](@ref) (mmap, full dense `[p,q,r,s]`).
+  - **Partial bra transform** (one or two coeffs on the bra pair, ket kept AO — the dressing pattern):
+    `@pmtensor voo[i,j,ρ,σ] := V[μ,ν,ρ,σ]*Co[μ,i]*Co[ν,j]` or `@pmtensor vAo[μ,j,ρ,σ] := V[μ,ν,ρ,σ]*Co[ν,j]`
+    → [`pm_bra_transform`](@ref) (dense). Only the bra indices `μ,ν` are transformable this way.
+  - **Coulomb** `@pmtensor J[μ,ρ] := V[μ,ν,ρ,σ]*D[ν,σ]` / **exchange** `@pmtensor K[μ,σ] := V[μ,ν,ρ,σ]*D[ν,ρ]`
+    → a dense `nao×nao` build over [`eachslab`](@ref) (the `add_coulomb!`/`add_exchange!` contraction).
+  Output indices may be permuted relative to the natural order (a `permutedims` is inserted).
+"""
+macro pmtensor(args...)
+  length(args) == 2 && return _pmt_transform(args[1], args[2])
+  length(args) == 1 && return _pmt_contract(args[1])
+  error("@pmtensor: use `@pmtensor EC out[…] := …` (full transform) or `@pmtensor out[…] := …` " *
+        "(partial bra transform / Coulomb / exchange)")
 end
 
 """
@@ -943,10 +1219,7 @@ end
   (`freeze_orbs_in_dump`), exactly as for a `dfdump`-generated dump.
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
-  # transform on the fly straight from the ± store when only it is on disk (never reconstruct the
-  # full joint nao⁴/2 int2); fall back to the joint slab transform when "ao_int2" exists.
-  use_pm = !file_exists(EC, "ao_int2") && pm_exists(EC)
-  @assert use_pm || file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
+  @assert file_exists(EC, "ao_int2") || pm_exists(EC) "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
   hAO = load2idx(EC, "h_AA")
@@ -956,9 +1229,12 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
   println("Transform AO integrals to MO basis...")
   C = Matrix{T}(cMO)
   nout = size(C, 2)
-  if use_pm
+  # from the ± store, `pm_transform` never materializes the joint nao⁴/2 int2 (it picks pair-space
+  # vs the N⁵ slab transform itself); only when the joint int2 is what is on disk (ao_pm=false) do
+  # we stream it through `transform_int2`.
+  if !file_exists(EC, "ao_int2") && pm_exists(EC)
     pm = open_pm_store(EC)
-    int2 = pm_transform_int2(EC, pm, C, C, C, C, "mo_int2"; triangular=true, description="tmp")
+    int2 = pm_transform(EC, pm, C, "mo_int2"; triangular=true, description="tmp")
     close_pm_store!(EC, pm)
   else
     aofile, aoint2 = mmap3idx(EC, "ao_int2")
@@ -991,10 +1267,7 @@ end
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   is_restricted(cMO) && return generate_mo_dump(EC, cMO.α)
-  # transform on the fly straight from the ± store when only it is on disk (never reconstruct the
-  # full joint int2); fall back to the joint slab transform when "ao_int2" exists.
-  use_pm = !file_exists(EC, "ao_int2") && pm_exists(EC)
-  @assert use_pm || file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
+  @assert file_exists(EC, "ao_int2") || pm_exists(EC) "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
   hAO = load2idx(EC, "h_AA")
@@ -1004,11 +1277,13 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   @assert size(Ca, 1) == size(S, 1) && size(Cb, 1) == size(S, 1) "cMO AO dimension does not match the system"
   @assert isapprox(Ca' * S * Ca, I, atol=1e-8) && isapprox(Cb' * S * Cb, I, atol=1e-8) "cMO are not orthonormal in the AO basis"
   println("Transform AO integrals to UHF MO basis...")
-  if use_pm
+  # straight from the ± store (never the joint nao⁴/2 int2); `pm_transform` picks pair-space vs the
+  # N⁵ slab transform per block (see the RHF method).
+  if !file_exists(EC, "ao_int2") && pm_exists(EC)
     pm = open_pm_store(EC)
-    int2aa = pm_transform_int2(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description="tmp")
-    int2bb = pm_transform_int2(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description="tmp")
-    int2ab = pm_transform_int2(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description="tmp")
+    int2aa = pm_transform(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description="tmp")
+    int2bb = pm_transform(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description="tmp")
+    int2ab = pm_transform(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description="tmp")
     close_pm_store!(EC, pm)
   else
     aofile, aoint2 = mmap3idx(EC, "ao_int2")
