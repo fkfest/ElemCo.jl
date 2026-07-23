@@ -13,6 +13,7 @@ using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
 using ElemCo.TensorTools: detri_int2, @tensor, newmmap, closemmap, mmap3idx
 using ElemCo.PMStore
 using ElemCo.FockFactory: ao_JK!, ao_J2K!
+using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2
 using ElemCo.ECInfos: delete_file!, file_exists
 using ElemCo.MSystems: parse_geometry
 using LinearAlgebra
@@ -360,6 +361,32 @@ end
     @test maximum(abs.(o3 .- r_oAoA2)) < 1e-13
     @test maximum(abs.(o4 .- r_oAAO)) < 1e-13
     @test maximum(abs.(o5 .- r_AOAO)) < 1e-13
+    close_pm_store!(EC, pm)
+  end
+end
+
+# On-the-fly AO→MO transform straight from the ± store (pm_transform_int2, used by
+# generate_mo_dump) reproduces the joint-int2 transform kernels for arbitrary RECTANGULAR
+# coefficients — RHF (triangular ket) and UHF αβ (full dense) — real + complex, several
+# blockings. The full joint int2 is never reconstructed.
+@testset "pm_transform_int2 (on-the-fly AO→MO) ↔ joint transform" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    intmem = Array{T,3}(int2)                          # in-memory joint for the reference kernels
+    na, nb = 4, 3
+    Ca = randn(T, n, na); Cb = randn(T, n, nb)         # rectangular, different per spin
+    ref_aa = transform_int2(intmem, Ca, Ca, Ca, Ca)                              # RHF (triangular)
+    new_aa = pm_transform_int2(EC, pm, Ca, Ca, Ca, Ca, "t_aa"; triangular=true)
+    @test maximum(abs.(collect(new_aa) .- ref_aa)) < 1e-11
+    ref_ab = transform_int2_Q(intmem, Ca, Cb, Ca, Cb)                            # UHF αβ (full dense)
+    new_ab = pm_transform_int2(EC, pm, Ca, Cb, Ca, Cb, "t_ab"; triangular=false)
+    @test maximum(abs.(collect(new_ab) .- ref_ab)) < 1e-11
+    # output p-blocking (membudget=1 ⇒ one p per pass) must give the identical result
+    blk_aa = pm_transform_int2(EC, pm, Ca, Ca, Ca, Ca, "t_aab"; triangular=true, membudget=1)
+    blk_ab = pm_transform_int2(EC, pm, Ca, Cb, Ca, Cb, "t_abb"; triangular=false, membudget=1)
+    @test maximum(abs.(collect(blk_aa) .- ref_aa)) < 1e-11
+    @test maximum(abs.(collect(blk_ab) .- ref_ab)) < 1e-11
     close_pm_store!(EC, pm)
   end
 end

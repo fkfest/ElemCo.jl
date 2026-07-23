@@ -728,6 +728,112 @@ function transform_int2_Q(EC::ECInfo, int2::Array{T,4}, Tl::AbstractArray, Tl2::
   return int2t
 end
 
+# --- on-the-fly AO→MO transform directly from the ± supermatrix store ------------------
+# Avoids reconstructing the full joint `ao_int2` (nao⁴/2). Two stages, streaming the ± store once:
+#   1. `pm_bra_ket2_sweep` — bra transform (both μν → MO via `pm_occ_early`'s band_htrans!+±-fold
+#      core) with the ket-2 contraction FUSED in, giving `Y[p,q,ρ,s]` (nmo³·nao — never the full
+#      `Hbra[p,q,ρσ]` of nmo²·nao²);
+#   2. the final ket-1 contraction `Σ_ρ Y[p,q,ρ,s] Tr[ρ,r]` → `⟨pq|rs⟩` (triangular or dense).
+# Footprint ≈ Y — orders of magnitude below the joint int2 when nmo ≪ nao (active spaces).
+
+"""
+    pm_bra_ket2_sweep(pm, Tl, Tl2, Tr2) -> Y
+
+  Half-transform the ± AO store on the fly, contracting BOTH bra indices with `Tl`,`Tl2` and the
+  ket-2 index with `Tr2` in a single n⁴/4 two-role sweep (the [`pm_occ_early`](@ref) core
+  generalized to arbitrary rectangular coefficients):
+  `Y[p,q,ρ,s] = Σ_μνσ ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q] Tr2[σ,s]`. Neither the full AO int2 nor the full
+  bra-transform `Hbra[p,q,ρσ]` is formed — only `Y` and `O(nmo·nao)` band buffers.
+"""
+function pm_bra_ket2_sweep(pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl2::AbstractMatrix,
+                           Tr2::AbstractMatrix) where T
+  n = pm.nao; np = size(Tl,2); nq = size(Tl2,2); ns = size(Tr2,2)
+  Y = zeros(T, np, nq, n, ns)
+  lutμ, lutν = pair_luts(n)
+  Sp = zeros(T, n, n); Am = zeros(T, n, n)                  # reconstructed Vs / Va band slabs
+  hS = zeros(T, np, n); hA = zeros(T, np, n)
+  tp = zeros(T, np, n); tm = zeros(T, np, n); Hc = zeros(T, np, nq)
+  # bra transform of the reconstructed ± slab for ket pair (ρ,σ), then fuse the ket-2 contraction
+  function accumulate!(ρ::Int, σ::Int, lo::Int, hi::Int)
+    band_htrans!(hS, Tl, Sp, lo, hi); band_htrans!(hA, Tl, Am, lo, hi)   # bra-1 (μ→p)
+    tp .= (hS .+ hA) ./ 2; tm .= (hS .- hA) ./ 2            # tp: ket (ρ,σ);  tm: ket (σ,ρ)
+    mul!(Hc, tp, Tl2)                                       # bra-2 (ν→q): Hc[p,q] = Σ_μν ⟨μν|ρσ⟩ Tl Tl2
+    @views Y[:,:,ρ,:] .+= reshape(Hc, np, nq, 1) .* reshape(Tr2[σ,:], 1, 1, ns)   # fuse ket-2 σ→s
+    if ρ < σ
+      mul!(Hc, tm, Tl2)
+      @views Y[:,:,σ,:] .+= reshape(Hc, np, nq, 1) .* reshape(Tr2[ρ,:], 1, 1, ns)
+    end
+    return
+  end
+  @inbounds for Jb in 1:pm_nblocks(pm)
+    cJ = pm.pairblocks[Jb]; r0 = first(cJ); ntile = length(cJ)
+    σ0 = Jb == 1 ? 0 : last(pm.σblocks[Jb-1]); σend = last(pm.σblocks[Jb])
+    Ps = spanel(pm, Jb); Pa = apanel(pm, Jb)
+    for (jc, c) in enumerate(cJ)                            # native role: stored columns as ket pairs
+      for k in 1:size(Ps,1)
+        x = lutμ[r0+k-1]; y = lutν[r0+k-1]; s = Ps[k,jc]; a = Pa[k,jc]
+        Sp[x,y] = s; Sp[y,x] = s; Am[x,y] = a; Am[y,x] = -a
+      end
+      accumulate!(lutμ[c], lutν[c], σ0, n)                  # native band (σ0, nao]
+    end
+    for k in ntile+1:size(Ps,1)                             # mirror role: sub-panel rows as conj ket pairs
+      r = r0 + k - 1
+      for (jc, c) in enumerate(cJ)
+        u = lutμ[c]; v = lutν[c]; s = conj(Ps[k,jc]); a = conj(Pa[k,jc])
+        Sp[u,v] = s; Sp[v,u] = s; Am[u,v] = a; Am[v,u] = -a
+      end
+      accumulate!(lutμ[r], lutν[r], σ0, σend)               # mirror band (σ0, σend]
+    end
+  end
+  return Y
+end
+
+"""
+    pm_transform_int2(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular=true) -> int2t
+
+  On-the-fly AO→MO 4-index transform directly from the ± supermatrix store `pm` — the analog of
+  [`transform_int2`](@ref) / [`transform_int2_Q`](@ref) that NEVER reconstructs the full joint AO
+  integrals. Writes `int2t[p,q,rs] = Σ_μνρσ ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q] Tr[ρ,r] Tr2[σ,s]` to a fresh
+  mmap `key`. `triangular=true` packs the ket pair as `tri(r,s)` (`r≤s`, requires
+  `size(Tr,2)==size(Tr2,2)`); `false` writes the full dense `[p,q,r,s]` (the UHF αβ block). The
+  first bra output index is blocked to keep the peak RAM (the `Y[p,q,ρ,s]` intermediate, `nmo³·nao`)
+  within `membudget` — a single pass for `nmo ≪ nao` (active spaces), more passes (repeating only
+  the store read, not the transform GEMMs) for a large target space. See [`pm_bra_ket2_sweep`](@ref).
+"""
+function pm_transform_int2(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl2::AbstractMatrix,
+                           Tr::AbstractMatrix, Tr2::AbstractMatrix, key::AbstractString;
+                           triangular::Bool=true, description::AbstractString=key,
+                           membudget::Int=available_memory(EC)) where T
+  n = pm.nao; np = size(Tl,2); nq = size(Tl2,2); nr = size(Tr,2); ns = size(Tr2,2)
+  if triangular
+    @assert nr == ns "triangular output requires size(Tr,2) == size(Tr2,2)"
+    int2t = newmmap(EC, key, (np, nq, nr*(nr+1)÷2), T; description)[2]
+  else
+    int2t = newmmap(EC, key, (np, nq, nr, ns), T; description)[2]
+  end
+  # Block the FIRST bra output index p to bound the peak RAM (the Y[p,q,ρ,s] intermediate,
+  # ≈ |pb|·nq·nao·ns). Blocking p splits every transform GEMM (the per-block work sums to the full
+  # transform) and only repeats the store read + slab reconstruction — whereas blocking the ket-2
+  # output s would redo the O(nao⁴·nmo) bra transform per block. For nmo ≪ nao the whole Y fits and
+  # this is a single pass. Half the budget is reserved for the O(nao²) sweep buffers + output write.
+  maxp = clamp(fld(membudget, 2 * nq * n * ns * sizeof(T)), 1, np)
+  for pb in get_spaceblocks(1:np, maxp)
+    Y = pm_bra_ket2_sweep(pm, (@view Tl[:, pb]), Tl2, Tr2)   # Y[|pb|, nq, ρ, s]
+    if triangular
+      for s in 1:ns                                          # ket-1 (ρ→r), packed r ≤ s
+        Ys = @mview Y[:,:,:,s]; Trs = @mview Tr[:,1:s]
+        v!int2t = @mview int2t[pb, :, uppertriangular_range(s)]
+        @mtensor v!int2t[p,q,r] = Ys[p,q,ρ] * Trs[ρ,r]
+      end
+    else
+      v!int2t = @mview int2t[pb, :, :, :]
+      @mtensor v!int2t[p,q,r,s] = Y[p,q,ρ,s] * Tr[ρ,r]
+    end
+  end
+  flushmmap(EC, int2t)
+  return int2t
+end
+
 """
     transform_int1(int1::AbstractArray, Tl::AbstractArray, Tr::AbstractArray) -> int1t
 
@@ -837,10 +943,10 @@ end
   (`freeze_orbs_in_dump`), exactly as for a `dfdump`-generated dump.
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
-  # joint-format consumer: reconstruct "ao_int2" from the ± supermatrix store if needed
-  reconstructed_joint = !file_exists(EC, "ao_int2") && pm_exists(EC)
-  reconstructed_joint && pm_to_joint!(EC)
-  @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
+  # transform on the fly straight from the ± store when only it is on disk (never reconstruct the
+  # full joint nao⁴/2 int2); fall back to the joint slab transform when "ao_int2" exists.
+  use_pm = !file_exists(EC, "ao_int2") && pm_exists(EC)
+  @assert use_pm || file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
   hAO = load2idx(EC, "h_AA")
@@ -850,10 +956,15 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
   println("Transform AO integrals to MO basis...")
   C = Matrix{T}(cMO)
   nout = size(C, 2)
-  aofile, aoint2 = mmap3idx(EC, "ao_int2")
-  int2 = transform_int2(EC, aoint2, C, C, C, C, "mo_int2"; description="tmp")
-  close(aofile)
-  reconstructed_joint && delete_file!(EC, "ao_int2")   # the joint file was a transient reconstruction
+  if use_pm
+    pm = open_pm_store(EC)
+    int2 = pm_transform_int2(EC, pm, C, C, C, C, "mo_int2"; triangular=true, description="tmp")
+    close_pm_store!(EC, pm)
+  else
+    aofile, aoint2 = mmap3idx(EC, "ao_int2")
+    int2 = transform_int2(EC, aoint2, C, C, C, C, "mo_int2"; description="tmp")
+    close(aofile)
+  end
   # NELEC/MS2 conventions follow `dfdump`: neutral electron count, `charge`/`ms2` from the
   # wf options are applied later by `setup_space_fd!`.
   nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
@@ -880,10 +991,10 @@ end
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   is_restricted(cMO) && return generate_mo_dump(EC, cMO.α)
-  # joint-format consumer: reconstruct "ao_int2" from the ± supermatrix store if needed
-  reconstructed_joint = !file_exists(EC, "ao_int2") && pm_exists(EC)
-  reconstructed_joint && pm_to_joint!(EC)
-  @assert file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\"); generate them first (@ints / ao_integrals)"
+  # transform on the fly straight from the ± store when only it is on disk (never reconstruct the
+  # full joint int2); fall back to the joint slab transform when "ao_int2" exists.
+  use_pm = !file_exists(EC, "ao_int2") && pm_exists(EC)
+  @assert use_pm || file_exists(EC, "ao_int2") "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
   hAO = load2idx(EC, "h_AA")
@@ -893,12 +1004,19 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   @assert size(Ca, 1) == size(S, 1) && size(Cb, 1) == size(S, 1) "cMO AO dimension does not match the system"
   @assert isapprox(Ca' * S * Ca, I, atol=1e-8) && isapprox(Cb' * S * Cb, I, atol=1e-8) "cMO are not orthonormal in the AO basis"
   println("Transform AO integrals to UHF MO basis...")
-  aofile, aoint2 = mmap3idx(EC, "ao_int2")
-  int2aa = transform_int2(EC, aoint2, Ca, Ca, Ca, Ca, "mo_int2aa"; description="tmp")
-  int2bb = transform_int2(EC, aoint2, Cb, Cb, Cb, Cb, "mo_int2bb"; description="tmp")
-  int2ab = transform_int2_Q(EC, aoint2, Ca, Cb, Ca, Cb, "mo_int2ab"; description="tmp")
-  close(aofile)
-  reconstructed_joint && delete_file!(EC, "ao_int2")   # the joint file was a transient reconstruction
+  if use_pm
+    pm = open_pm_store(EC)
+    int2aa = pm_transform_int2(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description="tmp")
+    int2bb = pm_transform_int2(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description="tmp")
+    int2ab = pm_transform_int2(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description="tmp")
+    close_pm_store!(EC, pm)
+  else
+    aofile, aoint2 = mmap3idx(EC, "ao_int2")
+    int2aa = transform_int2(EC, aoint2, Ca, Ca, Ca, Ca, "mo_int2aa"; description="tmp")
+    int2bb = transform_int2(EC, aoint2, Cb, Cb, Cb, Cb, "mo_int2bb"; description="tmp")
+    int2ab = transform_int2_Q(EC, aoint2, Ca, Cb, Ca, Cb, "mo_int2ab"; description="tmp")
+    close(aofile)
+  end
   nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
   ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
   fd = FDump{T,3}(nout, nelec; ms2, uhf=true)
