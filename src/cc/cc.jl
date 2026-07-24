@@ -1860,7 +1860,7 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
   @mtensor d_vovo[a,i,b,j] := (v_oAoA[i,ν,j,σ] * CLv[ν,a]) * CRv[σ,b]   # ⟨ai|bj⟩ = ⟨ia|jb⟩ (electron exchange)
   isnothing(aofile) || close(aofile)
   save!(EC, "d_oooo", d_oooo); save!(EC, "d_oovo", d_oovo); save!(EC, "d_oovv", d_oovv)
-  save!(EC, "d_voov", d_voov); save!(EC, "d_vovo", d_vovo)
+  save!(EC, "d_voov", d_voov); save!(EC, "d_vovo", d_vovo); save!(EC, "d_vooo", d_vooo)
   # dressed 1-electron: h̃[p,q] = Σ h_eff[μν] C̃ᴸ[μ,p] C̃ᴿ[ν,q], where `h1eff_AA` is the AO core
   # Hamiltonian plus the frozen-core mean field (see ao_cc_setup!); the mean-field sum below runs
   # over the ACTIVE occupied only, so `dfock` is the correct active-space (frozen-core) Fock.

@@ -114,7 +114,7 @@ function pm_half_trans(EC::ECInfo, pm::PMSupermatrices{Te}, C::AbstractMatrix, k
     end
   end
   closemmap(EC, io, A)
-  save!(EC, key * HT_META_SUFFIX, Int[n, m]; description="half-transformed store meta (nao, m)")
+  save!(EC, key * HT_META_SUFFIX, Int[n, m]; description="tmp half-transformed store meta (nao, m)")
   return key
 end
 

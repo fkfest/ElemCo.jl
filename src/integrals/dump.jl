@@ -284,9 +284,10 @@ end
 """
     is_similarity_transformed(fd::FDump)
 
-  Return true if the fcidump is similarity transformed
+  Return true if the fcidump is similarity transformed.
+  An empty dump (e.g. AO-direct runs, where `EC.fd` stays unpopulated) is not.
 """
-is_similarity_transformed(fd::FDump) = headvar(fd, "ST", Int) > 0
+is_similarity_transformed(fd::FDump) = !isempty(fd) && headvar(fd, "ST", Int) > 0
 
 """
     uses_reduced_permsym(fd::FDump{T}) where {T<:Number}

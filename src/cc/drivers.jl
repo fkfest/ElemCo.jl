@@ -308,7 +308,10 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # the orbitals. A mismatch (e.g. UCCSD on RHF orbitals) or deleted orbitals routes to derive.
     ecm = ECMethod(method)
     would_be_closed_shell = !is_unrestricted(ecm) && !has_prefix(ecm, "R") && closed_shell
+    # correlated properties need the Λ machinery, which is MO-dump-only so far → route to derive
+    # (pre-existing hole: AO-direct + cc.properties crashed in calc_dressed_ints on the empty fd).
     ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct && n_deleted_orbitals(EC) == 0 &&
+                !need_correlated_properties(EC) &&
                 is_restricted(load_orbitals(EC)) == would_be_closed_shell
     if ao_direct
       EC.ao_direct = true            # the active-space setup (freezing) happens in ao_cc_setup!
