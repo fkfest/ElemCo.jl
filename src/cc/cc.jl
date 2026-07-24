@@ -1834,7 +1834,12 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
   @assert file_exists(EC, "h1eff_AA") "ao_dressed_ints requires the effective 1-e Hamiltonian; call ao_cc_setup! first"
   # occ-early first half-transform: PM-native tile sweep on the ± store when present (half the
   # integral streaming), else the sequential storage-order pass over the joint mmap
-  if pm_exists(EC)
+  if ht_exists(EC, "ht_oAAA")
+    # prebuilt half-transformed store (ao_cc_setup!): read it instead of re-streaming the ± store.
+    # `CLo` is T1-independent, so the file (built with the same active-occ bra) is valid every iteration.
+    v_ooAA, v_AooA, v_oAoA = ht_occ_early(EC, CRo)
+    aofile = nothing
+  elseif pm_exists(EC)
     pm = open_pm_store(EC)
     v_ooAA, v_AooA, v_oAoA = pm_occ_early(pm, CLo, CRo)
     close_pm_store!(EC, pm)
@@ -1878,6 +1883,58 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
   dfock[virt,virt] .+= fvv
   save!(EC, "df_mm", dfock)
   return nothing
+end
+
+"""
+    ht_build_dress!(EC, pm, C)
+
+  Build the persistent half-transformed store for the AO dressing (called ONCE per orbital set in
+  [`ao_cc_setup!`](@ref)): `"ht_oAAA"` = `Σ_μ⟨μν|ρσ⟩C[μ,i]` in both ket orders ([`pm_half_trans`](@ref
+  PMStore.pm_half_trans)) plus the T1-independent `"ht_ooAA"` = `v_ooAA[i,j,ρ,σ] = Σ_μν⟨μν|ρσ⟩C[μ,i]C[ν,j]`.
+  `ao_dressed_ints` then reads these each iteration instead of re-streaming the ± store — one ± sweep
+  per CC run, not per iteration. `C` is the (T1-independent) active occupied bra coefficients.
+"""
+function ht_build_dress!(EC::ECInfo{T}, pm::PMSupermatrices, C::AbstractMatrix) where {T}
+  n = pm.nao; m = size(C, 2)
+  pm_half_trans(EC, pm, C, "ht_oAAA")
+  ht = open_ht_store(EC, "ht_oAAA")
+  voio, v_ooAA = newmmap(EC, "ht_ooAA", (m, m, n, n), T)
+  Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n)
+  for σ in 1:n
+    ht_column!(Aσ, Bσ, ht, σ)                            # only the A-role (Aσ) is needed here
+    A3 = reshape(Aσ, m, n, n)
+    voσ = @view v_ooAA[:, :, :, σ]
+    @mtensor voσ[i,j,ρ] = A3[i,ν,ρ] * C[ν,j]             # both bra → occ (contract ν)
+  end
+  closemmap(EC, voio, v_ooAA)
+  close_ht_store!(EC, ht)
+  return
+end
+
+"""
+    ht_occ_early(EC, Ro) -> (v_ooAA, v_AooA, v_oAoA)
+
+  The occ-early intermediates read from the prebuilt half-transformed store ([`ht_build_dress!`](@ref)):
+  `v_ooAA` is loaded (T1-independent); the T1-dependent ket contractions `v_oAoA[i,ν,j,σ] = Σ_ρ
+  Aσ[(i,ν),ρ]·Ro[ρ,j]` and `v_AooA[μ,i,j,σ] = Σ_ρ Bσ[(i,μ),ρ]·Ro[ρ,j]` are one BLAS GEMM per σ off the
+  A-/B-role slabs from [`ht_column!`](@ref PMStore.ht_column!). Bit-identical to `pm_occ_early` but
+  without re-streaming the ± store.
+"""
+function ht_occ_early(EC::ECInfo{T}, Ro::AbstractMatrix) where {T}
+  ht = open_ht_store(EC, "ht_oAAA")
+  n = ht.nao; m = ht.m; nj = size(Ro, 2)
+  v_ooAA = load4idx(EC, "ht_ooAA")
+  v_oAoA_f = zeros(T, m*n, nj, n)                         # [(i,ν), j, σ]  fused-leading ⇒ BLAS σ-slices
+  v_AooA   = zeros(T, n, m, nj, n)                        # [μ, i, j, σ]
+  Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n); vAtmp = zeros(T, m*n, nj)
+  @inbounds for σ in 1:n
+    ht_column!(Aσ, Bσ, ht, σ)
+    mul!(view(v_oAoA_f, :, :, σ), Aσ, Ro)                 # v_oAoA[(iν),j] = Aσ[(iν),ρ]·Ro[ρ,j]
+    mul!(vAtmp, Bσ, Ro)                                   # [(iμ),j]
+    permutedims!(view(v_AooA, :, :, :, σ), reshape(vAtmp, m, n, nj), (2, 1, 3))  # [i,μ,j] → [μ,i,j]
+  end
+  close_ht_store!(EC, ht)
+  return v_ooAA, v_AooA, reshape(v_oAoA_f, m, n, nj, n)
 end
 
 """
@@ -2222,6 +2279,15 @@ function ao_cc_setup!(EC::ECInfo{T}) where {T<:Number}
       Ecore = 2.0*sum(Dcore .* hao) + sum(Dcore .* Fcore)
     end
     save!(EC, "h1eff_AA", h1eff)
+    # Build the half-transformed store ONCE (bra-occ transform is T1-independent), so the bare pass
+    # below and every residual iteration read it instead of re-streaming the ± store. Delete first so a
+    # stale store from a prior run/orbital set is never reused; only the ± store path builds it.
+    delete_ht_store!(EC, "ht_oAAA"); file_exists(EC, "ht_ooAA") && delete_file!(EC, "ht_ooAA")
+    if pm_exists(EC)
+      pm = open_pm_store(EC)
+      ht_build_dress!(EC, pm, cMO[:, SP['o']])
+      close_pm_store!(EC, pm)
+    end
     ao_dressed_ints(EC, T[], cMO)                    # T1 empty ⇒ bare (active-space) integrals
     fock = load2idx(EC, "df_mm")
     save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
