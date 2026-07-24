@@ -261,3 +261,35 @@ for basis in ("sto-3g", "cc-pVDZ")
   close(aofile)
 end
 end
+
+# MIO positional (offset-addressed) I/O: mioheadersize gives the data offset from the mio header
+# structure; miopread! reads an exact byte range at an absolute offset (matches the mmapped data);
+# mioprefetch is an advisory best-effort no-op-safe hint. These back the out-of-core pm_half_trans reads.
+@testitem "MIO positional IO (mioheadersize / miopread! / mioprefetch)" tags=[:unit, :quick] begin
+  using ElemCo.MIO: mionewmmap, miommap, mioclosemmap, mioheadersize, miopread!, mioprefetch
+  for T in (Float64, ComplexF64)
+    dims = (4, 3, 5); ntot = prod(dims); sz = sizeof(T)
+    data = randn(T, dims)
+    fname = tempname()
+    io, arr = mionewmmap(fname, dims, T)
+    arr .= data; mioclosemmap(io, arr)
+    io2, _ = miommap(fname, Val(3), T)
+    hdr = mioheadersize(io2)
+    @test hdr == (3 + length(dims)) * sizeof(Int)          # type code + narray + ndim + dims
+    flat = vec(data)
+    # read a middle element range [7:19] positionally and compare (exact — same bits written/read)
+    i0, i1 = 7, 19; nel = i1 - i0 + 1
+    buf = Vector{T}(undef, nel)
+    GC.@preserve buf miopread!(io2, pointer(buf), nel*sz, hdr + (i0-1)*sz)
+    @test buf == flat[i0:i1]
+    # the whole array read positionally == the flat data
+    buf2 = Vector{T}(undef, ntot)
+    GC.@preserve buf2 miopread!(io2, pointer(buf2), ntot*sz, hdr)
+    @test buf2 == flat
+    # short read at the tail must error (asks for one element past the end)
+    @test_throws Exception (GC.@preserve buf miopread!(io2, pointer(buf), 2*sz, hdr + (ntot-1)*sz))
+    @test mioprefetch(io2, hdr, ntot*sz) === nothing       # advisory hint: best-effort, never throws
+    close(io2)
+    rm(fname; force=true)
+  end
+end

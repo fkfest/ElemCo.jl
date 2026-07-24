@@ -48,15 +48,6 @@ function delete_ht_store!(EC::ECInfo, key::AbstractString)
   return
 end
 
-# Raw `pread` + `posix_fadvise(WILLNEED)` for the out-of-core mirror row-slices — single-threaded, queue
-# depth from the kernel readahead (measured ~4.9 GB/s cold, vs ~0.02 for mmap faults on 4 KB runs). No
-# Julia threads (the repo is moving to MPI + BLAS threads). Correct and fast whether the ± store is cached.
-@inline _pread!(fdc, ptr::Ptr, nbytes::Int, off::Int) =   # fdc: an fd (RawFD) → cconvert to Cint in ccall
-  (r = ccall(:pread, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Clonglong), fdc, ptr, nbytes, off);
-   Int(r) == nbytes || error("pm_half_trans pread: read $r of $nbytes bytes at $off"); nothing)
-@inline _willneed(fdc, off::Int, len::Int) =
-  ccall(:posix_fadvise, Cint, (Cint, Clonglong, Clonglong, Cint), fdc, off, len, 3)  # POSIX_FADV_WILLNEED
-
 # [`reconstruct_mirror_both!`](@ref) reading from an in-RAM row-slice sub-block `Ss/As[r, jc]` (row `r`
 # = the r-th block-J pair, col `jc` = panel-Jp column) instead of the mmapped panel — for the pread path.
 @inline function reconstruct_mirror_sub!(w::SlabWork, Ss, As, r::Int, cJp, ntilep::Int)
@@ -86,9 +77,8 @@ function pm_half_trans(EC::ECInfo, pm::PMSupermatrices{Te}, C::AbstractMatrix, k
   w = SlabWork{Te}(pm); hν = zeros(Te, m, n); hμ = zeros(Te, m, n)
   σ0(J) = J == 1 ? 0 : last(pm.σblocks[J-1])         # first μ below the panel's band
   σend(J) = last(pm.σblocks[J])
-  fds = fd(pm.sio); fda = fd(pm.aio)                 # ± store fds for the mirror preads (cconvert in ccall)
-  hdr_s = filesize(pm.sio) - length(pm.smap) * sz    # mio header bytes preceding the mmapped data
-  hdr_a = filesize(pm.aio) - length(pm.amap) * sz
+  hdr_s = mioheadersize(pm.sio)                      # mio header bytes preceding the mmapped ± data
+  hdr_a = mioheadersize(pm.aio)                      # (absolute-offset base for the mirror preads)
   mx = maximum(length, pm.pairblocks)                # reusable mirror row-slice buffers (≤ block size)
   Ss = Matrix{Te}(undef, mx, mx); As = Matrix{Te}(undef, mx, mx)
   @inbounds for J in 1:nb
@@ -107,12 +97,12 @@ function pm_half_trans(EC::ECInfo, pm::PMSupermatrices{Te}, C::AbstractMatrix, k
       GC.@preserve Ss As begin
         for jc in 1:ntilep                           # prefetch every column's contiguous row-run
           off = base + (jc - 1) * nrowp * sz
-          _willneed(fds, hdr_s + off, nsub * sz); _willneed(fda, hdr_a + off, nsub * sz)
+          mioprefetch(pm.sio, hdr_s + off, nsub * sz); mioprefetch(pm.aio, hdr_a + off, nsub * sz)
         end
         for jc in 1:ntilep
           off = base + (jc - 1) * nrowp * sz
-          _pread!(fds, pointer(Ss, (jc - 1) * mx + 1), nsub * sz, hdr_s + off)
-          _pread!(fda, pointer(As, (jc - 1) * mx + 1), nsub * sz, hdr_a + off)
+          miopread!(pm.sio, pointer(Ss, (jc - 1) * mx + 1), nsub * sz, hdr_s + off)
+          miopread!(pm.aio, pointer(As, (jc - 1) * mx + 1), nsub * sz, hdr_a + off)
         end
       end
       lop = σ0(Jp); hip = σend(Jp)

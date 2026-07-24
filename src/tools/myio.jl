@@ -8,6 +8,7 @@ module MIO
 using Mmap
 
 export miosave, mioload, mioload!, miommap, mionewmmap, mioclosemmap, mioflushmmap
+export mioheadersize, miopread!, mioprefetch
 
 const Types = [
   Bool,
@@ -307,6 +308,78 @@ function miommap(fname::String, ::Val{N}, T::Type=Float64; writable::Bool=false)
     append!(dims, read(io, Int))
   end
   return io, mmap(io, Array{T,N}, Tuple(dims)::NTuple{N,Int})
+end
+
+# ---------------------------------------------------------------------------------------------------
+# Positional (offset-addressed) I/O on an mmapped mio file — the base layer for out-of-core readers
+# that want scattered `pread`s + kernel readahead instead of on-demand mmap page faults (the latter
+# measured ~100× slower for small scattered runs on a cold store). The mio header size lives here (next
+# to the format), so callers never re-derive it from `filesize`/array length.
+# ---------------------------------------------------------------------------------------------------
+
+# POSIX_FADV_WILLNEED (Linux): advise the kernel to begin reading a range asynchronously. Value 3 on all
+# mainstream arches (x86_64/aarch64/arm/riscv/ppc64le); s390x uses 6 — but the advice is best-effort and
+# its result is ignored, so a wrong value there is at worst a missed prefetch, never incorrect.
+const _POSIX_FADV_WILLNEED = Cint(3)
+
+"""
+    mioheadersize(io::IOStream) -> Int
+
+  Number of header bytes preceding the array data in an mio-format file (type code + array count +
+  ndim + dims) — equivalently, the absolute byte offset at which the single mmapped array's data
+  begins. Add it to a data-relative byte offset to address the data with [`miopread!`](@ref) /
+  [`mioprefetch`](@ref). Parses the header from the file start and restores the stream position.
+"""
+function mioheadersize(io::IOStream)
+  pos = position(io)
+  seekstart(io)
+  read(io, Int)                                # type code
+  narray = read(io, Int)
+  narray == 1 || error("mioheadersize: only single-array mio files are supported (narray=$narray)")
+  ndim = read(io, Int)
+  for _ in 1:ndim
+    read(io, Int)                              # each dimension
+  end
+  off = position(io)
+  seek(io, pos)
+  return off
+end
+
+"""
+    miopread!(io::IOStream, ptr::Ptr, nbytes::Int, offset::Int)
+
+  Positional read: copy exactly `nbytes` bytes from `io` at absolute byte `offset` into `ptr`. `offset`
+  is measured from the file start — add [`mioheadersize`](@ref) to address the array data. `ptr` must
+  point to at least `nbytes` of live memory (root it with `GC.@preserve`). Uses `pread(2)` on Unix
+  (positional, does not disturb the stream position); on other platforms falls back to
+  `seek`+`unsafe_read`, which *does* move the stream position (fine for single-threaded use). Errors if
+  fewer than `nbytes` bytes are available.
+"""
+@inline function miopread!(io::IOStream, ptr::Ptr, nbytes::Int, offset::Int)
+  @static if Sys.isunix()
+    r = ccall(:pread, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Clonglong), fd(io), ptr, nbytes, offset)
+    Int(r) == nbytes || error("miopread!: read $r of $nbytes bytes at offset $offset")
+  else
+    seek(io, offset)
+    unsafe_read(io, ptr, nbytes)               # exact read or EOFError
+  end
+  return nothing
+end
+
+"""
+    mioprefetch(io::IOStream, offset::Int, nbytes::Int)
+
+  Best-effort readahead hint: advise the kernel that `[offset, offset+nbytes)` of `io` (absolute bytes;
+  add [`mioheadersize`](@ref)) will be read soon, letting it queue the I/O asynchronously ahead of a
+  burst of [`miopread!`](@ref)s. Uses `posix_fadvise(POSIX_FADV_WILLNEED)` on Linux and is a silent
+  no-op elsewhere — it is purely advisory (never required for correctness) and only Linux exposes the
+  syscall portably (macOS would need `fcntl(F_RDADVISE)`, most BSDs vary).
+"""
+@inline function mioprefetch(io::IOStream, offset::Int, nbytes::Int)
+  @static if Sys.islinux()
+    ccall(:posix_fadvise, Cint, (Cint, Clonglong, Clonglong, Cint), fd(io), offset, nbytes, _POSIX_FADV_WILLNEED)
+  end
+  return nothing
 end
 
 

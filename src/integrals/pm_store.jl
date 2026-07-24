@@ -33,6 +33,7 @@ using LinearAlgebra
 using ..ElemCo.QMTensors
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
+using ..ElemCo.MIO: mioheadersize, miopread!, mioprefetch
 using ..ElemCo.Utils
 
 export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
