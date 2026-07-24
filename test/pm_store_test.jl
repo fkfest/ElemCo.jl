@@ -10,7 +10,7 @@
 # conjugation-free exchange symmetry, so the identity holds verbatim over ℂ).
 using ElemCo
 using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
-using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx
+using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx, load4idx
 using ElemCo.PMStore
 using ElemCo.FockFactory: ao_JK!, ao_J2K!, add_coulomb!, add_exchange!
 using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform
@@ -437,6 +437,43 @@ end
     for k in ("ht_ooAA_a", "ht_ooAA_b", "ht_oOAA")
       file_exists(EC, k) && delete_file!(EC, k)
     end
+  end
+end
+
+# MO-blocks engine (ht_mo_block / save_mo_block!): build 4-index MO integral blocks that carry the
+# store's occupied bra index, one sweep per block. Each must match the dense physicist reference. The 5
+# directly-mapped blocks are element-type-generic (real + complex); the vvvo block uses the bra↔ket
+# Hermiticity swap and is real-only from a bra-store (must throw for complex).
+@testset "ht_mo_block / save_mo_block! ↔ dense" begin
+  save_mo_block! = ElemCo.CoupledCluster.save_mo_block!
+  for T in (Float64, ComplexF64), (n, maxcols) in ((8, 8), (12, 30), (14, 300))
+    no = 3; nv = 5
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    G = detri_int2(int2, n, 1:n, 1:n, 1:n, 1:n)
+    Co = randn(T, n, no); Cv = randn(T, n, nv)
+    pm_half_trans(EC, pm, Co, "ht_e")                      # store's occupied bra = Co
+    close_pm_store!(EC, pm)
+    @tensor ovoo_r[i,a,j,k] := G[μ,ν,ρ,σ]*Co[μ,i]*Cv[ν,a]*Co[ρ,j]*Co[σ,k]   # ⟨ia|jk⟩
+    @tensor ooov_r[i,j,k,a] := G[μ,ν,ρ,σ]*Co[μ,i]*Co[ν,j]*Co[ρ,k]*Cv[σ,a]   # ⟨ij|ka⟩
+    @tensor vovv_r[a,i,b,c] := G[μ,ν,ρ,σ]*Cv[μ,a]*Co[ν,i]*Cv[ρ,b]*Cv[σ,c]   # ⟨ai|bc⟩
+    @tensor voov_r[a,i,j,b] := G[μ,ν,ρ,σ]*Cv[μ,a]*Co[ν,i]*Co[ρ,j]*Cv[σ,b]   # ⟨ai|jb⟩
+    @tensor vovo_r[a,i,b,j] := G[μ,ν,ρ,σ]*Cv[μ,a]*Co[ν,i]*Cv[ρ,b]*Co[σ,j]   # ⟨ai|bj⟩
+    @tensor vvvo_r[a,b,c,k] := G[μ,ν,ρ,σ]*Cv[μ,a]*Cv[ν,b]*Cv[ρ,c]*Co[σ,k]   # ⟨ab|ck⟩
+    for (name, ref) in (("ovoo",ovoo_r), ("ooov",ooov_r), ("vovv",vovv_r), ("voov",voov_r), ("vovo",vovo_r))
+      save_mo_block!(EC, name, "ht_e", Co, Cv)
+      @test maximum(abs.(load4idx(EC, name) .- ref)) < 1e-11
+    end
+    if T <: Complex
+      @test_throws Exception save_mo_block!(EC, "vvvo", "ht_e", Co, Cv)   # swap-block real-only
+    else
+      save_mo_block!(EC, "vvvo", "ht_e", Co, Cv)
+      @test maximum(abs.(load4idx(EC, "vvvo") .- vvvo_r)) < 1e-11
+    end
+    for k in ("ovoo", "ooov", "vovv", "voov", "vovo", "vvvo")
+      file_exists(EC, k) && delete_file!(EC, k)
+    end
+    delete_ht_store!(EC, "ht_e")
   end
 end
 

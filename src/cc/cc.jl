@@ -2033,6 +2033,87 @@ function ht_occ_early_unrestricted(EC::ECInfo{T}, Ra_o::AbstractMatrix, Rb_o::Ab
 end
 
 """
+    ht_mo_block(EC, htkey, role, CX, CY, CZ) -> W
+
+  General half-transformed-store → MO-block kernel: build a 4-index MO integral block that carries the
+  store's (occupied) bra index `i` plus three MO indices transformed by the coefficient matrices
+  `CX`/`CY`/`CZ`, in ONE sweep over the store `htkey` (`Σ_μ⟨μν|ρσ⟩C[μ,i]` in both ket orders, read
+  column-by-column with [`ht_column!`](@ref PMStore.ht_column!)). With
+
+      W[i,X,Y,Z] = Σ_μνρσ ⟨μν|ρσ⟩ C[μ,i] CX[ν,X] CY[ρ,Y] CZ[σ,Z]   (`role=:A`, occ i on bra-1)
+      W[X,i,Y,Z] = Σ_μνρσ ⟨μν|ρσ⟩ CX[μ,X] C[ν,i] CY[ρ,Y] CZ[σ,Z]   (`role=:B`, occ i on bra-2)
+
+  every block a CC method needs (which always has ≥1 occupied index) is one call plus a fixed output
+  permutation — see [`save_mo_block!`](@ref). Per σ-column two GEMMs transform the free bra (`ν`/`μ`)
+  and ket-1 (`ρ`) indices into the `[(i,X),Y]` intermediate; stacking those over σ and one final GEMM
+  contracts ket-2 (`σ`) into `Z`. Generic over the element type (the store applies plain `C`, matching
+  the AO-direct/FCIDUMP `detri` convention). Cost: nocc·nao³ read + GEMMs; peak RAM ≈ the output block.
+"""
+function ht_mo_block(EC::ECInfo, htkey::AbstractString, role::Symbol,
+                     CX::AbstractMatrix, CY::AbstractMatrix, CZ::AbstractMatrix)
+  role === :A || role === :B || error("ht_mo_block: role must be :A or :B (got $role)")
+  ht = open_ht_store(EC, htkey)
+  T = eltype(ht.map); n = ht.nao; m = ht.m
+  nX = size(CX, 2); nY = size(CY, 2); nZ = size(CZ, 2)
+  size(CX,1) == n && size(CY,1) == n && size(CZ,1) == n ||
+    error("ht_mo_block: coefficient rows must equal nao=$n")
+  Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n)
+  IXY = zeros(T, m*nX*nY, n)                        # [(i,X,Y), σ]  stacked ket-2 columns
+  iXρ = zeros(T, m, nX, n); iXY = zeros(T, m, nX, nY)
+  @inbounds for σ in 1:n
+    ht_column!(Aσ, Bσ, ht, σ)
+    S = reshape(role === :A ? Aσ : Bσ, m, n, n)    # [i, freeAO(ν|μ), ρ]
+    @mtensor iXρ[i,X,ρ] = S[i,f,ρ] * CX[f,X]        # free bra → X
+    @mtensor iXY[i,X,Y] = iXρ[i,X,ρ] * CY[ρ,Y]      # ket-1 → Y
+    @views IXY[:, σ] .= vec(iXY)
+  end
+  close_ht_store!(EC, ht)
+  W = reshape(IXY * CZ, m, nX, nY, nZ)             # ket-2 σ → Z (one BLAS-3 GEMM)
+  return role === :A ? W : permutedims(W, (2, 1, 3, 4))
+end
+
+# Closed-shell bare MO blocks the (T)/Λ(T)/EOM consumers read, expressed off a store whose bra index is
+# occupied: `role` + the (X,Y,Z) coefficient spaces + the output permutation from the kernel's natural
+# order to the physicist order the consumer loads. `swap=true` marks a block obtained by the bra↔ket
+# Hermiticity `⟨pq|rs⟩=conj⟨rs|pq⟩` (its only occ index sits on a ket): real-correct (conj is a no-op),
+# but for complex it needs a ket-transformed store — guarded below.
+const HT_MO_BLOCK_SPEC = Dict{String,NamedTuple{(:role,:X,:Y,:Z,:perm,:swap),
+                                                Tuple{Symbol,Char,Char,Char,NTuple{4,Int},Bool}}}(
+  "ovoo" => (role=:A, X='v', Y='o', Z='o', perm=(1,2,3,4), swap=false),  # ⟨ia|jk⟩
+  "ooov" => (role=:A, X='o', Y='o', Z='v', perm=(1,2,3,4), swap=false),  # ⟨ij|ka⟩
+  "vovv" => (role=:B, X='v', Y='v', Z='v', perm=(1,2,3,4), swap=false),  # ⟨ai|bc⟩
+  "voov" => (role=:B, X='v', Y='o', Z='v', perm=(1,2,3,4), swap=false),  # ⟨ai|jb⟩
+  "vovo" => (role=:B, X='v', Y='v', Z='o', perm=(1,2,3,4), swap=false),  # ⟨ai|bj⟩
+  "vvvo" => (role=:B, X='v', Y='v', Z='v', perm=(3,4,1,2), swap=true),   # ⟨ab|ck⟩ = conj⟨ck|ab⟩
+)
+
+"""
+    save_mo_block!(EC, name, htkey, Co, Cv)
+
+  Build the closed-shell bare MO block `name` (e.g. `"vvvo"`, `"ovoo"`, `"vovv"`, `"ooov"`, `"voov"`,
+  `"vovo"`) from the occupied-bra store `htkey` via [`ht_mo_block`](@ref) and save it (mmapped, `"tmp"`
+  so it is reclaimed at end-of-run) under its plain space name, in the exact index order the consumers
+  read. `Co`/`Cv` are the occupied/virtual MO coefficients. The store's own bra index supplies the
+  block's stored occupied index. Blocks flagged `swap` use the bra↔ket Hermiticity relation and are
+  real-only from this bra-store (see [`ht_mo_block`](@ref)); complex needs the (future) ket-transformed
+  store.
+"""
+function save_mo_block!(EC::ECInfo, name::AbstractString, htkey::AbstractString,
+                        Co::AbstractMatrix, Cv::AbstractMatrix)
+  spec = get(HT_MO_BLOCK_SPEC, name, nothing)
+  isnothing(spec) && error("save_mo_block!: no spec for block \"$name\"")
+  coef(c) = c == 'o' ? Co : Cv
+  spec.swap && eltype(Co) <: Complex &&
+    error("save_mo_block!: block \"$name\" uses a bra↔ket Hermiticity swap, which is real-only from a " *
+          "bra-transformed store; complex needs a ket-transformed store (pending complex-AO integrals)")
+  W = ht_mo_block(EC, htkey, spec.role, coef(spec.X), coef(spec.Y), coef(spec.Z))
+  spec.perm == (1,2,3,4) || (W = permutedims(W, spec.perm))
+  spec.swap && (W = conj(W))                       # Hermiticity conj (no-op for real)
+  save!(EC, name, W; description="tmp mo block ($name)")
+  return name
+end
+
+"""
     ao_core_fock(EC::ECInfo, Dcore::AbstractMatrix) -> Matrix
 
   Closed-shell mean-field (2J−K) AO Fock contribution of the density `Dcore` (spatial,
