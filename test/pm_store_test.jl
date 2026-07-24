@@ -612,6 +612,15 @@ end
   @test !file_exists(EC, "ao_int2")                        # αβ kext ran via pm_K2ab! (no joint file)
   @test abs(ehf_std["UHF"] - ehf_pm["UHF"]) < 1e-11
   @test abs(e_std["UCCSD"] - e_pm["UCCSD"]) < 1e-10
+  # standalone MP2/UMP2 run AO-direct off the ± store now (method gate admits MP2)
+  EC = fresh(); @ints; @hf; e_pm_mp2 = @cc mp2
+  @test pm_exists(EC) && isempty(EC.fd)                    # standalone MP2 stayed on the ± store
+  EC = fresh(); @set int ao_pm=false; @ints; @hf; e_j_mp2 = @cc mp2
+  @test abs(e_pm_mp2["MP2"] - e_j_mp2["MP2"]) < 1e-10      # ± store MP2 == joint MP2
+  EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ump2 = @cc mp2
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=false; @uhf; e_j_ump2 = @cc mp2
+  @test abs(e_pm_ump2["UMP2"] - e_j_ump2["UMP2"]) < 1e-10
 end
 
 end # @testitem

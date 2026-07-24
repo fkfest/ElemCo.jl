@@ -295,6 +295,20 @@ end
       @test abs(e_ao["MP2"] - e_ref["MP2"]) < 1e-9
     end
 
+    # STANDALONE AO-direct MP2 / UMP2 (`@cc mp2`, not as a CC start guess): the method gate now admits
+    # (U/R)MP2, so a bare `@cc mp2` on AO files runs AO-direct (EC.fd stays empty) off the bare
+    # d_oovv/d_OOVV/d_oOvV blocks + Fock, instead of deriving a full MO dump. Energies must match the
+    # derived-MO-dump MP2 from the same orbitals (int.ao_direct=false forces the derive route).
+    EC = fresh(); @hf; e_smp2 = @cc mp2                       # closed-shell, default frozen core
+    @test isempty(EC.fd)                                      # standalone MP2 stayed AO-direct
+    EC = fresh(); EC.options.int.ao_direct = false; @hf; e_smp2_ref = @cc mp2   # derive-route reference
+    @test abs(e_smp2["MP2"] - e_smp2_ref["MP2"]) < 1e-9
+    # open-shell standalone UMP2 (water cation): `@cc mp2` on UHF orbitals dispatches to UMP2
+    EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_sump2 = @cc mp2
+    @test isempty(EC.fd)                                      # AO-direct unrestricted MP2
+    EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_sump2_ref = @cc mp2
+    @test abs(e_sump2["UMP2"] - e_sump2_ref["UMP2"]) < 1e-8
+
     # The T1-dressed AO Fock is NON-Hermitian (bra uses C̃ᴸ, ket C̃ᴿ), so f_vo ≠ f_ovᵀ: ao_dressed_ints
     # must build the v,o Fock block from d_vooo, not by transposing f_ov. That block is latent on the
     # kext-only AO-direct energy path (R1 is seeded from dh_mm[v,o]), so the CCSD-energy checks above

@@ -181,15 +181,17 @@ end
     ao_direct_method(ecm::ECMethod) -> Bool
 
   Whether `ecm` runs directly on the AO integral files without a preceding MO transform:
-  CCSD/DCSD (closed- or open-shell) with no triples and no EOM/Lagrange prefix. For every other
-  method (triples/EOM/Λ/FCI) a transient MO dump is derived from the AO integrals (see
-  [`derive_mo_basis!`](@ref)). The caller additionally checks that the frozen-core AO setup
-  matches the residual's spin treatment and that no orbitals were deleted.
+  MP2/UMP2/RMP2, or CCSD/DCSD (closed- or open-shell) with no triples — in both cases with no
+  EOM/Lagrange prefix. For every other method (triples/EOM/Λ/FCI) a transient MO dump is derived
+  from the AO integrals (see [`derive_mo_basis!`](@ref)). The caller additionally checks that the
+  frozen-core AO setup matches the residual's spin treatment and that no orbitals were deleted.
 """
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm))
-  return ecm.exclevel[3] == :none &&
-         !has_prefix(ecm, "EOM") && !has_prefix(ecm, "Λ") && name in ("CCSD", "DCSD")
+  has_prefix(ecm, "EOM") && return false
+  has_prefix(ecm, "Λ") && return false
+  name in ("MP2", "UMP2", "RMP2") && return true        # standalone (U/R)MP2 off the bare AO blocks
+  return ecm.exclevel[3] == :none && name in ("CCSD", "DCSD")
 end
 
 
