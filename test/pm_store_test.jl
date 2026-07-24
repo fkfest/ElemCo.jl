@@ -658,6 +658,15 @@ end
   @test pm_exists(EC) && isempty(EC.fd)
   EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=false; @uhf; e_j_ump2 = @cc mp2
   @test abs(e_pm_ump2["UMP2"] - e_j_ump2["UMP2"]) < 1e-10
+  # closed-shell CCSD(T)/DCSD(T) run AO-direct off the ± store: the 3-external vvvo/ovoo blocks are built
+  # from ht_oAAA (no MO dump), and the (T) energy matches the derived-MO-dump reference
+  for m in ("ccsd(t)", "dcsd(t)")
+    key = uppercase(m)                                       # "CCSD(T)" / "DCSD(T)"
+    EC = fresh(); @ints; @hf; e_pm_t = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)                    # AO-direct (T): stayed on the ± store
+    EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_t = @cc m
+    @test abs(e_pm_t[key] - e_ref_t[key]) < 1e-8
+  end
 end
 
 end # @testitem

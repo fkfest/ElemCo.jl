@@ -335,15 +335,22 @@ function calc_pertT_closed_shell(EC::ECInfo{Ty}; save_t3=false) where Ty
   T2 = load4idx(EC,"T_vvoo")
   pseudocan_transform!(pct, T2, "vvoo")
 
-  # Load and (if needed) transform integrals
+  # Load and (if needed) transform integrals. AO-direct: read the bare oovv (dressed≡bare there) and
+  # build the 3-external vvvo/ovoo once from the half-transformed store (no MO dump); else from EC.fd.
+  if EC.ao_direct
+    nvir_est = n_virt_orbs(EC)
+    gb = 8 * nvir_est^3 / 1e9
+    gb > 1.0 && println("AO-direct (T): 3-external blocks ≈ $(round(gb, digits=1)) GB each (full arrays)")
+    build_ht_mo_blocks!(EC, ("vvvo", "ovoo"))
+  end
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
+  vv_oo = permutedims(EC.ao_direct ? load_bare_int2(EC,"oovv") : ints2(EC,"oovv"),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC,"vvvo")
+  vvvo = EC.ao_direct ? load4idx(EC,"vvvo") : ints2(EC,"vvvo")
   pseudocan_transform!(pct, vvvo, "vvvo")
   # ``v_{ia}^{jk}``
-  ovoo = ints2(EC,"ovoo")
+  ovoo = EC.ao_direct ? load4idx(EC,"ovoo") : ints2(EC,"ovoo")
   pseudocan_transform!(pct, ovoo, "ovoo")
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"

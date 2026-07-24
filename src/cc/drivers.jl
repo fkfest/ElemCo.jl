@@ -181,17 +181,19 @@ end
     ao_direct_method(ecm::ECMethod) -> Bool
 
   Whether `ecm` runs directly on the AO integral files without a preceding MO transform:
-  MP2/UMP2/RMP2, or CCSD/DCSD (closed- or open-shell) with no triples — in both cases with no
-  EOM/Lagrange prefix. For every other method (triples/EOM/Λ/FCI) a transient MO dump is derived
-  from the AO integrals (see [`derive_mo_basis!`](@ref)). The caller additionally checks that the
-  frozen-core AO setup matches the residual's spin treatment and that no orbitals were deleted.
+  MP2/UMP2/RMP2, or CCSD/DCSD (closed- or open-shell) optionally with perturbative triples — in all
+  cases with no EOM/Lagrange prefix. For every other method (EOM/Λ/FCI/iterative-triples) a transient
+  MO dump is derived from the AO integrals (see [`derive_mo_basis!`](@ref)). The caller additionally
+  restricts perturbative triples to the closed-shell ± store path (`would_be_closed_shell && pm_exists`)
+  and checks that the frozen-core AO setup matches the residual's spin treatment and no orbitals were
+  deleted.
 """
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm))
   has_prefix(ecm, "EOM") && return false
   has_prefix(ecm, "Λ") && return false
   name in ("MP2", "UMP2", "RMP2") && return true        # standalone (U/R)MP2 off the bare AO blocks
-  return ecm.exclevel[3] == :none && name in ("CCSD", "DCSD")
+  return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD")
 end
 
 
@@ -312,8 +314,11 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     would_be_closed_shell = !is_unrestricted(ecm) && !has_prefix(ecm, "R") && closed_shell
     # correlated properties need the Λ machinery, which is MO-dump-only so far → route to derive
     # (pre-existing hole: AO-direct + cc.properties crashed in calc_dressed_ints on the empty fd).
+    # AO-direct perturbative triples so far need the closed-shell half-transformed store (built only on
+    # the ± store path); unrestricted (T) is a follow-up → those route to derive.
+    triples_ok = ecm.exclevel[3] == :none || (would_be_closed_shell && pm_exists(EC))
     ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct && n_deleted_orbitals(EC) == 0 &&
-                !need_correlated_properties(EC) &&
+                !need_correlated_properties(EC) && triples_ok &&
                 is_restricted(load_orbitals(EC)) == would_be_closed_shell
     if ao_direct
       EC.ao_direct = true            # the active-space setup (freezing) happens in ao_cc_setup!

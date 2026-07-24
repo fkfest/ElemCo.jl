@@ -2114,6 +2114,27 @@ function save_mo_block!(EC::ECInfo, name::AbstractString, htkey::AbstractString,
 end
 
 """
+    build_ht_mo_blocks!(EC, names)
+
+  Build the closed-shell bare MO blocks `names` (e.g. `("vvvo","ovoo")` for (T), plus `"vovv"`/`"ooov"`
+  for Λ(T)) that the AO-direct triples / λ-triples read, from the occupied-bra half-transformed store
+  `"ht_oAAA"` (still on file from [`ao_cc_setup!`](@ref)) and the active-space MO coefficients. Each
+  block is saved (mmapped, `"tmp"`) under its plain name via [`save_mo_block!`](@ref); the consumers
+  pick them up with `load4idx`.
+"""
+function build_ht_mo_blocks!(EC::ECInfo, names)
+  ht_exists(EC, "ht_oAAA") ||
+    error("build_ht_mo_blocks!: half-transformed store \"ht_oAAA\" not found — AO-direct (T) needs the " *
+          "± store path (int.ao_pm=true); it is built in ao_cc_setup!")
+  cMO = ao_direct_orbitals(EC); SP = EC.space
+  Co = cMO[:, SP['o']]; Cv = cMO[:, SP['v']]
+  for name in names
+    save_mo_block!(EC, name, "ht_oAAA", Co, Cv)
+  end
+  return
+end
+
+"""
     ao_core_fock(EC::ECInfo, Dcore::AbstractMatrix) -> Matrix
 
   Closed-shell mean-field (2J−K) AO Fock contribution of the density `Dcore` (spatial,
