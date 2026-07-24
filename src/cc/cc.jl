@@ -1982,47 +1982,54 @@ function ht_occ_early(EC::ECInfo{T}, Ro::AbstractMatrix;
 end
 
 """
-    ht_os_sweep(EC, Ra_o, Rb_o) -> (v_oOAA, v_AOoA, v_oAoA, v_oAAO, v_AOAO)
+    ht_occ_early_unrestricted(EC, Ra_o, Rb_o) -> (ssa_in, ssb_in, os_in)
 
-  Opposite-spin occ-early intermediates read from the prebuilt per-spin half-transformed stores
-  ([`ht_build_dress_unrestricted!`](@ref)) — the drop-in for [`pm_os_sweep`](@ref) that avoids
-  re-streaming the ± store. `v_oOAA` (both bra occ, T1-independent) is loaded from `"ht_oOAA"`. The four
-  T1-dependent blocks are each ONE BLAS GEMM per σ-column off the A-/B-role slabs of [`ht_column!`](@ref
-  PMStore.ht_column!); particle symmetry `⟨μν|ρσ⟩=⟨νμ|σρ⟩` routes every kept-AO onto the store's fixed
-  second-ket column:
+  All the open-shell occ-early intermediates the unrestricted dressing needs, read from the prebuilt
+  per-spin half-transformed stores ([`ht_build_dress_unrestricted!`](@ref)) in ONE pass per store — the
+  fused replacement for two [`ht_occ_early`](@ref) calls plus a `pm_os_sweep`. Reading each store once (its
+  A-/B-role slabs both come from one [`ht_column!`](@ref PMStore.ht_column!) call) and reusing the shared
+  products removes the redundant re-reads/re-GEMMs of the separate passes (6 GEMMs + 2 reads per σ-column
+  vs 8 + 4). The doubly-occ blocks (`v_ooAA(αα)`/`v_ooAA(ββ)`/`v_oOAA`) are T1-independent and loaded.
 
-  - α store, col `c`: A-role · `Ra_o` → `v_oAoA[:,:,:,c]`   (kept σ);  B-role · `Rb_o` → `v_oAAO[:,:,c,:]` (kept ρ);
-  - β store, col `c`: B-role · `Ra_o` → `v_AOoA[:,:,:,c]`   (kept σ);  A-role · `Rb_o` → `v_AOAO[:,:,c,:]` (kept ρ).
-
-  Both roles come from one `ht_column!` call, so each store is read once here. `Ra_o`/`Rb_o` are the
-  T1-dependent occupied ket coefficients.
+  Per α column `c` (`Aa`/`Ba` = A-/B-role), particle symmetry `⟨μν|ρσ⟩=⟨νμ|σρ⟩` routing every kept-AO to
+  the fixed second-ket column: `Aa·Ra_o`→`v_oAoA(αα)` (shared by `ssa` AND `os`); `Ba·Ra_o`→`v_AooA(αα)`;
+  `Ba·Rb_o`→`v_oAAO`. Per β column: `Ab·Rb_o`→`v_oAoA(ββ)` (`ssb`) AND `v_AOAO` (`os`); `Bb·Rb_o`→
+  `v_AooA(ββ)`; `Bb·Ra_o`→`v_AOoA`. Returns the tuples for `ao_ss_finish`(α), `ao_ss_finish`(β),
+  `ao_os_finish`. `Ra_o`/`Rb_o` are the T1-dependent occupied ket coefficients.
 """
-function ht_os_sweep(EC::ECInfo{T}, Ra_o::AbstractMatrix, Rb_o::AbstractMatrix) where {T}
+function ht_occ_early_unrestricted(EC::ECInfo{T}, Ra_o::AbstractMatrix, Rb_o::AbstractMatrix) where {T}
   hta = open_ht_store(EC, "ht_oAAA_a"); htb = open_ht_store(EC, "ht_oAAA_b")
   n = hta.nao; na = hta.m; nb = htb.m
-  v_oOAA = load4idx(EC, "ht_oOAA")                        # [i,J,ρ,σ]  both bra occ (T1-independent)
-  v_oAoA_f = zeros(T, na*n, na, n)                        # [(i,ν), k, σ]  fused-leading ⇒ BLAS σ-slices
-  v_oAAO = zeros(T, na, n, n, nb)                         # [i,ν,ρ,J]
-  v_AOoA = zeros(T, n, nb, na, n)                         # [μ,I,k,σ]
-  v_AOAO = zeros(T, n, nb, n, nb)                         # [μ,I,ρ,J]
-  Aa = zeros(T, na*n, n); Ba = zeros(T, na*n, n)          # α A-/B-role columns
+  v_ooAA_a = load4idx(EC, "ht_ooAA_a"); v_ooAA_b = load4idx(EC, "ht_ooAA_b")  # same-spin, T1-independent
+  v_oOAA   = load4idx(EC, "ht_oOAA")                      # [i,J,ρ,σ]  both bra occ, T1-independent
+  v_oAoA_a_f = zeros(T, na*n, na, n)                      # [(i,ν),k,σ]  αα (shared by ssa & os), fused-leading
+  v_oAoA_b_f = zeros(T, nb*n, nb, n)                      # [(I,ν),L,σ]  ββ (ssb & os v_AOAO), fused-leading
+  v_AooA_a = zeros(T, n, na, na, n)                       # [μ,i,j,σ]   ssa
+  v_AooA_b = zeros(T, n, nb, nb, n)                       # [μ,I,J,σ]   ssb
+  v_oAAO = zeros(T, na, n, n, nb)                         # [i,ν,ρ,J]   os
+  v_AOoA = zeros(T, n, nb, na, n)                         # [μ,I,k,σ]   os
+  v_AOAO = zeros(T, n, nb, n, nb)                         # [μ,I,ρ,J]   os
+  Aa = zeros(T, na*n, n); Ba = zeros(T, na*n, n)          # α A-/B-role columns (one ht_column! each)
   Ab = zeros(T, nb*n, n); Bb = zeros(T, nb*n, n)          # β A-/B-role columns
-  ta = zeros(T, na*n, nb)                                 # α B-role · Rb_o  (→ v_oAAO placement)
-  tbA = zeros(T, nb*n, na)                                # β B-role · Ra_o  (→ v_AOoA, permuted)
-  tbB = zeros(T, nb*n, nb)                                # β A-role · Rb_o  (→ v_AOAO, permuted)
+  wa = zeros(T, na*n, na); ua = zeros(T, na*n, nb)        # α scratch: Ba·Ra_o (→v_AooA_a), Ba·Rb_o (→v_oAAO)
+  wb = zeros(T, nb*n, nb); ub = zeros(T, nb*n, na)        # β scratch: Bb·Rb_o (→v_AooA_b), Bb·Ra_o (→v_AOoA)
   @inbounds for c in 1:n
-    ht_column!(Aa, Ba, hta, c)                            # α store: A-role Aa, B-role Ba
-    mul!(view(v_oAoA_f, :, :, c), Aa, Ra_o)              # v_oAoA[(i,ν),k] = Aa[(i,ν),ρ]·Ra_o[ρ,k]
-    mul!(ta, Ba, Rb_o)                                    # [(i,ν),J]
-    @views v_oAAO[:, :, c, :] .= reshape(ta, na, n, nb)  # kept ρ = c
-    ht_column!(Ab, Bb, htb, c)                            # β store: A-role Ab, B-role Bb
-    mul!(tbA, Bb, Ra_o)                                   # [(I,ν),k]
-    permutedims!(view(v_AOoA, :, :, :, c), reshape(tbA, nb, n, na), (2, 1, 3))  # [I,ν,k] → [ν,I,k]
-    mul!(tbB, Ab, Rb_o)                                   # [(I,ν),J]
-    permutedims!(view(v_AOAO, :, :, c, :), reshape(tbB, nb, n, nb), (2, 1, 3))  # [I,ν,J] → [ν,I,J]
+    ht_column!(Aa, Ba, hta, c)                            # α store read (both roles)
+    mul!(view(v_oAoA_a_f, :, :, c), Aa, Ra_o)            # v_oAoA(αα)[(i,ν),k]  — shared with os
+    mul!(wa, Ba, Ra_o); permutedims!(view(v_AooA_a, :, :, :, c), reshape(wa, na, n, na), (2, 1, 3))  # →v_AooA(αα)
+    mul!(ua, Ba, Rb_o); @views v_oAAO[:, :, c, :] .= reshape(ua, na, n, nb)                          # →v_oAAO (kept ρ=c)
+    ht_column!(Ab, Bb, htb, c)                            # β store read (both roles)
+    mul!(view(v_oAoA_b_f, :, :, c), Ab, Rb_o)           # v_oAoA(ββ)[(I,ν),L]  — reused below for v_AOAO
+    permutedims!(view(v_AOAO, :, :, c, :), reshape(view(v_oAoA_b_f, :, :, c), nb, n, nb), (2, 1, 3))  # →v_AOAO (kept ρ=c)
+    mul!(wb, Bb, Rb_o); permutedims!(view(v_AooA_b, :, :, :, c), reshape(wb, nb, n, nb), (2, 1, 3))  # →v_AooA(ββ)
+    mul!(ub, Bb, Ra_o); permutedims!(view(v_AOoA, :, :, :, c), reshape(ub, nb, n, na), (2, 1, 3))    # →v_AOoA (kept σ=c)
   end
   close_ht_store!(EC, hta); close_ht_store!(EC, htb)
-  return v_oOAA, v_AOoA, reshape(v_oAoA_f, na, n, na, n), v_oAAO, v_AOAO
+  v_oAoA_a = reshape(v_oAoA_a_f, na, n, na, n); v_oAoA_b = reshape(v_oAoA_b_f, nb, n, nb, n)
+  ssa_in = (v_ooAA_a, v_AooA_a, v_oAoA_a)
+  ssb_in = (v_ooAA_b, v_AooA_b, v_oAoA_b)
+  os_in  = (v_oOAA, v_AOoA, v_oAoA_a, v_oAAO, v_AOAO)     # os reuses the αα v_oAoA
+  return ssa_in, ssb_in, os_in
 end
 
 """
@@ -2244,11 +2251,10 @@ function ao_dressed_ints_unrestricted(EC::ECInfo{T}, T1a, T1b, cMOa::AbstractMat
   # read here every iteration — the bra-occ transforms La_o/Lb_o are T1-independent) when present; else
   # the ± supermatrix store (PM-native tile sweeps, half the streaming); else the joint triangular mmap.
   if ht_exists(EC, "ht_oAAA_a")
-    va_oo, va_Ao, va_oA = ht_occ_early(EC, Ra_o; key="ht_oAAA_a", ookey="ht_ooAA_a")
-    ssa = ao_ss_finish(va_oo, va_Ao, va_oA, La_v, Ra_o, Ra_v)
-    vb_oo, vb_Ao, vb_oA = ht_occ_early(EC, Rb_o; key="ht_oAAA_b", ookey="ht_ooAA_b")
-    ssb = ao_ss_finish(vb_oo, vb_Ao, vb_oA, Lb_v, Rb_o, Rb_v)
-    osab = ao_os_finish(ht_os_sweep(EC, Ra_o, Rb_o)..., La_v, Ra_o, Ra_v, Lb_v, Rb_o, Rb_v)
+    ssa_in, ssb_in, os_in = ht_occ_early_unrestricted(EC, Ra_o, Rb_o)   # each per-spin store read once
+    ssa  = ao_ss_finish(ssa_in..., La_v, Ra_o, Ra_v)
+    ssb  = ao_ss_finish(ssb_in..., Lb_v, Rb_o, Rb_v)
+    osab = ao_os_finish(os_in..., La_v, Ra_o, Ra_v, Lb_v, Rb_o, Rb_v)
   else
     mb = available_memory(EC)                         # only the streaming block builders need a RAM budget
     use_pm = pm_exists(EC)

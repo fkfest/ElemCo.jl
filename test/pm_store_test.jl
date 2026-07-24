@@ -394,13 +394,12 @@ end
 end
 
 # Open-shell half-transformed store: the per-spin build (`ht_build_dress_unrestricted!` → `ht_oAAA_a`/
-# `ht_oAAA_b` stores + `ht_ooAA_a`/`ht_ooAA_b`/`ht_oOAA` doubly-occ blocks) + the opposite-spin reader
-# (`ht_os_sweep`) and the per-spin same-spin reader (`ht_occ_early` with keys) must reproduce the dense
-# occ-early intermediates — the drop-in for `pm_os_sweep`/`pm_occ_early` without re-streaming the ± store.
-@testset "ht_os_sweep / ht_occ_early (open-shell) ↔ dense" begin
+# `ht_oAAA_b` stores + `ht_ooAA_a`/`ht_ooAA_b`/`ht_oOAA` doubly-occ blocks) + the fused single-pass reader
+# `ht_occ_early_unrestricted` (each store read once) must reproduce ALL the dense occ-early intermediates
+# the unrestricted dressing needs — the ssa/ssb same-spin triples + the five opposite-spin blocks.
+@testset "ht_occ_early_unrestricted (open-shell) ↔ dense" begin
   ht_build_dress_unrestricted! = ElemCo.CoupledCluster.ht_build_dress_unrestricted!
-  ht_os_sweep = ElemCo.CoupledCluster.ht_os_sweep
-  ht_occ_early = ElemCo.CoupledCluster.ht_occ_early
+  ht_occ_early_unrestricted = ElemCo.CoupledCluster.ht_occ_early_unrestricted
   for T in (Float64, ComplexF64), (n, maxcols) in ((8, 8), (12, 30), (14, 300))
     na = 3; nb = 2
     EC, int2 = build_store(n, T, maxcols)
@@ -409,29 +408,31 @@ end
     La = randn(T, n, na); Ra = randn(T, n, na); Lb = randn(T, n, nb); Rb = randn(T, n, nb)
     ht_build_dress_unrestricted!(EC, pm, La, Lb)      # La/Lb are the (T1-independent) bra-occ coeffs
     close_pm_store!(EC, pm)
-    # opposite-spin sweep vs dense (o1..o5 = pm_os_sweep's outputs)
-    @tensor r_oOAA[i,J,ρ,σ] := G[μ,ν,ρ,σ] * La[μ,i] * Lb[ν,J]
-    @tensor r_AOoA[μ,I,k,σ] := G[μ,ν,ρ,σ] * Lb[ν,I] * Ra[ρ,k]
-    @tensor r_oAoA[i,ν,k,σ] := G[μ,ν,ρ,σ] * La[μ,i] * Ra[ρ,k]
-    @tensor r_oAAO[i,ν,ρ,J] := G[μ,ν,ρ,σ] * La[μ,i] * Rb[σ,J]
-    @tensor r_AOAO[μ,I,ρ,J] := G[μ,ν,ρ,σ] * Lb[ν,I] * Rb[σ,J]
-    o1, o2, o3, o4, o5 = ht_os_sweep(EC, Ra, Rb)
-    @test maximum(abs.(o1 .- r_oOAA)) < 1e-13
-    @test maximum(abs.(o2 .- r_AOoA)) < 1e-13
-    @test maximum(abs.(o3 .- r_oAoA)) < 1e-13
-    @test maximum(abs.(o4 .- r_oAAO)) < 1e-13
-    @test maximum(abs.(o5 .- r_AOAO)) < 1e-13
-    # per-spin same-spin readers (α: La/Ra + ht_ooAA_a; β: Lb/Rb + ht_ooAA_b)
+    ssa_in, ssb_in, os_in = ht_occ_early_unrestricted(EC, Ra, Rb)
+    # same-spin α triple (v_ooAA, v_AooA, v_oAoA)
     @tensor ra_ooAA[i,j,ρ,σ] := G[μ,ν,ρ,σ] * La[μ,i] * La[ν,j]
     @tensor ra_AooA[μ,i,j,σ] := G[μ,ν,ρ,σ] * La[ν,i] * Ra[ρ,j]
     @tensor ra_oAoA[i,ν,j,σ] := G[μ,ν,ρ,σ] * La[μ,i] * Ra[ρ,j]
-    a1, a2, a3 = ht_occ_early(EC, Ra; key="ht_oAAA_a", ookey="ht_ooAA_a")
-    @test maximum(abs.(a1 .- ra_ooAA)) < 1e-13
-    @test maximum(abs.(a2 .- ra_AooA)) < 1e-13
-    @test maximum(abs.(a3 .- ra_oAoA)) < 1e-13
+    @test maximum(abs.(ssa_in[1] .- ra_ooAA)) < 1e-13
+    @test maximum(abs.(ssa_in[2] .- ra_AooA)) < 1e-13
+    @test maximum(abs.(ssa_in[3] .- ra_oAoA)) < 1e-13
+    # same-spin β triple
     @tensor rb_ooAA[i,j,ρ,σ] := G[μ,ν,ρ,σ] * Lb[μ,i] * Lb[ν,j]
-    b1, _, _ = ht_occ_early(EC, Rb; key="ht_oAAA_b", ookey="ht_ooAA_b")
-    @test maximum(abs.(b1 .- rb_ooAA)) < 1e-13
+    @tensor rb_AooA[μ,i,j,σ] := G[μ,ν,ρ,σ] * Lb[ν,i] * Rb[ρ,j]
+    @tensor rb_oAoA[i,ν,j,σ] := G[μ,ν,ρ,σ] * Lb[μ,i] * Rb[ρ,j]
+    @test maximum(abs.(ssb_in[1] .- rb_ooAA)) < 1e-13
+    @test maximum(abs.(ssb_in[2] .- rb_AooA)) < 1e-13
+    @test maximum(abs.(ssb_in[3] .- rb_oAoA)) < 1e-13
+    # opposite-spin five (v_oOAA, v_AOoA, v_oAoA(αα), v_oAAO, v_AOAO)
+    @tensor r_oOAA[i,J,ρ,σ] := G[μ,ν,ρ,σ] * La[μ,i] * Lb[ν,J]
+    @tensor r_AOoA[μ,I,k,σ] := G[μ,ν,ρ,σ] * Lb[ν,I] * Ra[ρ,k]
+    @tensor r_oAAO[i,ν,ρ,J] := G[μ,ν,ρ,σ] * La[μ,i] * Rb[σ,J]
+    @tensor r_AOAO[μ,I,ρ,J] := G[μ,ν,ρ,σ] * Lb[ν,I] * Rb[σ,J]
+    @test maximum(abs.(os_in[1] .- r_oOAA)) < 1e-13
+    @test maximum(abs.(os_in[2] .- r_AOoA)) < 1e-13
+    @test os_in[3] === ssa_in[3]                       # os reuses the αα v_oAoA (shared, not recomputed)
+    @test maximum(abs.(os_in[4] .- r_oAAO)) < 1e-13
+    @test maximum(abs.(os_in[5] .- r_AOAO)) < 1e-13
     delete_ht_store!(EC, "ht_oAAA_a"); delete_ht_store!(EC, "ht_oAAA_b")
     for k in ("ht_ooAA_a", "ht_ooAA_b", "ht_oOAA")
       file_exists(EC, k) && delete_file!(EC, k)
