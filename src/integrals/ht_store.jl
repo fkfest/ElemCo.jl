@@ -48,24 +48,49 @@ function delete_ht_store!(EC::ECInfo, key::AbstractString)
   return
 end
 
+# Raw `pread` + `posix_fadvise(WILLNEED)` for the out-of-core mirror row-slices — single-threaded, queue
+# depth from the kernel readahead (measured ~4.9 GB/s cold, vs ~0.02 for mmap faults on 4 KB runs). No
+# Julia threads (the repo is moving to MPI + BLAS threads). Correct and fast whether the ± store is cached.
+@inline _pread!(fdc, ptr::Ptr, nbytes::Int, off::Int) =   # fdc: an fd (RawFD) → cconvert to Cint in ccall
+  (r = ccall(:pread, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Clonglong), fdc, ptr, nbytes, off);
+   Int(r) == nbytes || error("pm_half_trans pread: read $r of $nbytes bytes at $off"); nothing)
+@inline _willneed(fdc, off::Int, len::Int) =
+  ccall(:posix_fadvise, Cint, (Cint, Clonglong, Clonglong, Cint), fdc, off, len, 3)  # POSIX_FADV_WILLNEED
+
+# [`reconstruct_mirror_both!`](@ref) reading from an in-RAM row-slice sub-block `Ss/As[r, jc]` (row `r`
+# = the r-th block-J pair, col `jc` = panel-Jp column) instead of the mmapped panel — for the pread path.
+@inline function reconstruct_mirror_sub!(w::SlabWork, Ss, As, r::Int, cJp, ntilep::Int)
+  G = w.G; Gt = w.Gt; lutμ = w.lutμ; lutν = w.lutν
+  @inbounds for jc in 1:ntilep
+    c = cJp[jc]; u = lutμ[c]; v = lutν[c]; s = conj(Ss[r, jc]); a = conj(As[r, jc])
+    G[u,v] = (s+a)/2; G[v,u] = (s-a)/2; Gt[u,v] = (s-a)/2; Gt[v,u] = (s+a)/2
+  end
+end
+
 """
     pm_half_trans(EC, pm, C, key) -> key
 
 Build the half-transformed store `key` (data + `key*"_meta"`) from the ± store `pm` and bra
 coefficients `C[nao, m]`: `Σ_μ ⟨μν|ρσ⟩ C[μ,i]` for every ket pair, in both ket orders. Written by an
 **out-of-core gather** — one output pair-block `J` at a time: the native contribution from panel `J`'s
-own columns, plus the Hermitian-mirror contribution of block-`J` pairs as sub-panel **rows** of every
-earlier panel. Each ± element is read ≈ twice; only [`band_htrans!`](@ref)-transformed blocks are held
-in RAM, and each output block is written once. Reuses the exact `eachslab(:both)` reconstruction, just
-reordered by output block (so every `reconstruct_*_both!`+`band_htrans!` is self-contained).
+own columns (sequential mmap), plus the Hermitian-mirror contribution of block-`J` pairs as sub-panel
+**rows** of every earlier panel, read via `pread`+`WILLNEED` (contiguous per-column runs). Each ± element
+is read ≈ twice; only [`band_htrans!`](@ref)-transformed blocks are held in RAM, each output block written
+once. Reuses the exact `eachslab(:both)` reconstruction, reordered by output block (so every
+`reconstruct_*_both!`+`band_htrans!` is self-contained).
 """
 function pm_half_trans(EC::ECInfo, pm::PMSupermatrices{Te}, C::AbstractMatrix, key::AbstractString) where {Te}
-  n = pm.nao; m = size(C, 2); npp = pm.npp; nb = pm_nblocks(pm)
+  n = pm.nao; m = size(C, 2); npp = pm.npp; nb = pm_nblocks(pm); sz = sizeof(Te)
   size(C, 1) == n || error("pm_half_trans: size(C,1)=$(size(C,1)) must be nao=$n")
   io, A = newmmap(EC, key, (m * n, 2, npp), Te)
   w = SlabWork{Te}(pm); hν = zeros(Te, m, n); hμ = zeros(Te, m, n)
   σ0(J) = J == 1 ? 0 : last(pm.σblocks[J-1])         # first μ below the panel's band
   σend(J) = last(pm.σblocks[J])
+  fds = fd(pm.sio); fda = fd(pm.aio)                 # ± store fds for the mirror preads (cconvert in ccall)
+  hdr_s = filesize(pm.sio) - length(pm.smap) * sz    # mio header bytes preceding the mmapped data
+  hdr_a = filesize(pm.aio) - length(pm.amap) * sz
+  mx = maximum(length, pm.pairblocks)                # reusable mirror row-slice buffers (≤ block size)
+  Ss = Matrix{Te}(undef, mx, mx); As = Matrix{Te}(undef, mx, mx)
   @inbounds for J in 1:nb
     cJ = pm.pairblocks[J]; r0 = first(cJ); ntile = length(cJ)
     Ps = spanel(pm, J); Pa = apanel(pm, J); lo = σ0(J)
@@ -75,14 +100,26 @@ function pm_half_trans(EC::ECInfo, pm::PMSupermatrices{Te}, C::AbstractMatrix, k
       band_htrans!(hμ, C, w.Gt, lo, n)               # μ→occ, ket (σ,ρ)  = order 2
       p = cJ[jc]; @views A[:, 1, p] .= vec(hν); @views A[:, 2, p] .= vec(hμ)
     end
+    nsub = ntile                                     # block-J pairs form a contiguous row range per panel
     for Jp in 1:J-1                                  # MIRROR: block J's pairs as sub-panel rows of Jp
-      cJp = pm.pairblocks[Jp]; r0p = first(cJp); ntilep = length(cJp)
-      Psp = spanel(pm, Jp); Pap = apanel(pm, Jp); lop = σ0(Jp); hip = σend(Jp)
-      for p in cJ
-        reconstruct_mirror_both!(w, Psp, Pap, p - r0p + 1, cJp, ntilep)
-        band_htrans!(hν, C, w.G,  lop, hip)          # band (σ0(Jp), σend(Jp)] of the μ-tiling
-        band_htrans!(hμ, C, w.Gt, lop, hip)
-        @views A[:, 1, p] .+= vec(hν); @views A[:, 2, p] .+= vec(hμ)
+      cJp = pm.pairblocks[Jp]; r0p = first(cJp); ntilep = length(cJp); nrowp = npp - r0p + 1
+      base = (pm.offsets[Jp] - 1 + (first(cJ) - r0p)) * sz   # byte of (row=first block-J pair, col 1)
+      GC.@preserve Ss As begin
+        for jc in 1:ntilep                           # prefetch every column's contiguous row-run
+          off = base + (jc - 1) * nrowp * sz
+          _willneed(fds, hdr_s + off, nsub * sz); _willneed(fda, hdr_a + off, nsub * sz)
+        end
+        for jc in 1:ntilep
+          off = base + (jc - 1) * nrowp * sz
+          _pread!(fds, pointer(Ss, (jc - 1) * mx + 1), nsub * sz, hdr_s + off)
+          _pread!(fda, pointer(As, (jc - 1) * mx + 1), nsub * sz, hdr_a + off)
+        end
+      end
+      lop = σ0(Jp); hip = σend(Jp)
+      for r in 1:nsub
+        reconstruct_mirror_sub!(w, Ss, As, r, cJp, ntilep)
+        band_htrans!(hν, C, w.G,  lop, hip); band_htrans!(hμ, C, w.Gt, lop, hip)
+        p = cJ[r]; @views A[:, 1, p] .+= vec(hν); @views A[:, 2, p] .+= vec(hμ)
       end
     end
   end
