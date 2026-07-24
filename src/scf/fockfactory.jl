@@ -226,38 +226,32 @@ end
 # not be symmetric. `O(nao²)` working memory.
 
 """
-    add_coulomb!(J, w, ρ, σ, D, native_lo, mirror_lo)
+    add_coulomb!(J, s::PMSlab, D)
 
-  Add the Coulomb contribution of the reconstructed slab `w.G = ⟨μν|ρσ⟩` (ket pair `(ρ,σ)`):
-  the native role `J[:,ρ] += ⟨··|ρσ⟩·D[:,σ]` (+ ket-swap `⟨··|σρ⟩ = Gᵀ` for `ρ<σ`) and the
-  Hermitian mirror role into the rows `J[ρ,:]` / `J[σ,:]`.
+  Add the Coulomb contribution of the slab `s` (`⟨μν|ρσ⟩`, ket pair `(s.ρ,s.σ)`): the native role
+  `J[:,ρ] += ⟨··|ρσ⟩·D[:,σ]` (+ the ket-swap `⟨··|σρ⟩ = Gᵀ` for `ρ<σ`) and the Hermitian mirror role
+  into the rows `J[ρ,:]`/`J[σ,:]`. The simple per-slab routine [`ao_JK!`](@ref) calls in its `eachslab` loop.
 """
-function add_coulomb!(J, w::SlabWork, ρ::Int, σ::Int, D, native_lo::Int, mirror_lo::Int)
-  n = size(w.G, 1)
-  @views begin
-    band_mul!(J[:,ρ], w.G, native_lo, n, D[:,σ])           # J[:,ρ] += ⟨··|ρσ⟩ · D[:,σ]
-    ρ < σ && band_tmul!(J[:,σ], w.G, native_lo, n, D[:,ρ]) # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
-  end
-  add_mirror_row!(J, ρ, w, D, σ, mirror_lo, false)         # J[ρ,x] += Σ_y ⟨ρσ|xy⟩ D[σ,y]
-  ρ < σ && add_mirror_row!(J, σ, w, D, ρ, mirror_lo, true) # J[σ,x] += Σ_y ⟨σρ|xy⟩ D[ρ,y]
+function add_coulomb!(J, s::PMSlab, D)
+  slab_bandmul!(@mview(J[:,s.ρ]), s, @mview(D[:,s.σ]))               # J[:,ρ] += ⟨··|ρσ⟩ · D[:,σ]
+  s.ρ < s.σ && slab_bandtmul!(@mview(J[:,s.σ]), s, @mview(D[:,s.ρ])) # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
+  slab_mirror!(J, s.ρ, s, D, s.σ)                                    # mirror: J[ρ,:] += conj⟨ρσ|··⟩·conj(D[σ,:])
+  s.ρ < s.σ && slab_mirrort!(J, s.σ, s, D, s.ρ)
   return
 end
 
 """
-    add_exchange!(K, w, ρ, σ, D, native_lo, mirror_lo)
+    add_exchange!(K, s::PMSlab, D)
 
-  Add the exchange contribution of the slab `w.G = ⟨μν|ρσ⟩`. Same two roles as [`add_coulomb!`](@ref)
-  but with the `(ρ,σ)` output/density roles swapped (and the mirror transpose flag flipped):
-  native `K[:,σ] += ⟨··|ρσ⟩·D[:,ρ]` (+ `Gᵀ` for `ρ<σ`), plus the mirror into rows `K[ρ,:]`/`K[σ,:]`.
+  Add the exchange contribution of the slab `s`. Same two roles as [`add_coulomb!`](@ref) with the
+  `(ρ,σ)` output/density roles swapped (and the mirror transpose flag flipped): native
+  `K[:,σ] += ⟨··|ρσ⟩·D[:,ρ]` (+ `Gᵀ` for `ρ<σ`), plus the mirror into rows `K[ρ,:]`/`K[σ,:]`.
 """
-function add_exchange!(K, w::SlabWork, ρ::Int, σ::Int, D, native_lo::Int, mirror_lo::Int)
-  n = size(w.G, 1)
-  @views begin
-    band_mul!(K[:,σ], w.G, native_lo, n, D[:,ρ])           # K[:,σ] += ⟨··|ρσ⟩ · D[:,ρ]
-    ρ < σ && band_tmul!(K[:,ρ], w.G, native_lo, n, D[:,σ])
-  end
-  add_mirror_row!(K, ρ, w, D, σ, mirror_lo, true)          # K[ρ,y] += Σ_x ⟨ρσ|xy⟩ D[σ,x]
-  ρ < σ && add_mirror_row!(K, σ, w, D, ρ, mirror_lo, false)
+function add_exchange!(K, s::PMSlab, D)
+  slab_bandmul!(@mview(K[:,s.σ]), s, @mview(D[:,s.ρ]))              # K[:,σ] += ⟨··|ρσ⟩ · D[:,ρ]
+  s.ρ < s.σ && slab_bandtmul!(@mview(K[:,s.ρ]), s, @mview(D[:,s.σ]))
+  slab_mirrort!(K, s.ρ, s, D, s.σ)
+  s.ρ < s.σ && slab_mirror!(K, s.σ, s, D, s.ρ)
   return
 end
 
@@ -274,26 +268,22 @@ end
 # real symmetric `D` — no 8-fold assumption. Real only (`T<:Real`).
 
 "[`add_coulomb!`](@ref) for symmetric real `D`, mirror-free: sub-panel band → `J`, diagonal-tile band → `Jd`."
-function add_coulomb_sym!(J, Jd, w::SlabWork, ρ::Int, σ::Int, D, native_lo::Int, mirror_lo::Int)
-  n = size(w.G, 1)
-  @views begin
-    band_mul!(J[:,ρ],  w.G, mirror_lo, n, D[:,σ])            # sub-panel (symmetrized later)
-    ρ < σ && band_tmul!(J[:,σ], w.G, mirror_lo, n, D[:,ρ])
-    band_mul!(Jd[:,ρ], w.G, native_lo, mirror_lo, D[:,σ])    # diagonal tile (added once)
-    ρ < σ && band_tmul!(Jd[:,σ], w.G, native_lo, mirror_lo, D[:,ρ])
-  end
+function add_coulomb_sym!(J, Jd, s::PMSlab, D)
+  G = s.w.G; ρ = s.ρ; σ = s.σ
+  band_mul!(@mview(J[:,ρ]),  G, s.mirror_lo, s.nao, @mview(D[:,σ]))       # sub-panel (symmetrized later)
+  ρ < σ && band_tmul!(@mview(J[:,σ]), G, s.mirror_lo, s.nao, @mview(D[:,ρ]))
+  band_mul!(@mview(Jd[:,ρ]), G, s.native_lo, s.mirror_lo, @mview(D[:,σ])) # diagonal tile (added once)
+  ρ < σ && band_tmul!(@mview(Jd[:,σ]), G, s.native_lo, s.mirror_lo, @mview(D[:,ρ]))
   return
 end
 
 "[`add_exchange!`](@ref) for symmetric real `D`, mirror-free (the `(ρ,σ)` roles swapped vs Coulomb)."
-function add_exchange_sym!(K, Kd, w::SlabWork, ρ::Int, σ::Int, D, native_lo::Int, mirror_lo::Int)
-  n = size(w.G, 1)
-  @views begin
-    band_mul!(K[:,σ],  w.G, mirror_lo, n, D[:,ρ])
-    ρ < σ && band_tmul!(K[:,ρ], w.G, mirror_lo, n, D[:,σ])
-    band_mul!(Kd[:,σ], w.G, native_lo, mirror_lo, D[:,ρ])
-    ρ < σ && band_tmul!(Kd[:,ρ], w.G, native_lo, mirror_lo, D[:,σ])
-  end
+function add_exchange_sym!(K, Kd, s::PMSlab, D)
+  G = s.w.G; ρ = s.ρ; σ = s.σ
+  band_mul!(@mview(K[:,σ]),  G, s.mirror_lo, s.nao, @mview(D[:,ρ]))
+  ρ < σ && band_tmul!(@mview(K[:,ρ]), G, s.mirror_lo, s.nao, @mview(D[:,σ]))
+  band_mul!(@mview(Kd[:,σ]), G, s.native_lo, s.mirror_lo, @mview(D[:,ρ]))
+  ρ < σ && band_tmul!(@mview(Kd[:,ρ]), G, s.native_lo, s.mirror_lo, @mview(D[:,σ]))
   return
 end
 
@@ -309,11 +299,10 @@ end
 
 "Symmetric real-`D` fast path for [`ao_JK!`](@ref) on the ± store: mirror-free sweep + symmetrize."
 function ao_JK_sym!(J, K, pm::PMSupermatrices{T}, D) where {T<:Real}
-  w = SlabWork{T}(pm)
   Jd = zeros(T, pm.nao, pm.nao); Kd = zeros(T, pm.nao, pm.nao)
-  pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
-    add_coulomb_sym!(J,  Jd, w, ρ, σ, D, native_lo, mirror_lo)
-    add_exchange_sym!(K, Kd, w, ρ, σ, D, native_lo, mirror_lo)
+  for s in eachslab(pm; TF=T)
+    add_coulomb_sym!(J,  Jd, s, D)
+    add_exchange_sym!(K, Kd, s, D)
   end
   finalize_hermitian!(J, Jd); finalize_hermitian!(K, Kd)
   return J, K
@@ -321,12 +310,12 @@ end
 
 "Symmetric real-`D` fast path for [`ao_J2K!`](@ref): shared Coulomb + two exchanges, mirror-free."
 function ao_J2K_sym!(J, Ka, Kb, pm::PMSupermatrices{T}, Dt, Da, Db) where {T<:Real}
-  w = SlabWork{T}(pm); n = pm.nao
+  n = pm.nao
   Jd = zeros(T, n, n); Kad = zeros(T, n, n); Kbd = zeros(T, n, n)
-  pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
-    add_coulomb_sym!(J,  Jd,  w, ρ, σ, Dt, native_lo, mirror_lo)
-    add_exchange_sym!(Ka, Kad, w, ρ, σ, Da, native_lo, mirror_lo)
-    add_exchange_sym!(Kb, Kbd, w, ρ, σ, Db, native_lo, mirror_lo)
+  for s in eachslab(pm; TF=T)
+    add_coulomb_sym!(J,  Jd,  s, Dt)
+    add_exchange_sym!(Ka, Kad, s, Da)
+    add_exchange_sym!(Kb, Kbd, s, Db)
   end
   finalize_hermitian!(J, Jd); finalize_hermitian!(Ka, Kad); finalize_hermitian!(Kb, Kbd)
   return J, Ka, Kb
@@ -343,11 +332,13 @@ end
 """
 function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, pm::PMSupermatrices{T},
                 Dj::AbstractMatrix, Dk::AbstractMatrix; hermitian::Bool=false) where T
-  hermitian && T <: Real && eltype(Dj) <: Real && return ao_JK_sym!(J, K, pm, Dj)
+  if hermitian && T <: Real && eltype(Dj) <: Real
+    return ao_JK_sym!(J, K, pm, Dj)
+  end
   TF = promote_type(T, eltype(Dj), eltype(Dk))
   for s in eachslab(pm; TF=TF)                             # one reconstruction per slab, J + K fused
-    @pmtensor J[μ,ρ] += s[μ,ν,ρ,σ] * Dj[ν,σ]                # Coulomb
-    @pmtensor K[μ,σ] += s[μ,ν,ρ,σ] * Dk[ν,ρ]                # exchange
+    add_coulomb!(J, s, Dj)
+    add_exchange!(K, s, Dk)
   end
   return J, K
 end
@@ -363,12 +354,14 @@ end
 function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
                  pm::PMSupermatrices{T}, Dt::AbstractMatrix,
                  Da::AbstractMatrix, Db::AbstractMatrix; hermitian::Bool=false) where T
-  hermitian && T <: Real && eltype(Dt) <: Real && return ao_J2K_sym!(J, Ka, Kb, pm, Dt, Da, Db)
+  if hermitian && T <: Real && eltype(Dt) <: Real
+    return ao_J2K_sym!(J, Ka, Kb, pm, Dt, Da, Db)
+  end
   TF = promote_type(T, eltype(Dt), eltype(Da), eltype(Db))
   for s in eachslab(pm; TF=TF)                             # shared Coulomb + two same-spin K, one sweep
-    @pmtensor J[μ,ρ]  += s[μ,ν,ρ,σ] * Dt[ν,σ]               # shared Coulomb from the total density
-    @pmtensor Ka[μ,σ] += s[μ,ν,ρ,σ] * Da[ν,ρ]               # same-spin exchange α
-    @pmtensor Kb[μ,σ] += s[μ,ν,ρ,σ] * Db[ν,ρ]               # same-spin exchange β
+    add_coulomb!(J, s, Dt)                                 # shared Coulomb from the total density
+    add_exchange!(Ka, s, Da)                               # same-spin exchange α
+    add_exchange!(Kb, s, Db)                               # same-spin exchange β
   end
   return J, Ka, Kb
 end

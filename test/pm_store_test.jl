@@ -10,9 +10,9 @@
 # conjugation-free exchange symmetry, so the identity holds verbatim over ℂ).
 using ElemCo
 using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
-using ElemCo.TensorTools: detri_int2, @tensor, newmmap, closemmap, mmap3idx
+using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx
 using ElemCo.PMStore
-using ElemCo.FockFactory: ao_JK!, ao_J2K!
+using ElemCo.FockFactory: ao_JK!, ao_J2K!, add_coulomb!, add_exchange!
 using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform
 using ElemCo.ECInfos: delete_file!, file_exists
 using ElemCo.MSystems: parse_geometry
@@ -431,16 +431,16 @@ end
     D = randn(T, n, n)
     Jsweep = zeros(T, n, n); w = SlabWork{T}(pm)
     pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
-      band_mul!(view(Jsweep,:,ρ), w.G, native_lo, n, view(D,:,σ))
-      ρ < σ && band_tmul!(view(Jsweep,:,σ), w.G, native_lo, n, view(D,:,ρ))
+      band_mul!(@mview(Jsweep[:,ρ]), w.G, native_lo, n, @mview(D[:,σ]))
+      ρ < σ && band_tmul!(@mview(Jsweep[:,σ]), w.G, native_lo, n, @mview(D[:,ρ]))
       add_mirror_row!(Jsweep, ρ, w, D, σ, mirror_lo, false)
       ρ < σ && add_mirror_row!(Jsweep, σ, w, D, ρ, mirror_lo, true)
     end
     Jiter = zeros(T, n, n); nslab = 0
     for s in eachslab(pm)
       nslab += 1
-      slab_bandmul!(view(Jiter,:,s.ρ), s, view(D,:,s.σ))
-      s.ρ < s.σ && slab_bandtmul!(view(Jiter,:,s.σ), s, view(D,:,s.ρ))
+      slab_bandmul!(@mview(Jiter[:,s.ρ]), s, @mview(D[:,s.σ]))
+      s.ρ < s.σ && slab_bandtmul!(@mview(Jiter[:,s.σ]), s, @mview(D[:,s.ρ]))
       slab_mirror!(Jiter, s.ρ, s, D, s.σ)
       s.ρ < s.σ && slab_mirrort!(Jiter, s.σ, s, D, s.ρ)
     end
@@ -454,16 +454,16 @@ end
   end
 end
 
-# @pmtensor: a per-slab einsum inside an `eachslab` loop (emits native band GEMV + ket-swap +
-# Hermitian mirror). Fuse Coulomb J and exchange K over one sweep; check vs the dense @tensor reference.
-@testset "@pmtensor per-slab einsum" begin
+# The per-slab Fock routines add_coulomb!/add_exchange! inside an `eachslab` loop (native band GEMV +
+# ket-swap + Hermitian mirror). Fuse Coulomb J and exchange K over one sweep; check vs dense @tensor.
+@testset "add_coulomb! / add_exchange! (per-slab Fock)" begin
   for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
     EC, int2 = build_store(n, T, maxcols); pm = open_pm_store(EC)
     G = detri_int2(Array{T,3}(int2), n, 1:n, 1:n, 1:n, 1:n)
     D = randn(T, n, n); J = zeros(T, n, n); K = zeros(T, n, n)
     for s in eachslab(pm)                        # one reconstruction per slab, J + K fused
-      @pmtensor J[μ,ρ] += s[μ,ν,ρ,σ] * D[ν,σ]    # Coulomb
-      @pmtensor K[μ,σ] += s[μ,ν,ρ,σ] * D[ν,ρ]    # exchange
+      add_coulomb!(J, s, D)
+      add_exchange!(K, s, D)
     end
     @tensor Jref[μ,ρ] := G[μ,ν,ρ,σ]*D[ν,σ]
     @tensor Kref[μ,σ] := G[μ,ν,ρ,σ]*D[ν,ρ]

@@ -39,7 +39,7 @@ export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_st
        pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
        pm_matmul!, pm_matvec!, band_htrans!, pair_luts,
        SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
-       PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!, @pmtensor,
+       PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!,
        BothSlab, pm_bra_half!,
        PMWriter, pm_writer, pm_write_block!, pm_close_writer!
 
@@ -541,9 +541,10 @@ function pm_slab_sweep!(f, pm::PMSupermatrices, w::SlabWork)
 end
 
 # ======================= high-level "PM tensor" verbs / streaming ============================
-# A thin, tensor-like API over the primitives above: the pair-space matvec `pm_matvec!`, the slab
-# iterator `eachslab` + `pm_bra_half!`, and the per-slab einsum macro `@pmtensor` (below). The
-# full 4-index AO→MO transform is the `pm_transform` verb in IntegralTools.
+# A thin, tensor-like API over the primitives above: the pair-space matvec `pm_matvec!` and the slab
+# iterator `eachslab` (+ `pm_bra_half!` for the dressing's shared bra half-transform). The per-slab
+# Coulomb/exchange contractions are `FockFactory.add_coulomb!`/`add_exchange!`; the full 4-index
+# AO→MO transform is the `pm_transform` verb in IntegralTools.
 
 """
     pm_matvec!(out, pm, which, X) -> out
@@ -574,8 +575,8 @@ end
 """    Gslab(s::PMSlab) -> Matrix — the reconstructed dense slab `⟨μν|ρσ⟩` (aliases scratch)."""
 @inline Gslab(s::PMSlab) = s.w.G
 
-struct SlabIterator{TF}
-  pm::PMSupermatrices
+struct SlabIterator{T, TF}
+  pm::PMSupermatrices{T}      # concrete store type — else it.pm is abstract and spanel is type-unstable
   w::SlabWork{TF}
 end
 """
@@ -590,27 +591,27 @@ end
   `roles=:both` instead yields ALL ket pairs (native columns + the Hermitian-mirror sub-panel rows)
   as [`BothSlab`](@ref)s carrying `G` and `Gt`, for [`pm_bra_half!`](@ref) — the dressing sweep.
 
-# Example — AO Coulomb build `J[μ,ρ] = Σ_νσ ⟨μν|ρσ⟩ D[ν,σ]`
+# Example — AO Coulomb build `J[μ,ρ] = Σ_νσ ⟨μν|ρσ⟩ D[ν,σ]` (= `FockFactory.add_coulomb!(J, s, D)`)
 ```julia
 J = zeros(eltype(pm), pm.nao, pm.nao)
 for s in eachslab(pm)
-  slab_bandmul!(view(J,:,s.ρ), s, view(D,:,s.σ))            # native: ⟨··|ρσ⟩ · D[:,σ]
-  s.ρ < s.σ && slab_bandtmul!(view(J,:,s.σ), s, view(D,:,s.ρ))
+  slab_bandmul!(@mview(J[:,s.ρ]), s, @mview(D[:,s.σ]))       # native: ⟨··|ρσ⟩ · D[:,σ]
+  s.ρ < s.σ && slab_bandtmul!(@mview(J[:,s.σ]), s, @mview(D[:,s.ρ]))
   slab_mirror!(J, s.ρ, s, D, s.σ)                           # mirror: ⟨ρσ|··⟩ · D[σ,:]
   s.ρ < s.σ && slab_mirrort!(J, s.σ, s, D, s.ρ)
 end
 ```
 """
 eachslab(pm::PMSupermatrices; TF=eltype(pm), roles::Symbol=:native) =
-  roles === :both   ? BothSlabIterator{TF}(pm, SlabWork{TF}(pm)) :
-  roles === :native ? SlabIterator{TF}(pm, SlabWork{TF}(pm)) :
+  roles === :both   ? BothSlabIterator(pm, SlabWork{TF}(pm)) :
+  roles === :native ? SlabIterator(pm, SlabWork{TF}(pm)) :
   error("eachslab: roles must be :native or :both, got :$roles")
 
 Base.IteratorSize(::Type{<:SlabIterator}) = Base.SizeUnknown()
-Base.eltype(::Type{SlabIterator{TF}}) where {TF} = PMSlab{TF}
+Base.eltype(::Type{SlabIterator{T,TF}}) where {T,TF} = PMSlab{TF}
 Base.iterate(it::SlabIterator) = _slab_step(it, 1, 1)
 Base.iterate(it::SlabIterator, state) = _slab_step(it, state[1], state[2])
-@inline function _slab_step(it::SlabIterator{TF}, Jb::Int, jc::Int) where {TF}
+@inline function _slab_step(it::SlabIterator{T,TF}, Jb::Int, jc::Int) where {T,TF}
   pm = it.pm; w = it.w
   @inbounds while Jb <= pm_nblocks(pm)
     cJ = pm.pairblocks[Jb]
@@ -675,16 +676,16 @@ struct BothSlab{TF}
   hi::Int
 end
 
-struct BothSlabIterator{TF}
-  pm::PMSupermatrices
+struct BothSlabIterator{T, TF}
+  pm::PMSupermatrices{T}      # concrete store type (see SlabIterator)
   w::SlabWork{TF}
 end
 Base.IteratorSize(::Type{<:BothSlabIterator}) = Base.SizeUnknown()
-Base.eltype(::Type{BothSlabIterator{TF}}) where {TF} = BothSlab{TF}
+Base.eltype(::Type{BothSlabIterator{T,TF}}) where {T,TF} = BothSlab{TF}
 Base.iterate(it::BothSlabIterator) = _both_step(it, 1, 1, 1)
 Base.iterate(it::BothSlabIterator, st) = _both_step(it, st[1], st[2], st[3])
 # state = (Jb, phase, idx): phase 1 = native columns (band (σ0,nao]), phase 2 = mirror rows (band (σ0,σend])
-@inline function _both_step(it::BothSlabIterator{TF}, Jb::Int, phase::Int, idx::Int) where {TF}
+@inline function _both_step(it::BothSlabIterator{T,TF}, Jb::Int, phase::Int, idx::Int) where {T,TF}
   pm = it.pm; w = it.w
   @inbounds while Jb <= pm_nblocks(pm)
     cJ = pm.pairblocks[Jb]; r0 = first(cJ); ntile = length(cJ)
@@ -721,60 +722,6 @@ end
   band_htrans!(hν, C, s.w.G,  s.lo, s.hi)
   band_htrans!(hμ, C, s.w.Gt, s.lo, s.hi)
   return hν, hμ
-end
-
-# ---- @pmtensor: a per-slab einsum, the workhorse inside an `eachslab` loop --------------------
-# `@pmtensor out[…] += s[μ,ν,ρ,σ] * D[…]` where `s` is the current PMSlab. Emits the native band GEMV
-# + the ket-swap + the two Hermitian-mirror rows automatically (exactly add_coulomb!/add_exchange!),
-# so the caller writes the physics per slab and fuses as many terms as it likes in one sweep. `D`
-# contracting the bra index ν with ket label σ is Coulomb; with ket label ρ is exchange.
-function _pmtensor_gen(ex)
-  (ex isa Expr && ex.head === :(+=)) || error("@pmtensor: expected `out[…] += s[μ,ν,ρ,σ] * D[…]`")
-  lhs, rhs = ex.args
-  (lhs isa Expr && lhs.head === :ref) || error("@pmtensor: the output must be indexed, got `$lhs`")
-  factors = (rhs isa Expr && rhs.head === :call && rhs.args[1] === :*) ? rhs.args[2:end] : Any[rhs]
-  slabv = nothing; sidx = nothing; dens = nothing; didx = nothing
-  for f in factors
-    (f isa Expr && f.head === :ref) || error("@pmtensor: factors must be indexed, got `$f`")
-    idx = f.args[2:end]
-    if length(idx) == 4 && slabv === nothing
-      slabv = f.args[1]; sidx = idx
-    elseif length(idx) == 2
-      dens = f.args[1]; didx = idx
-    else
-      error("@pmtensor: expected a 4-index slab `s[μ,ν,ρ,σ]` and one 2-index density `D[·,·]`")
-    end
-  end
-  (slabv !== nothing && dens !== nothing) || error("@pmtensor: need `s[μ,ν,ρ,σ] * D[·,·]`")
-  μ, ν, ρ, σ = sidx
-  coulomb = didx[1] === ν && didx[2] === σ                # out[μ,ρ] += Σ_ν ⟨μν|ρσ⟩ D[ν,σ]
-  exch    = didx[1] === ν && didx[2] === ρ                # out[μ,σ] += Σ_ν ⟨μν|ρσ⟩ D[ν,ρ]
-  (coulomb || exch) || error("@pmtensor: density $didx must be [$ν,$σ] (Coulomb) or [$ν,$ρ] (exchange)")
-  s = esc(slabv); D = esc(dens); O = esc(lhs.args[1])
-  coulomb ? quote
-      slab_bandmul!(view($O,:,$s.ρ), $s, view($D,:,$s.σ))
-      $s.ρ < $s.σ && slab_bandtmul!(view($O,:,$s.σ), $s, view($D,:,$s.ρ))
-      slab_mirror!($O, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirrort!($O, $s.σ, $s, $D, $s.ρ)
-    end : quote
-      slab_bandmul!(view($O,:,$s.σ), $s, view($D,:,$s.ρ))
-      $s.ρ < $s.σ && slab_bandtmul!(view($O,:,$s.ρ), $s, view($D,:,$s.σ))
-      slab_mirrort!($O, $s.ρ, $s, $D, $s.σ); $s.ρ < $s.σ && slab_mirror!($O, $s.σ, $s, $D, $s.ρ)
-    end
-end
-
-"""
-    @pmtensor out[…] += s[μ,ν,ρ,σ] * D[…]
-
-  A per-slab einsum for use inside `for s in eachslab(pm) … end`: contract the current slab
-  (`s[μ,ν,ρ,σ]` = `⟨μν|ρσ⟩`) with a density `D`, accumulating into `out`. The macro emits the
-  native band GEMV, the ket-swap, and both Hermitian-mirror rows (i.e. [`slab_bandmul!`](@ref) /
-  [`slab_bandtmul!`](@ref) / [`slab_mirror!`](@ref) / [`slab_mirrort!`](@ref)) — the full two-role
-  contribution of that slab, identical to `FockFactory`'s `add_coulomb!`/`add_exchange!`. Stack
-  several `@pmtensor` lines in one loop to fuse them over a single reconstruction (as `ao_JK!` does).
-  `D[ν,σ]` (ket label σ) ⇒ Coulomb `out[μ,ρ]`; `D[ν,ρ]` (ket label ρ) ⇒ exchange `out[μ,σ]`.
-"""
-macro pmtensor(ex)
-  return _pmtensor_gen(ex)
 end
 
 end # module PMStore

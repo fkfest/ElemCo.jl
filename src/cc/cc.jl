@@ -1722,16 +1722,16 @@ function pm_occ_early(pm::PMSupermatrices{Te}, Lo, Ro) where Te
   hνT = zeros(Te, n, nocc); hμT = zeros(Te, n, nocc)        # their transposes (for the v_AooA outer product)
   for s in eachslab(pm; roles=:both)
     pm_bra_half!(hν, hμ, s, Lo)                            # ONE band-GEMM pair, reused by all outputs
-    ρ, σ = s.ρ, s.σ; Roρ = @view Ro[ρ,:]
+    ρ, σ = s.ρ, s.σ; v!Roρ = @mview Ro[ρ,:]
     permutedims!(hνT, hν, (2,1)); permutedims!(hμT, hμ, (2,1))
-    o1 = @view v_ooAA[:,:,ρ,σ]; @mtensor o1[i,j]   += hν[i,ν]  * Lo[ν,j]     # both bra → occ
-    a1 = @view v_AooA[:,:,:,σ]; @mtensor a1[μ,i,j] += hμT[μ,i] * Roρ[j]      # ν→occ, μ AO, ket ρ→occ
-    x1 = @view v_oAoA[:,:,:,σ]; @mtensor x1[i,ν,j] += hν[i,ν]  * Roρ[j]      # μ→occ, ν AO, ket ρ→occ
+    v!ooAAρσ = @mview v_ooAA[:,:,ρ,σ]; @mtensor v!ooAAρσ[i,j]   += hν[i,ν]  * Lo[ν,j]   # both bra → occ
+    v!AooAσ  = @mview v_AooA[:,:,:,σ]; @mtensor v!AooAσ[μ,i,j]  += hμT[μ,i] * v!Roρ[j]  # ν→occ, μ AO, ket ρ→occ
+    v!oAoAσ  = @mview v_oAoA[:,:,:,σ]; @mtensor v!oAoAσ[i,ν,j]  += hν[i,ν]  * v!Roρ[j]  # μ→occ, ν AO, ket ρ→occ
     if ρ < σ                                              # ket order (σ,ρ)
-      Roσ = @view Ro[σ,:]
-      o2 = @view v_ooAA[:,:,σ,ρ]; @mtensor o2[i,j]   += hμ[i,ν]  * Lo[ν,j]
-      a2 = @view v_AooA[:,:,:,ρ]; @mtensor a2[μ,i,j] += hνT[μ,i] * Roσ[j]
-      x2 = @view v_oAoA[:,:,:,ρ]; @mtensor x2[i,ν,j] += hμ[i,ν]  * Roσ[j]
+      v!Roσ = @mview Ro[σ,:]
+      v!ooAAσρ = @mview v_ooAA[:,:,σ,ρ]; @mtensor v!ooAAσρ[i,j]   += hμ[i,ν]  * Lo[ν,j]
+      v!AooAρ  = @mview v_AooA[:,:,:,ρ]; @mtensor v!AooAρ[μ,i,j]  += hνT[μ,i] * v!Roσ[j]
+      v!oAoAρ  = @mview v_oAoA[:,:,:,ρ]; @mtensor v!oAoAρ[i,ν,j]  += hμ[i,ν]  * v!Roσ[j]
     end
   end
   return v_ooAA, v_AooA, v_oAoA
@@ -1756,20 +1756,20 @@ function pm_os_sweep(pm::PMSupermatrices{Te}, La_o, Ra_o, Lb_o, Rb_o) where Te
   hνbT = zeros(Te,n,nb); hμbT = zeros(Te,n,nb)             # b transposes (for the AO-first outputs)
   for s in eachslab(pm; roles=:both)
     pm_bra_half!(hνa, hμa, s, La_o); pm_bra_half!(hνb, hμb, s, Lb_o)
-    ρ, σ = s.ρ, s.σ; Raρ = @view Ra_o[ρ,:]; Rbσ = @view Rb_o[σ,:]
+    ρ, σ = s.ρ, s.σ; v!Raρ = @mview Ra_o[ρ,:]; v!Rbσ = @mview Rb_o[σ,:]
     permutedims!(hνbT, hνb, (2,1)); permutedims!(hμbT, hμb, (2,1))
-    o1 = @view v_oOAA[:,:,ρ,σ]; @mtensor o1[i,J]   += hνa[i,ν]  * Lb_o[ν,J]
-    a1 = @view v_AOoA[:,:,:,σ]; @mtensor a1[μ,I,k] += hμbT[μ,I] * Raρ[k]
-    x1 = @view v_oAoA[:,:,:,σ]; @mtensor x1[i,ν,k] += hνa[i,ν]  * Raρ[k]
-    y1 = @view v_oAAO[:,:,ρ,:]; @mtensor y1[i,ν,J] += hνa[i,ν]  * Rbσ[J]
-    z1 = @view v_AOAO[:,:,ρ,:]; @mtensor z1[μ,I,J] += hμbT[μ,I] * Rbσ[J]
+    v!oOAAρσ = @mview v_oOAA[:,:,ρ,σ]; @mtensor v!oOAAρσ[i,J]   += hνa[i,ν]  * Lb_o[ν,J]
+    v!AOoAσ  = @mview v_AOoA[:,:,:,σ]; @mtensor v!AOoAσ[μ,I,k]  += hμbT[μ,I] * v!Raρ[k]
+    v!oAoAσ  = @mview v_oAoA[:,:,:,σ]; @mtensor v!oAoAσ[i,ν,k]  += hνa[i,ν]  * v!Raρ[k]
+    v!oAAOρ  = @mview v_oAAO[:,:,ρ,:]; @mtensor v!oAAOρ[i,ν,J]  += hνa[i,ν]  * v!Rbσ[J]
+    v!AOAOρ  = @mview v_AOAO[:,:,ρ,:]; @mtensor v!AOAOρ[μ,I,J]  += hμbT[μ,I] * v!Rbσ[J]
     if ρ < σ                                              # ket order (σ,ρ)
-      Raσ = @view Ra_o[σ,:]; Rbρ = @view Rb_o[ρ,:]
-      o2 = @view v_oOAA[:,:,σ,ρ]; @mtensor o2[i,J]   += hμa[i,ν]  * Lb_o[ν,J]
-      a2 = @view v_AOoA[:,:,:,ρ]; @mtensor a2[μ,I,k] += hνbT[μ,I] * Raσ[k]
-      x2 = @view v_oAoA[:,:,:,ρ]; @mtensor x2[i,ν,k] += hμa[i,ν]  * Raσ[k]
-      y2 = @view v_oAAO[:,:,σ,:]; @mtensor y2[i,ν,J] += hμa[i,ν]  * Rbρ[J]
-      z2 = @view v_AOAO[:,:,σ,:]; @mtensor z2[μ,I,J] += hνbT[μ,I] * Rbρ[J]
+      v!Raσ = @mview Ra_o[σ,:]; v!Rbρ = @mview Rb_o[ρ,:]
+      v!oOAAσρ = @mview v_oOAA[:,:,σ,ρ]; @mtensor v!oOAAσρ[i,J]   += hμa[i,ν]  * Lb_o[ν,J]
+      v!AOoAρ  = @mview v_AOoA[:,:,:,ρ]; @mtensor v!AOoAρ[μ,I,k]  += hνbT[μ,I] * v!Raσ[k]
+      v!oAoAρ  = @mview v_oAoA[:,:,:,ρ]; @mtensor v!oAoAρ[i,ν,k]  += hμa[i,ν]  * v!Raσ[k]
+      v!oAAOσ  = @mview v_oAAO[:,:,σ,:]; @mtensor v!oAAOσ[i,ν,J]  += hμa[i,ν]  * v!Rbρ[J]
+      v!AOAOσ  = @mview v_AOAO[:,:,σ,:]; @mtensor v!AOAOσ[μ,I,J]  += hνbT[μ,I] * v!Rbρ[J]
     end
   end
   return v_oOAA, v_AOoA, v_oAoA, v_oAAO, v_AOAO

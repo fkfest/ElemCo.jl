@@ -856,7 +856,7 @@ function pm_transform_int2_n5(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMa
   Gs2 = reshape(Gs,n,chunk*n); Ga2 = reshape(Ga,n,chunk*n)                  # bra-1 operands (contract x)
   kets = zeros(Int,chunk)
   for pb in get_spaceblocks(1:np, maxp)
-    npb = length(pb); Tlp = Matrix{T}(@view Tl[:, pb])                      # [nao, |pb|]
+    npb = length(pb); Tlp = Matrix{T}(@mview Tl[:, pb])                     # [nao, |pb|]
     hS = zeros(T,npb,chunk,n); hA = zeros(T,npb,chunk,n)                    # [p, c, y]
     tp = zeros(T,npb,chunk,n); tm = zeros(T,npb,chunk,n)
     H2n = zeros(T,npb,chunk,nq); H2s = zeros(T,npb,chunk,nq)                # [p, c, q]
@@ -870,35 +870,35 @@ function pm_transform_int2_n5(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMa
       @. tp = (hS+hA)/2; @. tm = (hS-hA)/2                                  # tp: ket (ρσ);  tm: ket (σρ)
       mul!(H2n2, tp2, Tl2); mul!(H2s2, tm2, Tl2)                           # bra-2 (ν→q): H2n[p,c,q]
       @inbounds for c in 1:mm; ρ=lutμ[kets[c]]; σ=lutν[kets[c]]
-        @views H2[:,:,ρ,σ] .+= H2n[:,c,:]; ρ<σ && (@views H2[:,:,σ,ρ] .+= H2s[:,c,:]); end
+        @mview(H2[:,:,ρ,σ]) .+= @mview(H2n[:,c,:])
+        ρ<σ && (@mview(H2[:,:,σ,ρ]) .+= @mview(H2s[:,c,:])); end
     end
     for Jb in 1:pm_nblocks(pm)
       cJ=pm.pairblocks[Jb]; r0=first(cJ); ntile=length(cJ); Ps=spanel(pm,Jb); Pa=apanel(pm,Jb)
       for jc in 1:length(cJ)                             # native: stored columns as ket pairs
-        m+=1; kets[m]=cJ[jc]; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
+        m+=1; kets[m]=cJ[jc]; @mview(Gs[:,m,:]) .= 0; @mview(Ga[:,m,:]) .= 0
         @inbounds for k in 1:size(Ps,1); x=lutμ[r0+k-1]; y=lutν[r0+k-1]; s=Ps[k,jc]; a=Pa[k,jc]
           Gs[x,m,y]=s; Gs[y,m,x]=s; Ga[x,m,y]=a; Ga[y,m,x]=-a; end
         m==chunk && (flush!(m); m=0)
       end
       @inbounds for k in ntile+1:size(Ps,1)              # mirror: sub-panel rows as conj ket pairs
-        m+=1; kets[m]=r0+k-1; @views Gs[:,m,:].=0; @views Ga[:,m,:].=0
+        m+=1; kets[m]=r0+k-1; @mview(Gs[:,m,:]) .= 0; @mview(Ga[:,m,:]) .= 0
         for jc in 1:length(cJ); u=lutμ[cJ[jc]]; v=lutν[cJ[jc]]; s=conj(Ps[k,jc]); a=conj(Pa[k,jc])
           Gs[u,m,v]=s; Gs[v,m,u]=s; Ga[u,m,v]=a; Ga[v,m,u]=-a; end
         m==chunk && (flush!(m); m=0)
       end
     end
     m>0 && flush!(m)
-    vH2 = H2                                             # ket transform (ρ→r, σ→s)
-    @tensor H3[p,q,r,σ] := vH2[p,q,ρ,σ]*Tr[ρ,r]
+    @tensor H3[p,q,r,σ] := H2[p,q,ρ,σ]*Tr[ρ,r]           # ket transform (ρ→r, σ→s)
     if triangular
       for s in 1:ns
-        H3s = @view H3[:,:,1:s,:]; Tr2s = @view Tr2[:,s]
-        vout = @view int2t[pb, :, uppertriangular_range(s)]
-        @tensor vout[p,q,r] = H3s[p,q,r,σ]*Tr2s[σ]
+        v!H3 = @mview H3[:,:,1:s,:]; v!Tr2 = @mview Tr2[:,s]
+        v!int2t = @mview int2t[pb, :, uppertriangular_range(s)]
+        @tensor v!int2t[p,q,r] = v!H3[p,q,r,σ]*v!Tr2[σ]
       end
     else
-      vout = @view int2t[pb, :, :, :]
-      @tensor vout[p,q,r,s] = H3[p,q,r,σ]*Tr2[σ,s]
+      v!int2t = @mview int2t[pb, :, :, :]
+      @tensor v!int2t[p,q,r,s] = H3[p,q,r,σ]*Tr2[σ,s]
     end
   end
   flushmmap(EC, int2t)
