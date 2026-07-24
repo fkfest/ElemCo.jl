@@ -1886,44 +1886,88 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
 end
 
 """
-    ht_build_dress!(EC, pm, C)
+    ht_build_oo!(EC, ht, C2, ookey)
+
+  Build the doubly-bra-occ intermediate `v[i,j,ρ,σ] = Σ_μν⟨μν|ρσ⟩ C1[μ,i] C2[ν,j]` (T1-independent)
+  from an open half-transformed store `ht` (whose bra-1 transform used `C1`) and a second occupied bra
+  `C2`, saved (mmapped) under `ookey` with shape `(ht.m, size(C2,2), nao, nao)`. Reads each A-role
+  σ-column ([`ht_column!`](@ref PMStore.ht_column!)) and contracts the free `ν` slot with `C2`. For the
+  closed shell `C2 == C1` (→ `v_ooAA`); for the opposite-spin cross block `C1 = La_o`, `C2 = Lb_o`
+  (→ `v_oOAA`).
+"""
+function ht_build_oo!(EC::ECInfo{T}, ht::HTStore, C2::AbstractMatrix, ookey::AbstractString) where {T}
+  n = ht.nao; m1 = ht.m; m2 = size(C2, 2)
+  voio, v_oo = newmmap(EC, ookey, (m1, m2, n, n), T)
+  Aσ = zeros(T, m1*n, n); Bσ = zeros(T, m1*n, n)         # only the A-role (Aσ) is needed here
+  for σ in 1:n
+    ht_column!(Aσ, Bσ, ht, σ)
+    A3 = reshape(Aσ, m1, n, n)
+    voσ = @view v_oo[:, :, :, σ]
+    @mtensor voσ[i,j,ρ] = A3[i,ν,ρ] * C2[ν,j]            # second bra → occ (contract ν)
+  end
+  closemmap(EC, voio, v_oo)
+  return
+end
+
+"""
+    ht_build_dress!(EC, pm, C; key="ht_oAAA", ookey="ht_ooAA")
 
   Build the persistent half-transformed store for the AO dressing (called ONCE per orbital set in
-  [`ao_cc_setup!`](@ref)): `"ht_oAAA"` = `Σ_μ⟨μν|ρσ⟩C[μ,i]` in both ket orders ([`pm_half_trans`](@ref
-  PMStore.pm_half_trans)) plus the T1-independent `"ht_ooAA"` = `v_ooAA[i,j,ρ,σ] = Σ_μν⟨μν|ρσ⟩C[μ,i]C[ν,j]`.
-  `ao_dressed_ints` then reads these each iteration instead of re-streaming the ± store — one ± sweep
-  per CC run, not per iteration. `C` is the (T1-independent) active occupied bra coefficients.
+  [`ao_cc_setup!`](@ref)): `key` = `Σ_μ⟨μν|ρσ⟩C[μ,i]` in both ket orders ([`pm_half_trans`](@ref
+  PMStore.pm_half_trans)) plus the T1-independent `ookey` = `v_ooAA[i,j,ρ,σ] = Σ_μν⟨μν|ρσ⟩C[μ,i]C[ν,j]`
+  ([`ht_build_oo!`](@ref)). `ao_dressed_ints` then reads these each iteration instead of re-streaming the
+  ± store — one ± sweep per CC run, not per iteration. `C` is the (T1-independent) active occupied bra
+  coefficients. The `key`/`ookey` arguments let the unrestricted build reuse this per spin.
 """
-function ht_build_dress!(EC::ECInfo{T}, pm::PMSupermatrices, C::AbstractMatrix) where {T}
-  n = pm.nao; m = size(C, 2)
-  pm_half_trans(EC, pm, C, "ht_oAAA")
-  ht = open_ht_store(EC, "ht_oAAA")
-  voio, v_ooAA = newmmap(EC, "ht_ooAA", (m, m, n, n), T)
-  Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n)
-  for σ in 1:n
-    ht_column!(Aσ, Bσ, ht, σ)                            # only the A-role (Aσ) is needed here
-    A3 = reshape(Aσ, m, n, n)
-    voσ = @view v_ooAA[:, :, :, σ]
-    @mtensor voσ[i,j,ρ] = A3[i,ν,ρ] * C[ν,j]             # both bra → occ (contract ν)
-  end
-  closemmap(EC, voio, v_ooAA)
+function ht_build_dress!(EC::ECInfo{T}, pm::PMSupermatrices, C::AbstractMatrix;
+                         key::AbstractString="ht_oAAA", ookey::AbstractString="ht_ooAA") where {T}
+  pm_half_trans(EC, pm, C, key)
+  ht = open_ht_store(EC, key)
+  ht_build_oo!(EC, ht, C, ookey)
   close_ht_store!(EC, ht)
   return
 end
 
 """
-    ht_occ_early(EC, Ro) -> (v_ooAA, v_AooA, v_oAoA)
+    ht_build_dress_unrestricted!(EC, pm, La_o, Lb_o)
 
-  The occ-early intermediates read from the prebuilt half-transformed store ([`ht_build_dress!`](@ref)):
+  Unrestricted analogue of [`ht_build_dress!`](@ref): build the per-spin half-transformed stores plus the
+  three T1-independent doubly-occ blocks the open-shell dressing reads each iteration. The bra-occ
+  transforms `La_o`/`Lb_o` are T1-independent, so this runs ONCE per orbital set in [`ao_cc_setup!`](@ref):
+
+  - `"ht_oAAA_a"` / `"ht_oAAA_b"` : the α / β half-transformed stores ([`pm_half_trans`](@ref));
+  - `"ht_ooAA_a"` = `v_ooAA(αα)` , `"ht_ooAA_b"` = `v_ooAA(ββ)` : the same-spin doubly-occ blocks;
+  - `"ht_oOAA"`   = `v_oOAA[i,J,ρ,σ] = Σ_μν⟨μν|ρσ⟩La_o[μ,i]Lb_o[ν,J]` : the opposite-spin cross block
+    (built off the α store's A-role columns × `Lb_o`, so no separate ± sweep).
+"""
+function ht_build_dress_unrestricted!(EC::ECInfo{T}, pm::PMSupermatrices,
+                                      La_o::AbstractMatrix, Lb_o::AbstractMatrix) where {T}
+  pm_half_trans(EC, pm, La_o, "ht_oAAA_a")
+  hta = open_ht_store(EC, "ht_oAAA_a")
+  ht_build_oo!(EC, hta, La_o, "ht_ooAA_a")               # v_ooAA (αα)
+  ht_build_oo!(EC, hta, Lb_o, "ht_oOAA")                 # v_oOAA (αβ cross), same α store
+  close_ht_store!(EC, hta)
+  pm_half_trans(EC, pm, Lb_o, "ht_oAAA_b")
+  htb = open_ht_store(EC, "ht_oAAA_b")
+  ht_build_oo!(EC, htb, Lb_o, "ht_ooAA_b")               # v_ooAA (ββ)
+  close_ht_store!(EC, htb)
+  return
+end
+
+"""
+    ht_occ_early(EC, Ro; key="ht_oAAA", ookey="ht_ooAA") -> (v_ooAA, v_AooA, v_oAoA)
+
+  The occ-early intermediates read from a prebuilt half-transformed store ([`ht_build_dress!`](@ref)):
   `v_ooAA` is loaded (T1-independent); the T1-dependent ket contractions `v_oAoA[i,ν,j,σ] = Σ_ρ
   Aσ[(i,ν),ρ]·Ro[ρ,j]` and `v_AooA[μ,i,j,σ] = Σ_ρ Bσ[(i,μ),ρ]·Ro[ρ,j]` are one BLAS GEMM per σ off the
   A-/B-role slabs from [`ht_column!`](@ref PMStore.ht_column!). Bit-identical to `pm_occ_early` but
-  without re-streaming the ± store.
+  without re-streaming the ± store. `key`/`ookey` select the store (per-spin in the unrestricted path).
 """
-function ht_occ_early(EC::ECInfo{T}, Ro::AbstractMatrix) where {T}
-  ht = open_ht_store(EC, "ht_oAAA")
+function ht_occ_early(EC::ECInfo{T}, Ro::AbstractMatrix;
+                      key::AbstractString="ht_oAAA", ookey::AbstractString="ht_ooAA") where {T}
+  ht = open_ht_store(EC, key)
   n = ht.nao; m = ht.m; nj = size(Ro, 2)
-  v_ooAA = load4idx(EC, "ht_ooAA")
+  v_ooAA = load4idx(EC, ookey)
   v_oAoA_f = zeros(T, m*n, nj, n)                         # [(i,ν), j, σ]  fused-leading ⇒ BLAS σ-slices
   v_AooA   = zeros(T, n, m, nj, n)                        # [μ, i, j, σ]
   Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n); vAtmp = zeros(T, m*n, nj)
@@ -1935,6 +1979,50 @@ function ht_occ_early(EC::ECInfo{T}, Ro::AbstractMatrix) where {T}
   end
   close_ht_store!(EC, ht)
   return v_ooAA, v_AooA, reshape(v_oAoA_f, m, n, nj, n)
+end
+
+"""
+    ht_os_sweep(EC, Ra_o, Rb_o) -> (v_oOAA, v_AOoA, v_oAoA, v_oAAO, v_AOAO)
+
+  Opposite-spin occ-early intermediates read from the prebuilt per-spin half-transformed stores
+  ([`ht_build_dress_unrestricted!`](@ref)) — the drop-in for [`pm_os_sweep`](@ref) that avoids
+  re-streaming the ± store. `v_oOAA` (both bra occ, T1-independent) is loaded from `"ht_oOAA"`. The four
+  T1-dependent blocks are each ONE BLAS GEMM per σ-column off the A-/B-role slabs of [`ht_column!`](@ref
+  PMStore.ht_column!); particle symmetry `⟨μν|ρσ⟩=⟨νμ|σρ⟩` routes every kept-AO onto the store's fixed
+  second-ket column:
+
+  - α store, col `c`: A-role · `Ra_o` → `v_oAoA[:,:,:,c]`   (kept σ);  B-role · `Rb_o` → `v_oAAO[:,:,c,:]` (kept ρ);
+  - β store, col `c`: B-role · `Ra_o` → `v_AOoA[:,:,:,c]`   (kept σ);  A-role · `Rb_o` → `v_AOAO[:,:,c,:]` (kept ρ).
+
+  Both roles come from one `ht_column!` call, so each store is read once here. `Ra_o`/`Rb_o` are the
+  T1-dependent occupied ket coefficients.
+"""
+function ht_os_sweep(EC::ECInfo{T}, Ra_o::AbstractMatrix, Rb_o::AbstractMatrix) where {T}
+  hta = open_ht_store(EC, "ht_oAAA_a"); htb = open_ht_store(EC, "ht_oAAA_b")
+  n = hta.nao; na = hta.m; nb = htb.m
+  v_oOAA = load4idx(EC, "ht_oOAA")                        # [i,J,ρ,σ]  both bra occ (T1-independent)
+  v_oAoA_f = zeros(T, na*n, na, n)                        # [(i,ν), k, σ]  fused-leading ⇒ BLAS σ-slices
+  v_oAAO = zeros(T, na, n, n, nb)                         # [i,ν,ρ,J]
+  v_AOoA = zeros(T, n, nb, na, n)                         # [μ,I,k,σ]
+  v_AOAO = zeros(T, n, nb, n, nb)                         # [μ,I,ρ,J]
+  Aa = zeros(T, na*n, n); Ba = zeros(T, na*n, n)          # α A-/B-role columns
+  Ab = zeros(T, nb*n, n); Bb = zeros(T, nb*n, n)          # β A-/B-role columns
+  ta = zeros(T, na*n, nb)                                 # α B-role · Rb_o  (→ v_oAAO placement)
+  tbA = zeros(T, nb*n, na)                                # β B-role · Ra_o  (→ v_AOoA, permuted)
+  tbB = zeros(T, nb*n, nb)                                # β A-role · Rb_o  (→ v_AOAO, permuted)
+  @inbounds for c in 1:n
+    ht_column!(Aa, Ba, hta, c)                            # α store: A-role Aa, B-role Ba
+    mul!(view(v_oAoA_f, :, :, c), Aa, Ra_o)              # v_oAoA[(i,ν),k] = Aa[(i,ν),ρ]·Ra_o[ρ,k]
+    mul!(ta, Ba, Rb_o)                                    # [(i,ν),J]
+    @views v_oAAO[:, :, c, :] .= reshape(ta, na, n, nb)  # kept ρ = c
+    ht_column!(Ab, Bb, htb, c)                            # β store: A-role Ab, B-role Bb
+    mul!(tbA, Bb, Ra_o)                                   # [(I,ν),k]
+    permutedims!(view(v_AOoA, :, :, :, c), reshape(tbA, nb, n, na), (2, 1, 3))  # [I,ν,k] → [ν,I,k]
+    mul!(tbB, Ab, Rb_o)                                   # [(I,ν),J]
+    permutedims!(view(v_AOAO, :, :, c, :), reshape(tbB, nb, n, nb), (2, 1, 3))  # [I,ν,J] → [ν,I,J]
+  end
+  close_ht_store!(EC, hta); close_ht_store!(EC, htb)
+  return v_oOAA, v_AOoA, reshape(v_oAoA_f, na, n, na, n), v_oAAO, v_AOAO
 end
 
 """
@@ -2150,36 +2238,45 @@ function ao_dressed_ints_unrestricted(EC::ECInfo{T}, T1a, T1b, cMOa::AbstractMat
   CLb, CRb = ao_dressed_coeffs(cMOb, T1b, ob, vb)
   La_o = CLa[:,oa]; La_v = CLa[:,va]; Ra_o = CRa[:,oa]; Ra_v = CRa[:,va]
   Lb_o = CLb[:,ob]; Lb_v = CLb[:,vb]; Rb_o = CRb[:,ob]; Rb_v = CRb[:,vb]
-  # integral source: the ± supermatrix store when present (PM-native tile sweeps, half the
-  # streaming), else the joint triangular mmap — the block builders dispatch on the handle
-  use_pm = pm_exists(EC)
-  int2 = use_pm ? open_pm_store(EC) : nothing
-  aofile = nothing
-  if !use_pm
-    aofile, int2 = mmap3idx(EC, "ao_int2")
-  end
   heffa = load2idx(EC, "h1eff_mm_AA")                # effective 1-e per spin (frozen-core folded)
   heffb = load2idx(EC, "h1eff_MM_AA")
-  mb = available_memory(EC)
-  # αα blocks (occ-early, closed-shell kernel with α dressed coefficients)
-  ssa = ao_ss_blocks(int2, La_o, La_v, Ra_o, Ra_v; membytes=mb)
+  # occ-early integral source: prebuilt per-spin half-transformed stores (built once in ao_cc_setup!,
+  # read here every iteration — the bra-occ transforms La_o/Lb_o are T1-independent) when present; else
+  # the ± supermatrix store (PM-native tile sweeps, half the streaming); else the joint triangular mmap.
+  if ht_exists(EC, "ht_oAAA_a")
+    va_oo, va_Ao, va_oA = ht_occ_early(EC, Ra_o; key="ht_oAAA_a", ookey="ht_ooAA_a")
+    ssa = ao_ss_finish(va_oo, va_Ao, va_oA, La_v, Ra_o, Ra_v)
+    vb_oo, vb_Ao, vb_oA = ht_occ_early(EC, Rb_o; key="ht_oAAA_b", ookey="ht_ooAA_b")
+    ssb = ao_ss_finish(vb_oo, vb_Ao, vb_oA, Lb_v, Rb_o, Rb_v)
+    osab = ao_os_finish(ht_os_sweep(EC, Ra_o, Rb_o)..., La_v, Ra_o, Ra_v, Lb_v, Rb_o, Rb_v)
+  else
+    mb = available_memory(EC)                         # only the streaming block builders need a RAM budget
+    use_pm = pm_exists(EC)
+    int2 = use_pm ? open_pm_store(EC) : nothing
+    aofile = nothing
+    if !use_pm
+      aofile, int2 = mmap3idx(EC, "ao_int2")
+    end
+    ssa  = ao_ss_blocks(int2, La_o, La_v, Ra_o, Ra_v; membytes=mb)          # αα (closed-shell kernel)
+    ssb  = ao_ss_blocks(int2, Lb_o, Lb_v, Rb_o, Rb_v; membytes=mb)          # ββ (same kernel, β coeffs)
+    osab = ao_os_blocks(int2, La_o,La_v,Ra_o,Ra_v, Lb_o,Lb_v,Rb_o,Rb_v; membytes=mb)  # αβ
+    use_pm ? close_pm_store!(EC, int2) : close(aofile)
+  end
+  # αα blocks
   d_oooo=ssa.oooo; d_oovo=ssa.oovo; d_voov=ssa.voov; d_vovo=ssa.vovo; d_vooo=ssa.vooo
   save!(EC,"d_oooo",d_oooo); save!(EC,"d_oovo",d_oovo); save!(EC,"d_voov",d_voov)
   save!(EC,"d_vovo",d_vovo); save!(EC,"d_vooo",d_vooo); save!(EC,"d_oovv",ssa.oovv)
-  # ββ blocks (same kernel with β dressed coefficients)
-  ssb = ao_ss_blocks(int2, Lb_o, Lb_v, Rb_o, Rb_v; membytes=mb)
+  # ββ blocks
   d_OOOO=ssb.oooo; d_OOVO=ssb.oovo; d_VOOV=ssb.voov; d_VOVO=ssb.vovo; d_VOOO=ssb.vooo
   save!(EC,"d_OOOO",d_OOOO); save!(EC,"d_OOVO",d_OOVO); save!(EC,"d_VOOV",d_VOOV)
   save!(EC,"d_VOVO",d_VOVO); save!(EC,"d_VOOO",d_VOOO); save!(EC,"d_OOVV",ssb.oovv)
-  # αβ blocks (occ-early opposite-spin pass; index1,3 = α = e1, index2,4 = β = e2)
-  osab = ao_os_blocks(int2, La_o,La_v,Ra_o,Ra_v, Lb_o,Lb_v,Rb_o,Rb_v; membytes=mb)
+  # αβ blocks (index1,3 = α = e1, index2,4 = β = e2)
   d_oOoO=osab.oOoO; d_oOvO=osab.oOvO; d_vOvO=osab.vOvO; d_oVoV=osab.oVoV
   d_vOoO=osab.vOoO; d_oVoO=osab.oVoO; d_oOoV=osab.oOoV
   save!(EC,"d_oOoO",d_oOoO); save!(EC,"d_oOoV",d_oOoV); save!(EC,"d_oOvO",d_oOvO)
   save!(EC,"d_vOoV",osab.vOoV); save!(EC,"d_oVvO",osab.oVvO); save!(EC,"d_vOvO",d_vOvO)
   save!(EC,"d_oVoV",d_oVoV); save!(EC,"d_vOoO",d_vOoO); save!(EC,"d_oVoO",d_oVoO)
   save!(EC,"d_oOvV",osab.oOvV)
-  use_pm ? close_pm_store!(EC, int2) : close(aofile)
   # dressed 1-electron per spin: h̃[p,q] = Σ h_eff[μν] C̃ᴸ[μ,p] C̃ᴿ[ν,q]
   @mtensor dh_a[p,q] := (heffa[μ,ν] * CLa[μ,p]) * CRa[ν,q]; save!(EC,"dh_mm",dh_a)
   @mtensor dh_b[p,q] := (heffb[μ,ν] * CLb[μ,p]) * CRb[ν,q]; save!(EC,"dh_MM",dh_b)
@@ -2307,6 +2404,18 @@ function ao_cc_setup!(EC::ECInfo{T}) where {T<:Number}
       Ecore = sum(Da .* hao) + sum(Db .* hao) + 0.5*(sum(Da .* Fa) + sum(Db .* Fb))
     end
     save!(EC, "h1eff_mm_AA", h1a); save!(EC, "h1eff_MM_AA", h1b)
+    # Build the per-spin half-transformed stores ONCE (bra-occ transforms are T1-independent), so the
+    # bare pass below and every residual iteration read them instead of re-streaming the ± store. Delete
+    # first so a stale store from a prior run/orbital set is never reused; only the ± store path builds them.
+    delete_ht_store!(EC, "ht_oAAA_a"); delete_ht_store!(EC, "ht_oAAA_b")
+    for k in ("ht_ooAA_a", "ht_ooAA_b", "ht_oOAA")
+      file_exists(EC, k) && delete_file!(EC, k)
+    end
+    if pm_exists(EC)
+      pm = open_pm_store(EC)
+      ht_build_dress_unrestricted!(EC, pm, cMOa[:, SP['o']], cMOb[:, SP['O']])
+      close_pm_store!(EC, pm)
+    end
     ao_dressed_ints_unrestricted(EC, T[], T[], cMOa, cMOb)
     focka = load2idx(EC, "df_mm"); fockb = load2idx(EC, "df_MM")
     save!(EC, "f_mm", focka); save!(EC, "f_MM", fockb)
