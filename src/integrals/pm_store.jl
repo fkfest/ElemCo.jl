@@ -41,7 +41,8 @@ export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_st
        SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
        PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!,
        BothSlab, pm_bra_half!,
-       PMWriter, pm_writer, pm_write_block!, pm_close_writer!
+       PMWriter, pm_writer, pm_write_block!, pm_close_writer!,
+       HTStore, pm_half_trans, ht_column!, open_ht_store, close_ht_store!, ht_exists, delete_ht_store!
 
 const PM_S_FILE = "ao_pm_s"
 const PM_A_FILE = "ao_pm_a"
@@ -723,5 +724,7 @@ end
   band_htrans!(hμ, C, s.w.Gt, s.lo, s.hi)
   return hν, hμ
 end
+
+include("ht_store.jl")   # half-transformed store: HTStore, pm_half_trans, ht_column!
 
 end # module PMStore

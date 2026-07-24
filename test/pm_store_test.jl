@@ -365,6 +365,34 @@ end
   end
 end
 
+# Half-transformed store: out-of-core gather build + σ-column reader. `ht_column!` must reconstruct
+# both the μ→occ (A-role) and ν→occ (B-role, exchange symmetry) dense σ-slabs from the pair-packed
+# file. Multi-block stores (small maxcols) exercise the native + mirror-from-earlier-panels gather.
+@testset "pm_half_trans / HTStore ↔ dense" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((8, 8), (12, 30), (14, 300))
+    m = 4
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    G = detri_int2(int2, n, 1:n, 1:n, 1:n, 1:n)
+    C = randn(T, n, m)
+    @tensor Aref[i,ν,ρ,σ] := G[μ,ν,ρ,σ] * C[μ,i]        # A-role: μ→occ, ν kept
+    @tensor Bref[i,μ,ρ,σ] := G[μ,ν,ρ,σ] * C[ν,i]        # B-role: ν→occ, μ kept
+    pm_half_trans(EC, pm, C, "ht_test")
+    ht = open_ht_store(EC, "ht_test")
+    @test ht.nao == n && ht.m == m
+    Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n); eA = 0.0; eB = 0.0
+    for σ in 1:n
+      ht_column!(Aσ, Bσ, ht, σ)
+      eA = max(eA, maximum(abs, reshape(Aσ, m, n, n) .- @view Aref[:,:,:,σ]))
+      eB = max(eB, maximum(abs, reshape(Bσ, m, n, n) .- @view Bref[:,:,:,σ]))
+    end
+    @test eA < 1e-13
+    @test eB < 1e-13
+    close_ht_store!(EC, ht); delete_ht_store!(EC, "ht_test")
+    close_pm_store!(EC, pm)
+  end
+end
+
 # On-the-fly AO→MO transform straight from the ± store (pm_transform_int2, used by
 # generate_mo_dump) reproduces the joint-int2 transform kernels for arbitrary RECTANGULAR
 # coefficients — RHF (triangular ket) and UHF αβ (full dense) — real + complex, several
