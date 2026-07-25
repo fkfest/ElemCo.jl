@@ -696,6 +696,18 @@ end
     EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ut = @cc m
     @test abs(e_pm_ut[key] - e_ref_ut[key]) < 1e-8
   end
+  # unrestricted Λ: the dressed 3-external blocks (d_vovv/d_VOVV/d_vOvV/d_oVvV), the per-spin and αβ
+  # Λ-kext (pm_K2!/pm_K2ab! on the AO-folded Λ2), and the dD1 term as the v,o block of the UHF
+  # generalized Fock J(Dα+Dβ)−K(Dσ). ΛUCCSD energy and the unrestricted correlated dipole match derive.
+  EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ul = @cc "Λuccsd"
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ul = @cc "Λuccsd"
+  @test abs(e_pm_ul["ΛUCCSD"] - e_ref_ul["ΛUCCSD"]) < 1e-8
+  EC = fresh(); @set wf charge=1 ms2=1; EC.options.cc.properties = true; @uhf; e_pm_up = @cc ccsd
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); @set wf charge=1 ms2=1; EC.options.cc.properties = true
+  EC.options.int.ao_direct = false; @uhf; e_ref_up = @cc ccsd
+  @test abs(e_pm_up["mu"] - e_ref_up["mu"]) < 1e-8
 end
 
 end # @testitem

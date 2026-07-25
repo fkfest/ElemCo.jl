@@ -2228,6 +2228,32 @@ function dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix)
 end
 
 """
+    dD1_ufock_vo(EC::ECInfo, dD1, dD1os, spin::Symbol) -> Matrix
+
+  Unrestricted analogue of [`dD1_fock_vo`](@ref): the `[e,m]` block the open-shell Λ residual adds for
+  `spin` from its own general-orbital density `dD1` and the opposite-spin `dD1os`. The three
+  general-orbital reads it replaces — same-spin `⟨qm|pe⟩−⟨qm|ep⟩` (a `momm`/`MOMM` block) plus the
+  opposite-spin Coulomb `⟨Qm|Pe⟩` (`oMvM`/`mOmV`) — together are exactly the virtual-occupied block of
+  the UHF generalized Fock `F^σ = J(D^α + D^β) − K(D^σ)`, so they come from ONE streaming
+  [`ao_core_ufock`](@ref) pass over the ± store instead of `nocc·norb³` general-orbital blocks.
+  Real-valued (the streaming builders assume a Hermitian density); complex is a follow-up.
+"""
+function dD1_ufock_vo(EC::ECInfo, dD1::AbstractMatrix, dD1os::AbstractMatrix, spin::Symbol)
+  isα = (spin == :α)
+  SP = EC.space
+  cMOsm = load_orbitals(EC)
+  cMOa = Matrix(cMOsm.α); cMOb = Matrix(cMOsm.β)
+  dD1a, dD1b = isα ? (dD1, dD1os) : (dD1os, dD1)
+  Da_AO = cMOa * transpose(dD1a) * transpose(cMOa)
+  Db_AO = cMOb * transpose(dD1b) * transpose(cMOb)
+  Fa_AO, Fb_AO = ao_core_ufock(EC, Da_AO, Db_AO)     # (J(Dα+Dβ) − K(Dα), … − K(Dβ))
+  cMO = isα ? cMOa : cMOb
+  F_MO = cMO' * (isα ? Fa_AO : Fb_AO) * cMO
+  o4s = space4spin('o', isα); v4s = space4spin('v', isα)
+  return permutedims(F_MO[SP[o4s], SP[v4s]], (2, 1)) # [e,m] block
+end
+
+"""
     ao_dressed_coeffs(cMO, T1, occ, virt) -> (CL, CR)
 
   T1-dressed bra/ket MO coefficient sets: `CL = [C_o | C_v − C_o·T1ᵀ]` (bra/particle) and
@@ -2408,7 +2434,8 @@ end
   passes [`ao_ss_blocks`](@ref)/[`ao_os_blocks`](@ref) — no dense `nao⁴` tensor is formed. Empty
   `T1a`/`T1b` ⇒ bare blocks.
 """
-function ao_dressed_ints_unrestricted(EC::ECInfo{T}, T1a, T1b, cMOa::AbstractMatrix, cMOb::AbstractMatrix) where {T<:Number}
+function ao_dressed_ints_unrestricted(EC::ECInfo{T}, T1a, T1b, cMOa::AbstractMatrix, cMOb::AbstractMatrix;
+                                      calc_d_vovv::Bool=false) where {T<:Number}
   SP = EC.space
   oa = SP['o']; va = SP['v']; ob = SP['O']; vb = SP['V']
   CLa, CRa = ao_dressed_coeffs(cMOa, T1a, oa, va)
@@ -2484,6 +2511,15 @@ function ao_dressed_ints_unrestricted(EC::ECInfo{T}, T1a, T1b, cMOa::AbstractMat
   end
   dfb[ob,ob] .+= foo_b; dfb[vb,ob] .+= fvo_b; dfb[ob,vb] .+= fov_b; dfb[vb,vb] .+= fvv_b
   save!(EC,"df_MM",dfb)
+  # 3-external dressed blocks for the unrestricted Λ residual / λ-triples. Each has its ONE occupied
+  # index on a bra (= the store's own T1-independent occ-bra La_o/Lb_o), so all four are direct block-
+  # engine calls off the per-spin stores — no Hermiticity swap. Index 1,3 = α = electron 1, 2,4 = β.
+  if calc_d_vovv
+    save!(EC, "d_vovv", ht_mo_block(EC, "ht_oAAA_a", :B, La_v, Ra_v, Ra_v))  # ⟨ai|bc⟩ (αα)
+    save!(EC, "d_VOVV", ht_mo_block(EC, "ht_oAAA_b", :B, Lb_v, Rb_v, Rb_v))  # ⟨AI|BC⟩ (ββ)
+    save!(EC, "d_vOvV", ht_mo_block(EC, "ht_oAAA_b", :B, La_v, Ra_v, Rb_v))  # ⟨aI|bC⟩ (occ I on bra-2, β store)
+    save!(EC, "d_oVvV", ht_mo_block(EC, "ht_oAAA_a", :A, Lb_v, Ra_v, Rb_v))  # ⟨iB|aC⟩ (occ i on bra-1, α store)
+  end
   return nothing
 end
 
