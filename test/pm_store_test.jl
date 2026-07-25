@@ -721,6 +721,21 @@ end
   @test pm_exists(EC) && isempty(EC.fd)
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ueom = @cc "eom-uccsd"
   @test abs(e_pm_ueom["ω1"] - e_ref_ueom["ω1"]) < 1e-7
+  # doubles-only methods (CCD/DCD and the quasi-variational QV-CCD/QV-DCD). They carry no singles, so
+  # the MO path uses the bare-integral `pseudo_dressed_ints`; AO-direct gets the same bare blocks from
+  # the dressing inside calc_cc_resid (empty T1) plus d_vvoo transposed from d_oovv.
+  for m in ("ccd", "dcd", "qv-ccd", "qv-dcd")
+    key = uppercase(m)
+    EC = fresh(); @ints; @hf; e_pm_qv = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)
+    EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_qv = @cc m
+    @test abs(e_pm_qv[key] - e_ref_qv[key]) < 1e-8
+  end
+  # the orbital-optimized variants still re-transform the integrals every macro-iteration
+  # (rotate_ints), so they must fall back to the derived MO dump and stay correct
+  EC = fresh(); @ints; @hf; e_oqv = @cc "oqv-ccd"
+  EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_oqv_ref = @cc "oqv-ccd"
+  @test abs(e_oqv["OQV-CCD"] - e_oqv_ref["OQV-CCD"]) < 1e-8
 end
 
 # AO-direct with DELETED (linearly-dependent) orbitals. `freeze_orbitals!` already removes the

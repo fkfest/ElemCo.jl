@@ -188,9 +188,13 @@ end
   AO setup matches the residual's spin treatment and no orbitals were deleted.
 """
 function ao_direct_method(ecm::ECMethod)
-  name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ prefixes stripped)
+  name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)
   name == "MP2" && return true                          # standalone MP2/UMP2/RMP2 off the bare AO blocks
-  return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD")
+  # orbital-optimized / Brueckner variants re-transform the integrals every macro-iteration
+  # (`rotate_ints`, incl. the general-orbital `d_mmmo` for the orbital gradient), which is still
+  # MO-dump-based → derive.
+  (has_prefix(ecm, "O") || has_prefix(ecm, "B")) && return false
+  return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD", "CCD", "DCD")
 end
 
 

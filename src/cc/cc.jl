@@ -2702,6 +2702,12 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   if orbopt
     Rpq = rotation_matrix(EC, T1)
     rotate_ints(EC, Rpq)
+  elseif EC.ao_direct
+    # AO-direct: the bare `d_*` blocks that `pseudo_dressed_ints` would provide are built straight from
+    # the AO integrals by the dressing inside `calc_cc_resid` below (called with an EMPTY T1, so the
+    # blocks come out bare). Only the `vvoo` block is extra here; the AO integrals are Hermitian, so
+    # ``⟨ab|ij⟩`` is the transpose of ``⟨ij|ab⟩`` — the route `calc_MP2` already uses AO-direct.
+    save!(EC, "d_vvoo", permutedims(load_bare_int2(EC, "oovv"), (3,4,1,2)))
   else
     EC.options.cc.calc_d_vvoo = true
     pseudo_dressed_ints(EC)
