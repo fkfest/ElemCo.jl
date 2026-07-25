@@ -876,26 +876,6 @@ macro region(args...)
 end
 
 """
-    default_integrals!(EC::ECInfo)
-
-  Generate the default integrals for correlated calculations when no integrals are
-  present yet — neither an MO dump in `EC.fd` nor exact AO integral files on scratch:
-  density-fitted MO integrals ([`@dfints`](@ref)/`dfdump`) when
-  [`IntOptions.df`](@ref ECInfos.IntOptions) is `true` (default), exact AO integrals
-  ([`@ints`](@ref)/`ao_integrals`) when `int.df=false`.
-"""
-function default_integrals!(EC::ECInfo)
-  if isempty(EC.fd) && !file_exists(EC, "ao_int2") && !pm_exists(EC)
-    if EC.options.int.df
-      dfdump(EC)
-    else
-      ao_integrals(EC)
-    end
-  end
-  return
-end
-
-"""
     @dfints(opts_block=nothing)
 
   Generate 2 and 4-idx MO integrals using density fitting.
@@ -1076,7 +1056,7 @@ macro cc(method, args...)
       return quote
         $(esc(:@tryECinit))
         with_local_options($(esc(:EC)), $local_opts_expr) do
-          default_integrals!($(esc(:EC)))
+          setup_fcidump_if_needed!($(esc(:EC)))
           strmethod = @var2string($(esc(method)), $(esc(strmethod)))
           ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
         end
@@ -1093,7 +1073,7 @@ macro cc(method, args...)
     else
       return quote
         $(esc(:@tryECinit))
-        default_integrals!($(esc(:EC)))
+        setup_fcidump_if_needed!($(esc(:EC)))
         strmethod = @var2string($(esc(method)), $(esc(strmethod)))
         ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
       end
@@ -1230,14 +1210,14 @@ macro fci(args...)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts_expr) do
-        default_integrals!($(esc(:EC)))
+        setup_fcidump_if_needed!($(esc(:EC)))
         fcidriver($(esc(:EC)); $(ekwa...))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      default_integrals!($(esc(:EC)))
+      setup_fcidump_if_needed!($(esc(:EC)))
       fcidriver($(esc(:EC)); $(ekwa...))
     end
   end
@@ -1290,14 +1270,14 @@ macro ciphi(args...)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts_expr) do
-        default_integrals!($(esc(:EC)))
+        setup_fcidump_if_needed!($(esc(:EC)))
         fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      default_integrals!($(esc(:EC)))
+      setup_fcidump_if_needed!($(esc(:EC)))
       fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
     end
   end

@@ -1604,30 +1604,30 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 end
 
 """
-  Fraction of linearly-dependent (deleted) orbitals above which [`ao_cc_setup!`](@ref) suggests the
-  MO-based route. AO-direct always works in the FULL AO dimension, while a derived MO basis correlates
-  in the reduced one, so the AO-direct overhead grows roughly like `(nao/(nao-ndel))^4` — ≈2.4× at 20%.
+  Fraction of deleted orbitals above which [`ao_cc_setup!`](@ref) suggests the MO-based route.
+  AO-direct always works in the FULL AO dimension, while a derived MO basis correlates in the reduced
+  one, so the AO-direct overhead grows roughly like `(nao/(nao-ndel))^4` — ≈2.4× at 20%.
 """
-const AO_DIRECT_REDUNDANCY_WARN = 0.2
+const AO_DIRECT_DELETED_WARN = 0.2
 
 """
-    warn_ao_direct_redundancy(EC::ECInfo, norb)
+    warn_ao_direct_deleted(EC::ECInfo, norb)
 
-  Warn when a large fraction of the `norb` orbitals is linearly dependent (deleted): AO-direct still
-  streams the full AO dimension, so beyond [`AO_DIRECT_REDUNDANCY_WARN`](@ref) the derived-MO-dump route
-  (which correlates in the reduced basis) is typically faster. Points at the option that switches routes.
+  Warn when a large fraction of the `norb` orbitals is deleted — whether linearly dependent or removed
+  on purpose (e.g. by `@region`); both are equally costly here. AO-direct still streams the full AO
+  dimension, so beyond [`AO_DIRECT_DELETED_WARN`](@ref) the derived-MO-dump route (which correlates in
+  the reduced basis) is typically faster. Points at the option that switches routes.
 """
-function warn_ao_direct_redundancy(EC::ECInfo, norb::Int)
-  ndel = n_deleted_orbitals(EC)
+function warn_ao_direct_deleted(EC::ECInfo, norb::Int)
+  ndel = n_deleted_orbitals_all(EC)
   (norb > 0 && ndel > 0) || return
   frac = ndel / norb
-  frac > AO_DIRECT_REDUNDANCY_WARN || return
-  println("WARNING: $ndel of $norb orbitals ($(round(100*frac, digits=1))%) are linearly dependent " *
-          "and deleted.\n" *
-          "         AO-direct still works in the full AO dimension, so with this much redundancy the\n" *
-          "         MO-based route is likely faster (it correlates in the reduced basis). To use it:\n" *
-          "           @set int ao_direct=false      # or: EC.options.int.ao_direct = false\n" *
-          "         Alternatively reduce the redundancy with a larger `@set scf redthr=...`.")
+  frac > AO_DIRECT_DELETED_WARN || return
+  println("WARNING: $ndel of $norb orbitals ($(round(100*frac, digits=1))%) are deleted and not " *
+          "correlated.\n" *
+          "         AO-direct still works in the full AO dimension, so with this many deleted orbitals\n" *
+          "         the MO-based route is likely faster (it correlates in the reduced basis). To use it:\n" *
+          "           @set int ao_direct=false      # or: EC.options.int.ao_direct = false")
   return
 end
 
@@ -2614,7 +2614,7 @@ function ao_cc_setup!(EC::ECInfo{T}) where {T<:Number}
   space_full = save_space(EC)
   occ_full_a = space_full['o']; occ_full_b = space_full['O']
   freeze_orbitals!(EC)
-  warn_ao_direct_redundancy(EC, length(space_full[':']))
+  warn_ao_direct_deleted(EC, length(space_full[':']))
   core_a = sort!(setdiff(occ_full_a, EC.space['o']))  # frozen occupied (core) α MOs
   core_b = sort!(setdiff(occ_full_b, EC.space['O']))  # frozen occupied (core) β MOs
   hao = Matrix{T}(load2idx(EC, "h_AA"))

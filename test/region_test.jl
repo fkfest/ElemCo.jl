@@ -109,6 +109,19 @@ ElemCo.OrbTools.freeze_orbitals!(EC; verbose=false)
 @test issubset([8, norb], EC.space['v'])             # high-index region virtuals NOT frozen by mistake
 @test length(EC.space['v']) == norb - 7              # 1 core + 4 inactive + 2 redundant removed
 ElemCo.restore_space!(EC, sp)
+
+# Counting the two kinds of "Deleted" orbitals. `n_deleted_orbitals` means the linearly-dependent
+# ones specifically (class "Deleted" AND the sentinel energy), while `n_deleted_orbitals_all` counts
+# every orbital kept out of the correlation — including virtuals deleted on purpose (e.g. by @region),
+# which keep their physical orbital energy. Cost estimates need the latter.
+@test ElemCo.OrbTools.n_deleted_orbitals_all(EC) == 2       # the sentinel-energy dump from above
+@test ElemCo.OrbTools.n_deleted_orbitals(EC) == 2
+classes_reg = fill("Virtual", norb); classes_reg[1:5] .= "Closed"; classes_reg[8:9] .= "Deleted"
+ElemCo.Wavefunctions.dump_orbitals(EC, ElemCo.QMTensors.SpinMatrix(cMO[1]);
+  basis=basis_ao, type="Region-test", energies=(copy(en[1]), Float64[]),   # PHYSICAL energies
+  occupations=occ, classes=(classes_reg, String[]))
+@test ElemCo.OrbTools.n_deleted_orbitals_all(EC) == 2       # @region-style deletions are counted
+@test ElemCo.OrbTools.n_deleted_orbitals(EC) == 0           # ... but they are not redundant ones
 end
 
 @testitem "region ghost PAO centers" tags=[:df, :region, :quick] begin

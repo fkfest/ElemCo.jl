@@ -754,6 +754,20 @@ end
     e_ref = @cc m
     @test abs(e_ao[key] - e_ref[key]) < 1e-8
   end
+  # ... and the physical invariant (as in oqv_restart_redundant): the duplicated functions add
+  # nothing, so the AO-direct energy in the redundant basis must equal the non-redundant one.
+  hbasis_nonredund = "{
+    s, H, 13.01, 1.962, 0.4446, 0.122
+    c, 1.4, 0.019685, 0.137977, 0.478148, 0.50124
+    c, 4.4, 1.0
+    p, H, 0.727
+    c, 1.1, 1.0}"
+  EC = fresh(); @ints; @hf; e_red = @cc ccsd
+  EC = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>hbasis_nonredund)))
+  EC.options.wf.dump = joinpath(EC.scr, "wf.h5"); EC.options.scf.redthr = 1.e-6
+  @ints; @hf; e_non = @cc ccsd
+  @test ElemCo.OrbTools.n_deleted_orbitals(EC) == 0
+  @test abs(e_red["CCSD"] - e_non["CCSD"]) < 1e-8
 end
 
 end # @testitem

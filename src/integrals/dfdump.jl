@@ -13,9 +13,10 @@ using ..ElemCo.FockFactory
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
 using ..ElemCo.IntegralTools
+using ..ElemCo.PMStore
 using ..ElemCo.Utils
 
-export dfdump
+export dfdump, setup_fcidump_if_needed!
 
 """
     prepare_mpfit(EC, bao, bfit)
@@ -403,7 +404,31 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::SpinMatrix, full
   println("Reference energy: ", eRef)
 end
 
-""" 
+"""
+    setup_fcidump_if_needed!(EC::ECInfo)
+
+  Generate the integrals for a correlated calculation when none are available yet: density-fitted MO
+  integrals in `EC.fd` ([`dfdump`](@ref)) when [`IntOptions.df`](@ref ECInfos.IntOptions) is `true`
+  (the default), or the exact AO integral files ([`ao_integrals`](@ref)) when `int.df=false`.
+
+  Nothing is generated when integrals are already available — an MO dump in `EC.fd`, or exact AO
+  integrals on scratch (the joint `ao_int2` or the ± supermatrix store), which the AO-direct methods
+  consume without ever building an FCIDUMP.
+"""
+function setup_fcidump_if_needed!(EC::ECInfo)
+  # exact AO integrals on scratch are integrals too — the AO-direct methods consume them directly
+  (file_exists(EC, "ao_int2") || pm_exists(EC)) && return
+  if isempty(EC.fd)
+    if EC.options.int.df
+      dfdump(EC)
+    else
+      ao_integrals(EC)
+    end
+  end
+  return
+end
+
+"""
     dfdump(EC::ECInfo)
 
   Generate fcidump using df integrals and store in `IntOptions.fcidump`.

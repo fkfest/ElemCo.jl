@@ -22,7 +22,7 @@ export rotate_orbs, rotate_orbs!, normalize_phase!
 export try_load_starting_orbitals
 export left_from_right_rotations, project_onto_basis
 export canonical_orthogonalization, select_lowdin_orth, opao_relthr, eigen_orth, n_redundant_orbitals
-export orbital_classes_with_deleted, n_deleted_orbitals, freeze_orbitals!
+export orbital_classes_with_deleted, n_deleted_orbitals, n_deleted_orbitals_all, freeze_orbitals!
 
 """
     REDUNDANT_ORBITAL_ENERGY
@@ -222,6 +222,22 @@ function n_deleted_orbitals(EC::ECInfo; MO="mo")
     @warn "Number of deleted orbitals stored in the dump ($ndel) does not match the redundancy of the current AO basis ($nredund). Using the stored count; check that scf.redthr is consistent with the HF run."
   end
   return ndel
+end
+
+"""
+    n_deleted_orbitals_all(EC::ECInfo; MO="mo")
+
+  Number of orbitals stored as class `"Deleted"`, i.e. ALL orbitals kept out of the correlation
+  treatment: the linearly-dependent (redundant) ones AND virtuals removed on purpose (e.g. by
+  `@region`), which keep their physical orbital energy. Use this where only the *count* of
+  non-correlated orbitals matters (cost estimates); use [`n_deleted_orbitals`](@ref) when the
+  linearly-dependent ones specifically are meant. Falls back to [`n_deleted_orbitals`](@ref) when
+  no class information is stored (e.g. imported orbitals).
+"""
+function n_deleted_orbitals_all(EC::ECInfo; MO="mo")
+  classa, _ = fetch_orbital_classes(EC; MO=MO)
+  isempty(classa) && return n_deleted_orbitals(EC; MO=MO)
+  return count(==("Deleted"), classa)
 end
 
 """
