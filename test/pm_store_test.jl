@@ -686,6 +686,16 @@ end
   @test pm_exists(EC) && isempty(EC.fd)
   EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_eom = @cc "eom-ccsd"
   @test abs(e_pm_eom["ω1"] - e_ref_eom["ω1"]) < 1e-7
+  # unrestricted (T) (water cation): the same-spin vvvo/vooo (per spin) and the five opposite-spin
+  # 3-external blocks are built from the per-spin stores ht_oAAA_a/_b — the βα-looking reads resolve to
+  # the same five αβ files. Energies match the derived-UHF-dump reference.
+  for m in ("uccsd(t)", "udcsd(t)")
+    key = uppercase(m)
+    EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ut = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)
+    EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ut = @cc m
+    @test abs(e_pm_ut[key] - e_ref_ut[key]) < 1e-8
+  end
 end
 
 end # @testitem

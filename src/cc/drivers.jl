@@ -313,8 +313,9 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # so far closed-shell + ± store + singles only (unrestricted and Λ-CCD/DCD are follow-ups → derive).
     needs_lambda = has_prefix(ecm, "Λ") || has_prefix(ecm, "EOM") || need_correlated_properties(EC)
     lambda_ok = !needs_lambda || (would_be_closed_shell && pm_exists(EC) && ecm.exclevel[1] == :full)
-    # AO-direct perturbative triples so far need the closed-shell half-transformed store (± path).
-    triples_ok = ecm.exclevel[3] == :none || (would_be_closed_shell && pm_exists(EC))
+    # AO-direct perturbative triples build their 3-external blocks from the half-transformed store(s),
+    # which exist only on the ± store path (closed shell: ht_oAAA; unrestricted: ht_oAAA_a/_b).
+    triples_ok = ecm.exclevel[3] == :none || pm_exists(EC)
     ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct && n_deleted_orbitals(EC) == 0 &&
                 lambda_ok && triples_ok &&
                 is_restricted(load_orbitals(EC)) == would_be_closed_shell

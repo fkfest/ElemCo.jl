@@ -1,5 +1,24 @@
 # triples routines
 
+"""
+    ints2_t(EC::ECInfo, spaces::AbstractString)
+
+  A bare MO integral block for the (T) kernels. AO-direct reads the block prebuilt from the
+  half-transformed store — the scratch files are named by their space string, see
+  [`build_ht_mo_blocks!`](@ref) / [`build_ht_mo_blocks_unrestricted!`](@ref) — otherwise the block is
+  cut from the MO fcidump by [`ints2`](@ref).
+"""
+ints2_t(EC::ECInfo, spaces::AbstractString) =
+  EC.ao_direct ? load4idx(EC, spaces) : ints2(EC, spaces)
+
+"""
+    ints2_t_oovv(EC::ECInfo, spaces::AbstractString)
+
+  As [`ints2_t`](@ref) for the `oovv`-class blocks (`oovv`/`OOVV`/`oOvV`), which the AO-direct dressing
+  already stores as bare blocks — read via [`load_bare_int2`](@ref) instead of the block engine.
+"""
+ints2_t_oovv(EC::ECInfo, spaces::AbstractString) =
+  EC.ao_direct ? load_bare_int2(EC, spaces) : ints2(EC, spaces)
 
 """
     PseudoCanonicalTransform
@@ -344,13 +363,13 @@ function calc_pertT_closed_shell(EC::ECInfo{Ty}; save_t3=false) where Ty
     build_ht_mo_blocks!(EC, ("vvvo", "ovoo"))
   end
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(EC.ao_direct ? load_bare_int2(EC,"oovv") : ints2(EC,"oovv"),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, "oovv"),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = EC.ao_direct ? load4idx(EC,"vvvo") : ints2(EC,"vvvo")
+  vvvo = ints2_t(EC, "vvvo")
   pseudocan_transform!(pct, vvvo, "vvvo")
   # ``v_{ia}^{jk}``
-  ovoo = EC.ao_direct ? load4idx(EC,"ovoo") : ints2(EC,"ovoo")
+  ovoo = ints2_t(EC, "ovoo")
   pseudocan_transform!(pct, ovoo, "ovoo")
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"
@@ -513,22 +532,22 @@ function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
     build_ht_mo_blocks!(EC, ("vvvo", "ovoo", "vovv", "ooov"))
   end
   # v^{ab}_{ij} stored as [a,b,i,j] → "vvoo"
-  vv_oo = permutedims(EC.ao_direct ? load_bare_int2(EC, "oovv") : ints2(EC, "oovv"), [3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, "oovv"), [3,4,1,2])
   pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # v_{ab}^{ck} as [a,b,c,k] → "vvvo"
-  vvvo = EC.ao_direct ? load4idx(EC, "vvvo") : ints2(EC, "vvvo")
+  vvvo = ints2_t(EC, "vvvo")
   pseudocan_transform!(pct, vvvo, "vvvo")
   # v_{ia}^{jk} as [i,a,j,k] → "ovoo"
-  ovoo = EC.ao_direct ? load4idx(EC, "ovoo") : ints2(EC, "ovoo")
+  ovoo = ints2_t(EC, "ovoo")
   pseudocan_transform!(pct, ovoo, "ovoo")
 
   # Load and transform integrals for U contractions (conjugate transformation)
   # v^{ab}_{ck} as [a,b,c,k] → "vvvo"
-  vv_vo = permutedims(EC.ao_direct ? load4idx(EC, "vovv") : ints2(EC, "vovv"), [3,4,1,2])
+  vv_vo = permutedims(ints2_t(EC, "vovv"), [3,4,1,2])
   pseudocan_transform!(pct, vv_vo, "vvvo"; conjugate=true)
   # v^{ia}_{jk} as [i,a,j,k] → "ovoo"
   # v_{jk}^{ia}, reordered to v^{ia}_{jk}
-  ov_oo = permutedims(EC.ao_direct ? load4idx(EC, "ooov") : ints2(EC, "ooov"), [3,4,1,2])
+  ov_oo = permutedims(ints2_t(EC, "ooov"), [3,4,1,2])
   pseudocan_transform!(pct, ov_oo, "ovoo"; conjugate=true)
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"
@@ -688,6 +707,13 @@ function calc_pertT_unrestricted(EC::ECInfo)
   if pct.need_transform
     println("Fock matrix not diagonal - performing pseudo-canonicalization for UCCSD(T)")
   end
+  # AO-direct: build the same-spin + opposite-spin 3-external blocks once from the per-spin
+  # half-transformed stores (the four calls below then read them); the bare oovv-class blocks come
+  # from the AO-direct dressing via load_bare_int2.
+  if EC.ao_direct
+    build_ht_mo_blocks_unrestricted!(EC, ("vvvo", "vooo", "VVVO", "VOOO",
+                                          "vVvO", "vVoV", "vOoO", "oVoO"))
+  end
 
   T1a = load2idx(EC,"T_vo")
   pseudocan_transform!(pct, T1a, "vo")
@@ -777,14 +803,15 @@ function calc_pertT_samespin(EC::ECInfo{Ty}, T1, T2, pct, spin::Symbol) where Ty
   SP = EC.space
   o = space4spin('o', spin==:α)
   v = space4spin('v', spin==:α)
+  # AO-direct reads the blocks prebuilt in `calc_pertT_unrestricted` (file names = space strings)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, o*o*v*v),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC, v*v*v*o)
+  vvvo = ints2_t(EC, v*v*v*o)
   pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
-  vooo = 0.5*ints2(EC, v*o*o*o)
+  vooo = 0.5*(ints2_t(EC, v*o*o*o))
   vooo -= permutedims(vooo,[1,2,4,3])
   pseudocan_transform!(pct, vooo, v*o*o*o)
   m = space4spin('m', spin==:α)
@@ -892,46 +919,46 @@ function calc_pertT_mixedspin(EC::ECInfo{Ty}, T1, T2, T1os, T2mix, pct, spin::Sy
   O = space4spin('o', !isα)
   V = space4spin('v', !isα)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, o*o*v*v),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC, v*v*v*o)
+  vvvo = ints2_t(EC, v*v*v*o)
   pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``v_{ai}^{kj} - v_{ai}^{jk}``
-  vooo = ints2(EC, v*o*o*o)
+  vooo = ints2_t(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
   pseudocan_transform!(pct, vooo, v*o*o*o)
   if isα
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
-    vV_oO = permutedims(ints2(EC, o*O*v*V),[3,4,1,2])
+    vV_oO = permutedims(ints2_t_oovv(EC, o*O*v*V),[3,4,1,2])
     pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
-    vVvO = ints2(EC, v*V*v*O)
+    vVvO = ints2_t(EC, v*V*v*O)
     pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
-    VvVo = permutedims(ints2(EC, v*V*o*V),[2,1,4,3])
+    VvVo = permutedims(ints2_t(EC, v*V*o*V),[2,1,4,3])
     pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
-    vOoO = ints2(EC, v*O*o*O)
+    vOoO = ints2_t(EC, v*O*o*O)
     pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
-    VoOo = permutedims(ints2(EC, o*V*o*O),[2,1,4,3])
+    VoOo = permutedims(ints2_t(EC, o*V*o*O),[2,1,4,3])
     pseudocan_transform!(pct, VoOo, V*o*O*o)
   else
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
-    vV_oO = permutedims(ints2(EC, O*o*V*v),[4,3,2,1])
+    vV_oO = permutedims(ints2_t_oovv(EC, O*o*V*v),[4,3,2,1])
     pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
-    vVvO = permutedims(ints2(EC, V*v*O*v),[2,1,4,3])
+    vVvO = permutedims(ints2_t(EC, V*v*O*v),[2,1,4,3])
     pseudocan_transform!(pct, vVvO, v*V*v*O)
     # ``v_{Ab}^{Ck}``
-    VvVo = ints2(EC, V*v*V*o)
+    VvVo = ints2_t(EC, V*v*V*o)
     pseudocan_transform!(pct, VvVo, V*v*V*o)
     # ``v_{aI}^{kJ}``
-    vOoO = permutedims(ints2(EC, O*v*O*o),[2,1,4,3])
+    vOoO = permutedims(ints2_t(EC, O*v*O*o),[2,1,4,3])
     pseudocan_transform!(pct, vOoO, v*O*o*O)
     # ``v_{Ai}^{Kj}``
-    VoOo = ints2(EC, V*o*O*o)
+    VoOo = ints2_t(EC, V*o*O*o)
     pseudocan_transform!(pct, VoOo, V*o*O*o)
   end
   m = space4spin('m', isα)
@@ -1065,14 +1092,15 @@ function calc_ΛpertT_samespin(EC::ECInfo{Ty}, T2, U1, U2, pct, spin::Symbol) wh
   SP = EC.space
   o = space4spin('o', spin==:α)
   v = space4spin('v', spin==:α)
+  # AO-direct reads the blocks prebuilt in `calc_pertT_unrestricted` (file names = space strings)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, o*o*v*v),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC, v*v*v*o)
+  vvvo = ints2_t(EC, v*v*v*o)
   pseudocan_transform!(pct, vvvo, v*v*v*o)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
-  vooo = 0.5*ints2(EC, v*o*o*o)
+  vooo = 0.5*(ints2_t(EC, v*o*o*o))
   vooo -= permutedims(vooo,[1,2,4,3])
   pseudocan_transform!(pct, vooo, v*o*o*o)
   # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
