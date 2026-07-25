@@ -317,7 +317,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # AO-direct perturbative triples build their 3-external blocks from the half-transformed store(s),
     # which exist only on the ± store path (closed shell: ht_oAAA; unrestricted: ht_oAAA_a/_b).
     triples_ok = ecm.exclevel[3] == :none || pm_exists(EC)
-    ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct && n_deleted_orbitals(EC) == 0 &&
+    ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct &&
                 lambda_ok && triples_ok &&
                 is_restricted(load_orbitals(EC)) == would_be_closed_shell
     if ao_direct

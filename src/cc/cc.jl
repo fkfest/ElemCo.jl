@@ -1604,6 +1604,34 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 end
 
 """
+  Fraction of linearly-dependent (deleted) orbitals above which [`ao_cc_setup!`](@ref) suggests the
+  MO-based route. AO-direct always works in the FULL AO dimension, while a derived MO basis correlates
+  in the reduced one, so the AO-direct overhead grows roughly like `(nao/(nao-ndel))^4` — ≈2.4× at 20%.
+"""
+const AO_DIRECT_REDUNDANCY_WARN = 0.2
+
+"""
+    warn_ao_direct_redundancy(EC::ECInfo, norb)
+
+  Warn when a large fraction of the `norb` orbitals is linearly dependent (deleted): AO-direct still
+  streams the full AO dimension, so beyond [`AO_DIRECT_REDUNDANCY_WARN`](@ref) the derived-MO-dump route
+  (which correlates in the reduced basis) is typically faster. Points at the option that switches routes.
+"""
+function warn_ao_direct_redundancy(EC::ECInfo, norb::Int)
+  ndel = n_deleted_orbitals(EC)
+  (norb > 0 && ndel > 0) || return
+  frac = ndel / norb
+  frac > AO_DIRECT_REDUNDANCY_WARN || return
+  println("WARNING: $ndel of $norb orbitals ($(round(100*frac, digits=1))%) are linearly dependent " *
+          "and deleted.\n" *
+          "         AO-direct still works in the full AO dimension, so with this much redundancy the\n" *
+          "         MO-based route is likely faster (it correlates in the reduced basis). To use it:\n" *
+          "           @set int ao_direct=false      # or: EC.options.int.ao_direct = false\n" *
+          "         Alternatively reduce the redundancy with a larger `@set scf redthr=...`.")
+  return
+end
+
+"""
     ao_direct_orbitals(EC::ECInfo) -> Matrix
 
   MO coefficients for an AO-direct run: the stored (α) orbitals with the linearly-dependent
@@ -2231,7 +2259,10 @@ end
   general-orbital `nocc·norb³` block.
 """
 function dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix)
-  cMO = ao_direct_orbitals(EC); SP = EC.space
+  # `dD1` spans the FULL orbital space (`n_orbs`), so the transform needs all MO columns — not the
+  # active-only set of `ao_direct_orbitals` (which drops the redundant tail). Deleted/frozen positions
+  # of `dD1` are zero, so they contribute nothing. Same convention as `dD1_ufock_vo`.
+  cMO = Matrix(load_orbitals(EC).α); SP = EC.space
   D_AO = cMO * transpose(dD1) * transpose(cMO)      # D_AO[μ,ρ] = Σ_pq cMO[μ,q] dD1[p,q] cMO[ρ,p]
   F_AO = ao_core_fock(EC, D_AO)                      # 2J − K (non-symmetric density)
   F_MO = cMO' * F_AO * cMO
@@ -2583,6 +2614,7 @@ function ao_cc_setup!(EC::ECInfo{T}) where {T<:Number}
   space_full = save_space(EC)
   occ_full_a = space_full['o']; occ_full_b = space_full['O']
   freeze_orbitals!(EC)
+  warn_ao_direct_redundancy(EC, length(space_full[':']))
   core_a = sort!(setdiff(occ_full_a, EC.space['o']))  # frozen occupied (core) α MOs
   core_b = sort!(setdiff(occ_full_b, EC.space['O']))  # frozen occupied (core) β MOs
   hao = Matrix{T}(load2idx(EC, "h_AA"))

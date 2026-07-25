@@ -723,4 +723,37 @@ end
   @test abs(e_pm_ueom["ω1"] - e_ref_ueom["ω1"]) < 1e-7
 end
 
+# AO-direct with DELETED (linearly-dependent) orbitals. `freeze_orbitals!` already removes the
+# "Deleted"-class orbitals from the correlated space and `ao_direct_orbitals` drops exactly that
+# redundant tail, so the AO-direct path needs no special casing — only the driver gate had to stop
+# excluding it. H2 with a duplicated s contraction makes the AO overlap exactly rank-deficient
+# (one redundant function per H), so the count is structural and platform-independent.
+@testset "AO-direct with redundant (deleted) orbitals" begin
+  hbasis = "{
+    s, H, 13.01, 1.962, 0.4446, 0.122
+    c, 1.4, 0.019685, 0.137977, 0.478148, 0.50124
+    c, 4.4, 1.0
+    c, 4.4, 1.0
+    p, H, 0.727
+    c, 1.1, 1.0}"
+  geometry = "bohr
+       H1 0.0 0.0 0.0
+       H2 0.0 0.0 1.4"
+  fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>hbasis)));
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e.options.scf.redthr = 1.e-6; e)
+  for (m, key, open) in (("ccsd", "CCSD", false), ("ccsd(t)", "CCSD(T)", false),
+                         ("Λccsd", "ΛCCSD", false), ("eom-ccsd", "ω1", false),
+                         ("uccsd", "UCCSD", true), ("Λuccsd", "ΛUCCSD", true))
+    EC = fresh(); @ints
+    if open; @set wf charge=-1 ms2=1; @uhf; else; @hf; end
+    @test ElemCo.OrbTools.n_deleted_orbitals(EC) == 2       # the two linearly-dependent orbitals
+    e_ao = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)                   # ran AO-direct on the ± store
+    EC = fresh(); EC.options.int.ao_direct = false; @ints
+    if open; @set wf charge=-1 ms2=1; @uhf; else; @hf; end
+    e_ref = @cc m
+    @test abs(e_ao[key] - e_ref[key]) < 1e-8
+  end
+end
+
 end # @testitem
