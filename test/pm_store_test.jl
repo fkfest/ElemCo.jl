@@ -708,6 +708,19 @@ end
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.cc.properties = true
   EC.options.int.ao_direct = false; @uhf; e_ref_up = @cc ccsd
   @test abs(e_pm_up["mu"] - e_ref_up["mu"]) < 1e-8
+  # unrestricted Λ(T) and unrestricted EOM: the Λ-specific conjugate mixed blocks and the unrestricted
+  # CIS blocks are built from the per-spin stores too, so these run AO-direct as well
+  for m in ("Λuccsd(t)", "Λudcsd(t)")
+    key = uppercase(m)
+    EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ult = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)
+    EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ult = @cc m
+    @test abs(e_pm_ult[key] - e_ref_ult[key]) < 1e-8
+  end
+  EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ueom = @cc "eom-uccsd"
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ueom = @cc "eom-uccsd"
+  @test abs(e_pm_ueom["ω1"] - e_ref_ueom["ω1"]) < 1e-7
 end
 
 end # @testitem

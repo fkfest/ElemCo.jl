@@ -80,7 +80,7 @@ export calc_cc, calc_pertT
 export ao_cc_setup!
 export calc_lm_cc, calc_1RDM
 export calc_ccsd_vector_times_Jacobian, calc_intermediates4Jacobian
-export build_ht_mo_blocks!
+export build_ht_mo_blocks!, build_ht_mo_blocks_unrestricted!
 
 include("cc_triples.jl")
 
@@ -2101,9 +2101,20 @@ const HT_MO_BLOCK_SPEC = Dict{String,NamedTuple{(:store,:role,:X,:Y,:Z,:perm,:sw
   # same-spin β (the α entries with every space flipped, off the β store)
   "VOOO" => (store=:b, role=:B, X='V', Y='O', Z='O', perm=(1,2,3,4), swap=false),  # ⟨AI|KJ⟩
   "VVVO" => (store=:b, role=:B, X='V', Y='V', Z='V', perm=(3,4,1,2), swap=true),   # ⟨AB|CK⟩
+  "VOVV" => (store=:b, role=:B, X='V', Y='V', Z='V', perm=(1,2,3,4), swap=false),  # ⟨AI|BC⟩
+  "oovo" => (store=:a, role=:A, X='o', Y='v', Z='o', perm=(1,2,3,4), swap=false),  # ⟨ij|ak⟩
+  "OOVO" => (store=:b, role=:A, X='O', Y='V', Z='O', perm=(1,2,3,4), swap=false),  # ⟨IJ|AK⟩
+  "VOOV" => (store=:b, role=:B, X='V', Y='O', Z='V', perm=(1,2,3,4), swap=false),  # ⟨AI|JB⟩
+  "VOVO" => (store=:b, role=:B, X='V', Y='V', Z='O', perm=(1,2,3,4), swap=false),  # ⟨AI|BJ⟩
   # opposite spin (index 1,3 = α = electron 1; index 2,4 = β = electron 2)
   "vOoO" => (store=:b, role=:B, X='v', Y='o', Z='O', perm=(1,2,3,4), swap=false),  # ⟨aI|kJ⟩
   "oVoO" => (store=:a, role=:A, X='V', Y='o', Z='O', perm=(1,2,3,4), swap=false),  # ⟨iB|kJ⟩
+  "vOvV" => (store=:b, role=:B, X='v', Y='v', Z='V', perm=(1,2,3,4), swap=false),  # ⟨aI|bC⟩
+  "oVvV" => (store=:a, role=:A, X='V', Y='v', Z='V', perm=(1,2,3,4), swap=false),  # ⟨iB|aC⟩
+  "oOvO" => (store=:a, role=:A, X='O', Y='v', Z='O', perm=(1,2,3,4), swap=false),  # ⟨iJ|aK⟩
+  "oOoV" => (store=:a, role=:A, X='O', Y='o', Z='V', perm=(1,2,3,4), swap=false),  # ⟨iJ|kB⟩
+  "vOoV" => (store=:b, role=:B, X='v', Y='o', Z='V', perm=(1,2,3,4), swap=false),  # ⟨aI|kB⟩
+  "oVvO" => (store=:a, role=:A, X='V', Y='v', Z='O', perm=(1,2,3,4), swap=false),  # ⟨iB|aJ⟩
   "vVvO" => (store=:b, role=:B, X='v', Y='v', Z='V', perm=(3,4,1,2), swap=true),   # ⟨aB|cK⟩ = conj⟨cK|aB⟩
   "vVoV" => (store=:a, role=:B, X='V', Y='V', Z='v', perm=(4,3,2,1), swap=true),   # ⟨aB|iD⟩ = conj⟨Di|Ba⟩
 )

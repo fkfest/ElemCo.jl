@@ -314,9 +314,6 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # (Λ-CCD/DCD go through the MO-only pseudo_dressed_ints → derive).
     needs_lambda = has_prefix(ecm, "Λ") || has_prefix(ecm, "EOM") || need_correlated_properties(EC)
     lambda_ok = !needs_lambda || (pm_exists(EC) && ecm.exclevel[1] == :full)
-    # UNRESTRICTED Λ + perturbative triples (ΛUCCSD(T)) additionally needs the Λ-specific conjugate
-    # mixed-spin 3-external blocks, which the engine does not build yet → keep that combination on derive.
-    lambda_ok &= !(needs_lambda && ecm.exclevel[3] != :none) || would_be_closed_shell
     # AO-direct perturbative triples build their 3-external blocks from the half-transformed store(s),
     # which exist only on the ± store path (closed shell: ht_oAAA; unrestricted: ht_oAAA_a/_b).
     triples_ok = ecm.exclevel[3] == :none || pm_exists(EC)
