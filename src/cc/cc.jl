@@ -80,6 +80,7 @@ export calc_cc, calc_pertT
 export ao_cc_setup!
 export calc_lm_cc, calc_1RDM
 export calc_ccsd_vector_times_Jacobian, calc_intermediates4Jacobian
+export build_ht_mo_blocks!
 
 include("cc_triples.jl")
 

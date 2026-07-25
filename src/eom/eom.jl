@@ -36,6 +36,11 @@ function calc_eom(EC::ECInfo, method::ECMethod)
     error("only implemented upto doubles")
   end
   unrestricted = is_unrestricted(method) || has_prefix(method, "R")
+  # AO-direct (closed-shell): the CIS pre-pass reads the bare voov/vovo blocks; build them once from the
+  # half-transformed store (the dressed Jacobian set is built inside eom_iterations2 as for Λ).
+  if EC.ao_direct && !unrestricted
+    build_ht_mo_blocks!(EC, ("voov", "vovo"))
+  end
   if unrestricted
     if highest_full_exc == 2
       cis_method = has_prefix(method, "R") ? ECMethod("EOM-RCCS") : ECMethod("EOM-UCCS")
@@ -670,9 +675,13 @@ function cis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
       HH[:,i,:,j] = f_vv .- f_oo[i,j]
     end
   end
-  int2 = ints2(EC, spv, spo, spo, spv, :α) 
+  # AO-direct: slice the built full voov/vovo blocks to the HOMO/LUMO window (spv=first nva virt,
+  # spo=last noa occ, i.e. local ranges 1:nva and end-noa+1:end)
+  no = length(SP['o'])
+  rv = 1:nva; ro = (no-noa+1):no
+  int2 = EC.ao_direct ? load4idx(EC, "voov")[rv, ro, ro, rv] : ints2(EC, spv, spo, spo, spv, :α)
   HH .+= 2 * permutedims(int2, (1,3,4,2))
-  int2 = ints2(EC, spv, spo, spv, spo, :α) 
+  int2 = EC.ao_direct ? load4idx(EC, "vovo")[rv, ro, rv, ro] : ints2(EC, spv, spo, spv, spo, :α)
   HH .-= permutedims(int2, (1,4,3,2))
   vals, vecs = eigen(Hermitian(reshape(HH, (nva*noa, nva*noa))))
   return vals[1:nstates], reshape(vecs[:,1:nstates], (nva, noa, nstates))

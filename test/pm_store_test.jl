@@ -680,6 +680,12 @@ end
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_lt = @cc m
     @test abs(e_pm_lt[key] - e_ref_lt[key]) < 1e-8
   end
+  # closed-shell EOM-CCSD runs AO-direct off the ± store: the CIS pre-pass reads voov/vovo built from
+  # ht_oAAA, the doubles Jacobian reuses the Λ machinery; excitation energies match the derive path.
+  EC = fresh(); @ints; @hf; e_pm_eom = @cc "eom-ccsd"
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_eom = @cc "eom-ccsd"
+  @test abs(e_pm_eom["ω1"] - e_ref_eom["ω1"]) < 1e-7
 end
 
 end # @testitem
