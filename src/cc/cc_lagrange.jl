@@ -35,7 +35,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
     R1 = U1
   end
 
-  oovv = ints2(EC,"oovv")
+  oovv = EC.ao_direct ? load_bare_int2(EC,"oovv") : ints2(EC,"oovv")
   if with_rhs
     @mtensor R2[e,f,m,n] := 2.0 * oovv[m,n,e,f] - oovv[n,m,e,f]
   else
@@ -177,9 +177,14 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
   pR2 = nothing
 
   if length(U1) > 0
-    # ``R^e_m += \hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})``
-    int2 = ints2(EC,"momm")
-    @mtensor R1[e,m] += dD1[p,q] * (2.0 * int2[:,:,:,SP['v']][q,m,p,e] - int2[:,:,SP['v'],:][q,m,e,p])
+    # ``R^e_m += \hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})`` — a generalized (2J−K) Fock v,o block of dD1.
+    # AO-direct builds it straight from the ± store (no general-orbital "momm" block); else from EC.fd.
+    if EC.ao_direct
+      R1 .+= dD1_fock_vo(EC, dD1)
+    else
+      int2 = ints2(EC,"momm")
+      @mtensor R1[e,m] += dD1[p,q] * (2.0 * int2[:,:,:,SP['v']][q,m,p,e] - int2[:,:,SP['v'],:][q,m,e,p])
+    end
     t1 = print_time(EC, t1, "R^e_m += \\hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})",2)
     # ``R^e_m -= 2 Λ_{ij}^{eb} \hat v_{mb}^{ij}``
     int2 = load4idx(EC, "d_vooo")
@@ -223,6 +228,40 @@ function calc_dU2(EC::ECInfo, T1, T12, U2, o1='o', v1='v', o2='o', v2='v')
 end
 
 """
+    ao_lagrange_K2(EC, T1, U2, o4s, v4s) -> Kmmoo
+
+  AO-direct `K_{mn}^{rs} = Σ_pq ⟨pq|rs⟩ dU2_{mn}^{pq}` for the closed-shell Λ kext, mirroring the
+  amplitude kext ([`cc_kext!`](@ref)). The MO-space dressing `calc_dU2` is skipped: the AO dressed-Λ2
+  density is folded directly, `dU2_AO[μ,ν,m,n] = Σ_ab CLv[μ,a] CLv[ν,b] U2[a,b,m,n]` with the dressed
+  virtual bra `CLv = C_v − C_o·T1ᵀ` (same as [`ao_dressed_coeffs`](@ref)). By `⟨pq|rs⟩=⟨rs|pq⟩` this is
+  [`pm_K2!`](@ref)'s ket-pair contraction: ½-scale the `μν` diagonal (scalepp), pack the pair
+  triangularly, contract against the ± store (or `ao_int2`), and rotate the kept `ρσ` pair back to MO
+  with `cMO`. Real-valued (the bra↔ket reuse of the ± store); complex AO-direct is a follow-up.
+"""
+function ao_lagrange_K2(EC::ECInfo, T1, U2, o4s::Char, v4s::Char)
+  cMO = ao_direct_orbitals(EC); SP = EC.space
+  nao = size(cMO, 1)
+  Co = cMO[:, SP[o4s]]; Cv = cMO[:, SP[v4s]]
+  CLv = length(T1) > 0 ? Cv .- Co * transpose(T1) : Cv            # dressed virtual bra
+  @mtensor dU2p[μ,b,m,n] := U2[a,b,m,n] * CLv[μ,a]                 # fold Λ2 vv-block with CLv (both bra slots)
+  @mtensor dU2_AO[μ,ν,m,n] := dU2p[μ,b,m,n] * CLv[ν,b]
+  @inbounds for μ in 1:nao; @views dU2_AO[μ,μ,:,:] .*= 0.5; end   # scalepp (½ the μ=ν diagonal)
+  tripp = uppertriangular_cut(nao)
+  dU2_tri = dU2_AO[tripp, :, :]
+  if pm_exists(EC)
+    pm = open_pm_store(EC)
+    K2_AO = pm_K2!(pm, dU2_tri, tripp)                            # K2_AO[ρ,σ,m,n] = Σ_μν⟨ρσ|μν⟩ dU2_AO
+    close_pm_store!(EC, pm)
+  else
+    aofile, int2 = mmap3idx(EC, "ao_int2")
+    K2_AO = calc_pm_K2!(int2, dU2_tri, tripp)
+    close(aofile)
+  end
+  @mtensor Kmmoo[r,s,m,n] := (K2_AO[ρ,σ,m,n] * cMO[ρ,r]) * cMO[σ,s]  # rotate the kept ρσ pair to MO
+  return Kmmoo
+end
+
+"""
     cc_lagrange_kext!(EC::ECInfo, R1, R2, T1, U2, spin=:closed)
 
   Calculate the contribution of the 4-external integrals to the Λ equations for CCSD/DCSD.
@@ -238,13 +277,17 @@ function cc_lagrange_kext!(EC, R1, R2, T1, U2, spin=:closed)
   # spaces for the given spin
   o4s = space4spin('o', isα)
   v4s = space4spin('v', isα)
-  # last two indices of integrals are stored as upper triangular 
-  int2 = integ2_ss(EC.fd, spin)
-  @assert ndims(int2) == 3 # should be (norb,norb,uppertriangular)
-  dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
-  # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-  Kmmoo = calc_lagrange_K2(int2, dU2)
-  dU2 = nothing
+  # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``. AO-direct contracts the dressed Λ2 pair with the exact
+  # AO integrals (± store) directly; else the T1-dressed dU2 is contracted with the MO fcidump.
+  if EC.ao_direct
+    Kmmoo = ao_lagrange_K2(EC, T1, U2, o4s, v4s)
+  else
+    int2 = integ2_ss(EC.fd, spin)                # (norb,norb,uppertriangular)
+    @assert ndims(int2) == 3
+    dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
+    Kmmoo = calc_lagrange_K2(int2, dU2)
+    dU2 = nothing
+  end
   t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
   # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
   @views R2 .+= Kmmoo[SP[v4s],SP[v4s],:,:]
@@ -1357,6 +1400,21 @@ function calc_lm_cc(EC::ECInfo{T}, method::ECMethod) where T
 end
 
 """
+    dress_lambda_ints!(EC, T1)
+
+  Closed-shell integral dressing for the Λ residual / EOM Jacobian (dressed `d_*` blocks incl. the
+  3-external `d_vovv`). AO-direct: [`ao_dressed_ints`](@ref) with `calc_d_vovv=true` (built from the
+  half-transformed store) instead of the MO-fcidump [`calc_dressed_ints`](@ref).
+"""
+function dress_lambda_ints!(EC::ECInfo, T1)
+  if EC.ao_direct
+    ao_dressed_ints(EC, T1, ao_direct_orbitals(EC); calc_d_vovv=true)
+  else
+    calc_dressed_ints(EC, T1; calc_d_vovv=true)
+  end
+end
+
+"""
     calc_intermediates4Jacobian(EC::ECInfo, method::ECMethod)
 
   Calculate intermediates required in [`calc_ccsd_vector_times_Jacobian`](@ref)
@@ -1374,7 +1432,7 @@ function calc_intermediates4Jacobian(EC::ECInfo, method::ECMethod)
     calc_vT2_intermediates(EC, T2a, T2b, T2ab; dc=dc)
   else
     T1 = read_starting_guess4amplitudes(EC, Val(1))
-    calc_dressed_ints(EC, T1; calc_d_vovv=true)
+    dress_lambda_ints!(EC, T1)
     T2 = read_starting_guess4amplitudes(EC, Val(2))
     calc_vT2_intermediates(EC, T2; dc=dc)
   end
@@ -1400,7 +1458,11 @@ function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   # dress integrals
   t1 = time_ns()
   if do_sing
-    calc_dressed_ints(EC, LMs1...; calc_d_vovv=true)
+    if is_unrestricted(method) || has_prefix(method, "R")
+      calc_dressed_ints(EC, LMs1...; calc_d_vovv=true)
+    else
+      dress_lambda_ints!(EC, LMs1...)                # closed-shell (AO-direct or fcidump)
+    end
   else
     pseudo_dressed_ints(EC, is_unrestricted(method) || has_prefix(method, "R"); calc_d_vovv=true)
   end

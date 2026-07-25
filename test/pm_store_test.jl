@@ -667,6 +667,19 @@ end
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_t = @cc m
     @test abs(e_pm_t[key] - e_ref_t[key]) < 1e-8
   end
+  # closed-shell Λ runs AO-direct off the ± store: the full Λ residual (dressed d_vovv + dD1 Fock-vo +
+  # Λ-kext) + the correlated 1-RDM reproduce the derived-MO-dump dipole; ΛCCSD(T)/ΛDCSD(T) energies too.
+  EC = fresh(); EC.options.cc.properties = true; @ints; @hf; e_pm_l = @cc ccsd
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); EC.options.cc.properties = true; EC.options.int.ao_direct = false; @ints; @hf; e_ref_l = @cc ccsd
+  @test abs(e_pm_l["mu"] - e_ref_l["mu"]) < 1e-8
+  for m in ("Λccsd(t)", "Λdcsd(t)")
+    key = uppercase(m)                                      # "ΛCCSD(T)" / "ΛDCSD(T)"
+    EC = fresh(); @ints; @hf; e_pm_lt = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)
+    EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_lt = @cc m
+    @test abs(e_pm_lt[key] - e_ref_lt[key]) < 1e-8
+  end
 end
 
 end # @testitem

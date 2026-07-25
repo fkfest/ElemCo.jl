@@ -507,24 +507,28 @@ function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
   U2 = contra2covariant(load4idx(EC, "U_vvoo"))
   pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
   
-  # Load and (if needed) transform integrals
+  # Load and (if needed) transform integrals. AO-direct: read the bare oovv and build the four
+  # 3-external blocks (vvvo/ovoo + Λ(T)'s vovv/ooov) once from the half-transformed store; else EC.fd.
+  if EC.ao_direct
+    build_ht_mo_blocks!(EC, ("vvvo", "ovoo", "vovv", "ooov"))
+  end
   # v^{ab}_{ij} stored as [a,b,i,j] → "vvoo"
-  vv_oo = permutedims(ints2(EC, "oovv"), [3,4,1,2])
+  vv_oo = permutedims(EC.ao_direct ? load_bare_int2(EC, "oovv") : ints2(EC, "oovv"), [3,4,1,2])
   pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # v_{ab}^{ck} as [a,b,c,k] → "vvvo"
-  vvvo = ints2(EC, "vvvo")
+  vvvo = EC.ao_direct ? load4idx(EC, "vvvo") : ints2(EC, "vvvo")
   pseudocan_transform!(pct, vvvo, "vvvo")
   # v_{ia}^{jk} as [i,a,j,k] → "ovoo"
-  ovoo = ints2(EC, "ovoo")
+  ovoo = EC.ao_direct ? load4idx(EC, "ovoo") : ints2(EC, "ovoo")
   pseudocan_transform!(pct, ovoo, "ovoo")
-  
+
   # Load and transform integrals for U contractions (conjugate transformation)
   # v^{ab}_{ck} as [a,b,c,k] → "vvvo"
-  vv_vo = permutedims(ints2(EC, "vovv"), [3,4,1,2])
+  vv_vo = permutedims(EC.ao_direct ? load4idx(EC, "vovv") : ints2(EC, "vovv"), [3,4,1,2])
   pseudocan_transform!(pct, vv_vo, "vvvo"; conjugate=true)
   # v^{ia}_{jk} as [i,a,j,k] → "ovoo"
   # v_{jk}^{ia}, reordered to v^{ia}_{jk}
-  ov_oo = permutedims(ints2(EC, "ooov"), [3,4,1,2])
+  ov_oo = permutedims(EC.ao_direct ? load4idx(EC, "ooov") : ints2(EC, "ooov"), [3,4,1,2])
   pseudocan_transform!(pct, ov_oo, "ovoo"; conjugate=true)
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"

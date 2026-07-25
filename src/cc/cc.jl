@@ -1814,7 +1814,7 @@ end
   the blocks need — the full `nao⁴` tensor, the full MO integrals, and every all-virtual
   block are never formed. Occupied-restricted indices use `i,j,k,l,m,n`.
 """
-function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
+function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix; calc_d_vovv::Bool=false) where T
   SP = EC.space
   nao = size(cMO, 1)     # AO dimension (the dressed coefficients may map to fewer than nao MOs)
   occ = SP['o']; virt = SP['v']
@@ -1882,6 +1882,12 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix) where T
   dfock[virt,occ]  .+= fvo
   dfock[virt,virt] .+= fvv
   save!(EC, "df_mm", dfock)
+  # 3-external dressed block for the Λ residual / λ-triples: d_vovv[a,i,b,c] = ⟨ai|bc⟩ (dressed) built
+  # from the occupied-bra store (occ i = CLo is T1-independent; the free virt slots carry CLv/CRv).
+  if calc_d_vovv
+    d_vovv = ht_mo_block(EC, "ht_oAAA", :B, CLv, CRv, CRv)
+    save!(EC, "d_vovv", d_vovv)
+  end
   return nothing
 end
 
@@ -2157,6 +2163,25 @@ function ao_core_fock(EC::ECInfo{T}, Dcore::AbstractMatrix) where T
     close(aofile)
   end
   return 2 .* J .- K                 # F = 2J − K
+end
+
+"""
+    dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix) -> Matrix
+
+  The virtual-occupied block the closed-shell Λ residual needs from the general-orbital density `dD1`:
+  ``R^e_m += Σ_pq dD1_p^q (2⟨qm|pe⟩ − ⟨qm|ep⟩)`` — structurally the v,o block of a generalized (2J−K)
+  Fock built with `dD1`. AO-direct: rotate `D_AO = cMO·dD1ᵀ·cMOᵀ`, form `2J−K` from the ± store (the
+  streaming [`ao_core_fock`](@ref), which accepts a non-symmetric density), transform back and return
+  `(cMOᵀ(2J−K)cMO)[occ,virt]ᵀ` as an `[nvirt,nocc]` block. Real-valued (`ao_JK!` assumes a Hermitian
+  density); complex AO-direct is a follow-up. Replaces the bare `ints2(EC,"momm")` read, forming no
+  general-orbital `nocc·norb³` block.
+"""
+function dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix)
+  cMO = ao_direct_orbitals(EC); SP = EC.space
+  D_AO = cMO * transpose(dD1) * transpose(cMO)      # D_AO[μ,ρ] = Σ_pq cMO[μ,q] dD1[p,q] cMO[ρ,p]
+  F_AO = ao_core_fock(EC, D_AO)                      # 2J − K (non-symmetric density)
+  F_MO = cMO' * F_AO * cMO
+  return permutedims(F_MO[SP['o'], SP['v']], (2, 1)) # [e,m] block
 end
 
 """
