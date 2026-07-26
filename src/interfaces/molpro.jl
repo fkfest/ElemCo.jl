@@ -162,7 +162,7 @@ end
   Read a line from a file and return the numbers in it.
 """
 function read_numbers_in_line(f::IOStream)
-  if eof(f)
+  if Base.eof(f)  # qualified: XML.jl ≥ 0.4 also exports `eof`
     return [], false
   end
   line = readline(f)
