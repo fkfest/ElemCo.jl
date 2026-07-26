@@ -103,7 +103,7 @@ function parse_exportdata_file(exportdata_file::AbstractString)
     done = false
     while !done
       line = readline(f)
-      if eof(f) 
+      if Base.eof(f)  # qualified: XML.jl ≥ 0.4 also exports `eof`
         break
       end
       # Strip leading whitespace
@@ -140,7 +140,7 @@ Returns a vector of nodes that match the XPath expression.
 If `what` is an empty string, it returns the node itself.
 """
 function get_xml_info(node::Node, what::AbstractString)
-  return xpath(what, node)
+  return Utils.xpath(what, node)  # qualified: XML.jl ≥ 0.4 also exports `xpath`
 end
 
 """
@@ -154,7 +154,7 @@ If `what` is an empty string, it returns the nodes themselves.
 function get_xml_info(nodes::Vector{Node}, what::AbstractString)
   results = Node[]
   for node in nodes
-    append!(results, xpath(what, node))
+    append!(results, Utils.xpath(what, node))  # qualified: XML.jl ≥ 0.4 also exports `xpath`
   end
   return results
 end
@@ -237,6 +237,8 @@ If the node has non-simple children, it raises an error.
 function get_xml_variable_values(node::Node)
   values = String[]
   for child in children(node)
+    # XML.jl ≥ 0.4 preserves whitespace between elements as Text nodes; skip them
+    nodetype(child) == XML.Element || continue
     @assert is_simple(child) "Expected a simple node for variable value"
     push!(values, simple_value(child))
   end
