@@ -731,11 +731,20 @@ end
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_qv = @cc m
     @test abs(e_pm_qv[key] - e_ref_qv[key]) < 1e-8
   end
-  # the orbital-optimized variants still re-transform the integrals every macro-iteration
-  # (rotate_ints), so they must fall back to the derived MO dump and stay correct
-  EC = fresh(); @ints; @hf; e_oqv = @cc "oqv-ccd"
-  EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_oqv_ref = @cc "oqv-ccd"
-  @test abs(e_oqv["OQV-CCD"] - e_oqv_ref["OQV-CCD"]) < 1e-8
+  # the orbital-optimized variants re-transform the integrals every macro-iteration: AO-direct folds
+  # the rotation into the coefficients (ao_rotate_ints) instead of re-transforming an MO dump, and
+  # rebuilds the half-transformed stores for the ROTATED occupied space — their bra IS the occupied
+  # space, so unlike the T1 dressing they cannot be built once. `d_mmmo` stays in the AO basis.
+  # Note both `E` and `HF(rotated)` are compared: the rotated reference energy is the sensitive one
+  # (a stale store leaves E right at R=I and only drifts once the orbitals actually rotate).
+  for m in ("oqv-ccd", "oqv-dcd")
+    key = uppercase(m)
+    EC = fresh(); @ints; @hf; e_oqv = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)
+    EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_oqv_ref = @cc m
+    @test abs(e_oqv[key] - e_oqv_ref[key]) < 1e-8
+    @test abs(e_oqv["HF"] - e_oqv_ref["HF"]) < 1e-8
+  end
 end
 
 # AO-direct with DELETED (linearly-dependent) orbitals. `freeze_orbitals!` already removes the

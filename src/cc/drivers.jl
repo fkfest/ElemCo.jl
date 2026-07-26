@@ -181,19 +181,20 @@ end
     ao_direct_method(ecm::ECMethod) -> Bool
 
   Whether `ecm` runs directly on the AO integral files without a preceding MO transform:
-  MP2/UMP2/RMP2, or CCSD/DCSD optionally with perturbative triples and/or a Λ prefix. Only EOM and
-  FCI/iterative-triples always derive a transient MO dump (see [`derive_mo_basis!`](@ref)). The caller
-  additionally restricts perturbative triples AND Λ / correlated properties to the closed-shell ± store
-  path (`would_be_closed_shell && pm_exists`, Λ also needing singles), and checks that the frozen-core
-  AO setup matches the residual's spin treatment and no orbitals were deleted.
+  MP2/UMP2/RMP2, or CCSD/DCSD/CCD/DCD optionally with perturbative triples and/or a Λ, EOM, QV or
+  orbital-optimizing (`O`) prefix. FCI and iterative triples always derive a transient MO dump (see
+  [`derive_mo_basis!`](@ref)), as do the Brueckner (`B`) variants. The caller additionally restricts
+  perturbative triples, Λ / correlated properties and the orbital optimization to the ± store path
+  (`pm_exists`; Λ also needs singles, the orbital optimization also needs `!keepOQVorbitals`), and
+  checks that the frozen-core AO setup matches the residual's spin treatment.
 """
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)
   name == "MP2" && return true                          # standalone MP2/UMP2/RMP2 off the bare AO blocks
-  # orbital-optimized / Brueckner variants re-transform the integrals every macro-iteration
-  # (`rotate_ints`, incl. the general-orbital `d_mmmo` for the orbital gradient), which is still
-  # MO-dump-based → derive.
-  (has_prefix(ecm, "O") || has_prefix(ecm, "B")) && return false
+  # Brueckner variants are not wired for AO-direct yet → derive. The orbital-optimized ("O") ones are:
+  # `ao_rotate_ints` folds the rotation into the coefficients and keeps `d_mmmo` in the AO space (the
+  # caller additionally requires the ± store, which the per-iteration re-transform needs).
+  has_prefix(ecm, "B") && return false
   return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD", "CCD", "DCD")
 end
 
@@ -321,8 +322,12 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # AO-direct perturbative triples build their 3-external blocks from the half-transformed store(s),
     # which exist only on the ± store path (closed shell: ht_oAAA; unrestricted: ht_oAAA_a/_b).
     triples_ok = ecm.exclevel[3] == :none || pm_exists(EC)
+    # orbital-optimized QV re-transforms the integrals every macro-iteration and rebuilds the
+    # half-transformed store with the rotated occupied orbitals → needs the ± store. `keepOQVorbitals`
+    # additionally transforms the MO dump itself (transform_fcidump!), which AO-direct does not have.
+    orbopt_ok = !has_prefix(ecm, "O") || (pm_exists(EC) && !EC.options.cc.keepOQVorbitals)
     ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct &&
-                lambda_ok && triples_ok &&
+                lambda_ok && triples_ok && orbopt_ok &&
                 is_restricted(load_orbitals(EC)) == would_be_closed_shell
     if ao_direct
       EC.ao_direct = true            # the active-space setup (freezing) happens in ao_cc_setup!

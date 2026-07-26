@@ -1559,6 +1559,74 @@ function calc_rotated_fock(EC::ECInfo, into, R::Matrix)
 end
 
 """
+    save_ao_mmmo!(EC::ECInfo)
+
+  Build the general-orbital block the OQV orbital gradient needs, kept in the **AO** space:
+  `d_mmmo[μ,ν,ρ,i] = ⟨μν|ρi⟩`. Read off the half-transformed store `"ht_oAAA"`, whose bra IS the
+  occupied space, so the caller ([`ao_rotate_ints`](@ref)) must have rebuilt it for the current
+  rotation. Uses `⟨μν|ρi⟩ = conj⟨ρi|μν⟩`, i.e. the B-role slab of column `ν` (`Bν[(i,ρ),μ]`), so it
+  is real-only, like the other bra↔ket-swap blocks.
+"""
+function save_ao_mmmo!(EC::ECInfo)
+  ht = open_ht_store(EC, "ht_oAAA")
+  T = eltype(ht.map); n = ht.nao; m = ht.m
+  if T <: Complex
+    close_ht_store!(EC, ht)
+    error("save_ao_mmmo!: the AO-space d_mmmo uses a bra↔ket Hermiticity swap and is real-only; " *
+          "complex needs a ket-transformed store (pending complex-AO integrals)")
+  end
+  io, mmmo = newmmap(EC, "d_mmmo", (n, n, n, m), T)
+  Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n)
+  @inbounds for ν in 1:n
+    ht_column!(Aσ, Bσ, ht, ν)
+    B3 = reshape(Bσ, m, n, n)                     # [i, ρ, μ]
+    @views mmmo[:, ν, :, :] .= conj.(permutedims(B3, (3, 2, 1)))   # → [μ, ρ, i]
+  end
+  closemmap(EC, io, mmmo)
+  close_ht_store!(EC, ht)
+  return
+end
+
+"""
+    ao_rotate_ints(EC::ECInfo, R::AbstractMatrix) -> Crot
+
+  AO-direct analogue of [`rotate_ints`](@ref) for the orbital-optimized QV methods: rather than
+  re-transforming an MO integral dump, the orbital rotation is folded into the MO coefficients
+  (`Crot = cMO·R`) and the (bare) integral blocks are rebuilt straight from the AO integrals in the
+  rotated basis — the same "fold the rotation into the coefficients" route the T1 dressing and the
+  Λ2 kext use.
+
+  The general-orbital block stays in the AO space ([`save_ao_mmmo!`](@ref)): [`calc_oqv_gradient`](@ref)
+  only ever contracts its three general indices with the virtual rotation, so it is indifferent to
+  whether they are MO or AO — it just receives `Crot` (whose virtual columns are the AO→rotated-virtual
+  coefficients) in place of `R`. Returns `Crot`, which the caller also passes on as the AO→MO map for
+  the residual and `cc_kext!`.
+"""
+function ao_rotate_ints(EC::ECInfo, R::AbstractMatrix)
+  SP = EC.space
+  cMO = ao_direct_orbitals(EC)                    # as in `ao_cc_setup!`: α, deleted columns dropped
+  size(cMO, 2) == size(R, 1) ||
+    error("ao_rotate_ints: rotation matrix $(size(R)) does not match the orbitals $(size(cMO))")
+  pm_exists(EC) || error("AO-direct OQV needs the ± supermatrix store (int.ao_pm=true)")
+  Crot = cMO * R
+  # The half-transformed stores are half-transformed with the OCCUPIED orbitals. The T1 dressing
+  # leaves that bra invariant (which is why `ao_cc_setup!` builds them once), but an orbital
+  # rotation does NOT: they must be rebuilt for the rotated occupied space BEFORE anything reads
+  # them, or every block derived from them silently mixes the old occupied space into the new basis.
+  delete_ht_store!(EC, "ht_oAAA"); file_exists(EC, "ht_ooAA") && delete_file!(EC, "ht_ooAA")
+  pm = open_pm_store(EC)
+  ht_build_dress!(EC, pm, Crot[:, SP['o']])
+  close_pm_store!(EC, pm)
+  ao_dressed_ints(EC, eltype(Crot)[], Crot)       # bare blocks in the rotated basis
+  fock = load2idx(EC, "df_mm")                    # rotate_ints stores the same Fock under all keys
+  save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
+  eps = diag(fock); save!(EC, "e_m", eps); save!(EC, "e_M", eps)
+  save!(EC, "d_vvoo", permutedims(load4idx(EC, "d_oovv"), (3,4,1,2)))
+  save_ao_mmmo!(EC)                               # off the store rebuilt above
+  return Crot
+end
+
+"""
     rotate_ints(EC::ECInfo, R::Matrix)
 
   Update the fock matrix with rotated integrals.
@@ -2645,6 +2713,9 @@ function ao_cc_setup!(EC::ECInfo{T}) where {T<:Number}
     save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
     eps = diag(fock); save!(EC, "e_m", eps); save!(EC, "e_M", eps)
     h_mm = load2idx(EC, "dh_mm"); save!(EC, "h_mm", h_mm)
+    # constant part of the reference energy (nuclear repulsion + frozen core) — the AO-direct
+    # counterpart of the dump's `int0`, used by `calc_rotated_HF_energy` for the OQV methods
+    save!(EC, "ao_e0", [Enuc + Ecore])
     return sum(eps[SP['o']]) + sum(diag(h_mm[SP['o'],SP['o']])) + Enuc + Ecore
   else
     cMOa = Matrix{T}(cMOsm.α); cMOb = Matrix{T}(cMOsm.β)
@@ -2697,11 +2768,18 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   norb = n_orbs(EC)
   SP = EC.space
   Rpq = zeros(0,0)
+  Crot = zeros(0,0)     # AO-direct: the rotated AO→MO map (cMO·Rpq), see ao_rotate_ints
 
   # orbital optimization -- integral tranformation
   if orbopt
     Rpq = rotation_matrix(EC, T1)
-    rotate_ints(EC, Rpq)
+    if EC.ao_direct
+      # fold the rotation into the coefficients and rebuild the blocks from the AO integrals;
+      # `Crot` then stands in for `Rpq` wherever the rotation multiplies a general orbital index
+      Crot = ao_rotate_ints(EC, Rpq)
+    else
+      rotate_ints(EC, Rpq)
+    end
   elseif EC.ao_direct
     # AO-direct: the bare `d_*` blocks that `pseudo_dressed_ints` would provide are built straight from
     # the AO integrals by the dressing inside `calc_cc_resid` below (called with an EMPTY T1, so the
@@ -2758,7 +2836,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
 
   # orbital optimization -- gradients calculation
   if orbopt
-    G1 = calc_oqv_gradient(EC, q1T, q2T, Rpq)
+    G1 = calc_oqv_gradient(EC, q1T, q2T, EC.ao_direct ? Crot : Rpq)
   else
     G1 = T1
   end
@@ -2767,7 +2845,7 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   T1_0 = zeros(eltype(T1),0,0)
   # q2VD = ints2(EC, "vvoo")
   q2VD = load4idx(EC,"d_vvoo")
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, Rot=Rpq, linearized=true)[2]
+  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, Rot=(EC.ao_direct && orbopt ? Crot : Rpq), linearized=true)[2]
 
   q1VD .-= q2VD
   @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
@@ -3072,9 +3150,12 @@ function pm_K2!(pm::PMSupermatrices{T}, D2::AbstractArray{T,3}, tripp) where {T<
   trioo = uppertriangular_cut(nocc)
   trioo_swap = swapped_uppertriangular_cut(nocc)
   tripp_swap = swapped_uppertriangular_cut(norb)
-  # ij-±-folded density, ket rs kept raw (½ rs-diagonal already in D2 via scalepp): [npp × ntri_oo]
-  Ds = 0.5 .* (D2[:, trioo] .+ D2[:, trioo_swap])
-  Da = 0.5 .* (D2[:, trioo] .- D2[:, trioo_swap])
+  # ij-±-folded density, ket rs kept raw (½ rs-diagonal already in D2 via scalepp): [npp × ntri_oo].
+  # Gather each cut ONCE: a fresh-array `getindex` is not `:consistent`, so Julia cannot CSE the
+  # repeated `D2[:, trioo]` — writing it out twice costs an extra pair of npp×ntri_oo temporaries.
+  Dpp = D2[:, trioo]; Dsw = D2[:, trioo_swap]
+  Ds = 0.5 .* (Dpp .+ Dsw)
+  Da = 0.5 .* (Dpp .- Dsw)
   ntri_oo = size(Ds, 2)
   sK2 = zeros(T, pm.npp, ntri_oo); aK2 = zeros(T, pm.npp, ntri_oo)
   pm_matmul!(sK2, pm, :s, Ds)     # sK2[pq,ij] = Σ_rs V_s[pq,rs] D_s[rs,ij]
@@ -3102,8 +3183,9 @@ function pm_K2ab!(pm::PMSupermatrices{T}, D2ab_full::AbstractArray{T,4}, tripp, 
   na = size(D2ab_full, 3); nb = size(D2ab_full, 4)
   ntri = length(tripp)
   @assert pm.npp == ntri "PM store nao ($(pm.nao)) inconsistent with kext norb"
-  Ds = 0.5 .* (D2ab_full[tripp,:,:] .+ D2ab_full[tripp_swap,:,:])
-  Da = 0.5 .* (D2ab_full[tripp,:,:] .- D2ab_full[tripp_swap,:,:])
+  Dpp = D2ab_full[tripp,:,:]; Dsw = D2ab_full[tripp_swap,:,:]   # gather once (see pm_K2!)
+  Ds = 0.5 .* (Dpp .+ Dsw)
+  Da = 0.5 .* (Dpp .- Dsw)
   sK = zeros(T, ntri, na*nb); aK = zeros(T, ntri, na*nb)
   pm_matmul!(sK, pm, :s, reshape(Ds, ntri, na*nb))
   pm_matmul!(aK, pm, :a, reshape(Da, ntri, na*nb))
@@ -4439,6 +4521,11 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
     if EC.options.cc.keepOQVorbitals
       # park the rotated 2-e integrals on scratch mmaps instead of materializing them in memory
       transform_fcidump!(EC, EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
+    elseif EC.ao_direct
+      # AO-direct: rebuild the blocks in the rotated basis straight from the AO integrals. The
+      # rotated one-electron integrals are just the (undressed) `dh_mm` of that transform.
+      ao_rotate_ints(EC, Rpq)
+      save!(EC, "int1_r", load2idx(EC, "dh_mm"))
     else
       rotate_ints(EC, Rpq)
       @mtensor int1_r[p,q] := EC.fd.int1[p',q'] * Rpq[p',p] * Rpq[q',q]

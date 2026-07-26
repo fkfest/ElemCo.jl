@@ -331,11 +331,9 @@ function hf(EC::ECInfo{T}) where {T}
   # integral source: the persisted ± supermatrix store (half the streaming per iteration)
   # when present, else the joint triangular mmap — gen_fock dispatches on the handle type
   use_pm = pm_exists(EC)
-  ints = use_pm ? open_pm_store(EC) : nothing
-  aofile = nothing
-  if !use_pm
-    aofile, ints = mmap3idx(EC, "ao_int2")
-  end
+  # ONE assignment to `ints`: it is captured by the `fockbuilder` closure below, and a second
+  # assignment would make lowering box it (`Core.Box`), degrading the whole SCF to dynamic dispatch.
+  aofile, ints = use_pm ? (nothing, open_pm_store(EC)) : mmap3idx(EC, "ao_int2")
   fockbuilder = cMO -> gen_fock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
@@ -377,11 +375,7 @@ function uhf(EC::ECInfo{T}) where {T}
   t1 = print_time(EC, t1, "guess orbitals", 2)
   # integral source: ± supermatrix store when present, else the joint mmap (see `hf`)
   use_pm = pm_exists(EC)
-  ints = use_pm ? open_pm_store(EC) : nothing
-  aofile = nothing
-  if !use_pm
-    aofile, ints = mmap3idx(EC, "ao_int2")
-  end
+  aofile, ints = use_pm ? (nothing, open_pm_store(EC)) : mmap3idx(EC, "ao_int2")  # one assignment: see `hf`
   fockbuilder = cMO -> gen_ufock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)

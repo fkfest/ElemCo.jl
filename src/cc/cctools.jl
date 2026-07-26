@@ -118,7 +118,9 @@ function calc_rotated_HF_energy(EC::ECInfo, closed_shell)
   if closed_shell
     ϵo = load1idx(EC,"e_m")[SP['o']]
     int1_r = load2idx(EC,"int1_r")[SP['o'],SP['o']]
-    EHF = sum(ϵo) + sum(diag(int1_r)) + EC.fd.int0
+    # AO-direct has no dump: its `int0` (nuclear repulsion + frozen core) is saved by `ao_cc_setup!`
+    int0 = EC.ao_direct ? load1idx(EC,"ao_e0")[1] : EC.fd.int0
+    EHF = sum(ϵo) + sum(diag(int1_r)) + int0
   else
     # TODO
   end

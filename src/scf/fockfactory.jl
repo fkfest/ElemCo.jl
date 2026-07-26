@@ -233,8 +233,11 @@ end
   into the rows `J[ρ,:]`/`J[σ,:]`. The simple per-slab routine [`ao_JK!`](@ref) calls in its `eachslab` loop.
 """
 function add_coulomb!(J, s::PMSlab, D)
-  slab_bandmul!(@mview(J[:,s.ρ]), s, @mview(D[:,s.σ]))               # J[:,ρ] += ⟨··|ρσ⟩ · D[:,σ]
-  s.ρ < s.σ && slab_bandtmul!(@mview(J[:,s.σ]), s, @mview(D[:,s.ρ])) # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
+  # `view`, NOT `@mview`: these columns are BLAS `mul!` operands (see `band_mul!`), and the
+  # `StridedView` that `@mview` returns is not `<:StridedVecOrMat`, so `mul!` would silently fall
+  # back to the generic (non-BLAS) matvec — measured ~6× slower for a whole Fock build.
+  slab_bandmul!(view(J,:,s.ρ), s, view(D,:,s.σ))               # J[:,ρ] += ⟨··|ρσ⟩ · D[:,σ]
+  s.ρ < s.σ && slab_bandtmul!(view(J,:,s.σ), s, view(D,:,s.ρ)) # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
   slab_mirror!(J, s.ρ, s, D, s.σ)                                    # mirror: J[ρ,:] += conj⟨ρσ|··⟩·conj(D[σ,:])
   s.ρ < s.σ && slab_mirrort!(J, s.σ, s, D, s.ρ)
   return
@@ -248,8 +251,8 @@ end
   `K[:,σ] += ⟨··|ρσ⟩·D[:,ρ]` (+ `Gᵀ` for `ρ<σ`), plus the mirror into rows `K[ρ,:]`/`K[σ,:]`.
 """
 function add_exchange!(K, s::PMSlab, D)
-  slab_bandmul!(@mview(K[:,s.σ]), s, @mview(D[:,s.ρ]))              # K[:,σ] += ⟨··|ρσ⟩ · D[:,ρ]
-  s.ρ < s.σ && slab_bandtmul!(@mview(K[:,s.ρ]), s, @mview(D[:,s.σ]))
+  slab_bandmul!(view(K,:,s.σ), s, view(D,:,s.ρ))              # K[:,σ] += ⟨··|ρσ⟩ · D[:,ρ]  (`view`: see add_coulomb!)
+  s.ρ < s.σ && slab_bandtmul!(view(K,:,s.ρ), s, view(D,:,s.σ))
   slab_mirrort!(K, s.ρ, s, D, s.σ)
   s.ρ < s.σ && slab_mirror!(K, s.σ, s, D, s.ρ)
   return
@@ -270,20 +273,20 @@ end
 "[`add_coulomb!`](@ref) for symmetric real `D`, mirror-free: sub-panel band → `J`, diagonal-tile band → `Jd`."
 function add_coulomb_sym!(J, Jd, s::PMSlab, D)
   G = s.w.G; ρ = s.ρ; σ = s.σ
-  band_mul!(@mview(J[:,ρ]),  G, s.mirror_lo, s.nao, @mview(D[:,σ]))       # sub-panel (symmetrized later)
-  ρ < σ && band_tmul!(@mview(J[:,σ]), G, s.mirror_lo, s.nao, @mview(D[:,ρ]))
-  band_mul!(@mview(Jd[:,ρ]), G, s.native_lo, s.mirror_lo, @mview(D[:,σ])) # diagonal tile (added once)
-  ρ < σ && band_tmul!(@mview(Jd[:,σ]), G, s.native_lo, s.mirror_lo, @mview(D[:,ρ]))
+  band_mul!(view(J,:,ρ),  G, s.mirror_lo, s.nao, view(D,:,σ))       # sub-panel (symmetrized later)
+  ρ < σ && band_tmul!(view(J,:,σ), G, s.mirror_lo, s.nao, view(D,:,ρ))
+  band_mul!(view(Jd,:,ρ), G, s.native_lo, s.mirror_lo, view(D,:,σ)) # diagonal tile (added once)
+  ρ < σ && band_tmul!(view(Jd,:,σ), G, s.native_lo, s.mirror_lo, view(D,:,ρ))
   return
 end
 
 "[`add_exchange!`](@ref) for symmetric real `D`, mirror-free (the `(ρ,σ)` roles swapped vs Coulomb)."
 function add_exchange_sym!(K, Kd, s::PMSlab, D)
   G = s.w.G; ρ = s.ρ; σ = s.σ
-  band_mul!(@mview(K[:,σ]),  G, s.mirror_lo, s.nao, @mview(D[:,ρ]))
-  ρ < σ && band_tmul!(@mview(K[:,ρ]), G, s.mirror_lo, s.nao, @mview(D[:,σ]))
-  band_mul!(@mview(Kd[:,σ]), G, s.native_lo, s.mirror_lo, @mview(D[:,ρ]))
-  ρ < σ && band_tmul!(@mview(Kd[:,ρ]), G, s.native_lo, s.mirror_lo, @mview(D[:,σ]))
+  band_mul!(view(K,:,σ),  G, s.mirror_lo, s.nao, view(D,:,ρ))
+  ρ < σ && band_tmul!(view(K,:,ρ), G, s.mirror_lo, s.nao, view(D,:,σ))
+  band_mul!(view(Kd,:,σ), G, s.native_lo, s.mirror_lo, view(D,:,ρ))
+  ρ < σ && band_tmul!(view(Kd,:,ρ), G, s.native_lo, s.mirror_lo, view(D,:,σ))
   return
 end
 

@@ -597,8 +597,8 @@ end
 ```julia
 J = zeros(eltype(pm), pm.nao, pm.nao)
 for s in eachslab(pm)
-  slab_bandmul!(@mview(J[:,s.ρ]), s, @mview(D[:,s.σ]))       # native: ⟨··|ρσ⟩ · D[:,σ]
-  s.ρ < s.σ && slab_bandtmul!(@mview(J[:,s.σ]), s, @mview(D[:,s.ρ]))
+  slab_bandmul!(view(J,:,s.ρ), s, view(D,:,s.σ))             # native: ⟨··|ρσ⟩ · D[:,σ]
+  s.ρ < s.σ && slab_bandtmul!(view(J,:,s.σ), s, view(D,:,s.ρ))
   slab_mirror!(J, s.ρ, s, D, s.σ)                           # mirror: ⟨ρσ|··⟩ · D[σ,:]
   s.ρ < s.σ && slab_mirrort!(J, s.σ, s, D, s.ρ)
 end
