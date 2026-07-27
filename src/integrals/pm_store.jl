@@ -33,11 +33,11 @@ using LinearAlgebra
 using ..ElemCo.QMTensors
 using ..ElemCo.ECInfos
 using ..ElemCo.TensorTools
-using ..ElemCo.MIO: mioheadersize, miopread!, mioprefetch
+using ..ElemCo.MIO: mioheadersize, miopread!, mioprefetch, mioclosemmap
 using ..ElemCo.Utils
 
 export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
-       pm_exists, delete_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
+       pm_exists, delete_pm_store!, release_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
        pm_matmul!, pm_matvec!, band_htrans!, pair_luts,
        SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
        PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!,
@@ -204,27 +204,66 @@ subpanel(P::AbstractMatrix, pm::PMSupermatrices, J::Int) = @view P[length(pm.pai
 
 pm_exists(EC::ECInfo) = file_exists(EC, PM_S_FILE) && file_exists(EC, PM_A_FILE) && file_exists(EC, PM_META_FILE)
 
+# The open handle is CACHED. `open_pm_store`/`close_pm_store!` sit inside the CC residual, so they
+# run once per iteration, and re-mapping the store each time re-faults all of it through the page
+# table — the GEMMs then touch every page anew. Measured on a 6 GB store: ~0.25 s per call, i.e.
+# 21-26% of `calc K2` and ~4% of a whole CC run. The mapping is read-only and the files cannot
+# change while mapped, so one handle is kept alive and handed out again. ONE slot, keyed by the
+# scratch directory, so a second `ECInfo` (as in the test suite) evicts the first rather than
+# accumulating mappings. Not thread-safe; the CC driver is single-threaded at this level.
+const CACHED_SCR = Ref{String}("")
+const CACHED_PM = Ref{Any}(nothing)
+
+"""
+    release_pm_store!()
+
+Close and forget the cached ± store handle (see [`open_pm_store`](@ref)). Must be called before the
+store files are rewritten or deleted; a no-op when nothing is cached.
+"""
+function release_pm_store!()
+  pm = CACHED_PM[]
+  if pm !== nothing
+    mioclosemmap(pm.sio, pm.smap)
+    mioclosemmap(pm.aio, pm.amap)
+  end
+  CACHED_PM[] = nothing
+  CACHED_SCR[] = ""
+  return
+end
+
 """
     open_pm_store(EC) -> PMSupermatrices
 
-Memory-map an existing ± store (read-only) and rebuild the layout from `ao_pm_meta`.
+Memory-map an existing ± store (read-only) and rebuild the layout from `ao_pm_meta`. The handle is
+cached and reused across calls for the same scratch directory — see the note above and
+[`release_pm_store!`](@ref); [`close_pm_store!`](@ref) therefore does NOT unmap a cached handle.
 """
 function open_pm_store(EC::ECInfo{T}) where T
+  if CACHED_SCR[] == EC.scr
+    pm = CACHED_PM[]
+    pm isa PMSupermatrices{T} && return pm
+  end
+  release_pm_store!()                       # handle of another ECInfo (or element type)
   breakpoints = Int.(load(EC, PM_META_FILE, Val(1), Int))
   nao = breakpoints[end]
   σblocks, pairblocks, offsets, _ = pm_layout(nao, breakpoints)
   sio, smap = mmap1idx(EC, PM_S_FILE, T)
   aio, amap = mmap1idx(EC, PM_A_FILE, T)
-  return PMSupermatrices{T}(nao, nao*(nao+1)÷2, σblocks, pairblocks, offsets, sio, smap, aio, amap)
+  pm = PMSupermatrices{T}(nao, nao*(nao+1)÷2, σblocks, pairblocks, offsets, sio, smap, aio, amap)
+  CACHED_SCR[] = EC.scr
+  CACHED_PM[] = pm
+  return pm
 end
 
 function close_pm_store!(EC::ECInfo, pm::PMSupermatrices)
+  pm === CACHED_PM[] && return              # the cache owns this mapping (`release_pm_store!`)
   closemmap(EC, pm.sio, pm.smap)
   closemmap(EC, pm.aio, pm.amap)
   return
 end
 
 function delete_pm_store!(EC::ECInfo)
+  CACHED_SCR[] == EC.scr && release_pm_store!()
   for f in (PM_S_FILE, PM_A_FILE, PM_META_FILE)
     file_exists(EC, f) && delete_file!(EC, f)
   end
@@ -254,6 +293,7 @@ end
 
 "Open a ± store for writing with the given `σ`-block `breakpoints` (any valid blocking)."
 function pm_writer(EC::ECInfo{T}, nao::Int, breakpoints::Vector{Int}) where T
+  CACHED_SCR[] == EC.scr && release_pm_store!()   # never keep a mapping of the file being rewritten
   _, pairblocks, offsets, totlen = pm_layout(nao, breakpoints)
   sio, smap = newmmap(EC, PM_S_FILE, (totlen,), T; description="PM ± AO ints (symmetric)")
   aio, amap = newmmap(EC, PM_A_FILE, (totlen,), T; description="PM ± AO ints (antisymmetric)")

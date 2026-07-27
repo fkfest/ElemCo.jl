@@ -218,6 +218,53 @@ end
   end
 end
 
+# The fused, multi-threaded ± fold and 4-quadrant scatter are shared by pm_K2! and calc_pm_K2!,
+# so they need their own gate against the explicit cut-by-cut reference they replaced. Bit-for-bit
+# (not "to round-off"): both forms perform the same two flops per element, in the same order.
+# Includes odd/even nocc, nocc=1, and the pq/ij diagonals where the four quadrants alias.
+@testset "pm_fold_ij! / pm_scatter_K2! (fused ± fold and unscatter)" begin
+  pm_fold_ij! = ElemCo.CoupledCluster.pm_fold_ij!
+  pm_scatter_K2! = ElemCo.CoupledCluster.pm_scatter_K2!
+  pm_scatter_K2ab! = ElemCo.CoupledCluster.pm_scatter_K2ab!
+  ucut = ElemCo.QMTensors.uppertriangular_cut
+  scut = ElemCo.QMTensors.swapped_uppertriangular_cut
+  for T in (Float64, ComplexF64), (n, nocc) in ((9, 4), (7, 3), (5, 1), (11, 6))
+    tripp = ucut(n); tripp_swap = scut(n); ntri = length(tripp)
+    trioo = ucut(nocc); trioo_swap = scut(nocc); m = length(trioo)
+    D2 = randn(T, ntri, nocc, nocc)
+    # --- fold: ½(D2[:,i,j] ± D2[:,j,i]) ---
+    Ds = Matrix{T}(undef, ntri, m); Da = Matrix{T}(undef, ntri, m)
+    pm_fold_ij!(Ds, Da, D2, trioo)
+    Dpp = D2[:, trioo]; Dsw = D2[:, trioo_swap]
+    @test Ds == 0.5 .* (Dpp .+ Dsw)                        # bit-for-bit
+    @test Da == 0.5 .* (Dpp .- Dsw)
+    @test all(iszero, Da[:, [k for k in 1:m if trioo[k][1] == trioo[k][2]]])   # ij-diagonal is 0
+    # --- scatter: the four quadrants. aK2 must carry the physical zeros on both diagonals,
+    #     which is where the quadrants overlap (V_a has zero pp rows, D_a zero ii columns).
+    sK2 = randn(T, ntri, m); aK2 = randn(T, ntri, m)
+    for q in 1:n; aK2[ElemCo.QMTensors.uppertriangular_index(q, q), :] .= zero(T); end
+    for k in 1:m; trioo[k][1] == trioo[k][2] && (aK2[:, k] .= zero(T)); end
+    Kref = Array{T,4}(undef, n, n, nocc, nocc)
+    @views Kref[tripp, trioo] .= sK2 .+ aK2
+    @views Kref[tripp_swap, trioo_swap] .= sK2 .+ aK2
+    @views Kref[tripp, trioo_swap] .= sK2 .- aK2
+    @views Kref[tripp_swap, trioo] .= sK2 .- aK2
+    K = fill(T(NaN), n, n, nocc, nocc)
+    pm_scatter_K2!(K, sK2, aK2, trioo)
+    @test K == Kref                                        # bit-for-bit, and no element left unwritten
+    # --- αβ scatter: both pq orders of a pair-nonsymmetric density ---
+    nij = 3
+    sK = randn(T, ntri, nij); aK = randn(T, ntri, nij)
+    for q in 1:n; aK[ElemCo.QMTensors.uppertriangular_index(q, q), :] .= zero(T); end
+    Kabref = Array{T,3}(undef, n, n, nij)
+    @views Kabref[tripp, :] .= sK .+ aK
+    @views Kabref[tripp_swap, :] .= sK .- aK
+    Kab = fill(T(NaN), n, n, nij)
+    pm_scatter_K2ab!(Kab, sK, aK)
+    @test Kab == Kabref
+  end
+end
+
 # Phase-4 gate: pm_to_joint! reconstructs the joint "ao_int2" file exactly from the ± store
 # (serves joint-format consumers — the AO→MO transform — once ao_int2 is retired).
 @testset "pm_to_joint! (inverse builder)" begin

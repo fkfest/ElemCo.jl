@@ -286,12 +286,13 @@ function ao_lagrange_K2ab(EC::ECInfo, T1a, T1b, U2ab)
   @mtensor dU2p[μ,B,m,N] := U2ab[a,B,m,N] * CLva[μ,a]
   @mtensor dU2_AO[μ,ν,m,N] := dU2p[μ,B,m,N] * CLvb[ν,B]
   @inbounds for μ in 1:nao; @views dU2_AO[μ,μ,:,:] .*= 0.5; end     # scalepp (½ the μ=ν diagonal)
-  tripp = uppertriangular_cut(nao); tripp_swap = swapped_uppertriangular_cut(nao)
+  tripp = uppertriangular_cut(nao)
   if pm_exists(EC)
     pm = open_pm_store(EC)
-    K2_AO = pm_K2ab!(pm, dU2_AO, tripp, tripp_swap)                 # full-square pair in and out
+    K2_AO = pm_K2ab!(pm, dU2_AO, tripp)                             # full-square pair in and out
     close_pm_store!(EC, pm)
   else
+    tripp_swap = swapped_uppertriangular_cut(nao)
     aofile, int2 = mmap3idx(EC, "ao_int2")
     K2t = calc_K2(int2, dU2_AO[tripp,:,:], tripp; symmetrize=false)
     K2s = calc_K2(int2, dU2_AO[tripp_swap,:,:], tripp_swap; symmetrize=false)

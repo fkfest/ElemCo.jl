@@ -3039,11 +3039,11 @@ function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab
       @views R2ab .+= K2pqab[SP['v'],SP['V'],:,:]
     else
       D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true; Rota, Rotb)
-      tripp_swap = swapped_uppertriangular_cut(norb)
       if use_pm
-        K2pqab = pm_K2ab!(pm, D2ab_full, tripp, tripp_swap)
+        K2pqab = pm_K2ab!(pm, D2ab_full, tripp)
         D2ab_full = nothing
       else
+        tripp_swap = swapped_uppertriangular_cut(norb)
         int2 = ao ? int2ao : integ2_ss(EC.fd)
         D2ab = D2ab_full[tripp,:,:]
         K2pqab = calc_K2(int2, D2ab, tripp; symmetrize=false)
@@ -3080,13 +3080,73 @@ function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab
   return
 end
 
+""" `rs`-block length the 4-external contractions fall back to: the default of the shared
+    `get_spaceblocks`, so that [`kext_rs_blocksize`](@ref) reproduces the previous blocking
+    exactly wherever it does not grow it. """
+const KEXT_RS_MINBLOCK = 128
+
+""" Growth of the `rs`-block length per result column beyond `KEXT_RS_MINBLOCK`, see
+    [`kext_rs_blocksize`](@ref). Measured on the `calc_K2` GEMM shape (MKL, 8 threads,
+    `norb` = 96…232): the block GEMM saturates around `k ≈ 5–8` times the number of result
+    columns. """
+const KEXT_RS_PER_COL = 8
+
+""" Result width below which the blocking is left at `KEXT_RS_MINBLOCK`, see
+    [`kext_rs_blocksize`](@ref). Deliberately conservative: block lengths in `129…511` measured
+    *slower* than the old default at `norb=164, ncols=144` (−6%, where the 128-block GEMM already
+    runs at 93–100% of its shape roofline), and the sweep is not monotonic. Ramping only above
+    `ncols = 256` puts the smallest block the ramp can produce at `128 + 8·129 = 1160`, so that
+    band is unreachable by construction rather than by a tuned special case. The cost is some
+    forgone gain for `ncols ∈ (128, 256]`; the benefit is that no shape can regress. """
+const KEXT_RS_RAMP_FROM = 256
+
+"""
+    kext_rs_blocksize(nrs, ncols; scratch_per_rs=0, nout=0)
+
+  Block length for the `rs` loop of the 4-external (kext) contractions
+  ([`calc_K2`](@ref), [`calc_pm_K2!`](@ref)).
+
+  Each block is a single GEMM whose contraction (`k`) dimension is the block length and which
+  read-modify-writes the *whole* result, so the shared `get_spaceblocks` default of 128 streams
+  the result `nrs/128` times (212 times at `norb=232`) on top of the one unavoidable pass over
+  the integrals. The ratio of the two is `2*ncols/blocklength`, i.e. it is governed by `ncols`,
+  the width of the GEMM's right-hand side (`nocc1*nocc2`, or `ntri_oo` for the ± variant) — and
+  so is the measured payoff: for narrow results the result traffic does not exceed the integral
+  stream and enlarging the block *loses* (up to 17% at `ncols=64`), while for wide ones the gain
+  reaches 1.35× (at `ncols=400`, i.e. 20 correlated occupied orbitals, `norb=232`).
+
+  The rule is deliberately conservative (see `KEXT_RS_RAMP_FROM`): the blocking is left exactly as
+  it was unless `ncols` exceeds that threshold, and only then grows by `KEXT_RS_PER_COL` per
+  result column. So every shape either keeps its previous, bit-for-bit identical blocking or gets
+  a block in a range where enlarging was measured to win — the non-monotonic band in between is
+  never selected. The payoff is not governed by `ncols` alone (the same `ncols=144` loses 6% at
+  `norb=164`, where the 128-block GEMM is already at roofline, and gains 1.08× at `norb=232`),
+  which is the reason for the threshold rather than a finer fit.
+
+  `scratch_per_rs` (elements of per-`rs` scratch, if any) and `nout` (elements of the result the
+  scratch is measured against) cap the block so the scratch stays below a quarter of a result
+  array that is allocated anyway — no new memory regime, at most a few percent on the peak. The
+  result never exceeds `nrs`.
+"""
+function kext_rs_blocksize(nrs::Int, ncols::Int; scratch_per_rs::Int=0, nout::Int=0)
+  ncols <= KEXT_RS_RAMP_FROM && return min(KEXT_RS_MINBLOCK, nrs)   # unchanged blocking
+  bsz = KEXT_RS_MINBLOCK + KEXT_RS_PER_COL * (ncols - KEXT_RS_MINBLOCK)
+  if scratch_per_rs > 0
+    bsz = min(bsz, nout ÷ (4*scratch_per_rs))
+  end
+  return min(max(bsz, KEXT_RS_MINBLOCK), nrs)
+end
+
 """
     calc_pm_K2!(int2, D2, tripp)
   
-  Calculate the kext K2 contribution to the CCSD residuals 
-  using the symmetric/antisymmetric (plus/minus) factorization. 
+  Calculate the kext K2 contribution to the CCSD residuals
+  using the symmetric/antisymmetric (plus/minus) factorization.
 
   ``K^{ij}_{pq} = v_{pq}^{rs} D^ij_rs``
+
+  The 4-quadrant unpacking of the ± products is the shared [`pm_scatter_K2!`](@ref), as in the
+  persisted-store [`pm_K2!`](@ref).
 
   Return K2pq::Array{4}.
 """
@@ -3095,7 +3155,6 @@ function calc_pm_K2!(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp) wh
   nocc = size(D2, 2)
   trioo = uppertriangular_cut(nocc)
   trioo_swap = swapped_uppertriangular_cut(nocc)
-  tripp_swap = swapped_uppertriangular_cut(norb)
   @views D2s = permutedims(0.5 * (D2[:,trioo] + D2[:,trioo_swap]), (2, 1))
   @views D2a = permutedims(0.5 * (D2[:,trioo] - D2[:,trioo_swap]), (2, 1))
   ntri_pp = length(tripp)
@@ -3104,6 +3163,9 @@ function calc_pm_K2!(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp) wh
   ntri_oo = length(trioo)
   aK2pq = zeros(T, ntri_pp, ntri_oo)
   sK2pq = zeros(T, ntri_pp, ntri_oo)
+  # NOT grown by `kext_rs_blocksize`: here the per-`rs` scratch is `ntri_pp` (not `ntri_oo`) wide,
+  # so a larger block buys ~1.1× at 4× the scratch (211 MB against an 87 MB result) — the cap would
+  # decline it anyway. The persisted-± path (`pm_K2!`) is the one that matters and does not block.
   rsBlks = get_spaceblocks(1:nrs)
   maxrs = maximum(length, rsBlks)
   lenbuf = maxrs * ntri_pp * 2
@@ -3123,10 +3185,7 @@ function calc_pm_K2!(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp) wh
   end # buffer
 
   K2pq = Array{eltype(D2), 4}(undef, norb, norb, nocc, nocc)
-  @views K2pq[tripp,trioo] .= sK2pq .+ aK2pq
-  @views K2pq[tripp_swap,trioo_swap] .= sK2pq .+ aK2pq
-  @views K2pq[tripp,trioo_swap] .= sK2pq .- aK2pq
-  @views K2pq[tripp_swap,trioo] .= sK2pq .- aK2pq
+  pm_scatter_K2!(K2pq, sK2pq, aK2pq, trioo)
   return K2pq
 end
 
@@ -3140,59 +3199,174 @@ end
   block-triangle — halved flops and streaming, no per-iteration ± build. `D2[tri(pq),i,j]`
   must already carry the ½ rs-diagonal (`calc_D2(...; scalepp=true)`, as `cc_kext!` passes).
 
+  The ±-fold of the density ([`pm_fold_ij!`](@ref)) and the 4-quadrant unpacking of the products
+  ([`pm_scatter_K2!`](@ref)) are pure memory traffic around the two GEMMs; both run as one fused
+  multi-threaded pass over the `i ≤ j` pairs instead of the `CartesianIndex`-cut gather/scatter
+  broadcasts of [`calc_pm_K2!`](@ref).
+
   ``K^{ij}_{pq} = v_{pq}^{rs} D^{ij}_{rs}``
 
   Return K2pq::Array{4}.
 """
 function pm_K2!(pm::PMSupermatrices{T}, D2::AbstractArray{T,3}, tripp) where {T<:Number}
-  norb = pm.nao; nocc = size(D2, 2)
-  @assert pm.npp == length(tripp) "PM store nao ($(pm.nao)) inconsistent with kext norb"
-  trioo = uppertriangular_cut(nocc)
-  trioo_swap = swapped_uppertriangular_cut(nocc)
-  tripp_swap = swapped_uppertriangular_cut(norb)
-  # ij-±-folded density, ket rs kept raw (½ rs-diagonal already in D2 via scalepp): [npp × ntri_oo].
-  # Gather each cut ONCE: a fresh-array `getindex` is not `:consistent`, so Julia cannot CSE the
-  # repeated `D2[:, trioo]` — writing it out twice costs an extra pair of npp×ntri_oo temporaries.
-  Dpp = D2[:, trioo]; Dsw = D2[:, trioo_swap]
-  Ds = 0.5 .* (Dpp .+ Dsw)
-  Da = 0.5 .* (Dpp .- Dsw)
-  ntri_oo = size(Ds, 2)
-  sK2 = zeros(T, pm.npp, ntri_oo); aK2 = zeros(T, pm.npp, ntri_oo)
+  norb = pm.nao; nocc = size(D2, 2); npp = pm.npp
+  @assert npp == length(tripp) "PM store nao ($(pm.nao)) inconsistent with kext norb"
+  trioo = uppertriangular_cut(nocc)      # the (i ≤ j) list driving fold, GEMM and scatter
+  ntri_oo = length(trioo)
+  # ij-±-folded density, ket rs kept raw (½ rs-diagonal already in D2 via scalepp): [npp × ntri_oo]
+  Ds = Matrix{T}(undef, npp, ntri_oo); Da = Matrix{T}(undef, npp, ntri_oo)
+  pm_fold_ij!(Ds, Da, D2, trioo)
+  sK2 = Matrix{T}(undef, npp, ntri_oo); aK2 = Matrix{T}(undef, npp, ntri_oo)
   pm_matmul!(sK2, pm, :s, Ds)     # sK2[pq,ij] = Σ_rs V_s[pq,rs] D_s[rs,ij]
   pm_matmul!(aK2, pm, :a, Da)     # aK2[pq,ij] = Σ_rs V_a[pq,rs] D_a[rs,ij]
   K2pq = Array{T,4}(undef, norb, norb, nocc, nocc)
-  @views K2pq[tripp, trioo] .= sK2 .+ aK2
-  @views K2pq[tripp_swap, trioo_swap] .= sK2 .+ aK2
-  @views K2pq[tripp, trioo_swap] .= sK2 .- aK2
-  @views K2pq[tripp_swap, trioo] .= sK2 .- aK2
+  pm_scatter_K2!(K2pq, sK2, aK2, trioo)
   return K2pq
 end
 
 """
-    pm_K2ab!(pm, D2ab_full, tripp, tripp_swap)
+    pm_fold_ij!(Ds, Da, D2, trioo)
+
+  ±-fold of the kext density over the *occupied* pair: `Ds/Da[rs,ij] = ½(D2[rs,i,j] ± D2[rs,j,i])`
+  for the `i ≤ j` list `trioo`, in a single fused pass (`Ds`, `Da` are `npp × length(trioo)`).
+
+  Both source columns and both destination columns are contiguous in `rs`, so this is four
+  streaming vectors; the previous `D2[:,trioo] ± D2[:,trioo_swap]` form instead paid two
+  `CartesianIndex` gathers plus two broadcasts over a pair of `npp × ntri_oo` temporaries.
+
+  Threaded over `ij`: iteration `ij` writes only column `ij` of `Ds`/`Da`, and each unordered
+  pair `{i,j}` occurs once, so the writes are disjoint (`i == j` merely reads one column twice
+  and yields `Da[:,ij] = 0`, as the ± fold requires).
+"""
+function pm_fold_ij!(Ds::AbstractMatrix{T}, Da::AbstractMatrix{T}, D2::AbstractArray{T,3},
+                     trioo) where {T<:Number}
+  npp = size(D2, 1); nocc = size(D2, 2)
+  D2r = reshape(D2, npp, nocc*nocc)      # flat ij column, so the column offsets hoist
+  Threads.@threads for ij in eachindex(trioo)
+    @inbounds begin
+      i = trioo[ij][1]; j = trioo[ij][2]
+      cij = i + (j-1)*nocc; cji = j + (i-1)*nocc
+      @simd ivdep for rs in 1:npp
+        d1 = D2r[rs,cij]; d2 = D2r[rs,cji]
+        Ds[rs,ij] = 0.5*(d1 + d2)
+        Da[rs,ij] = 0.5*(d1 - d2)
+      end
+    end
+  end
+  return
+end
+
+"""
+    pm_scatter_K2!(K2pq, sK2, aK2, trioo)
+
+  Unpack the ± kext products into `K2pq[p,q,i,j]`, both `pq` orders and both `ij` orders:
+  `K2pq[p,q,i,j] = K2pq[q,p,j,i] = sK2[pq,ij] + aK2[pq,ij]` and
+  `K2pq[p,q,j,i] = K2pq[q,p,i,j] = sK2[pq,ij] - aK2[pq,ij]` (`p ≤ q`, `ij` running over `trioo`).
+
+  One fused pass over the output replaces the four `K2pq[cut,cut] .= sK2 .± aK2` broadcasts,
+  which re-read both products (and re-evaluated `sK2 .± aK2`) four times over.
+
+  The `pq`- and `ij`-diagonals are where the four quadrants alias, and they are written *once*,
+  explicitly: on `p == q` the two `pq` orders coincide, on `i == j` the two `ij` orders coincide.
+  Both carry `aK2 = 0` exactly (`V_a` has zero `pp` rows; `D_a` has zero `ii` columns), so the
+  single value `s - a` written there equals `s + a`, matching the previous last-write-wins.
+  With no two writes of an iteration hitting one address, `@simd ivdep` is sound and the
+  `Threads.@threads` over `ij` is race-free: iteration `ij` owns exactly the `(i,j)` and `(j,i)`
+  planes of `K2pq`, and distinct `ij` are distinct unordered pairs, hence disjoint planes.
+"""
+function pm_scatter_K2!(K2pq::AbstractArray{T,4}, sK2::AbstractMatrix{T}, aK2::AbstractMatrix{T},
+                        trioo) where {T<:Number}
+  norb = size(K2pq, 1)
+  Threads.@threads for ij in eachindex(trioo)
+    @inbounds begin
+      i = trioo[ij][1]; j = trioo[ij][2]
+      Mij = @view K2pq[:,:,i,j]
+      if i == j                                  # single plane, aK2[:,ij] = 0: symmetric fill
+        for q in 1:norb
+          pq0 = q*(q-1)÷2
+          @simd ivdep for p in 1:q-1
+            v = sK2[pq0+p,ij] - aK2[pq0+p,ij]
+            Mij[p,q] = v; Mij[q,p] = v
+          end
+          Mij[q,q] = sK2[pq0+q,ij] - aK2[pq0+q,ij]
+        end
+      else
+        Mji = @view K2pq[:,:,j,i]                # distinct plane: 4 distinct addresses per (p<q)
+        for q in 1:norb
+          pq0 = q*(q-1)÷2
+          @simd ivdep for p in 1:q-1
+            s = sK2[pq0+p,ij]; a = aK2[pq0+p,ij]
+            Mij[p,q] = s + a; Mji[q,p] = s + a
+            Mij[q,p] = s - a; Mji[p,q] = s - a
+          end
+          v = sK2[pq0+q,ij] - aK2[pq0+q,ij]      # p == q: the two pq orders coincide
+          Mij[q,q] = v; Mji[q,q] = v
+        end
+      end
+    end
+  end
+  return
+end
+
+"""
+    pm_K2ab!(pm, D2ab_full, tripp)
 
   αβ kext from the persisted ± store: the full contraction
   ``K2ab_{pq}^{iJ} = Σ_{rs} ⟨pq|rs⟩ D^{iJ}_{rs}`` for the (non-`rs`-symmetric) αβ density.
-  The `rs`-± fold is explicit — `Ds/Da = ½(D[tripp] ± D[tripp_swap])`, with the ½
-  `rs`-diagonal already carried by `calc_D2ab(...; scalepp=true)` — then two
-  [`pm_matmul!`](@ref PMStore.pm_matmul!) panel GEMMs and the ± unscatter to both `pq`
-  orders. Halved flops and streaming vs the two joint-store `calc_K2` passes.
+  The `rs`-± fold is explicit — `Ds/Da = ½(D[pq] ± D[qp])`, with the ½ `rs`-diagonal already
+  carried by `calc_D2ab(...; scalepp=true)` — then two [`pm_matmul!`](@ref PMStore.pm_matmul!)
+  panel GEMMs and the ± unscatter to both `pq` orders ([`pm_scatter_K2ab!`](@ref)). Halved flops
+  and streaming vs the two joint-store `calc_K2` passes.
+
+  Because this fold transposes the *AO* pair (unlike the occupied-pair fold of [`pm_K2!`](@ref)),
+  it is exactly [`calc_tri_sym_antisym!`](@ref QMTensors.calc_tri_sym_antisym!) with `fac = ½` —
+  one fused, threaded, row-buffered pass instead of two `CartesianIndex` gathers plus two
+  broadcasts over a pair of `npp × nanb` temporaries.
 """
-function pm_K2ab!(pm::PMSupermatrices{T}, D2ab_full::AbstractArray{T,4}, tripp, tripp_swap) where {T<:Number}
+function pm_K2ab!(pm::PMSupermatrices{T}, D2ab_full::AbstractArray{T,4}, tripp) where {T<:Number}
   norb = pm.nao
-  na = size(D2ab_full, 3); nb = size(D2ab_full, 4)
+  na = size(D2ab_full, 3); nb = size(D2ab_full, 4); nij = na*nb
   ntri = length(tripp)
   @assert pm.npp == ntri "PM store nao ($(pm.nao)) inconsistent with kext norb"
-  Dpp = D2ab_full[tripp,:,:]; Dsw = D2ab_full[tripp_swap,:,:]   # gather once (see pm_K2!)
-  Ds = 0.5 .* (Dpp .+ Dsw)
-  Da = 0.5 .* (Dpp .- Dsw)
-  sK = zeros(T, ntri, na*nb); aK = zeros(T, ntri, na*nb)
-  pm_matmul!(sK, pm, :s, reshape(Ds, ntri, na*nb))
-  pm_matmul!(aK, pm, :a, reshape(Da, ntri, na*nb))
+  Ds = Matrix{T}(undef, ntri, nij); Da = Matrix{T}(undef, ntri, nij)
+  calc_tri_sym_antisym!(Ds, Da, reshape(D2ab_full, norb, norb, nij), T(0.5))   # fac = ½: ± average
+  sK = Matrix{T}(undef, ntri, nij); aK = Matrix{T}(undef, ntri, nij)
+  pm_matmul!(sK, pm, :s, Ds)
+  pm_matmul!(aK, pm, :a, Da)
   K2 = Array{T,4}(undef, norb, norb, na, nb)
-  @views K2[tripp, :, :] .= reshape(sK .+ aK, ntri, na, nb)
-  @views K2[tripp_swap, :, :] .= reshape(sK .- aK, ntri, na, nb)   # pq-diagonal consistent: aK diag rows = 0
+  pm_scatter_K2ab!(reshape(K2, norb, norb, nij), sK, aK)
   return K2
+end
+
+"""
+    pm_scatter_K2ab!(K2, sK, aK)
+
+  Unpack the αβ ± kext products into both `pq` orders of the (pair-nonsymmetric) αβ `K2`:
+  `K2[p,q,iJ] = sK[pq,iJ] + aK[pq,iJ]`, `K2[q,p,iJ] = sK[pq,iJ] - aK[pq,iJ]` for `p ≤ q`.
+  `K2` is the output reshaped to `[p, q, iJ]` with the αβ pair flattened.
+
+  One fused pass over the output replaces the two `K2[cut,:,:] .= sK .± aK` broadcasts. The
+  `pq`-diagonal, where the two orders alias, is written once (there `aK = 0` exactly — `V_a` has
+  zero `pp` rows — so `s - a` equals `s + a`, matching the previous last-write-wins). Threaded
+  over `iJ`, which owns one full `norb × norb` plane, hence disjoint writes.
+"""
+function pm_scatter_K2ab!(K2::AbstractArray{T,3}, sK::AbstractMatrix{T},
+                          aK::AbstractMatrix{T}) where {T<:Number}
+  norb = size(K2, 1)
+  Threads.@threads for u in 1:size(K2, 3)
+    @inbounds begin
+      M = @view K2[:,:,u]
+      for q in 1:norb
+        pq0 = q*(q-1)÷2
+        @simd ivdep for p in 1:q-1
+          s = sK[pq0+p,u]; a = aK[pq0+p,u]
+          M[p,q] = s + a; M[q,p] = s - a
+        end
+        M[q,q] = sK[pq0+q,u] - aK[pq0+q,u]
+      end
+    end
+  end
+  return
 end
 
 """
@@ -3212,7 +3386,8 @@ function calc_K2(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp; symmet
   nrs = size(int2, 3)
   @assert ntri_pp == nrs # sanity check for the dimensions
   rK2pq = zeros(T, norb, norb, nocc1, nocc2)
-  rsBlks = get_spaceblocks(1:nrs)
+  ncols = nocc1 * nocc2
+  rsBlks = get_spaceblocks(1:nrs, kext_rs_blocksize(nrs, ncols; scratch_per_rs=ncols, nout=length(rK2pq)))
   maxrs = maximum(length, rsBlks)
   lenbuf = maxrs * nocc1 * nocc2
   @buffer buf(T, lenbuf) begin
