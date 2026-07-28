@@ -178,7 +178,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
 
   if length(U1) > 0
     # ``R^e_m += \hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})`` — a generalized (2J−K) Fock v,o block of dD1.
-    # AO-direct builds it straight from the ± store (no general-orbital "momm" block); else from EC.fd.
+    # AO-direct builds it straight from the half-transformed integrals; else from EC.fd.
     if EC.ao_direct
       R1 .+= dD1_fock_vo(EC, dD1)
     else
@@ -284,7 +284,7 @@ function ao_lagrange_K2ab(EC::ECInfo, T1a, T1b, U2ab)
   pm = open_pm_store(EC)
   K2_AO = pm_K2ab!(pm, dU2_AO, tripp)                               # full-square pair in and out
   close_pm_store!(EC, pm)
-  @mtensor KmMoO[r,s,m,N] := (K2_AO[ρ,σ,m,N] * cMOa[ρ,r]) * cMOb[σ,s]   # α external, β external
+  @mtensor KmMoO[r,S,m,N] := (K2_AO[ρ,σ,m,N] * cMOa[ρ,r]) * cMOb[σ,S]   # α external, β external
   return KmMoO
 end
 
@@ -530,7 +530,7 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo{T}, U1, U2, U2ab,
     end
     # ``R^e_m += \hat D_p^q (v_{mq}^{ep} - v_{mq}^{pe}) + \hat D_P^Q v_{Qm}^{Pe}`` — the same-spin
     # (J−K) and opposite-spin (J) pieces together are the v,o block of the UHF generalized Fock
-    # ``F^σ = J(D^α+D^β) − K(D^σ)``, which AO-direct builds in ONE streaming ± pass instead of reading
+    # ``F^σ = J(D^α+D^β) − K(D^σ)``, which AO-direct builds in ONE streaming ht pass instead of reading
     # the general-orbital `momm`/`oMvM`/`mOmV` blocks.
     if EC.ao_direct
       R1 .+= dD1_ufock_vo(EC, dD1, dD1os, spin)

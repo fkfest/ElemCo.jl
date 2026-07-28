@@ -2162,12 +2162,19 @@ save_mo_block!(EC::ECInfo, name::AbstractString, htkey::AbstractString,
   block is saved (mmapped, `"tmp"`) under its plain name via [`save_mo_block!`](@ref); the consumers
   pick them up with `load4idx`.
 """
-function build_ht_mo_blocks!(EC::ECInfo, names)
+function build_ht_mo_blocks!(EC::ECInfo, names; Rv=nothing)
   ht_exists(EC, "ht_oAAA") ||
     error("build_ht_mo_blocks!: half-transformed store \"ht_oAAA\" not found — AO-direct (T) needs the " *
           "± supermatrix store; it is built in ao_cc_setup!")
   cMO = ao_direct_orbitals(EC); SP = EC.space
   Co = cMO[:, SP['o']]; Cv = cMO[:, SP['v']]
+  # `Rv`: fold a virtual-space rotation (the pseudo-canonicalization of (T)) straight into the
+  # coefficients, so the blocks come out with their virtual indices already in that basis instead of
+  # being built and then rotated — rotating three virtual indices of a `vvvo` costs ~3·nv⁴·no, more
+  # than building the block. The OCCUPIED index of these blocks comes from the store's bra (fixed
+  # when `ht_oAAA` was built), so it is left plain and rotated afterwards by
+  # `pseudocan_transform!(...; spaces=:occ)` — an occ-occ contraction, which is cheap.
+  isnothing(Rv) || (Cv = Cv * Rv)
   for name in names
     save_mo_block!(EC, name, "ht_oAAA", Co, Cv)
   end
@@ -2183,7 +2190,7 @@ end
   [`ao_cc_setup!`](@ref)) and the per-spin MO coefficients. Each block's spec says which store supplies
   its occupied index and which spin's coefficients go on the free slots.
 """
-function build_ht_mo_blocks_unrestricted!(EC::ECInfo, names)
+function build_ht_mo_blocks_unrestricted!(EC::ECInfo, names; Rv=nothing)
   (ht_exists(EC, "ht_oAAA_a") && ht_exists(EC, "ht_oAAA_b")) ||
     error("build_ht_mo_blocks_unrestricted!: per-spin half-transformed stores not found — AO-direct " *
           "unrestricted (T)/Λ needs the ± supermatrix store; they are built in ao_cc_setup!")
@@ -2191,6 +2198,13 @@ function build_ht_mo_blocks_unrestricted!(EC::ECInfo, names)
   cMOa = Matrix(cMOsm.α); cMOb = Matrix(cMOsm.β)
   coefs = Dict('o' => cMOa[:, SP['o']], 'v' => cMOa[:, SP['v']],
                'O' => cMOb[:, SP['O']], 'V' => cMOb[:, SP['V']])
+  # per-spin virtual rotation folded into the coefficients (see `build_ht_mo_blocks!`): the blocks
+  # come out with their virtual indices already pseudo-canonical, so only their occupied indices
+  # have to be rotated afterwards (`pseudocan_transform!(...; spaces=:occ)`).
+  if !isnothing(Rv)
+    coefs['v'] = coefs['v'] * Rv.α
+    coefs['V'] = coefs['V'] * Rv.β
+  end
   htkeys = Dict(:a => "ht_oAAA_a", :b => "ht_oAAA_b")
   for name in names
     save_mo_block!(EC, name, htkeys, coefs)
