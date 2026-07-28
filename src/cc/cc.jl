@@ -1823,18 +1823,6 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix; calc_d_vovv::Bo
   return nothing
 end
 
-
-
-
-
-
-
-# AO integrals are spin-free, so a mixed-spin block simply puts the other spin's coefficients on the
-# free slots; the βα-looking reads of the unrestricted (T) all resolve to these same αβ blocks
-# ([`ht_mo_block_spec`](@ref) resolves a block name into the sweep that produces it).
-
-
-
 """
     ao_core_fock(EC::ECInfo, Dcore::AbstractMatrix) -> Matrix
 
@@ -1886,17 +1874,14 @@ function dD1_ht_vo(EC::ECInfo, htkey::AbstractString, DJ::AbstractMatrix, DK::Ab
     error("dD1_ht_vo: half-transformed store \"$htkey\" not found — the AO-direct Λ residual needs the " *
           "± supermatrix store (int.ao_pm=true), which ao_cc_setup! half-transforms once per orbital set")
   ht = open_ht_store(EC, htkey)
-  try
-    n = ht.nao; m = ht.m
-    size(DJ) == (n, n) && size(DK) == (n, n) && size(Cv, 1) == n ||
-      error("dD1_ht_vo: densities $(size(DJ))/$(size(DK)) and coefficients $(size(Cv)) do not match nao=$n")
-    TC = promote_type(eltype(ht.map), eltype(DJ), eltype(DK), eltype(Cv))
-    t = Matrix{TC}(undef, m, n)                     # t[m,ν], the [occ, AO-ket] generalized-Fock block
-    ht_jk_columns!(t, ht, Matrix{TC}(DJ), Matrix{TC}(DK))
-    return permutedims(t * Cv, (2, 1))              # ket-2 ν → virtual e, then [m,e] → [e,m]
-  finally
-    close_ht_store!(EC, ht)
-  end
+  n = ht.nao; m = ht.m
+  size(DJ) == (n, n) && size(DK) == (n, n) && size(Cv, 1) == n ||
+    error("dD1_ht_vo: densities $(size(DJ))/$(size(DK)) and coefficients $(size(Cv)) do not match nao=$n")
+  TC = promote_type(eltype(ht.map), eltype(DJ), eltype(DK), eltype(Cv))
+  t = Matrix{TC}(undef, m, n)                     # t[m,ν], the [occ, AO-ket] generalized-Fock block
+  ht_jk_columns!(t, ht, Matrix{TC}(DJ), Matrix{TC}(DK))
+  close_ht_store!(EC, ht)
+  return permutedims(t * Cv, (2, 1))              # ket-2 ν → virtual e, then [m,e] → [e,m]
 end
 
 """
@@ -1914,11 +1899,6 @@ function dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix)
   # active-only set of `ao_direct_orbitals` (which drops the redundant tail). Deleted/frozen positions
   # of `dD1` are zero, so they contribute nothing. `ht_oAAA`'s bra used `ao_direct_orbitals(EC)[:,o]`,
   # which agrees with these leading columns. Same convention as `dD1_ufock_vo`.
-  # NB the store's occupied bra must belong to the SAME orbitals as `cMO` here. That holds for the T1
-  # dressing (whose bra-occupied transform is T1-independent) but NOT after an orbital rotation, where
-  # `ao_rotate_ints` rebuilds the store for `Crot` while `load_orbitals` still returns the old set.
-  # That combination is NOT guarded (`@cc "oqv-ccsd"` with `cc.properties` reaches it) — but it is
-  # already wrong the same way before this change; closing it needs a driver gate (see CHANGELOG).
   cMO = Matrix(load_orbitals(EC).α); SP = EC.space
   D_AO = cMO * transpose(dD1) * transpose(cMO)      # D_AO[μ,ρ] = Σ_pq cMO[μ,q] dD1[p,q] cMO[ρ,p]
   return dD1_ht_vo(EC, "ht_oAAA", 2 .* D_AO, D_AO, cMO[:, SP['v']])
@@ -1967,9 +1947,6 @@ function ao_dressed_coeffs(cMO::AbstractMatrix{T}, T1, occ, virt) where {T<:Numb
   end
   return CL, CR
 end
-
-
-
 
 
 """
@@ -2108,6 +2085,8 @@ end
   different calculation and is rejected by the caller (`ccdriver` derives an MO dump instead).
 """
 function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
+  pm_exists(EC) ||
+    error("AO-direct CC needs the exact AO integrals on file; generate them first (@ints / @hf).")
   save_ao_1e_integrals!(EC)                          # fresh AO 1-e integrals for the current system
   cMOsm = load_orbitals(EC)
   @assert !closed_shell || is_restricted(cMOsm) "closed-shell AO-direct setup needs restricted orbitals"
@@ -2135,13 +2114,11 @@ function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
     save!(EC, "h1eff_AA", h1eff)
     # Build the half-transformed store ONCE (bra-occ transform is T1-independent), so the bare pass
     # below and every residual iteration read it instead of re-streaming the ± store. Delete first so a
-    # stale store from a prior run/orbital set is never reused; only the ± store path builds it.
+    # stale store from a prior run/orbital set is never reused.
     delete_ht_store!(EC, "ht_oAAA"); file_exists(EC, "ht_ooAA") && delete_file!(EC, "ht_ooAA")
-    if pm_exists(EC)
-      pm = open_pm_store(EC)
-      ht_build_dress!(EC, pm, cMO[:, SP['o']])
-      close_pm_store!(EC, pm)
-    end
+    pm = open_pm_store(EC)
+    ht_build_dress!(EC, pm, cMO[:, SP['o']])
+    close_pm_store!(EC, pm)
     ao_dressed_ints(EC, T[], cMO)                    # T1 empty ⇒ bare (active-space) integrals
     fock = load2idx(EC, "df_mm")
     save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
@@ -2166,16 +2143,14 @@ function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
     save!(EC, "h1eff_mm_AA", h1a); save!(EC, "h1eff_MM_AA", h1b)
     # Build the per-spin half-transformed stores ONCE (bra-occ transforms are T1-independent), so the
     # bare pass below and every residual iteration read them instead of re-streaming the ± store. Delete
-    # first so a stale store from a prior run/orbital set is never reused; only the ± store path builds them.
+    # first so a stale store from a prior run/orbital set is never reused.
     delete_ht_store!(EC, "ht_oAAA_a"); delete_ht_store!(EC, "ht_oAAA_b")
     for k in ("ht_ooAA_a", "ht_ooAA_b", "ht_oOAA")
       file_exists(EC, k) && delete_file!(EC, k)
     end
-    if pm_exists(EC)
-      pm = open_pm_store(EC)
-      ht_build_dress_unrestricted!(EC, pm, cMOa[:, SP['o']], cMOb[:, SP['O']])
-      close_pm_store!(EC, pm)
-    end
+    pm = open_pm_store(EC)
+    ht_build_dress_unrestricted!(EC, pm, cMOa[:, SP['o']], cMOb[:, SP['O']])
+    close_pm_store!(EC, pm)
     ao_dressed_ints_unrestricted(EC, T[], T[], cMOa, cMOb)
     focka = load2idx(EC, "df_mm"); fockb = load2idx(EC, "df_MM")
     save!(EC, "f_mm", focka); save!(EC, "f_MM", fockb)
