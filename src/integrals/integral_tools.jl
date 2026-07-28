@@ -457,10 +457,6 @@ function delete_ao_integrals!(EC::ECInfo)
   for f in ("S_AA", "h_AA")
     file_exists(EC, f) && delete_file!(EC, f)
   end
-  # `"ao_int2"` is not produced by any calculation any more (see [`ao_integrals`](@ref)); it is
-  # removed only so that a scratch directory written by an older version cannot leave a stale
-  # joint-format file behind.
-  file_exists(EC, "ao_int2") && delete_file!(EC, "ao_int2")
   delete_pm_store!(EC)
   return
 end
@@ -769,13 +765,13 @@ end
   Whether the pair-space [`pm_transform_int2`](@ref) is the right choice over the batched N⁵
   [`pm_transform_int2_n5`](@ref) (both transform directly from the ± store — neither materializes
   the joint int2). Two conditions:
-  - **speed** — `2·nout ≤ nao`: the pair-space is `O(nao⁴·nmo²)`, so it wins comfortably only while
+  - **speed** — `10·nout ≤ nao`: the pair-space is `O(nao⁴·nmo²)`, so it wins comfortably only while
     the target space is a fraction of the basis (an active space); as `nout → nao` it becomes N⁶
     and the N⁵ slab transform is faster, so route near-full transforms there.
   - **memory** — the bra-fold `Ls,La` (`2·npp·nout²`) must fit comfortably in `membudget`.
 """
 pm_transform_worthwhile(nout::Int, nao::Int, ::Type{T}, membudget::Int) where {T} =
-  2 * nout <= nao && 2 * (nao*(nao+1)÷2) * nout^2 * sizeof(T) < membudget ÷ 4
+  10 * nout <= nao && 2 * (nao*(nao+1)÷2) * nout^2 * sizeof(T) < membudget ÷ 4
 
 """
     pm_transform_int2(EC, pm, Tl, Tl2, Tr, Tr2, key; triangular=true) -> int2t
@@ -823,11 +819,13 @@ end
 
   N⁵ AO→MO 4-index transform directly from the ± store, for a NEAR-FULL target space (where the
   pair-space [`pm_transform_int2`](@ref) would be N⁶) — and, crucially, WITHOUT ever materializing
-  the joint `nao⁴/2` int2 on disk (the whole point of the ± store for large systems). Batched
-  index-by-index quarter-transforms, all BLAS-3. Per p-block: a chunked two-role sweep reconstructs
-  the ± slabs into a bounded buffer and bra-transforms them into `H2[p,q,ρ,σ] = Σ_μν ⟨μν|ρσ⟩
-  Tl[μ,p] Tl2[ν,q]`, then the ket pair is transformed `Σ_ρσ H2 Tr[ρ,r] Tr2[σ,s]`. Peak memory
-  ≈ `H2` (`|pb|·nq·nao²`) + the `O(nao²·chunk)` slab buffer; both blocked to `membudget`.
+  the joint `nao⁴/2` int2 on disk.
+
+  Batched index-by-index quarter-transforms, all BLAS-3.
+  Per p-block: a chunked two-role sweep reconstructs the ± slabs into a bounded buffer
+  and bra-transforms them into `H2[p,q,ρ,σ] = Σ_μν ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q]`,
+  then the ket pair is transformed `Σ_ρσ H2 Tr[ρ,r] Tr2[σ,s]`.
+  Peak memory ≈ `H2` (`|pb|·nq·nao²`) + the `O(nao²·chunk)` slab buffer; both blocked to `membudget`.
 """
 function pm_transform_int2_n5(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMatrix, Tl2::AbstractMatrix,
                               Tr::AbstractMatrix, Tr2::AbstractMatrix, key::AbstractString;
@@ -866,36 +864,61 @@ function pm_transform_int2_n5(EC::ECInfo, pm::PMSupermatrices{T}, Tl::AbstractMa
       mul!(hS2, transpose(Tlp), Gs2); mul!(hA2, transpose(Tlp), Ga2)       # bra-1 (μ→p): h[p,c,y]
       @. tp = (hS+hA)/2; @. tm = (hS-hA)/2                                  # tp: ket (ρσ);  tm: ket (σρ)
       mul!(H2n2, tp2, Tl2); mul!(H2s2, tm2, Tl2)                           # bra-2 (ν→q): H2n[p,c,q]
-      @inbounds for c in 1:mm; ρ=lutμ[kets[c]]; σ=lutν[kets[c]]
+      @inbounds for c in 1:mm
+        ρ = lutμ[kets[c]]; σ = lutν[kets[c]]
         @mview(H2[:,:,ρ,σ]) .+= @mview(H2n[:,c,:])
-        ρ<σ && (@mview(H2[:,:,σ,ρ]) .+= @mview(H2s[:,c,:])); end
+        if ρ < σ 
+          @mview(H2[:,:,σ,ρ]) .+= @mview(H2s[:,c,:])
+        end
+      end
     end
+
     for Jb in 1:pm_nblocks(pm)
-      cJ=pm.pairblocks[Jb]; r0=first(cJ); ntile=length(cJ); Ps=spanel(pm,Jb); Pa=apanel(pm,Jb)
-      for jc in 1:length(cJ)                             # native: stored columns as ket pairs
-        m+=1; kets[m]=cJ[jc]; @mview(Gs[:,m,:]) .= 0; @mview(Ga[:,m,:]) .= 0
-        @inbounds for k in 1:size(Ps,1); x=lutμ[r0+k-1]; y=lutν[r0+k-1]; s=Ps[k,jc]; a=Pa[k,jc]
-          Gs[x,m,y]=s; Gs[y,m,x]=s; Ga[x,m,y]=a; Ga[y,m,x]=-a; end
-        m==chunk && (flush!(m); m=0)
+      cJ = pm.pairblocks[Jb]
+      r0 = first(cJ); ntile = length(cJ)
+      Ps = spanel(pm,Jb); Pa = apanel(pm,Jb)
+      for jc = 1:length(cJ)                             # native: stored columns as ket pairs
+        m += 1
+        kets[m] = cJ[jc]
+        @mview(Gs[:,m,:]) .= 0; @mview(Ga[:,m,:]) .= 0
+        @inbounds for k = 1:size(Ps,1)
+          x = lutμ[r0+k-1]; y = lutν[r0+k-1]
+          s = Ps[k,jc]; a = Pa[k,jc]
+          Gs[x,m,y] = s; Gs[y,m,x] = s
+          Ga[x,m,y] = a; Ga[y,m,x] = -a
+        end
+        if m == chunk
+          flush!(m); m = 0
+        end
       end
-      @inbounds for k in ntile+1:size(Ps,1)              # mirror: sub-panel rows as conj ket pairs
-        m+=1; kets[m]=r0+k-1; @mview(Gs[:,m,:]) .= 0; @mview(Ga[:,m,:]) .= 0
-        for jc in 1:length(cJ); u=lutμ[cJ[jc]]; v=lutν[cJ[jc]]; s=conj(Ps[k,jc]); a=conj(Pa[k,jc])
-          Gs[u,m,v]=s; Gs[v,m,u]=s; Ga[u,m,v]=a; Ga[v,m,u]=-a; end
-        m==chunk && (flush!(m); m=0)
+      @inbounds for k = ntile+1:size(Ps,1)              # mirror: sub-panel rows as conj ket pairs
+        m += 1
+        kets[m] = r0+k-1
+        @mview(Gs[:,m,:]) .= 0; @mview(Ga[:,m,:]) .= 0
+        for jc = 1:length(cJ)
+          u = lutμ[cJ[jc]]; v = lutν[cJ[jc]]
+          s = conj(Ps[k,jc]); a = conj(Pa[k,jc])
+          Gs[u,m,v]=s; Gs[v,m,u]=s
+          Ga[u,m,v]=a; Ga[v,m,u]=-a
+        end
+        if m == chunk
+          flush!(m); m = 0
+        end
       end
     end
-    m>0 && flush!(m)
-    @tensor H3[p,q,r,σ] := H2[p,q,ρ,σ]*Tr[ρ,r]           # ket transform (ρ→r, σ→s)
+    if m > 0
+      flush!(m)
+    end
+    @mtensor H3[p,q,r,σ] := H2[p,q,ρ,σ]*Tr[ρ,r]           # ket transform (ρ→r, σ→s)
     if triangular
       for s in 1:ns
         v!H3 = @mview H3[:,:,1:s,:]; v!Tr2 = @mview Tr2[:,s]
         v!int2t = @mview int2t[pb, :, uppertriangular_range(s)]
-        @tensor v!int2t[p,q,r] = v!H3[p,q,r,σ]*v!Tr2[σ]
+        @mtensor v!int2t[p,q,r] = v!H3[p,q,r,σ]*v!Tr2[σ]
       end
     else
       v!int2t = @mview int2t[pb, :, :, :]
-      @tensor v!int2t[p,q,r,s] = H3[p,q,r,σ]*Tr2[σ,s]
+      @mtensor v!int2t[p,q,r,s] = H3[p,q,r,σ]*Tr2[σ,s]
     end
   end
   flushmmap(EC, int2t)
@@ -908,7 +931,7 @@ end
 
   Transform the ± AO store to the MO basis, `int2t[p,q,rs] = Σ_μνρσ ⟨μν|ρσ⟩ Tl[μ,p] Tl2[ν,q]
   Tr[ρ,r] Tr2[σ,s]`, **without ever reconstructing the joint `nao⁴/2` int2** — the high-level verb
-  that hides the pair-space-vs-N⁵ choice callers used to make by hand. Dispatches to the all-BLAS-3
+  that hides the pair-space-vs-N⁵ choice. Dispatches to the all-BLAS-3
   pair-space [`pm_transform_int2`](@ref) for a small target space and the batched N⁵
   [`pm_transform_int2_n5`](@ref) for a near-full one ([`pm_transform_worthwhile`](@ref)). `triangular`
   packs the ket pair `tri(r,s)` (needs `size(Tr,2)==size(Tr2,2)`); `false` writes the full dense
@@ -1019,7 +1042,7 @@ function transform_fcidump!(fd::FDump{T,N}, Tl::SpinMatrix, Tr::SpinMatrix) wher
 end
 
 """
-    generate_mo_dump(EC::ECInfo, cMO::AbstractMatrix) -> FDump
+    generate_mo_dump(EC::ECInfo, cMO::AbstractMatrix; core::AbstractMatrix) -> FDump
 
   Build an MO-basis [`FDump`](@ref) in `EC.fd` from the exact AO integral files
   (`"ao_int2"`/`"h_AA"`, see [`ao_integrals`](@ref)) and the (restricted/closed-shell)
@@ -1031,11 +1054,11 @@ end
   be rectangular (`nao × nout` with `nout ≤ nao`): only those `nout` orbitals are kept
   (e.g. deleted virtuals and frozen virtuals excluded).
 
-  `NELEC` is stored as the full (neutral) electron count — `charge` is applied later by
-  `setup_space_fd!` — and frozen-core folding is left to the caller
-  (`freeze_orbs_in_dump`), exactly as for a `dfdump`-generated dump.
+  `NELEC` is stored as the full (neutral) electron count (without frozen core)
+  A frozen core is folded in the AO basis via `core`, so only
+  the active orbitals are transformed.
 """
-function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
+function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix; core::AbstractMatrix=zeros(T, size(cMO,1), 0)) where {T<:Number}
   @assert pm_exists(EC) "no AO integrals on file; generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
@@ -1046,25 +1069,43 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
   println("Transform AO integrals to MO basis...")
   C = Matrix{T}(cMO)
   nout = size(C, 2)
+  # Frozen core folded in the AO basis, so that ONLY the active orbitals are ever transformed: the
+  # O(N⁵) transform and the resulting `int2` both scale with the active space, and nothing has to be
+  # re-indexed afterwards. Same expressions as `freeze_orbs_in_dump` (and `ao_cc_setup!`), evaluated
+  # over AO traces: `2·tr(D_core·h) + tr(D_core·F_core)` is `2Σ_c h_cc + Σ_c F^core_cc`, and
+  # `Cᵀ(h+F_core)C` is `int1[act,act] + core_fock[act,act]`.
+  ncore = size(core, 2)
+  Ecore = zero(real(T)); h1eff = hAO
   # `pm_transform` transforms straight out of the ± store and never materializes an nao⁴/2 AO
-  # array (it picks pair-space vs the N⁵ slab transform itself).
+  # array (it picks pair-space vs the N⁵ slab transform itself); the core Fock is built from the
+  # same open handle.
   pm = open_pm_store(EC)
+  if ncore > 0
+    Ccore = Matrix{T}(core)
+    @mtensor Dcore[μ,ν] := Ccore[μ,c] * Ccore[ν,c]     # closed-shell core density (per spin)
+    nao = size(hAO, 1)
+    J = zeros(T, nao, nao); K = zeros(T, nao, nao)
+    ao_JK!(J, K, pm, Dcore, Dcore; hermitian=true)
+    Fcore = 2 .* J .- K                                # frozen-core mean field
+    h1eff = hAO + Fcore
+    Ecore = 2.0*sum(Dcore .* hAO) + sum(Dcore .* Fcore)
+  end
   int2 = pm_transform(EC, pm, C, "mo_int2"; triangular=true, description="tmp")
   close_pm_store!(EC, pm)
-  # NELEC/MS2 conventions follow `dfdump`: neutral electron count, `charge`/`ms2` from the
-  # wf options are applied later by `setup_space_fd!`.
-  nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
-  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
-  fd = FDump{T,3}(nout, nelec; ms2)
+  # NELEC/MS2 conventions follow `dfdump`: neutral electron count (less the frozen core, which is
+  # no longer in the dump), `charge`/`ms2` from the wf options applied later by `setup_space_fd!`.
+  nelec_full = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
+  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec_full, 2) : EC.options.wf.ms2
+  fd = FDump{T,3}(nout, nelec_full - 2*ncore; ms2)
   fd.int2 = int2
-  fd.int1 = Matrix{T}(C' * hAO * C)
-  fd.int0 = nuclear_repulsion(EC.system)
+  fd.int1 = Matrix{T}(C' * h1eff * C)
+  fd.int0 = nuclear_repulsion(EC.system) + Ecore
   EC.fd = fd
   return fd
 end
 
 """
-    generate_mo_dump(EC::ECInfo, cMO::SpinMatrix) -> FDump
+    generate_mo_dump(EC::ECInfo, cMO::SpinMatrix; core::SpinMatrix) -> FDump
 
   Build an MO-basis [`FDump`](@ref) in `EC.fd` from the exact AO integral files and the MO
   coefficients `cMO`. For a restricted `cMO` this builds a closed-shell (RHF) dump (see the
@@ -1073,10 +1114,12 @@ end
   (`v_{pQ}^{rS}`, full 4-index), and per-spin 1-e integrals — the exact-AO analogue of the
   `rhf→uhf` branch of [`transform_fcidump!`](@ref). Both spins must have the same orbital
   count (a single `NORB`); each block may be rectangular (deleted / frozen-virtual orbitals
-  dropped). Frozen-core folding is left to the caller ([`freeze_orbs_in_dump`](@ref)).
+  dropped). A frozen core is folded in the AO basis via `core`, so only
+  the active orbitals are transformed.
 """
-function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
-  is_restricted(cMO) && return generate_mo_dump(EC, cMO.α)
+function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix;
+                          core::SpinMatrix=SpinMatrix(zeros(T, size(cMO.α,1), 0))) where {T<:Number}
+  is_restricted(cMO) && is_restricted(core) && return generate_mo_dump(EC, cMO.α; core=core.α)
   @assert pm_exists(EC) "no AO integrals on file; generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
@@ -1088,19 +1131,33 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   @assert isapprox(Ca' * S * Ca, I, atol=1e-8) && isapprox(Cb' * S * Cb, I, atol=1e-8) "cMO are not orthonormal in the AO basis"
   println("Transform AO integrals to UHF MO basis...")
   # straight from the ± store; `pm_transform` picks pair-space vs the N⁵ slab transform per block
-  # (see the RHF method).
+  # (see the RHF method). The per-spin core Fock comes off the same open handle.
+  Ccore_a = Matrix{T}(core.α); Ccore_b = Matrix{T}(core.β)
+  ncore_a = size(Ccore_a, 2); ncore_b = size(Ccore_b, 2)
+  h1a = hAO; h1b = hAO; Ecore = zero(real(T))
   pm = open_pm_store(EC)
+  if ncore_a + ncore_b > 0
+    @mtensor Da[μ,ν] := Ccore_a[μ,c] * Ccore_a[ν,c]
+    @mtensor Db[μ,ν] := Ccore_b[μ,c] * Ccore_b[ν,c]
+    nao = size(hAO, 1)
+    J = zeros(T, nao, nao); Ka = zeros(T, nao, nao); Kb = zeros(T, nao, nao)
+    ao_J2K!(J, Ka, Kb, pm, Da .+ Db, Da, Db; hermitian=true)
+    Fa = J .- Ka; Fb = J .- Kb                         # F^σ = J(Dα+Dβ) − K(Dσ)
+    h1a = hAO + Fa; h1b = hAO + Fb
+    # same expression as `freeze_orbs_in_dump`: Σ_c h + ½ Σ_c F^core, per spin
+    Ecore = sum(Da .* hAO) + sum(Db .* hAO) + 0.5*(sum(Da .* Fa) + sum(Db .* Fb))
+  end
   int2aa = pm_transform(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description="tmp")
   int2bb = pm_transform(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description="tmp")
   int2ab = pm_transform(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description="tmp")
   close_pm_store!(EC, pm)
-  nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
-  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
-  fd = FDump{T,3}(nout, nelec; ms2, uhf=true)
+  nelec_full = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
+  ms2 = EC.options.wf.ms2 < 0 ? mod(nelec_full, 2) : EC.options.wf.ms2
+  fd = FDump{T,3}(nout, nelec_full - ncore_a - ncore_b; ms2, uhf=true)
   fd.int2aa = int2aa; fd.int2bb = int2bb; fd.int2ab = int2ab
-  fd.int1a = Matrix{T}(Ca' * hAO * Ca)
-  fd.int1b = Matrix{T}(Cb' * hAO * Cb)
-  fd.int0 = nuclear_repulsion(EC.system)
+  fd.int1a = Matrix{T}(Ca' * h1a * Ca)
+  fd.int1b = Matrix{T}(Cb' * h1b * Cb)
+  fd.int0 = nuclear_repulsion(EC.system) + Ecore
   EC.fd = fd
   return fd
 end

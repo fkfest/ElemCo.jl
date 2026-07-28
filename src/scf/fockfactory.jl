@@ -20,6 +20,9 @@ using ..ElemCo.PMStore
 
 export gen_fock, gen_ufock, gen_dffock, gen_pfock, gen_df3idx_fock
 export gen_density_matrix, gen_frac_density_matrix
+# AO Coulomb/exchange builders on the ± store — used by the AO-direct CC dressing/frozen core
+# (`CoupledCluster`) and by the frozen-core fold of the AO→MO transform (`IntegralTools`).
+export ao_JK!, ao_J2K!
 
 """ 
     gen_fock(EC::ECInfo)

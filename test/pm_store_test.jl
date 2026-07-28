@@ -836,6 +836,18 @@ end
     EC = fresh(); EC.options.wf.natorb = "natorb"; @ints; @hf
     @test_throws ErrorException ElemCo.ccdriver(EC, m_oqvp; fcidump="")
   end
+  # An EXPLICIT unrestricted request is never overridden by the closed-shell detection: `uccsd` on a
+  # closed-shell molecule with RHF orbitals must run UNRESTRICTED, not be silently relabelled CCSD.
+  # The UCCSD keys prove the method stayed unrestricted; the energy matching derive to ~1e-14 while
+  # differing from CCSD by ~1e-10 proves it was independently converged (own α/β amplitudes and DIIS
+  # trajectory) rather than the closed-shell result under another name — a forced-CCSD bug would
+  # give exactly 0.0 here.
+  EC = fresh(); @ints; @hf; e_u_cs = @cc "uccsd"
+  @test haskey(e_u_cs, "UCCSD") && !haskey(e_u_cs, "CCSD")
+  EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_u_cs_d = @cc "uccsd"
+  @test abs(e_u_cs["UCCSD"] - e_u_cs_d["UCCSD"]) < 1e-10
+  EC = fresh(); @ints; @hf; e_c_cs = @cc "ccsd"
+  @test 0.0 < abs(e_u_cs["UCCSD"] - e_c_cs["CCSD"]) < 1e-7
   # EOM needs singles — also an error, not a reroute
   EC = fresh(); @ints; @hf
   @test_throws ErrorException ElemCo.ccdriver(EC, "eom-ccd"; fcidump="")

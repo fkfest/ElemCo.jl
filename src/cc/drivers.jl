@@ -183,12 +183,7 @@ end
   Whether `ecm` runs directly on the AO integral files without a preceding MO transform:
   MP2/UMP2/RMP2, or CCSD/DCSD/CCD/DCD optionally with perturbative triples and/or a Λ, EOM, QV or
   orbital-optimizing (`O`) prefix. FCI and iterative triples always derive a transient MO dump (see
-  [`derive_mo_basis!`](@ref)), as do the Brueckner (`B`) variants. Everything else that cannot be
-  done AO-direct is rejected rather than silently rerouted: EOM without singles and Λ / correlated
-  properties on top of an orbital optimization (`O`) are errors (see `ccdriver`). A closed-shell
-  method meeting unrestricted orbitals or open-shell occupations is not rerouted either — it is
-  promoted to its unrestricted form by
-  [`checkset_unrestricted_closedshell!`](@ref).
+  [`derive_mo_basis!`](@ref)), as do the Brueckner (`B`) variants. 
 """
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)
@@ -213,10 +208,9 @@ end
     or explicitly frozen virtuals.
   - **Deleted and frozen virtual** orbitals are excluded from the transform — they carry no
     electrons, so no folding is needed and there is no reason to pay the O(N⁵) transform.
-  - **Frozen occupied** orbitals must be transformed (they enter the core energy/Fock), then
-    are physically folded out of the MO dump via [`freeze_orbs_in_dump`](@ref) (core energy +
-    core Fock into `int0`/`int1`, `int2` reindexed, `NORB`/`NELEC` reduced). The reduced
-    `int2` is written straight onto a fresh scratch mmap (no in-memory copy).
+  - **Frozen occupied** orbitals are excluded from the transform too: their mean field is built
+    directly in the AO basis (the same `2J−K` / `J(Dα+Dβ)−K(Dσ)` core Fock the AO-direct setup
+    uses) and folded into `int0`/`int1` by `generate_mo_dump`.
   - `orig_orbs` records the active↔full orbital map, so user orbital lists (`occa` etc.) and
     property post-processing interpret the reduced dump correctly; the freeze options are
     **not** modified.
@@ -243,27 +237,13 @@ function derive_mo_basis!(EC::ECInfo{T}) where {T}
   # fold the core energy/Fock); deleted and frozen-virtual orbitals (the highest columns, see
   # `dfdump`) are dropped from the transform. Restricted orbitals build a closed-shell dump,
   # unrestricted a UHF dump (both spins keep the same number of columns — symmetric freezing).
-  keep = 1:full_norb-nfrozvirt
+  active = (ncore_orbs+1):(full_norb-nfrozvirt)
+  corerng = 1:ncore_orbs
   if is_restricted(cMO)
-    generate_mo_dump(EC, Matrix(cMO.α)[:, keep])
+    generate_mo_dump(EC, Matrix(cMO.α)[:, active]; core=Matrix(cMO.α)[:, corerng])
   else
-    generate_mo_dump(EC, SpinMatrix(Matrix(cMO.α)[:, keep], Matrix(cMO.β)[:, keep]))
-  end
-  if ncore_orbs > 0
-    # Fold the frozen-occupied orbitals, writing each reduced (active) 2-e block straight onto its
-    # own fresh scratch mmap — no in-memory active block and no extra copy. The filename must be
-    # per-block (`key`): a UHF dump reduces three blocks (int2aa/int2bb/int2ab), and a shared name
-    # would clobber them onto one file. Frozen-occ indices are unchanged by dropping the higher
-    # (virtual) columns.
-    freeze_orbs_in_dump(EC, frozen_occ;
-        int2alloc=(key, dims) -> newmmap(EC, key*"_act", dims, T; description="tmp")[2])
-    if EC.fd.uhf
-      flushmmap(EC, EC.fd.int2aa); flushmmap(EC, EC.fd.int2bb); flushmmap(EC, EC.fd.int2ab)
-    else
-      flushmmap(EC, EC.fd.int2)
-    end
-    # the full pre-fold "mo_int2" mmap is now orphaned; its scratch file is reclaimed by the
-    # end-of-run `delete_temporary_files!` (don't rm it here while its mapping may still be live)
+    generate_mo_dump(EC, SpinMatrix(Matrix(cMO.α)[:, active], Matrix(cMO.β)[:, active]);
+                     core=SpinMatrix(Matrix(cMO.α)[:, corerng], Matrix(cMO.β)[:, corerng]))
   end
   if ncore_orbs + nfrozvirt > 0
     # record the full-space orbital range of the active orbitals (as `dfdump` does), so user
@@ -294,27 +274,21 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     contract_df_integrals!(EC)
   end
   # Integral-source selection: a non-empty `EC.fd` (external FCIDUMP / generated MO dump) wins;
-  # otherwise the exact AO integrals (the ± supermatrix store) are used. Closed- and open-shell
-  # MP2/CCSD/DCSD, their doubles-only and quasi-variational variants, perturbative triples, the Λ
-  # equations (with or without singles), correlated properties and EOM all run AO-direct by default
-  # (the frozen core is folded into an effective 1-e Hamiltonian inside `ao_cc_setup!`), including
-  # with linearly-dependent (deleted) orbitals and with an unrestricted residual on restricted
-  # orbitals; set `int.ao_direct=false` to route them through a derived MO dump instead. Iterative
-  # triples, Brueckner, FCI and the combinations excluded by the gates below get a transient MO dump
-  # derived from the AO integrals (`derive_mo_basis!`, folded like `dfdump`).
-  # Combinations that are not supported are REJECTED here rather than quietly rerouted to the MO
-  # dump: a silent reroute hides both the cost and (for the `O`+Λ case) a wrong answer.
-  ecm_check = ECMethod(method)
-  if has_prefix(ecm_check, "EOM") && ecm_check.exclevel[1] != :full
+  # otherwise the exact AO integrals (the ± supermatrix store) are used. 
+  # MP2, doubles methods (CC), and perturbative triples all run AO-direct by default
+  # (the frozen core is folded into an effective 1-e Hamiltonian inside `ao_cc_setup!`);
+  # set `int.ao_direct=false` to route them through a derived MO dump instead.
+  # Iterative triples and FCI get a transient MO dump derived from the AO integrals (`derive_mo_basis!`).
+  ecmethod = ECMethod(method)
+  if has_prefix(ecmethod, "EOM") && ecmethod.exclevel[1] != :full
     error("EOM requires singles — `$(method)` has none. Use an EOM method built on a " *
           "singles-carrying reference (e.g. EOM-CCSD).")
   end
-  if has_prefix(ecm_check, "O") && need_lagrange_multipliers(EC, ecm_check)
-    error("The orbital-optimized methods do not provide Λ equations, so `$(method)` cannot be " *
-          "combined with a Λ prefix, `cc.properties` or `wf.natorb`.")
+  if has_prefix(ecmethod, "QV") && need_lagrange_multipliers(EC, ecmethod)
+    error("The quasi-variatonal methods do not provide Λ equations, so `$(method)` cannot be " *
+          "combined with a Λ prefix, `cc.properties` or `wf.natorb` (yet).")
   end
   ao_source = isempty(EC.fd)
-  ao_closed_shell = false   # AO-direct: spin treatment of the residual, passed to `ao_cc_setup!`
   if ao_source
     pm_exists(EC) ||
       error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
@@ -327,13 +301,11 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # Nothing below reroutes any more: the unsupported combinations errored above, a closed-shell
     # method on unrestricted orbitals/occupations is promoted to its unrestricted form, and the
     # AO-direct path covers deleted orbitals. Only the method itself (FCI, iterative triples,
-    # Brueckner) and the user's `int.ao_direct` decide.
-    ecm = ECMethod(method)
-    would_be_closed_shell = !is_unrestricted(ecm) && !has_prefix(ecm, "R") && closed_shell
-    ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct
+    # Brueckner) and the user's `int.ao_direct` decide. `ao_direct_method` is asked BEFORE the
+    # method is promoted below, so the route follows what the user requested.
+    ao_direct = ao_direct_method(ecmethod) && EC.options.int.ao_direct
     if ao_direct
       EC.ao_direct = true            # the active-space setup (freezing) happens in ao_cc_setup!
-      ao_closed_shell = would_be_closed_shell
     else
       EC.ao_direct = false           # never inherit a stale `true` from an aborted earlier run
       derive_mo_basis!(EC)
@@ -345,21 +317,22 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     closed_shell = is_closed_shell(EC)
   end
 
+  # Whether the ORBITALS are UHF (only the `R` methods care — they require a non-UHF reference; an
+  # unrestricted residual runs on either kind). AO-direct leaves `EC.fd` empty, so it asks the orbitals.
+  unrestricted_orbs = EC.ao_direct ? !is_restricted(load_orbitals(EC)) : EC.fd.uhf
+  # Promote a closed-shell method name to its unrestricted form where the reference demands it
+  closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
+
   energies = OutDict()
   if EC.ao_direct
     # freezes core (fold into eff. 1-e H), builds bare f_mm/e_m/d_oovv for the residual's spin case
-    EHF = ao_cc_setup!(EC; closed_shell=ao_closed_shell)
+    EHF = ao_cc_setup!(EC; closed_shell=closed_shell_method)
     output_E_method(EHF, "HF", "energy:"); println(); flush_output()
     energies = merge(energies, "HF"=>(EHF, "HF energy"))
   else
     energies = eval_hf_energy(EC, energies, closed_shell)
   end
   # t1 = print_time(EC, t1, "HF energy", 1)
-  ecmethod = ECMethod(method)
-  # Whether the ORBITALS are UHF (only the `R` methods care — they require a non-UHF reference; an
-  # unrestricted residual runs on either kind). AO-direct leaves `EC.fd` empty, so it asks the orbitals.
-  unrestricted_orbs = EC.ao_direct ? !is_restricted(load_orbitals(EC)) : EC.fd.uhf
-  closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
   # calculate MP2 (also the CC start guess). `calc_MP2`/`calc_UMP2` read the bare MO integrals
   # from the AO-direct dressed-integral files (`d_oovv`/`d_OOVV`/`d_oOvV`).
   if EC.options.cc.nomp2 == 0

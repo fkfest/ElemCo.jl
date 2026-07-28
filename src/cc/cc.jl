@@ -72,8 +72,8 @@ using ..ElemCo.IntegralTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
-using ..ElemCo.FockFactory: ao_JK!, ao_J2K!
 using ..ElemCo.PMStore
+using ..ElemCo.FockFactory
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy, calc_posMP2 
 export calc_cc, calc_pertT
