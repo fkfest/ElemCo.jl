@@ -119,6 +119,28 @@ function pm_half_trans(EC::ECInfo, pm::PMSupermatrices{Te}, C::AbstractMatrix, k
 end
 
 """
+    ht_column_A!(Aσ, ht, σ) -> Aσ
+
+  A-role half of [`ht_column!`](@ref): the slab `Aσ[(i,ν), ρ] = Σ_μ⟨μν|ρσ⟩C[μ,i]` alone.
+
+  Each stored element is the A entry of exactly ONE column, so a full σ-sweep with this reader touches
+  the store exactly once — half the bytes of the two-slab `ht_column!`. Consumers that need the other
+  ket order do NOT need the B slab: by the particle-exchange symmetry `⟨μν|ρσ⟩ = ⟨νμ|σρ⟩` the B-role
+  block is the A-role block with the two ket coefficients swapped and the output permuted `(2,1,4,3)`
+  (see [`ht_mo_block`](@ref CoupledCluster.ht_mo_block)). Only the per-column dressing sweeps, which
+  contract both roles into the SAME output, genuinely need both slabs.
+"""
+function ht_column_A!(Aσ::AbstractMatrix, ht::HTStore, σ::Int)
+  n = ht.nao
+  colrng = uppertriangular_range(σ)
+  @views Aσ[:, 1:σ] .= ht.map[:, 1, colrng]
+  @inbounds for ρ in σ+1:n
+    @views Aσ[:, ρ] .= ht.map[:, 2, uppertriangular_index(σ, ρ)]
+  end
+  return Aσ
+end
+
+"""
     ht_column!(Aσ, Bσ, ht, σ) -> (Aσ, Bσ)
 
 Fill the dense σ-column slabs (both `[m·nao, nao]`) for all `ρ`:
@@ -295,16 +317,17 @@ end
   Build the doubly-bra-occ intermediate `v[i,j,ρ,σ] = Σ_μν⟨μν|ρσ⟩ C1[μ,i] C2[ν,j]` (T1-independent)
   from an open half-transformed store `ht` (whose bra-1 transform used `C1`) and a second occupied bra
   `C2`, saved (mmapped) under `ookey` with shape `(ht.m, size(C2,2), nao, nao)`. Reads each A-role
-  σ-column ([`ht_column!`](@ref PMStore.ht_column!)) and contracts the free `ν` slot with `C2`. For the
+  σ-column ([`ht_column_A!`](@ref PMStore.ht_column_A!) — the B slab is not needed, so this touches
+  each stored element once) and contracts the free `ν` slot with `C2`. For the
   closed shell `C2 == C1` (→ `v_ooAA`); for the opposite-spin cross block `C1 = La_o`, `C2 = Lb_o`
   (→ `v_oOAA`).
 """
 function ht_build_oo!(EC::ECInfo{T}, ht::HTStore, C2::AbstractMatrix, ookey::AbstractString) where {T}
   n = ht.nao; m1 = ht.m; m2 = size(C2, 2)
   voio, v_oo = newmmap(EC, ookey, (m1, m2, n, n), T)
-  Aσ = zeros(T, m1*n, n); Bσ = zeros(T, m1*n, n)         # only the A-role (Aσ) is needed here
+  Aσ = zeros(T, m1*n, n)                                 # A-role only → one pass over the store
   for σ in 1:n
-    ht_column!(Aσ, Bσ, ht, σ)
+    ht_column_A!(Aσ, ht, σ)
     A3 = reshape(Aσ, m1, n, n)
     voσ = @view v_oo[:, :, :, σ]
     @mtensor voσ[i,j,ρ] = A3[i,ν,ρ] * C2[ν,j]            # second bra → occ (contract ν)

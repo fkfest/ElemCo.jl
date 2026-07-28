@@ -1816,7 +1816,8 @@ function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix; calc_d_vovv::Bo
   # 3-external dressed block for the Λ residual / λ-triples: d_vovv[a,i,b,c] = ⟨ai|bc⟩ (dressed) built
   # from the occupied-bra store (occ i = CLo is T1-independent; the free virt slots carry CLv/CRv).
   if calc_d_vovv
-    d_vovv = ht_mo_block(EC, "ht_oAAA", :B, CLv, CRv, CRv)
+    # occ i sits on bra-2 here, so build ⟨ia|cb⟩ and exchange the particles (see `ht_mo_block`)
+    d_vovv = permutedims(ht_mo_block(EC, "ht_oAAA", CLv, CRv, CRv), (2,1,4,3))
     save!(EC, "d_vovv", d_vovv)
   end
   return nothing
@@ -1828,21 +1829,9 @@ end
 
 
 
-# Bare MO blocks the (T)/Λ(T)/EOM consumers read, expressed off a half-transformed store whose bra index
-# is occupied: which `store` supplies that occupied index (`:a`/`:b` = the α/β store; `:a` alone for
-# closed shell), the `role` (occ on bra-1 or bra-2), the (X,Y,Z) coefficient spaces for the three free
-# slots (lower case = α, upper case = β), and the output permutation from the kernel's natural order to
-# the physicist order the consumer loads. `swap=true` marks a block obtained by the bra↔ket Hermiticity
-# `⟨pq|rs⟩=conj⟨rs|pq⟩` (its only occupied index sits on a ket): real-correct (the conj is a no-op for
-# real), but for complex it needs a ket-transformed store — guarded in [`save_mo_block!`](@ref).
 # AO integrals are spin-free, so a mixed-spin block simply puts the other spin's coefficients on the
-# free slots; the βα-looking reads of the unrestricted (T) all resolve to these same αβ blocks.
-
-
-"Closed-shell [`save_mo_block!`](@ref): the single store `htkey` with occupied/virtual coefficients."
-save_mo_block!(EC::ECInfo, name::AbstractString, htkey::AbstractString,
-               Co::AbstractMatrix, Cv::AbstractMatrix) =
-  save_mo_block!(EC, name, Dict(:a => htkey), Dict('o' => Co, 'v' => Cv))
+# free slots; the βα-looking reads of the unrestricted (T) all resolve to these same αβ blocks
+# ([`ht_mo_block_spec`](@ref) resolves a block name into the sweep that produces it).
 
 
 
@@ -2070,10 +2059,12 @@ function ao_dressed_ints_unrestricted(EC::ECInfo{T}, T1a, T1b, cMOa::AbstractMat
   # index on a bra (= the store's own T1-independent occ-bra La_o/Lb_o), so all four are direct block-
   # engine calls off the per-spin stores — no Hermiticity swap. Index 1,3 = α = electron 1, 2,4 = β.
   if calc_d_vovv
-    save!(EC, "d_vovv", ht_mo_block(EC, "ht_oAAA_a", :B, La_v, Ra_v, Ra_v))  # ⟨ai|bc⟩ (αα)
-    save!(EC, "d_VOVV", ht_mo_block(EC, "ht_oAAA_b", :B, Lb_v, Rb_v, Rb_v))  # ⟨AI|BC⟩ (ββ)
-    save!(EC, "d_vOvV", ht_mo_block(EC, "ht_oAAA_b", :B, La_v, Ra_v, Rb_v))  # ⟨aI|bC⟩ (occ I on bra-2, β store)
-    save!(EC, "d_oVvV", ht_mo_block(EC, "ht_oAAA_a", :A, Lb_v, Ra_v, Rb_v))  # ⟨iB|aC⟩ (occ i on bra-1, α store)
+    # the first three carry occ on bra-2: build the particle-exchanged block (ket coefficients
+    # swapped) and permute (2,1,4,3) — see `ht_mo_block`. The last one has occ on bra-1 already.
+    save!(EC, "d_vovv", permutedims(ht_mo_block(EC, "ht_oAAA_a", La_v, Ra_v, Ra_v), (2,1,4,3)))  # ⟨ai|bc⟩ (αα)
+    save!(EC, "d_VOVV", permutedims(ht_mo_block(EC, "ht_oAAA_b", Lb_v, Rb_v, Rb_v), (2,1,4,3)))  # ⟨AI|BC⟩ (ββ)
+    save!(EC, "d_vOvV", permutedims(ht_mo_block(EC, "ht_oAAA_b", La_v, Rb_v, Ra_v), (2,1,4,3)))  # ⟨aI|bC⟩ (occ I on bra-2, β store)
+    save!(EC, "d_oVvV", ht_mo_block(EC, "ht_oAAA_a", Lb_v, Ra_v, Rb_v))                          # ⟨iB|aC⟩ (occ i on bra-1, α store)
   end
   return nothing
 end

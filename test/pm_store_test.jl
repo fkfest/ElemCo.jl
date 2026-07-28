@@ -501,40 +501,59 @@ end
   end
 end
 
-# MO-blocks engine (ht_mo_block / save_mo_block!): build 4-index MO integral blocks that carry the
-# store's occupied bra index, one sweep per block. Each must match the dense physicist reference. The 5
-# directly-mapped blocks are element-type-generic (real + complex); the vvvo block uses the bra↔ket
-# Hermiticity swap and is real-only from a bra-store (must throw for complex).
-@testset "ht_mo_block / save_mo_block! ↔ dense" begin
-  save_mo_block! = ElemCo.CoupledCluster.save_mo_block!
+# MO-blocks engine (ht_mo_block / save_mo_blocks!): build 4-index MO integral blocks that carry a
+# store's occupied bra index. Each must match the dense physicist reference, which is generated here
+# straight from the block name (index 1,3 = electron 1, 2,4 = electron 2; lower case = α) and so is an
+# independent statement of the convention, not a re-use of the spec table.
+#
+# Covers all four occupied positions of `ht_mo_block_spec`: on a bra slot (1,2) the block follows from
+# particle exchange alone and must work for COMPLEX too; on a ket slot (3,4) it needs the bra↔ket
+# Hermiticity relation, which is real-only from a bra-transformed store and must throw for complex.
+# Blocks sharing an A-form (`vovv`/`vvvo`, `ovoo`/`vooo`, `vOvV`/`vVvO`, `oVvV`/`vVoV`) are requested
+# in one call, so the shared-sweep path is what is being checked.
+@testset "ht_mo_block / save_mo_blocks! ↔ dense" begin
+  save_mo_blocks! = ElemCo.CoupledCluster.save_mo_blocks!
+  ht_mo_block_spec = ElemCo.CoupledCluster.ht_mo_block_spec
+  SWAPPED = ("vvvo", "VVVO", "vVvO", "vVoV")        # occupied index on a ket slot
+  ALL = ("ovoo", "vooo", "ooov", "oovo", "vovv", "voov", "vovo", "vvvo",
+         "VOOO", "VOVV", "VOOV", "VOVO", "OOVO", "VVVO",
+         "vOoO", "oVoO", "vOvV", "oVvV", "oOvO", "oOoV", "vOoV", "oVvO", "vVvO", "vVoV")
   for T in (Float64, ComplexF64), (n, maxcols) in ((8, 8), (12, 30), (14, 300))
     no = 3; nv = 5
     EC, int2 = build_store(n, T, maxcols)
-    pm = open_pm_store(EC)
     G = detri_int2(int2, n, 1:n, 1:n, 1:n, 1:n)
-    Co = randn(T, n, no); Cv = randn(T, n, nv)
-    pm_half_trans(EC, pm, Co, "ht_e")                      # store's occupied bra = Co
+    coefs = Dict('o' => randn(T, n, no), 'v' => randn(T, n, nv),
+                 'O' => randn(T, n, no), 'V' => randn(T, n, nv))
+    pm = open_pm_store(EC)
+    pm_half_trans(EC, pm, coefs['o'], "ht_a")       # α store: occupied bra = Co(α)
+    pm_half_trans(EC, pm, coefs['O'], "ht_b")       # β store: occupied bra = Co(β)
     close_pm_store!(EC, pm)
-    @tensor ovoo_r[i,a,j,k] := G[μ,ν,ρ,σ]*Co[μ,i]*Cv[ν,a]*Co[ρ,j]*Co[σ,k]   # ⟨ia|jk⟩
-    @tensor ooov_r[i,j,k,a] := G[μ,ν,ρ,σ]*Co[μ,i]*Co[ν,j]*Co[ρ,k]*Cv[σ,a]   # ⟨ij|ka⟩
-    @tensor vovv_r[a,i,b,c] := G[μ,ν,ρ,σ]*Cv[μ,a]*Co[ν,i]*Cv[ρ,b]*Cv[σ,c]   # ⟨ai|bc⟩
-    @tensor voov_r[a,i,j,b] := G[μ,ν,ρ,σ]*Cv[μ,a]*Co[ν,i]*Co[ρ,j]*Cv[σ,b]   # ⟨ai|jb⟩
-    @tensor vovo_r[a,i,b,j] := G[μ,ν,ρ,σ]*Cv[μ,a]*Co[ν,i]*Cv[ρ,b]*Co[σ,j]   # ⟨ai|bj⟩
-    @tensor vvvo_r[a,b,c,k] := G[μ,ν,ρ,σ]*Cv[μ,a]*Cv[ν,b]*Cv[ρ,c]*Co[σ,k]   # ⟨ab|ck⟩
-    for (name, ref) in (("ovoo",ovoo_r), ("ooov",ooov_r), ("vovv",vovv_r), ("voov",voov_r), ("vovo",vovo_r))
-      save_mo_block!(EC, name, "ht_e", Co, Cv)
-      @test maximum(abs.(load4idx(EC, name) .- ref)) < 1e-11
+    htkeys = Dict(:a => "ht_a", :b => "ht_b")
+    # dense reference straight from the name: ⟨s₁s₂|s₃s₄⟩ = Σ G[μνρσ] C₁[μ,s₁]C₂[ν,s₂]C₃[ρ,s₃]C₄[σ,s₄]
+    function dense_ref(name)
+      C1, C2, C3, C4 = (coefs[c] for c in name)
+      @tensor R[p,q,r,s] := G[μ,ν,ρ,σ]*C1[μ,p]*C2[ν,q]*C3[ρ,r]*C4[σ,s]
+      return R
+    end
+    names = T <: Complex ? filter(nm -> !(nm in SWAPPED), ALL) : collect(ALL)
+    save_mo_blocks!(EC, names, htkeys, coefs)       # one call: exercises the shared-sweep grouping
+    for name in names
+      @test maximum(abs.(load4idx(EC, name) .- dense_ref(name))) < 1e-11
     end
     if T <: Complex
-      @test_throws Exception save_mo_block!(EC, "vvvo", "ht_e", Co, Cv)   # swap-block real-only
-    else
-      save_mo_block!(EC, "vvvo", "ht_e", Co, Cv)
-      @test maximum(abs.(load4idx(EC, "vvvo") .- vvvo_r)) < 1e-11
+      for name in SWAPPED                           # bra↔ket relation: must refuse, not guess
+        @test_throws Exception save_mo_blocks!(EC, (name,), htkeys, coefs)
+      end
     end
-    for k in ("ovoo", "ooov", "vovv", "voov", "vovo", "vvvo")
+    # blocks that share an A-form must really share a sweep, i.e. resolve to the same spec key
+    for (x, y) in (("vovv","vvvo"), ("ovoo","vooo"), ("VOVV","VVVO"), ("vOvV","vVvO"), ("oVvV","vVoV"))
+      sx = ht_mo_block_spec(x); sy = ht_mo_block_spec(y)
+      @test (sx.store, sx.X, sx.Y, sx.Z) == (sy.store, sy.X, sy.Y, sy.Z)
+    end
+    for k in ALL
       file_exists(EC, k) && delete_file!(EC, k)
     end
-    delete_ht_store!(EC, "ht_e")
+    delete_ht_store!(EC, "ht_a"); delete_ht_store!(EC, "ht_b")
   end
 end
 
