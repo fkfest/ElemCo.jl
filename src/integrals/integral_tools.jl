@@ -377,18 +377,11 @@ function ao_integrals(EC::ECInfo{T}) where T
     EC.fd = FDump{T,3}()
   end
   bao = save_ao_1e_integrals!(EC)
-  nao = size(load2idx(EC, "S_AA"), 1)
-  ntri = nao*(nao+1)÷2
-  if EC.options.int.ao_pm
-    # fused generation of the persisted ± supermatrix store straight from the ERI generator
-    # (kext/Fock/dressing consumers at halved flops/streaming) — the joint ao_int2 is never
-    # created, disk ≈ n⁴/4 throughout. Joint-format consumers reconstruct it on demand.
-    pm_integrals!(EC, bao)
-  else
-    int2_file, int2 = newmmap(EC, "ao_int2", (nao, nao, ntri), T; description="int2 ao")
-    eri_2e4idx_tri!(int2, bao)
-    closemmap(EC, int2_file, int2)
-  end
+  # Fused generation of the persisted ± supermatrix store straight from the ERI generator: every
+  # consumer (kext, Fock builders, the T1 dressing, the AO→MO transform) works on it directly, at
+  # halved flops and streaming, and disk stays at ≈ n⁴/4. The AO integrals exist in this format
+  # only — the exact-integral side of the code has exactly one representation.
+  pm_integrals!(EC, bao)
   return nuclear_repulsion(EC.system)
 end
 
@@ -444,7 +437,7 @@ function ensure_ao_integrals!(EC::ECInfo{T}; method="@hf", alternative="@bohf") 
           "use $alternative instead."
     EC.fd = FDump{T,3}()
   end
-  if !(file_exists(EC, "ao_int2") || pm_exists(EC))
+  if !pm_exists(EC)
     ao_integrals(EC)
   else
     save_ao_1e_integrals!(EC)
@@ -455,16 +448,20 @@ end
 """
     delete_ao_integrals!(EC::ECInfo)
 
-  Delete all exact AO integral scratch files (`"ao_int2"`, `"S_AA"`, `"h_AA"`) if present.
-  Called when the geometry or basis changes — then even the 2-e AO integrals `(μν|ρσ)` and the
-  overlap are invalid. For a pure nuclear charge/dummy change use [`invalidate_ao_1e_integrals!`](@ref),
-  which keeps the (unchanged) 2-e integrals.
+  Delete all exact AO integral scratch files (the ± supermatrix store, `"S_AA"`, `"h_AA"`) if
+  present. Called when the geometry or basis changes — then even the 2-e AO integrals `(μν|ρσ)` and
+  the overlap are invalid. For a pure nuclear charge/dummy change use
+  [`invalidate_ao_1e_integrals!`](@ref), which keeps the (unchanged) 2-e integrals.
 """
 function delete_ao_integrals!(EC::ECInfo)
-  for f in ("ao_int2", "S_AA", "h_AA")
+  for f in ("S_AA", "h_AA")
     file_exists(EC, f) && delete_file!(EC, f)
   end
-  delete_pm_store!(EC)   # the ± supermatrices derive from ao_int2 — invalidate together
+  # `"ao_int2"` is not produced by any calculation any more (see [`ao_integrals`](@ref)); it is
+  # removed only so that a scratch directory written by an older version cannot leave a stale
+  # joint-format file behind.
+  file_exists(EC, "ao_int2") && delete_file!(EC, "ao_int2")
+  delete_pm_store!(EC)
   return
 end
 
@@ -1039,7 +1036,7 @@ end
   (`freeze_orbs_in_dump`), exactly as for a `dfdump`-generated dump.
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
-  @assert file_exists(EC, "ao_int2") || pm_exists(EC) "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
+  @assert pm_exists(EC) "no AO integrals on file; generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
   hAO = load2idx(EC, "h_AA")
@@ -1049,18 +1046,11 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix) where {T<:Number}
   println("Transform AO integrals to MO basis...")
   C = Matrix{T}(cMO)
   nout = size(C, 2)
-  # from the ± store, `pm_transform` never materializes the joint nao⁴/2 int2 (it picks pair-space
-  # vs the N⁵ slab transform itself); only when the joint int2 is what is on disk (ao_pm=false) do
-  # we stream it through `transform_int2`.
-  if !file_exists(EC, "ao_int2") && pm_exists(EC)
-    pm = open_pm_store(EC)
-    int2 = pm_transform(EC, pm, C, "mo_int2"; triangular=true, description="tmp")
-    close_pm_store!(EC, pm)
-  else
-    aofile, aoint2 = mmap3idx(EC, "ao_int2")
-    int2 = transform_int2(EC, aoint2, C, C, C, C, "mo_int2"; description="tmp")
-    close(aofile)
-  end
+  # `pm_transform` transforms straight out of the ± store and never materializes an nao⁴/2 AO
+  # array (it picks pair-space vs the N⁵ slab transform itself).
+  pm = open_pm_store(EC)
+  int2 = pm_transform(EC, pm, C, "mo_int2"; triangular=true, description="tmp")
+  close_pm_store!(EC, pm)
   # NELEC/MS2 conventions follow `dfdump`: neutral electron count, `charge`/`ms2` from the
   # wf options are applied later by `setup_space_fd!`.
   nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
@@ -1087,7 +1077,7 @@ end
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   is_restricted(cMO) && return generate_mo_dump(EC, cMO.α)
-  @assert file_exists(EC, "ao_int2") || pm_exists(EC) "no AO integrals on file (\"ao_int2\" or ± store); generate them first (@ints / ao_integrals)"
+  @assert pm_exists(EC) "no AO integrals on file; generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
   hAO = load2idx(EC, "h_AA")
@@ -1097,21 +1087,13 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix) where {T<:Number}
   @assert size(Ca, 1) == size(S, 1) && size(Cb, 1) == size(S, 1) "cMO AO dimension does not match the system"
   @assert isapprox(Ca' * S * Ca, I, atol=1e-8) && isapprox(Cb' * S * Cb, I, atol=1e-8) "cMO are not orthonormal in the AO basis"
   println("Transform AO integrals to UHF MO basis...")
-  # straight from the ± store (never the joint nao⁴/2 int2); `pm_transform` picks pair-space vs the
-  # N⁵ slab transform per block (see the RHF method).
-  if !file_exists(EC, "ao_int2") && pm_exists(EC)
-    pm = open_pm_store(EC)
-    int2aa = pm_transform(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description="tmp")
-    int2bb = pm_transform(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description="tmp")
-    int2ab = pm_transform(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description="tmp")
-    close_pm_store!(EC, pm)
-  else
-    aofile, aoint2 = mmap3idx(EC, "ao_int2")
-    int2aa = transform_int2(EC, aoint2, Ca, Ca, Ca, Ca, "mo_int2aa"; description="tmp")
-    int2bb = transform_int2(EC, aoint2, Cb, Cb, Cb, Cb, "mo_int2bb"; description="tmp")
-    int2ab = transform_int2_Q(EC, aoint2, Ca, Cb, Ca, Cb, "mo_int2ab"; description="tmp")
-    close(aofile)
-  end
+  # straight from the ± store; `pm_transform` picks pair-space vs the N⁵ slab transform per block
+  # (see the RHF method).
+  pm = open_pm_store(EC)
+  int2aa = pm_transform(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description="tmp")
+  int2bb = pm_transform(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description="tmp")
+  int2ab = pm_transform(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description="tmp")
+  close_pm_store!(EC, pm)
   nelec = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
   ms2 = EC.options.wf.ms2 < 0 ? mod(nelec, 2) : EC.options.wf.ms2
   fd = FDump{T,3}(nout, nelec; ms2, uhf=true)

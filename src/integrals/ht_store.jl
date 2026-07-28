@@ -140,3 +140,67 @@ function ht_column!(Aσ::AbstractMatrix, Bσ::AbstractMatrix, ht::HTStore, σ::I
   end
   return Aσ, Bσ
 end
+
+"""
+    ht_jk_columns!(t, ht, DJ, DK) -> t
+
+Contract every σ-column's B- and A-role slabs with the AO densities `DJ` / `DK` over **both** of their
+free AO slots, for all σ in one go (`t` is `[m, nao]` and is overwritten):
+
+    t[i,σ] = Σ_xy ( B_σ[i,x,y]·DJ[x,y] − A_σ[i,x,y]·DK[x,y] )
+           = Σ_xy ( ⟨x i|y σ⟩·DJ[x,y]  − ⟨i x|y σ⟩·DK[x,y] )
+
+with the slabs exactly as [`ht_column!`](@ref) defines them (σ = ket-2 in both). That is the
+`[bra-occ, AO-ket]` block of a generalized `J(DJ) − K(DK)` Fock — the contraction the Λ residual's
+`dD1` generalized-Fock term needs (`CoupledCluster.dD1_ht_vo`), which wants only that block and so
+never has to build an `nao×nao` Fock.
+
+**One sequential pass, each stored element read EXACTLY once** — half of what a full `ht_column!`
+sweep reads (that gathers every pair twice: once as a column entry, once as a row pick) and with no
+dense per-column slab materialised at all. The four contributions of a stored pair `p = tri(a,b)`,
+`a ≤ b`, are read straight off `ht_column!`'s two cases:
+
+    map[:,1,p] = A_{σ=b}[:,y=a] = B_{σ=a}[:,y=b]     (ket order (a,b))
+    map[:,2,p] = A_{σ=a}[:,y=b] = B_{σ=b}[:,y=a]     (ket order (b,a))
+
+so each `map[:,o,p]` — a contiguous `m×nao` block, hence a BLAS `gemv` — is used twice, against one
+column of `DJ`/`DK`. On the pair diagonal `a == b` the two ket orders coincide with `ht_column!`'s
+single `ρ ≤ σ` case, which is why only the `σ=b` pair of contributions is applied there.
+
+Threaded over contiguous `b`-ranges holding equal numbers of pairs (so every task still streams the
+map sequentially), each with a private accumulator: race-free and deterministic. `DJ`/`DK` need not
+be symmetric, and no conjugation is applied anywhere, so this is element-type generic.
+"""
+function ht_jk_columns!(t::AbstractMatrix{T}, ht::HTStore, DJ::AbstractMatrix{T},
+                        DK::AbstractMatrix{T}) where {T}
+  n = ht.nao; m = ht.m
+  size(t) == (m, n) || error("ht_jk_columns!: t is $(size(t)), must be $((m, n))")
+  size(DJ) == (n, n) && size(DK) == (n, n) ||
+    error("ht_jk_columns!: densities are $(size(DJ))/$(size(DK)), must be $((n, n))")
+  M4 = reshape(ht.map, m, n, 2, ht.npp)              # [i, x, ketorder, pair] — contiguous m×n slices
+  nch = max(1, min(Threads.nthreads(), n))
+  bnd = [round(Int, n*sqrt(k/nch)) for k in 0:nch]   # equal pair count per chunk (Σ_{b≤B} b ∝ B²)
+  parts = [zeros(T, m, n) for _ in 1:nch]
+  @sync for c in 1:nch
+    Threads.@spawn begin
+      tl = parts[c]
+      @inbounds for b in bnd[c]+1:bnd[c+1]
+        tb = view(tl, :, b); p0 = b*(b-1)÷2          # tri(a,b) = a + b(b-1)/2
+        for a in 1:b
+          M1 = view(M4, :, :, 1, p0+a); M2 = view(M4, :, :, 2, p0+a)
+          mul!(tb, M2, view(DJ, :, a),  one(T), one(T))   # + B_{σ=b}[:,y=a]·DJ[:,a]
+          mul!(tb, M1, view(DK, :, a), -one(T), one(T))   # − A_{σ=b}[:,y=a]·DK[:,a]
+          a == b && continue                              # diagonal pair: the σ=a case IS the σ=b one
+          ta = view(tl, :, a)
+          mul!(ta, M1, view(DJ, :, b),  one(T), one(T))   # + B_{σ=a}[:,y=b]·DJ[:,b]
+          mul!(ta, M2, view(DK, :, b), -one(T), one(T))   # − A_{σ=a}[:,y=b]·DK[:,b]
+        end
+      end
+    end
+  end
+  t .= parts[1]
+  for c in 2:nch
+    t .+= parts[c]
+  end
+  return t
+end

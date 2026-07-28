@@ -236,7 +236,7 @@ end
   density is folded directly, `dU2_AO[μ,ν,m,n] = Σ_ab CLv[μ,a] CLv[ν,b] U2[a,b,m,n]` with the dressed
   virtual bra `CLv = C_v − C_o·T1ᵀ` (same as [`ao_dressed_coeffs`](@ref)). By `⟨pq|rs⟩=⟨rs|pq⟩` this is
   [`pm_K2!`](@ref)'s ket-pair contraction: ½-scale the `μν` diagonal (scalepp), pack the pair
-  triangularly, contract against the ± store (or `ao_int2`), and rotate the kept `ρσ` pair back to MO
+  triangularly, contract against the ± store, and rotate the kept `ρσ` pair back to MO
   with `cMO`. Real-valued (the bra↔ket reuse of the ± store); complex AO-direct is a follow-up.
 """
 function ao_lagrange_K2(EC::ECInfo, T1, U2, o4s::Char, v4s::Char, spin::Symbol=:α)
@@ -250,15 +250,9 @@ function ao_lagrange_K2(EC::ECInfo, T1, U2, o4s::Char, v4s::Char, spin::Symbol=:
   @inbounds for μ in 1:nao; @views dU2_AO[μ,μ,:,:] .*= 0.5; end   # scalepp (½ the μ=ν diagonal)
   tripp = uppertriangular_cut(nao)
   dU2_tri = dU2_AO[tripp, :, :]
-  if pm_exists(EC)
-    pm = open_pm_store(EC)
-    K2_AO = pm_K2!(pm, dU2_tri, tripp)                            # K2_AO[ρ,σ,m,n] = Σ_μν⟨ρσ|μν⟩ dU2_AO
-    close_pm_store!(EC, pm)
-  else
-    aofile, int2 = mmap3idx(EC, "ao_int2")
-    K2_AO = calc_pm_K2!(int2, dU2_tri, tripp)
-    close(aofile)
-  end
+  pm = open_pm_store(EC)
+  K2_AO = pm_K2!(pm, dU2_tri, tripp)                              # K2_AO[ρ,σ,m,n] = Σ_μν⟨ρσ|μν⟩ dU2_AO
+  close_pm_store!(EC, pm)
   @mtensor Kmmoo[r,s,m,n] := (K2_AO[ρ,σ,m,n] * cMO[ρ,r]) * cMO[σ,s]  # rotate the kept ρσ pair to MO
   return Kmmoo
 end
@@ -287,18 +281,9 @@ function ao_lagrange_K2ab(EC::ECInfo, T1a, T1b, U2ab)
   @mtensor dU2_AO[μ,ν,m,N] := dU2p[μ,B,m,N] * CLvb[ν,B]
   @inbounds for μ in 1:nao; @views dU2_AO[μ,μ,:,:] .*= 0.5; end     # scalepp (½ the μ=ν diagonal)
   tripp = uppertriangular_cut(nao)
-  if pm_exists(EC)
-    pm = open_pm_store(EC)
-    K2_AO = pm_K2ab!(pm, dU2_AO, tripp)                             # full-square pair in and out
-    close_pm_store!(EC, pm)
-  else
-    tripp_swap = swapped_uppertriangular_cut(nao)
-    aofile, int2 = mmap3idx(EC, "ao_int2")
-    K2t = calc_K2(int2, dU2_AO[tripp,:,:], tripp; symmetrize=false)
-    K2s = calc_K2(int2, dU2_AO[tripp_swap,:,:], tripp_swap; symmetrize=false)
-    @mtensor K2_AO[p,r,i,j] := K2t[p,r,i,j] + K2s[r,p,i,j]
-    close(aofile)
-  end
+  pm = open_pm_store(EC)
+  K2_AO = pm_K2ab!(pm, dU2_AO, tripp)                               # full-square pair in and out
+  close_pm_store!(EC, pm)
   @mtensor KmMoO[r,s,m,N] := (K2_AO[ρ,σ,m,N] * cMOa[ρ,r]) * cMOb[σ,s]   # α external, β external
   return KmMoO
 end
@@ -1458,6 +1443,9 @@ end
   Closed-shell integral dressing for the Λ residual / EOM Jacobian (dressed `d_*` blocks incl. the
   3-external `d_vovv`). AO-direct: [`ao_dressed_ints`](@ref) with `calc_d_vovv=true` (built from the
   half-transformed store) instead of the MO-fcidump [`calc_dressed_ints`](@ref).
+  An EMPTY `T1` (methods without singles, Λ-CCD/Λ-DCD) leaves the coefficients undressed and hence
+  writes the BARE blocks under the same `d_*` names — the AO-direct analogue of
+  [`pseudo_dressed_ints`](@ref). Only supported AO-direct (the MO dressing has no empty-T1 path).
 """
 function dress_lambda_ints!(EC::ECInfo, T1)
   if EC.ao_direct
@@ -1467,7 +1455,8 @@ function dress_lambda_ints!(EC::ECInfo, T1)
   end
 end
 
-"Unrestricted [`dress_lambda_ints!`](@ref): AO-direct dressing (with the 3-external blocks) or the dump."
+"""Unrestricted [`dress_lambda_ints!`](@ref): AO-direct dressing (with the 3-external blocks) or the
+dump. Empty `T1a`/`T1b` ⇒ bare blocks (Λ-UCCD/Λ-UDCD), AO-direct only."""
 function dress_lambda_ints!(EC::ECInfo, T1a, T1b)
   if EC.ao_direct
     cMOsm = load_orbitals(EC)
@@ -1518,14 +1507,14 @@ function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
     @assert (length(LMs1) == 1) && (length(LMs2) == 1) 
   end
   LMs = (LMs1..., LMs2...)
-  # dress integrals
+  # Dress integrals. `dress_lambda_ints!` dispatches on the number of T1 arguments (closed-shell vs
+  # unrestricted) and, inside, on `EC.ao_direct`. Without singles (Λ-CCD/Λ-DCD) the `LMs1` are EMPTY
+  # matrices, so the AO dressing degenerates to the BARE blocks under the same `d_*` names — exactly
+  # how the AO-direct doubles-only ground states get their integrals (cf. `calc_cc_resid`). The MO
+  # dump has no empty-T1 dressing, so it keeps `pseudo_dressed_ints` (bare blocks read from `EC.fd`).
   t1 = time_ns()
-  if do_sing
-    if is_unrestricted(method) || has_prefix(method, "R")
-      dress_lambda_ints!(EC, LMs1...)
-    else
-      dress_lambda_ints!(EC, LMs1...)                # closed-shell (AO-direct or fcidump)
-    end
+  if do_sing || EC.ao_direct
+    dress_lambda_ints!(EC, LMs1...)
   else
     pseudo_dressed_ints(EC, is_unrestricted(method) || has_prefix(method, "R"); calc_d_vovv=true)
   end

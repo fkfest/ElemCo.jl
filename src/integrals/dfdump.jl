@@ -412,12 +412,12 @@ end
   (the default), or the exact AO integral files ([`ao_integrals`](@ref)) when `int.df=false`.
 
   Nothing is generated when integrals are already available — an MO dump in `EC.fd`, or exact AO
-  integrals on scratch (the joint `ao_int2` or the ± supermatrix store), which the AO-direct methods
+  integrals on scratch (the ± supermatrix store), which the AO-direct methods
   consume without ever building an FCIDUMP.
 """
 function setup_fcidump_if_needed!(EC::ECInfo)
   # exact AO integrals on scratch are integrals too — the AO-direct methods consume them directly
-  (file_exists(EC, "ao_int2") || pm_exists(EC)) && return
+  pm_exists(EC) && return
   if isempty(EC.fd)
     if EC.options.int.df
       dfdump(EC)

@@ -5,6 +5,7 @@ using ElemCo.MSystems: parse_geometry, nuclear_repulsion
 using ElemCo.BasisSets: generate_basis, n_ao
 using ElemCo.Integrals: eri_2e4idx, overlap, kinetic, nuclear
 using ElemCo.IntegralTools: ao_integrals, generate_mo_dump
+using ElemCo.PMStore: pm_exists, pm_to_joint!
 using ElemCo.FciDumps
 using ElemCo.FciDumps: headvar
 using ElemCo.TensorTools: detri_int2, load2idx, mmap3idx, @mtensor, @tensor
@@ -17,7 +18,6 @@ using LinearAlgebra
     H2  0.000000000  -1.489124508   1.033245507"
 
   EC = ECInfo{Float64}()
-  EC.options.int.ao_pm = false   # this testitem regression-tests the joint (ao_int2) flow
   EC.system = parse_geometry(geometry, Dict("ao"=>"sto-3g"))
 
   bao = generate_basis(EC, "ao")
@@ -26,16 +26,18 @@ using LinearAlgebra
   S = overlap(bao)
   hAO = kinetic(bao) + nuclear(bao)
 
-  Enuc = ao_integrals(EC)      # writes "ao_int2"/"S_AA"/"h_AA", returns Enuc
+  Enuc = ao_integrals(EC)      # writes the ± supermatrix store + "S_AA"/"h_AA", returns Enuc
 
   @testset "files and metadata" begin
     @test isempty(EC.fd)                        # EC.fd is MO-only, never holds AO integrals
-    @test file_exists(EC, "ao_int2")
+    @test pm_exists(EC)                         # the ± supermatrix store is the AO representation
+    @test !file_exists(EC, "ao_int2")           # no jointly packed AO integrals are ever written
     @test abs(Enuc - nuclear_repulsion(EC.system)) < 1e-12
     @test maximum(abs.(load2idx(EC, "S_AA") .- S)) < 1e-12
     @test maximum(abs.(load2idx(EC, "h_AA") .- hAO)) < 1e-12
   end
 
+  pm_to_joint!(EC)      # reconstruct the jointly packed integrals from the store for the round-trip
   aofile, aoint2 = mmap3idx(EC, "ao_int2")
   @testset "physicist-notation round-trip" begin
     # detri reconstructs full <pq|rs> from the triangular storage;
@@ -125,7 +127,6 @@ using LinearAlgebra
     Eref = ref_rhf(S, hAO, G, Enuc, 5)   # water: 10 e⁻ → 5 doubly occupied
 
     EC2 = ECInfo{Float64}()
-    EC2.options.int.ao_pm = false
     EC2.system = parse_geometry(geometry, Dict("ao"=>"sto-3g"))
     res = ElemCo.hf(EC2)                 # generates the AO integral files itself
     @test abs(res["HF"] - Eref) < 1e-7
@@ -173,36 +174,32 @@ end
 
   # @hf auto-generates the AO integral files when they are missing
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
-  EC.options.int.ao_pm = false
   @test isempty(EC.fd)
   e_hf = @hf
   @test isempty(EC.fd)                       # EC.fd is MO-only; AO integrals live on files
-  @test file_exists(EC, "ao_int2")
+  @test pm_exists(EC)
   @test abs(e_hf["HF"] - Eref) < 1e-7
 
   # explicit @ints, then @hf reuses the stored integrals
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
-  EC.options.int.ao_pm = false
   @ints
-  @test file_exists(EC, "ao_int2")
+  @test pm_exists(EC)
   e_hf2 = @hf
   @test abs(e_hf2["HF"] - Eref) < 1e-7
 
   # @dummy changes the nuclear charges → the 1-e core Hamiltonian (h_AA) must be invalidated,
-  # but the 2-e AO integrals (ao_int2) are unchanged (ghost atoms keep their basis functions)
+  # but the 2-e AO integrals are unchanged (ghost atoms keep their basis functions)
   # and must be KEPT (they are the expensive part).
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
-  EC.options.int.ao_pm = false
   @ints
-  @test file_exists(EC, "ao_int2")
+  @test pm_exists(EC)
   @test file_exists(EC, "h_AA")
   @dummy ["O"]
-  @test file_exists(EC, "ao_int2")    # 2-e integrals kept (dummy-independent)
+  @test pm_exists(EC)                 # 2-e integrals kept (dummy-independent)
   @test !file_exists(EC, "h_AA")      # 1-e core Hamiltonian invalidated -> recomputed on demand
 
   # closed-shell UHF must reduce to RHF
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
-  EC.options.int.ao_pm = false
   e_uhf = @uhf
   @test abs(e_uhf["UHF"] - Eref) < 1e-7
 
@@ -210,7 +207,6 @@ end
   bao = generate_basis(parse_geometry(geometry, basis), "ao")
   G = eri_2e4idx(bao); S = overlap(bao); hAO = kinetic(bao) + nuclear(bao)
   EC = ElemCo.ECInfo(system=parse_geometry(geometry, basis))
-  EC.options.int.ao_pm = false
   @set wf charge=1 ms2=1
   e_uhf_cation = @uhf
   Enuc = nuclear_repulsion(EC.system)
@@ -224,7 +220,6 @@ end
     # each EC gets its own orbital dump in its (unique) scratch dir, so differently-sized
     # systems below don't clash over the shared default "wf.h5" in the working directory
     fresh(b=basis) = (e = ElemCo.ECInfo(system=parse_geometry(geometry, b));
-                      e.options.int.ao_pm = false;   # joint-flow regression testitem
                       e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
 
     # OPEN-SHELL AO→MO derivation: correlated methods on an AO-source open-shell reference derive
@@ -315,11 +310,12 @@ end
     # cannot catch a wrong f_vo — compare df_mm directly to a dense dressed-Fock reference at nonzero T1.
     EC = fresh(); EC.options.wf.freeze_nocc = 0; @hf
     cMO = Matrix(load_orbitals(EC).α); nao_d = size(cMO, 1)
-    ElemCo.CoupledCluster.ao_cc_setup!(EC)
+    ElemCo.CoupledCluster.ao_cc_setup!(EC; closed_shell=true)   # closed-shell residual on RHF orbitals
     occ = EC.space['o']; virt = EC.space['v']; no_d = length(occ); nv_d = length(virt)
     T1d = 0.03 .* reshape(range(-1.0, 1.0; length=nv_d*no_d), nv_d, no_d)   # deterministic nonzero singles
     ElemCo.CoupledCluster.ao_dressed_ints(EC, T1d, cMO)
     df = load2idx(EC, "df_mm")
+    pm_to_joint!(EC)                                                        # dense reference from the store
     aofile, int2m = mmap3idx(EC, "ao_int2")
     vAO = detri_int2(int2m, nao_d, 1:nao_d, 1:nao_d, 1:nao_d, 1:nao_d)      # dense ⟨μν|ρσ⟩
     close(aofile)

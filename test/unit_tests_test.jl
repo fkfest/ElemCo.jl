@@ -220,6 +220,7 @@ using ElemCo.Integrals: eri_2e4idx
 using ElemCo.IntegralTools: ao_integrals
 using ElemCo.TensorTools: detri_int2, mmap3idx
 using ElemCo.FockFactory: ao_JK!, ao_J2K!
+using ElemCo.PMStore: pm_to_joint!, open_pm_store, close_pm_store!
 using ElemCo.ECInfos
 using LinearAlgebra, Random
 
@@ -236,29 +237,34 @@ Random.seed!(42)
 for basis in ("sto-3g", "cc-pVDZ")
   EC = ECInfo{Float64}()
   EC.system = parse_geometry(geometry, Dict("ao"=>basis))
-  EC.options.int.ao_pm = false   # this testset unit-tests the JOINT streaming kernels
-  ao_integrals(EC)
+  ao_integrals(EC)                       # builds the ± supermatrix store
+  # dense reference: reconstruct the jointly packed integrals from the store (`pm_to_joint!` is
+  # exactly the inverse of the fold, so this compares the Fock builders against integrals that
+  # never went through them)
+  pm_to_joint!(EC)
   aofile, int2 = mmap3idx(EC, "ao_int2")
   nao = size(int2, 1)
   v = detri_int2(int2, nao, 1:nao, 1:nao, 1:nao, 1:nao)   # dense <pq|rs> reference
+  close(aofile)
+  pm = open_pm_store(EC)
   for sym in (true, false)   # HF densities are symmetric; biorthogonal ones need not be
     Dj = randn(nao,nao); Dk = randn(nao,nao); Da = randn(nao,nao); Db = randn(nao,nao)
     if sym
       Dj += Dj'; Dk += Dk'; Da += Da'; Db += Db'
     end
     # fused Coulomb+exchange, no dense nao⁴ tensor formed
-    J = zeros(nao,nao); K = zeros(nao,nao); ao_JK!(J, K, int2, Dj, Dk)
+    J = zeros(nao,nao); K = zeros(nao,nao); ao_JK!(J, K, pm, Dj, Dk)
     @test maximum(abs.(J .- jref(v,Dj))) < 1e-11
     @test maximum(abs.(K .- kref(v,Dk))) < 1e-11
     # UHF: shared Coulomb from the total density + two same-spin exchanges in one pass
     Dt = Da .+ Db
     J2 = zeros(nao,nao); Ka = zeros(nao,nao); Kb = zeros(nao,nao)
-    ao_J2K!(J2, Ka, Kb, int2, Dt, Da, Db)
+    ao_J2K!(J2, Ka, Kb, pm, Dt, Da, Db)
     @test maximum(abs.(J2 .- jref(v,Dt))) < 1e-11
     @test maximum(abs.(Ka .- kref(v,Da))) < 1e-11
     @test maximum(abs.(Kb .- kref(v,Db))) < 1e-11
   end
-  close(aofile)
+  close_pm_store!(EC, pm)
 end
 end
 

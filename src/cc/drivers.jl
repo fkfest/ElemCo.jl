@@ -183,17 +183,18 @@ end
   Whether `ecm` runs directly on the AO integral files without a preceding MO transform:
   MP2/UMP2/RMP2, or CCSD/DCSD/CCD/DCD optionally with perturbative triples and/or a Λ, EOM, QV or
   orbital-optimizing (`O`) prefix. FCI and iterative triples always derive a transient MO dump (see
-  [`derive_mo_basis!`](@ref)), as do the Brueckner (`B`) variants. The caller additionally restricts
-  perturbative triples, Λ / correlated properties and the orbital optimization to the ± store path
-  (`pm_exists`; Λ also needs singles, the orbital optimization also needs `!keepOQVorbitals`), and
-  checks that the frozen-core AO setup matches the residual's spin treatment.
+  [`derive_mo_basis!`](@ref)), as do the Brueckner (`B`) variants. Everything else that cannot be
+  done AO-direct is rejected rather than silently rerouted: EOM without singles and Λ / correlated
+  properties on top of an orbital optimization (`O`) are errors (see `ccdriver`). A closed-shell
+  method meeting unrestricted orbitals or open-shell occupations is not rerouted either — it is
+  promoted to its unrestricted form by
+  [`checkset_unrestricted_closedshell!`](@ref).
 """
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)
   name == "MP2" && return true                          # standalone MP2/UMP2/RMP2 off the bare AO blocks
   # Brueckner variants are not wired for AO-direct yet → derive. The orbital-optimized ("O") ones are:
-  # `ao_rotate_ints` folds the rotation into the coefficients and keeps `d_mmmo` in the AO space (the
-  # caller additionally requires the ± store, which the per-iteration re-transform needs).
+  # `ao_rotate_ints` folds the rotation into the coefficients and keeps `d_mmmo` in the AO space.
   has_prefix(ecm, "B") && return false
   return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD", "CCD", "DCD")
 end
@@ -202,7 +203,7 @@ end
 """
     derive_mo_basis!(EC::ECInfo)
 
-  Derive a transient MO-basis `EC.fd` from the exact AO integral files (`"ao_int2"`/`"h_AA"`,
+  Derive a transient MO-basis `EC.fd` from the exact AO integrals (the ± supermatrix store, `"h_AA"`,
   see `ao_integrals`) and the current orbitals, reducing the dump to the active
   space so that the MO integrals (and all downstream methods) scale with the active space
   rather than `nao` — the non-DF analogue of `dfdump`:
@@ -293,45 +294,48 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     contract_df_integrals!(EC)
   end
   # Integral-source selection: a non-empty `EC.fd` (external FCIDUMP / generated MO dump) wins;
-  # otherwise the exact AO integral files are used. Closed-shell CCSD/DCSD run AO-direct by
-  # default (frozen core folded into an effective 1-e Hamiltonian inside `ao_cc_setup!`); set
-  # `int.ao_direct=false` to route them through a derived MO dump instead. Every other method
-  # (triples/EOM/Λ/FCI), an unrestricted reference, or a basis with linearly-dependent (deleted)
-  # orbitals gets a transient MO dump derived from the AO integrals (`derive_mo_basis!`, folded
-  # like `dfdump`). Linearly-dependent (deleted/redundant) orbitals also route to the derived MO
-  # dump: the AO-direct rectangular-`Rot` path reproduces HF/MP2 but not yet the CCSD kext
-  # (joint-symmetry of the rotated density) — a follow-up; the derive path is exact meanwhile.
+  # otherwise the exact AO integrals (the ± supermatrix store) are used. Closed- and open-shell
+  # MP2/CCSD/DCSD, their doubles-only and quasi-variational variants, perturbative triples, the Λ
+  # equations (with or without singles), correlated properties and EOM all run AO-direct by default
+  # (the frozen core is folded into an effective 1-e Hamiltonian inside `ao_cc_setup!`), including
+  # with linearly-dependent (deleted) orbitals and with an unrestricted residual on restricted
+  # orbitals; set `int.ao_direct=false` to route them through a derived MO dump instead. Iterative
+  # triples, Brueckner, FCI and the combinations excluded by the gates below get a transient MO dump
+  # derived from the AO integrals (`derive_mo_basis!`, folded like `dfdump`).
+  # Combinations that are not supported are REJECTED here rather than quietly rerouted to the MO
+  # dump: a silent reroute hides both the cost and (for the `O`+Λ case) a wrong answer.
+  ecm_check = ECMethod(method)
+  if has_prefix(ecm_check, "EOM") && ecm_check.exclevel[1] != :full
+    error("EOM requires singles — `$(method)` has none. Use an EOM method built on a " *
+          "singles-carrying reference (e.g. EOM-CCSD).")
+  end
+  if has_prefix(ecm_check, "O") && need_lagrange_multipliers(EC, ecm_check)
+    error("The orbital-optimized methods do not provide Λ equations, so `$(method)` cannot be " *
+          "combined with a Λ prefix, `cc.properties` or `wf.natorb`.")
+  end
   ao_source = isempty(EC.fd)
+  ao_closed_shell = false   # AO-direct: spin treatment of the residual, passed to `ao_cc_setup!`
   if ao_source
-    (file_exists(EC, "ao_int2") || pm_exists(EC)) ||
+    pm_exists(EC) ||
       error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
             "Generate integrals first (@ints/@hf/@dfints) or provide an fcidump.")
     setup_space_system!(EC)
-    closed_shell = (EC.space['o'] == EC.space['O'])
-    # AO-direct requires that `ao_cc_setup!` (which builds the reference dispatched on the stored
-    # orbitals' restrictedness) matches the residual's spin treatment. The residual is closed-shell
-    # iff the method has no U/R prefix and the occupations are equal; require that this agrees with
-    # the orbitals. A mismatch (e.g. UCCSD on RHF orbitals) or deleted orbitals routes to derive.
+    # "closed shell" for the RESIDUAL: equal occupations AND restricted orbitals. Unrestricted
+    # orbitals make the residual unrestricted even for a closed-shell method name — the method is
+    # then promoted (`checkset_unrestricted_closedshell!`), not rerouted to the MO dump.
+    closed_shell = (EC.space['o'] == EC.space['O']) && is_restricted(load_orbitals(EC))
+    # Nothing below reroutes any more: the unsupported combinations errored above, a closed-shell
+    # method on unrestricted orbitals/occupations is promoted to its unrestricted form, and the
+    # AO-direct path covers deleted orbitals. Only the method itself (FCI, iterative triples,
+    # Brueckner) and the user's `int.ao_direct` decide.
     ecm = ECMethod(method)
     would_be_closed_shell = !is_unrestricted(ecm) && !has_prefix(ecm, "R") && closed_shell
-    # AO-direct Λ / EOM / correlated-properties need the AO Λ machinery (dressing incl. the 3-external
-    # blocks + kext + the generalized-Fock dD1 term), which lives on the ± store and needs singles
-    # (Λ-CCD/DCD go through the MO-only pseudo_dressed_ints → derive).
-    needs_lambda = has_prefix(ecm, "Λ") || has_prefix(ecm, "EOM") || need_correlated_properties(EC)
-    lambda_ok = !needs_lambda || (pm_exists(EC) && ecm.exclevel[1] == :full)
-    # AO-direct perturbative triples build their 3-external blocks from the half-transformed store(s),
-    # which exist only on the ± store path (closed shell: ht_oAAA; unrestricted: ht_oAAA_a/_b).
-    triples_ok = ecm.exclevel[3] == :none || pm_exists(EC)
-    # orbital-optimized QV re-transforms the integrals every macro-iteration and rebuilds the
-    # half-transformed store with the rotated occupied orbitals → needs the ± store. `keepOQVorbitals`
-    # additionally transforms the MO dump itself (transform_fcidump!), which AO-direct does not have.
-    orbopt_ok = !has_prefix(ecm, "O") || (pm_exists(EC) && !EC.options.cc.keepOQVorbitals)
-    ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct &&
-                lambda_ok && triples_ok && orbopt_ok &&
-                is_restricted(load_orbitals(EC)) == would_be_closed_shell
+    ao_direct = ao_direct_method(ecm) && EC.options.int.ao_direct
     if ao_direct
       EC.ao_direct = true            # the active-space setup (freezing) happens in ao_cc_setup!
+      ao_closed_shell = would_be_closed_shell
     else
+      EC.ao_direct = false           # never inherit a stale `true` from an aborted earlier run
       derive_mo_basis!(EC)
       setup_space_fd!(EC)
       closed_shell = is_closed_shell(EC)
@@ -343,7 +347,8 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
 
   energies = OutDict()
   if EC.ao_direct
-    EHF = ao_cc_setup!(EC)   # freezes core (fold into eff. 1-e H), builds bare f_mm/e_m/d_oovv
+    # freezes core (fold into eff. 1-e H), builds bare f_mm/e_m/d_oovv for the residual's spin case
+    EHF = ao_cc_setup!(EC; closed_shell=ao_closed_shell)
     output_E_method(EHF, "HF", "energy:"); println(); flush_output()
     energies = merge(energies, "HF"=>(EHF, "HF energy"))
   else
@@ -351,7 +356,8 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   end
   # t1 = print_time(EC, t1, "HF energy", 1)
   ecmethod = ECMethod(method)
-  # AO-direct leaves `EC.fd` empty, so the reference's spin comes from the stored orbitals.
+  # Whether the ORBITALS are UHF (only the `R` methods care — they require a non-UHF reference; an
+  # unrestricted residual runs on either kind). AO-direct leaves `EC.fd` empty, so it asks the orbitals.
   unrestricted_orbs = EC.ao_direct ? !is_restricted(load_orbitals(EC)) : EC.fd.uhf
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
   # calculate MP2 (also the CC start guess). `calc_MP2`/`calc_UMP2` read the bare MO integrals
@@ -538,7 +544,7 @@ function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   # from the exact AO integral files (deleted orbitals dropped, frozen core folded).
   ao_source = isempty(EC.fd)
   if ao_source
-    (file_exists(EC, "ao_int2") || pm_exists(EC)) ||
+    pm_exists(EC) ||
       error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
             "Generate integrals first (@ints/@hf/@dfints) or provide an fcidump.")
     derive_mo_basis!(EC)
@@ -847,12 +853,7 @@ function eval_cc_groundstate(EC::ECInfo, ecmethod::ECMethod, energies_in::OutDic
   ECC = calc_cc(EC, ECMethod(main_name))
   if has_prefix(ecmethod, "O") && has_prefix(ecmethod, "QV")
     closed_shell = is_closed_shell(EC)
-    if EC.options.cc.keepOQVorbitals
-      push!(energies, "HF(original)"=>(energies["HF"], "HF energy"))
-      energies = eval_hf_energy(EC, energies, closed_shell)
-    else
-      energies = eval_hf_energy(EC, energies, closed_shell; rotated=true)
-    end
+    energies = eval_hf_energy(EC, energies, closed_shell; rotated=true)
   end
   if has_prefix(ecmethod, "2D")
     energies = output_2d_energy(EC, ECC, energies, main_name)

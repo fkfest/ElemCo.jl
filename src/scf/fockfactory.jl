@@ -144,79 +144,14 @@ function gen_fock(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
   return fock
 end
 
-"""
-    ao_JK!(J, K, int2, Dj, Dk)
-
-  Accumulate (added to `J`/`K`) the Coulomb and exchange AO matrices
-  ``J_{pq} \\mathrel{+}= \\sum_{rs} \\langle pr|qs\\rangle D^J_{rs}`` and
-  ``K_{pq} \\mathrel{+}= \\sum_{rs} \\langle pr|sq\\rangle D^K_{rs}`` directly from the
-  **triangular** spin-free 2-e integrals `int2[p,q,tri(r,s)] = <pq|rs>` (`r ≤ s`, e.g. the
-  memory-mapped exact AO integrals `"ao_int2"`). One `nao×nao` integral slab
-  `slab = int2[:,:,tri(r,s)]` is streamed at a time via BLAS `mul!` (GEMV, no allocation): the
-  full `nao⁴` tensor is never materialized, no large intermediate is formed, and the `r ≤ s`
-  packing is exploited — each off-diagonal slab also serves its transposed `(s,r)` partner
-  through the joint symmetry `<pq|rs> = <qp|sr>`. `Dj`, `Dk` need not be symmetric. `O(nao²)`
-  working memory. Slab identities: `J[:,r] += slab·Dj[:,s]`, `K[:,s] += slab·Dk[:,r]`, and for
-  `r < s` also `J[:,s] += slabᵀ·Dj[:,r]`, `K[:,r] += slabᵀ·Dk[:,s]`.
-"""
-function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, int2::AbstractArray{<:Number,3},
-                Dj::AbstractMatrix, Dk::AbstractMatrix; hermitian::Bool=false)
-  # `hermitian` (accepted so callers can stay integral-source-agnostic) is unused here — the
-  # joint slab stream has no symmetric-density fast path; the ± store does (see below).
-  nao = size(int2, 1)
-  @inbounds for s in 1:nao
-    rng = uppertriangular_range(s)                 # packed indices of (r=1:s, s), contiguous
-    for r in 1:s
-      slab = @view int2[:, :, rng[r]]              # slab[p,q] = <pq|rs>
-      mul!(view(J,:,r), slab, view(Dj,:,s), true, true)   # J[:,r] += slab · Dj[:,s]
-      mul!(view(K,:,s), slab, view(Dk,:,r), true, true)   # K[:,s] += slab · Dk[:,r]
-      if r < s
-        slabT = transpose(slab)
-        mul!(view(J,:,s), slabT, view(Dj,:,r), true, true)  # J[:,s] += slabᵀ · Dj[:,r]
-        mul!(view(K,:,r), slabT, view(Dk,:,s), true, true)  # K[:,r] += slabᵀ · Dk[:,s]
-      end
-    end
-  end
-  return J, K
-end
-
-"""
-    ao_J2K!(J, Ka, Kb, int2, Dt, Da, Db)
-
-  Like [`ao_JK!`](@ref) but builds the **shared** Coulomb `J` from the total density `Dt` once
-  and both same-spin exchange matrices `Ka`,`Kb` (from `Da`,`Db`) in a single streaming pass
-  over the AO integral slabs — the Coulomb slab products are not repeated per spin.
-"""
-function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
-                 int2::AbstractArray{<:Number,3}, Dt::AbstractMatrix,
-                 Da::AbstractMatrix, Db::AbstractMatrix; hermitian::Bool=false)
-  nao = size(int2, 1)
-  @inbounds for s in 1:nao
-    rng = uppertriangular_range(s)
-    for r in 1:s
-      slab = @view int2[:, :, rng[r]]
-      mul!(view(J,:,r),  slab, view(Dt,:,s), true, true)
-      mul!(view(Ka,:,s), slab, view(Da,:,r), true, true)
-      mul!(view(Kb,:,s), slab, view(Db,:,r), true, true)
-      if r < s
-        slabT = transpose(slab)
-        mul!(view(J,:,s),  slabT, view(Dt,:,r), true, true)
-        mul!(view(Ka,:,r), slabT, view(Da,:,s), true, true)
-        mul!(view(Kb,:,r), slabT, view(Db,:,s), true, true)
-      end
-    end
-  end
-  return J, Ka, Kb
-end
-
 # ---- ao_JK!/ao_J2K! on the persisted ± supermatrix store ------------------------------
 #
-# The joint-store `ao_JK!` above streams one FULL slab `G[μ,ν]=⟨μν|ρσ⟩` per ket pair (ρσ) and
-# applies the slab identities  `J[:,ρ] += G·Dj[:,σ]`,  `K[:,σ] += G·Dk[:,ρ]`  (plus the ket-swap
-# `Gᵀ` for `ρ<σ`). The ± store keeps only the lower block-triangle; `PMStore.pm_slab_sweep!`
+# Per ket pair (ρσ) the AO Fock build needs the slab identities  `J[:,ρ] += G·Dj[:,σ]`,
+# `K[:,σ] += G·Dk[:,ρ]`  (plus the ket-swap `Gᵀ` for `ρ<σ`) with the full slab
+# `G[μ,ν] = ⟨μν|ρσ⟩`. The ± store keeps only the lower block-triangle; `PMStore.pm_slab_sweep!`
 # reconstructs each column's slab and lets us apply those identities in two roles — NATIVE (this
 # column as the ket ⟨··|ρσ⟩, L-band `(native_lo, nao]`) and MIRROR (by hermiticity the bra
-# ⟨ρσ|··⟩, sub-panel band `(mirror_lo, nao]`) — reading n⁴/4, half the joint store. See the
+# ⟨ρσ|··⟩, sub-panel band `(mirror_lo, nao]`) — reading n⁴/4, half a jointly packed store. See the
 # PMStore "per-column slab reconstruction sweep" section for the machinery.
 #
 # `add_coulomb!` / `add_exchange!` each perform both roles for one density. A closed-shell Fock
@@ -369,16 +304,16 @@ function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
   return J, Ka, Kb
 end
 
-# Integral handle accepted by the AO Fock builders: the joint triangular array or the ± store.
-const AOIntegrals = Union{AbstractArray{<:Number,3}, PMSupermatrices}
+# Integral handle accepted by the AO Fock builders: the persisted ± supermatrix store.
+const AOIntegrals = PMSupermatrices
 
 """
     gen_fock(EC::ECInfo, ints, h1::AbstractMatrix, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
 
   Closed-shell AO Fock matrix `h1 + 2J − K` from explicitly given spin-free 2-e integrals
-  `ints` and orbitals `CMOl`, `CMOr`. `ints` is either the joint triangular array
-  `int2[p,q,tri(r,s)] = ⟨pq|rs⟩` or the persisted ± supermatrix store ([`PMSupermatrices`](@ref
-  PMStore.PMSupermatrices)) — [`ao_JK!`](@ref) dispatches on it (the ± store halves the integral
+  `ints` and orbitals `CMOl`, `CMOr`. `ints` is the persisted ± supermatrix store
+  ([`PMSupermatrices`](@ref PMStore.PMSupermatrices)), the only exact-AO integral
+  representation — [`ao_JK!`](@ref) contracts it directly (the ± store halves the integral
   I/O). The contraction is basis-agnostic (physicists' notation), so feeding AO integrals + AO
   density yields the AO Fock; no dense `nao⁴` tensor is formed. `nao` is taken from the orbitals.
 """
@@ -396,7 +331,7 @@ end
 """
     gen_ufock(EC::ECInfo, ints, h1::AbstractMatrix, cMOl::SpinMatrix, cMOr::SpinMatrix)
 
-  UHF AO Fock matrix from explicitly given spin-free 2-e integrals `ints` (joint array or ±
+  UHF AO Fock matrix from explicitly given spin-free 2-e integrals `ints` (the ±
   store; [`ao_J2K!`](@ref) dispatches) and 1-e integrals `h1` (same for both spins). The shared
   Coulomb term (total density) is built once and both same-spin exchange terms in a single
   streaming pass; no dense `nao⁴` tensor is formed. `nao` is taken from the orbitals.

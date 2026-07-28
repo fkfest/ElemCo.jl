@@ -170,9 +170,6 @@ end
   ampsvdfac::Float64 = 1.e-2
   """`⟨true⟩` use kext for doubles residual. """
   use_kext::Bool = true
-  """`⟨false⟩` use plus/minus factorization in kext. 
-  This kext has two times less FLOPs, but is less cache-friendly and can be slower for small systems. """
-  use_pm_kext::Bool = false
   """`⟨false⟩` calculate dressed <vv|vv>. """
   calc_d_vvvv::Bool = false
   """`⟨false⟩` calculate dressed <vv|vo>. """
@@ -256,8 +253,6 @@ end
   dcsd_ofac::Float64 = 0.15
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
-  """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
-  keepOQVorbitals::Bool = false
   """`⟨:maxdim⟩` pivot tolerance mode for LLAMA decomposition:
   - `:adaptive` use LLAMA's internal adaptive `tol/sqrt(m_eff)` pivot tolerance
   - `:maxdim` use `tol/sqrt(max(m,n))` as pivot tolerance (more robust for difficult cases, e.g., ghost atoms)
@@ -517,10 +512,6 @@ end
   effective 1-electron Hamiltonian). Set to `false` to instead derive a transient MO integral
   dump from the AO integrals (as for CCSDT/FCI). No effect on DF integrals. """
   ao_direct::Bool = true
-  """`⟨true⟩` for exact AO integrals: store them as the persisted ± (plus/minus) supermatrix
-  store (`ao_pm_s`/`ao_pm_a`, ≈ half the disk of the joint `ao_int2`).
-  Set to `false` to keep the joint-only flow. """
-  ao_pm::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """
   fcidump::String = ""
   """`⟨false⟩` use Cartesian subshells instead of Spherical. """

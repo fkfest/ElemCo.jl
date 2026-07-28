@@ -10,7 +10,7 @@
 # conjugation-free exchange symmetry, so the identity holds verbatim over ℂ).
 using ElemCo
 using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
-using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx, load4idx
+using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx, load4idx, load2idx
 using ElemCo.PMStore
 using ElemCo.FockFactory: ao_JK!, ao_J2K!, add_coulomb!, add_exchange!
 using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform
@@ -113,24 +113,6 @@ end
   end
 end
 
-# Baseline: the existing on-the-fly ± kext (cc.use_pm_kext) must agree with the standard
-# GEMM kext on the AO-direct path — documents correctness of the reused D-prep/scatter
-# before the persisted store replaces the per-iteration ± build (plan Phase 0, gate).
-@testset "AO-direct kext: pm ↔ standard" begin
-  geometry = "
-    O   0.000000000   0.000000000  -0.130186067
-    H1  0.000000000   1.489124508   1.033245507
-    H2  0.000000000  -1.489124508   1.033245507"
-  fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
-             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
-
-  EC = fresh(); @set int ao_pm=false; @ints; @hf; @set cc use_pm_kext=false
-  e_std = @cc ccsd
-  EC = fresh(); @set int ao_pm=false; @ints; @hf; @set cc use_pm_kext=true
-  e_pm = @cc ccsd
-  @test abs(e_std["CCSD"] - e_pm["CCSD"]) < 1e-10
-end
-
 # Phase-1 gate: the persisted ± store round-trips exactly. Build a physical (exchange +
 # hermitian) int2, write it as "ao_int2", pm_from_joint!, reopen, reconstruct the full
 # supermatrices from the stored lower block-triangle (+ Hermitian mirror) and compare to
@@ -200,12 +182,12 @@ end
   end
 end
 
-# Phase-2 kernel gate: the persisted kext pm_K2! reproduces the streaming ± kext
-# calc_pm_K2! bit-for-bit (both apply the same ij-fold + 4-quadrant scatter to the same
-# Vs/Va — persisted vs re-folded). Holds for ANY D2. Real and complex.
-@testset "pm_K2! ↔ calc_pm_K2!" begin
+# Phase-2 kernel gate: the persisted ± kext pm_K2! reproduces calc_K2 — the kext of the MO/dump
+# path, which `cc_kext!` uses interchangeably with pm_K2! on the same `D2`/`tripp`, so this pins
+# exactly the invariant the two integral paths rely on. Holds for ANY D2. Real and complex.
+@testset "pm_K2! ↔ calc_K2" begin
   pm_K2! = ElemCo.CoupledCluster.pm_K2!
-  calc_pm_K2! = ElemCo.CoupledCluster.calc_pm_K2!
+  calc_K2 = ElemCo.CoupledCluster.calc_K2
   for T in (Float64, ComplexF64), (n, nocc, maxcols) in ((9, 3, 12), (12, 4, 30))
     EC, int2 = build_store(n, T, maxcols)
     tripp = ElemCo.QMTensors.uppertriangular_cut(n); ntri = length(tripp)
@@ -213,12 +195,12 @@ end
     pm = open_pm_store(EC)
     Kpm = pm_K2!(pm, D2, tripp)
     close_pm_store!(EC, pm)
-    Kref = calc_pm_K2!(int2, D2, tripp)
+    Kref = calc_K2(int2, D2, tripp)
     @test maximum(abs.(Kpm .- Kref)) < 1e-11
   end
 end
 
-# The fused, multi-threaded ± fold and 4-quadrant scatter are shared by pm_K2! and calc_pm_K2!,
+# The fused, multi-threaded ± fold and 4-quadrant scatter are shared by pm_K2! and pm_K2ab!,
 # so they need their own gate against the explicit cut-by-cut reference they replaced. Bit-for-bit
 # (not "to round-off"): both forms perform the same two flops per element, in the same order.
 # Includes odd/even nocc, nocc=1, and the pq/ij diagonals where the four quadrants alias.
@@ -283,28 +265,28 @@ end
 # Phase-3 kernel gate: the PM Fock kernels reproduce the streaming joint-store kernels for
 # ARBITRARY (nonsymmetric!) densities — pins the elementwise two-role sweep incl. the
 # uniform ½-degeneracy weights and the conj mirror role. Real and complex, several blockings.
-# ao_JK!/ao_J2K! dispatch on the ± store handle == the joint-store methods, for arbitrary
-# (nonsymmetric!) densities — pins the two-role band sweep + conj mirror. Real and complex.
-@testset "ao_JK!/ao_J2K! (± store dispatch) ↔ joint" begin
+# ao_JK!/ao_J2K! on the ± store reproduce a DENSE reference for arbitrary (nonsymmetric!)
+# densities — pins the two-role band sweep + conj mirror. Real and complex.
+@testset "ao_JK!/ao_J2K! (± store) ↔ dense" begin
+  # dense physicist references: J[p,q]=Σ⟨pr|qs⟩Dj[r,s], K[p,q]=Σ⟨pr|sq⟩Dk[r,s]
+  jdense(G, D) = (@tensor Jd[p,q] := G[p,r,q,s] * D[r,s]; Jd)
+  kdense(G, D) = (@tensor Kd[p,q] := G[p,r,s,q] * D[r,s]; Kd)
   for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (13, 30), (11, 200))
     EC, int2 = build_store(n, T, maxcols)
+    G = detri_int2(int2, n, 1:n, 1:n, 1:n, 1:n)            # dense ⟨pq|rs⟩ reference
     pm = open_pm_store(EC)
     Dj = randn(T, n, n); Dk = randn(T, n, n)               # nonsymmetric on purpose
-    J1 = zeros(T, n, n); K1 = zeros(T, n, n)
-    ao_JK!(J1, K1, int2, Dj, Dk)                           # joint-store reference
     J2 = zeros(T, n, n); K2 = zeros(T, n, n)
     ao_JK!(J2, K2, pm, Dj, Dk)             # dispatch on PMSupermatrices
-    @test maximum(abs.(J2 .- J1)) < 1e-12
-    @test maximum(abs.(K2 .- K1)) < 1e-12
+    @test maximum(abs.(J2 .- jdense(G, Dj))) < 1e-12
+    @test maximum(abs.(K2 .- kdense(G, Dk))) < 1e-12
     # UHF variant: shared Coulomb + two exchanges in one pass
     Da = randn(T, n, n); Db = randn(T, n, n); Dt = Da .+ Db
-    J1 .= 0; Ka1 = zeros(T, n, n); Kb1 = zeros(T, n, n)
-    ao_J2K!(J1, Ka1, Kb1, int2, Dt, Da, Db)
     J2 .= 0; Ka2 = zeros(T, n, n); Kb2 = zeros(T, n, n)
     ao_J2K!(J2, Ka2, Kb2, pm, Dt, Da, Db)
-    @test maximum(abs.(J2 .- J1)) < 1e-12
-    @test maximum(abs.(Ka2 .- Ka1)) < 1e-12
-    @test maximum(abs.(Kb2 .- Kb1)) < 1e-12
+    @test maximum(abs.(J2 .- jdense(G, Dt))) < 1e-12
+    @test maximum(abs.(Ka2 .- kdense(G, Da))) < 1e-12
+    @test maximum(abs.(Kb2 .- kdense(G, Db))) < 1e-12
     close_pm_store!(EC, pm)
   end
 
@@ -437,6 +419,38 @@ end
     @test eB < 1e-13
     close_ht_store!(EC, ht); delete_ht_store!(EC, "ht_test")
     close_pm_store!(EC, pm)
+  end
+end
+
+# `ht_jk_columns!`: the single-pass generalized-J/K contraction of both slab roles with two AO
+# densities, the kernel the Λ residual's dD1 v,o term (`dD1_ht_vo`) runs on. It reads the pair-packed
+# map directly (each element ONCE, vs `ht_column!`'s two passes), so it must reproduce exactly what
+# the `ht_column!` slabs give — including on the pair diagonal, where the two ket orders coincide.
+# `DJ`/`DK` are deliberately DIFFERENT and NON-symmetric (the whole point of the dD1 term), and the
+# complex cases pin that no conjugation sneaks in (real alone cannot distinguish that).
+@testset "ht_jk_columns! (single-pass J/K columns) ↔ ht_column!" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((8, 8), (12, 30), (14, 300))
+    m = 4
+    EC, int2 = build_store(n, T, maxcols)
+    G = detri_int2(int2, n, 1:n, 1:n, 1:n, 1:n)
+    C = randn(T, n, m); DJ = randn(T, n, n); DK = randn(T, n, n)
+    pm = open_pm_store(EC); pm_half_trans(EC, pm, C, "ht_jk"); close_pm_store!(EC, pm)
+    ht = open_ht_store(EC, "ht_jk")
+    # dense reference: t[i,σ] = Σ_xy ( ⟨x i|y σ⟩ DJ[x,y] − ⟨i x|y σ⟩ DK[x,y] )
+    @tensor tref[i,σ] := (G[x,ν,y,σ] * C[ν,i]) * DJ[x,y] - (G[ν,x,y,σ] * C[ν,i]) * DK[x,y]
+    t = Matrix{T}(undef, m, n)
+    ht_jk_columns!(t, ht, DJ, DK)
+    @test maximum(abs, t .- tref) < 1e-12 * max(1.0, maximum(abs, tref))
+    # and bit-for-structure agreement with the ht_column! route it replaces
+    tcol = zeros(T, m, n); Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n)
+    for σ in 1:n
+      ht_column!(Aσ, Bσ, ht, σ)
+      tv = view(tcol, :, σ)
+      mul!(tv, reshape(Bσ, m, n*n), vec(DJ))
+      mul!(tv, reshape(Aσ, m, n*n), vec(DK), -one(T), one(T))
+    end
+    @test maximum(abs, t .- tcol) < 1e-12 * max(1.0, maximum(abs, tref))
+    close_ht_store!(EC, ht); delete_ht_store!(EC, "ht_jk")
   end
 end
 
@@ -632,20 +646,22 @@ end
   end
 end
 
-# Fused ± generation: ao_integrals with ao_pm builds the store straight from the ERI
-# generator (shell-aligned blocks, no joint ao_int2 intermediate at any point). Validate the
-# store contents against a joint-generated reference via pm_to_joint!, incl. a forced
-# multi-block blocking.
-@testset "fused ± generation ≡ joint generation" begin
+# Fused ± generation: `ao_integrals` builds the store straight from the ERI generator
+# (shell-aligned blocks, no jointly packed intermediate at any point). Validate the store contents
+# against a reference obtained by running the ERI kernel into a plain triangular array, via
+# pm_to_joint!, incl. a forced multi-block blocking.
+@testset "fused ± generation ≡ direct ERI generation" begin
   geometry = "
     O   0.000000000   0.000000000  -0.130186067
     H1  0.000000000   1.489124508   1.033245507
     H2  0.000000000  -1.489124508   1.033245507"
   mk() = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")))
-  # reference: joint generation
-  EC2 = mk(); EC2.options.int.ao_pm = false
-  ElemCo.IntegralTools.ao_integrals(EC2)
-  f2, j2 = mmap3idx(EC2, "ao_int2"); ref = copy(j2); close(f2)
+  # reference: the ERI kernel written straight into a jointly packed triangular array
+  EC2 = mk()
+  bao2 = ElemCo.IntegralTools.save_ao_1e_integrals!(EC2)
+  nao2 = size(load2idx(EC2, "S_AA"), 1)
+  ref = zeros(Float64, nao2, nao2, nao2*(nao2+1)÷2)
+  ElemCo.Integrals.eri_2e4idx_tri!(ref, bao2)
   # fused, default blocking
   EC1 = mk()
   ElemCo.IntegralTools.ao_integrals(EC1)
@@ -668,10 +684,10 @@ end
   close(f3)
 end
 
-# Phase-2 acceptance: AO-direct energies through the PM-store kext match the standard GEMM
-# kext, closed shell (CCSD/DCSD) and open shell (UCCSD, same-spin via PM + αβ raw).
-# After Phase 5 these runs also exercise the PM-native dressing sweeps end-to-end.
-@testset "AO-direct kext via PM store ↔ standard" begin
+# Phase-2 acceptance: AO-direct energies through the PM-store kext match the derived-MO-dump
+# reference, closed shell (CCSD/DCSD) and open shell (UCCSD, same-spin via PM + αβ raw).
+# These runs also exercise the PM-native dressing sweeps end-to-end.
+@testset "AO-direct kext via PM store ↔ derived MO dump" begin
   geometry = "
     O   0.000000000   0.000000000  -0.130186067
     H1  0.000000000   1.489124508   1.033245507
@@ -680,31 +696,26 @@ end
              e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
   for m in ("ccsd", "dcsd")
     key = uppercase(m)
-    EC = fresh(); @set int ao_pm=false; @ints; ehf_std = @hf; e_std = @cc m
-    EC = fresh(); @ints; ehf_pm = @hf; e_pm = @cc m        # default: ± store, joint retired
+    EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_std = @cc m
+    EC = fresh(); @ints; @hf; e_pm = @cc m                 # default: AO-direct on the ± store
     @test pm_exists(EC)                                    # the ± store was built by @ints
-    @test !file_exists(EC, "ao_int2")                      # joint intermediate retired (disk ≈ n⁴/4)
     @test isempty(EC.fd)                                   # still AO-direct
-    # AO-HF via the PM Fock builder (gen_fock dispatch) == joint-store HF
-    @test abs(ehf_std["HF"] - ehf_pm["HF"]) < 1e-11
     @test abs(e_std[key] - e_pm[key]) < 1e-10
   end
   # open-shell cation (ms2=1): UHF via ao_J2K!(pm,…) + frozen-core ao_core_ufock via the PM path
-  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=false; ehf_std = @uhf; e_std = @cc ccsd
-  EC = fresh(); @set wf charge=1 ms2=1; ehf_pm = @uhf; e_pm = @cc ccsd   # default PM flow
+  EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_std = @cc ccsd
+  EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm = @cc ccsd            # AO-direct on the ± store
   @test pm_exists(EC)
-  @test !file_exists(EC, "ao_int2")                        # αβ kext ran via pm_K2ab! (no joint file)
-  @test abs(ehf_std["UHF"] - ehf_pm["UHF"]) < 1e-11
   @test abs(e_std["UCCSD"] - e_pm["UCCSD"]) < 1e-10
-  # standalone MP2/UMP2 run AO-direct off the ± store now (method gate admits MP2)
+  # standalone MP2/UMP2 run AO-direct off the ± store (method gate admits MP2)
   EC = fresh(); @ints; @hf; e_pm_mp2 = @cc mp2
   @test pm_exists(EC) && isempty(EC.fd)                    # standalone MP2 stayed on the ± store
-  EC = fresh(); @set int ao_pm=false; @ints; @hf; e_j_mp2 = @cc mp2
-  @test abs(e_pm_mp2["MP2"] - e_j_mp2["MP2"]) < 1e-10      # ± store MP2 == joint MP2
+  EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_d_mp2 = @cc mp2
+  @test abs(e_pm_mp2["MP2"] - e_d_mp2["MP2"]) < 1e-10      # ± store MP2 == derived-dump MP2
   EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ump2 = @cc mp2
   @test pm_exists(EC) && isempty(EC.fd)
-  EC = fresh(); @set wf charge=1 ms2=1; @set int ao_pm=false; @uhf; e_j_ump2 = @cc mp2
-  @test abs(e_pm_ump2["UMP2"] - e_j_ump2["UMP2"]) < 1e-10
+  EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_d_ump2 = @cc mp2
+  @test abs(e_pm_ump2["UMP2"] - e_d_ump2["UMP2"]) < 1e-10
   # closed-shell CCSD(T)/DCSD(T) run AO-direct off the ± store: the 3-external vvvo/ovoo blocks are built
   # from ht_oAAA (no MO dump), and the (T) energy matches the derived-MO-dump reference
   for m in ("ccsd(t)", "dcsd(t)")
@@ -778,6 +789,27 @@ end
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_qv = @cc m
     @test abs(e_pm_qv[key] - e_ref_qv[key]) < 1e-8
   end
+  # Λ for the doubles-only methods: the Λ dressing is called with EMPTY Lagrange singles, so the AO
+  # path writes the BARE blocks under the same `d_*` names that `pseudo_dressed_ints` writes on the MO
+  # path (incl. the 3-external d_vovv). Closed shell and the unrestricted (cation) counterparts.
+  for (m, key, open) in (("Λccd", "ΛCCD", false), ("Λdcd", "ΛDCD", false),
+                         ("Λuccd", "ΛUCCD", true), ("Λudcd", "ΛUDCD", true))
+    EC = fresh(); @ints
+    if open; @set wf charge=1 ms2=1; @uhf; else; @hf; end
+    e_pm_lam = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)
+    EC = fresh(); EC.options.int.ao_direct = false; @ints
+    if open; @set wf charge=1 ms2=1; @uhf; else; @hf; end
+    e_ref_lam = @cc m
+    @test abs(e_pm_lam[key] - e_ref_lam[key]) < 1e-8
+  end
+  # correlated properties without singles go through the same no-singles Λ (the 1-RDM is
+  # amplitude-only): the CCD dipole matches the derived-MO-dump one.
+  EC = fresh(); EC.options.cc.properties = true; @ints; @hf; e_pm_dp = @cc ccd
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); EC.options.cc.properties = true; EC.options.int.ao_direct = false
+  @ints; @hf; e_ref_dp = @cc ccd
+  @test abs(e_pm_dp["mu"] - e_ref_dp["mu"]) < 1e-8
   # the orbital-optimized variants re-transform the integrals every macro-iteration: AO-direct folds
   # the rotation into the coefficients (ao_rotate_ints) instead of re-transforming an MO dump, and
   # rebuilds the half-transformed stores for the ROTATED occupied space — their bra IS the occupied
@@ -792,6 +824,60 @@ end
     @test abs(e_oqv[key] - e_oqv_ref[key]) < 1e-8
     @test abs(e_oqv["HF"] - e_oqv_ref["HF"]) < 1e-8
   end
+  # ... but the orbital-optimized methods provide NO Λ equations, so they cannot be combined with a
+  # Λ prefix, `cc.properties` or `wf.natorb` — that is rejected rather than silently rerouted.
+  # (Historically it was allowed and produced a dipole wrong in the 3rd decimal at an unchanged
+  # energy: `ao_rotate_ints` rebuilds the half-transformed store from the ROTATED occupied orbitals
+  # without persisting the rotated coefficients, so `dress_lambda_ints!` — which reads the STORED
+  # ones — mixed rotated bras with unrotated kets.)
+  for m_oqvp in ("oqv-ccd", "oqv-ccsd")
+    EC = fresh(); EC.options.cc.properties = true; @ints; @hf
+    @test_throws ErrorException ElemCo.ccdriver(EC, m_oqvp; fcidump="")
+    EC = fresh(); EC.options.wf.natorb = "natorb"; @ints; @hf
+    @test_throws ErrorException ElemCo.ccdriver(EC, m_oqvp; fcidump="")
+  end
+  # EOM needs singles — also an error, not a reroute
+  EC = fresh(); @ints; @hf
+  @test_throws ErrorException ElemCo.ccdriver(EC, "eom-ccd"; fcidump="")
+end
+
+# An UNRESTRICTED residual on RESTRICTED (RHF) orbitals runs AO-direct too: `ao_cc_setup!` follows
+# the residual's spin treatment (passed by the driver), not the stored orbitals, and unrestricts the
+# latter (β = α) exactly as `uhf` does with a restricted guess. Only the opposite combination — a
+# closed-shell residual on UHF orbitals — still derives an MO dump, since that is a different
+# calculation (the derive path turns it into UCCSD on the UHF dump).
+@testset "AO-direct unrestricted residual on restricted orbitals" begin
+  geometry = "
+    O   0.000000000   0.000000000  -0.130186067
+    H1  0.000000000   1.489124508   1.033245507
+    H2  0.000000000  -1.489124508   1.033245507"
+  fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+  # UHF-form methods on RHF orbitals: the per-spin reference, half-transformed stores (also used by
+  # the (T) 3-external blocks) and the unrestricted Λ machinery all run on the duplicated orbitals.
+  for (m, key) in (("uccsd", "UCCSD"), ("uccsd(t)", "UCCSD(T)"), ("Λuccsd", "ΛUCCSD"), ("uccd", "UCCD"))
+    EC = fresh(); @ints; @hf; e_ao = @cc m
+    @test pm_exists(EC) && isempty(EC.fd)
+    EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref = @cc m
+    @test abs(e_ao[key] - e_ref[key]) < 1e-8
+  end
+  # ... and the physical identity: a UHF-form calculation on RHF orbitals IS the closed-shell one.
+  EC = fresh(); @ints; @hf; e_u = @cc uccsd
+  EC = fresh(); @ints; @hf; e_cs = @cc ccsd
+  @test abs(e_u["UCCSD"] - e_cs["CCSD"]) < 1e-8
+  # open-shell occupations on restricted orbitals (ionized reference on the neutral's RHF orbitals):
+  # the residual is unrestricted although the orbitals are not, which used to force the derive path
+  EC = fresh(); @ints; @hf; @set wf charge=1 ms2=1; e_ao = @cc ccsd
+  @test pm_exists(EC) && isempty(EC.fd)
+  EC = fresh(); EC.options.int.ao_direct = false
+  @ints; @hf; @set wf charge=1 ms2=1; e_ref = @cc ccsd
+  @test abs(e_ao["UCCSD"] - e_ref["UCCSD"]) < 1e-8
+  # the other direction still derives: with UHF orbitals of a closed-shell molecule, `ccsd` must NOT
+  # run the closed-shell residual AO-direct. The derive path detects the UHF dump and runs UCCSD —
+  # so the returned key is the route marker (AO-direct would have produced "CCSD").
+  EC = fresh(); @uhf; e_uhf_orbs = @cc ccsd
+  @test haskey(e_uhf_orbs, "UCCSD") && !haskey(e_uhf_orbs, "CCSD")
+  @test abs(e_uhf_orbs["UCCSD"] - e_cs["CCSD"]) < 1e-8   # UHF collapses to RHF for this molecule
 end
 
 # AO-direct with DELETED (linearly-dependent) orbitals. `freeze_orbitals!` already removes the

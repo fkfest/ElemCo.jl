@@ -302,7 +302,7 @@ end
     hf(EC::ECInfo)
 
   Perform a closed-shell Hartree-Fock calculation directly from exact (non-density-fitted)
-  AO integrals stored as scratch files (`"ao_int2"`/`"S_AA"`/`"h_AA"`, generated on demand
+  AO integrals stored as scratch files (the ± supermatrix store, `"S_AA"`, `"h_AA"`, generated on demand
   via [`ensure_ao_integrals!`](@ref)); electron count etc. come from the molecular system.
 
   The SCF is solved in the non-orthogonal AO basis using the overlap `S_AA`:
@@ -328,16 +328,12 @@ function hf(EC::ECInfo{T}) where {T}
   @assert is_restricted(cMO_sm) "hf only for closed-shell"
   cMO = cMO_sm.α
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  # integral source: the persisted ± supermatrix store (half the streaming per iteration)
-  # when present, else the joint triangular mmap — gen_fock dispatches on the handle type
-  use_pm = pm_exists(EC)
-  # ONE assignment to `ints`: it is captured by the `fockbuilder` closure below, and a second
-  # assignment would make lowering box it (`Core.Box`), degrading the whole SCF to dynamic dispatch.
-  aofile, ints = use_pm ? (nothing, open_pm_store(EC)) : mmap3idx(EC, "ao_int2")
+  # integral source: the persisted ± supermatrix store, the only exact-AO representation
+  ints = open_pm_store(EC)
   fockbuilder = cMO -> gen_fock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
-  use_pm ? close_pm_store!(EC, ints) : close(aofile)
+  close_pm_store!(EC, ints)
   normalize_phase!(cMO)
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
   classes = redundant_orbital_classes(EC, Xredundant)
@@ -353,7 +349,7 @@ end
     uhf(EC::ECInfo)
 
   Perform exact (non-density-fitted) unrestricted Hartree-Fock from AO integrals stored
-  as scratch files (`"ao_int2"`/`"S_AA"`/`"h_AA"`, generated on demand via
+  as scratch files (the ± supermatrix store, `"S_AA"`, `"h_AA"`, generated on demand via
   [`ensure_ao_integrals!`](@ref)). Uses the shared
   open-shell loop [`scf_open_shell!`](@ref) with a UHF Fock builder over the AO integrals (`gen_ufock`)
   and canonical orthogonalization for linear-dependence handling. Returns the energy as
@@ -373,13 +369,12 @@ function uhf(EC::ECInfo{T}) where {T}
   cMO = starting_orbitals(EC)
   unrestrict!(cMO)
   t1 = print_time(EC, t1, "guess orbitals", 2)
-  # integral source: ± supermatrix store when present, else the joint mmap (see `hf`)
-  use_pm = pm_exists(EC)
-  aofile, ints = use_pm ? (nothing, open_pm_store(EC)) : mmap3idx(EC, "ao_int2")  # one assignment: see `hf`
+  # integral source: the ± supermatrix store (see `hf`)
+  ints = open_pm_store(EC)
   fockbuilder = cMO -> gen_ufock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)
-  use_pm ? close_pm_store!(EC, ints) : close(aofile)
+  close_pm_store!(EC, ints)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end
