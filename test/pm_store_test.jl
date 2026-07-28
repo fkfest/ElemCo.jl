@@ -832,7 +832,7 @@ end
   # the orbital-optimized variants re-transform the integrals every macro-iteration: AO-direct folds
   # the rotation into the coefficients (ao_rotate_ints) instead of re-transforming an MO dump, and
   # rebuilds the half-transformed stores for the ROTATED occupied space — their bra IS the occupied
-  # space, so unlike the T1 dressing they cannot be built once. `d_mmmo` stays in the AO basis.
+  # space, so unlike the T1 dressing they cannot be built once. the general block stays in the AO basis (`d_AAAo`).
   # Note both `E` and `HF(rotated)` are compared: the rotated reference energy is the sensitive one
   # (a stale store leaves E right at R=I and only drifts once the orbitals actually rotate).
   for m in ("oqv-ccd", "oqv-dcd")

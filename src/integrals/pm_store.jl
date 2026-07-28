@@ -43,7 +43,7 @@ export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_st
        PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!,
        BothSlab, pm_bra_half!,
        PMWriter, pm_writer, pm_write_block!, pm_close_writer!,
-       HTStore, pm_half_trans, ht_column!, ht_column_A!, ht_jk_columns!, open_ht_store, close_ht_store!,
+       HTStore, pm_half_trans, ht_column!, ht_column_A!, ht_column_B!, ht_jk_columns!, open_ht_store, close_ht_store!,
        ht_exists, delete_ht_store!,
        pm_occ_early, pm_os_sweep, ht_build_oo!, ht_build_dress!, ht_build_dress_unrestricted!,
        ht_occ_early, ht_occ_early_unrestricted

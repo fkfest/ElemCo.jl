@@ -119,6 +119,30 @@ function pm_half_trans(EC::ECInfo, pm::PMSupermatrices{Te}, C::AbstractMatrix, k
 end
 
 """
+    ht_column_B!(Bσ, ht, σ) -> Bσ
+
+  B-role half of [`ht_column!`](@ref): the slab `Bσ[(i,μ), ρ] = Σ_ν⟨μν|ρσ⟩C[ν,i]` alone. Like
+  [`ht_column_A!`](@ref) it touches each stored element exactly once, so a full σ-sweep reads the store
+  once rather than twice.
+
+  A block builder does NOT need this: the B ordering is reachable from the A slab by particle exchange
+  (see [`ht_mo_block`](@ref CoupledCluster.ht_mo_block)), and a builder is free to choose its output
+  permutation. It is for consumers whose output layout is fixed by someone else and for which the B
+  order is the one that writes contiguously — `save_ao_AAAo!` streams `⟨μν|ρi⟩` into `[μ,ν,ρ,i]` and
+  gets a contiguous `[:,ν,:,:]` slice per column from the B slab, where the A slab would leave it
+  writing single strided elements.
+"""
+function ht_column_B!(Bσ::AbstractMatrix, ht::HTStore, σ::Int)
+  n = ht.nao
+  colrng = uppertriangular_range(σ)
+  @views Bσ[:, 1:σ] .= ht.map[:, 2, colrng]
+  @inbounds for ρ in σ+1:n
+    @views Bσ[:, ρ] .= ht.map[:, 1, uppertriangular_index(σ, ρ)]
+  end
+  return Bσ
+end
+
+"""
     ht_column_A!(Aσ, ht, σ) -> Aσ
 
   A-role half of [`ht_column!`](@ref): the slab `Aσ[(i,ν), ρ] = Σ_μ⟨μν|ρσ⟩C[μ,i]` alone.

@@ -189,7 +189,8 @@ function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)
   name == "MP2" && return true                          # standalone MP2/UMP2/RMP2 off the bare AO blocks
   # Brueckner variants are not wired for AO-direct yet → derive. The orbital-optimized ("O") ones are:
-  # `ao_rotate_ints` folds the rotation into the coefficients and keeps `d_mmmo` in the AO space.
+  # `ao_rotate_ints` folds the rotation into the coefficients and keeps the general block in the
+  # AO space (`d_AAAo`, the AO counterpart of the MO route's `d_mmmo`).
   has_prefix(ecm, "B") && return false
   return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD", "CCD", "DCD")
 end

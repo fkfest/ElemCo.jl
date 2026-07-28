@@ -1390,14 +1390,16 @@ function calc_oqv_gradient(EC::ECInfo, q1T, q2T, R)
 
   @mtensor grad[a,i] := R1[a,i] - Tij[i,j]*R1[a,j] - Tab[a,b]*R1[b,i]
 
-  mmmo = load4idx(EC,"d_mmmo")
+  # three general indices in the basis `R` maps FROM: AO for the AO-direct route (`d_AAAo`, built by
+  # `save_ao_AAAo!`, with `R = Crot`), MO for the dump route (`d_mmmo`, built by `rotate_ints_o`).
+  AAAo = load4idx(EC, EC.ao_direct ? "d_AAAo" : "d_mmmo")
   Rpa = R[:,SP['v']]
-  @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * mmmo[p',q',r',i] - mmmo[p',r',q',i]) *  Rpa[q',a]
-  @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * mmmo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
-  @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
-  # @mtensor grad[a,i] -= (1.5 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
-  @mtensor grad[a,i] += (q1Tt[b,d,i,k] * q1Tt[c,d,j,k]+  q2Tt[b,c,i,j]) * Rpa[p',b] * Rpa[q',c] * mmmo[p',q',r',j] * Rpa[r',a]
-  mmmo = nothing
+  @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * AAAo[p',q',r',i] - AAAo[p',r',q',i]) *  Rpa[q',a]
+  @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * AAAo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
+  @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * AAAo[p',q',r',j] * Rpa[q',a]
+  # @mtensor grad[a,i] -= (1.5 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * AAAo[p',q',r',j] * Rpa[q',a]
+  @mtensor grad[a,i] += (q1Tt[b,d,i,k] * q1Tt[c,d,j,k]+  q2Tt[b,c,i,j]) * Rpa[p',b] * Rpa[q',c] * AAAo[p',q',r',j] * Rpa[r',a]
+  AAAo = nothing
 
   oovo = load4idx(EC,"d_oovo")
   @mtensor grad[a,i] -=  q2Tt[a,b,j,k] * oovo[k,i,b,j]
@@ -1561,30 +1563,40 @@ function calc_rotated_fock(EC::ECInfo, into, R::Matrix)
 end
 
 """
-    save_ao_mmmo!(EC::ECInfo)
+    save_ao_AAAo!(EC::ECInfo)
 
   Build the general-orbital block the OQV orbital gradient needs, kept in the **AO** space:
-  `d_mmmo[μ,ν,ρ,i] = ⟨μν|ρi⟩`. Read off the half-transformed store `"ht_oAAA"`, whose bra IS the
+  `d_AAAo[μ,ν,ρ,i] = ⟨μν|ρi⟩`. Read off the half-transformed store `"ht_oAAA"`, whose bra IS the
   occupied space, so the caller ([`ao_rotate_ints`](@ref)) must have rebuilt it for the current
-  rotation. Uses `⟨μν|ρi⟩ = conj⟨ρi|μν⟩`, i.e. the B-role slab of column `ν` (`Bν[(i,ρ),μ]`), so it
-  is real-only, like the other bra↔ket-swap blocks.
+  rotation.
+
+  The key is `d_AAAo`, not the `d_mmmo` of the MO route ([`rotate_ints_o`](@ref)): the two hold the
+  same integrals over DIFFERENT one-particle bases (three AO indices here, three MO indices there),
+  and [`calc_oqv_gradient`](@ref) is indifferent only because it contracts all three with whatever
+  basis its rotation maps from. Separate names keep a block built in one basis from being read
+  against the other.
+
+  The occupied index sits on a ket, which no particle exchange can move to the bra, so this needs the
+  bra↔ket relation `⟨μν|ρi⟩ = conj⟨ρi|μν⟩` and is real-only like the other such blocks. It reads the
+  B-role slab ([`ht_column_B!`](@ref PMStore.ht_column_B!)) — not because the A slab could not produce
+  the block, but because the fixed `[μ,ν,ρ,i]` output makes `[:,ν,:,:]` the contiguous write.
 """
-function save_ao_mmmo!(EC::ECInfo)
+function save_ao_AAAo!(EC::ECInfo)
   ht = open_ht_store(EC, "ht_oAAA")
   T = eltype(ht.map); n = ht.nao; m = ht.m
   if T <: Complex
     close_ht_store!(EC, ht)
-    error("save_ao_mmmo!: the AO-space d_mmmo uses a bra↔ket Hermiticity swap and is real-only; " *
+    error("save_ao_AAAo!: the AO-space d_AAAo uses a bra↔ket Hermiticity swap and is real-only; " *
           "complex needs a ket-transformed store (pending complex-AO integrals)")
   end
-  io, mmmo = newmmap(EC, "d_mmmo", (n, n, n, m), T)
-  Aσ = zeros(T, m*n, n); Bσ = zeros(T, m*n, n)
+  io, AAAo = newmmap(EC, "d_AAAo", (n, n, n, m), T)
+  Bσ = zeros(T, m*n, n)                           # B-role only → one pass over the store
   @inbounds for ν in 1:n
-    ht_column!(Aσ, Bσ, ht, ν)
-    B3 = reshape(Bσ, m, n, n)                     # [i, ρ, μ]
-    @views mmmo[:, ν, :, :] .= conj.(permutedims(B3, (3, 2, 1)))   # → [μ, ρ, i]
+    ht_column_B!(Bσ, ht, ν)
+    B3 = reshape(Bσ, m, n, n)                     # [i, μ, ρ] = ⟨μ i|ρ ν⟩
+    @views AAAo[:, ν, :, :] .= conj.(permutedims(B3, (3, 2, 1)))   # → [μ, ρ, i] = conj⟨ρ i|μ ν⟩
   end
-  closemmap(EC, io, mmmo)
+  closemmap(EC, io, AAAo)
   close_ht_store!(EC, ht)
   return
 end
@@ -1598,7 +1610,7 @@ end
   rotated basis — the same "fold the rotation into the coefficients" route the T1 dressing and the
   Λ2 kext use.
 
-  The general-orbital block stays in the AO space ([`save_ao_mmmo!`](@ref)): [`calc_oqv_gradient`](@ref)
+  The general-orbital block stays in the AO space ([`save_ao_AAAo!`](@ref)): [`calc_oqv_gradient`](@ref)
   only ever contracts its three general indices with the virtual rotation, so it is indifferent to
   whether they are MO or AO — it just receives `Crot` (whose virtual columns are the AO→rotated-virtual
   coefficients) in place of `R`. Returns `Crot`, which the caller also passes on as the AO→MO map for
@@ -1624,7 +1636,7 @@ function ao_rotate_ints(EC::ECInfo, R::AbstractMatrix)
   save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
   eps = diag(fock); save!(EC, "e_m", eps); save!(EC, "e_M", eps)
   save!(EC, "d_vvoo", permutedims(load4idx(EC, "d_oovv"), (3,4,1,2)))
-  save_ao_mmmo!(EC)                               # off the store rebuilt above
+  save_ao_AAAo!(EC)                               # off the store rebuilt above
   return Crot
 end
 
