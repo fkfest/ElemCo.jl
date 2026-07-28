@@ -15,7 +15,7 @@
 #   Pkg.test("ElemCo"; test_args=["long"])          # all :long items
 #   Pkg.test("ElemCo"; test_args=["pos_mp2"])       # one item by name (even if :broken)
 # Category tags in use: :fcidump :cc :eom :fci :ciphi :qvcc :df :region :system
-# :pos :svd :interface :unit :complex :properties :dmrg :highorder, plus :quick / :long.
+# :pos :svd :interface :unit :complex :properties :dmrg :highorder :pm, plus :quick / :long.
 # With no tokens, the :quick items run. :broken items run only when named
 # explicitly (or via the `broken` token); they otherwise stay VS-Code-visible only.
 #

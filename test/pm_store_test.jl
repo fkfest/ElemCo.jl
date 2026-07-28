@@ -1,4 +1,4 @@
-@testitem "pm_store" tags=[:cc, :quick] begin
+@testitem "pm_store" tags=[:cc, :pm, :quick] begin
 # Phase-0 harness for the PM (±) supermatrix AO-integral store — see dev/pm_ao_store_plan.md §2.
 # Pins the normative conventions the persisted-± kernels will rely on:
 #   Vs[tri(μν),tri(ρσ)] = ⟨μν|ρσ⟩ + ⟨νμ|ρσ⟩   (row diagonal μ=ν carries ×2)
@@ -8,59 +8,7 @@
 # with Ds/Da the ½-diagonal ±-folded density. Every check runs for Float64 AND ComplexF64
 # (real supermatrices are symmetric, complex ones Hermitian — the derivation uses only the
 # conjugation-free exchange symmetry, so the identity holds verbatim over ℂ).
-using ElemCo
-using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
-using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx, load4idx, load2idx
-using ElemCo.PMStore
-using ElemCo.FockFactory: ao_JK!, ao_J2K!, add_coulomb!, add_exchange!
-using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform
-using ElemCo.ECInfos: delete_file!, file_exists
-using ElemCo.MSystems: parse_geometry
-using LinearAlgebra
-using Random
-
-# Fold a full density D[ρ,σ] into the ± triangular vectors (plan §2.3): the ½ on the
-# ρ=σ diagonal is what makes the identity exact — do not touch it without re-deriving.
-function pack_pm_density(D)
-  n = size(D, 1); ntri = n*(n+1)÷2; T = eltype(D)
-  Ds = zeros(T, ntri); Da = zeros(T, ntri)
-  for σ in 1:n, ρ in 1:σ
-    idx = uppertriangular_index(ρ, σ)
-    if ρ == σ
-      Ds[idx] = D[ρ,ρ] / 2
-    else
-      Ds[idx] = (D[ρ,σ] + D[σ,ρ]) / 2
-      Da[idx] = (D[ρ,σ] - D[σ,ρ]) / 2
-    end
-  end
-  return Ds, Da
-end
-
-# A random packed int2 with the ONE symmetry a *stored* physical AO integral must carry:
-# the diagonal ket slabs (ρ=σ) are μν-symmetric — ⟨μν|ρρ⟩=⟨νμ|ρρ⟩ — so detri_int2 then
-# reconstructs a fully exchange-symmetric ⟨μν|ρσ⟩=⟨νμ|σρ⟩ (off-diagonal slabs unconstrained).
-# `transpose` not `adjoint`: exchange is the conjugation-free swap (plan §2.2).
-function exch_int2(n, ::Type{T}) where T
-  int2 = randn(T, n, n, n*(n+1)÷2)
-  for ρ in 1:n
-    d = uppertriangular_index(ρ, ρ)
-    @views int2[:, :, d] .= (int2[:, :, d] .+ transpose(int2[:, :, d])) ./ 2
-  end
-  return int2
-end
-
-# The FULL physical symmetry: exchange (via exch_int2) AND hermiticity ⟨μν|ρσ⟩=conj(⟨ρσ|μν⟩).
-# Used only for the supermatrix-hermiticity check; the other checks use exch_int2 directly.
-function herm_int2(int2raw)
-  n = size(int2raw, 1); T = eltype(int2raw)
-  G = detri_int2(int2raw, n, 1:n, 1:n, 1:n, 1:n)          # exchange-symmetric dense
-  Gh = (G .+ conj(permutedims(G, (3,4,1,2)))) ./ 2         # hermitize (keeps exchange sym)
-  out = zeros(T, n, n, n*(n+1)÷2)
-  for σ in 1:n, ρ in 1:σ
-    @views out[:, :, uppertriangular_index(ρ, σ)] .= Gh[:, :, ρ, σ]
-  end
-  return out
-end
+include(joinpath(@__DIR__, "pm_store_common.jl"))
 
 @testset "PM convention harness (dense reference)" begin
   Random.seed!(20260720)
@@ -117,15 +65,6 @@ end
 # hermitian) int2, write it as "ao_int2", pm_from_joint!, reopen, reconstruct the full
 # supermatrices from the stored lower block-triangle (+ Hermitian mirror) and compare to
 # calc_tri_sym_antisym! of the joint tensor. Real AND complex; several block sizes.
-# place a synthetic physical ao_int2 into a fresh EC's scratch and build the ± store from it
-function build_store(n, ::Type{T}, maxcols; int2=nothing) where T
-  EC = ElemCo.ECInfo{T}()
-  int2 === nothing && (int2 = herm_int2(exch_int2(n, T)))  # default: exchange + hermitian
-  f, arr = newmmap(EC, "ao_int2", (n, n, n*(n+1)÷2), T; description="int2 ao")
-  arr .= int2; closemmap(EC, f, arr)
-  pm_from_joint!(EC; maxcols=maxcols)
-  return EC, int2
-end
 
 @testset "PM store round-trip (build ↔ reconstruct)" begin
   # reconstruct the full npp×npp Vs/Va from the stored panels (+ Hermitian mirror)
@@ -262,6 +201,15 @@ end
   end
 end
 
+end # @testitem
+
+@testitem "pm_fock" tags=[:cc, :pm, :quick] begin
+# ± store Fock builders and the high-level ± tensor verbs: `ao_JK!`/`ao_J2K!` against dense
+# references (arbitrary nonsymmetric densities + the symmetric-D fast path), the per-slab
+# `add_coulomb!`/`add_exchange!`, the `pm_transform`/`eachslab`/`pm_matvec!` API, and the fused ±
+# generation that builds the store straight from the ERI generator.
+include(joinpath(@__DIR__, "pm_store_common.jl"))
+
 # Phase-3 kernel gate: the PM Fock kernels reproduce the streaming joint-store kernels for
 # ARBITRARY (nonsymmetric!) densities — pins the elementwise two-role sweep incl. the
 # uniform ½-degeneracy weights and the conj mirror role. Real and complex, several blockings.
@@ -358,6 +306,114 @@ end
   @test maximum(abs.(Kf .- Kg)) < 1e-11
   close_pm_store!(EC, pm)
 end
+
+# High-level ± "tensor" API: the pm_transform verb (routes pair-space vs N⁵), the eachslab
+# streaming iterator (must reproduce pm_slab_sweep! exactly), and the pm_matvec! alias.
+@testset "PM tensor verbs (pm_transform / eachslab / pm_matvec!)" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
+    EC, int2 = build_store(n, T, maxcols)
+    pm = open_pm_store(EC)
+    intmem = Array{T,3}(int2)
+    C = randn(T, n, 4)
+    # pm_transform ≡ transform_int2 (RHF triangular) and ≡ transform_int2_Q (full)
+    @test maximum(abs.(collect(pm_transform(EC, pm, C, "v_aa"; triangular=true)) .-
+                       transform_int2(intmem, C, C, C, C))) < 1e-11
+    Cb = randn(T, n, 3)
+    @test maximum(abs.(collect(pm_transform(EC, pm, C, Cb, C, Cb, "v_ab"; triangular=false)) .-
+                       transform_int2_Q(intmem, C, Cb, C, Cb))) < 1e-11
+    # eachslab must reproduce pm_slab_sweep! bit-for-bit (an AO Coulomb build), and visit npp columns
+    D = randn(T, n, n)
+    Jsweep = zeros(T, n, n); w = SlabWork{T}(pm)
+    pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
+      band_mul!(@mview(Jsweep[:,ρ]), w.G, native_lo, n, @mview(D[:,σ]))
+      ρ < σ && band_tmul!(@mview(Jsweep[:,σ]), w.G, native_lo, n, @mview(D[:,ρ]))
+      add_mirror_row!(Jsweep, ρ, w, D, σ, mirror_lo, false)
+      ρ < σ && add_mirror_row!(Jsweep, σ, w, D, ρ, mirror_lo, true)
+    end
+    Jiter = zeros(T, n, n); nslab = 0
+    for s in eachslab(pm)
+      nslab += 1
+      slab_bandmul!(@mview(Jiter[:,s.ρ]), s, @mview(D[:,s.σ]))
+      s.ρ < s.σ && slab_bandtmul!(@mview(Jiter[:,s.σ]), s, @mview(D[:,s.ρ]))
+      slab_mirror!(Jiter, s.ρ, s, D, s.σ)
+      s.ρ < s.σ && slab_mirrort!(Jiter, s.σ, s, D, s.ρ)
+    end
+    @test nslab == pm.npp
+    @test Jiter == Jsweep                      # bit-for-bit
+    # pm_matvec! ≡ pm_matmul!
+    X = randn(T, pm.npp, 3); o1 = zeros(T, pm.npp, 3); o2 = zeros(T, pm.npp, 3)
+    pm_matvec!(o1, pm, :s, X); pm_matmul!(o2, pm, :s, X)
+    @test o1 == o2
+    close_pm_store!(EC, pm)
+  end
+end
+
+# The per-slab Fock routines add_coulomb!/add_exchange! inside an `eachslab` loop (native band GEMV +
+# ket-swap + Hermitian mirror). Fuse Coulomb J and exchange K over one sweep; check vs dense @tensor.
+@testset "add_coulomb! / add_exchange! (per-slab Fock)" begin
+  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
+    EC, int2 = build_store(n, T, maxcols); pm = open_pm_store(EC)
+    G = detri_int2(Array{T,3}(int2), n, 1:n, 1:n, 1:n, 1:n)
+    D = randn(T, n, n); J = zeros(T, n, n); K = zeros(T, n, n)
+    for s in eachslab(pm)                        # one reconstruction per slab, J + K fused
+      add_coulomb!(J, s, D)
+      add_exchange!(K, s, D)
+    end
+    @tensor Jref[μ,ρ] := G[μ,ν,ρ,σ]*D[ν,σ]
+    @tensor Kref[μ,σ] := G[μ,ν,ρ,σ]*D[ν,ρ]
+    @test maximum(abs.(J .- Jref)) < 1e-11
+    @test maximum(abs.(K .- Kref)) < 1e-11
+    close_pm_store!(EC, pm)
+  end
+end
+
+# Fused ± generation: `ao_integrals` builds the store straight from the ERI generator
+# (shell-aligned blocks, no jointly packed intermediate at any point). Validate the store contents
+# against a reference obtained by running the ERI kernel into a plain triangular array, via
+# pm_to_joint!, incl. a forced multi-block blocking.
+@testset "fused ± generation ≡ direct ERI generation" begin
+  geometry = "
+    O   0.000000000   0.000000000  -0.130186067
+    H1  0.000000000   1.489124508   1.033245507
+    H2  0.000000000  -1.489124508   1.033245507"
+  mk() = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")))
+  # reference: the ERI kernel written straight into a jointly packed triangular array
+  EC2 = mk()
+  bao2 = ElemCo.IntegralTools.save_ao_1e_integrals!(EC2)
+  nao2 = size(load2idx(EC2, "S_AA"), 1)
+  ref = zeros(Float64, nao2, nao2, nao2*(nao2+1)÷2)
+  ElemCo.Integrals.eri_2e4idx_tri!(ref, bao2)
+  # fused, default blocking
+  EC1 = mk()
+  ElemCo.IntegralTools.ao_integrals(EC1)
+  @test pm_exists(EC1)
+  @test !file_exists(EC1, "ao_int2")                       # never created
+  ElemCo.PMStore.pm_to_joint!(EC1)
+  f1, j1 = mmap3idx(EC1, "ao_int2")
+  @test maximum(abs.(j1 .- ref)) < 1e-13
+  close(f1)
+  # fused, forced small blocks (multi-block + single-shell batches)
+  EC3 = mk()
+  bao = ElemCo.IntegralTools.save_ao_1e_integrals!(EC3)
+  ElemCo.IntegralTools.pm_integrals!(EC3, bao; maxcols=8)  # nao=7, npp=28 ⇒ several blocks
+  pm3 = open_pm_store(EC3)
+  @test pm_nblocks(pm3) > 1
+  close_pm_store!(EC3, pm3)
+  ElemCo.PMStore.pm_to_joint!(EC3)
+  f3, j3 = mmap3idx(EC3, "ao_int2")
+  @test maximum(abs.(j3 .- ref)) < 1e-13
+  close(f3)
+end
+
+end # @testitem
+
+@testitem "pm_ht" tags=[:cc, :pm, :quick] begin
+# Half-transformed (`ht_*`) store and the dressing sweeps that read it: the occ-early
+# intermediates, `pm_half_trans`/`HTStore` and its column readers, the MO-block engine
+# (`ht_mo_block`/`save_mo_blocks!`), and the on-the-fly AO→MO transforms — all against dense
+# references, real and complex, single- and multi-block.
+include(joinpath(@__DIR__, "pm_store_common.jl"))
+
 
 # Phase-5 gate: the PM-native dressing sweeps reproduce the dense einsum references —
 # all 8 occ-early intermediates (3 closed/same-spin + 5 opposite-spin), real+complex,
@@ -605,107 +661,13 @@ end
   end
 end
 
-# High-level ± "tensor" API: the pm_transform verb (routes pair-space vs N⁵), the eachslab
-# streaming iterator (must reproduce pm_slab_sweep! exactly), and the pm_matvec! alias.
-@testset "PM tensor verbs (pm_transform / eachslab / pm_matvec!)" begin
-  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
-    EC, int2 = build_store(n, T, maxcols)
-    pm = open_pm_store(EC)
-    intmem = Array{T,3}(int2)
-    C = randn(T, n, 4)
-    # pm_transform ≡ transform_int2 (RHF triangular) and ≡ transform_int2_Q (full)
-    @test maximum(abs.(collect(pm_transform(EC, pm, C, "v_aa"; triangular=true)) .-
-                       transform_int2(intmem, C, C, C, C))) < 1e-11
-    Cb = randn(T, n, 3)
-    @test maximum(abs.(collect(pm_transform(EC, pm, C, Cb, C, Cb, "v_ab"; triangular=false)) .-
-                       transform_int2_Q(intmem, C, Cb, C, Cb))) < 1e-11
-    # eachslab must reproduce pm_slab_sweep! bit-for-bit (an AO Coulomb build), and visit npp columns
-    D = randn(T, n, n)
-    Jsweep = zeros(T, n, n); w = SlabWork{T}(pm)
-    pm_slab_sweep!(pm, w) do ρ, σ, native_lo, mirror_lo
-      band_mul!(@mview(Jsweep[:,ρ]), w.G, native_lo, n, @mview(D[:,σ]))
-      ρ < σ && band_tmul!(@mview(Jsweep[:,σ]), w.G, native_lo, n, @mview(D[:,ρ]))
-      add_mirror_row!(Jsweep, ρ, w, D, σ, mirror_lo, false)
-      ρ < σ && add_mirror_row!(Jsweep, σ, w, D, ρ, mirror_lo, true)
-    end
-    Jiter = zeros(T, n, n); nslab = 0
-    for s in eachslab(pm)
-      nslab += 1
-      slab_bandmul!(@mview(Jiter[:,s.ρ]), s, @mview(D[:,s.σ]))
-      s.ρ < s.σ && slab_bandtmul!(@mview(Jiter[:,s.σ]), s, @mview(D[:,s.ρ]))
-      slab_mirror!(Jiter, s.ρ, s, D, s.σ)
-      s.ρ < s.σ && slab_mirrort!(Jiter, s.σ, s, D, s.ρ)
-    end
-    @test nslab == pm.npp
-    @test Jiter == Jsweep                      # bit-for-bit
-    # pm_matvec! ≡ pm_matmul!
-    X = randn(T, pm.npp, 3); o1 = zeros(T, pm.npp, 3); o2 = zeros(T, pm.npp, 3)
-    pm_matvec!(o1, pm, :s, X); pm_matmul!(o2, pm, :s, X)
-    @test o1 == o2
-    close_pm_store!(EC, pm)
-  end
-end
+end # @testitem
 
-# The per-slab Fock routines add_coulomb!/add_exchange! inside an `eachslab` loop (native band GEMV +
-# ket-swap + Hermitian mirror). Fuse Coulomb J and exchange K over one sweep; check vs dense @tensor.
-@testset "add_coulomb! / add_exchange! (per-slab Fock)" begin
-  for T in (Float64, ComplexF64), (n, maxcols) in ((9, 9), (12, 16), (11, 200))
-    EC, int2 = build_store(n, T, maxcols); pm = open_pm_store(EC)
-    G = detri_int2(Array{T,3}(int2), n, 1:n, 1:n, 1:n, 1:n)
-    D = randn(T, n, n); J = zeros(T, n, n); K = zeros(T, n, n)
-    for s in eachslab(pm)                        # one reconstruction per slab, J + K fused
-      add_coulomb!(J, s, D)
-      add_exchange!(K, s, D)
-    end
-    @tensor Jref[μ,ρ] := G[μ,ν,ρ,σ]*D[ν,σ]
-    @tensor Kref[μ,σ] := G[μ,ν,ρ,σ]*D[ν,ρ]
-    @test maximum(abs.(J .- Jref)) < 1e-11
-    @test maximum(abs.(K .- Kref)) < 1e-11
-    close_pm_store!(EC, pm)
-  end
-end
+@testitem "pm_ao_direct" tags=[:cc, :pm, :quick] begin
+# AO-direct end-to-end, CLOSED SHELL: energies computed off the ± store (no MO dump) against the
+# derived-MO-dump reference — kext, standalone MP2, (T), Λ + correlated properties, and EOM.
+include(joinpath(@__DIR__, "pm_store_common.jl"))
 
-# Fused ± generation: `ao_integrals` builds the store straight from the ERI generator
-# (shell-aligned blocks, no jointly packed intermediate at any point). Validate the store contents
-# against a reference obtained by running the ERI kernel into a plain triangular array, via
-# pm_to_joint!, incl. a forced multi-block blocking.
-@testset "fused ± generation ≡ direct ERI generation" begin
-  geometry = "
-    O   0.000000000   0.000000000  -0.130186067
-    H1  0.000000000   1.489124508   1.033245507
-    H2  0.000000000  -1.489124508   1.033245507"
-  mk() = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")))
-  # reference: the ERI kernel written straight into a jointly packed triangular array
-  EC2 = mk()
-  bao2 = ElemCo.IntegralTools.save_ao_1e_integrals!(EC2)
-  nao2 = size(load2idx(EC2, "S_AA"), 1)
-  ref = zeros(Float64, nao2, nao2, nao2*(nao2+1)÷2)
-  ElemCo.Integrals.eri_2e4idx_tri!(ref, bao2)
-  # fused, default blocking
-  EC1 = mk()
-  ElemCo.IntegralTools.ao_integrals(EC1)
-  @test pm_exists(EC1)
-  @test !file_exists(EC1, "ao_int2")                       # never created
-  ElemCo.PMStore.pm_to_joint!(EC1)
-  f1, j1 = mmap3idx(EC1, "ao_int2")
-  @test maximum(abs.(j1 .- ref)) < 1e-13
-  close(f1)
-  # fused, forced small blocks (multi-block + single-shell batches)
-  EC3 = mk()
-  bao = ElemCo.IntegralTools.save_ao_1e_integrals!(EC3)
-  ElemCo.IntegralTools.pm_integrals!(EC3, bao; maxcols=8)  # nao=7, npp=28 ⇒ several blocks
-  pm3 = open_pm_store(EC3)
-  @test pm_nblocks(pm3) > 1
-  close_pm_store!(EC3, pm3)
-  ElemCo.PMStore.pm_to_joint!(EC3)
-  f3, j3 = mmap3idx(EC3, "ao_int2")
-  @test maximum(abs.(j3 .- ref)) < 1e-13
-  close(f3)
-end
-
-# Phase-2 acceptance: AO-direct energies through the PM-store kext match the derived-MO-dump
-# reference, closed shell (CCSD/DCSD) and open shell (UCCSD, same-spin via PM + αβ raw).
-# These runs also exercise the PM-native dressing sweeps end-to-end.
 @testset "AO-direct kext via PM store ↔ derived MO dump" begin
   geometry = "
     O   0.000000000   0.000000000  -0.130186067
@@ -763,6 +725,22 @@ end
   @test pm_exists(EC) && isempty(EC.fd)
   EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_eom = @cc "eom-ccsd"
   @test abs(e_pm_eom["ω1"] - e_ref_eom["ω1"]) < 1e-7
+end
+
+end # @testitem
+
+@testitem "pm_ao_direct_uhf" tags=[:cc, :pm, :quick] begin
+# AO-direct end-to-end, UNRESTRICTED: the per-spin half-transformed stores feed the same-spin and
+# opposite-spin 3-external blocks for (T), Λ, Λ(T) and EOM; all match the derived-UHF-dump reference.
+include(joinpath(@__DIR__, "pm_store_common.jl"))
+
+@testset "AO-direct unrestricted ↔ derived MO dump" begin
+  geometry = "
+    O   0.000000000   0.000000000  -0.130186067
+    H1  0.000000000   1.489124508   1.033245507
+    H2  0.000000000  -1.489124508   1.033245507"
+  fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
   # unrestricted (T) (water cation): the same-spin vvvo/vooo (per spin) and the five opposite-spin
   # 3-external blocks are built from the per-spin stores ht_oAAA_a/_b — the βα-looking reads resolve to
   # the same five αβ files. Energies match the derived-UHF-dump reference.
@@ -798,6 +776,23 @@ end
   @test pm_exists(EC) && isempty(EC.fd)
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ueom = @cc "eom-uccsd"
   @test abs(e_pm_ueom["ω1"] - e_ref_ueom["ω1"]) < 1e-7
+end
+
+end # @testitem
+
+@testitem "pm_ao_direct_misc" tags=[:cc, :pm, :quick] begin
+# AO-direct for the remaining routes: the doubles-only methods (CCD/DCD, QV/OQV) whose Λ dressing
+# runs with empty singles, the gate errors that must NOT be silently rerouted, an unrestricted
+# residual on restricted orbitals, and deleted (linearly-dependent) orbitals.
+include(joinpath(@__DIR__, "pm_store_common.jl"))
+
+@testset "AO-direct doubles-only, orbital-optimized and gates" begin
+  geometry = "
+    O   0.000000000   0.000000000  -0.130186067
+    H1  0.000000000   1.489124508   1.033245507
+    H2  0.000000000  -1.489124508   1.033245507"
+  fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
   # doubles-only methods (CCD/DCD and the quasi-variational QV-CCD/QV-DCD). They carry no singles, so
   # the MO path uses the bare-integral `pseudo_dressed_ints`; AO-direct gets the same bare blocks from
   # the dressing inside calc_cc_resid (empty T1) plus d_vvoo transposed from d_oovv.
@@ -871,7 +866,6 @@ end
   EC = fresh(); @ints; @hf
   @test_throws ErrorException ElemCo.ccdriver(EC, "eom-ccd"; fcidump="")
 end
-
 # An UNRESTRICTED residual on RESTRICTED (RHF) orbitals runs AO-direct too: `ao_cc_setup!` follows
 # the residual's spin treatment (passed by the driver), not the stored orbitals, and unrestricts the
 # latter (β = α) exactly as `uhf` does with a restricted guess. Only the opposite combination — a
