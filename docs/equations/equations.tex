@@ -994,8 +994,9 @@ the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} 
 \end{equation}
 where
 \begin{equation}
+\label{eq:kext-K}
 \begin{aligned}
-K^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b 
+K^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b
 +δ_r^i T^j_b δ_s^b + T^i_a δ_r^a δ_s^j + δ_r^i δ_s^j \right)
 \end{aligned}
 \end{equation}
@@ -1949,6 +1950,138 @@ K^{\spa{a}\spa{b}\spb{c}}_{\spa{i}\spa{j}\spb{k}}
 \end{aligned}
 \end{equation}
 and the conjugate-transpose of the amplitudes in \eq{eq:Euccsd(t)} are replaced with the Lagrange multipliers.
+
+
+\section{AO-driven coupled cluster} \label{sec:ao-direct}
+In the \textsf{cckext} factorization of Sec.~\ref{sec:cs-ccsd} the only quantity that requires integrals
+with two general indices in the bra is $K^{ij}_{pq}$, \eq{eq:kext-K}; every other integral block
+appearing in the amplitude, $\Lambda$, perturbative-triples and EOM equations carries at least one
+occupied index. This makes it possible to evaluate the equations \emph{directly} from the AO
+integrals $v_{\mu\nu}^{\rho\sigma}$, without ever constructing the MO integrals, and thus without
+the $\mathcal{O}(N^5)$ four-index transformation and without storing an $\mathcal{O}(N^4)$ MO
+integral set. Below $\mu,\nu,\rho,\sigma$ denote AO indices, $n$ the number of AOs and $o$ the
+number of correlated occupied orbitals.
+
+\subsection{Singles dressing as a coefficient transformation}
+Only lower virtual and upper occupied indices are dressed (Sec.~\ref{sec:cs-ccsd}), and the dressing is
+linear in each index separately. It can therefore be absorbed entirely into two sets of
+coefficients, one for the lower (bra) and one for the upper (ket) indices,
+\begin{equation}
+\label{eq:ao-dressed-coeffs}
+\begin{aligned}
+L^\mu_p &= \begin{cases} C^\mu_i, & p = i\\[2pt] C^\mu_a - C^\mu_k T^k_a, & p = a\end{cases}
+&\qquad
+R_\mu^p &= \begin{cases} C_\mu^i + C_\mu^c T^i_c, & p = i\\[2pt] C_\mu^a, & p = a,\end{cases}
+\end{aligned}
+\end{equation}
+so that every dressed integral is an \emph{undressed} AO integral transformed with $L$ on the lower
+and $R$ on the upper indices,
+\begin{equation}
+\label{eq:ao-dressed-ints}
+\hat v_{pq}^{rs} = L^\mu_p L^\nu_q\, v_{\mu\nu}^{\rho\sigma}\, R_\rho^r R_\sigma^s.
+\end{equation}
+The two sets are biorthogonal with respect to the AO overlap $S_\mu^\nu$,
+\begin{equation}
+\label{eq:ao-biorthogonal}
+L^\mu_p\, S_\mu^\nu\, R_\nu^q = δ_p^q,
+\end{equation}
+which follows from the orthonormality of the MOs, $C^\mu_p S_\mu^\nu C_\nu^q = δ_p^q$, together
+with the fact that the occupied--virtual blocks of \eq{eq:ao-dressed-coeffs} cancel:
+$-T^k_a δ_k^j$ from $L$ against $+δ_a^c T^j_c$ from $R$. \eq{eq:ao-biorthogonal} is the statement
+that the dressing is a similarity transformation. Consequently the singles never enter as a
+separate dressing step: each iteration simply rebuilds \eq{eq:ao-dressed-coeffs} and re-contracts
+the AO integrals.
+
+\subsection{Half-transformed integrals}
+The lower occupied coefficients in \eq{eq:ao-dressed-coeffs} are \emph{undressed}, $L^\mu_i =
+C^\mu_i$. The half-transformed integrals
+\begin{equation}
+\label{eq:ao-halftrans}
+v_{i\nu}^{\rho\sigma} = C^\mu_i\, v_{\mu\nu}^{\rho\sigma}
+\end{equation}
+are therefore independent of $T_1$ and can be constructed once per set of orbitals rather than once
+per iteration. Every block with at least one occupied index is then obtained from
+\eq{eq:ao-halftrans} by matrix multiplications alone, at a cost of $\mathcal{O}(o\,n^3)$ per block
+instead of a fresh pass over the AO integrals. Blocks whose only occupied index sits on an upper (ket) slot are reached through
+\begin{equation}
+v_{pq}^{rs} = \left(v_{rs}^{pq}\right)^*,
+\end{equation}
+which for real integrals is the plain bra--ket exchange.
+
+\subsection{Four-external term: $\pm$ supermatrices} \label{sec:pm-supermatrix}
+The AO integrals possess only the \emph{joint} exchange symmetry
+\begin{equation}
+\label{eq:ao-joint-sym}
+v_{\mu\nu}^{\rho\sigma} = v_{\nu\mu}^{\sigma\rho},
+\end{equation}
+i.e.\ neither the bra pair nor the ket pair may be packed triangularly on its own. Splitting the
+integrals into the parts that are symmetric and antisymmetric with respect to the exchange of the
+bra pair,
+\begin{equation}
+\label{eq:pm-def}
+V^{\pm}_{(\mu\nu)(\rho\sigma)} = v_{\mu\nu}^{\rho\sigma} \pm v_{\nu\mu}^{\rho\sigma},
+\qquad \mu \le \nu,\quad \rho \le \sigma,
+\end{equation}
+converts the single joint symmetry \eq{eq:ao-joint-sym} into two independent ones: together with the
+hermiticity of the integrals, both $V^{+}$ and $V^{-}$ are symmetric (hermitian for complex
+integrals) matrices in the packed pair space,
+\begin{equation}
+V^{\pm}_{(\rho\sigma)(\mu\nu)} = \left(V^{\pm}_{(\mu\nu)(\rho\sigma)}\right)^*,
+\end{equation}
+so that \emph{both} index pairs are triangular. Only the lower block triangle has to be stored, and
+the store occupies $\approx n^4/4$ instead of the $n^4/2$ of the joint triangular packing.
+
+With the effective pair density of \eq{eq:kext-K} transformed to the AO basis, $D^{ij}_{\rho\sigma}$,
+and folded in the same way,
+\begin{equation}
+\label{eq:pm-density}
+D^{\pm,ij}_{(\rho\sigma)} = \half\left(D^{ij}_{\rho\sigma} \pm D^{ij}_{\sigma\rho}\right)\quad(\rho\lt\sigma),
+\qquad D^{+,ij}_{(\rho\rho)} = \half D^{ij}_{\rho\rho},\qquad D^{-,ij}_{(\rho\rho)} = 0,
+\end{equation}
+the four-external term reduces to two matrix products in the packed pair space,
+\begin{equation}
+\label{eq:pm-kext}
+\begin{aligned}
+K^{ij}_{\mu\nu} &= \left(V^{+}D^{+,ij} + V^{-}D^{-,ij}\right)_{(\mu\nu)},\\
+K^{ij}_{\nu\mu} &= \left(V^{+}D^{+,ij} - V^{-}D^{-,ij}\right)_{(\mu\nu)},
+\end{aligned}
+\end{equation}
+i.e.\ \emph{both} orders of the bra pair are obtained from the same pair of products. The MO-basis
+$K^{ij}_{pq}$ of \eq{eq:kext-K} follows by contracting the remaining pair with $L$.
+
+\subsection{Occupied-pair packing and operation count}
+The effective pair density satisfies $D^{ij}_{\rho\sigma} = D^{ji}_{\sigma\rho}$, which together
+with \eq{eq:ao-joint-sym} gives
+\begin{equation}
+\label{eq:kext-ij-sym}
+K^{ij}_{pq} = K^{ji}_{qp}.
+\end{equation}
+Because \eq{eq:pm-kext} delivers both bra orders simultaneously, \eq{eq:kext-ij-sym} allows the
+occupied pair to be restricted to $i \le j$ as well. With $n_{pp} = n(n+1)/2$ and
+$n_{oo} = o(o+1)/2$ the $\pm$ form therefore requires
+\begin{equation}
+2\, n_{pp}^2\, n_{oo}
+\end{equation}
+multiplications, whereas the contraction over the jointly packed integrals requires
+$n^2 n_{pp} o^2$: there the ket pair alone is packed, the result is recovered as
+$K^{ij}_{pq} = A^{ij}_{pq} + A^{ji}_{qp}$ from a partial contraction $A$, and this symmetrization
+consumes \emph{both} occupied orders, so the occupied triangle cannot be exploited. The ratio is
+\begin{equation}
+\label{eq:pm-flop-ratio}
+\frac{n^2 n_{pp} o^2}{2\,n_{pp}^2\,n_{oo}} = \frac{2no}{(n+1)(o+1)}
+\;\xrightarrow[\;n,o\gg 1\;]{}\; 2,
+\end{equation}
+the product of the bra-pair packing ($n^2 \to n_{pp}$), the two products instead of one, and the
+occupied-pair packing ($o^2 \to n_{oo}$). Both the operation count and the amount of data streamed
+are thus halved. Note that the second factor in \eq{eq:pm-flop-ratio} approaches unity only for a
+sufficiently large occupied space: $n_{oo}$ is the width of the right-hand side of the matrix
+products \eq{eq:pm-kext}, and for small $o$ the products are too narrow to reach the asymptotic
+performance of the underlying matrix multiplication.
+
+The same supermatrices are used for the closed- and open-shell Fock-like intermediates, which are
+built by streaming $V^{\pm}$ once, and — through \eq{eq:ao-halftrans} — for the $\Lambda$,
+perturbative-triples and EOM integral blocks, so that the AO integrals are the only integral set
+that is ever stored.
 
 
 \chapter{Two determinant coupled cluster}
