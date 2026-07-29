@@ -1716,63 +1716,52 @@ function warn_ao_direct_deleted(EC::ECInfo, norb::Int)
 end
 
 """
-    ao_direct_orbitals_spin(EC::ECInfo) -> SpinMatrix
-
-  The correlation reference orbitals of an AO-direct run — the SINGLE orbital source every
-  AO-direct consumer must use (the dressing, the `kext` rotation, the Λ generalized-Fock terms,
-  the setup), so that no two of them can end up in different bases.
-
-  This is [`load_orbitals_for_correlation`](@ref), not [`load_orbitals`](@ref): the latter projects
-  stored orbitals onto the current AO basis but does NOT re-orthonormalize them, so reusing orbitals
-  across a geometry change (a `wf.dump=""` + `wf.start` restart, where `dumpfile` falls back to the
-  start file) leaves a reference that is not orthonormal in the current metric — measured
-  `max|CᵀSC − I| ≈ 2e-5` for a 1e-3 bohr displacement, silently shifting the energy. The correlation
-  loader Löwdin-orthonormalizes the projection (and completes it across a basis-size change),
-  which is exactly what the MO/FCIDUMP route has done since the same fix was made there.
-
-  Once [`ao_cc_setup!`](@ref) has settled the reference it is read back from file
-  ([`save_ao_correlation_orbitals!`](@ref)), so every consumer — the setup itself, the `Rot` the
-  residual hoists, the Λ generalized-Fock terms, the OQV rotation — sees the SAME orbitals even when
-  the reference is not a pure function of the orbital file (`wf.dump4core_only`).
-"""
-const AO_CORR_ORB_A = "cMOcorr_a"
-const AO_CORR_ORB_B = "cMOcorr_b"
-
-"""
     save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
 
-  Persist the AO-direct correlation reference computed by [`ao_cc_setup!`](@ref) — the single
-  artifact every later consumer reads, the AO-direct counterpart of the MO route's FCIDUMP. It has
-  to be stored rather than re-derived because it is not a pure function of the orbital file: with
-  `wf.dump4core_only` the frozen core is spliced in from a second file and the correlating orbitals
-  are re-orthonormalized against it ([`replace_core_from_dump!`](@ref)).
+  Persist the AO-direct correlation reference computed by [`ao_cc_setup!`](@ref) as `C_Am` (and
+  `C_AM` for the β spin) — the single artifact every later consumer reads, the AO-direct counterpart
+  of the MO route's FCIDUMP. It has to be stored rather than re-derived because it is not a pure
+  function of the orbital file: with `wf.dump4core_only` the frozen core is spliced in from a second
+  file and the correlating orbitals are re-orthonormalized against it
+  ([`replace_core_from_dump!`](@ref)). Restricted orbitals write `C_Am` only.
 """
 function save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
-  save!(EC, AO_CORR_ORB_A, Matrix(cMO.α); description="AO-direct correlation reference (α)")
-  file_exists(EC, AO_CORR_ORB_B) && delete_file!(EC, AO_CORR_ORB_B)
+  save!(EC, "C_Am", Matrix(cMO.α); description="AO-direct correlation reference (α)")
+  file_exists(EC, "C_AM") && delete_file!(EC, "C_AM")
   is_restricted(cMO) ||
-    save!(EC, AO_CORR_ORB_B, Matrix(cMO.β); description="AO-direct correlation reference (β)")
+    save!(EC, "C_AM", Matrix(cMO.β); description="AO-direct correlation reference (β)")
   return
 end
 
 """
     delete_ao_correlation_orbitals!(EC::ECInfo)
 
-  Drop a persisted AO-direct correlation reference, so a new run never inherits the previous one
-  (the orbitals may have changed in between, e.g. a re-run `@hf`).
+  Drop a persisted AO-direct correlation reference (`C_Am`/`C_AM`), so a new run never inherits the
+  previous one (the orbitals may have changed in between, e.g. a re-run `@hf`).
 """
 function delete_ao_correlation_orbitals!(EC::ECInfo)
-  for key in (AO_CORR_ORB_A, AO_CORR_ORB_B)
+  for key in ("C_Am", "C_AM")
     file_exists(EC, key) && delete_file!(EC, key)
   end
   return
 end
 
+"""
+    ao_direct_orbitals_spin(EC::ECInfo) -> SpinMatrix
+
+  The correlation reference orbitals of an AO-direct run — the SINGLE orbital source every
+  AO-direct consumer must use (the dressing, the `kext` rotation, the Λ generalized-Fock terms,
+  the setup), so that no two of them can end up in different bases.
+
+  Once [`ao_cc_setup!`](@ref) has settled the reference it is read back from `C_Am`/`C_AM`
+  ([`save_ao_correlation_orbitals!`](@ref)), so every consumer — the setup itself, the `Rot` the
+  residual hoists, the Λ generalized-Fock terms, the OQV rotation — sees the SAME orbitals even when
+  the reference is not a pure function of the orbital file (`wf.dump4core_only`).
+"""
 function ao_direct_orbitals_spin(EC::ECInfo)
-  if file_exists(EC, AO_CORR_ORB_A)                  # the reference `ao_cc_setup!` settled on
-    Ca = load2idx(EC, AO_CORR_ORB_A)
-    return file_exists(EC, AO_CORR_ORB_B) ? SpinMatrix(Ca, load2idx(EC, AO_CORR_ORB_B)) :
-                                            SpinMatrix(Ca)
+  if file_exists(EC, "C_Am")                         # the reference `ao_cc_setup!` settled on
+    Ca = load2idx(EC, "C_Am")
+    return file_exists(EC, "C_AM") ? SpinMatrix(Ca, load2idx(EC, "C_AM")) : SpinMatrix(Ca)
   end
   return load_orbitals_for_correlation(EC)[1]        # before setup (route decisions)
 end
@@ -2186,7 +2175,7 @@ function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
   # effective one-electron Hamiltonian and `Ecore` computed just below, once per run — but the
   # re-orthonormalization also touches the correlating orbitals, which is why the resulting
   # reference is persisted rather than re-derived by every later reader.
-  if EC.options.wf.dump4core_only && !isempty(EC.system) && !isempty(core_a)
+  if EC.options.wf.dump4core_only && isempty(core_a)
     core_a == 1:length(core_a) ||
       error("dump4core_only expects the frozen core at the lowest orbitals, got $core_a")
     replace_core_from_dump!(EC, cMOsm, length(core_a))

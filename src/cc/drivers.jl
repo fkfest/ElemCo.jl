@@ -241,7 +241,7 @@ function derive_mo_basis!(EC::ECInfo{T}) where {T}
   # unrestricted a UHF dump (both spins keep the same number of columns — symmetric freezing).
   # dump4core_only: replace the stale (previous-geometry) frozen core reused from `start` with the
   # fresh-HF core at the current geometry, re-orthonormalizing the correlating orbitals against it
-  if EC.options.wf.dump4core_only && !isempty(EC.system) && ncore_orbs > 0
+  if EC.options.wf.dump4core_only && ncore_orbs > 0
     replace_core_from_dump!(EC, cMO, ncore_orbs)
   end
   active = (ncore_orbs+1):(full_norb-nfrozvirt)
