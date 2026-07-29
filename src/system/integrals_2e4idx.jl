@@ -373,6 +373,11 @@ function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatc
     S0sh += 1
   end
   S0sh <= nsh || error("eri_2e4idx_tri_batch!: rowfloor=$rowfloor exceeds the AO range")
+  # Column maxima of the Schwarz bounds, hoisted out of the shell loops: they depend only on the
+  # ket-1 shell R (and on the fixed S0sh), so computing them per (Sb,R) pair rescanned the same
+  # column once for every Sb ≥ R — O(nsh³) element reads where O(nsh²) does.
+  qmaxR = screen ? vec(maximum(qsh, dims=1)) : Float64[]
+  qmaxRhi = (screen && S0sh > 1) ? vec(maximum(@view(qsh[S0sh:nsh, :]), dims=1)) : qmaxR
 
   for Sb in batch.shrange                  # s-shell (ket-2)
     @inbounds begin
@@ -385,12 +390,12 @@ function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatc
         # max_P Q[P,R], so a Q-shell failing against THAT fails for every P — skip the whole loop.
         # For Q below the row cut only P ≥ S0sh run, so the tighter max over that range applies
         # (any Q it skips would have every per-P test fail too — the computed set is unchanged).
-        qmaxR = screen ? maximum(@view qsh[:, R]) : 0.0
-        qmaxRhi = (screen && S0sh > 1) ? maximum(@view qsh[S0sh:nsh, R]) : qmaxR
+        qmR = screen ? qmaxR[R] : 0.0
+        qmRhi = screen ? qmaxRhi[R] : 0.0
         for Q in 1:nsh                     # q-shell (bra-2): full
           nQ = v[Q]; Qoff = off[Q]
           Plo = Q >= S0sh ? 1 : S0sh       # row cut: skip iff max(P,Q) < S0sh
-          screen && (Plo == 1 ? qmaxR : qmaxRhi) * qsh[Q, Sb] < thr && continue
+          screen && (Plo == 1 ? qmR : qmRhi) * qsh[Q, Sb] < thr && continue
           qQS = screen ? qsh[Q, Sb] : 0.0
           for P in Plo:nsh                 # p-shell (bra-1): full above the row cut
             nP = v[P]; Poff = off[P]
