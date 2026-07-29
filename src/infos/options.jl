@@ -533,6 +533,10 @@ end
   cartesian::Bool = false
   """`⟨1000⟩` target batch length for the integral transformation. """
   target_batch_length::Int = 1000
+  """`⟨1e-12⟩` Cauchy–Schwarz prescreening threshold for the exact AO integrals: a shell quartet
+  whose bound `sqrt((pr|pr))·sqrt((qs|qs))` stays below this is skipped (and stored as zero).
+  Set to `0` to disable screening and compute every quartet. """
+  screen::Float64 = 1.e-12
   """`⟨false⟩` use fallback basis sets (in case of missing basis sets). """
   use_fallback_basis::Bool = false
   """`⟨true⟩` sanity check of the fit basis (i.e., that it's not an AO basis)"""

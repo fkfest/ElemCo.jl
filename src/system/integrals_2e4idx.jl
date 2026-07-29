@@ -152,6 +152,38 @@ function eri_2e4idx_tri!(int2::AbstractArray{<:Number,3}, ao_basis::BasisSet; ta
 end
 
 """
+    schwarz_bounds(ao_basis::BasisSet, callback::Function) -> Matrix{Float64}
+
+  Cauchy–Schwarz shell-pair bounds `Q[P,R] = sqrt(max_{p∈P,r∈R} |(pr|pr)|)` for prescreening the
+  four-index integrals: the chemists' quartet obeys `|(pr|qs)| ≤ Q[P,R]·Q[Q,S]`, so a quartet whose
+  product falls below the threshold can be skipped without computing it.
+
+  Costs `nshell²/2` diagonal quartets against the `nshell⁴` of the full generation, i.e. nothing.
+"""
+function schwarz_bounds(ao_basis::BasisSet, callback::Function)
+  bb = BasisBatcher(ao_basis, 1)
+  v = bb.n4sh[1]
+  nsh = length(v)
+  Q = zeros(Float64, nsh, nsh)
+  @threadsbuffer tbufs(Cdouble, buffer_size_4idx(bb)) begin
+  @sync for P in 1:nsh
+    Threads.@spawn begin
+      @inbounds begin
+        buf = neuralyze(reshape_buf!(tbufs, length(tbufs)))
+        for R in 1:P
+          callback(buf, P, R, P, R, ao_basis)
+          q = sqrt(maximum(abs, reshape_buf(buf, v[P], v[R], v[P], v[R])))
+          Q[P,R] = q; Q[R,P] = q
+        end
+        reset!(tbufs)
+      end
+    end
+  end
+  end #threadsbuffer
+  return Q
+end
+
+"""
     calc_2e4idx_tri!(int2, callback::Function, ao_basis::BasisSet; target_length=100)
 
   Assemble the AO two-electron integrals **directly into the physicist-triangular
@@ -172,10 +204,11 @@ end
   can likewise be used integral-direct (e.g. an AO Fock build) without an `int2`.
 """
 function calc_2e4idx_tri!(int2::AbstractArray{T,3}, callback::Function, ao_basis::BasisSet;
-                          target_length::Int=100) where {T}
+                          target_length::Int=100, screen_thr::Float64=0.0) where {T}
   nao = n_ao(ao_basis)
   @assert size(int2) == (nao, nao, nao*(nao+1)÷2) "int2 has wrong shape for nao=$nao"
   bb = BasisBatcher(ao_basis, target_length)
+  qsh = screen_thr > 0.0 ? schwarz_bounds(ao_basis, callback) : nothing
 
   @threadsbuffer tbufs(Cdouble, buffer_size_4idx(bb)) begin
   @sync for batch in bb
@@ -185,7 +218,7 @@ function calc_2e4idx_tri!(int2::AbstractArray{T,3}, callback::Function, ao_basis
       col_lo = s_lo*(s_lo-1)÷2 + 1        # uppertriangular_index(1, s_lo)
       col_hi = s_hi*(s_hi+1)÷2            # uppertriangular_index(s_hi, s_hi)
       slab = @view int2[:, :, col_lo:col_hi]
-      eri_2e4idx_tri_batch!(slab, tbufs, callback, batch)
+      eri_2e4idx_tri_batch!(slab, tbufs, callback, batch; qsh, thr=screen_thr)
     end
   end
   end #threadsbuffer
@@ -227,8 +260,9 @@ end
   array is never stored; e.g. the ± supermatrix store is folded directly from the slabs.
 """
 function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
-                                    groups::Vector{Vector{BasisBatch}})
+                                    groups::Vector{Vector{BasisBatch}}; screen_thr::Float64=0.0)
   callback = is_cartesian(ao_basis) ? eri_2e4idx_cart! : eri_2e4idx_sph!
+  qsh = screen_thr > 0.0 ? schwarz_bounds(ao_basis, callback) : nothing
   nao = n_ao(ao_basis)
   maxblockcols = maximum(groups) do g
     s_lo = first(first(g).range); s_hi = last(last(g).range)
@@ -247,7 +281,7 @@ function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
         bcol_lo = b_lo*(b_lo-1)÷2 + 1
         bcol_hi = b_hi*(b_hi+1)÷2
         sl = @view slab[:, :, (bcol_lo - col_lo + 1):(bcol_hi - col_lo + 1)]
-        eri_2e4idx_tri_batch!(sl, tbufs, callback, batch)
+        eri_2e4idx_tri_batch!(sl, tbufs, callback, batch; qsh, thr=screen_thr)
       end
     end
     consume!(J, @view slab[:, :, 1:ncols])
@@ -268,15 +302,22 @@ end
   third dimension. The triangular symmetry is applied at the shell-pair level
   (`r`-shell ≤ `s`-shell, with the diagonal shell handled at the AO level); the bra
   shells `(p,q)` are full. `buffer` is a `Cdouble` (threads) buffer of size
-  [`buffer_size_4idx`](@ref). This is the reusable core — pass an `int2` view to fill
+  [`buffer_size_4idx`](@ref). Passing [`schwarz_bounds`](@ref) as `qsh` with `thr > 0` skips shell
+  quartets whose Cauchy–Schwarz bound `Q[P,R]·Q[Q,S]` falls below `thr`; `out` is then zeroed first,
+  since screened quartets are never written. This is the reusable core — pass an `int2` view to fill
   a memory-mapped dump, or a scratch slab to consume the block integral-direct.
 """
-function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatch)
+function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatch;
+                               qsh::Union{Matrix{Float64},Nothing}=nothing, thr::Float64=0.0)
   bs = batch.bb.basis
   v = n4sh(batch, 1)                       # AO count per shell (single basis)
   off = bas_offset(batch, 1)               # AO offset per shell
   nsh = length(v)
   col_offset = (first(batch.range) - 1) * first(batch.range) ÷ 2   # tri(1, s_lo) - 1
+  screen = !isnothing(qsh) && thr > 0.0
+  # Screened quartets are never written, so the destination must start at zero — `out` is a slab
+  # REUSED across blocks, and each batch owns disjoint columns of it, so this is race-free.
+  screen && fill!(out, 0)
 
   for Sb in batch.shrange                  # s-shell (ket-2)
     @inbounds begin
@@ -285,10 +326,16 @@ function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatc
       for R in 1:Sb                        # r-shell (ket-1): r ≤ s ⇒ R ≤ S
         nR = v[R]; Roff = off[R]
         diagRS = (R == Sb)
+        # |(pr|qs)| ≤ Q[P,R]·Q[Q,S]: with (R,S) fixed, the largest bound any P can give is
+        # max_P Q[P,R], so a Q-shell failing against THAT fails for every P — skip the whole loop.
+        qmaxR = screen ? maximum(@view qsh[:, R]) : 0.0
         for Q in 1:nsh                     # q-shell (bra-2): full
           nQ = v[Q]; Qoff = off[Q]
+          screen && qmaxR * qsh[Q, Sb] < thr && continue
+          qQS = screen ? qsh[Q, Sb] : 0.0
           for P in 1:nsh                   # p-shell (bra-1): full
             nP = v[P]; Poff = off[P]
+            screen && qsh[P, R] * qQS < thr && continue
             # libcint: (P R | Q S) chemists' = (p r | q s), p∈P, r∈R, q∈Q, s∈S
             callback(buf, P, R, Q, Sb, bs)
             vbuf = reshape_buf(buf, nP, nR, nQ, nS)

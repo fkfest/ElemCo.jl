@@ -11,6 +11,8 @@ using ElemCo.FockFactory: ao_JK!, ao_J2K!, add_coulomb!, add_exchange!
 using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform
 using ElemCo.ECInfos: delete_file!, file_exists
 using ElemCo.MSystems: parse_geometry
+using ElemCo.BasisSets: generate_basis, n_ao
+using ElemCo.Integrals: calc_2e4idx_tri!, eri_2e4idx_sph!, schwarz_bounds
 using LinearAlgebra
 using Random
 

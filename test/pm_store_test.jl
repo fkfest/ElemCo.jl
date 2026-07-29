@@ -371,6 +371,39 @@ end
 # (shell-aligned blocks, no jointly packed intermediate at any point). Validate the store contents
 # against a reference obtained by running the ERI kernel into a plain triangular array, via
 # pm_to_joint!, incl. a forced multi-block blocking.
+# Cauchy-Schwarz prescreening (`int.screen`). Tested on two waters far apart, because that is where
+# it actually bites: a single compact molecule has NO negligible shell quartet at 1e-12 (measured
+# 0% skipped), so screening it changes nothing and would make this test vacuous. Skipped quartets
+# must come out as exact zeros — the slab is reused across blocks, so a missing zero-fill would
+# leave stale integrals from a previous block rather than an obvious garbage value.
+@testset "Schwarz prescreening ≡ unscreened within its threshold" begin
+  far = """
+    O   0.000000000   0.000000000  -0.130186067
+    H   0.000000000   1.489124508   1.033245507
+    H   0.000000000  -1.489124508   1.033245507
+    O  15.000000000   0.000000000  -0.130186067
+    H  15.000000000   1.489124508   1.033245507
+    H  15.000000000  -1.489124508   1.033245507"""
+  bao = generate_basis(parse_geometry(far, Dict("ao"=>"cc-pVDZ")), "ao")
+  nao = n_ao(bao); npp = nao*(nao+1)÷2
+  thr = 1e-12
+  ref = zeros(nao, nao, npp); scr = zeros(nao, nao, npp)
+  calc_2e4idx_tri!(ref, eri_2e4idx_sph!, bao)
+  calc_2e4idx_tri!(scr, eri_2e4idx_sph!, bao; screen_thr=thr)
+  @test maximum(abs, ref .- scr) < thr                  # nothing above the bound was dropped
+  @test count(iszero, scr) > count(iszero, ref)         # ... and screening really fired
+  # the bound itself: no discarded quartet may hold an integral above its Schwarz product
+  Q = schwarz_bounds(bao, eri_2e4idx_sph!)
+  @test size(Q) == (length(bao), length(bao))
+  @test all(>=(0.0), Q) && issymmetric(Q)
+  # end to end: the screened AO integrals give the same CCSD energy
+  fresh_scr() = (e = ElemCo.ECInfo(system=parse_geometry(far, Dict("ao"=>"cc-pVDZ")));
+                 e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+  EC = fresh_scr(); @ints; @hf; e_on = @cc ccsd
+  EC = fresh_scr(); EC.options.int.screen = 0.0; @ints; @hf; e_off = @cc ccsd
+  @test abs(e_on["CCSD"] - e_off["CCSD"]) < 1e-9
+end
+
 @testset "fused ± generation ≡ direct ERI generation" begin
   geometry = "
     O   0.000000000   0.000000000  -0.130186067

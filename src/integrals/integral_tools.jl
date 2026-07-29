@@ -377,11 +377,17 @@ function ao_integrals(EC::ECInfo{T}) where T
     EC.fd = FDump{T,3}()
   end
   bao = save_ao_1e_integrals!(EC)
+  nao = n_ao(bao)
+  gb = round(nao^2*(nao+1)*(nao+2)/4 * sizeof(T) / 2^30, digits=2)
+  println("Generating exact AO integrals for $nao basis functions ($gb GB ± store)...")
+  flush(stdout)
+  t1 = time_ns()
   # Fused generation of the persisted ± supermatrix store straight from the ERI generator: every
   # consumer (kext, Fock builders, the T1 dressing, the AO→MO transform) works on it directly, at
   # halved flops and streaming, and disk stays at ≈ n⁴/4. The AO integrals exist in this format
   # only — the exact-integral side of the code has exactly one representation.
   pm_integrals!(EC, bao)
+  print_time(EC, t1, "generate AO integrals", 1)
   return nuclear_repulsion(EC.system)
 end
 
@@ -393,7 +399,8 @@ end
   `σ`-blocks, batches within a block generated in parallel), ±-folded with
   `calc_tri_sym_antisym!` and written as PM panels — the joint `ao_int2` intermediate is
   never created (disk ≈ n⁴/4 throughout, no transient peak). `maxcols` bounds the block
-  width (`0` = the deterministic [`PMStore.pm_default_maxcols`](@ref) default).
+  width (`0` = the deterministic [`PMStore.pm_default_maxcols`](@ref) default). Shell quartets whose
+  Cauchy–Schwarz bound falls below `int.screen` are skipped (see [`schwarz_bounds`](@ref)).
 """
 function pm_integrals!(EC::ECInfo{T}, bao; maxcols::Int=0) where T
   nao = n_ao(bao)
@@ -406,7 +413,7 @@ function pm_integrals!(EC::ECInfo{T}, bao; maxcols::Int=0) where T
   w = pm_writer(EC, nao, breakpoints)
   colcap = maximum(length, w.pairblocks)
   fullS = zeros(T, npp, colcap); fullA = zeros(T, npp, colcap)   # reused full-height ± buffers
-  calc_2e4idx_tri_blockwise!(bao, groups) do J, slab
+  calc_2e4idx_tri_blockwise!(bao, groups; screen_thr=EC.options.int.screen) do J, slab
     ncol = size(slab, 3)
     Ssub = @view fullS[:, 1:ncol]; Asub = @view fullA[:, 1:ncol]
     calc_tri_sym_antisym!(Ssub, Asub, slab)
