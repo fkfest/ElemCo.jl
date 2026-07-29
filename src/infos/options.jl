@@ -24,6 +24,14 @@
   If empty, amplitudes are read from `dump`. If provided, amplitudes (and MOs/basis) 
   are read from this file and projected to the current MO basis. """
   start::String = ""
+  """`⟨false⟩` in a geometry-change restart of orbital-optimized methods, use the `dump` file for the
+  *frozen-core orbitals only* and take the correlating orbitals from `start`. The reused orbitals in
+  `start` carry the frozen core from the *previous* geometry; with `dump4core_only=true`
+  the frozen core is instead taken from `dump` — a fresh HF at the *current* geometry — while the
+  correlating orbitals come from `start` (projected and orthogonalized against the new core).
+  Typical use: run `@dfhf` at the new geometry (writes `dump`), then
+  `@set wf start="cc.h5" dump4core_only=true` (no need to set `dump=""`). """
+  dump4core_only::Bool = false
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
   """`⟨:auto⟩` core type for frozen-core approximation:
@@ -161,6 +169,13 @@ end
   shiftp::Float64 = 0.2
   """`⟨0.2⟩` level shift for triples. """
   shiftt::Float64 = 0.2
+  """`⟨1.0⟩` damping factor for the orbital-rotation step in orbital-optimized
+  QV methods (OQV-CCD/DCD). The orbital update is scaled by `orbdamp`; `1.0`
+  is the undamped step. Values `< 1` (e.g. `0.15`) stabilise the coupled
+  orbital+amplitude iteration near strong correlation / instabilities (stretched
+  bonds), at the cost of slower orbital convergence. Does not bias the solution:
+  the fixed point (gradient `= 0`) is unchanged by the damping. """
+  orbdamp::Float64 = 1.0
   """`⟨false⟩` calculate properties. """
   properties::Bool = false
   """`⟨1.e-5⟩` amplitude decomposition threshold. """

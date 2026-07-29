@@ -412,13 +412,22 @@ end
   (the default), or the exact AO integral files ([`ao_integrals`](@ref)) when `int.df=false`.
 
   Nothing is generated when integrals are already available — an MO dump in `EC.fd`, or exact AO
-  integrals on scratch (the ± supermatrix store), which the AO-direct methods
-  consume without ever building an FCIDUMP.
+  integrals on scratch (the ± supermatrix store), which the AO-direct methods consume without ever
+  building an FCIDUMP.
+
+  The one case where an EXISTING `EC.fd` is regenerated anyway is the `wf.dump==""` + `wf.start`
+  same-session restart (and the `dump4core_only` + `wf.start` core swap): the cached dump was built
+  from different (e.g. pre-optimization) orbitals, so reusing it would combine the restarted
+  amplitudes — which live in the stored, optimized basis — with stale integrals, and the calculation
+  would re-optimize instead of resuming at the stored solution. Skipped when there is no molecular
+  system (FCIDUMP-only), where the integrals come from a fixed file.
 """
 function setup_fcidump_if_needed!(EC::ECInfo)
   # exact AO integrals on scratch are integrals too — the AO-direct methods consume them directly
   pm_exists(EC) && return
-  if isempty(EC.fd)
+  if isempty(EC.fd) ||
+     ((EC.options.wf.dump == "" || EC.options.wf.dump4core_only) &&
+      EC.options.wf.start != "" && !isempty(EC.system))
     if EC.options.int.df
       dfdump(EC)
     else
@@ -441,12 +450,18 @@ function dfdump(EC::ECInfo)
   if !EC.options.int.df
     error("Only density-fitted integrals implemented")
   end
+  # classes describing the loaded orbital set; `nothing` means "use the dump's own classes". For a
+  # basis-change restart the orbitals are completed to the full new basis and matching classes are
+  # returned, so freezing operates on classes that describe the actual (completed) orbital set.
+  completed_classes = nothing
   if EC.options.wf.npositron > 0
     cMO = load_orbitals(EC)
     cPO = load_positron_orbitals(EC)
     norbs_pos = size(cPO,2)
   else
-    cMO = load_orbitals(EC)
+    # `dump4core_only`: correlating orbitals come from `start` (the frozen core from `dump` is spliced
+    # in below); otherwise the usual source (dump, or start via a dump="" restart).
+    cMO, completed_classes = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
   end
   norbs = size(cMO,2)
   space_save = save_space(EC)
@@ -455,13 +470,19 @@ function dfdump(EC::ECInfo)
   EC.options.wf.npositron > 0 && n_redundant_orbitals(EC) > 0 &&
     error("Redundant (linearly-dependent) basis sets are not supported with positrons.")
   # frozen core, redundant orbitals, and (dump-deleted / explicit) virtuals, all by class/index
-  cls = freeze_orbitals!(EC)
+  cls = freeze_orbitals!(EC; classes=completed_classes)
   (cls.occ_a == cls.occ_b && cls.virt_a == cls.virt_b) ||
     error("FCIDUMP generation requires symmetric (restricted-like) freezing!")
   # total per-orbital frozen counts (chemical core + class-honored core, and frozen/deleted virt);
   # the region layout keeps frozen core at the lowest and deleted virtuals at the highest indices.
   ncore_orbs = nocc_full - length(EC.space['o'])
   nfrozvirt = nvirt_full - length(EC.space['v'])
+  # on a geometry-change restart the frozen core reused from `start` is stale (stuck at the
+  # previous geometry). With `dump4core_only`, take the frozen core (the leading `ncore_orbs` columns,
+  # cf. the `core_orbs == 1:ncore_orbs` assertion in generate_integrals) from the fresh-HF `dump`.
+  if EC.options.wf.dump4core_only && !isempty(EC.system) && ncore_orbs > 0
+    cMO = replace_core_from_dump!(EC, cMO, ncore_orbs)
+  end
 
   full_norb = length(space_save[':'])
   nelec = guess_nelec(EC.system) - 2*ncore_orbs

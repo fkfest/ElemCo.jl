@@ -65,6 +65,57 @@ Options can also be set globally using the [`@set`](@ref) macro outside of calcu
 
 Global options persist until explicitly changed or reset with [`@reset`](@ref).
 
+## Restarting a coupled-cluster calculation
+
+A coupled-cluster calculation can be restarted from previously converged amplitudes. This is useful to
+continue an interrupted run, to converge a related calculation faster (e.g. the next point along a
+geometry scan or a change of basis), or to reuse the optimized orbitals of an orbital-optimized method
+such as `oqv-dcd`.
+
+**1. Store the amplitudes.** Set [`wf.store`](@ref ECInfos.WfOptions) to a file name; the orbitals and
+the converged amplitudes are written there (in TREXIO/HDF5 format). For an orbital-optimized method the
+*optimized* orbitals are stored.
+
+```julia
+@dfhf
+@cc dcsd begin
+  @set wf store="cc.h5"
+end
+```
+
+**2. Restart from the amplitudes.** Set [`wf.start`](@ref ECInfos.WfOptions) to that file; the stored
+amplitudes are read and used as the starting guess instead of the default (MP2) guess:
+
+```julia
+@dfhf
+@cc dcsd begin
+  @set wf start="cc.h5"
+end
+```
+
+By default the reference orbitals are taken from the [`wf.dump`](@ref ECInfos.WfOptions) file (the
+current Hartree–Fock orbitals just written by `@dfhf`), and the stored amplitudes are **projected** from
+the orbitals of the `start` file onto those `dump` orbitals. This is what you want when the reference
+should be the new Hartree–Fock orbitals — e.g. a normal method at a displaced geometry: run `@dfhf` for
+the new geometry, then restart the amplitudes onto the freshly computed orbitals.
+
+**Reusing the stored orbitals (`dump=""`).** If you do *not* want to use the orbitals on the `dump` file
+but instead want to reuse the orbitals stored in the `start` file — for instance to resume an
+orbital-optimized calculation from its optimized orbitals — set `wf.dump=""`:
+
+```julia
+@cc oqv-dcd begin
+  @set wf start="cc.h5" dump=""
+end
+```
+
+With `dump=""` the orbitals from the `start` file become the reference: they are projected onto the
+current basis and geometry (and re-orthonormalized), and the amplitudes are then projected onto those
+projected orbitals. If the basis is larger than the stored one, the missing space is filled with
+orthogonal complementary orbitals; if it is smaller (or redundant), the excess/redundant orbitals are
+dropped, exactly as in a fresh Hartree–Fock calculation. For an unchanged geometry and basis this
+reproduces the stored solution and converges in a single iteration.
+
 ## Reserved Variables
 
 Various macros are defined and exported to simplify running calculations. The macros use several reserved variable names. The following table lists the reserved variable names and their meanings.
