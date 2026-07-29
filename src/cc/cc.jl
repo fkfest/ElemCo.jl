@@ -77,7 +77,7 @@ using ..ElemCo.FockFactory
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy, calc_posMP2 
 export calc_cc, calc_pertT
-export ao_cc_setup!
+export ao_cc_setup!, ao_direct_orbitals_spin, delete_ao_correlation_orbitals!
 export calc_lm_cc, calc_1RDM
 
 include("ao_direct_blocks.jl")   # ht→MO block engine, dressed blocks, ± kext kernels
@@ -1716,16 +1716,79 @@ function warn_ao_direct_deleted(EC::ECInfo, norb::Int)
 end
 
 """
+    ao_direct_orbitals_spin(EC::ECInfo) -> SpinMatrix
+
+  The correlation reference orbitals of an AO-direct run — the SINGLE orbital source every
+  AO-direct consumer must use (the dressing, the `kext` rotation, the Λ generalized-Fock terms,
+  the setup), so that no two of them can end up in different bases.
+
+  This is [`load_orbitals_for_correlation`](@ref), not [`load_orbitals`](@ref): the latter projects
+  stored orbitals onto the current AO basis but does NOT re-orthonormalize them, so reusing orbitals
+  across a geometry change (a `wf.dump=""` + `wf.start` restart, where `dumpfile` falls back to the
+  start file) leaves a reference that is not orthonormal in the current metric — measured
+  `max|CᵀSC − I| ≈ 2e-5` for a 1e-3 bohr displacement, silently shifting the energy. The correlation
+  loader Löwdin-orthonormalizes the projection (and completes it across a basis-size change),
+  which is exactly what the MO/FCIDUMP route has done since the same fix was made there.
+
+  Once [`ao_cc_setup!`](@ref) has settled the reference it is read back from file
+  ([`save_ao_correlation_orbitals!`](@ref)), so every consumer — the setup itself, the `Rot` the
+  residual hoists, the Λ generalized-Fock terms, the OQV rotation — sees the SAME orbitals even when
+  the reference is not a pure function of the orbital file (`wf.dump4core_only`).
+"""
+const AO_CORR_ORB_A = "cMOcorr_a"
+const AO_CORR_ORB_B = "cMOcorr_b"
+
+"""
+    save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
+
+  Persist the AO-direct correlation reference computed by [`ao_cc_setup!`](@ref) — the single
+  artifact every later consumer reads, the AO-direct counterpart of the MO route's FCIDUMP. It has
+  to be stored rather than re-derived because it is not a pure function of the orbital file: with
+  `wf.dump4core_only` the frozen core is spliced in from a second file and the correlating orbitals
+  are re-orthonormalized against it ([`replace_core_from_dump!`](@ref)).
+"""
+function save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
+  save!(EC, AO_CORR_ORB_A, Matrix(cMO.α); description="AO-direct correlation reference (α)")
+  file_exists(EC, AO_CORR_ORB_B) && delete_file!(EC, AO_CORR_ORB_B)
+  is_restricted(cMO) ||
+    save!(EC, AO_CORR_ORB_B, Matrix(cMO.β); description="AO-direct correlation reference (β)")
+  return
+end
+
+"""
+    delete_ao_correlation_orbitals!(EC::ECInfo)
+
+  Drop a persisted AO-direct correlation reference, so a new run never inherits the previous one
+  (the orbitals may have changed in between, e.g. a re-run `@hf`).
+"""
+function delete_ao_correlation_orbitals!(EC::ECInfo)
+  for key in (AO_CORR_ORB_A, AO_CORR_ORB_B)
+    file_exists(EC, key) && delete_file!(EC, key)
+  end
+  return
+end
+
+function ao_direct_orbitals_spin(EC::ECInfo)
+  if file_exists(EC, AO_CORR_ORB_A)                  # the reference `ao_cc_setup!` settled on
+    Ca = load2idx(EC, AO_CORR_ORB_A)
+    return file_exists(EC, AO_CORR_ORB_B) ? SpinMatrix(Ca, load2idx(EC, AO_CORR_ORB_B)) :
+                                            SpinMatrix(Ca)
+  end
+  return load_orbitals_for_correlation(EC)[1]        # before setup (route decisions)
+end
+
+"""
     ao_direct_orbitals(EC::ECInfo) -> Matrix
 
-  MO coefficients for an AO-direct run: the stored (α) orbitals with the linearly-dependent
-  (deleted/redundant) columns — the last `n_deleted_orbitals` — dropped, so the AO-direct MO
-  space excludes them. They carry no electrons and their (near-)zero coefficients would otherwise
-  corrupt the `Rot` AO↔MO rotation in `cc_kext!`. The dropped columns are the highest orbital
-  indices (appended by the canonical orthogonalization).
+  MO coefficients for an AO-direct run: the (α) correlation reference orbitals
+  ([`ao_direct_orbitals_spin`](@ref)) with the linearly-dependent (deleted/redundant) columns — the
+  last `n_deleted_orbitals` — dropped, so the AO-direct MO space excludes them. They carry no
+  electrons and their (near-)zero coefficients would otherwise corrupt the `Rot` AO↔MO rotation in
+  `cc_kext!`. The dropped columns are the highest orbital indices (appended by the canonical
+  orthogonalization, and by the completion of a projected set).
 """
 function ao_direct_orbitals(EC::ECInfo)
-  cMO = Matrix(load_orbitals(EC).α)
+  cMO = Matrix(ao_direct_orbitals_spin(EC).α)
   ndel = n_deleted_orbitals(EC)
   return ndel > 0 ? cMO[:, 1:size(cMO,2)-ndel] : cMO
 end
@@ -1913,7 +1976,7 @@ function dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix)
   # active-only set of `ao_direct_orbitals` (which drops the redundant tail). Deleted/frozen positions
   # of `dD1` are zero, so they contribute nothing. `ht_oAAA`'s bra used `ao_direct_orbitals(EC)[:,o]`,
   # which agrees with these leading columns. Same convention as `dD1_ufock_vo`.
-  cMO = Matrix(load_orbitals(EC).α); SP = EC.space
+  cMO = Matrix(ao_direct_orbitals_spin(EC).α); SP = EC.space
   D_AO = cMO * transpose(dD1) * transpose(cMO)      # D_AO[μ,ρ] = Σ_pq cMO[μ,q] dD1[p,q] cMO[ρ,p]
   return dD1_ht_vo(EC, "ht_oAAA", 2 .* D_AO, D_AO, cMO[:, SP['v']])
 end
@@ -1933,7 +1996,7 @@ end
 function dD1_ufock_vo(EC::ECInfo, dD1::AbstractMatrix, dD1os::AbstractMatrix, spin::Symbol)
   isα = (spin == :α)
   SP = EC.space
-  cMOsm = load_orbitals(EC)
+  cMOsm = ao_direct_orbitals_spin(EC)
   cMOa = Matrix(cMOsm.α); cMOb = Matrix(cMOsm.β)
   dD1a, dD1b = isα ? (dD1, dD1os) : (dD1os, dD1)
   Da_AO = cMOa * transpose(dD1a) * transpose(cMOa)
@@ -2102,16 +2165,33 @@ function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
   pm_exists(EC) ||
     error("AO-direct CC needs the exact AO integrals on file; generate them first (@ints / @hf).")
   save_ao_1e_integrals!(EC)                          # fresh AO 1-e integrals for the current system
-  cMOsm = load_orbitals(EC)
+  # the correlation reference (projected + re-orthonormalized across a geometry/basis change) and
+  # the orbital classes that describe THAT set — freezing must use them, not the stored file's
+  # classes, when a projection completed/dropped orbitals
+  # `dump4core_only`: the correlating orbitals come from `start` (their frozen core is stale, stuck
+  # at the previous geometry); the core is swapped in from `dump` below — same source selection as
+  # the density-fitted dump builder.
+  cMOsm, corr_classes = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
   @assert !closed_shell || is_restricted(cMOsm) "closed-shell AO-direct setup needs restricted orbitals"
   closed_shell || unrestrict!(cMOsm)                 # β = copy(α) for restricted (RHF/ROHF) orbitals
   # freeze core/deleted/frozen-virtual orbitals -> EC.space becomes the active space
   space_full = save_space(EC)
   occ_full_a = space_full['o']; occ_full_b = space_full['O']
-  freeze_orbitals!(EC)
+  freeze_orbitals!(EC; classes=corr_classes)
   warn_ao_direct_deleted(EC, length(space_full[':']))
   core_a = sort!(setdiff(occ_full_a, EC.space['o']))  # frozen occupied (core) α MOs
   core_b = sort!(setdiff(occ_full_b, EC.space['O']))  # frozen occupied (core) β MOs
+  # `dump4core_only`: take the frozen core from the fresh-HF `dump` at the CURRENT geometry and
+  # re-orthonormalize the correlating orbitals against it. Only the core needs this — it enters the
+  # effective one-electron Hamiltonian and `Ecore` computed just below, once per run — but the
+  # re-orthonormalization also touches the correlating orbitals, which is why the resulting
+  # reference is persisted rather than re-derived by every later reader.
+  if EC.options.wf.dump4core_only && !isempty(EC.system) && !isempty(core_a)
+    core_a == 1:length(core_a) ||
+      error("dump4core_only expects the frozen core at the lowest orbitals, got $core_a")
+    replace_core_from_dump!(EC, cMOsm, length(core_a))
+  end
+  save_ao_correlation_orbitals!(EC, cMOsm)           # the reference every later consumer reads
   hao = Matrix{T}(load2idx(EC, "h_AA"))
   Enuc = nuclear_repulsion(EC.system)
   SP = EC.space
@@ -2792,7 +2872,7 @@ function calc_cc_resid(EC::ECInfo{T}, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef
     # Rota/Rotb, so the orbitals are loaded at most once. (The UHF kext has no orbital-optimization
     # rotation, so `Rot` here is purely these AO→MO coefficients.)
     @assert EC.options.cc.use_kext "AO-direct CC requires cc.use_kext=true"
-    cMOsm = Rot === nothing ? load_orbitals(EC) : Rot
+    cMOsm = Rot === nothing ? ao_direct_orbitals_spin(EC) : Rot
     ao_dressed_ints_unrestricted(EC, T1a, T1b, Matrix(cMOsm.α), Matrix(cMOsm.β))
     t1 = print_time(EC,t1,"AO dressing",2)
   elseif length(T1a) > 0 || length(T1b) > 0
@@ -3786,7 +3866,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   ao_kw = if !EC.ao_direct
     (;)
   elseif is_unrestricted(method) || restrict
-    (; Rot = load_orbitals(EC))          # SpinMatrix → unrestricted calc_cc_resid
+    (; Rot = ao_direct_orbitals_spin(EC))# SpinMatrix → unrestricted calc_cc_resid
   else
     (; Rot = ao_direct_orbitals(EC))     # Matrix (deleted cols dropped) → closed-shell calc_cc_resid
   end

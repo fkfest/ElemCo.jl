@@ -221,19 +221,29 @@ function derive_mo_basis!(EC::ECInfo{T}) where {T}
   nocc_full = length(EC.space['o'])
   nvirt_full = length(EC.space['v'])
   full_norb = length(space_save[':'])
+  # the correlation reference (projected + re-orthonormalized across a geometry/basis change, as the
+  # DF route does) and the classes describing THAT set — `generate_mo_dump` asserts orthonormality,
+  # so a plain `load_orbitals` here turns a reused-orbital restart into an assertion failure
+  # `start=dump4core_only`: the correlating orbitals then come from `start` and the frozen core is
+  # swapped in from `dump` below, as in the density-fitted builder and `ao_cc_setup!`
+  cMO, corr_classes = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
   # frozen core, redundant orbitals, and (dump-deleted / explicit) virtuals, all by class/index
-  cls = freeze_orbitals!(EC)
+  cls = freeze_orbitals!(EC; classes=corr_classes)
   (cls.occ_a == cls.occ_b && cls.virt_a == cls.virt_b) ||
     error("AO→MO integral transformation requires symmetric (restricted-like) freezing!")
   ncore_orbs = nocc_full - length(EC.space['o'])
   nfrozvirt = nvirt_full - length(EC.space['v'])
   frozen_occ = sort!(setdiff(space_save['o'], EC.space['o']))
   restore_space!(EC, space_save)
-  cMO = load_orbitals(EC)
   # Transform only the kept orbitals: active + frozen-occupied (the frozen-occ are needed to
   # fold the core energy/Fock); deleted and frozen-virtual orbitals (the highest columns, see
   # `dfdump`) are dropped from the transform. Restricted orbitals build a closed-shell dump,
   # unrestricted a UHF dump (both spins keep the same number of columns — symmetric freezing).
+  # dump4core_only: replace the stale (previous-geometry) frozen core reused from `start` with the
+  # fresh-HF core at the current geometry, re-orthonormalizing the correlating orbitals against it
+  if EC.options.wf.dump4core_only && !isempty(EC.system) && ncore_orbs > 0
+    replace_core_from_dump!(EC, cMO, ncore_orbs)
+  end
   active = (ncore_orbs+1):(full_norb-nfrozvirt)
   corerng = 1:ncore_orbs
   if is_restricted(cMO)
@@ -290,11 +300,14 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     pm_exists(EC) ||
       error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
             "Generate integrals first (@ints/@hf/@dfints) or provide an fcidump.")
+    # never inherit the correlation reference of an earlier run in this scratch (the orbitals may
+    # have changed since, e.g. a re-run `@hf`); `ao_cc_setup!` writes the current one
+    delete_ao_correlation_orbitals!(EC)
     setup_space_system!(EC)
     # "closed shell" for the RESIDUAL: equal occupations AND restricted orbitals. Unrestricted
     # orbitals make the residual unrestricted even for a closed-shell method name — the method is
     # then promoted (`checkset_unrestricted_closedshell!`), not rerouted to the MO dump.
-    closed_shell = (EC.space['o'] == EC.space['O']) && is_restricted(load_orbitals(EC))
+    closed_shell = (EC.space['o'] == EC.space['O']) && is_restricted(ao_direct_orbitals_spin(EC))
     # Nothing below reroutes any more: the unsupported combinations errored above, a closed-shell
     # method on unrestricted orbitals/occupations is promoted to its unrestricted form, and the
     # AO-direct path covers deleted orbitals. Only the method itself (FCI, iterative triples,
@@ -316,7 +329,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
 
   # Whether the ORBITALS are UHF (only the `R` methods care — they require a non-UHF reference; an
   # unrestricted residual runs on either kind). AO-direct leaves `EC.fd` empty, so it asks the orbitals.
-  unrestricted_orbs = EC.ao_direct ? !is_restricted(load_orbitals(EC)) : EC.fd.uhf
+  unrestricted_orbs = EC.ao_direct ? !is_restricted(ao_direct_orbitals_spin(EC)) : EC.fd.uhf
   # Promote a closed-shell method name to its unrestricted form where the reference demands it
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
 
