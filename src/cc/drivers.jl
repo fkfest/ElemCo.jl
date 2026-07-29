@@ -221,9 +221,8 @@ function derive_mo_basis!(EC::ECInfo{T}) where {T}
   nocc_full = length(EC.space['o'])
   nvirt_full = length(EC.space['v'])
   full_norb = length(space_save[':'])
-  # the correlation reference (projected + re-orthonormalized across a geometry/basis change, as the
-  # DF route does) and the classes describing THAT set — `generate_mo_dump` asserts orthonormality,
-  # so a plain `load_orbitals` here turns a reused-orbital restart into an assertion failure
+  # the correlation reference (projected + re-orthonormalized across a geometry/basis change)
+  # and the classes describing THAT set.
   # `start=dump4core_only`: the correlating orbitals then come from `start` and the frozen core is
   # swapped in from `dump` below, as in the density-fitted builder and `ao_cc_setup!`
   cMO, corr_classes = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
@@ -296,6 +295,7 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
           "combined with a Λ prefix, `cc.properties` or `wf.natorb` (yet).")
   end
   ao_source = isempty(EC.fd)
+  EC.ao_direct = false
   restricted_orbs = false            # AO route only: asked once, used by both decisions below
   ao_orbitals = nothing              # ... and the loaded reference is handed to `ao_cc_setup!`
   if ao_source
@@ -306,29 +306,23 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # have changed since, e.g. a re-run `@hf`); `ao_cc_setup!` writes the current one
     delete_ao_correlation_orbitals!(EC)
     setup_space_system!(EC)
+    ao_orbitals = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
+    restricted_orbs = is_restricted(ao_orbitals[1])
     # "closed shell" for the RESIDUAL: equal occupations AND restricted orbitals. Unrestricted
     # orbitals make the residual unrestricted even for a closed-shell method name — the method is
     # then promoted (`checkset_unrestricted_closedshell!`), not rerouted to the MO dump.
-    # read the correlation reference ONCE here: the spin case decides the method, and
-    # `ao_cc_setup!` gets the same objects instead of re-reading the orbital file
-    ao_orbitals = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
-    restricted_orbs = is_restricted(ao_orbitals[1])
     closed_shell = (EC.space['o'] == EC.space['O']) && restricted_orbs
     # Nothing below reroutes any more: the unsupported combinations errored above, a closed-shell
     # method on unrestricted orbitals/occupations is promoted to its unrestricted form, and the
     # AO-direct path covers deleted orbitals. Only the method itself (FCI, iterative triples,
     # Brueckner) and the user's `int.ao_direct` decide. `ao_direct_method` is asked BEFORE the
     # method is promoted below, so the route follows what the user requested.
-    ao_direct = ao_direct_method(ecmethod) && EC.options.int.ao_direct
-    if ao_direct
-      EC.ao_direct = true            # the active-space setup (freezing) happens in ao_cc_setup!
-    else
-      EC.ao_direct = false           # never inherit a stale `true` from an aborted earlier run
+    EC.ao_direct = ao_direct_method(ecmethod) && EC.options.int.ao_direct
+    if !EC.ao_direct
       derive_mo_basis!(EC)
-      setup_space_fd!(EC)
-      closed_shell = is_closed_shell(EC)
     end
-  else
+  end
+  if !EC.ao_direct
     setup_space_fd!(EC)
     closed_shell = is_closed_shell(EC)
   end

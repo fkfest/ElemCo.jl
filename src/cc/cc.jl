@@ -2137,7 +2137,7 @@ function ao_core_ufock(EC::ECInfo{T}, Da::AbstractMatrix, Db::AbstractMatrix) wh
 end
 
 """
-    ao_cc_setup!(EC::ECInfo; closed_shell::Bool) -> EHF
+    ao_cc_setup!(EC::ECInfo; closed_shell::Bool, orbitals=nothing) -> EHF
 
   Set up an AO-direct CC run. Freezes core / deleted / frozen-virtual orbitals (reducing
   `EC.space` to the active space, exactly like the DF/MO path via [`freeze_orbitals!`](@ref))
@@ -2154,6 +2154,7 @@ end
   β ([`unrestrict!`](@ref), as `uhf` does with a restricted guess) and builds the per-spin reference
   from two identical orbital sets. The opposite combination (closed-shell residual, UHF orbitals) is a
   different calculation and is rejected by the caller (`ccdriver` derives an MO dump instead).
+  `orbitals` lets the caller hand over the `(cMO, classes)` pair it already loaded.
 """
 function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool, orbitals=nothing) where {T<:Number}
   pm_exists(EC) ||
