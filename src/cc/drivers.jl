@@ -296,6 +296,8 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
           "combined with a Λ prefix, `cc.properties` or `wf.natorb` (yet).")
   end
   ao_source = isempty(EC.fd)
+  restricted_orbs = false            # AO route only: asked once, used by both decisions below
+  ao_orbitals = nothing              # ... and the loaded reference is handed to `ao_cc_setup!`
   if ao_source
     pm_exists(EC) ||
       error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
@@ -307,7 +309,11 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     # "closed shell" for the RESIDUAL: equal occupations AND restricted orbitals. Unrestricted
     # orbitals make the residual unrestricted even for a closed-shell method name — the method is
     # then promoted (`checkset_unrestricted_closedshell!`), not rerouted to the MO dump.
-    closed_shell = (EC.space['o'] == EC.space['O']) && is_restricted(ao_direct_orbitals_spin(EC))
+    # read the correlation reference ONCE here: the spin case decides the method, and
+    # `ao_cc_setup!` gets the same objects instead of re-reading the orbital file
+    ao_orbitals = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
+    restricted_orbs = is_restricted(ao_orbitals[1])
+    closed_shell = (EC.space['o'] == EC.space['O']) && restricted_orbs
     # Nothing below reroutes any more: the unsupported combinations errored above, a closed-shell
     # method on unrestricted orbitals/occupations is promoted to its unrestricted form, and the
     # AO-direct path covers deleted orbitals. Only the method itself (FCI, iterative triples,
@@ -329,14 +335,14 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
 
   # Whether the ORBITALS are UHF (only the `R` methods care — they require a non-UHF reference; an
   # unrestricted residual runs on either kind). AO-direct leaves `EC.fd` empty, so it asks the orbitals.
-  unrestricted_orbs = EC.ao_direct ? !is_restricted(ao_direct_orbitals_spin(EC)) : EC.fd.uhf
+  unrestricted_orbs = EC.ao_direct ? !restricted_orbs : EC.fd.uhf
   # Promote a closed-shell method name to its unrestricted form where the reference demands it
   closed_shell_method = checkset_unrestricted_closedshell!(ecmethod, closed_shell, unrestricted_orbs)
 
   energies = OutDict()
   if EC.ao_direct
     # freezes core (fold into eff. 1-e H), builds bare f_mm/e_m/d_oovv for the residual's spin case
-    EHF = ao_cc_setup!(EC; closed_shell=closed_shell_method)
+    EHF = ao_cc_setup!(EC; closed_shell=closed_shell_method, orbitals=ao_orbitals)
     output_E_method(EHF, "HF", "energy:"); println(); flush_output()
     energies = merge(energies, "HF"=>(EHF, "HF energy"))
   else

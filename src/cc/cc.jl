@@ -1730,6 +1730,11 @@ function save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
   file_exists(EC, "C_AM") && delete_file!(EC, "C_AM")
   is_restricted(cMO) ||
     save!(EC, "C_AM", Matrix(cMO.β); description="AO-direct correlation reference (β)")
+  # the number of deleted (linearly-dependent) orbitals of THIS reference: constant for the run, but
+  # `n_deleted_orbitals` re-reads the orbital dump twice (classes + energies) on every call, so it is
+  # settled here with the reference rather than by each consumer
+  save!(EC, "n_del", eltype(cMO.α)[n_deleted_orbitals(EC)];
+        description="AO-direct deleted-orbital count")
   return
 end
 
@@ -1740,7 +1745,7 @@ end
   previous one (the orbitals may have changed in between, e.g. a re-run `@hf`).
 """
 function delete_ao_correlation_orbitals!(EC::ECInfo)
-  for key in ("C_Am", "C_AM")
+  for key in ("C_Am", "C_AM", "n_del")
     file_exists(EC, key) && delete_file!(EC, key)
   end
   return
@@ -1778,7 +1783,7 @@ end
 """
 function ao_direct_orbitals(EC::ECInfo)
   cMO = Matrix(ao_direct_orbitals_spin(EC).α)
-  ndel = n_deleted_orbitals(EC)
+  ndel = file_exists(EC, "n_del") ? Int(load1idx(EC, "n_del")[1]) : n_deleted_orbitals(EC)
   return ndel > 0 ? cMO[:, 1:size(cMO,2)-ndel] : cMO
 end
 
@@ -2150,7 +2155,7 @@ end
   from two identical orbital sets. The opposite combination (closed-shell residual, UHF orbitals) is a
   different calculation and is rejected by the caller (`ccdriver` derives an MO dump instead).
 """
-function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
+function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool, orbitals=nothing) where {T<:Number}
   pm_exists(EC) ||
     error("AO-direct CC needs the exact AO integrals on file; generate them first (@ints / @hf).")
   save_ao_1e_integrals!(EC)                          # fresh AO 1-e integrals for the current system
@@ -2159,8 +2164,11 @@ function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
   # classes, when a projection completed/dropped orbitals
   # `dump4core_only`: the correlating orbitals come from `start` (their frozen core is stale, stuck
   # at the previous geometry); the core is swapped in from `dump` below — same source selection as
-  # the density-fitted dump builder.
-  cMOsm, corr_classes = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
+  # the density-fitted dump builder. `orbitals` lets the caller hand over the `(cMO, classes)` pair
+  # it already loaded (the driver needs the spin case to pick the method), so the orbital file is
+  # read once per run instead of once here and once there.
+  cMOsm, corr_classes = isnothing(orbitals) ?
+      load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only) : orbitals
   @assert !closed_shell || is_restricted(cMOsm) "closed-shell AO-direct setup needs restricted orbitals"
   closed_shell || unrestrict!(cMOsm)                 # β = copy(α) for restricted (RHF/ROHF) orbitals
   # freeze core/deleted/frozen-virtual orbitals -> EC.space becomes the active space
@@ -2175,7 +2183,7 @@ function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool) where {T<:Number}
   # effective one-electron Hamiltonian and `Ecore` computed just below, once per run — but the
   # re-orthonormalization also touches the correlating orbitals, which is why the resulting
   # reference is persisted rather than re-derived by every later reader.
-  if EC.options.wf.dump4core_only && isempty(core_a)
+  if EC.options.wf.dump4core_only && !isempty(EC.system) && !isempty(core_a)
     core_a == 1:length(core_a) ||
       error("dump4core_only expects the frozen core at the lowest orbitals, got $core_a")
     replace_core_from_dump!(EC, cMOsm, length(core_a))
