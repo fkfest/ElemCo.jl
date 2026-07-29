@@ -13,8 +13,10 @@ using ElemCo.ECInfos: delete_file!, file_exists
 using ElemCo.MSystems: parse_geometry
 using ElemCo.BasisSets: generate_basis, n_ao
 using ElemCo.Integrals: calc_2e4idx_tri!, eri_2e4idx_sph!, schwarz_bounds,
-                        eri_2e4idx_tri_batch!, ket_shell_blocks, buffer_size_4idx
+                        eri_2e4idx_tri_batch!, ket_shell_blocks, buffer_size_4idx,
+                        eri_2e4idx_callback
 using ElemCo.IntegralTools: pm_integrals!, save_ao_1e_integrals!
+using ElemCo.Libcint: free_optimizer!
 using LinearAlgebra
 using Random
 

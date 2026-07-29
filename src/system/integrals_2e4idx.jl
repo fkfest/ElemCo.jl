@@ -23,6 +23,35 @@ function eri_2e4idx_cart!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
   cint2e_cart!(out, MVector(Cint(i-1),Cint(j-1),Cint(k-1),Cint(l-1)), basis.lib)
 end
 
+# optimizer-taking variants: same integrals through libcint's fast path (precomputed shell-pair
+# data in a `CIntOpt` instead of a NULL handle recomputing it per quartet)
+function eri_2e4idx_sph!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet, opt::CIntOpt)
+  cint2e_sph!(out, MVector(Cint(i-1),Cint(j-1),Cint(k-1),Cint(l-1)), basis.lib, opt)
+end
+function eri_2e4idx_cart!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet, opt::CIntOpt)
+  cint2e_cart!(out, MVector(Cint(i-1),Cint(j-1),Cint(k-1),Cint(l-1)), basis.lib, opt)
+end
+
+"""
+    eri_2e4idx_callback(ao_basis::BasisSet) -> (callback, opt)
+
+  The per-quartet ERI callback for a generation sweep, running through libcint's optimizer fast
+  path: allocates the [`CIntOpt`](@ref Libcint.CIntOpt) for this basis (spherical/cartesian
+  resolved here) and returns a closure with the plain `callback(out, i, j, k, l, basis)` signature
+  every driver and [`schwarz_bounds`](@ref) expects, plus the optimizer handle. The caller frees
+  the handle with `free_optimizer!(opt)` after the sweep (a finalizer backs it up); the handle is
+  read-only during evaluation, so all threads of the sweep share it.
+"""
+function eri_2e4idx_callback(ao_basis::BasisSet)
+  if is_cartesian(ao_basis)
+    opt = cint2e_cart_optimizer(ao_basis.lib)
+    return (out, i, j, k, l, bs) -> eri_2e4idx_cart!(out, i, j, k, l, bs, opt), opt
+  else
+    opt = cint2e_sph_optimizer(ao_basis.lib)
+    return (out, i, j, k, l, bs) -> eri_2e4idx_sph!(out, i, j, k, l, bs, opt), opt
+  end
+end
+
 """
     eri_2e4idx!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
 
@@ -268,7 +297,7 @@ end
 function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
                                     groups::Vector{Vector{BasisBatch}}; screen_thr::Float64=0.0,
                                     rowcut::Bool=false)
-  callback = is_cartesian(ao_basis) ? eri_2e4idx_cart! : eri_2e4idx_sph!
+  callback, opt = eri_2e4idx_callback(ao_basis)   # libcint optimizer fast path, shared by threads
   qsh = screen_thr > 0.0 ? schwarz_bounds(ao_basis, callback) : nothing
   nao = n_ao(ao_basis)
   maxblockcols = maximum(groups) do g
@@ -295,6 +324,7 @@ function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
     consume!(J, @view slab[:, :, 1:ncols])
   end
   end #threadsbuffer
+  free_optimizer!(opt)
   return
 end
 

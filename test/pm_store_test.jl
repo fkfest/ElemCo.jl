@@ -438,6 +438,29 @@ end
   close(f3)
 end
 
+# libcint CINTOpt optimizer: the generation sweeps run every quartet through a per-basis optimizer
+# handle (precomputed shell-pair data) instead of a NULL pointer. The optimizer changes libcint's
+# internal summation paths, so values differ from the NULL route at the ulp level (~1e-15) — pinned
+# here at 1e-13, far below every physical tolerance. The handle is freed deterministically after a
+# sweep; free must be idempotent (a finalizer also runs it).
+@testset "CIntOpt optimizer ≡ NULL-optimizer values" begin
+  water = "
+    O   0.000000000   0.000000000  -0.130186067
+    H   0.000000000   1.489124508   1.033245507
+    H   0.000000000  -1.489124508   1.033245507"
+  bao = generate_basis(parse_geometry(water, Dict("ao"=>"cc-pVDZ")), "ao")
+  nao = n_ao(bao); npp = nao*(nao+1)÷2
+  a = zeros(nao, nao, npp); b = zeros(nao, nao, npp)
+  calc_2e4idx_tri!(a, eri_2e4idx_sph!, bao)          # NULL-optimizer route
+  cb, opt = eri_2e4idx_callback(bao)
+  calc_2e4idx_tri!(b, cb, bao)                       # optimizer route (the production sweep path)
+  @test maximum(abs, a .- b) < 1e-13
+  free_optimizer!(opt)
+  @test opt.ptr == C_NULL
+  free_optimizer!(opt)                               # idempotent (finalizer will run it again)
+  @test opt.ptr == C_NULL
+end
+
 # Hermiticity row cut: the ± store keeps only the lower block-triangle (rows tri(p,q) ≥ the block's
 # first ket-pair index; the rest is the conj-Hermitian mirror reconstructed at read), so the
 # generation skips the bra shell pairs that produce only discarded rows. Two claims are tested:
