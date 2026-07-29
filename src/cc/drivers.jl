@@ -184,13 +184,6 @@ end
   MP2/UMP2/RMP2, or CCSD/DCSD/CCD/DCD optionally with perturbative triples and/or a Λ, EOM, QV,
   orbital-optimizing (`O`) or Brueckner (`B`) prefix. FCI and iterative triples always derive a
   transient MO dump (see [`derive_mo_basis!`](@ref)).
-
-  Both orbital-rotating prefixes are covered by the same machinery: they rotate through
-  [`ao_rotate_ints`](@ref), which folds the rotation into the MO coefficients and keeps the general
-  block in the AO space (`d_AAAo`, the AO counterpart of the MO route's `d_mmmo`). They differ only
-  in what drives the rotation — an orbital gradient for `O`, the singles residual for `B` — and that
-  residual is built from blocks the AO path already produces (`dh_mm`/`df_mm`/`d_vovv` and the ±
-  `kext`), so it needs nothing extra.
 """
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)

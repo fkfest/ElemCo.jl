@@ -438,6 +438,71 @@ end
   close(f3)
 end
 
+# Hermiticity row cut: the ± store keeps only the lower block-triangle (rows tri(p,q) ≥ the block's
+# first ket-pair index; the rest is the conj-Hermitian mirror reconstructed at read), so the
+# generation skips the bra shell pairs that produce only discarded rows. Two claims are tested:
+# the skip fires EXACTLY on the predicate region (NaN sentinel — a too-eager skip would leave NaN
+# in a kept entry, a too-lazy one would overwrite a sentinel), and the assembled store is
+# BIT-identical to the uncut build across blockings and with/without screening (finite floats, so
+# `==` is bitwise; a floor off-by-one would leave stored rows stale and fail loudly).
+@testset "Hermiticity row cut ≡ full generation (bit-identical)" begin
+  water = "
+    O   0.000000000   0.000000000  -0.130186067
+    H   0.000000000   1.489124508   1.033245507
+    H   0.000000000  -1.489124508   1.033245507"
+  # kernel-level sentinel: sto-3g water, one all-shells batch. Shell AO widths [1,1,3,1,1] ⇒
+  # rowfloor=6 makes S0sh the first H shell; skipped bra pairs = AO square [1:5]×[1:5].
+  bao = generate_basis(parse_geometry(water, Dict("ao"=>"sto-3g")), "ao")
+  nao = n_ao(bao); npp = nao*(nao+1)÷2
+  batch = only(only(ket_shell_blocks(bao; maxcols=npp, target_length=1000)))
+  buf = ElemCo.Integrals.Buffers.Buffer{Cdouble}(buffer_size_4idx(batch.bb))
+  slab0 = zeros(nao, nao, npp)
+  eri_2e4idx_tri_batch!(slab0, buf, eri_2e4idx_sph!, batch)                  # reference, no cut
+  slab = fill(NaN, nao, nao, npp)
+  eri_2e4idx_tri_batch!(slab, buf, eri_2e4idx_sph!, batch; rowfloor=6)
+  @test slab[6:nao, :, :] == slab0[6:nao, :, :]                              # kept rows: bit-equal
+  @test slab[:, 6:nao, :] == slab0[:, 6:nao, :]
+  @test all(isnan, @view slab[1:5, 1:5, :])                                  # skip fired, and only there
+  # ... and with screening on top (fill! wipes the sentinel, so only the kept-region equality)
+  qsh = schwarz_bounds(bao, eri_2e4idx_sph!)
+  slabs0 = zeros(nao, nao, npp); slabs = zeros(nao, nao, npp)
+  eri_2e4idx_tri_batch!(slabs0, buf, eri_2e4idx_sph!, batch; qsh, thr=1e-12)
+  eri_2e4idx_tri_batch!(slabs, buf, eri_2e4idx_sph!, batch; qsh, thr=1e-12, rowfloor=6)
+  @test slabs[6:nao, :, :] == slabs0[6:nao, :, :]
+  @test slabs[:, 6:nao, :] == slabs0[:, 6:nao, :]
+
+  # store-level bit-identity, cut vs no-cut, across blockings and with/without screening.
+  # `open_pm_store` keeps a single cached mapping per scratch — copy the panels out and release
+  # before building the second store.
+  function built_panels(geom, basis, maxcols, rowcut, screen)
+    EC = ElemCo.ECInfo(system=parse_geometry(geom, Dict("ao"=>basis)))
+    EC.options.int.screen = screen
+    bao1 = save_ao_1e_integrals!(EC)
+    pm_integrals!(EC, bao1; maxcols, rowcut)
+    pm = open_pm_store(EC)
+    S = copy(pm.smap); A = copy(pm.amap)
+    close_pm_store!(EC, pm); ElemCo.PMStore.release_pm_store!()
+    return S, A
+  end
+  far = "
+    O   0.000000000   0.000000000  -0.130186067
+    H   0.000000000   1.489124508   1.033245507
+    H   0.000000000  -1.489124508   1.033245507
+    O  15.000000000   0.000000000  -0.130186067
+    H  15.000000000   1.489124508   1.033245507
+    H  15.000000000  -1.489124508   1.033245507"
+  for (geom, basis, mcs) in ((water, "sto-3g", (8, 12, 300)),   # tiny blocks / mid / single-block
+                             (far, "cc-pVDZ", (60,)))           # cut ⊗ screening on a screenable system
+    for maxcols in mcs, screen in (0.0, 1e-12)
+      Scut, Acut = built_panels(geom, basis, maxcols, true, screen)
+      Sref, Aref = built_panels(geom, basis, maxcols, false, screen)
+      @test Scut == Sref
+      @test Acut == Aref
+    end
+  end
+end
+
+
 end # @testitem
 
 @testitem "pm_ht" tags=[:cc, :pm, :quick] begin

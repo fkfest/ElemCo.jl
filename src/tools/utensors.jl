@@ -247,15 +247,20 @@ end
   For each column `q`, the strided row `A[q, 1:q, x]` is copied into a small
   contiguous buffer, then sum/difference is computed with stride-1 SIMD access.
   Multi-threaded over `x`.
+
+  `qmin` restricts the fold to the rows `tri(p,q)` with `q ≥ qmin` (all `p ≤ q`), i.e. packed rows
+  `uppertriangular_index(1,qmin)` to the end; rows below are left UNTOUCHED. Used by the ± store
+  build, which persists only rows at/above its per-block floor and never generates the rest (see
+  `IntegralTools.pm_integrals!`) — with the default `qmin=1` the full fold is emitted unchanged.
 """
 function calc_tri_sym_antisym!(out_s::AbstractMatrix, out_a::AbstractMatrix,
-                               A::AbstractArray{T,3}, fac=nothing) where T
+                               A::AbstractArray{T,3}, fac=nothing; qmin::Int=1) where T
   norb = size(A, 1)
   nx = size(A, 3)
   @threadsbuffer tbuf(T, norb) begin
   Threads.@threads for x in 1:nx
     buf = alloc!(tbuf, norb)
-    @inbounds for q in 1:norb
+    @inbounds for q in qmin:norb
       pq0 = q * (q - 1) ÷ 2
       @simd for p in 1:q
         buf[p] = A[q, p, x]

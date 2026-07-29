@@ -258,9 +258,16 @@ end
   batches within a block run in parallel over disjoint columns, exactly like
   [`calc_2e4idx_tri!`](@ref) — and handed to `consume!(J, slab)`. The full triangular
   array is never stored; e.g. the ± supermatrix store is folded directly from the slabs.
+
+  With `rowcut=true` only the bra pairs the ± store keeps for block `J` are generated: slab entries
+  with `max(p,q) < s_lo(J)` (packed row below the block's first ket-pair index, i.e. the store's
+  conj-Hermitian mirror) are stale garbage the consumer must not read — exactly the rows a ± fold
+  discards. The floor is the GROUP's `s_lo`, shared by all its batches (each batch owns distinct
+  columns but must produce all kept rows of the block). Default `false` keeps the full-slab contract.
 """
 function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
-                                    groups::Vector{Vector{BasisBatch}}; screen_thr::Float64=0.0)
+                                    groups::Vector{Vector{BasisBatch}}; screen_thr::Float64=0.0,
+                                    rowcut::Bool=false)
   callback = is_cartesian(ao_basis) ? eri_2e4idx_cart! : eri_2e4idx_sph!
   qsh = screen_thr > 0.0 ? schwarz_bounds(ao_basis, callback) : nothing
   nao = n_ao(ao_basis)
@@ -275,13 +282,14 @@ function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
     s_lo = first(first(group).range); s_hi = last(last(group).range)
     col_lo = s_lo*(s_lo-1)÷2 + 1
     ncols = s_hi*(s_hi+1)÷2 - col_lo + 1
+    rowfloor = rowcut ? s_lo : 1
     @sync for batch in group
       Threads.@spawn begin
         b_lo = first(batch.range); b_hi = last(batch.range)
         bcol_lo = b_lo*(b_lo-1)÷2 + 1
         bcol_hi = b_hi*(b_hi+1)÷2
         sl = @view slab[:, :, (bcol_lo - col_lo + 1):(bcol_hi - col_lo + 1)]
-        eri_2e4idx_tri_batch!(sl, tbufs, callback, batch; qsh, thr=screen_thr)
+        eri_2e4idx_tri_batch!(sl, tbufs, callback, batch; qsh, thr=screen_thr, rowfloor)
       end
     end
     consume!(J, @view slab[:, :, 1:ncols])
@@ -306,9 +314,18 @@ end
   quartets whose Cauchy–Schwarz bound `Q[P,R]·Q[Q,S]` falls below `thr`; `out` is then zeroed first,
   since screened quartets are never written. This is the reusable core — pass an `int2` view to fill
   a memory-mapped dump, or a scratch slab to consume the block integral-direct.
+
+  `rowfloor` (an AO index, default 1 = off) is the Hermiticity row cut for a consumer that keeps only
+  the bra pairs with packed row `tri(p,q) ≥ tri(1, rowfloor)` — equivalently `max(p,q) ≥ rowfloor` —
+  and reconstructs the rest as the conj-Hermitian mirror (the ± supermatrix store). Bra shell pairs
+  with BOTH shells entirely below `rowfloor` produce only discarded rows and are skipped; the
+  predicate is symmetric in `P↔Q`, so both ordered quartets of every kept unordered pair are still
+  computed (a ± fold needs `out[p,q,·]` and `out[q,p,·]`). With `rowfloor > 1`, `out` entries with
+  `max(p,q) < rowfloor` are never written (stale garbage) and must not be read by the consumer.
 """
 function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatch;
-                               qsh::Union{Matrix{Float64},Nothing}=nothing, thr::Float64=0.0)
+                               qsh::Union{Matrix{Float64},Nothing}=nothing, thr::Float64=0.0,
+                               rowfloor::Int=1)
   bs = batch.bb.basis
   v = n4sh(batch, 1)                       # AO count per shell (single basis)
   off = bas_offset(batch, 1)               # AO offset per shell
@@ -318,6 +335,14 @@ function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatc
   # Screened quartets are never written, so the destination must start at zero — `out` is a slab
   # REUSED across blocks, and each batch owns disjoint columns of it, so this is race-free.
   screen && fill!(out, 0)
+  # Hermiticity row cut: S0sh = first shell reaching the floor; a quartet is skipped iff
+  # max(P,Q) < S0sh, i.e. both bra shells end below `rowfloor` (shells tile the AO range
+  # contiguously, so a shell is entirely below the floor iff its last AO is).
+  S0sh = 1
+  @inbounds while S0sh <= nsh && off[S0sh] + v[S0sh] < rowfloor
+    S0sh += 1
+  end
+  S0sh <= nsh || error("eri_2e4idx_tri_batch!: rowfloor=$rowfloor exceeds the AO range")
 
   for Sb in batch.shrange                  # s-shell (ket-2)
     @inbounds begin
@@ -328,12 +353,16 @@ function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatc
         diagRS = (R == Sb)
         # |(pr|qs)| ≤ Q[P,R]·Q[Q,S]: with (R,S) fixed, the largest bound any P can give is
         # max_P Q[P,R], so a Q-shell failing against THAT fails for every P — skip the whole loop.
+        # For Q below the row cut only P ≥ S0sh run, so the tighter max over that range applies
+        # (any Q it skips would have every per-P test fail too — the computed set is unchanged).
         qmaxR = screen ? maximum(@view qsh[:, R]) : 0.0
+        qmaxRhi = (screen && S0sh > 1) ? maximum(@view qsh[S0sh:nsh, R]) : qmaxR
         for Q in 1:nsh                     # q-shell (bra-2): full
           nQ = v[Q]; Qoff = off[Q]
-          screen && qmaxR * qsh[Q, Sb] < thr && continue
+          Plo = Q >= S0sh ? 1 : S0sh       # row cut: skip iff max(P,Q) < S0sh
+          screen && (Plo == 1 ? qmaxR : qmaxRhi) * qsh[Q, Sb] < thr && continue
           qQS = screen ? qsh[Q, Sb] : 0.0
-          for P in 1:nsh                   # p-shell (bra-1): full
+          for P in Plo:nsh                 # p-shell (bra-1): full above the row cut
             nP = v[P]; Poff = off[P]
             screen && qsh[P, R] * qQS < thr && continue
             # libcint: (P R | Q S) chemists' = (p r | q s), p∈P, r∈R, q∈Q, s∈S

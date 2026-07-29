@@ -401,8 +401,15 @@ end
   never created (disk ≈ n⁴/4 throughout, no transient peak). `maxcols` bounds the block
   width (`0` = the deterministic [`PMStore.pm_default_maxcols`](@ref) default). Shell quartets whose
   Cauchy–Schwarz bound falls below `int.screen` are skipped (see [`schwarz_bounds`](@ref)).
+
+  The generation computes exactly the stored lower block-triangle (`rowcut`, default on): bra pairs
+  whose packed row falls below a block's floor are the conj-Hermitian mirror that
+  [`PMStore.pm_write_block!`](@ref) never stores, so their quartets are skipped in the ERI kernel
+  (bra shell pairs entirely below `first(σblock)`) and the ± fold is restricted to the kept rows —
+  roughly half the quartets and fold flops, bit-identical store. `rowcut=false` restores the full
+  computation (for testing).
 """
-function pm_integrals!(EC::ECInfo{T}, bao; maxcols::Int=0) where T
+function pm_integrals!(EC::ECInfo{T}, bao; maxcols::Int=0, rowcut::Bool=true) where T
   nao = n_ao(bao)
   npp = nao*(nao+1)÷2
   maxcols == 0 && (maxcols = PMStore.pm_default_maxcols(nao))
@@ -411,12 +418,19 @@ function pm_integrals!(EC::ECInfo{T}, bao; maxcols::Int=0) where T
   groups = ket_shell_blocks(bao; maxcols=maxcols, target_length=tlen)
   breakpoints = Int[last(last(g).range) for g in groups]
   w = pm_writer(EC, nao, breakpoints)
+  # the kernel's compute floor (per-group s_lo) and the store's row floor (pairblocks) must be the
+  # same AO index — both derive from `groups`, this pins the correspondence:
+  @assert all(J -> first(first(groups[J]).range) == (J == 1 ? 1 : breakpoints[J-1] + 1),
+              eachindex(groups))
   colcap = maximum(length, w.pairblocks)
   fullS = zeros(T, npp, colcap); fullA = zeros(T, npp, colcap)   # reused full-height ± buffers
-  calc_2e4idx_tri_blockwise!(bao, groups; screen_thr=EC.options.int.screen) do J, slab
+  calc_2e4idx_tri_blockwise!(bao, groups; screen_thr=EC.options.int.screen, rowcut) do J, slab
     ncol = size(slab, 3)
+    # fold only the rows this block stores (tri(p,q) ≥ tri(1, σ0) ⟺ q ≥ σ0); with the row cut the
+    # slab rows below hold stale garbage and must not be read — pm_write_block! slices the same range
+    qmin = rowcut ? (J == 1 ? 1 : w.breakpoints[J-1] + 1) : 1
     Ssub = @view fullS[:, 1:ncol]; Asub = @view fullA[:, 1:ncol]
-    calc_tri_sym_antisym!(Ssub, Asub, slab)
+    calc_tri_sym_antisym!(Ssub, Asub, slab; qmin)
     pm_write_block!(w, J, Ssub, Asub)
   end
   pm_close_writer!(EC, w)
