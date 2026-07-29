@@ -828,15 +828,19 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
   # the rotation into the coefficients (ao_rotate_ints) instead of re-transforming an MO dump, and
   # rebuilds the half-transformed stores for the ROTATED occupied space — their bra IS the occupied
   # space, so unlike the T1 dressing they cannot be built once. the general block stays in the AO basis (`d_AAAo`).
-  # Note both `E` and `HF(rotated)` are compared: the rotated reference energy is the sensitive one
-  # (a stale store leaves E right at R=I and only drifts once the orbitals actually rotate).
-  for m in ("oqv-ccd", "oqv-dcd")
+  # Note `HF(rotated)` is compared, not `HF`: the rotated reference energy is the sensitive one
+  # (a stale store leaves E right at R=I and only drifts once the orbitals actually rotate), whereas
+  # `HF` is the unrotated reference and agrees between the routes whatever the rotation does.
+  # The Brueckner (`B`) variants ride the same machinery — they differ from `O` only in what drives
+  # the rotation (singles residual vs orbital gradient), which needs no integral block the AO path
+  # does not already build — so they are compared here too.
+  for m in ("oqv-ccd", "oqv-dcd", "bqv-ccd", "bqv-dcd")
     key = uppercase(m)
     EC = fresh(); @ints; @hf; e_oqv = @cc m
     @test pm_exists(EC) && isempty(EC.fd)
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_oqv_ref = @cc m
     @test abs(e_oqv[key] - e_oqv_ref[key]) < 1e-8
-    @test abs(e_oqv["HF"] - e_oqv_ref["HF"]) < 1e-8
+    @test abs(e_oqv["HF(rotated)"] - e_oqv_ref["HF(rotated)"]) < 1e-8
   end
   # ... but the orbital-optimized methods provide NO Λ equations, so they cannot be combined with a
   # Λ prefix, `cc.properties` or `wf.natorb` — that is rejected rather than silently rerouted.

@@ -181,17 +181,20 @@ end
     ao_direct_method(ecm::ECMethod) -> Bool
 
   Whether `ecm` runs directly on the AO integral files without a preceding MO transform:
-  MP2/UMP2/RMP2, or CCSD/DCSD/CCD/DCD optionally with perturbative triples and/or a Λ, EOM, QV or
-  orbital-optimizing (`O`) prefix. FCI and iterative triples always derive a transient MO dump (see
-  [`derive_mo_basis!`](@ref)), as do the Brueckner (`B`) variants. 
+  MP2/UMP2/RMP2, or CCSD/DCSD/CCD/DCD optionally with perturbative triples and/or a Λ, EOM, QV,
+  orbital-optimizing (`O`) or Brueckner (`B`) prefix. FCI and iterative triples always derive a
+  transient MO dump (see [`derive_mo_basis!`](@ref)).
+
+  Both orbital-rotating prefixes are covered by the same machinery: they rotate through
+  [`ao_rotate_ints`](@ref), which folds the rotation into the MO coefficients and keeps the general
+  block in the AO space (`d_AAAo`, the AO counterpart of the MO route's `d_mmmo`). They differ only
+  in what drives the rotation — an orbital gradient for `O`, the singles residual for `B` — and that
+  residual is built from blocks the AO path already produces (`dh_mm`/`df_mm`/`d_vovv` and the ±
+  `kext`), so it needs nothing extra.
 """
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)
   name == "MP2" && return true                          # standalone MP2/UMP2/RMP2 off the bare AO blocks
-  # Brueckner variants are not wired for AO-direct yet → derive. The orbital-optimized ("O") ones are:
-  # `ao_rotate_ints` folds the rotation into the coefficients and keeps the general block in the
-  # AO space (`d_AAAo`, the AO counterpart of the MO route's `d_mmmo`).
-  has_prefix(ecm, "B") && return false
   return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD", "CCD", "DCD")
 end
 
