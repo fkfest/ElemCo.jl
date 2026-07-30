@@ -415,6 +415,55 @@ end
     e_ao2 = @cc ccsd
     @test isempty(EC.fd)
 
+    # @moints: the user-facing AO→MO transform. Unlike the dump a driver derives for itself it
+    # PERSISTS (the mmapped MO integrals survive `delete_temporary_files!` at the end of a run), so
+    # it can be written out and reused. It must reproduce the AO-direct energies exactly, both
+    # closed- and open-shell, and a re-read of the written FCIDUMP must reproduce them too.
+    EC = fresh()
+    @hf                                              # default frozen core (1 core orbital)
+    e_ao = @cc ccsd
+    @test isempty(EC.fd)                             # AO-direct
+    EC = fresh()
+    @hf
+    @moints
+    @test !isempty(EC.fd)                            # MO integrals parked in EC.fd ...
+    @test headvar(EC.fd, "NORB", Int) == nao_ref - 1 #  ... reduced to the active space (core folded)
+    fcidump_file = joinpath(EC.scr, "MOINTS_FCIDUMP")
+    @write_ints fcidump_file
+    e_mo1 = @cc ccsd
+    e_mo2 = @cc ccsd                                 # the dump survives a driver run and is reused
+    @test !isempty(EC.fd)
+    @test abs(e_mo1["CCSD"] - e_ao["CCSD"]) < 1e-8
+    @test abs(e_mo2["CCSD"] - e_mo1["CCSD"]) < 1e-12
+    EC = fresh(); EC.fd = read_fcidump(fcidump_file) # the written FCIDUMP is a complete input
+    EC.options.wf.freeze_nocc = 0                    # already folded
+    e_fd = @cc ccsd
+    @test abs(e_fd["HF"]   - e_ao["HF"])   < 1e-9
+    @test abs(e_fd["CCSD"] - e_ao["CCSD"]) < 1e-8
+    # open shell: @moints builds the unrestricted (UHF) dump
+    EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_cat_ao = @cc ccsd
+    EC = fresh(); @set wf charge=1 ms2=1; @uhf; @moints
+    @test EC.fd.uhf
+    e_cat_mo = @cc ccsd
+    @test abs(e_cat_mo["UCCSD"] - e_cat_ao["UCCSD"]) < 1e-8
+    # ... and the FCIDUMP written from a CHARGED calculation is self-contained: its NELEC is the
+    # cation's electron count (the writer applies `wf.charge`), so reading it back needs no charge
+    cat_file = joinpath(EC.scr, "MOINTS_CATION_FCIDUMP")
+    @write_ints cat_file
+    fd_cat = read_fcidump(cat_file)
+    @test headvar(fd_cat, "NELEC", Int) == 10 - 1 - 2   # neutral 10, cation, 1 folded core orbital
+    @test headvar(fd_cat, "MS2", Int) == 1
+    EC = fresh(); EC.fd = fd_cat                        # no charge/ms2 set — the dump says it all
+    EC.options.wf.freeze_nocc = 0
+    e_cat_fd = @cc ccsd
+    @test abs(e_cat_fd["HF"]    - e_cat_ao["HF"])    < 1e-9
+    @test abs(e_cat_fd["UCCSD"] - e_cat_ao["UCCSD"]) < 1e-8
+    # @moints without AO integrals on file generates them itself (like @ints)
+    EC = fresh(); @hf; ElemCo.IntegralTools.delete_ao_integrals!(EC)
+    @test !pm_exists(EC)
+    @moints
+    @test pm_exists(EC) && !isempty(EC.fd)
+
     # redundant (linearly-dependent) orbitals: a high redthr forces an orbital to be deleted.
     # The automatic derivation drops it from the transform; FCI must match the explicit
     # transform with the same orbital dropped.

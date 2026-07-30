@@ -116,7 +116,7 @@ export @set_default_eltype
 # from ECInfos
 export ECInfo, ec_eltype, DEFAULT_ELTYPE, set_default_eltype!
 export @transform_ints, @write_ints, @dfints, @freeze_orbs, @rotate_orbs, @show_orbs
-export @ints, @hf, @uhf
+export @ints, @moints, @hf, @uhf
 export @dfhf, @dfhf_positron, @dfuhf, @cc, @dfcc, @dfmp2, @bohf, @bouhf, @dfmcscf
 export @localize, @region
 export @fci, @ciphi, @sci, @ciϕ
@@ -127,7 +127,7 @@ export last_energy
 # from DescDict
 export ODDict
 # from Drivers
-export extrapolate
+export extrapolate, mo_integrals
 
 """
     __init__()
@@ -937,6 +937,54 @@ macro ints(opts_block=nothing)
 end
 
 """
+    @moints(opts_block=nothing)
+
+  Generate 2 and 4-idx MO integrals from exact (non-density-fitted) AO integrals.
+  If the AO integral files are not on file yet, they are generated first (equivalent to
+  calling [`@ints`](@ref)). The MO coefficients are read from
+  [`WfOptions.dump`](@ref ECInfos.WfOptions). This is the non-DF counterpart of [`@dfints`](@ref).
+
+  As in `@dfints`, the dump covers the active space: the frozen core is folded into the
+  one-electron integrals and the core energy, and deleted/frozen virtuals are left out
+  (`wf.freeze_nocc=0` keeps the core in the dump).
+
+  These integrals PERSIST for the rest of the session and are yours to manage: because they are
+  built from a particular set of orbitals, they become stale if the orbitals change (a re-run `@hf`,
+  `@localize`, an orbital-optimized method), and re-running `@moints` is what refreshes them. Use it
+  when the MO integrals themselves are the point — to write them out with
+  [`@write_ints`](@ref), or to have ONE generation serve several driver calls on the same orbitals:
+
+```julia
+@hf
+@moints
+@write_ints "FCIDUMP"
+@cc ccsd
+```
+
+  Note that a correlated method that can run AO-direct (MP2/CCSD/DCSD and friends) is *faster*
+  without `@moints`: it contracts the AO integrals directly and never forms the MO integrals.
+
+  Optionally, a `begin...end` block can be provided to set local options for this call.
+  The options are reset after the call completes.
+"""
+macro moints(opts_block=nothing)
+  if !isnothing(opts_block) && is_options_block(opts_block)
+    local_opts = parse_options_block(opts_block)
+    return quote
+      $(esc(:@tryECinit))
+      with_local_options($(esc(:EC)), $local_opts) do
+        mo_integrals($(esc(:EC)))
+      end
+    end
+  else
+    return quote
+      $(esc(:@tryECinit))
+      mo_integrals($(esc(:EC)))
+    end
+  end
+end
+
+"""
     @hf(opts_block=nothing)
 
   Run closed-shell Hartree-Fock from exact (non-DF) AO integrals. If the AO integral
@@ -1415,7 +1463,16 @@ end
 """
     @write_ints(file="FCIDUMP", kwargs...)
 
-  Write FCIDump integrals to file `file`.
+  Write FCIDump integrals to file `file`, which can be a string literal or a variable holding one.
+
+  The integrals must persist in `EC.fd`: create them explicitly with [`@dfints`](@ref) or
+  [`@moints`](@ref), or read an FCIDUMP — the integrals a correlated driver creates for itself
+  are deleted again when it finishes.
+
+  The written file is self-contained: its `NELEC` (and `MS2`) describe the system as currently
+  set up, i.e. with [`WfOptions.charge`](@ref ECInfos.WfOptions) applied. Reading such a file
+  back therefore needs no `charge` — and setting one would ionize it *further*, since `wf.charge`
+  is always relative to the electron count of the integral source.
 
   # Keyword arguments
   - `tol::Float64`: tolerance for writing integrals (default: `-1.0` - all integrals are written).
@@ -1426,10 +1483,11 @@ macro write_ints(file="FCIDUMP", kwargs...)
   return quote
     $(esc(:@tryECinit))
     if isempty($(esc(:EC)).fd)
-      error("No integrals in memory. Create them explicitly first with @dfints (they persist), " *
-            "or provide an fcidump — integrals a driver creates for itself are deleted after its run.")
+      error("No integrals in memory. Create them explicitly first with @dfints or @moints " *
+            "(they persist), or provide an fcidump — integrals a driver creates for itself are " *
+            "deleted after its run.")
     end
-    write_fcidump($(esc(:EC)).fd, $file; $(ekwa...))
+    write_fcidump($(esc(:EC)).fd, $(esc(file)); charge=$(esc(:EC)).options.wf.charge, $(ekwa...))
   end
 end
 

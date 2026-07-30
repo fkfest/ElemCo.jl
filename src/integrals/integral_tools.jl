@@ -1063,23 +1063,27 @@ function transform_fcidump!(fd::FDump{T,N}, Tl::SpinMatrix, Tr::SpinMatrix) wher
 end
 
 """
-    generate_mo_dump(EC::ECInfo, cMO::AbstractMatrix; core::AbstractMatrix) -> FDump
+    generate_mo_dump(EC::ECInfo, cMO::AbstractMatrix; core::AbstractMatrix, persistent=false) -> FDump
 
   Build an MO-basis [`FDump`](@ref) in `EC.fd` from the exact AO integral files
   (`"ao_int2"`/`"h_AA"`, see [`ao_integrals`](@ref)) and the (restricted/closed-shell)
   MO coefficients `cMO[μ,p]`. This is the non-DF analogue of `dfdump`.
 
   Exact (non-density-fitted) `O(N⁵)` four-index transformation, written straight onto a
-  fresh memory-mapped scratch file (`"mo_int2"`, temporary — the dump is transient and
-  re-derived on demand): the full MO tensor is never materialized in memory. `cMO` may
-  be rectangular (`nao × nout` with `nout ≤ nao`): only those `nout` orbitals are kept
-  (e.g. deleted virtuals and frozen virtuals excluded).
+  fresh memory-mapped scratch file (`"mo_int2"`): the full MO tensor is never materialized
+  in memory. `cMO` may be rectangular (`nao × nout` with `nout ≤ nao`): only those `nout`
+  orbitals are kept (e.g. deleted virtuals and frozen virtuals excluded).
+
+  By default the file is temporary (the dump is transient and re-derived on demand);
+  `persistent=true` keeps it for the rest of the session, so that the dump survives the
+  `delete_temporary_files!` at the end of a driver run (used by `@moints`).
 
   `NELEC` is stored as the full (neutral) electron count (without frozen core)
   A frozen core is folded in the AO basis via `core`, so only
   the active orbitals are transformed.
 """
-function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix; core::AbstractMatrix=zeros(T, size(cMO,1), 0)) where {T<:Number}
+function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix; core::AbstractMatrix=zeros(T, size(cMO,1), 0),
+                          persistent::Bool=false) where {T<:Number}
   @assert pm_exists(EC) "no AO integrals on file; generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
@@ -1111,7 +1115,7 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix; core::AbstractMatr
     h1eff = hAO + Fcore
     Ecore = 2.0*sum(Dcore .* hAO) + sum(Dcore .* Fcore)
   end
-  int2 = pm_transform(EC, pm, C, "mo_int2"; triangular=true, description="tmp")
+  int2 = pm_transform(EC, pm, C, "mo_int2"; triangular=true, description=persistent ? "int2" : "tmp")
   close_pm_store!(EC, pm)
   # NELEC/MS2 conventions follow `dfdump`: neutral electron count (less the frozen core, which is
   # no longer in the dump), `charge`/`ms2` from the wf options applied later by `setup_space_fd!`.
@@ -1126,7 +1130,7 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::AbstractMatrix; core::AbstractMatr
 end
 
 """
-    generate_mo_dump(EC::ECInfo, cMO::SpinMatrix; core::SpinMatrix) -> FDump
+    generate_mo_dump(EC::ECInfo, cMO::SpinMatrix; core::SpinMatrix, persistent=false) -> FDump
 
   Build an MO-basis [`FDump`](@ref) in `EC.fd` from the exact AO integral files and the MO
   coefficients `cMO`. For a restricted `cMO` this builds a closed-shell (RHF) dump (see the
@@ -1136,11 +1140,12 @@ end
   `rhf→uhf` branch of [`transform_fcidump!`](@ref). Both spins must have the same orbital
   count (a single `NORB`); each block may be rectangular (deleted / frozen-virtual orbitals
   dropped). A frozen core is folded in the AO basis via `core`, so only
-  the active orbitals are transformed.
+  the active orbitals are transformed. `persistent` is as in the matrix method.
 """
 function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix;
-                          core::SpinMatrix=SpinMatrix(zeros(T, size(cMO.α,1), 0))) where {T<:Number}
-  is_restricted(cMO) && is_restricted(core) && return generate_mo_dump(EC, cMO.α; core=core.α)
+                          core::SpinMatrix=SpinMatrix(zeros(T, size(cMO.α,1), 0)),
+                          persistent::Bool=false) where {T<:Number}
+  is_restricted(cMO) && is_restricted(core) && return generate_mo_dump(EC, cMO.α; core=core.α, persistent)
   @assert pm_exists(EC) "no AO integrals on file; generate them first (@ints / ao_integrals)"
   save_ao_1e_integrals!(EC)
   S = load2idx(EC, "S_AA")
@@ -1168,9 +1173,10 @@ function generate_mo_dump(EC::ECInfo{T}, cMO::SpinMatrix;
     # same expression as `freeze_orbs_in_dump`: Σ_c h + ½ Σ_c F^core, per spin
     Ecore = sum(Da .* hAO) + sum(Db .* hAO) + 0.5*(sum(Da .* Fa) + sum(Db .* Fb))
   end
-  int2aa = pm_transform(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description="tmp")
-  int2bb = pm_transform(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description="tmp")
-  int2ab = pm_transform(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description="tmp")
+  descr = persistent ? "int2" : "tmp"
+  int2aa = pm_transform(EC, pm, Ca, Ca, Ca, Ca, "mo_int2aa"; triangular=true, description=descr)
+  int2bb = pm_transform(EC, pm, Cb, Cb, Cb, Cb, "mo_int2bb"; triangular=true, description=descr)
+  int2ab = pm_transform(EC, pm, Ca, Cb, Ca, Cb, "mo_int2ab"; triangular=false, description=descr)
   close_pm_store!(EC, pm)
   nelec_full = EC.options.wf.nelec < 0 ? guess_nelec(EC.system) : EC.options.wf.nelec
   ms2 = EC.options.wf.ms2 < 0 ? mod(nelec_full, 2) : EC.options.wf.ms2

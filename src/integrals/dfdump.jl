@@ -478,7 +478,11 @@ function dfdump(EC::ECInfo)
   restore_space!(EC, space_save)
   if length(dumpfile) > 0
     println("writing fcidump $dumpfile")
-    write_fcidump(fdump, dumpfile; tol=-1.0)  
+    # NB no `charge=` here (unlike the `@write_ints` export): `int.fcidump` parks the integrals on
+    # disk to be read back by THIS session, where `wf.charge` still describes the molecule (the
+    # property/RDM path rebuilds the space from the system via `restore_system_space!`). The file
+    # therefore keeps the count `setup_space_fd!` applies `wf.charge` to, as an in-memory dump does.
+    write_fcidump(fdump, dumpfile; tol=-1.0)
   else
     EC.fd = fdump
   end

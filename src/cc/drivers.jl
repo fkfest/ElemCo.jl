@@ -28,6 +28,7 @@ using ..ElemCo.DfDump: dfdump
 using LinearAlgebra: diag
 
 export ccdriver, dfccdriver, fcidriver, extrapolate
+export mo_integrals
 
 """
     need_correlated_properties(EC::ECInfo)
@@ -193,9 +194,9 @@ end
 
 
 """
-    derive_mo_basis!(EC::ECInfo)
+    derive_mo_basis!(EC::ECInfo; persistent=false)
 
-  Derive a transient MO-basis `EC.fd` from the exact AO integrals (the ± supermatrix store, `"h_AA"`,
+  Derive an MO-basis `EC.fd` from the exact AO integrals (the ± supermatrix store, `"h_AA"`,
   see `ao_integrals`) and the current orbitals, reducing the dump to the active
   space so that the MO integrals (and all downstream methods) scale with the active space
   rather than `nao` — the non-DF analogue of `dfdump`:
@@ -212,10 +213,11 @@ end
     property post-processing interpret the reduced dump correctly; the freeze options are
     **not** modified.
 
-  The derived dump is transient: the caller discards it at the end of the run, and it is
-  re-derived from the AO files on demand.
+  The derived dump is transient by default: the driver discards it at the end of the run, and it
+  is re-derived from the AO files on demand. With `persistent=true` ([`mo_integrals`](@ref), the
+  `@moints` macro) the dump and its scratch file survive the run and are the user's to refresh.
 """
-function derive_mo_basis!(EC::ECInfo{T}) where {T}
+function derive_mo_basis!(EC::ECInfo{T}; persistent::Bool=false) where {T}
   setup_space_system!(EC; verbose=false)
   space_save = save_space(EC)
   nocc_full = length(EC.space['o'])
@@ -246,10 +248,10 @@ function derive_mo_basis!(EC::ECInfo{T}) where {T}
   active = (ncore_orbs+1):(full_norb-nfrozvirt)
   corerng = 1:ncore_orbs
   if is_restricted(cMO)
-    generate_mo_dump(EC, Matrix(cMO.α)[:, active]; core=Matrix(cMO.α)[:, corerng])
+    generate_mo_dump(EC, Matrix(cMO.α)[:, active]; core=Matrix(cMO.α)[:, corerng], persistent)
   else
     generate_mo_dump(EC, SpinMatrix(Matrix(cMO.α)[:, active], Matrix(cMO.β)[:, active]);
-                     core=SpinMatrix(Matrix(cMO.α)[:, corerng], Matrix(cMO.β)[:, corerng]))
+                     core=SpinMatrix(Matrix(cMO.α)[:, corerng], Matrix(cMO.β)[:, corerng]), persistent)
   end
   if ncore_orbs + nfrozvirt > 0
     # record the full-space orbital range of the active orbitals (as `dfdump` does), so user
@@ -257,6 +259,29 @@ function derive_mo_basis!(EC::ECInfo{T}) where {T}
     EC.fd.orig_orbs = (ncore_orbs+1):(full_norb-nfrozvirt)
   end
   return EC.fd
+end
+
+"""
+    mo_integrals(EC::ECInfo)
+
+  Generate MO integrals from the exact (non-density-fitted) AO integrals and store them in `EC.fd`.
+  This is the entry point behind the `@moints` macro, and the non-DF counterpart of `dfdump`
+  (`@dfints`): the AO integrals are generated first if they are not on file yet (as `@ints` would),
+  and are then transformed to the MO basis of the current orbitals ([`derive_mo_basis!`](@ref), so
+  the dump covers the active space — the frozen core is folded into `int0`/`int1`).
+
+  Unlike the dump a correlated driver derives for itself, these integrals PERSIST for the rest of
+  the session and are yours to manage: they are built from a particular set of orbitals and become
+  stale if the orbitals change, and re-running `@moints` is what refreshes them.
+"""
+function mo_integrals(EC::ECInfo{T}) where {T}
+  # empty EC.fd first: a stale MO dump is superseded here, and `ao_integrals` would otherwise warn
+  # about discarding integrals that this call replaces anyway
+  isempty(EC.fd) || (EC.fd = FDump{T,3}())
+  pm_exists(EC) || ao_integrals(EC)   # the 1-e integrals are refreshed by `generate_mo_dump`
+  derive_mo_basis!(EC; persistent=true)
+  draw_endline()
+  return
 end
 
 """
