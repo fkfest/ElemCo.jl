@@ -315,9 +315,6 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     pm_exists(EC) ||
       error("No integrals found: no fcidump, no AO integrals on file, and no molecular system to " *
             "generate them from. Run @dfhf/@hf (or @dfints / provide an fcidump) first.")
-    # never inherit the correlation reference of an earlier run in this scratch (the orbitals may
-    # have changed since, e.g. a re-run `@hf`); `ao_cc_setup!` writes the current one
-    delete_ao_correlation_orbitals!(EC)
     setup_space_system!(EC)
     ao_orbitals = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
     restricted_orbs = is_restricted(ao_orbitals[1])
@@ -338,6 +335,18 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   if !EC.ao_direct
     setup_space_fd!(EC)
     closed_shell = is_closed_shell(EC)
+  end
+
+  # one line saying which integrals this run uses (the routing above is silent about it)
+  if EC.ao_direct
+    println("Integrals: exact AO (± store), AO-direct.")
+  elseif ao_source
+    println("Integrals: exact AO (± store) via a transient MO dump.")
+  elseif no_user_fd
+    println("Integrals: density-fitted MO, generated for this run.")
+  else
+    println("Integrals: MO fcidump", isempty(EC.fd.origin) ? " (user-generated)." :
+            " from \"$(EC.fd.origin)\".")
   end
 
   # Whether the ORBITALS are UHF (only the `R` methods care — they require a non-UHF reference; an
@@ -556,6 +565,14 @@ function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
       error("No integrals found: no fcidump, no AO integrals on file, and no molecular system to " *
             "generate them from. Run @dfhf/@hf (or @dfints / provide an fcidump) first.")
     derive_mo_basis!(EC)
+  end
+  if ao_source
+    println("Integrals: exact AO (± store) via a transient MO dump.")
+  elseif no_user_fd
+    println("Integrals: density-fitted MO, generated for this run.")
+  else
+    println("Integrals: MO fcidump", isempty(EC.fd.origin) ? " (user-generated)." :
+            " from \"$(EC.fd.origin)\".")
   end
   setup_space_fd!(EC)
   closed_shell = is_closed_shell(EC)
@@ -936,7 +953,11 @@ end
 """
 function eval_df_mo_integrals(EC::ECInfo, energies::OutDict; save3idx=true)
   t1 = time_ns()
-  cMO = load_orbitals(EC)
+  # the correlation reference: projected AND re-orthonormalized across a geometry/basis change.
+  # `load_orbitals` projects only, and unlike `generate_mo_dump` this route has no orthonormality
+  # assertion — with reused orbitals it silently ran on a non-orthonormal reference
+  # (measured max|CᵀSC−I| ≈ 2e-5 for a 1e-3 bohr displacement).
+  cMO = load_orbitals_for_correlation(EC)[1]
   unrestricted = !is_restricted(cMO)
   ERef = generate_DF_integrals(EC, cMO; save3idx)
   t1 = print_time(EC, t1, "generate DF integrals", 2)

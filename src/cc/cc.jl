@@ -77,7 +77,7 @@ using ..ElemCo.FockFactory
 
 export calc_MP2, calc_UMP2, calc_UMP2_energy, calc_posMP2 
 export calc_cc, calc_pertT
-export ao_cc_setup!, ao_direct_orbitals_spin, delete_ao_correlation_orbitals!
+export ao_cc_setup!, ao_direct_orbitals_spin
 export calc_lm_cc, calc_1RDM
 
 include("ao_direct_blocks.jl")   # ht→MO block engine, dressed blocks, ± kext kernels
@@ -1719,35 +1719,26 @@ end
     save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
 
   Persist the AO-direct correlation reference computed by [`ao_cc_setup!`](@ref) as `C_Am` (and
-  `C_AM` for the β spin) — the single artifact every later consumer reads, the AO-direct counterpart
-  of the MO route's FCIDUMP. It has to be stored rather than re-derived because it is not a pure
-  function of the orbital file: with `wf.dump4core_only` the frozen core is spliced in from a second
-  file and the correlating orbitals are re-orthonormalized against it
+  `C_AM` for the β spin) — the single artifact every later consumer of THIS run reads, the AO-direct
+  counterpart of the MO route's FCIDUMP. It has to be stored rather than re-derived because it is not
+  a pure function of the orbital file: with `wf.dump4core_only` the frozen core is spliced in from a
+  second file and the correlating orbitals are re-orthonormalized against it
   ([`replace_core_from_dump!`](@ref)). Restricted orbitals write `C_Am` only.
+
+  The files are temporary ("tmp"): they belong to the run, so `delete_temporary_files!` reclaims
+  them at its end — like the per-run DF fd, the reference does not outlive the calculation that
+  settled it.
 """
 function save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
-  save!(EC, "C_Am", Matrix(cMO.α); description="AO-direct correlation reference (α)")
+  save!(EC, "C_Am", Matrix(cMO.α); description="tmp AO-direct correlation reference (α)")
   file_exists(EC, "C_AM") && delete_file!(EC, "C_AM")
   is_restricted(cMO) ||
-    save!(EC, "C_AM", Matrix(cMO.β); description="AO-direct correlation reference (β)")
+    save!(EC, "C_AM", Matrix(cMO.β); description="tmp AO-direct correlation reference (β)")
   # the number of deleted (linearly-dependent) orbitals of THIS reference: constant for the run, but
   # `n_deleted_orbitals` re-reads the orbital dump twice (classes + energies) on every call, so it is
   # settled here with the reference rather than by each consumer
   save!(EC, "n_del", eltype(cMO.α)[n_deleted_orbitals(EC)];
-        description="AO-direct deleted-orbital count")
-  return
-end
-
-"""
-    delete_ao_correlation_orbitals!(EC::ECInfo)
-
-  Drop a persisted AO-direct correlation reference (`C_Am`/`C_AM`), so a new run never inherits the
-  previous one (the orbitals may have changed in between, e.g. a re-run `@hf`).
-"""
-function delete_ao_correlation_orbitals!(EC::ECInfo)
-  for key in ("C_Am", "C_AM", "n_del")
-    file_exists(EC, key) && delete_file!(EC, key)
-  end
+        description="tmp AO-direct deleted-orbital count")
   return
 end
 

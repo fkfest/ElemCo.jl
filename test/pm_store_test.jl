@@ -398,7 +398,7 @@ end
   @test all(>=(0.0), Q) && issymmetric(Q)
   # end to end: the screened AO integrals give the same CCSD energy
   fresh_scr() = (e = ElemCo.ECInfo(system=parse_geometry(far, Dict("ao"=>"cc-pVDZ")));
-                 e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+                 e.options.wf.dump = joinpath(e.scr, "wf.h5"); plant_route_decoy!(e); e)
   EC = fresh_scr(); @ints; @hf; e_on = @cc ccsd
   EC = fresh_scr(); EC.options.int.screen = 0.0; @ints; @hf; e_off = @cc ccsd
   @test abs(e_on["CCSD"] - e_off["CCSD"]) < 1e-9
@@ -795,13 +795,13 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
     H1  0.000000000   1.489124508   1.033245507
     H2  0.000000000  -1.489124508   1.033245507"
   fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
-             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); plant_route_decoy!(e); e)
   for m in ("ccsd", "dcsd")
     key = uppercase(m)
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_std = @cc m
     EC = fresh(); @ints; @hf; e_pm = @cc m                 # default: AO-direct on the ± store
     @test pm_exists(EC)                                    # the ± store was built by @ints
-    @test isempty(EC.fd)                                   # still AO-direct
+    @test ao_route_taken(EC)                               # the decoy is consumed only AO-direct
     @test abs(e_std[key] - e_pm[key]) < 1e-10
   end
   # open-shell cation (ms2=1): UHF via ao_J2K!(pm,…) + frozen-core ao_core_ufock via the PM path
@@ -811,11 +811,11 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
   @test abs(e_std["UCCSD"] - e_pm["UCCSD"]) < 1e-10
   # standalone MP2/UMP2 run AO-direct off the ± store (method gate admits MP2)
   EC = fresh(); @ints; @hf; e_pm_mp2 = @cc mp2
-  @test pm_exists(EC) && isempty(EC.fd)                    # standalone MP2 stayed on the ± store
+  @test ao_route_taken(EC)                    # standalone MP2 stayed on the ± store
   EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_d_mp2 = @cc mp2
   @test abs(e_pm_mp2["MP2"] - e_d_mp2["MP2"]) < 1e-10      # ± store MP2 == derived-dump MP2
   EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ump2 = @cc mp2
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_d_ump2 = @cc mp2
   @test abs(e_pm_ump2["UMP2"] - e_d_ump2["UMP2"]) < 1e-10
   # closed-shell CCSD(T)/DCSD(T) run AO-direct off the ± store: the 3-external vvvo/ovoo blocks are built
@@ -823,27 +823,27 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
   for m in ("ccsd(t)", "dcsd(t)")
     key = uppercase(m)                                       # "CCSD(T)" / "DCSD(T)"
     EC = fresh(); @ints; @hf; e_pm_t = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)                    # AO-direct (T): stayed on the ± store
+    @test ao_route_taken(EC)                    # AO-direct (T): stayed on the ± store
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_t = @cc m
     @test abs(e_pm_t[key] - e_ref_t[key]) < 1e-8
   end
   # closed-shell Λ runs AO-direct off the ± store: the full Λ residual (dressed d_vovv + dD1 Fock-vo +
   # Λ-kext) + the correlated 1-RDM reproduce the derived-MO-dump dipole; ΛCCSD(T)/ΛDCSD(T) energies too.
   EC = fresh(); EC.options.cc.properties = true; @ints; @hf; e_pm_l = @cc ccsd
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); EC.options.cc.properties = true; EC.options.int.ao_direct = false; @ints; @hf; e_ref_l = @cc ccsd
   @test abs(e_pm_l["mu"] - e_ref_l["mu"]) < 1e-8
   for m in ("Λccsd(t)", "Λdcsd(t)")
     key = uppercase(m)                                      # "ΛCCSD(T)" / "ΛDCSD(T)"
     EC = fresh(); @ints; @hf; e_pm_lt = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)
+    @test ao_route_taken(EC)
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_lt = @cc m
     @test abs(e_pm_lt[key] - e_ref_lt[key]) < 1e-8
   end
   # closed-shell EOM-CCSD runs AO-direct off the ± store: the CIS pre-pass reads voov/vovo built from
   # ht_oAAA, the doubles Jacobian reuses the Λ machinery; excitation energies match the derive path.
   EC = fresh(); @ints; @hf; e_pm_eom = @cc "eom-ccsd"
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_eom = @cc "eom-ccsd"
   @test abs(e_pm_eom["ω1"] - e_ref_eom["ω1"]) < 1e-7
 end
@@ -861,14 +861,14 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
     H1  0.000000000   1.489124508   1.033245507
     H2  0.000000000  -1.489124508   1.033245507"
   fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
-             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); plant_route_decoy!(e); e)
   # unrestricted (T) (water cation): the same-spin vvvo/vooo (per spin) and the five opposite-spin
   # 3-external blocks are built from the per-spin stores ht_oAAA_a/_b — the βα-looking reads resolve to
   # the same five αβ files. Energies match the derived-UHF-dump reference.
   for m in ("uccsd(t)", "udcsd(t)")
     key = uppercase(m)
     EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ut = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)
+    @test ao_route_taken(EC)
     EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ut = @cc m
     @test abs(e_pm_ut[key] - e_ref_ut[key]) < 1e-8
   end
@@ -876,11 +876,11 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
   # Λ-kext (pm_K2!/pm_K2ab! on the AO-folded Λ2), and the dD1 term as the v,o block of the UHF
   # generalized Fock J(Dα+Dβ)−K(Dσ). ΛUCCSD energy and the unrestricted correlated dipole match derive.
   EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ul = @cc "Λuccsd"
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ul = @cc "Λuccsd"
   @test abs(e_pm_ul["ΛUCCSD"] - e_ref_ul["ΛUCCSD"]) < 1e-8
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.cc.properties = true; @uhf; e_pm_up = @cc ccsd
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.cc.properties = true
   EC.options.int.ao_direct = false; @uhf; e_ref_up = @cc ccsd
   @test abs(e_pm_up["mu"] - e_ref_up["mu"]) < 1e-8
@@ -889,12 +889,12 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
   for m in ("Λuccsd(t)", "Λudcsd(t)")
     key = uppercase(m)
     EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ult = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)
+    @test ao_route_taken(EC)
     EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ult = @cc m
     @test abs(e_pm_ult[key] - e_ref_ult[key]) < 1e-8
   end
   EC = fresh(); @set wf charge=1 ms2=1; @uhf; e_pm_ueom = @cc "eom-uccsd"
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); @set wf charge=1 ms2=1; EC.options.int.ao_direct = false; @uhf; e_ref_ueom = @cc "eom-uccsd"
   @test abs(e_pm_ueom["ω1"] - e_ref_ueom["ω1"]) < 1e-7
 end
@@ -913,14 +913,14 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
     H1  0.000000000   1.489124508   1.033245507
     H2  0.000000000  -1.489124508   1.033245507"
   fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
-             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); plant_route_decoy!(e); e)
   # doubles-only methods (CCD/DCD and the quasi-variational QV-CCD/QV-DCD). They carry no singles, so
   # the MO path uses the bare-integral `pseudo_dressed_ints`; AO-direct gets the same bare blocks from
   # the dressing inside calc_cc_resid (empty T1) plus d_vvoo transposed from d_oovv.
   for m in ("ccd", "dcd", "qv-ccd", "qv-dcd")
     key = uppercase(m)
     EC = fresh(); @ints; @hf; e_pm_qv = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)
+    @test ao_route_taken(EC)
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref_qv = @cc m
     @test abs(e_pm_qv[key] - e_ref_qv[key]) < 1e-8
   end
@@ -932,7 +932,7 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
     EC = fresh(); @ints
     if open; @set wf charge=1 ms2=1; @uhf; else; @hf; end
     e_pm_lam = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)
+    @test ao_route_taken(EC)
     EC = fresh(); EC.options.int.ao_direct = false; @ints
     if open; @set wf charge=1 ms2=1; @uhf; else; @hf; end
     e_ref_lam = @cc m
@@ -941,7 +941,7 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
   # correlated properties without singles go through the same no-singles Λ (the 1-RDM is
   # amplitude-only): the CCD dipole matches the derived-MO-dump one.
   EC = fresh(); EC.options.cc.properties = true; @ints; @hf; e_pm_dp = @cc ccd
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); EC.options.cc.properties = true; EC.options.int.ao_direct = false
   @ints; @hf; e_ref_dp = @cc ccd
   @test abs(e_pm_dp["mu"] - e_ref_dp["mu"]) < 1e-8
@@ -958,7 +958,7 @@ include(joinpath(@__DIR__, "pm_store_common.jl"))
   for m in ("oqv-ccd", "oqv-dcd", "bqv-ccd", "bqv-dcd")
     key = uppercase(m)
     EC = fresh(); @ints; @hf; e_oqv = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)
+    @test ao_route_taken(EC)
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_oqv_ref = @cc m
     @test abs(e_oqv[key] - e_oqv_ref[key]) < 1e-8
     @test abs(e_oqv["HF(rotated)"] - e_oqv_ref["HF(rotated)"]) < 1e-8
@@ -1002,12 +1002,12 @@ end
     H1  0.000000000   1.489124508   1.033245507
     H2  0.000000000  -1.489124508   1.033245507"
   fresh() = (e = ElemCo.ECInfo(system=parse_geometry(geometry, Dict("ao"=>"sto-3g")));
-             e.options.wf.dump = joinpath(e.scr, "wf.h5"); e)
+             e.options.wf.dump = joinpath(e.scr, "wf.h5"); plant_route_decoy!(e); e)
   # UHF-form methods on RHF orbitals: the per-spin reference, half-transformed stores (also used by
   # the (T) 3-external blocks) and the unrestricted Λ machinery all run on the duplicated orbitals.
   for (m, key) in (("uccsd", "UCCSD"), ("uccsd(t)", "UCCSD(T)"), ("Λuccsd", "ΛUCCSD"), ("uccd", "UCCD"))
     EC = fresh(); @ints; @hf; e_ao = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)
+    @test ao_route_taken(EC)
     EC = fresh(); EC.options.int.ao_direct = false; @ints; @hf; e_ref = @cc m
     @test abs(e_ao[key] - e_ref[key]) < 1e-8
   end
@@ -1018,7 +1018,7 @@ end
   # open-shell occupations on restricted orbitals (ionized reference on the neutral's RHF orbitals):
   # the residual is unrestricted although the orbitals are not, which used to force the derive path
   EC = fresh(); @ints; @hf; @set wf charge=1 ms2=1; e_ao = @cc ccsd
-  @test pm_exists(EC) && isempty(EC.fd)
+  @test ao_route_taken(EC)
   EC = fresh(); EC.options.int.ao_direct = false
   @ints; @hf; @set wf charge=1 ms2=1; e_ref = @cc ccsd
   @test abs(e_ao["UCCSD"] - e_ref["UCCSD"]) < 1e-8
@@ -1055,7 +1055,7 @@ end
     if open; @set wf charge=-1 ms2=1; @uhf; else; @hf; end
     @test ElemCo.OrbTools.n_deleted_orbitals(EC) == 2       # the two linearly-dependent orbitals
     e_ao = @cc m
-    @test pm_exists(EC) && isempty(EC.fd)                   # ran AO-direct on the ± store
+    @test ao_route_taken(EC)                   # ran AO-direct on the ± store
     EC = fresh(); EC.options.int.ao_direct = false; @ints
     if open; @set wf charge=-1 ms2=1; @uhf; else; @hf; end
     e_ref = @cc m

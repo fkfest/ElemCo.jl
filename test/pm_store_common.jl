@@ -5,7 +5,7 @@
 
 using ElemCo
 using ElemCo.QMTensors: uppertriangular_index, calc_tri_sym_antisym!
-using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx, load4idx, load2idx
+using ElemCo.TensorTools: detri_int2, @tensor, @mview, newmmap, closemmap, mmap3idx, load4idx, load2idx, save!
 using ElemCo.PMStore
 using ElemCo.FockFactory: ao_JK!, ao_J2K!, add_coulomb!, add_exchange!
 using ElemCo.IntegralTools: transform_int2, transform_int2_Q, pm_transform_int2, pm_transform_int2_n5, pm_transform
@@ -72,3 +72,13 @@ function build_store(n, ::Type{T}, maxcols; int2=nothing) where T
   pm_from_joint!(EC; maxcols=maxcols)
   return EC, int2
 end
+
+# Route marker: "this driver call really ran AO-direct". `pm_exists(EC) && isempty(EC.fd)` cannot
+# fail — both hold after BOTH routes (the derive route resets its transient fd, the ± store persists
+# either way) — so it proves nothing. Instead, plant a DECOY `C_Am` (registered WITHOUT the "tmp"
+# word) before the run: the AO-direct path overwrites it in `ao_cc_setup!` (re-registering it as a
+# tmp file) and the run's `delete_temporary_files!` removes it; the derive/fcidump routes never touch
+# it. After the run: decoy gone ⇔ AO-direct was taken. Valid for the FIRST driver call after
+# planting (that call consumes the decoy).
+plant_route_decoy!(EC) = save!(EC, "C_Am", zeros(1,1); description="route decoy")
+ao_route_taken(EC) = !file_exists(EC, "C_Am")
