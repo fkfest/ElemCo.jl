@@ -23,6 +23,9 @@ basis = Dict("ao"=>"6-31g", "jkfit"=>"vdz-jkfit", "mpfit"=>"vdz-mpfit")
 
 @testset "Complex FCI - RHF" begin
   @dfhf
+  # `@dfints`: this testset reuses `EC.fd` AFTER the run (to build a complex copy of it), so the
+  # integrals have to be user-owned — a driver deletes the ones it creates for itself.
+  @dfints
   energies_ref = @fci
   E_FCI_ref = energies_ref["FCI"]
   fd_real = EC.fd
@@ -54,6 +57,7 @@ end
 
 @testset "Complex CIPHI - RHF" begin
   @dfhf
+  @dfints                     # see above: `EC.fd` is reused after the run
   energies_ref = @ciphi
   E_CIPHI_ref = energies_ref["CIPHI"]
   fd_real = EC.fd
@@ -81,6 +85,7 @@ end
 @testset "Complex FCI - UHF" begin
   @set wf charge=-1
   @dfuhf
+  @dfints                     # see above: `EC.fd` is reused after the run
   energies_ref = @fci
   E_FCI_ref = energies_ref["FCI"]
   fd_real = EC.fd
@@ -106,6 +111,7 @@ end
 @testset "Complex CIPHI - UHF" begin
   @set wf charge=-1
   @dfuhf
+  @dfints                     # see above: `EC.fd` is reused after the run
   energies_ref = @ciphi
   E_CIPHI_ref = energies_ref["CIPHI"]
   fd_real = EC.fd

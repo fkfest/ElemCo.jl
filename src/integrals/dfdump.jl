@@ -16,7 +16,7 @@ using ..ElemCo.IntegralTools
 using ..ElemCo.PMStore
 using ..ElemCo.Utils
 
-export dfdump, setup_fcidump_if_needed!
+export dfdump
 
 """
     prepare_mpfit(EC, bao, bfit)
@@ -402,39 +402,6 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::SpinMatrix, full
   eRef = Enuc + 0.5*(haii + sum(diag(fock_jkfitMOa)[full_spaces['o']]) 
                    + hbii + sum(diag(fock_jkfitMOb)[full_spaces['O']]))
   println("Reference energy: ", eRef)
-end
-
-"""
-    setup_fcidump_if_needed!(EC::ECInfo)
-
-  Generate the integrals for a correlated calculation when none are available yet: density-fitted MO
-  integrals in `EC.fd` ([`dfdump`](@ref)) when [`IntOptions.df`](@ref ECInfos.IntOptions) is `true`
-  (the default), or the exact AO integral files ([`ao_integrals`](@ref)) when `int.df=false`.
-
-  Nothing is generated when integrals are already available — an MO dump in `EC.fd`, or exact AO
-  integrals on scratch (the ± supermatrix store), which the AO-direct methods consume without ever
-  building an FCIDUMP.
-
-  The one case where an EXISTING `EC.fd` is regenerated anyway is the `wf.dump==""` + `wf.start`
-  same-session restart (and the `dump4core_only` + `wf.start` core swap): the cached dump was built
-  from different (e.g. pre-optimization) orbitals, so reusing it would combine the restarted
-  amplitudes — which live in the stored, optimized basis — with stale integrals, and the calculation
-  would re-optimize instead of resuming at the stored solution. Skipped when there is no molecular
-  system (FCIDUMP-only), where the integrals come from a fixed file.
-"""
-function setup_fcidump_if_needed!(EC::ECInfo)
-  # exact AO integrals on scratch are integrals too — the AO-direct methods consume them directly
-  pm_exists(EC) && return
-  if isempty(EC.fd) ||
-     ((EC.options.wf.dump == "" || EC.options.wf.dump4core_only) &&
-      EC.options.wf.start != "" && !isempty(EC.system))
-    if EC.options.int.df
-      dfdump(EC)
-    else
-      ao_integrals(EC)
-    end
-  end
-  return
 end
 
 """

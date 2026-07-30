@@ -294,14 +294,27 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     error("The quasi-variatonal methods do not provide Λ equations, so `$(method)` cannot be " *
           "combined with a Λ prefix, `cc.properties` or `wf.natorb` (yet).")
   end
-  ao_source = isempty(EC.fd)
+  # Creator responsibility: orbital-dependent integrals persist only when the user created them
+  # (@dfints, an fcidump file). If no integrals of any kind are available, this driver creates them
+  # itself — DF gives a PER-RUN fd built from the current correlation orbitals and deleted at the end
+  # of this function (so it can never go stale when orbitals change between runs); int.df=false
+  # generates the ± AO store, which is orbital-independent and therefore persists.
+  no_user_fd = isempty(EC.fd)
+  if no_user_fd && !pm_exists(EC) && !isempty(EC.system)
+    if EC.options.int.df
+      dfdump(EC)
+    else
+      ao_integrals(EC)
+    end
+  end
+  ao_source = isempty(EC.fd)         # false when the bootstrap above produced a DF fd
   EC.ao_direct = false
   restricted_orbs = false            # AO route only: asked once, used by both decisions below
   ao_orbitals = nothing              # ... and the loaded reference is handed to `ao_cc_setup!`
   if ao_source
     pm_exists(EC) ||
-      error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
-            "Generate integrals first (@ints/@hf/@dfints) or provide an fcidump.")
+      error("No integrals found: no fcidump, no AO integrals on file, and no molecular system to " *
+            "generate them from. Run @dfhf/@hf (or @dfints / provide an fcidump) first.")
     # never inherit the correlation reference of an earlier run in this scratch (the orbitals may
     # have changed since, e.g. a re-run `@hf`); `ao_cc_setup!` writes the current one
     delete_ao_correlation_orbitals!(EC)
@@ -398,9 +411,10 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   delete_temporary_files!(EC)
   draw_endline()
   EC.ao_direct = false
-  if ao_source
-    # started from the AO files: AO-direct leaves EC.fd empty; a derived MO dump is transient
-    # and re-derived on demand, so it must not persist into the next calculation.
+  if no_user_fd
+    # this driver created the fd it used (per-run DF dump or AO-derived MO dump) — it deletes it:
+    # both are built from the CURRENT orbitals and must not persist into the next calculation
+    # (AO-direct leaves EC.fd empty anyway).
     EC.fd = FDump{ec_eltype(EC),3}()
   end
   # restore occs
@@ -523,13 +537,24 @@ function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
   if EC.fd.df3idx
     contract_df_integrals!(EC)
   end
+  # Creator responsibility (see `ccdriver`): with no user-provided integrals, create them here —
+  # a per-run DF fd (deleted at the end of this function), or the persistent ± AO store for
+  # int.df=false, from which a transient MO dump is derived below.
+  no_user_fd = isempty(EC.fd)
+  if no_user_fd && !pm_exists(EC) && !isempty(EC.system)
+    if EC.options.int.df
+      dfdump(EC)
+    else
+      ao_integrals(EC)
+    end
+  end
   # FCI always needs MO integrals: with no MO dump in `EC.fd`, derive a transient one
   # from the exact AO integral files (deleted orbitals dropped, frozen core folded).
   ao_source = isempty(EC.fd)
   if ao_source
     pm_exists(EC) ||
-      error("No integrals found: EC.fd is empty and no AO integrals are on file. " *
-            "Generate integrals first (@ints/@hf/@dfints) or provide an fcidump.")
+      error("No integrals found: no fcidump, no AO integrals on file, and no molecular system to " *
+            "generate them from. Run @dfhf/@hf (or @dfints / provide an fcidump) first.")
     derive_mo_basis!(EC)
   end
   setup_space_fd!(EC)
@@ -560,9 +585,9 @@ function fcidriver(EC::ECInfo; occa="-", occb="-", ciphi=false)
 
   delete_temporary_files!(EC)
   draw_endline()
-  if ao_source
-    # started from the AO files: the derived MO dump is transient and re-derived on demand,
-    # so it must not persist into the next calculation.
+  if no_user_fd
+    # this driver created the fd it used (per-run DF dump or AO-derived MO dump) — it deletes it:
+    # both are built from the CURRENT orbitals and must not persist into the next calculation.
     EC.fd = FDump{ec_eltype(EC),3}()
   end
   # restore occs

@@ -881,6 +881,13 @@ end
   Generate 2 and 4-idx MO integrals using density fitting.
   The MO coefficients are read from [`WfOptions.dump`](@ref ECInfos.WfOptions).
 
+  These integrals PERSIST for the rest of the session and are yours to manage: because they are built
+  from a particular set of orbitals, they become stale if the orbitals change (a re-run `@dfhf`,
+  `@localize`, an orbital-optimized method), and re-running `@dfints` is what refreshes them. A
+  correlated driver (`@cc`, `@fci`, ...) that finds no integrals creates its own from the current
+  orbitals and deletes them again when it finishes, so it can never use a stale set — use `@dfints`
+  when you deliberately want ONE generation to serve several driver calls on the same orbitals.
+
   Optionally, a `begin...end` block can be provided to set local options for this call.
   The options are reset after the call completes.
 """
@@ -1056,7 +1063,6 @@ macro cc(method, args...)
       return quote
         $(esc(:@tryECinit))
         with_local_options($(esc(:EC)), $local_opts_expr) do
-          setup_fcidump_if_needed!($(esc(:EC)))
           strmethod = @var2string($(esc(method)), $(esc(strmethod)))
           ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
         end
@@ -1073,7 +1079,6 @@ macro cc(method, args...)
     else
       return quote
         $(esc(:@tryECinit))
-        setup_fcidump_if_needed!($(esc(:EC)))
         strmethod = @var2string($(esc(method)), $(esc(strmethod)))
         ccdriver($(esc(:EC)), strmethod; fcidump="", $(ekwa...))
       end
@@ -1210,14 +1215,12 @@ macro fci(args...)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts_expr) do
-        setup_fcidump_if_needed!($(esc(:EC)))
         fcidriver($(esc(:EC)); $(ekwa...))
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      setup_fcidump_if_needed!($(esc(:EC)))
       fcidriver($(esc(:EC)); $(ekwa...))
     end
   end
@@ -1270,14 +1273,12 @@ macro ciphi(args...)
     return quote
       $(esc(:@tryECinit))
       with_local_options($(esc(:EC)), $local_opts_expr) do
-        setup_fcidump_if_needed!($(esc(:EC)))
         fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
       end
     end
   else
     return quote
       $(esc(:@tryECinit))
-      setup_fcidump_if_needed!($(esc(:EC)))
       fcidriver($(esc(:EC)); $(ekwa...), ciphi=true)
     end
   end
@@ -1425,7 +1426,8 @@ macro write_ints(file="FCIDUMP", kwargs...)
   return quote
     $(esc(:@tryECinit))
     if isempty($(esc(:EC)).fd)
-      error("No FCIDump found.")
+      error("No integrals in memory. Create them explicitly first with @dfints (they persist), " *
+            "or provide an fcidump — integrals a driver creates for itself are deleted after its run.")
     end
     write_fcidump($(esc(:EC)).fd, $file; $(ekwa...))
   end

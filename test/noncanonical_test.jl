@@ -20,6 +20,13 @@ basis = "vdz"
   @set scf maxit=1
 end
 
+# One explicit integral generation, shared by every calculation below. This is deliberate here: the
+# anion runs UNRESTRICTED CC on the neutral (closed-shell, deliberately non-canonical) RHF orbitals,
+# which is exactly what this test is about. Letting each `@cc` generate its own integrals would try
+# to build them for the anion's open-shell electron count from restricted orbitals — unsupported by
+# `dfdump`. `@dfints` makes the sharing (and the ownership of the integrals) explicit.
+@dfints
+
 energies = @cc ccsd(t)
 @test abs(energies["CCSD(T)"]-ECCSD_T_test) < epsilon
 
