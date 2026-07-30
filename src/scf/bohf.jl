@@ -236,7 +236,9 @@ function bohf(EC::ECInfo{T}) where T
   end
   flush(stdout)
   t0 = time_ns()
-  for it=1:maxit
+  # `scf.maxit=0`: build the Fock matrix (and energy) for the given orbitals without iterating
+  noiter = !pseudo && maxit < 1
+  for it=1:max(maxit, 1)
     fock = gen_fock(EC, cMOl[1], cMOr[1])
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
     den = gen_density_matrix(EC, cMOl[1], cMOr[1], SP['o'])
@@ -251,6 +253,11 @@ function bohf(EC::ECInfo{T}) where T
       output_E_var(EHF, var, time_ns() - t0)
     else
       output_iteration(it, var, time_ns() - t0, EHF, ΔE)
+    end
+    if noiter
+      # orbitals not updated -> they do not diagonalize the Fock matrix; report ⟨p|F|p⟩ instead
+      ϵ .= diag(transpose(cMOl[1]) * fock * cMOr[1])
+      break
     end
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
@@ -329,7 +336,9 @@ function bouhf(EC::ECInfo{T}) where T
   end
   flush(stdout)
   t0 = time_ns()
-  for it=1:maxit
+  # `scf.maxit=0`: build the Fock matrices (and energy) for the given orbitals without iterating
+  noiter = !pseudo && maxit < 1
+  for it=1:max(maxit, 1)
     fock = gen_ufock(EC, cMOl, cMOr)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
     var = 0.0
@@ -348,6 +357,13 @@ function bouhf(EC::ECInfo{T}) where T
       output_E_var(EHF, var, time_ns() - t0)
     else
       output_iteration(it, var, time_ns() - t0, EHF, ΔE)
+    end
+    if noiter
+      # orbitals not updated -> they do not diagonalize the Fock matrices; report ⟨p|F|p⟩ instead
+      for ispin = 1:2
+        ϵ[ispin] .= diag(transpose(cMOl[ispin]) * fock[ispin] * cMOr[ispin])
+      end
+      break
     end
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break

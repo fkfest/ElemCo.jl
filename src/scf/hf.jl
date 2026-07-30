@@ -92,6 +92,74 @@ function starting_orbitals(EC::ECInfo)
 end
 
 """
+    fock_expectation_energies(fock, cMO)
+
+  Orbital energies of a non-iterated SCF (`scf.maxit=0`): the diagonal of the Fock matrix in the
+  basis of the given orbitals, ``ϵ_p = ⟨p|F|p⟩``.
+
+  With no iteration the orbitals are never updated, so they do not diagonalize the Fock matrix and
+  there are no eigenvalues to report. The expectation values are the meaningful stand-in — they are
+  what a Fock matrix build for fixed orbitals can say about them, and they coincide with the
+  eigenvalues when the orbitals happen to be canonical.
+"""
+fock_expectation_energies(fock, cMO) = real.(diag(cMO' * fock * cMO))
+
+"""
+    scf_iterations(EC::ECInfo) -> (niter, noiter)
+
+  Number of SCF passes to run and whether this is a no-iteration (`scf.maxit=0`) run.
+
+  `scf.maxit=0` means "do not iterate", not "do nothing": the loop body still has to run once to
+  build the Fock matrix and the energy for the given orbitals (`noiter` then makes the caller break
+  before the orbitals are updated). Running it zero times would also leave the Fock matrix the loops
+  return undefined.
+"""
+scf_iterations(EC::ECInfo) = (max(EC.options.scf.maxit, 1), EC.options.scf.maxit < 1)
+
+"""
+    kept_virtuals(virt, nredundant::Int)
+
+  The virtual orbitals excluding the `nredundant` linearly-dependent ones, which the solver appends
+  as the highest orbitals with a sentinel energy ([`eigen_orth`](@ref)).
+"""
+function kept_virtuals(virt, nredundant::Int)
+  nredundant <= 0 && return virt
+  @assert length(virt) >= nredundant "more redundant orbitals ($nredundant) than virtuals ($(length(virt)))"
+  return virt[1:end-nredundant]
+end
+
+"""
+    canonicalize_occ_virt!(ϵ, cMO, fock, occ, virt)
+
+  Rotate `cMO` within the occupied and within the virtual space so that the orbitals diagonalize the
+  corresponding blocks of the *final* Fock matrix, and set `ϵ` to the resulting orbital energies.
+
+  An SCF iteration builds the Fock matrix, tests convergence and breaks, so the orbitals the loop
+  leaves behind diagonalize the (DIIS-extrapolated) Fock matrix of the PREVIOUS iteration — the final
+  one keeps occ-occ/virt-virt off-diagonal elements of the order of the remaining orbital gradient
+  (`≈ 0.1·sqrt(scf.thr)`, so `~1e-6` at the default). That is enough for everything downstream to
+  see non-canonical orbitals and pay for a pseudo-canonicalization: it is what trips the
+  `cc.fock_diag_thr` check in `(T)`.
+
+  Rotations *within* the occupied and *within* the virtual space leave the density — and therefore
+  the energy, and the Fock matrix itself — exactly invariant, so this costs two small
+  diagonalizations and cannot perturb the converged solution.
+
+  Orbitals in neither space — the linearly-dependent ones, which carry a sentinel energy and no
+  meaningful Fock matrix elements — are left untouched.
+"""
+function canonicalize_occ_virt!(ϵ, cMO, fock, occ, virt)
+  fock_mo = cMO' * fock * cMO
+  for sp in (occ, virt)
+    isempty(sp) && continue
+    ϵ_sp, U = eigen(Hermitian(fock_mo[sp, sp]))
+    cMO[:, sp] = cMO[:, sp] * U
+    ϵ[sp] .= ϵ_sp
+  end
+  return ϵ
+end
+
+"""
     scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
 
   Shared closed-shell SCF iteration loop, parameterized by a pluggable Fock builder
@@ -104,9 +172,13 @@ end
   - `fockbuilder(cMO) -> fock` builds the Fock matrix from the current orbitals.
   - `solver(fock) -> (ϵ, cMO_new)` solves the (generalized) eigenvalue problem.
 
+  With `scf.maxit=0` no iteration is performed: the Fock matrix and the energy are built for the
+  given orbitals, which are left untouched (see [`fock_expectation_energies`](@ref)).
+
   Returns `(EHF, ϵ, fock)` (the converged Fock matrix is returned for orbital dumps).
 """
-function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, solver) where {T}
+function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, solver;
+                           nredundant::Int=0) where {T}
   SP = EC.space
   norb = length(SP[':'])
   thren = scf_thren(EC)
@@ -119,7 +191,9 @@ function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, s
   t0 = time_ns()
   t1 = time_ns()
   local fock
-  for it=1:EC.options.scf.maxit
+  niter, noiter = scf_iterations(EC)
+  converged = false
+  for it=1:niter
     cMO2 = cMO[:,SP['o']]
     fock = fockbuilder(cMO)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
@@ -133,7 +207,12 @@ function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, s
     Δfock = sdf - sdf'
     var = sum(abs2,Δfock)
     output_iteration(it, var, time_ns() - t0, EHF, ΔE)
+    if noiter
+      ϵ .= fock_expectation_energies(fock, cMO)
+      break
+    end
     if abs(ΔE) < thren && var < EC.options.scf.thr
+      converged = true
       break
     end
     t1 = print_time(EC, t1, "HF residual", 2)
@@ -144,6 +223,9 @@ function scf_closed_shell!(EC::ECInfo{T}, cMO, sao, hsmall, Enuc, fockbuilder, s
     cMO .= cMO_new
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
   end
+  # only on the converged exit is `fock` the Fock matrix of the current `cMO` (a maxit-exhausted loop
+  # leaves `cMO` one update ahead of `fock`, and a `maxit=0` run must not touch the orbitals at all)
+  converged && canonicalize_occ_virt!(ϵ, cMO, fock, SP['o'], kept_virtuals(SP['v'], nredundant))
   return EHF, ϵ, fock
 end
 
@@ -155,10 +237,12 @@ end
   updated in place. `fockbuilder(cMO)` returns the spin Fock pair (indexable `[1]`/`[2]`,
   e.g. a `SpinMatrix`); `solver(fock_spin)` returns `(ϵ_spin, cMO_spin)`. `h1a`/`h1b` are
   the α/β core Hamiltonians (equal for UHF). Convergence is driven by the metric
-  residual `S·D·F − F·D·S` per spin. Returns `(EHF, ϵ, fock)` with `ϵ` an `[ϵα, ϵβ]` vector
-  and `fock` the converged spin Fock pair.
+  residual `S·D·F − F·D·S` per spin. `scf.maxit=0` builds the Fock matrices for the given
+  orbitals without iterating, as in the closed-shell loop. Returns `(EHF, ϵ, fock)` with `ϵ` an
+  `[ϵα, ϵβ]` vector and `fock` the converged spin Fock pair.
 """
-function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver) where {T}
+function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fockbuilder, solver;
+                         nredundant::Int=0) where {T}
   SP = EC.space
   norb = length(SP[':'])
   thren = scf_thren(EC)
@@ -173,7 +257,9 @@ function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fo
   t0 = time_ns()
   t1 = time_ns()
   local fock
-  for it=1:EC.options.scf.maxit
+  niter, noiter = scf_iterations(EC)
+  converged = false
+  for it=1:niter
     fock = fockbuilder(cMO)
     t1 = print_time(EC, t1, "generate Fock matrix", 2)
     efhsmall = [zero(real(T)), zero(real(T))]
@@ -193,7 +279,14 @@ function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fo
     ΔE = EHF - previousEHF
     previousEHF = EHF
     output_iteration(it, var, time_ns() - t0, EHF, ΔE)
+    if noiter
+      for ispin = 1:2
+        ϵ[ispin] .= fock_expectation_energies(fock[ispin], cMO[ispin])
+      end
+      break
+    end
     if abs(ΔE) < thren && var < EC.options.scf.thr
+      converged = true
       break
     end
     t1 = print_time(EC, t1, "HF residual", 2)
@@ -203,6 +296,13 @@ function scf_open_shell!(EC::ECInfo{T}, cMO::SpinMatrix, sao, h1a, h1b, Enuc, fo
       ϵ[ispin], cMO[ispin] = solver(fock[ispin])
     end
     t1 = print_time(EC, t1, "diagonalize Fock matrix", 2)
+  end
+  if converged      # see the closed-shell loop; per spin, since each density is separately invariant
+    spvirt = ('v', 'V')
+    for ispin = 1:2
+      canonicalize_occ_virt!(ϵ[ispin], cMO[ispin], fock[ispin], SP[spocc[ispin]],
+                             kept_virtuals(SP[spvirt[ispin]], nredundant))
+    end
   end
   return EHF, ϵ, fock
 end
@@ -262,7 +362,9 @@ function dfhf(EC::ECInfo{T}) where T
     cMO -> gen_dffock(EC, cMO)
   end
   solver = use_df3idx ? (fock -> eigen(Hermitian(fock))) : (fock -> eigen_orth(fock, Xorth, Xredundant))
-  EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
+  # the df3idx path works in the MO basis (no linear dependence to remove)
+  nredundant = use_df3idx ? 0 : size(Xredundant, 2)
+  EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver; nredundant)
   normalize_phase!(cMO)
   if use_df3idx
     close(mmLfile)
@@ -332,7 +434,8 @@ function hf(EC::ECInfo{T}) where {T}
   ints = open_pm_store(EC)
   fockbuilder = cMO -> gen_fock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
-  EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver)
+  EHF, ϵ, fock = scf_closed_shell!(EC, cMO, sao, hsmall, Enuc, fockbuilder, solver;
+                                   nredundant=size(Xredundant, 2))
   close_pm_store!(EC, ints)
   normalize_phase!(cMO)
   occupations = [2*ones(length(SP['o'])); zeros(length(SP['v']))]
@@ -373,7 +476,8 @@ function uhf(EC::ECInfo{T}) where {T}
   ints = open_pm_store(EC)
   fockbuilder = cMO -> gen_ufock(EC, ints, hsmall, cMO, cMO)
   solver = fock -> eigen_orth(fock, Xorth, Xredundant)
-  EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver)
+  EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, hsmall, hsmall, Enuc, fockbuilder, solver;
+                                 nredundant=size(Xredundant, 2))
   close_pm_store!(EC, ints)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
@@ -431,7 +535,8 @@ function dfhf_positron(EC::ECInfo)
   println("Iter     Energy      DE          Res         Time")
   flush_output()
   t0 = time_ns()
-  for it=1:EC.options.scf.maxit
+  niter, noiter = scf_iterations(EC)
+  for it=1:niter
     eden = gen_density_matrix(EC, cMO, cMO, SP['o'])
     pden = gen_density_matrix(EC, cPO, cPO, [1])
     if direct
@@ -450,6 +555,11 @@ function dfhf_positron(EC::ECInfo)
     Δfock_pos = sao*pden'*fock_pos - fock_pos*pden'*sao
     var = sum(abs2,Δfock) + sum(abs2,Δfock_pos)
     output_iteration(it, var, time_ns() - t0, EHF, ΔE)
+    if noiter
+      ϵ .= fock_expectation_energies(fock, cMO)
+      ε_pos .= fock_expectation_energies(fock_pos, cPO)
+      break
+    end
     if abs(ΔE) < thren && var < EC.options.scf.thr
       break
     end
@@ -548,7 +658,8 @@ function dfuhf(EC::ECInfo{T}) where T
     fockbuilder = direct ? (cMO -> gen_dffock(EC, cMO, bao, bfit)) : (cMO -> gen_dffock(EC, cMO))
     solver = fock -> eigen_orth(fock, Xorth, Xredundant)
   end
-  EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, h1a, h1b, Enuc, fockbuilder, solver)
+  nredundant = use_df3idx ? 0 : size(Xredundant, 2)
+  EHF, ϵ, fock = scf_open_shell!(EC, cMO, sao, h1a, h1b, Enuc, fockbuilder, solver; nredundant)
   for ispin = 1:2
     normalize_phase!(cMO[ispin])
   end
