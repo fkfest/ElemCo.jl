@@ -303,36 +303,45 @@ end
   The opposite-spin occ-early sweep on the ± store (the five intermediates of [`ao_os_blocks`](@ref)
   at half the streaming), as a [`eachslab`](@ref PMStore.eachslab)`(pm; roles=:both)` sweep like
   [`pm_occ_early`](@ref) but with TWO coefficient sets: [`pm_bra_half!`](@ref PMStore.pm_bra_half!)
-  gives the shared half-transforms of `La_o` (`hνa`/`hμa`) and `Lb_o` (`hνb`/`hμb`), reused by the
-  five `@mtensor` outputs (the ket-contracted `v_oAAO`/`v_AOAO` take the `Rb_o` row of the kept ket
-  order). `hνbT`/`hμbT` are the `b` transposes the AO-first outputs (`v_AOoA`/`v_AOAO`) need.
+  gives the shared half-transforms of `La_o` (`hνa`/`hμa`) and `Lb_o` (`hνb`/`hμb`).
 """
 function pm_os_sweep(pm::PMSupermatrices{Te}, La_o, Ra_o, Lb_o, Rb_o) where Te
+  # Only `v_oOAA` (both bras transformed) is formed fused per slab; the other four are ket-contracted,
+  # and batching them is what [`pm_occ_early`](@ref) does — the same treatment applies here with only
+  # TWO accumulators, because each free-AO half-transform feeds two outputs: `Aa[(i,ν),ρ,σ]` (the `a`
+  # μ→occ transform) feeds `v_oAoA` and `v_oAAO`, and `Bb[(μ,I),ρ,σ]` (the `b` ν→occ transform) feeds
+  # `v_AOoA` and `v_AOAO`. The bra index is fused LEADING so each `σ`-slice is BLAS-contiguous. The two
+  # ket-1 outputs contract `ρ` — one BLAS GEMM per `σ`, as in [`pm_occ_early`](@ref) — while the two
+  # ket-2 outputs contract `σ`, which is the trailing dimension of the accumulator and so needs no loop
+  # at all: ONE GEMM over the flattened `[(bra,ρ), σ]` matrix. `Aa`/`Bb` cost `(na+nb)·nao³` in RAM
+  # (the closed-shell sweep's `2·nocc·nao³`), so the same mmap fallback for large systems is a follow-up.
   n = pm.nao; na = size(La_o,2); nb = size(Lb_o,2)
-  v_oOAA = zeros(Te, na,nb,n,n); v_AOoA = zeros(Te, n,nb,na,n); v_oAoA = zeros(Te, na,n,na,n)
-  v_oAAO = zeros(Te, na,n,n,nb); v_AOAO = zeros(Te, n,nb,n,nb)
+  v_oOAA = zeros(Te, na,nb,n,n)
+  Aa = zeros(Te, na*n, n, n)               # [(i,ν),ρ,σ]  a μ→occ half-transforms (feed v_oAoA, v_oAAO)
+  Bb = zeros(Te, n*nb, n, n)               # [(μ,I),ρ,σ]  b ν→occ half-transforms (feed v_AOoA, v_AOAO)
   hνa = zeros(Te,na,n); hμa = zeros(Te,na,n)               # La half-transforms (μ→a / ν→a)
   hνb = zeros(Te,nb,n); hμb = zeros(Te,nb,n)               # Lb half-transforms
   hνbT = zeros(Te,n,nb); hμbT = zeros(Te,n,nb)             # b transposes (for the AO-first outputs)
   for s in eachslab(pm; roles=:both)
     pm_bra_half!(hνa, hμa, s, La_o); pm_bra_half!(hνb, hμb, s, Lb_o)
-    ρ, σ = s.ρ, s.σ; v!Raρ = @mview Ra_o[ρ,:]; v!Rbσ = @mview Rb_o[σ,:]
-    permutedims!(hνbT, hνb, (2,1)); permutedims!(hμbT, hμb, (2,1))
-    v!oOAAρσ = @mview v_oOAA[:,:,ρ,σ]; @mtensor v!oOAAρσ[i,J]   += hνa[i,ν]  * Lb_o[ν,J]
-    v!AOoAσ  = @mview v_AOoA[:,:,:,σ]; @mtensor v!AOoAσ[μ,I,k]  += hμbT[μ,I] * v!Raρ[k]
-    v!oAoAσ  = @mview v_oAoA[:,:,:,σ]; @mtensor v!oAoAσ[i,ν,k]  += hνa[i,ν]  * v!Raρ[k]
-    v!oAAOρ  = @mview v_oAAO[:,:,ρ,:]; @mtensor v!oAAOρ[i,ν,J]  += hνa[i,ν]  * v!Rbσ[J]
-    v!AOAOρ  = @mview v_AOAO[:,:,ρ,:]; @mtensor v!AOAOρ[μ,I,J]  += hμbT[μ,I] * v!Rbσ[J]
+    ρ, σ = s.ρ, s.σ; permutedims!(hμbT, hμb, (2,1))
+    @mview(Aa[:,ρ,σ]) .+= vec(hνa); @mview(Bb[:,ρ,σ]) .+= vec(hμbT)  # accumulate the ket column (ρ,σ)
+    v!oOAAρσ = @mview v_oOAA[:,:,ρ,σ]; @mtensor v!oOAAρσ[i,J] += hνa[i,ν] * Lb_o[ν,J]  # fused, in cache
     if ρ < σ                                              # ket order (σ,ρ)
-      v!Raσ = @mview Ra_o[σ,:]; v!Rbρ = @mview Rb_o[ρ,:]
-      v!oOAAσρ = @mview v_oOAA[:,:,σ,ρ]; @mtensor v!oOAAσρ[i,J]   += hμa[i,ν]  * Lb_o[ν,J]
-      v!AOoAρ  = @mview v_AOoA[:,:,:,ρ]; @mtensor v!AOoAρ[μ,I,k]  += hνbT[μ,I] * v!Raσ[k]
-      v!oAoAρ  = @mview v_oAoA[:,:,:,ρ]; @mtensor v!oAoAρ[i,ν,k]  += hμa[i,ν]  * v!Raσ[k]
-      v!oAAOσ  = @mview v_oAAO[:,:,σ,:]; @mtensor v!oAAOσ[i,ν,J]  += hμa[i,ν]  * v!Rbρ[J]
-      v!AOAOσ  = @mview v_AOAO[:,:,σ,:]; @mtensor v!AOAOσ[μ,I,J]  += hνbT[μ,I] * v!Rbρ[J]
+      permutedims!(hνbT, hνb, (2,1))
+      @mview(Aa[:,σ,ρ]) .+= vec(hμa); @mview(Bb[:,σ,ρ]) .+= vec(hνbT)
+      v!oOAAσρ = @mview v_oOAA[:,:,σ,ρ]; @mtensor v!oOAAσρ[i,J] += hμa[i,ν] * Lb_o[ν,J]
     end
   end
-  return v_oOAA, v_AOoA, v_oAoA, v_oAAO, v_AOAO
+  v_oAoA = zeros(Te, na*n, na, n); v_AOoA = zeros(Te, n*nb, na, n)  # [(i,ν),k,σ] / [(μ,I),k,σ]
+  @inbounds for σ in 1:n                                            # ket-1: batch the ρ-sum, GEMM per σ
+    mul!(view(v_oAoA,:,:,σ), view(Aa,:,:,σ), Ra_o)                  # plain `view` slices ⇒ BLAS-3
+    mul!(view(v_AOoA,:,:,σ), view(Bb,:,:,σ), Ra_o)                  # (reshape-of-@mview drops to generic)
+  end
+  v_oAAO = reshape(Aa, na*n*n, n) * Rb_o                            # ket-2: σ is trailing ⇒ ONE GEMM
+  v_AOAO = reshape(Bb, n*nb*n, n) * Rb_o
+  return v_oOAA, reshape(v_AOoA, n,nb,na,n), reshape(v_oAoA, na,n,na,n),
+         reshape(v_oAAO, na,n,n,nb), reshape(v_AOAO, n,nb,n,nb)
 end
 
 """
