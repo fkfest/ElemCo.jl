@@ -144,10 +144,12 @@ end
   df3idx::Bool = false
   """ for ElemCo-generated reduced (frozen-core/deleted-virtual) dumps: the contiguous full-space
       (original) orbital range of the active orbitals (frozen core below it, deleted virtuals above
-      it), i.e. active orbital `k` corresponds to full orbital `orig_orbs[k]`. Empty (`1:0`) for
+      it), i.e. active orbital `k` corresponds to full orbital `orig_orbs[k]` (sorted; NOT
+      necessarily contiguous -- region/redundant "Deleted" virtuals are dropped at their actual
+      indices). Empty for
       externally-read or non-reduced dumps. Used to translate user-supplied orbital lists
       (`occa`/`occb`/`active`), which always refer to the full MO space, to the active space. """
-  orig_orbs::UnitRange{Int} = 1:0
+  orig_orbs::Vector{Int} = Int[]
 end
 
 const TFDump{T<:Number} = FDump{T,3}

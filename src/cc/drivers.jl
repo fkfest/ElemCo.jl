@@ -235,6 +235,10 @@ function derive_mo_basis!(EC::ECInfo{T}; persistent::Bool=false) where {T}
   ncore_orbs = nocc_full - length(EC.space['o'])
   nfrozvirt = nvirt_full - length(EC.space['v'])
   frozen_occ = sort!(setdiff(space_save['o'], EC.space['o']))
+  # The kept columns by their ACTUAL indices: freeze_orbitals! removes region/redundant
+  # "Deleted" virtuals mid-range (never by top index), so a trailing-truncation range would
+  # transform the deleted columns and drop valid high virtuals.
+  active_cols = sort!(vcat(EC.space['o'], EC.space['v']))
   restore_space!(EC, space_save)
   # Transform only the kept orbitals: active + frozen-occupied (the frozen-occ are needed to
   # fold the core energy/Fock); deleted and frozen-virtual orbitals (the highest columns, see
@@ -245,18 +249,16 @@ function derive_mo_basis!(EC::ECInfo{T}; persistent::Bool=false) where {T}
   if EC.options.wf.dump4core_only && ncore_orbs > 0
     replace_core_from_dump!(EC, cMO, ncore_orbs)
   end
-  active = (ncore_orbs+1):(full_norb-nfrozvirt)
-  corerng = 1:ncore_orbs
   if is_restricted(cMO)
-    generate_mo_dump(EC, Matrix(cMO.α)[:, active]; core=Matrix(cMO.α)[:, corerng], persistent)
+    generate_mo_dump(EC, Matrix(cMO.α)[:, active_cols]; core=Matrix(cMO.α)[:, frozen_occ], persistent)
   else
-    generate_mo_dump(EC, SpinMatrix(Matrix(cMO.α)[:, active], Matrix(cMO.β)[:, active]);
-                     core=SpinMatrix(Matrix(cMO.α)[:, corerng], Matrix(cMO.β)[:, corerng]), persistent)
+    generate_mo_dump(EC, SpinMatrix(Matrix(cMO.α)[:, active_cols], Matrix(cMO.β)[:, active_cols]);
+                     core=SpinMatrix(Matrix(cMO.α)[:, frozen_occ], Matrix(cMO.β)[:, frozen_occ]), persistent)
   end
   if ncore_orbs + nfrozvirt > 0
-    # record the full-space orbital range of the active orbitals (as `dfdump` does), so user
+    # record the full-space indices of the active orbitals (as `dfdump` does), so user
     # orbital lists and property post-processing translate to this reduced dump
-    EC.fd.orig_orbs = (ncore_orbs+1):(full_norb-nfrozvirt)
+    EC.fd.orig_orbs = active_cols
   end
   return EC.fd
 end
@@ -300,6 +302,8 @@ end
 function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   t1 = time_ns()
   save_occs = check_occs(EC, occa, occb)
+  local no_user_fd = false   # set below; the finally block must see it even on an early error
+  try
   check_fcidump(EC, fcidump)
   if EC.fd.df3idx
     contract_df_integrals!(EC)
@@ -449,18 +453,22 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
     t1 = print_time(EC, t1, "EOM", 1)
   end
 
-  delete_temporary_files!(EC)
   draw_endline()
-  EC.ao_direct = false
-  if no_user_fd
-    # this driver created the fd it used (per-run DF dump or AO-derived MO dump) — it deletes it:
-    # both are built from the CURRENT orbitals and must not persist into the next calculation
-    # (AO-direct leaves EC.fd empty anyway).
-    EC.fd = FDump{ec_eltype(EC),3}()
-  end
-  # restore occs
-  EC.options.wf.occa, EC.options.wf.occb = save_occs
   return energies
+  finally
+    # Always, error or not: a convergence failure must not leave the next driver call believing
+    # an implicitly generated (orbital-dependent) dump is user-owned, running AO-direct by
+    # accident, or inheriting this run's occupation strings.
+    delete_temporary_files!(EC)
+    EC.ao_direct = false
+    if no_user_fd
+      # this driver created the fd it used (per-run DF dump or AO-derived MO dump) — it deletes
+      # it: both are built from the CURRENT orbitals and must not persist into the next
+      # calculation (AO-direct leaves EC.fd empty anyway).
+      EC.fd = FDump{ec_eltype(EC),3}()
+    end
+    EC.options.wf.occa, EC.options.wf.occb = save_occs
+  end
 end
 
 """

@@ -876,7 +876,7 @@ function symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
 end
 
 """
-    translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::UnitRange{Int})
+    translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::AbstractVector{Int})
 
   Translate full-MO-space orbital indices `orbs` to the active-space numbering of a reduced dump.
   The active orbitals are the contiguous full-space range `orig_orbs` (`= lo:hi`, with the frozen
@@ -886,17 +886,19 @@ end
   out-of-range index) raises an error, since these lists are usually user input. If `orig_orbs` is
   empty (external or non-reduced dump), `orbs` is returned unchanged (indices are taken as-is).
 """
-function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::UnitRange{Int})
+function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::AbstractVector{Int})
   isempty(orig_orbs) && return orbs
-  lo, hi = first(orig_orbs), last(orig_orbs)
+  lo = first(orig_orbs)                    # sorted; deleted orbitals may leave holes inside
   active = Int[]
   for o in orbs
-    if lo <= o <= hi
-      push!(active, o - lo + 1)
+    k = searchsortedfirst(orig_orbs, o)
+    if k <= length(orig_orbs) && orig_orbs[k] == o
+      push!(active, k)
     elseif 1 <= o < lo
       continue  # frozen core: occupied in the reference but not part of the active space
     else
-      error("Orbital $o is not in the active space (full-space active orbital range is $lo:$hi).")
+      error("Orbital $o is not in the active space (full-space active orbitals: " *
+            "$(first(orig_orbs))..$(last(orig_orbs)) minus deleted/frozen).")
     end
   end
   return sort!(active)
