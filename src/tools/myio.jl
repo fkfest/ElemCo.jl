@@ -357,8 +357,21 @@ end
 """
 @inline function miopread!(io::IOStream, ptr::Ptr, nbytes::Int, offset::Int)
   @static if Sys.isunix()
-    r = ccall(:pread, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Clonglong), fd(io), ptr, nbytes, offset)
-    Int(r) == nbytes || error("miopread!: read $r of $nbytes bytes at offset $offset")
+    # pread(2) may legally return short (or -1/EINTR on a signal) before EOF; loop until the
+    # request is filled and only error on true EOF or a non-retryable errno.
+    done = 0
+    while done < nbytes
+      r = ccall(:pread, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Clonglong),
+                fd(io), ptr + done, nbytes - done, offset + done)
+      if r > 0
+        done += Int(r)
+      elseif r == 0
+        error("miopread!: EOF after $done of $nbytes bytes at offset $offset")
+      elseif Libc.errno() != Libc.EINTR
+        error("miopread!: read failed after $done of $nbytes bytes at offset $offset " *
+              "(errno $(Libc.errno()))")
+      end
+    end
   else
     seek(io, offset)
     unsafe_read(io, ptr, nbytes)               # exact read or EOFError

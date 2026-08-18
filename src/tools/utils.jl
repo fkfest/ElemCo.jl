@@ -173,18 +173,27 @@ function cgroup_memory_available()
   if isfile("/sys/fs/cgroup/cgroup.controllers")            # cgroup v2 (unified)
     rel = _cgroup_relpath("")
     rel === nothing && return nothing
-    limit = nothing
-    leaf = "/sys/fs/cgroup"
-    for seg in split(rel, '/'; keepempty=false)             # effective limit = min(memory.max) up the path
-      leaf = joinpath(leaf, seg)
-      m = _read_uint_file(joinpath(leaf, "memory.max"))
-      m === nothing || (limit = limit === nothing ? m : min(limit, m))
+    # Walk from the cgroupfs ROOT down to the leaf. In containers with a private cgroup
+    # namespace /proc/self/cgroup reads "0::/", so the leaf IS the root and a finite limit
+    # lives at /sys/fs/cgroup/memory.max itself; and an ancestor's limit binds through the
+    # usage charged at that ancestor (siblings included), so availability is evaluated
+    # per level and the minimum taken.
+    avail = nothing
+    level = "/sys/fs/cgroup"
+    paths = [level]
+    for seg in split(rel, '/'; keepempty=false)
+      level = joinpath(level, seg)
+      push!(paths, level)
     end
-    limit === nothing && return nothing                     # no finite limit ⇒ unconstrained
-    cur = _read_uint_file(joinpath(leaf, "memory.current"))
-    cur === nothing && return limit
-    reclaim = something(_stat_value(joinpath(leaf, "memory.stat"), "inactive_file"), 0)
-    return max(0, limit - max(0, cur - reclaim))
+    for dir in paths
+      m = _read_uint_file(joinpath(dir, "memory.max"))
+      m === nothing && continue                             # no finite limit at this level
+      cur = something(_read_uint_file(joinpath(dir, "memory.current")), 0)
+      reclaim = something(_stat_value(joinpath(dir, "memory.stat"), "inactive_file"), 0)
+      a = max(0, m - max(0, cur - reclaim))
+      avail = avail === nothing ? a : min(avail, a)
+    end
+    return avail                                            # nothing ⇒ unconstrained
   else                                                       # cgroup v1
     rel = _cgroup_relpath("memory")
     rel === nothing && return nothing
@@ -239,7 +248,9 @@ function available_memory(; fraction::Real=0.8, gc::Bool=true)
   cg === nothing || (avail = min(avail, cg))
   sl = slurm_memory_limit()
   sl === nothing || (avail = min(avail, sl))
-  return max(round(Int, avail * fraction), 256 * 2^20)
+  # a comfort floor, but never beyond what is actually there: reporting 256 MiB into a
+  # 100 MiB cgroup would hand callers an allocation budget the kernel will kill
+  return min(max(round(Int, avail * fraction), 256 * 2^20), avail)
 end
 
 """
