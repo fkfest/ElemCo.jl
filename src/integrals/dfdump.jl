@@ -187,7 +187,9 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, full_spa
   M = nothing
   contract_tri!(int2, Lmm)
   Lmm = nothing
-  flushmmap(EC, int2)
+  # close the file handle (the mapping stays valid); it was leaked before, so a script that
+  # regenerates the dump in a loop accumulated one open descriptor per `@dfints`
+  closemmap(EC, int2_file, int2)
   fdump.int2 = int2
 
   hAO = kinetic(bao) + nuclear(bao)
@@ -211,7 +213,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, full_spa
   filename1 = int1_npy_filename(fdump)
   int1_file, int1 = newmmap(EC, filename1, (norbs,norbs), description="int1")
   int1 .= fock_jkfitMO[wocore,wocore] - fock
-  flushmmap(EC, int1)
+  closemmap(EC, int1_file, int1)   # see the int2 handle above
   fdump.int1 = int1
   fdump.int0 = Enuc + hii + sum(diag(fock_jkfitMO)[core_orbs]) - sum(diag(int1)[spo])
 

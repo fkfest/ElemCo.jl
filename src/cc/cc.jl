@@ -495,6 +495,38 @@ function auto_buf_length4calc_dressed_ints(no1, no2, nv1, nv2, calc_d_vvvv, calc
     return (buf1[2], buf2[2])
 end
 
+"""
+    bare_ints2!(out, EC::ECInfo, spaces::String)
+
+  Fill `out` with the *bare* MO integral block `spaces`, caching it on scratch so that the CC
+  iterations extract it from the integral dump only once.
+
+  Blocks larger than a quarter of the integral dump are NOT cached: at that size the copy stops
+  being cheap next to what it saves, and it keeps a pathological case (`vvvv` at `nvirt^4`)
+  from being written to scratch. Such blocks only arise with `cc.calc_d_vvvv` and friends,
+  which the `use_kext` residual does not use.
+
+  The cache file carries the plain space string as its name — bare integrals are never prefixed
+  (only dressed blocks are, `d_*`), and these are the same names the AO-direct engine blocks use
+  ([`save_mo_blocks!`](@ref)); both are temporary, so the two routes can never serve each other a
+  stale file.
+
+  The cache is temporary (`description="tmp"`), so `delete_temporary_files!` drops it at the end of
+  every driver run: a regenerated dump can never be served a stale block. A cached file whose
+  dimensions no longer match (a changed space) is silently regenerated.
+"""
+function bare_ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, spaces::String)
+  # caching pays for itself unless the block approaches the size of the dump it is read from
+  sizeof(out) * 4 <= sizeof(integ2_ss(EC.fd)) || return ints2!(out, EC, spaces)
+  cachefile = spaces                     # bare ⇒ no prefix, by the integral naming convention
+  if file_exists(EC, cachefile) && load!(EC, cachefile, out; skip_error=true)
+    return out
+  end
+  ints2!(out, EC, spaces)
+  save!(EC, cachefile, out; description="tmp")
+  return out
+end
+
 """ 
     calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
               calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
@@ -522,9 +554,9 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   if calc_d_vvvv
     # <a\hat c|bd>
     hd_vvvv = alloc!(buf1, nv1,nv2,nv1,nv2)
-    ints2!(hd_vvvv, EC, v1*v2*v1*v2)
+    bare_ints2!(hd_vvvv, EC, v1*v2*v1*v2)
     vovv = alloc!(buf2, nv1,no2,nv1,nv2)
-    ints2!(vovv, EC, v1*o2*v1*v2)
+    bare_ints2!(vovv, EC, v1*o2*v1*v2)
     @mtensor hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T12[c,k]
     save!(EC, "hd_"*v1*v2*v1*v2, hd_vvvv)
     drop!(buf2, vovv)
@@ -533,29 +565,29 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   end
   # <ik|j \hat l>
   hd_oooo = alloc!(buf1, no1,no2,no1,no2)
-  ints2!(hd_oooo, EC, o1*o2*o1*o2)
+  bare_ints2!(hd_oooo, EC, o1*o2*o1*o2)
   if mixed
     # <ik|\hat j l>
     hd_oooo2 = alloc!(buf1, no1,no2,no1,no2)
     hd_oooo2 .= hd_oooo
     oovo = alloc!(buf2, no1,no2,nv1,no2)
-    ints2!(oovo, EC, o1*o2*v1*o2)
+    bare_ints2!(oovo, EC, o1*o2*v1*o2)
     @mtensor hd_oooo2[i,j,k,l] += oovo[i,j,d,l] * T1[d,k]
     drop!(buf2, oovo)
   end
   ooov = alloc!(buf2, no1,no2,no1,nv2)
-  ints2!(ooov, EC, o1*o2*o1*v2)
+  bare_ints2!(ooov, EC, o1*o2*o1*v2)
   @mtensor hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
   drop!(buf2, ooov)
   t1 = print_time(EC, t1, "dress hd_"*o1*o2*o1*o2, 3)
   if calc_d_vvoo
     # <a\hat c|j \hat l>
     hd_vvoo = alloc!(buf1, nv1,nv2,no1,no2)
-    ints2!(hd_vvoo, EC, v1*v2*o1*o2)
+    bare_ints2!(hd_vvoo, EC, v1*v2*o1*o2)
     vooo = alloc!(buf2, nv1,no2,no1,no2)
-    ints2!(vooo, EC, v1*o2*o1*o2)
+    bare_ints2!(vooo, EC, v1*o2*o1*o2)
     voov = alloc!(buf1, nv1,no2,no1,nv2)
-    ints2!(voov, EC, v1*o2*o1*v2)
+    bare_ints2!(voov, EC, v1*o2*o1*v2)
     @mtensor begin
       vooo[a,k,j,l] += voov[a,k,j,d] * T12[d,l]
       hd_vvoo[a,c,j,l] -= vooo[a,k,j,l] * T12[c,k]
@@ -563,7 +595,7 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
     drop!(buf1, voov)
     drop!(buf2, vooo)
     vvov = alloc!(buf2, nv1,nv2,no1,nv2)
-    ints2!(vvov, EC, v1*v2*o1*v2)
+    bare_ints2!(vvov, EC, v1*v2*o1*v2)
     @mtensor hd_vvoo[a,c,j,l] += vvov[a,c,j,d] * T12[d,l]
     drop!(buf2, vvov)
     save!(EC, "hd_"*v1*v2*o1*o2, hd_vvoo)
@@ -572,7 +604,7 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   end
   # <\hat a k| \hat j l>
   hd_vooo = alloc!(buf2, nv1,no2,no1,no2)
-  ints2!(hd_vooo, EC, v1*o2*o1*o2)
+  bare_ints2!(hd_vooo, EC, v1*o2*o1*o2)
   if !mixed
     @mtensor hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
   else
@@ -581,7 +613,7 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   end
   if no2 > 0
     vovo = alloc!(buf1, nv1,no2,nv1,no2)
-    ints2!(vovo, EC, v1*o2*v1*o2)
+    bare_ints2!(vovo, EC, v1*o2*v1*o2)
     @mtensor hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
     drop!(buf1, vovo)
   end
@@ -589,9 +621,9 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   if mixed
     # <k\hat a | l\hat j >
     hd_ovoo = alloc!(buf2, no1,nv2,no1,no2)
-    ints2!(hd_ovoo, EC, o1*v2*o1*o2)
+    bare_ints2!(hd_ovoo, EC, o1*v2*o1*o2)
     ovov = alloc!(buf1, no1,nv2,no1,nv2)
-    ints2!(ovov, EC, o1*v2*o1*v2)
+    bare_ints2!(ovov, EC, o1*v2*o1*v2)
     if no1 > 0 && no2 > 0
       @mtensor begin
         hd_ovoo[k,a,l,j] -= hd_oooo[k,i,l,j] * T12[a,i]
@@ -604,9 +636,9 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   # some of the fully dressing moved here...
   # <ki\hat|dj>
   d_oovo = alloc!(buf2, no1,no2,nv1,no2)
-  ints2!(d_oovo, EC, o1*o2*v1*o2)
+  bare_ints2!(d_oovo, EC, o1*o2*v1*o2)
   oovv = alloc!(buf1, no1,no2,nv1,nv2)
-  ints2!(oovv, EC, o1*o2*v1*v2)
+  bare_ints2!(oovv, EC, o1*o2*v1*v2)
   @mtensor d_oovo[k,i,d,j] += oovv[k,i,d,b] * T12[b,j]
   save!(EC, "d_"*o1*o2*v1*o2, d_oovo)
   drop!(buf1, oovv)
@@ -617,17 +649,17 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   drop!(buf1, hd_oooo)
   if mixed
     d_ooov = alloc!(buf2, no1,no2,no1,nv2)
-    ints2!(d_ooov, EC, o1*o2*o1*v2)
+    bare_ints2!(d_ooov, EC, o1*o2*o1*v2)
   end
   # <ak\hat|jd>
   vovv = alloc!(buf2, nv1,no2,nv1,nv2)
-  ints2!(vovv, EC, v1*o2*v1*v2)
+  bare_ints2!(vovv, EC, v1*o2*v1*v2)
   d_voov = alloc!(buf1, nv1,no2,no1,nv2)
-  ints2!(d_voov, EC, v1*o2*o1*v2)
+  bare_ints2!(d_voov, EC, v1*o2*o1*v2)
   if mixed
     # <oo|ov>
     oOvV = alloc!(buf1, no1,no2,nv1,nv2)
-    ints2!(oOvV, EC, o1*o2*v1*v2)
+    bare_ints2!(oOvV, EC, o1*o2*v1*v2)
     @mtensor d_ooov[k,l,j,d] += oOvV[k,l,b,d] * T1[b,j]
     drop!(buf1, oOvV)
     save!(EC, "d_"*o1*o2*o1*v2, d_ooov)
@@ -652,11 +684,11 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   # finish half-dressing
   if mixed
     d_ovvo = alloc!(buf1, no1,nv2,nv1,no2)
-    ints2!(d_ovvo, EC, o1*v2*v1*o2)
+    bare_ints2!(d_ovvo, EC, o1*v2*v1*o2)
   end
   # <ak|b \hat l>
   hd_vovo = alloc!(buf1, nv1,no2,nv1,no2)
-  ints2!(hd_vovo, EC, v1*o2*v1*o2)
+  bare_ints2!(hd_vovo, EC, v1*o2*v1*o2)
   if no2 > 0
     @mtensor hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
   end
@@ -664,7 +696,7 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   if mixed
     # <k\hat a|dj>
     ovvv = alloc!(buf2, no1,nv2,nv1,nv2)
-    ints2!(ovvv, EC, o1*v2*v1*v2)
+    bare_ints2!(ovvv, EC, o1*v2*v1*v2)
     @mtensor begin
       d_ovvo[i,A,b,J] -= d_oovo[i,K,b,J] * T12[A,K]
       d_ovvo[i,A,b,J] += ovvv[i,A,b,C] * T12[C,J]
@@ -673,7 +705,7 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
     t1 = print_time(EC, t1, "dress d_"*o1*v2*v1*o2, 3)
 
     hd_ovov = alloc!(buf1, no1,nv2,no1,nv2)
-    ints2!(hd_ovov, EC, o1*v2*o1*v2)
+    bare_ints2!(hd_ovov, EC, o1*v2*o1*v2)
     @mtensor hd_ovov[k,a,l,b] += ovvv[k,a,d,b] * T1[d,l]
     drop!(buf2, ovvv)
   end
@@ -681,9 +713,9 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   if calc_d_vvvo
     # <a\hat c|b \hat l>
     vvvv = alloc!(buf1, nv1,nv2,nv1,nv2)
-    ints2!(vvvv, EC, v1*v2*v1*v2)
+    bare_ints2!(vvvv, EC, v1*v2*v1*v2)
     hd_vvvo = alloc!(buf2, nv1,nv2,nv1,no2)
-    ints2!(hd_vvvo, EC, v1*v2*v1*o2)
+    bare_ints2!(hd_vvvo, EC, v1*v2*v1*o2)
     @mtensor begin
       hd_vvvo[a,c,b,l] -= hd_vovo[a,k,b,l] * T12[c,k]
       hd_vvvo[a,c,b,l] += vvvv[a,c,b,d] * T12[d,l]
@@ -692,7 +724,7 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
     drop!(buf2, hd_vvvo)
     if mixed
       hd_vvov = alloc!(buf2, nv1,nv2,no1,nv2)
-      ints2!(hd_vvov, EC, v1*v2*o1*v2)
+      bare_ints2!(hd_vvov, EC, v1*v2*o1*v2)
       @mtensor begin
         hd_vvov[a,c,l,b] -= hd_ovov[k,c,l,b] * T1[a,k]
         hd_vvov[a,c,l,b] += vvvv[a,c,d,b] * T1[d,l]
@@ -722,16 +754,16 @@ function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char,
   if calc_d_vovv
     # <ak\hat|bd>
     d_vovv = alloc!(buf2, nv1,no2,nv1,nv2)
-    ints2!(d_vovv, EC, v1*o2*v1*v2)
+    bare_ints2!(d_vovv, EC, v1*o2*v1*v2)
     oovv = alloc!(buf1, no1,no2,nv1,nv2)
-    ints2!(oovv, EC, o1*o2*v1*v2)
+    bare_ints2!(oovv, EC, o1*o2*v1*v2)
     @mtensor d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
     save!(EC, "d_"*v1*o2*v1*v2, d_vovv)
     t1 = print_time(EC, t1, "dress d_"*v1*o2*v1*v2, 3)
     if mixed
       drop!(buf2, d_vovv)
       d_ovvv = alloc!(buf2, no1,nv2,nv1,nv2)
-      ints2!(d_ovvv, EC, o1*v2*v1*v2)
+      bare_ints2!(d_ovvv, EC, o1*v2*v1*v2)
       @mtensor d_ovvv[i,b,a,c] -= oovv[i,j,a,c] * T12[b,j]
       save!(EC, "d_"*o1*v2*v1*v2, d_ovvv)
       t1 = print_time(EC, t1, "dress d_"*o1*v2*v1*v2, 3)
