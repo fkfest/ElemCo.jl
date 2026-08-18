@@ -433,6 +433,13 @@ function ccdriver(EC::ECInfo, method; fcidump="", occa="-", occb="-")
   end
 
   if defer_pert_t
+    # The dressed 3-external blocks (`d_vovv` and friends, `nocc·nvirt³` each, forced by the Λ
+    # equations) are dead here: Λ and the 1-RDM above were their last readers, and the (T) kernels
+    # read no dressed block beyond the oovv class. Delete them BEFORE (T) builds its bare
+    # 3-external blocks, so the two generations never occupy scratch at the same time.
+    for f in ("d_vovv", "d_VOVV", "d_vOvV", "d_oVvV", "d_vvvo", "d_vvoo", "d_vvvv", "d_VVVV", "d_vVvV")
+      file_exists(EC, f) && delete_file!(EC, f)
+    end
     energies, t1 = add_perturbative_triples(EC, ecmethod, energies; timer=t1)
   end
 
