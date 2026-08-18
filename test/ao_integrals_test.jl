@@ -481,6 +481,39 @@ end
     generate_mo_dump(EC, cMO[:, 1:nao_ref-ndel])    # explicit drop of the same orbital
     e_ref = @fci
     @test abs(e_ao["FCI"] - e_ref["FCI"]) < 1e-7
+
+    # region-style "Deleted" virtuals at INTERIOR indices (the redundant-orbital case above
+    # always deletes the TRAILING orbital, and in sto-3g water 6:7 IS the trailing range, so a
+    # bigger basis is needed to discriminate): the derived dump must transform the ACTUAL kept
+    # columns. A trailing-truncation range would keep the deleted columns 7:8 and drop the two
+    # valid top virtuals 12:13 instead (caught by review on PR #363).
+    # NB direct function calls, no calculation macros: `@hf`/`@cc` run `@setupEC`, which picks up
+    # the testset-scope `geometry`/`basis` variables BY NAME and silently resets `EC.system`
+    # to sto-3g -- the input-script convenience is a trap inside test scopes.
+    EC = fresh(Dict("ao"=>"6-31g"))
+    EC.options.wf.freeze_nocc = 0
+    ElemCo.hf(EC)
+    cMO631 = Matrix(load_orbitals(EC).α)
+    en631 = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
+    occ631 = ElemCo.Wavefunctions.fetch_orbital_occupations(EC)
+    basis631 = ElemCo.Wavefunctions.fetch_orbitals(EC)[3]
+    norb631 = size(cMO631, 2)
+    @test norb631 == 13                                 # water/6-31g; 7:8 is strictly interior
+    classes = fill("Virtual", norb631)
+    classes[1:5] .= "Closed"                            # all five occupied stay correlated
+    classes[7:8] .= "Deleted"                           # mid-range region deletions, PHYSICAL energies
+    ElemCo.Wavefunctions.dump_orbitals(EC, ElemCo.QMTensors.SpinMatrix(cMO631);
+      basis=basis631, type="Region-test", energies=(copy(en631[1]), Float64[]),
+      occupations=occ631, classes=(classes, String[]))
+    EC.options.int.ao_direct = false                    # force the DERIVE route for CCSD
+    e_der = ElemCo.ccdriver(EC, "ccsd")
+    EC = fresh(Dict("ao"=>"6-31g"))
+    EC.options.wf.freeze_nocc = 0
+    ao_integrals(EC)
+    generate_mo_dump(EC, cMO631[:, setdiff(1:norb631, 7:8)])   # explicit drop of the same two
+    e_ref = ElemCo.ccdriver(EC, "ccsd")
+    @test abs(e_der["HF"]   - e_ref["HF"])   < 1e-9
+    @test abs(e_der["CCSD"] - e_ref["CCSD"]) < 1e-8
   end
 end
 end
