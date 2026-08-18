@@ -38,6 +38,20 @@ struct BasisBatcher
     basis = combine(basis1, basis2)
     new(basis, n4sh, n_max, bas_offset, target_length)
   end
+  @doc """
+      BasisBatcher(basis::BasisSet, target_length::Int=100)
+
+    Single-basis batcher: iterate the shells of `basis` (the batched dimension) in
+    target-length batches, without combining two basis sets. Used e.g. to batch the
+    ket-2 (`s`) index of the four-index AO integrals `⟨pq|rs⟩`, where all four indices
+    live in the same AO basis. `n4sh(batch, 1)`/`bas_offset(batch, 1)` then refer to
+    that single basis.
+  """
+  function BasisBatcher(basis::BasisSet, target_length::Int=100)
+    v = Int[n_ao(ash, basis.cartesian) for ash in basis]
+    # single entry ⇒ `iterate` uses `ib = length(n4sh) = 1` and `shell_range(basis, 1)`
+    new(basis, [v], [maximum(v)], [cumsum(vcat(0, v))], target_length)
+  end
 end
 
 """
@@ -48,6 +62,14 @@ end
   The buffer has to be of type `[MAlloc]Buffer{Cdouble}(lenbuf)` or `[MAlloc]ThreadsBuffer{Cdouble}(lenbuf)`.
 """
 buffer_size_3idx(bb::BasisBatcher) = bb.n_max[1]^2*bb.n_max[2]
+
+"""
+    buffer_size_4idx(bb::BasisBatcher)
+
+  Return the per-thread buffer size needed for a four-index AO shell quartet
+  `(P R | Q S)` in the single-basis batcher (largest `nP·nR·nQ·nS`).
+"""
+buffer_size_4idx(bb::BasisBatcher) = bb.n_max[1]^4
 
 """
     BasisBatch

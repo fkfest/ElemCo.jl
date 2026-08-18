@@ -36,6 +36,15 @@ function calc_eom(EC::ECInfo, method::ECMethod)
     error("only implemented upto doubles")
   end
   unrestricted = is_unrestricted(method) || has_prefix(method, "R")
+  # AO-direct: the CIS pre-pass reads bare voov/vovo-class blocks; build them once from the
+  # half-transformed store(s) (the dressed Jacobian set is built inside eom_iterations2 as for Λ).
+  if EC.ao_direct
+    if unrestricted
+      build_ht_mo_blocks_unrestricted!(EC, ("voov", "vovo", "VOOV", "VOVO", "vOoV", "oVvO"))
+    else
+      build_ht_mo_blocks!(EC, ("voov", "vovo"))
+    end
+  end
   if unrestricted
     if highest_full_exc == 2
       cis_method = has_prefix(method, "R") ? ECMethod("EOM-RCCS") : ECMethod("EOM-UCCS")
@@ -489,16 +498,16 @@ function ucis_HU1(EC::ECInfo, U1, U1os, spin)
 
   @mtensor V1[a,i] := f_vv[a,c] * U1[c,i] - f_oo[k,i] * U1[a,k]
   # same-spin integrals
-  int2 = ints2(EC, v4s*o4s*o4s*v4s)
+  int2 = (EC.ao_direct ? load4idx(EC, v4s*o4s*o4s*v4s) : ints2(EC, v4s*o4s*o4s*v4s))
   @mtensor V1[a,i] += int2[a,k,i,c] * U1[c,k]
-  int2 = ints2(EC, v4s*o4s*v4s*o4s)
+  int2 = (EC.ao_direct ? load4idx(EC, v4s*o4s*v4s*o4s) : ints2(EC, v4s*o4s*v4s*o4s))
   @mtensor V1[a,i] -= int2[a,k,c,i] * U1[c,k]
   # opposite-spin integrals
   if isα
-    int2 = ints2(EC, v4s*o4os*o4s*v4os)
+    int2 = (EC.ao_direct ? load4idx(EC, v4s*o4os*o4s*v4os) : ints2(EC, v4s*o4os*o4s*v4os))
     @mtensor V1[a,i] += int2[a,K,i,C] * U1os[C,K]
   else
-    int2 = ints2(EC, o4os*v4s*v4os*o4s)
+    int2 = (EC.ao_direct ? load4idx(EC, o4os*v4s*v4os*o4s) : ints2(EC, o4os*v4s*v4os*o4s))
     @mtensor V1[A,I] += int2[k,A,c,I] * U1os[c,k]
   end
   return V1
@@ -523,6 +532,9 @@ function ucis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
   spva = SP['v'][1:nva]
   spob = SP['O'][end-nob+1:end]
   spvb = SP['V'][1:nvb]
+  # AO-direct slices the full prebuilt blocks to the same HOMO/LUMO window (local index ranges)
+  roa = (n_occ_orbs(EC)-noa+1):n_occ_orbs(EC); rva = 1:nva
+  rob = (n_occb_orbs(EC)-nob+1):n_occb_orbs(EC); rvb = 1:nvb
   dim_a = nva * noa
   dim_b = nvb * nob
   dim = dim_a + dim_b
@@ -537,9 +549,9 @@ function ucis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
       HHaa[:,i,:,j] = f_vva .- f_ooa[i,j]
     end
   end
-  int2 = ints2(EC, spva, spoa, spoa, spva, :α)
+  int2 = (EC.ao_direct ? load4idx(EC, "voov")[rva, roa, roa, rva] : ints2(EC, spva, spoa, spoa, spva, :α))
   HHaa .+= permutedims(int2, (1,3,4,2))
-  int2 = ints2(EC, spva, spoa, spva, spoa, :α)
+  int2 = (EC.ao_direct ? load4idx(EC, "vovo")[rva, roa, rva, roa] : ints2(EC, spva, spoa, spva, spoa, :α))
   HHaa .-= permutedims(int2, (1,4,3,2))
   HH[1:dim_a, 1:dim_a] = reshape(HHaa, (dim_a, dim_a))
   # β-β block
@@ -552,16 +564,16 @@ function ucis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
       HHbb[:,i,:,j] = f_vvb .- f_oob[i,j]
     end
   end
-  int2 = ints2(EC, spvb, spob, spob, spvb, :β)
+  int2 = (EC.ao_direct ? load4idx(EC, "VOOV")[rvb, rob, rob, rvb] : ints2(EC, spvb, spob, spob, spvb, :β))
   HHbb .+= permutedims(int2, (1,3,4,2))
-  int2 = ints2(EC, spvb, spob, spvb, spob, :β)
+  int2 = (EC.ao_direct ? load4idx(EC, "VOVO")[rvb, rob, rvb, rob] : ints2(EC, spvb, spob, spvb, spob, :β))
   HHbb .-= permutedims(int2, (1,4,3,2))
   HH[dim_a+1:dim, dim_a+1:dim] = reshape(HHbb, (dim_b, dim_b))
   # α-β coupling block (Coulomb only, no exchange between different spins)
-  int2 = ints2(EC, spva, spob, spoa, spvb, :αβ)
+  int2 = (EC.ao_direct ? load4idx(EC, "vOoV")[rva, rob, roa, rvb] : ints2(EC, spva, spob, spoa, spvb, :αβ))
   HHab = permutedims(int2, (1,3,4,2))
   HH[1:dim_a, dim_a+1:dim] = reshape(HHab, (dim_a, dim_b))
-  int2 = ints2(EC, spoa, spvb, spva, spob, :αβ)
+  int2 = (EC.ao_direct ? load4idx(EC, "oVvO")[roa, rvb, rva, rob] : ints2(EC, spoa, spvb, spva, spob, :αβ))
   HHba = permutedims(int2, (2,4,3,1))
   HH[dim_a+1:dim, 1:dim_a] = reshape(HHba, (dim_b, dim_a))
   vals, vecs = eigen(Hermitian(HH))
@@ -670,9 +682,13 @@ function cis_homo_lumo_guess(EC::ECInfo{T}, nstates) where T
       HH[:,i,:,j] = f_vv .- f_oo[i,j]
     end
   end
-  int2 = ints2(EC, spv, spo, spo, spv, :α) 
+  # AO-direct: slice the built full voov/vovo blocks to the HOMO/LUMO window (spv=first nva virt,
+  # spo=last noa occ, i.e. local ranges 1:nva and end-noa+1:end)
+  no = length(SP['o'])
+  rv = 1:nva; ro = (no-noa+1):no
+  int2 = EC.ao_direct ? load4idx(EC, "voov")[rv, ro, ro, rv] : ints2(EC, spv, spo, spo, spv, :α)
   HH .+= 2 * permutedims(int2, (1,3,4,2))
-  int2 = ints2(EC, spv, spo, spv, spo, :α) 
+  int2 = EC.ao_direct ? load4idx(EC, "vovo")[rv, ro, rv, ro] : ints2(EC, spv, spo, spv, spo, :α)
   HH .-= permutedims(int2, (1,4,3,2))
   vals, vecs = eigen(Hermitian(reshape(HH, (nva*noa, nva*noa))))
   return vals[1:nstates], reshape(vecs[:,1:nstates], (nva, noa, nstates))

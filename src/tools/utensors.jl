@@ -229,41 +229,54 @@ function detri_samespin_doubles(T2::AbstractMatrix{T}) where T
 end
 
 """
-    calc_tri_sym_antisym!(out_s, out_a, A)
+    calc_tri_sym_antisym!(out_s, out_a, A, fac=nothing)
 
   Compute symmetric and antisymmetric combinations of a 3-index array `A[p,q,x]`
   in a single pass over the data.
-  
-  ``out\\_s[pq,x] = A[p,q,x] + A[q,p,x]``  (symmetric in p,q)
 
-  ``out\\_a[pq,x] = A[p,q,x] - A[q,p,x]``  (antisymmetric in p,q)
-  
+  ``out\\_s[pq,x] = fac (A[p,q,x] + A[q,p,x])``  (symmetric in p,q)
+
+  ``out\\_a[pq,x] = fac (A[p,q,x] - A[q,p,x])``  (antisymmetric in p,q)
+
   where `pq` is the upper triangular index for `p ≤ q`.
+
+  `fac` is an optional common prefactor of both combinations — e.g. `fac=½` for the ± *average*,
+  the pair-space density convention of the αβ kext `CoupledCluster.pm_K2ab!`. The default
+  `nothing` applies none and, being resolved by dispatch, emits exactly the unscaled kernel.
 
   For each column `q`, the strided row `A[q, 1:q, x]` is copied into a small
   contiguous buffer, then sum/difference is computed with stride-1 SIMD access.
   Multi-threaded over `x`.
+
+  `qmin` restricts the fold to the rows `tri(p,q)` with `q ≥ qmin` (all `p ≤ q`), i.e. packed rows
+  `uppertriangular_index(1,qmin)` to the end; rows below are left UNTOUCHED. Used by the ± store
+  build, which persists only rows at/above its per-block floor and never generates the rest (see
+  `IntegralTools.pm_integrals!`) — with the default `qmin=1` the full fold is emitted unchanged.
 """
 function calc_tri_sym_antisym!(out_s::AbstractMatrix, out_a::AbstractMatrix,
-                               A::AbstractArray{T,3}) where T
+                               A::AbstractArray{T,3}, fac=nothing; qmin::Int=1) where T
   norb = size(A, 1)
   nx = size(A, 3)
   @threadsbuffer tbuf(T, norb) begin
   Threads.@threads for x in 1:nx
     buf = alloc!(tbuf, norb)
-    @inbounds for q in 1:norb
+    @inbounds for q in qmin:norb
       pq0 = q * (q - 1) ÷ 2
       @simd for p in 1:q
         buf[p] = A[q, p, x]
       end
       @simd ivdep for p in 1:q-1
-        out_s[pq0 + p, x] = A[p, q, x] + buf[p]
-        out_a[pq0 + p, x] = A[p, q, x] - buf[p]
+        out_s[pq0 + p, x] = _prefac(fac, A[p, q, x] + buf[p])
+        out_a[pq0 + p, x] = _prefac(fac, A[p, q, x] - buf[p])
       end
-      out_s[pq0 + q, x] = buf[q] + buf[q]
+      out_s[pq0 + q, x] = _prefac(fac, buf[q] + buf[q])
       out_a[pq0 + q, x] = zero(eltype(A))
     end
     reset!(tbuf) # reset buffer for the next thread iteration
   end
-  end # buffer 
+  end # buffer
 end
+
+""" Apply an optional prefactor; `nothing` is the identity (no code emitted). """
+@inline _prefac(::Nothing, x) = x
+@inline _prefac(fac, x) = fac * x

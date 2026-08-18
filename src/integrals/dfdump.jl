@@ -12,10 +12,11 @@ using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
-using ..ElemCo.DFTools
+using ..ElemCo.IntegralTools
+using ..ElemCo.PMStore
 using ..ElemCo.Utils
 
-export dfdump, setup_fcidump_if_needed!
+export dfdump
 
 """
     prepare_mpfit(EC, bao, bfit)
@@ -186,7 +187,9 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, full_spa
   M = nothing
   contract_tri!(int2, Lmm)
   Lmm = nothing
-  flushmmap(EC, int2)
+  # close the file handle (the mapping stays valid); it was leaked before, so a script that
+  # regenerates the dump in a loop accumulated one open descriptor per `@dfints`
+  closemmap(EC, int2_file, int2)
   fdump.int2 = int2
 
   hAO = kinetic(bao) + nuclear(bao)
@@ -210,7 +213,7 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, full_spa
   filename1 = int1_npy_filename(fdump)
   int1_file, int1 = newmmap(EC, filename1, (norbs,norbs), description="int1")
   int1 .= fock_jkfitMO[wocore,wocore] - fock
-  flushmmap(EC, int1)
+  closemmap(EC, int1_file, int1)   # see the int2 handle above
   fdump.int1 = int1
   fdump.int0 = Enuc + hii + sum(diag(fock_jkfitMO)[core_orbs]) - sum(diag(int1)[spo])
 
@@ -404,28 +407,6 @@ function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::SpinMatrix, full
 end
 
 """
-    setup_fcidump_if_needed!(EC::ECInfo)
-
-  (Re)generate the MO-integral FCIDUMP (`EC.fd`) with [`dfdump`](@ref) when it is missing, or when a
-  same-session restart must rebuild it from the `start` orbitals.
-
-  The latter is the `wf.dump==""` + `wf.start` reuse case (and the `dump4core_only` + `wf.start` core
-  swap): the cached `EC.fd` from an earlier call was built from different (e.g. pre-optimization)
-  orbitals, so it must not be reused — otherwise the restarted amplitudes (in the stored, optimized
-  basis) would be used with stale integrals and the calculation would re-optimize instead of resuming
-  at the stored solution. Skipped when there is no molecular system (FCIDUMP-only), where the
-  integrals come from a fixed file.
-"""
-function setup_fcidump_if_needed!(EC::ECInfo)
-  if isempty(EC.fd) ||
-     ((EC.options.wf.dump == "" || EC.options.wf.dump4core_only) &&
-      EC.options.wf.start != "" && !isempty(EC.system))
-    dfdump(EC)
-  end
-  return
-end
-
-"""
     dfdump(EC::ECInfo)
 
   Generate fcidump using df integrals and store in `IntOptions.fcidump`.
@@ -499,7 +480,11 @@ function dfdump(EC::ECInfo)
   restore_space!(EC, space_save)
   if length(dumpfile) > 0
     println("writing fcidump $dumpfile")
-    write_fcidump(fdump, dumpfile; tol=-1.0)  
+    # NB no `charge=` here (unlike the `@write_ints` export): `int.fcidump` parks the integrals on
+    # disk to be read back by THIS session, where `wf.charge` still describes the molecule (the
+    # property/RDM path rebuilds the space from the system via `restore_system_space!`). The file
+    # therefore keeps the count `setup_space_fd!` applies `wf.charge` to, as an in-memory dump does.
+    write_fcidump(fdump, dumpfile; tol=-1.0)
   else
     EC.fd = fdump
   end

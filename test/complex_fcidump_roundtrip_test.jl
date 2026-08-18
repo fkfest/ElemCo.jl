@@ -1,6 +1,7 @@
 @testitem "complex_fcidump_roundtrip" tags=[:complex, :quick] begin
 using Test
 using ElemCo
+using ElemCo.IntegralTools: transform_fcidump!
 using ElemCo.FciDumps
 using ElemCo.FciDumps: headvar
 using ElemCo.QMTensors

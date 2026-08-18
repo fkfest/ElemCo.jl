@@ -2,7 +2,7 @@
 using ElemCo
 using ElemCo.ECInfos
 using ElemCo.FciDumps: headvar
-using ElemCo.DFTools: contract_df_integrals!
+using ElemCo.IntegralTools: contract_df_integrals!
 using ElemCo.VaspInterface
 
 @testset "DF-3IDX VASP" begin

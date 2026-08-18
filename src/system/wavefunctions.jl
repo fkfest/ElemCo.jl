@@ -86,7 +86,10 @@ function open_dump(EC::ECInfo, intent; start::Bool=false)
   elseif intent == "u"
     mode = "updating (unsafe mode)"
   end
-  println("Opening dump file $filename for $mode ...")
+  # Reads are frequent internal bookkeeping — a single correlated run opens the dump ~10 times for
+  # orbitals, classes, energies and amplitude probes — so they are announced only above the default
+  # verbosity. Writes are rare and worth reporting.
+  (intent != "r" || EC.verbosity > 2) && println("Opening dump file $filename for $mode ...")
   return open_trexio(full_filename, intent)
 end
 
@@ -406,7 +409,7 @@ function fetch_orbital_classes(EC::ECInfo; MO="mo", start::Bool=false)
   end
 end
 function fetch_orbital_classes(io::TrexioFile, EC::ECInfo; MO="mo")
-  println("Fetching orbital classes ...")
+  EC.verbosity > 2 && println("Fetching orbital classes ...")
   return read_trexio_orbital_classes(io, MO)
 end
 
@@ -427,7 +430,7 @@ function fetch_orbital_energies(EC::ECInfo, MO="mo"; start::Bool=false)
   end
 end
 function fetch_orbital_energies(io::TrexioFile, EC::ECInfo, MO="mo")
-  println("Fetching orbital energies ...")
+  EC.verbosity > 2 && println("Fetching orbital energies ...")
   return read_trexio_orbital_energies(io, MO)
 end
 
@@ -448,7 +451,7 @@ function fetch_orbital_occupations(EC::ECInfo, MO="mo"; start::Bool=false)
   end
 end
 function fetch_orbital_occupations(io::TrexioFile, EC::ECInfo, MO="mo")
-  println("Fetching orbital occupations ...")
+  EC.verbosity > 2 && println("Fetching orbital occupations ...")
   return read_trexio_orbital_occupations(io, MO)
 end
 

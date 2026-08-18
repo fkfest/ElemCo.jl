@@ -1,5 +1,6 @@
 @testitem "complex_eom" tags=[:complex, :quick] begin
 using ElemCo
+using ElemCo.IntegralTools: transform_fcidump!
 using ElemCo.ECInfos
 using ElemCo.FciDumps
 using ElemCo.FciDumps: headvar

@@ -16,9 +16,13 @@ using ..ElemCo.Wavefunctions
 using ..ElemCo.FciDumps
 using ..ElemCo.Integrals
 using ..ElemCo.OrbTools
+using ..ElemCo.PMStore
 
 export gen_fock, gen_ufock, gen_dffock, gen_pfock, gen_df3idx_fock
 export gen_density_matrix, gen_frac_density_matrix
+# AO Coulomb/exchange builders on the ± store — used by the AO-direct CC dressing/frozen core
+# (`CoupledCluster`) and by the frozen-core fold of the AO→MO transform (`IntegralTools`).
+export ao_JK!, ao_J2K!
 
 """ 
     gen_fock(EC::ECInfo)
@@ -143,11 +147,216 @@ function gen_fock(EC::ECInfo, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
   return fock
 end
 
-""" 
+# ---- ao_JK!/ao_J2K! on the persisted ± supermatrix store ------------------------------
+#
+# Per ket pair (ρσ) the AO Fock build needs the slab identities  `J[:,ρ] += G·Dj[:,σ]`,
+# `K[:,σ] += G·Dk[:,ρ]`  (plus the ket-swap `Gᵀ` for `ρ<σ`) with the full slab
+# `G[μ,ν] = ⟨μν|ρσ⟩`. The ± store keeps only the lower block-triangle; `PMStore.pm_slab_sweep!`
+# reconstructs each column's slab and lets us apply those identities in two roles — NATIVE (this
+# column as the ket ⟨··|ρσ⟩, L-band `(native_lo, nao]`) and MIRROR (by hermiticity the bra
+# ⟨ρσ|··⟩, sub-panel band `(mirror_lo, nao]`) — reading n⁴/4, half a jointly packed store. See the
+# PMStore "per-column slab reconstruction sweep" section for the machinery.
+#
+# `add_coulomb!` / `add_exchange!` each perform both roles for one density. A closed-shell Fock
+# is `add_coulomb! + add_exchange!`; the UHF `ao_J2K!` is `add_coulomb!` once (shared Coulomb from
+# the total density) + `add_exchange!` twice (the two same-spin exchanges) in the same sweep.
+# Requires the physical hermiticity `⟨μν|ρσ⟩ = conj(⟨ρσ|μν⟩)` the store presumes; `Dj`,`Dk` need
+# not be symmetric. `O(nao²)` working memory.
+
+"""
+    add_coulomb!(J, s::PMSlab, D)
+
+  Add the Coulomb contribution of the slab `s` (`⟨μν|ρσ⟩`, ket pair `(s.ρ,s.σ)`): the native role
+  `J[:,ρ] += ⟨··|ρσ⟩·D[:,σ]` (+ the ket-swap `⟨··|σρ⟩ = Gᵀ` for `ρ<σ`) and the Hermitian mirror role
+  into the rows `J[ρ,:]`/`J[σ,:]`. The simple per-slab routine [`ao_JK!`](@ref) calls in its `eachslab` loop.
+"""
+function add_coulomb!(J, s::PMSlab, D)
+  # `view`, NOT `@mview`: these columns are BLAS `mul!` operands (see `band_mul!`), and the
+  # `StridedView` that `@mview` returns is not `<:StridedVecOrMat`, so `mul!` would silently fall
+  # back to the generic (non-BLAS) matvec — measured ~6× slower for a whole Fock build.
+  slab_bandmul!(view(J,:,s.ρ), s, view(D,:,s.σ))               # J[:,ρ] += ⟨··|ρσ⟩ · D[:,σ]
+  s.ρ < s.σ && slab_bandtmul!(view(J,:,s.σ), s, view(D,:,s.ρ)) # ket-swapped slab ⟨··|σρ⟩ = Gᵀ
+  slab_mirror!(J, s.ρ, s, D, s.σ)                                    # mirror: J[ρ,:] += conj⟨ρσ|··⟩·conj(D[σ,:])
+  s.ρ < s.σ && slab_mirrort!(J, s.σ, s, D, s.ρ)
+  return
+end
+
+"""
+    add_exchange!(K, s::PMSlab, D)
+
+  Add the exchange contribution of the slab `s`. Same two roles as [`add_coulomb!`](@ref) with the
+  `(ρ,σ)` output/density roles swapped (and the mirror transpose flag flipped): native
+  `K[:,σ] += ⟨··|ρσ⟩·D[:,ρ]` (+ `Gᵀ` for `ρ<σ`), plus the mirror into rows `K[ρ,:]`/`K[σ,:]`.
+"""
+function add_exchange!(K, s::PMSlab, D)
+  slab_bandmul!(view(K,:,s.σ), s, view(D,:,s.ρ))              # K[:,σ] += ⟨··|ρσ⟩ · D[:,ρ]  (`view`: see add_coulomb!)
+  s.ρ < s.σ && slab_bandtmul!(view(K,:,s.ρ), s, view(D,:,s.σ))
+  slab_mirrort!(K, s.ρ, s, D, s.σ)
+  s.ρ < s.σ && slab_mirror!(K, s.σ, s, D, s.ρ)
+  return
+end
+
+# ---- symmetric-density (HF) fast path ------------------------------------------------
+#
+# When the density is symmetric (real HF: `D = C·Cᵀ`), the Fock matrices are symmetric, so the
+# mirror role is redundant: for real symmetric `D` the mirror contribution to row `J[ρ,·]` is
+# exactly the transpose of the native contribution to column `J[·,ρ]`. We can therefore SKIP the
+# mirror entirely and symmetrize at the end — ≈2× fewer GEMVs. The one subtlety is the diagonal
+# tile (stored full, hence self-mirroring): a plain `J + Jᵀ` would double-count it. So we split
+# the native contribution into the **sub-panel** band `(mirror_lo, nao]` (accumulated into `J`,
+# then symmetrized) and the **diagonal-tile** band `(native_lo, mirror_lo]` (into `Jd`, symmetric
+# already, added once): `J_final = J + Jᵀ + Jd`. Needs only the store's built-in Hermiticity +
+# real symmetric `D` — no 8-fold assumption. Real only (`T<:Real`).
+
+"[`add_coulomb!`](@ref) for symmetric real `D`, mirror-free: sub-panel band → `J`, diagonal-tile band → `Jd`."
+function add_coulomb_sym!(J, Jd, s::PMSlab, D)
+  G = s.w.G; ρ = s.ρ; σ = s.σ
+  band_mul!(view(J,:,ρ),  G, s.mirror_lo, s.nao, view(D,:,σ))       # sub-panel (symmetrized later)
+  ρ < σ && band_tmul!(view(J,:,σ), G, s.mirror_lo, s.nao, view(D,:,ρ))
+  band_mul!(view(Jd,:,ρ), G, s.native_lo, s.mirror_lo, view(D,:,σ)) # diagonal tile (added once)
+  ρ < σ && band_tmul!(view(Jd,:,σ), G, s.native_lo, s.mirror_lo, view(D,:,ρ))
+  return
+end
+
+"[`add_exchange!`](@ref) for symmetric real `D`, mirror-free (the `(ρ,σ)` roles swapped vs Coulomb)."
+function add_exchange_sym!(K, Kd, s::PMSlab, D)
+  G = s.w.G; ρ = s.ρ; σ = s.σ
+  band_mul!(view(K,:,σ),  G, s.mirror_lo, s.nao, view(D,:,ρ))
+  ρ < σ && band_tmul!(view(K,:,ρ), G, s.mirror_lo, s.nao, view(D,:,σ))
+  band_mul!(view(Kd,:,σ), G, s.native_lo, s.mirror_lo, view(D,:,ρ))
+  ρ < σ && band_tmul!(view(Kd,:,ρ), G, s.native_lo, s.mirror_lo, view(D,:,σ))
+  return
+end
+
+"In place `A .= A + Aᵀ + Ad` for the symmetric-D finalize (result is symmetric; `Ad` symmetric)."
+function finalize_hermitian!(A::AbstractMatrix, Ad::AbstractMatrix)
+  n = size(A, 1)
+  @inbounds for j in 1:n, i in 1:j
+    v = A[i,j] + A[j,i] + Ad[i,j]
+    A[i,j] = v; A[j,i] = v
+  end
+  return A
+end
+
+"Symmetric real-`D` fast path for [`ao_JK!`](@ref) on the ± store: mirror-free sweep + symmetrize."
+function ao_JK_sym!(J, K, pm::PMSupermatrices{T}, D) where {T<:Real}
+  Jd = zeros(T, pm.nao, pm.nao); Kd = zeros(T, pm.nao, pm.nao)
+  for s in eachslab(pm; TF=T)
+    add_coulomb_sym!(J,  Jd, s, D)
+    add_exchange_sym!(K, Kd, s, D)
+  end
+  finalize_hermitian!(J, Jd); finalize_hermitian!(K, Kd)
+  return J, K
+end
+
+"Symmetric real-`D` fast path for [`ao_J2K!`](@ref): shared Coulomb + two exchanges, mirror-free."
+function ao_J2K_sym!(J, Ka, Kb, pm::PMSupermatrices{T}, Dt, Da, Db) where {T<:Real}
+  n = pm.nao
+  Jd = zeros(T, n, n); Kad = zeros(T, n, n); Kbd = zeros(T, n, n)
+  for s in eachslab(pm; TF=T)
+    add_coulomb_sym!(J,  Jd,  s, Dt)
+    add_exchange_sym!(Ka, Kad, s, Da)
+    add_exchange_sym!(Kb, Kbd, s, Db)
+  end
+  finalize_hermitian!(J, Jd); finalize_hermitian!(Ka, Kad); finalize_hermitian!(Kb, Kbd)
+  return J, Ka, Kb
+end
+
+"""
+    ao_JK!(J, K, pm::PMSupermatrices, Dj, Dk)
+
+  The [`ao_JK!`](@ref) Coulomb/exchange contraction from the persisted ± supermatrix store at
+  **half the streaming I/O** (each stored element read once, ≈ n⁴/4). One [`PMStore.pm_slab_sweep!`](@ref)
+  of the store; per ket column, add its Coulomb and exchange contributions. `Dj`, `Dk` need not
+  be symmetric. Pass `hermitian=true` when `Dj === Dk` is a real symmetric density (HF) to take
+  the mirror-free fast path ([`ao_JK_sym!`](@ref), ≈2× fewer GEMVs).
+"""
+function ao_JK!(J::AbstractMatrix, K::AbstractMatrix, pm::PMSupermatrices{T},
+                Dj::AbstractMatrix, Dk::AbstractMatrix; hermitian::Bool=false) where T
+  if hermitian && T <: Real && eltype(Dj) <: Real
+    return ao_JK_sym!(J, K, pm, Dj)
+  end
+  TF = promote_type(T, eltype(Dj), eltype(Dk))
+  for s in eachslab(pm; TF=TF)                             # one reconstruction per slab, J + K fused
+    add_coulomb!(J, s, Dj)
+    add_exchange!(K, s, Dk)
+  end
+  return J, K
+end
+
+"""
+    ao_J2K!(J, Ka, Kb, pm::PMSupermatrices, Dt, Da, Db)
+
+  The UHF [`ao_J2K!`](@ref) from the ± store: the shared Coulomb `J` (from the total density
+  `Dt`) and both same-spin exchanges `Ka`,`Kb` (from `Da`,`Db`) in a single sweep — [`ao_JK!`](@ref)'s
+  twin, one `add_coulomb!` + two `add_exchange!` per ket column. `hermitian=true` (real, all three
+  densities symmetric) takes the mirror-free fast path ([`ao_J2K_sym!`](@ref)).
+"""
+function ao_J2K!(J::AbstractMatrix, Ka::AbstractMatrix, Kb::AbstractMatrix,
+                 pm::PMSupermatrices{T}, Dt::AbstractMatrix,
+                 Da::AbstractMatrix, Db::AbstractMatrix; hermitian::Bool=false) where T
+  if hermitian && T <: Real && eltype(Dt) <: Real
+    return ao_J2K_sym!(J, Ka, Kb, pm, Dt, Da, Db)
+  end
+  TF = promote_type(T, eltype(Dt), eltype(Da), eltype(Db))
+  for s in eachslab(pm; TF=TF)                             # shared Coulomb + two same-spin K, one sweep
+    add_coulomb!(J, s, Dt)                                 # shared Coulomb from the total density
+    add_exchange!(Ka, s, Da)                               # same-spin exchange α
+    add_exchange!(Kb, s, Db)                               # same-spin exchange β
+  end
+  return J, Ka, Kb
+end
+
+# Integral handle accepted by the AO Fock builders: the persisted ± supermatrix store.
+const AOIntegrals = PMSupermatrices
+
+"""
+    gen_fock(EC::ECInfo, ints, h1::AbstractMatrix, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
+
+  Closed-shell AO Fock matrix `h1 + 2J − K` from explicitly given spin-free 2-e integrals
+  `ints` and orbitals `CMOl`, `CMOr`. `ints` is the persisted ± supermatrix store
+  ([`PMSupermatrices`](@ref PMStore.PMSupermatrices)), the only exact-AO integral
+  representation — [`ao_JK!`](@ref) contracts it directly (the ± store halves the integral
+  I/O). The contraction is basis-agnostic (physicists' notation), so feeding AO integrals + AO
+  density yields the AO Fock; no dense `nao⁴` tensor is formed. `nao` is taken from the orbitals.
+"""
+function gen_fock(EC::ECInfo, ints::AOIntegrals, h1::AbstractMatrix,
+                  CMOl::AbstractMatrix, CMOr::AbstractMatrix)
+  @assert EC.space['o'] == EC.space['O'] # closed-shell
+  den = gen_density_matrix(EC, CMOl, CMOr, EC.space['o'])
+  nao = size(CMOl, 1)
+  TF = promote_type(eltype(ints), eltype(den))
+  J = zeros(TF, nao, nao); K = zeros(TF, nao, nao)
+  ao_JK!(J, K, ints, den, den; hermitian = (CMOl === CMOr))   # den = C·Cᵀ symmetric ⇒ fast path
+  return h1 .+ 2 .* J .- K
+end
+
+"""
+    gen_ufock(EC::ECInfo, ints, h1::AbstractMatrix, cMOl::SpinMatrix, cMOr::SpinMatrix)
+
+  UHF AO Fock matrix from explicitly given spin-free 2-e integrals `ints` (the ±
+  store; [`ao_J2K!`](@ref) dispatches) and 1-e integrals `h1` (same for both spins). The shared
+  Coulomb term (total density) is built once and both same-spin exchange terms in a single
+  streaming pass; no dense `nao⁴` tensor is formed. `nao` is taken from the orbitals.
+"""
+function gen_ufock(EC::ECInfo, ints::AOIntegrals, h1::AbstractMatrix,
+                   cMOl::SpinMatrix, cMOr::SpinMatrix)
+  Da = gen_density_matrix(EC, cMOl.α, cMOr.α, EC.space['o'])
+  Db = gen_density_matrix(EC, cMOl.β, cMOr.β, EC.space['O'])
+  Dt = Da .+ Db
+  nao = size(cMOl.α, 1)
+  TF = promote_type(eltype(ints), eltype(Da))
+  J = zeros(TF, nao, nao); Ka = zeros(TF, nao, nao); Kb = zeros(TF, nao, nao)
+  # Da, Db (hence Dt) symmetric when left/right orbitals coincide ⇒ fast path
+  ao_J2K!(J, Ka, Kb, ints, Dt, Da, Db; hermitian = (cMOl.α === cMOr.α && cMOl.β === cMOr.β))
+  return SpinMatrix(h1 .+ J .- Ka, h1 .+ J .- Kb)
+end
+
+"""
     gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractMatrix, CMOr::AbstractMatrix)
 
   Calculate UHF fock matrix from FCIDump integrals for `spincase`∈{`:α`,`:β`} and orbitals `CMOl`, `CMOr` and
-  orbitals for the opposite-spin `CMOlOS` and `CMOrOS`. 
+  orbitals for the opposite-spin `CMOlOS` and `CMOrOS`.
 """
 function gen_fock(EC::ECInfo, spincase::Symbol, CMOl::AbstractMatrix, CMOr::AbstractMatrix,
                   CMOlOS::AbstractMatrix, CMOrOS::AbstractMatrix)

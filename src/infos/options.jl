@@ -185,9 +185,6 @@ end
   ampsvdfac::Float64 = 1.e-2
   """`⟨true⟩` use kext for doubles residual. """
   use_kext::Bool = true
-  """`⟨false⟩` use plus/minus factorization in kext. 
-  This kext has two times less FLOPs, but is less cache-friendly and can be slower for small systems. """
-  use_pm_kext::Bool = false
   """`⟨false⟩` calculate dressed <vv|vv>. """
   calc_d_vvvv::Bool = false
   """`⟨false⟩` calculate dressed <vv|vo>. """
@@ -271,8 +268,6 @@ end
   dcsd_ofac::Float64 = 0.15
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
-  """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
-  keepOQVorbitals::Bool = false
   """`⟨:maxdim⟩` pivot tolerance mode for LLAMA decomposition:
   - `:adaptive` use LLAMA's internal adaptive `tol/sqrt(m_eff)` pivot tolerance
   - `:maxdim` use `tol/sqrt(max(m,n))` as pivot tolerance (more robust for difficult cases, e.g., ghost atoms)
@@ -527,12 +522,21 @@ end
 @kwdef mutable struct IntOptions
   """`⟨true⟩` use density-fitted integrals. """
   df::Bool = true
+  """`⟨true⟩` for exact (non-DF) AO integrals: run closed-shell CCSD/DCSD **AO-direct**
+  (contract the AO integrals on the fly, no MO integral dump; frozen core is folded into an
+  effective 1-electron Hamiltonian). Set to `false` to instead derive a transient MO integral
+  dump from the AO integrals (as for CCSDT/FCI). No effect on DF integrals. """
+  ao_direct::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """
   fcidump::String = ""
   """`⟨false⟩` use Cartesian subshells instead of Spherical. """
   cartesian::Bool = false
   """`⟨1000⟩` target batch length for the integral transformation. """
   target_batch_length::Int = 1000
+  """`⟨1e-12⟩` Cauchy–Schwarz prescreening threshold for the exact AO integrals: a shell quartet
+  whose bound `sqrt((pr|pr))·sqrt((qs|qs))` stays below this is skipped (and stored as zero).
+  Set to `0` to disable screening and compute every quartet. """
+  screen::Float64 = 1.e-12
   """`⟨false⟩` use fallback basis sets (in case of missing basis sets). """
   use_fallback_basis::Bool = false
   """`⟨true⟩` sanity check of the fit basis (i.e., that it's not an AO basis)"""
@@ -601,11 +605,29 @@ end
   ncoeff::Int = 10
 end
 
-""" 
+"""
+    MemoryOptions
+
+  Options for memory management (used to size blocked/streaming scratch allocations so they adapt
+  to the machine and honor an explicit user budget).
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct MemoryOptions
+  """`⟨-1.0⟩` memory budget in GB for large scratch allocations (e.g. the 4-index integral
+  transformation). `-1.0` (default) estimates the budget automatically from the node's free memory.
+  Set explicitly (e.g. on fat nodes) to allow larger blocks and fewer passes over the integrals. """
+  budget::Float64 = -1.0
+  """`⟨0.8⟩` fraction of the currently available memory (node free memory, capped by any cgroup /
+  SLURM limit) to use when the budget is estimated automatically (`budget ≤ 0`). """
+  fraction::Float64 = 0.8
+end
+
+"""
   Options for ElemCo.jl.
 
   $(TYPEDFIELDS)
-"""  
+"""
 @kwdef mutable struct Options
   """ Wavefunction options ([`WfOptions`](@ref)). """
   wf::WfOptions = WfOptions()
@@ -637,4 +659,6 @@ end
   loc::LocOptions = LocOptions()
   """ Region selection options ([`RegionOptions`](@ref)). """
   region::RegionOptions = RegionOptions()
+  """ Memory-management options ([`MemoryOptions`](@ref)). """
+  mem::MemoryOptions = MemoryOptions()
 end

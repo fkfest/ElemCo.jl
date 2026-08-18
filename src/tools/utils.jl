@@ -11,7 +11,8 @@ using ..ElemCo.VersionInfo
 
 export NOTHING1idx, NOTHING2idx, NOTHING3idx, NOTHING4idx, NOTHING5idx, NOTHING6idx
 export warnerror
-export mainname, print_time, print_memory, free_memory
+export mainname, print_time, print_memory, free_memory, total_memory, available_memory
+export cgroup_memory_available, slurm_memory_limit
 export draw_line, draw_wiggly_line, print_info, print_info2, draw_endline
 export kwarg_provided_in_macro
 export subspace_in_space, get_spaceblocks, argmaxN
@@ -99,6 +100,173 @@ end
   Return the amount of free memory in bytes.
 """
 free_memory() = Sys.free_memory()
+
+"""
+    total_memory()
+
+  Return the total physical memory of the node in bytes (`Sys.total_memory()`).
+"""
+total_memory() = Sys.total_memory()
+
+# Read a sysfs/proc file holding a single unsigned integer (or the literal "max"); return `nothing`
+# on any failure. Defensive I/O: these files can exist but be unreadable (sandbox / delegation).
+function _read_uint_file(path::AbstractString)
+  isfile(path) || return nothing
+  txt = ""
+  try
+    txt = readchomp(path)
+  catch
+    return nothing
+  end
+  isempty(txt) && return nothing
+  tok = first(split(txt))
+  tok == "max" && return nothing
+  return tryparse(Int, tok)
+end
+
+# Value of `key` in a cgroup `memory.stat`-style file (whitespace-separated `key value` lines).
+function _stat_value(path::AbstractString, key::AbstractString)
+  isfile(path) || return nothing
+  try
+    for line in eachline(path)
+      p = split(line)
+      length(p) >= 2 && p[1] == key && return tryparse(Int, p[2])
+    end
+  catch
+    return nothing
+  end
+  return nothing
+end
+
+# This process's cgroup path for `controller` ("" = v2 unified, e.g. "memory" = v1), from
+# /proc/self/cgroup (v2 lines are `0::/path`, v1 lines `N:memory,...:/path`); `nothing` if absent.
+function _cgroup_relpath(controller::AbstractString)
+  isfile("/proc/self/cgroup") || return nothing
+  try
+    for line in eachline("/proc/self/cgroup")
+      f = split(line, ':'; limit=3)
+      length(f) == 3 || continue
+      if controller == "" && f[1] == "0"
+        return String(f[3])
+      elseif controller != "" && controller in split(f[2], ',')
+        return String(f[3])
+      end
+    end
+  catch
+    return nothing
+  end
+  return nothing
+end
+
+"""
+    cgroup_memory_available()
+
+  Memory available (in bytes) inside this process's control group, or `nothing` if unconstrained,
+  unknown, or not on Linux. Honors the *enforced* cgroup memory limit (v2 `memory.max`, min over the
+  hierarchy; v1 `memory.limit_in_bytes`) and counts reclaimable page cache (`inactive_file`) as
+  available: `limit − max(0, current − reclaimable)`. This is the universal enforcement seen by
+  SLURM (`ConstrainRAMSpace`), containers and k8s — it is what actually OOM-kills the job — so it is
+  the most portable way to bound the budget on a shared/constrained node.
+"""
+function cgroup_memory_available()
+  Sys.islinux() || return nothing
+  if isfile("/sys/fs/cgroup/cgroup.controllers")            # cgroup v2 (unified)
+    rel = _cgroup_relpath("")
+    rel === nothing && return nothing
+    # Walk from the cgroupfs ROOT down to the leaf. In containers with a private cgroup
+    # namespace /proc/self/cgroup reads "0::/", so the leaf IS the root and a finite limit
+    # lives at /sys/fs/cgroup/memory.max itself; and an ancestor's limit binds through the
+    # usage charged at that ancestor (siblings included), so availability is evaluated
+    # per level and the minimum taken.
+    avail = nothing
+    level = "/sys/fs/cgroup"
+    paths = [level]
+    for seg in split(rel, '/'; keepempty=false)
+      level = joinpath(level, seg)
+      push!(paths, level)
+    end
+    for dir in paths
+      m = _read_uint_file(joinpath(dir, "memory.max"))
+      m === nothing && continue                             # no finite limit at this level
+      cur = something(_read_uint_file(joinpath(dir, "memory.current")), 0)
+      reclaim = something(_stat_value(joinpath(dir, "memory.stat"), "inactive_file"), 0)
+      a = max(0, m - max(0, cur - reclaim))
+      avail = avail === nothing ? a : min(avail, a)
+    end
+    return avail                                            # nothing ⇒ unconstrained
+  else                                                       # cgroup v1
+    rel = _cgroup_relpath("memory")
+    rel === nothing && return nothing
+    leaf = joinpath("/sys/fs/cgroup/memory", lstrip(rel, '/'))
+    limit = _read_uint_file(joinpath(leaf, "memory.limit_in_bytes"))
+    (limit === nothing || limit > 4 * Int(total_memory())) && return nothing   # v1 "unlimited" sentinel
+    cur = _read_uint_file(joinpath(leaf, "memory.usage_in_bytes"))
+    cur === nothing && return limit
+    reclaim = something(_stat_value(joinpath(leaf, "memory.stat"), "total_inactive_file"), 0)
+    return max(0, limit - max(0, cur - reclaim))
+  end
+end
+
+"""
+    slurm_memory_limit()
+
+  Memory limit (in bytes) requested for this SLURM job step from the `SLURM_MEM_PER_NODE` /
+  `SLURM_MEM_PER_CPU` environment variables (MiB units; `SLURM_MEM_PER_CPU` is multiplied by the
+  cores on this node), or `nothing` if not under SLURM or the job requested all node memory
+  (`--mem=0`). A fallback bound for clusters that do *not* enforce memory via cgroups; when cgroup
+  enforcement is on, [`cgroup_memory_available`](@ref) is authoritative (and tighter).
+"""
+function slurm_memory_limit()
+  mn = tryparse(Int, get(ENV, "SLURM_MEM_PER_NODE", "x"))
+  if mn !== nothing
+    return mn == 0 ? nothing : mn * (1 << 20)
+  end
+  mc = tryparse(Int, get(ENV, "SLURM_MEM_PER_CPU", "x"))
+  if mc !== nothing && mc > 0
+    ncpu = something(tryparse(Int, get(ENV, "SLURM_CPUS_ON_NODE", "x")), Sys.CPU_THREADS)
+    return mc * ncpu * (1 << 20)
+  end
+  return nothing
+end
+
+"""
+    available_memory(; fraction=0.8, gc=true)
+
+  Heuristic estimate (in bytes) of how much memory may reasonably be used for a large scratch
+  allocation, as `fraction` of what is currently available — the minimum of the node's
+  [`free_memory`](@ref) (already ≈ `MemAvailable`, i.e. it counts reclaimable page cache), any
+  enforced cgroup budget ([`cgroup_memory_available`](@ref)), and any SLURM per-job limit
+  ([`slurm_memory_limit`](@ref)) — floored at 256 MiB. `fraction < 1` leaves headroom. If `gc`,
+  a full `GC.gc(true)` runs first so Julia's own freed memory (e.g. a previous scratch) is
+  reclaimed and reflected in the reading. On fat nodes set an explicit budget
+  (`@set mem budget=<GB>`) to allow larger scratch allocations (and thus fewer passes over the data).
+"""
+function available_memory(; fraction::Real=0.8, gc::Bool=true)
+  gc && GC.gc(true)                       # reclaim Julia's freed memory before reading what's free
+  avail = Int(free_memory())
+  cg = cgroup_memory_available()
+  cg === nothing || (avail = min(avail, cg))
+  sl = slurm_memory_limit()
+  sl === nothing || (avail = min(avail, sl))
+  # a comfort floor, but never beyond what is actually there: reporting 256 MiB into a
+  # 100 MiB cgroup would hand callers an allocation budget the kernel will kill
+  return min(max(round(Int, avail * fraction), 256 * 2^20), avail)
+end
+
+"""
+    available_memory(EC::AbstractECInfo)
+
+  Memory budget in bytes for `EC`: the user-set `mem.budget` (in GB, via `@set mem budget=...`) when
+  positive, otherwise the automatic estimate (node free memory, capped by any cgroup/SLURM limit,
+  scaled by `mem.fraction`; see [`available_memory`](@ref)). Use this to size blocked/streaming
+  scratch allocations so they adapt to the machine and honor an explicit user budget.
+"""
+function available_memory(EC::AbstractECInfo)
+  if EC.options.mem.budget > 0.0
+    return round(Int, EC.options.mem.budget * 2^30)
+  end
+  return available_memory(fraction=EC.options.mem.fraction)
+end
 
 """ 
     print_memory(EC::AbstractECInfo, mem1, info::AbstractString, verb::Int)

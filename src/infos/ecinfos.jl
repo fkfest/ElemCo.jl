@@ -20,7 +20,7 @@ export delete_file!, delete_files!, delete_temporary_files!
 export file_description
 export isalphaspin, space4spin, spin4space, flipspin
 export get_options, with_local_options
-export FCIOptions, CIPHIOptions, RegionOptions
+export FCIOptions, CIPHIOptions, RegionOptions, MemoryOptions
 export DEFAULT_ELTYPE, set_default_eltype!, ec_eltype
 
 include("options.jl")
@@ -88,7 +88,11 @@ mutable struct ECInfo{T<:Number} <: AbstractECInfo
   system::MSystem
   """ fcidump. """
   fd::FDump{T,3}
-  """ information about (temporary) files. 
+  """`⟨false⟩` the current correlated calculation runs AO-direct (integrals are read from the
+  `ao_int2`/`h_AA` scratch files instead of an MO fcidump). Set by the drivers for the duration
+  of an AO-direct run and reset afterwards. """
+  ao_direct::Bool
+  """ information about (temporary) files.
   The naming convention is: `prefix`_ + `name` (+extension `EC.ext` added automatically).
   `prefix` can be:
     - `d` for dressed integrals 
@@ -143,10 +147,11 @@ function ECInfo{T}(;
     options::Options = Options(),
     system::MSystem = MSystem(),
     fd::FDump{T,3} = FDump{T,3}(),
+    ao_direct::Bool = false,
     files::Dict{String,String} = Dict{String,String}(),
     space::Dict{Char,Vector{Int}} = Dict{Char,Vector{Int}}(),
   ) where {T<:Number}
-  ECInfo{T}(scr, ext, verbosity, options, system, fd, files, space)
+  ECInfo{T}(scr, ext, verbosity, options, system, fd, ao_direct, files, space)
 end
 
 """
@@ -173,18 +178,24 @@ function reset_wf_info!(EC::ECInfo)
 end
 
 """
-    setup_space_fd!(EC::ECInfo; verbose=true)
+    setup_space_fd!(EC::ECInfo; norb=nothing, verbose=true)
 
   Setup EC.space from fcidump EC.fd.
+
+  If `norb` is given it overrides the dump's `NORB` (and `ORBSYM` is truncated to `norb`); this
+  is used to set up the space for a reduced orbital count (e.g. the non-deleted MO space) before
+  the integrals are actually transformed/reindexed.
 """
-function setup_space_fd!(EC::ECInfo; verbose=true)
+function setup_space_fd!(EC::ECInfo; norb=nothing, verbose=true)
   @assert !isempty(EC.fd) "EC.fd is not set up!"
   nelec = EC.options.wf.nelec
   npos = EC.options.wf.npositron
   charge = EC.options.wf.charge
   ms2 = EC.options.wf.ms2
 
-  norb = headvar(EC.fd, "NORB", Int)
+  if isnothing(norb)
+    norb = headvar(EC.fd, "NORB", Int)
+  end
   @assert !isnothing(norb)
   nelec_from_fcidump = headvar(EC.fd, "NELEC", Int)
   @assert !isnothing(nelec_from_fcidump)
@@ -202,6 +213,9 @@ function setup_space_fd!(EC::ECInfo; verbose=true)
   end
   orbsym = headvars(EC.fd, "ORBSYM", Int)
   @assert !isnothing(orbsym)
+  if length(orbsym) > norb
+    orbsym = orbsym[1:norb]
+  end
   # for ElemCo-generated reduced dumps, user orbital lists refer to the full MO space and are
   # translated to this active dump; externally-read dumps have no such map (indices stay native)
   orig_orbs = (length(EC.fd.orig_orbs) == norb) ? EC.fd.orig_orbs : (1:0)
@@ -862,7 +876,7 @@ function symorb2orb(symorb::AbstractString, symoffset::Vector{Int})
 end
 
 """
-    translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::UnitRange{Int})
+    translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::AbstractVector{Int})
 
   Translate full-MO-space orbital indices `orbs` to the active-space numbering of a reduced dump.
   The active orbitals are the contiguous full-space range `orig_orbs` (`= lo:hi`, with the frozen
@@ -872,17 +886,19 @@ end
   out-of-range index) raises an error, since these lists are usually user input. If `orig_orbs` is
   empty (external or non-reduced dump), `orbs` is returned unchanged (indices are taken as-is).
 """
-function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::UnitRange{Int})
+function translate_orbs_to_active(orbs::Vector{Int}, orig_orbs::AbstractVector{Int})
   isempty(orig_orbs) && return orbs
-  lo, hi = first(orig_orbs), last(orig_orbs)
+  lo = first(orig_orbs)                    # sorted; deleted orbitals may leave holes inside
   active = Int[]
   for o in orbs
-    if lo <= o <= hi
-      push!(active, o - lo + 1)
+    k = searchsortedfirst(orig_orbs, o)
+    if k <= length(orig_orbs) && orig_orbs[k] == o
+      push!(active, k)
     elseif 1 <= o < lo
       continue  # frozen core: occupied in the reference but not part of the active space
     else
-      error("Orbital $o is not in the active space (full-space active orbital range is $lo:$hi).")
+      error("Orbital $o is not in the active space (full-space active orbitals: " *
+            "$(first(orig_orbs))..$(last(orig_orbs)) minus deleted/frozen).")
     end
   end
   return sort!(active)

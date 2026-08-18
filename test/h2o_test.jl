@@ -22,9 +22,7 @@ energies = ElemCo.ccdriver(EC, "ccsd(t)"; fcidump)
 @test abs(energies["MP2c"]-EMP2_test) < epsilon
 @test abs(energies["CCSD(T)"]-ECCSD_T_test) < epsilon
 
-energies = @cc λccsd(t) begin
-  @set cc use_pm_kext=true
-end
+energies = @cc λccsd(t)
 @test abs(energies["ΛCCSD(T)"]-EΛCCSD_T_test) < epsilon
 
 energies = ElemCo.ccdriver(EC, "dcsd"; fcidump)

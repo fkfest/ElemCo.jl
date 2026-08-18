@@ -1,5 +1,6 @@
 @testitem "complex_lambda" tags=[:complex, :quick] begin
 using ElemCo
+using ElemCo.IntegralTools: transform_fcidump!
 using ElemCo.ECInfos
 using ElemCo.FciDumps
 using ElemCo.FciDumps: headvar
@@ -37,12 +38,11 @@ U_b = diagm(exp.(im .* phases_b))
 EHF_ref = -75.6457645933
 EHF_triplet_ref = -75.62407982361415
 
-# ΛCCSD(T) with complex rotation (use_pm_kext=true)
+# ΛCCSD(T) with complex rotation
 EΛCCSD_T_ref = -0.326915143863 + EHF_ref
 EC1 = ECInfo{ComplexF64}()
 EC1.fd = FDump{ComplexF64,3}(fd_real)
 transform_fcidump!(EC1.fd, SpinMatrix(conj(U)), SpinMatrix(U))
-EC1.options.cc.use_pm_kext = true
 energies1 = ElemCo.ccdriver(EC1, "λccsd(t)"; fcidump="")
 @test abs(energies1["ΛCCSD(T)"] - EΛCCSD_T_ref) < epsilon
 
