@@ -74,7 +74,7 @@ end
   ``(\\mu\\nu|\\rho\\sigma)`` in chemists' notation, i.e. `out[μ,ν,ρ,σ] = (μν|ρσ)`.
 
   The result is a dense `nao × nao × nao × nao` array. This is the non-density-fitted
-  (exact) AO integral tensor. For storage in an [`FDump`](@ref) it has to be brought
+  (exact) AO integral tensor. For storage in an `FDump` it has to be brought
   into physicists' notation (`<pq|rs> = (pr|qs)`); see the AO-dump assembler.
 """
 function eri_2e4idx(ao_basis::BasisSet)
@@ -168,7 +168,7 @@ end
     eri_2e4idx_tri!(int2, ao_basis::BasisSet; target_length=100)
 
   Assemble the AO two-electron integrals **directly in the physicist-triangular
-  layout** of an AO [`FDump`](@ref), dispatching on the basis (spherical/cartesian).
+  layout** of an AO `FDump`, dispatching on the basis (spherical/cartesian).
   See [`calc_2e4idx_tri!`](@ref).
 """
 function eri_2e4idx_tri!(int2::AbstractArray{<:Number,3}, ao_basis::BasisSet; target_length::Int=100)
@@ -216,7 +216,7 @@ end
     calc_2e4idx_tri!(int2, callback::Function, ao_basis::BasisSet; target_length=100)
 
   Assemble the AO two-electron integrals **directly into the physicist-triangular
-  layout** used by an AO [`FDump`](@ref), i.e.
+  layout** used by an AO `FDump`, i.e.
 
       int2[p, q, tri(r,s)] = ⟨pq|rs⟩ = (pr|qs) = G[p,r,q,s]   (for r ≤ s),
 

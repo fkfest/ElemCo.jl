@@ -258,6 +258,7 @@ function open_pm_store(EC::ECInfo{T}) where T
   return pm
 end
 
+"Close a ± store handle from [`open_pm_store`](@ref) (a no-op for the cached handle, which `release_pm_store!` owns)."
 function close_pm_store!(EC::ECInfo, pm::PMSupermatrices)
   pm === CACHED_PM[] && return              # the cache owns this mapping (`release_pm_store!`)
   closemmap(EC, pm.sio, pm.smap)
@@ -525,6 +526,7 @@ reconstructed slab `G`: two rectangle GEMVs (bottom band + right band) covering 
   lo > 0 && @views mul!(y[1:lo], G[1:lo, lo+1:hi], x[lo+1:hi], true, true)
   return
 end
+"Transposed band product `y[1:hi] += G[lo+1:hi, 1:hi]' * x[lo+1:hi]` (the mirror rows' contribution)."
 @inline function band_tmul!(y, G, lo::Int, hi::Int, x)
   @views mul!(y[1:hi], transpose(G[lo+1:hi, 1:hi]), x[lo+1:hi], true, true)
   lo > 0 && @views mul!(y[lo+1:hi], transpose(G[1:lo, lo+1:hi]), x[1:lo], true, true)

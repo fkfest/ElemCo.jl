@@ -68,6 +68,7 @@ makedocs(
       "laplace.md",
       "localization.md",
       "mio.md",
+      "pmstore.md",
       "mnpy.md",
       "msystems.md",
       "properties.md",

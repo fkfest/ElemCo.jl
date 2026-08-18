@@ -65,6 +65,7 @@ using ..ElemCo.ECMethods
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDumps
+using ..ElemCo.DumpTools: freeze_orbs_in_dump
 using ..ElemCo.MSystems
 using ..ElemCo.DIIS
 using ..ElemCo.DecompTools

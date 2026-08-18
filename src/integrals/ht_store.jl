@@ -126,7 +126,7 @@ end
   once rather than twice.
 
   A block builder does NOT need this: the B ordering is reachable from the A slab by particle exchange
-  (see [`ht_mo_block`](@ref CoupledCluster.ht_mo_block)), and a builder is free to choose its output
+  (see `ht_mo_block`), and a builder is free to choose its output
   permutation. It is for consumers whose output layout is fixed by someone else and for which the B
   order is the one that writes contiguously — `save_ao_AAAo!` streams `⟨μν|ρi⟩` into `[μ,ν,ρ,i]` and
   gets a contiguous `[:,ν,:,:]` slice per column from the B slab, where the A slab would leave it
@@ -151,7 +151,7 @@ end
   the store exactly once — half the bytes of the two-slab `ht_column!`. Consumers that need the other
   ket order do NOT need the B slab: by the particle-exchange symmetry `⟨μν|ρσ⟩ = ⟨νμ|σρ⟩` the B-role
   block is the A-role block with the two ket coefficients swapped and the output permuted `(2,1,4,3)`
-  (see [`ht_mo_block`](@ref CoupledCluster.ht_mo_block)). Only the per-column dressing sweeps, which
+  (see `ht_mo_block`). Only the per-column dressing sweeps, which
   contract both roles into the SAME output, genuinely need both slabs.
 """
 function ht_column_A!(Aσ::AbstractMatrix, ht::HTStore, σ::Int)
@@ -300,7 +300,7 @@ end
 """
     pm_os_sweep(pm::PMSupermatrices, La_o, Ra_o, Lb_o, Rb_o) -> (v_oOAA, v_AOoA, v_oAoA, v_oAAO, v_AOAO)
 
-  The opposite-spin occ-early sweep on the ± store (the five intermediates of [`ao_os_blocks`](@ref)
+  The opposite-spin occ-early sweep on the ± store (the five intermediates of `ao_os_blocks`
   at half the streaming), as a [`eachslab`](@ref PMStore.eachslab)`(pm; roles=:both)` sweep like
   [`pm_occ_early`](@ref) but with TWO coefficient sets: [`pm_bra_half!`](@ref PMStore.pm_bra_half!)
   gives the shared half-transforms of `La_o` (`hνa`/`hμa`) and `Lb_o` (`hνb`/`hμb`).
@@ -373,7 +373,7 @@ end
     ht_build_dress!(EC, pm, C; key="ht_oAAA", ookey="ht_ooAA")
 
   Build the persistent half-transformed store for the AO dressing (called ONCE per orbital set in
-  [`ao_cc_setup!`](@ref)): `key` = `Σ_μ⟨μν|ρσ⟩C[μ,i]` in both ket orders ([`pm_half_trans`](@ref
+  `ao_cc_setup!`): `key` = `Σ_μ⟨μν|ρσ⟩C[μ,i]` in both ket orders ([`pm_half_trans`](@ref
   PMStore.pm_half_trans)) plus the T1-independent `ookey` = `v_ooAA[i,j,ρ,σ] = Σ_μν⟨μν|ρσ⟩C[μ,i]C[ν,j]`
   ([`ht_build_oo!`](@ref)). `ao_dressed_ints` then reads these each iteration instead of re-streaming the
   ± store — one ± sweep per CC run, not per iteration. `C` is the (T1-independent) active occupied bra
@@ -393,7 +393,7 @@ end
 
   Unrestricted analogue of [`ht_build_dress!`](@ref): build the per-spin half-transformed stores plus the
   three T1-independent doubly-occ blocks the open-shell dressing reads each iteration. The bra-occ
-  transforms `La_o`/`Lb_o` are T1-independent, so this runs ONCE per orbital set in [`ao_cc_setup!`](@ref):
+  transforms `La_o`/`Lb_o` are T1-independent, so this runs ONCE per orbital set in `ao_cc_setup!`:
 
   - `"ht_oAAA_a"` / `"ht_oAAA_b"` : the α / β half-transformed stores ([`pm_half_trans`](@ref));
   - `"ht_ooAA_a"` = `v_ooAA(αα)` , `"ht_ooAA_b"` = `v_ooAA(ββ)` : the same-spin doubly-occ blocks;
