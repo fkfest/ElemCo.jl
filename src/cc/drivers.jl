@@ -189,6 +189,11 @@ end
 function ao_direct_method(ecm::ECMethod)
   name = uppercase(method_name(ecm; root=true))         # base method (EOM/U/R/Λ/QV prefixes stripped)
   name == "MP2" && return true                          # standalone MP2/UMP2/RMP2 off the bare AO blocks
+  # SVD triples (SVD-DC-CCSDT / SVD-CC3): the doubles residual is the AO-direct CCSD one, and the
+  # triples machinery works from 3-index integrals fitted for the SYSTEM (`cc.usedf`, the default)
+  # -- no MO integral set is needed. The `usedf=false` decomposition route needs an MO dump and is
+  # guarded in `calc_ccsdt`.
+  has_prefix(ecm, "SVD") && ecm.exclevel[3] != :none && return true
   return ecm.exclevel[3] in (:none, :pert) && name in ("CCSD", "DCSD", "CCD", "DCD")
 end
 

@@ -514,6 +514,29 @@ end
     e_ref = ElemCo.ccdriver(EC, "ccsd")
     @test abs(e_der["HF"]   - e_ref["HF"])   < 1e-9
     @test abs(e_der["CCSD"] - e_ref["CCSD"]) < 1e-8
+
+    # SVD-DC-CCSDT on the AO-direct route: the doubles residual is the AO-direct CCSD one and
+    # the SVD triples work from the system-DF 3-index integrals (cc.usedf, the default), so no
+    # MO integral set is needed. (vdz, not sto-3g: minimal-basis water has too few virtuals to
+    # exercise the SVD triples meaningfully.)
+    EC = fresh(Dict("ao"=>"vdz", "mpfit"=>"cc-pvdz-rifit"))
+    EC.options.wf.freeze_nocc = 0
+    ElemCo.hf(EC)
+    e_svd = ElemCo.ccdriver(EC, "svd-dc-ccsdt")
+    @test abs(e_svd["SVD-DC-CCSDT"] - (-76.24145350597587)) < 1e-8
+
+    # ... and fit-free: cc.usedf=false Cholesky-decomposes the exact AO integrals straight
+    # from the ± store, element-wise (no joint array) -- no mpfit basis, no MO dump.
+    # The derive-route MO-basis Cholesky gives -76.24145246783 (4.6e-8 away: the AO- and
+    # MO-basis decompositions truncate different matrices at cholesky.thr, so the retained
+    # aux spaces differ); the 1.1e-6 gap to the DF value above is the fit error itself.
+    # Tolerance 1e-7: the pivoted-Cholesky truncation is the accuracy scale here.
+    EC = fresh(Dict("ao"=>"vdz"))
+    EC.options.wf.freeze_nocc = 0
+    ElemCo.hf(EC)
+    EC.options.cc.usedf = false
+    e_ff = ElemCo.ccdriver(EC, "svd-dc-ccsdt")
+    @test abs(e_ff["SVD-DC-CCSDT"] - (-76.24145242204338)) < 1e-7
   end
 end
 end

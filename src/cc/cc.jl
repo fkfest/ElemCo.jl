@@ -4045,7 +4045,13 @@ function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
     calc_system_df_integrals(EC)
   else
     println("Decomposing integrals")
-    calc_integrals_decomposition(EC)
+    if EC.ao_direct
+      # fit-free on the AO-direct route: Cholesky of the exact AO integrals from the ± store,
+      # Cholesky vectors transformed to the MO basis
+      calc_integrals_decomposition_ao(EC, ao_direct_orbitals(EC))
+    else
+      calc_integrals_decomposition(EC)
+    end
   end
   t0 = print_time(EC, t0, "integrals decomposition", 1)
   T1 = read_starting_guess4amplitudes(EC, Val(1))
