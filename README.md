@@ -63,9 +63,12 @@ The `@print_input` macro prints the input file to the standard output. The calcu
 
 The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](https://elem.co.il/stable/elemco/)),
 
+- `@hf` / `@uhf` - Performs a Hartree-Fock calculation using exact (non-density-fitted) AO integrals,
 - `@dfhf` - Performs a density-fitted Hartree-Fock calculation,
 - `@cc <method>` - Performs a coupled cluster calculation,
-- `@dfcc <method>` - Performs a coupled cluster calculation using density fitting,
+- `@dfcc <method>` - Performs a coupled cluster calculation using density-fitted integrals in the correlation treatment,
+- `@ints` - Generates the exact AO integral files (done automatically by `@hf`/`@uhf`),
+- `@dfints` / `@moints` - Generates a persistent MO integral set (density-fitted / from the exact AO integrals),
 - `@set <option> <setting>` - Sets the options for the calculation,
 
 etc.
@@ -95,9 +98,31 @@ fcidump = "../test/H2O.FCIDUMP"
 @cc dcsd
 ```
 
-#### DCSD calculation of the water molecule using density-fitted integrals
+#### DCSD calculation of the water molecule using exact (non-DF) integrals
 
-In order to calculate the ground state energy of the water molecule using the DCSD method, the following script can be used:
+The ground state energy of the water molecule with the DCSD method, using the exact
+four-index AO integrals throughout:
+
+```julia
+using ElemCo
+@print_input
+geometry="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+basis = "vdz"
+@hf
+@cc dcsd
+```
+
+The `@hf` macro generates the exact AO integrals (as `@ints` would) and calculates the
+Hartree-Fock energy and orbitals from them; the correlated calculation then runs
+**AO-direct** -- the MO integrals are never formed. `@uhf` is the unrestricted counterpart.
+
+#### DCSD calculation using density-fitted integrals
+
+The same calculation with density fitting:
 
 ```julia
 using ElemCo
@@ -113,7 +138,29 @@ basis = "vdz"
 ```
 
 The `@dfhf` macro calculates the density-fitted Hartree-Fock energy and orbitals
-and then DCSD calculation is performed using density-fitted integrals.
+and then the DCSD calculation is performed using density-fitted integrals.
+
+#### Which integrals does a calculation use?
+
+The correlated methods follow the integrals of the reference:
+
+- `@hf` (or `@uhf`) + `@cc` -- exact AO integrals; most methods (MP2, CCSD/DCSD and
+  variants, (T), Lambda/properties, EOM, SVD-DC-CCSDT) run **AO-direct**, without ever
+  forming an MO integral set. (SVD-DC-CCSDT works from 3-index triples
+  intermediates: by default density-fitted, needing an `"mpfit"` basis; with
+  `@set cc usedf=false` the exact integrals are Cholesky-decomposed instead -- fit-free,
+  on either route.)
+- `@dfhf` + `@cc` -- density-fitted integrals: the MO integrals are generated **on the fly**
+  inside the correlated calculation and **deleted** when it finishes (they depend on the
+  orbitals, so a stale set must never be silently reused). If several calculations should
+  reuse one MO integral set, generate it explicitly with `@dfints` (or `@moints` for the
+  exact-AO counterpart) -- an explicitly created set persists and is yours to refresh.
+- `fcidump = "..."` + `@cc` -- integrals from the FCIDUMP file.
+- After `@dfhf`, the exact-AO route can still be requested with `@ints` before `@cc`
+  (or `@set int df=false` to make it the default for new calculations); conversely
+  `@set int ao_direct=false` routes an exact-AO calculation through a derived MO dump.
+
+Every correlated run prints one line stating which integrals it uses.
 
 Various [options](https://elem.co.il/stable/options/) can be set using the `@set` macro. It is advisable to set options locally for each calculation to avoid unintended side effects. For example, to change the convergence threshold of the Hartree-Fock calculation to `1e-8`, the following line can be added before the `@dfhf` macro:
 

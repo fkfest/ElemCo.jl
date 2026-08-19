@@ -51,9 +51,12 @@ The `@print_input` macro prints the input file to the standard output. The calcu
 
 The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](@ref list_of_macros)),
 
+- [`@hf`](@ref)/[`@uhf`](@ref) - Performs a Hartree-Fock calculation using exact (non-density-fitted) AO integrals.
 - [`@dfhf`](@ref) - Performs a density-fitted Hartree-Fock calculation.
 - [`@cc`](@ref)` <method>` - Performs a coupled cluster calculation.
-- [`@dfcc`](@ref)` <method>` - Performs a coupled cluster calculation using density fitting.
+- [`@dfcc`](@ref)` <method>` - Performs a coupled cluster calculation using density-fitted integrals in the correlation treatment.
+- [`@ints`](@ref) - Generates the exact AO integral files (done automatically by `@hf`/`@uhf`).
+- [`@dfints`](@ref)/[`@moints`](@ref) - Generates a persistent MO integral set (density-fitted / from the exact AO integrals).
 - [`@set`](@ref)` <option> <setting>` - Sets the options([`ElemCo.ECInfos.Options`](@ref)) for the calculation.
 
 etc.
@@ -70,12 +73,45 @@ Variable names `fcidump`, `geometry` and `basis` are reserved for the file name 
 which can also be used to visualize the molecular orbitals.
 The browser version of `jlmol` can be found at [app.jlmol.com](https://app.jlmol.com).
 
+### Computing Hartree-Fock and Coupled Cluster methods
+
+The correlated methods follow the integrals of the reference. The default first-class route
+uses the **exact (non-density-fitted) AO integrals**: [`@hf`](@ref) (or [`@uhf`](@ref))
+generates the AO integral files (as [`@ints`](@ref) would) and computes the Hartree-Fock
+reference from them, and a subsequent [`@cc`](@ref) runs **AO-direct** -- MP2, CCSD/DCSD and
+their variants, (T), the Lambda equations and properties, EOM and SVD-DC-CCSDT contract the
+AO integrals directly, and no MO integral set is ever formed:
+
+```julia
+using ElemCo
+@print_input
+geometry="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+basis = "cc-pVDZ"
+@hf
+@cc ccsd(t)
+```
+
+(The SVD triples of SVD-DC-CCSDT work from 3-index integrals: by default density-fitted for
+the system, which needs an `"mpfit"` entry in the `basis` dictionary; with
+`@set cc usedf=false` the exact integrals are Cholesky-decomposed instead -- fit-free, and
+available on the AO-direct route as well.)
+
 ### Computing density-fitted Hartree-Fock and Coupled Cluster methods
 
-To compute density-fitted Hartree-Fock (DF-HF) using ElemCo.jl, you can use the [`@dfhf`](@ref) macro. In order to run post-HF calculations, the integrals have to be transformed to the MO basis (using the [`@dfints`](@ref) macro), and
-the coupled cluster calculations can be performed using [`@cc`](@ref) macro. 
-The `@dfints` macro is optional, `@cc` macro will automatically call `@dfints` if it has not been called before.
-Here's an example of how you can use these macros:
+With a density-fitted reference ([`@dfhf`](@ref)) the correlation treatment uses
+density-fitted integrals: the MO integrals are generated **on the fly** inside the [`@cc`](@ref)
+calculation and **deleted** when the driver returns -- they depend on the current orbitals, and
+an implicitly created set must never be silently reused after the orbitals change. If several
+calculations should share one MO integral set, generate it explicitly with [`@dfints`](@ref)
+(it then persists and is yours to refresh); [`@moints`](@ref) is the exact-AO counterpart.
+After `@dfhf`, the exact-AO route can still be selected with [`@ints`](@ref) before `@cc` (or
+`@set int df=false`); conversely `@set int ao_direct=false` routes an exact-AO calculation
+through a derived MO dump. Every correlated run prints one line stating which integrals it
+uses. Here's an example:
 
 ```julia
 using ElemCo
