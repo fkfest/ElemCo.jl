@@ -39,6 +39,7 @@ using ..ElemCo.Utils
 export PMSupermatrices, pm_from_joint!, pm_to_joint!, open_pm_store, close_pm_store!,
        pm_exists, delete_pm_store!, release_pm_store!, pm_nblocks, spanel, apanel, diagtile, subpanel,
        pm_matmul!, pm_matvec!, band_htrans!, pair_luts,
+       PMElementReader, pm_vs_va,
        SlabWork, reconstruct_slab!, band_mul!, band_tmul!, add_mirror_row!, pm_slab_sweep!,
        PMSlab, eachslab, slab_bandmul!, slab_bandtmul!, slab_mirror!, slab_mirrort!,
        BothSlab, pm_bra_half!,
@@ -395,6 +396,46 @@ function pm_to_joint!(EC::ECInfo{T}) where T
   closemmap(EC, jfile, jint2)
   close_pm_store!(EC, pm)
   return
+end
+
+# ---- random access ---------------------------------------------------------------------
+
+"""
+    PMElementReader(pm) -> reader
+
+  O(1) random access to the ± supermatrices: `pm_vs_va(reader, B, K)` returns
+  `(V_s[B,K], V_a[B,K])` for packed pair indices `B` (bra) and `K` (ket), resolving the
+  block-triangle storage through the hermitian mirror when `B` lies above the ket panel's
+  row floor. For consumers that genuinely need scattered elements (e.g. a pivoted Cholesky
+  of the integral matrix) — sweeps should keep using [`eachslab`](@ref).
+"""
+struct PMElementReader{T}
+  pm::PMSupermatrices{T}
+  blockof::Vector{Int32}   # packed pair index -> its σ-block
+  r0::Vector{Int}          # σ-block -> first stored row of its panel
+end
+
+function PMElementReader(pm::PMSupermatrices{T}) where {T}
+  blockof = Vector{Int32}(undef, pm.npp)
+  r0 = Vector{Int}(undef, pm_nblocks(pm))
+  for J in 1:pm_nblocks(pm)
+    r0[J] = first(pm.pairblocks[J])
+    blockof[pm.pairblocks[J]] .= Int32(J)
+  end
+  return PMElementReader{T}(pm, blockof, r0)
+end
+
+@inline function pm_vs_va(rd::PMElementReader, B::Int, K::Int)
+  pm = rd.pm
+  J = rd.blockof[K]; r0 = rd.r0[J]
+  if B >= r0                                              # stored natively in K's panel
+    i = pm.offsets[J] + (K - r0) * (pm.npp - r0 + 1) + (B - r0)
+    return pm.smap[i], pm.amap[i]
+  else                                                    # hermitian mirror: [K,B] in B's panel
+    J2 = rd.blockof[B]; r02 = rd.r0[J2]                   # (K ≥ r0 > B ≥ r02, always stored)
+    i = pm.offsets[J2] + (B - r02) * (pm.npp - r02 + 1) + (K - r02)
+    return conj(pm.smap[i]), conj(pm.amap[i])
+  end
 end
 
 # ---- contraction primitive ------------------------------------------------------------
