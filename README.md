@@ -7,7 +7,7 @@ The integrals are obtained from a FCIDUMP file or calculated using an interface 
 
 | Class           | Methods                               |
 |-----------------|---------------------------------------|
-| Mean-field      | DF-HF, DF-UHF, BO-HF, BO-UHF, DF-MCSCF|
+| Mean-field      | HF, UHF, DF-HF, DF-UHF, BO-HF, BO-UHF, DF-MCSCF|
 | Perturbative    | DF-MP2, MP2, UMP2, SOS-LT-DF-MP2      |
 | Coupled Cluster | CCSD, RCCSD, UCCSD, DCSD, RDCSD, UDCSD, CCSD(T), RCCSD(T), UCCSD(T), ΛCCSD(T), ΛUCCSD(T), FR-CCSD, FR-DCSD, 2D-CCSD, 2D-DCSD, CCSDT, UCCSDT, DC-CCSDT, UDC-CCSDT, FR-CCSDT, FR-DC-CCSDT, SVD-DF-DCSD, SVD-DC-CCSDT          |
 | CI              | FCI, CIPHI                            |
