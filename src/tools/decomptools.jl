@@ -100,7 +100,15 @@ function calc_integrals_decomposition_ao(EC::ECInfo, cMO::AbstractMatrix)
   naux = size(left, 3)
   nmo = size(cMO, 2)
   moL = zeros(eltype(left), nmo, nmo, naux)
-  @mtensor moL[p,q,L] = conj(cMO[μ,p]) * left[μ,ν,L] * cMO[ν,q]
+  # per-L similarity transform as two GEMMs with a reused nao×nmo workspace: a single
+  # three-tensor contraction would allocate an nmo×nao×naux intermediate next to `left`.
+  lC = zeros(eltype(left), size(left, 1), nmo)
+  for L in axes(left, 3)
+    v!left = @mview left[:,:,L]
+    v!moL = @mview moL[:,:,L]
+    mul!(lC, v!left, cMO)
+    mul!(v!moL, cMO', lC)
+  end
   save!(EC, "mmL", moL)
   return
 end
