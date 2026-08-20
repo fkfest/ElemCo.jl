@@ -407,7 +407,7 @@ end
   `(V_s[B,K], V_a[B,K])` for packed pair indices `B` (bra) and `K` (ket), resolving the
   block-triangle storage through the hermitian mirror when `B` lies above the ket panel's
   row floor. For consumers that genuinely need scattered elements (e.g. a pivoted Cholesky
-  of the integral matrix) — sweeps should keep using [`eachslab`](@ref).
+  of the integral matrix) — sweeps should use [`eachslab`](@ref).
 """
 struct PMElementReader{T}
   pm::PMSupermatrices{T}

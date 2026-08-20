@@ -517,8 +517,7 @@ end
 
     # SVD-DC-CCSDT on the AO-direct route: the doubles residual is the AO-direct CCSD one and
     # the SVD triples work from the system-DF 3-index integrals (cc.usedf, the default), so no
-    # MO integral set is needed. (vdz, not sto-3g: minimal-basis water has too few virtuals to
-    # exercise the SVD triples meaningfully.)
+    # MO integral set is needed.
     EC = fresh(Dict("ao"=>"vdz", "mpfit"=>"cc-pvdz-rifit"))
     EC.options.wf.freeze_nocc = 0
     ElemCo.hf(EC)

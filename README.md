@@ -98,10 +98,9 @@ fcidump = "../test/H2O.FCIDUMP"
 @cc dcsd
 ```
 
-#### DCSD calculation of the water molecule using exact (non-DF) integrals
+#### DCSD calculation of the water molecule
 
-The ground state energy of the water molecule with the DCSD method, using the exact
-four-index AO integrals throughout:
+The ground state energy of the water molecule with the DCSD method:
 
 ```julia
 using ElemCo
@@ -118,7 +117,7 @@ basis = "vdz"
 
 The `@hf` macro generates the exact AO integrals (as `@ints` would) and calculates the
 Hartree-Fock energy and orbitals from them; the correlated calculation then runs
-**AO-direct** -- the MO integrals are never formed. `@uhf` is the unrestricted counterpart.
+**AO-direct** -- the full MO integrals are never formed. `@uhf` is the unrestricted counterpart.
 
 #### DCSD calculation using density-fitted integrals
 
@@ -146,13 +145,13 @@ The correlated methods follow the integrals of the reference:
 
 - `@hf` (or `@uhf`) + `@cc` -- exact AO integrals; most methods (MP2, CCSD/DCSD and
   variants, (T), Lambda/properties, EOM, SVD-DC-CCSDT) run **AO-direct**, without ever
-  forming an MO integral set. (SVD-DC-CCSDT works from 3-index triples
+  forming a full MO integral set. (SVD-DC-CCSDT works from 3-index triples
   intermediates: by default density-fitted, needing an `"mpfit"` basis; with
   `@set cc usedf=false` the exact integrals are Cholesky-decomposed instead -- fit-free,
   on either route.)
 - `@dfhf` + `@cc` -- density-fitted integrals: the MO integrals are generated **on the fly**
-  inside the correlated calculation and **deleted** when it finishes (they depend on the
-  orbitals, so a stale set must never be silently reused). If several calculations should
+  inside the correlated calculation and **deleted** when it finishes.
+  If several calculations should
   reuse one MO integral set, generate it explicitly with `@dfints` (or `@moints` for the
   exact-AO counterpart) -- an explicitly created set persists and is yours to refresh.
 - `fcidump = "..."` + `@cc` -- integrals from the FCIDUMP file.

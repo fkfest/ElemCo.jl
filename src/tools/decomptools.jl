@@ -87,7 +87,8 @@ end
 
   The decomposition reads the ± store DIRECTLY, element-wise
   ([`PMIntegralMatrix`](@ref)): no jointly-packed array and no MO integral set is formed at
-  any point.
+  any point. If I/O becomes a bottleneck, one could implement an on-the-fly decomposition of
+  original AO integrals.
 """
 function calc_integrals_decomposition_ao(EC::ECInfo, cMO::AbstractMatrix)
   pm = open_pm_store(EC)

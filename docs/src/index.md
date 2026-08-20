@@ -51,7 +51,7 @@ The `@print_input` macro prints the input file to the standard output. The calcu
 
 The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](@ref list_of_macros)),
 
-- [`@hf`](@ref)/[`@uhf`](@ref) - Performs a Hartree-Fock calculation using exact (non-density-fitted) AO integrals.
+- [`@hf`](@ref)/[`@uhf`](@ref) - Performs a Hartree-Fock calculation.
 - [`@dfhf`](@ref) - Performs a density-fitted Hartree-Fock calculation.
 - [`@cc`](@ref)` <method>` - Performs a coupled cluster calculation.
 - [`@dfcc`](@ref)` <method>` - Performs a coupled cluster calculation using density-fitted integrals in the correlation treatment.
@@ -80,7 +80,7 @@ uses the **exact (non-density-fitted) AO integrals**: [`@hf`](@ref) (or [`@uhf`]
 generates the AO integral files (as [`@ints`](@ref) would) and computes the Hartree-Fock
 reference from them, and a subsequent [`@cc`](@ref) runs **AO-direct** -- MP2, CCSD/DCSD and
 their variants, (T), the Lambda equations and properties, EOM and SVD-DC-CCSDT contract the
-AO integrals directly, and no MO integral set is ever formed:
+AO integrals directly, and no full MO integral set is ever formed:
 
 ```julia
 using ElemCo
@@ -95,17 +95,11 @@ basis = "cc-pVDZ"
 @cc ccsd(t)
 ```
 
-(The SVD triples of SVD-DC-CCSDT work from 3-index integrals: by default density-fitted for
-the system, which needs an `"mpfit"` entry in the `basis` dictionary; with
-`@set cc usedf=false` the exact integrals are Cholesky-decomposed instead -- fit-free, and
-available on the AO-direct route as well.)
-
 ### Computing density-fitted Hartree-Fock and Coupled Cluster methods
 
 With a density-fitted reference ([`@dfhf`](@ref)) the correlation treatment uses
 density-fitted integrals: the MO integrals are generated **on the fly** inside the [`@cc`](@ref)
-calculation and **deleted** when the driver returns -- they depend on the current orbitals, and
-an implicitly created set must never be silently reused after the orbitals change. If several
+calculation and **deleted** when the driver returns. If several
 calculations should share one MO integral set, generate it explicitly with [`@dfints`](@ref)
 (it then persists and is yours to refresh); [`@moints`](@ref) is the exact-AO counterpart.
 After `@dfhf`, the exact-AO route can still be selected with [`@ints`](@ref) before `@cc` (or
