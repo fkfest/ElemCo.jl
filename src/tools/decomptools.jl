@@ -102,10 +102,12 @@ function calc_integrals_decomposition_ao(EC::ECInfo, cMO::AbstractMatrix)
   moL = zeros(eltype(left), nmo, nmo, naux)
   # per-L similarity transform as two GEMMs with a reused nao×nmo workspace: a single
   # three-tensor contraction would allocate an nmo×nao×naux intermediate next to `left`.
+  # NOTE plain `view`, not `@mview`: a StridedView is not a `Base.StridedArray`, so `mul!`
+  # falls back to the generic kernel (measured 44x slower); the contiguous SubArray hits BLAS.
   lC = zeros(eltype(left), size(left, 1), nmo)
   for L in axes(left, 3)
-    v!left = @mview left[:,:,L]
-    v!moL = @mview moL[:,:,L]
+    v!left = view(left, :, :, L)
+    v!moL = view(moL, :, :, L)
     mul!(lC, v!left, cMO)
     mul!(v!moL, cMO', lC)
   end
