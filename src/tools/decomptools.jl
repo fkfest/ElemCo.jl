@@ -9,9 +9,10 @@ using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
 using ..ElemCo.QMTensors
 using ..ElemCo.ALPACADecomposition
+using ..ElemCo.PMStore: PMSupermatrices, open_pm_store, close_pm_store!, PMElementReader, pm_vs_va
 using ..ElemCo.OrbLocalization
 
-export calc_integrals_decomposition
+export calc_integrals_decomposition, calc_integrals_decomposition_ao
 export svd_decompose, svd_decompose_dense, svd_decompose_llama
 export get_localization_rotations
 export prepare_doubles_for_decomposition, backtransform_svd_vectors!
@@ -72,7 +73,111 @@ end
 function calc_integrals_decomposition(EC::ECInfo)
   int2 = integ2_ss(EC.fd)
   n = n_orbs(EC)
-  tol = EC.options.cholesky.thr
+  left = _alpaca_int2_decomposition(int2, n, EC.options.cholesky.thr)
+  save!(EC, "mmL", left)
+  return
+end
+
+"""
+    calc_integrals_decomposition_ao(EC::ECInfo, cMO::AbstractMatrix)
+
+  Fit-free 3-index integrals for the AO-direct route: Cholesky-decompose the **exact AO**
+  integrals of the ± supermatrix store and transform the Cholesky vectors to the MO basis
+  `cMO` (``v_p^{qL} = C^{\\dagger} v_{\\mu}^{\\nu L} C``), saved as `mmL`.
+
+  The decomposition reads the ± store DIRECTLY, element-wise
+  ([`PMIntegralMatrix`](@ref)): no jointly-packed array and no MO integral set is formed at
+  any point. If I/O becomes a bottleneck, one could implement an on-the-fly decomposition of
+  original AO integrals.
+"""
+function calc_integrals_decomposition_ao(EC::ECInfo, cMO::AbstractMatrix)
+  pm = open_pm_store(EC)
+  left = try
+    _alpaca_pm_decomposition(pm, EC.options.cholesky.thr)
+  finally
+    close_pm_store!(EC, pm)
+  end
+  naux = size(left, 3)
+  nmo = size(cMO, 2)
+  moL = zeros(eltype(left), nmo, nmo, naux)
+  # per-L similarity transform as two GEMMs with a reused nao×nmo workspace: a single
+  # three-tensor contraction would allocate an nmo×nao×naux intermediate next to `left`.
+  # NOTE plain `view`, not `@mview`: a StridedView is not a `Base.StridedArray`, so `mul!`
+  # falls back to the generic kernel (measured 44x slower); the contiguous SubArray hits BLAS.
+  lC = zeros(eltype(left), size(left, 1), nmo)
+  for L in axes(left, 3)
+    v!left = view(left, :, :, L)
+    v!moL = view(moL, :, :, L)
+    mul!(lC, v!left, cMO)
+    mul!(v!moL, cMO', lC)
+  end
+  save!(EC, "mmL", moL)
+  return
+end
+
+"""
+    PMIntegralMatrix{T} <: AbstractALPACAMatrix{T}
+
+  The AO integral matrix ``M_{(pr),(qs)} = v_{pq}^{rs}`` served element-wise from the ±
+  supermatrix store: a requested column is reconstructed on the fly through
+  `pm_vs_va`, a ket swap reduced to a bra swap by the
+  exchange symmetry ``v_{pq}^{rs} = v_{qp}^{sr}``. Nothing is materialized.
+"""
+struct PMIntegralMatrix{T} <: AbstractALPACAMatrix{T}
+  rd::PMElementReader{T}
+  n::Int
+end
+
+Base.size(mat::PMIntegralMatrix) = (mat.n^2, mat.n^2)
+
+function ALPACADecomposition.column!(buffer::AbstractVector, mat::PMIntegralMatrix, j::Integer)
+  n = mat.n; rd = mat.rd
+  q = ((j - 1) % n) + 1
+  s = ((j - 1) ÷ n) + 1
+  @inbounds for r in 1:n
+    # buffer[I] = v_{pq}^{rs}, I = (r-1)*n + p; for r > s use v_{pq}^{rs} = v_{qp}^{sr}
+    ketsorted = r <= s
+    K = ketsorted ? uppertriangular_index(r, s) : uppertriangular_index(s, r)
+    off = (r - 1) * n
+    for p in 1:n
+      a, b = ketsorted ? (p, q) : (q, p)
+      B = a <= b ? uppertriangular_index(a, b) : uppertriangular_index(b, a)
+      vs, va = pm_vs_va(rd, B, K)
+      buffer[off + p] = a <= b ? (vs + va) / 2 : (vs - va) / 2
+    end
+  end
+  return buffer
+end
+
+function _alpaca_pm_decomposition(pm::PMSupermatrices{T}, tol) where {T}
+  n = pm.nao
+  rd = PMElementReader(pm)
+  n2 = n^2
+  diag_pairs = Vector{Tuple{Int,Int}}(undef, n2)
+  diag_values = Vector{T}(undef, n2)
+  @inbounds for r in 1:n
+    K = uppertriangular_index(r, r)
+    off = (r - 1) * n
+    for p in 1:n
+      B = uppertriangular_index(p, p)
+      vs, va = pm_vs_va(rd, B, K)
+      I = off + p
+      diag_pairs[I] = (I, I)
+      diag_values[I] = (vs + va) / 2
+    end
+  end
+  principal = PrincipalTriples(diag_pairs, diag_values)
+  mat = PMIntegralMatrix{T}(rd, n)
+  opts = ALPACAOptions(tol=tol, symmetry=:symmetric)
+  result = alpaca(mat; principal=principal, options=opts)
+  naux1 = size(result.left, 2)
+  isempty(result.neg_indices) ||
+    @warn "ALPACA found $(length(result.neg_indices)) negative eigenvalues in integral matrix"
+  println("Integral auxiliary space size: ", naux1)
+  return reshape(result.left, (n, n, naux1))
+end
+
+function _alpaca_int2_decomposition(int2, n::Int, tol)
 
   # Pre-compute diagonal elements M[I,I] = ⟨pp|rr⟩ where I = (r-1)*n + p
   n2 = n^2
@@ -98,7 +203,7 @@ function calc_integrals_decomposition(EC::ECInfo)
     @warn "ALPACA found $(length(result.neg_indices)) negative eigenvalues in integral matrix"
   end
   println("Integral auxiliary space size: ",naux1)
-  save!(EC, "mmL", reshape(result.left, (n,n,naux1)))
+  return reshape(result.left, (n,n,naux1))
 end
 
 """

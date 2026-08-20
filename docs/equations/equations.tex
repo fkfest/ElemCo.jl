@@ -252,6 +252,61 @@ and other indices do not include the core orbitals.
 $\tilde L$ corresponds to the \textit{JKFIT} density-fitting basis functions,
 and $L$ corresponds to the \textit{MPFIT} density-fitting basis functions.
 
+\section{Exact AO integrals: the $\pm$ supermatrix store} \label{sec:pm-store}
+The exact (non-density-fitted) four-index AO integrals are stored as the $\pm$
+supermatrices, the only representation from which both Hartree--Fock
+(Sec.~\ref{sec:ao-hf}) and the AO-driven coupled-cluster methods
+(Sec.~\ref{sec:ao-direct}) contract directly.
+
+Real AO integrals possess the full eight-fold permutational symmetry, which would in principle
+permit an $n^4/8$ packing. The store, however, is built on the smaller symmetry group that
+survives for \emph{complex} and for similarity-transformed integrals: the \emph{joint} exchange
+symmetry
+\begin{equation}
+\label{eq:ao-joint-sym}
+v_{\mu\nu}^{\rho\sigma} = v_{\nu\mu}^{\sigma\rho}
+\end{equation}
+together with hermiticity, $v_{\mu\nu}^{\rho\sigma} = \left(v_{\rho\sigma}^{\mu\nu}\right)^*$.
+In this group neither the bra pair nor the ket pair may be packed triangularly on its own. Splitting the
+integrals into the parts that are symmetric and antisymmetric with respect to the exchange of the
+bra pair,
+\begin{equation}
+\label{eq:pm-def}
+V^{\pm}_{(\mu\nu)(\rho\sigma)} = v_{\mu\nu}^{\rho\sigma} \pm v_{\nu\mu}^{\rho\sigma},
+\qquad \mu \le \nu,\quad \rho \le \sigma,
+\end{equation}
+converts the single joint symmetry \eq{eq:ao-joint-sym} into two independent ones: together with the
+hermiticity of the integrals, both $V^{+}$ and $V^{-}$ are symmetric (hermitian for complex
+integrals) matrices in the packed pair space,
+\begin{equation}
+V^{\pm}_{(\rho\sigma)(\mu\nu)} = \left(V^{\pm}_{(\mu\nu)(\rho\sigma)}\right)^*,
+\end{equation}
+so that \emph{both} index pairs are triangular. Only the lower block triangle has to be stored, and
+the store occupies $\approx n^4/4$ instead of the $n^4/2$ of the joint triangular packing.
+
+\subsection{Storage layout and generation}
+Both $V^{+}$ and $V^{-}$ are kept as their lower \emph{block} triangles over the packed pair
+space, written as $\sigma$-aligned column panels; the upper part is the (conjugate-)hermitian
+mirror, reconstructed at read time. The $\pm$ fold is fused into the integral generation: each
+shell-aligned ket-column block is assembled in a bounded slab of memory, folded according to
+\eq{eq:pm-def} and written directly as panels, so no jointly packed $n^4/2$ intermediate exists at
+any point, on disk or in memory. Since the stored rows of a panel are bounded below by the panel's
+own block, the ERI kernel skips every bra shell pair lying entirely below that row floor
+(the kept-pair predicate $\max(\mu,\nu)\ge\sigma_{\mathrm{block\,start}}$ is exact for
+shell-aligned blocks), which removes roughly half of the integral evaluations without any
+screening approximation.
+
+The half-transformed store of \eq{eq:ao-halftrans} is kept pair-packed as well,
+$\left[(i\nu),\, o,\, (\rho\sigma)\right]$ with $\rho\le\sigma$ and both ket orders stored
+($o=1$: $(\rho,\sigma)$; $o=2$: $(\sigma,\rho)$) -- the layout in which each output pair block
+owns its column range outright, so the out-of-core gather writes every block exactly once. By the
+exchange symmetry \eq{eq:ao-joint-sym} a single file serves both half-transform roles of
+\eq{eq:ao-occ-early-half}. The gather reads each $\pm$ element approximately twice (the native
+panel sequentially through the memory map, the mirror rows of earlier panels by positional reads
+with read-ahead advice), and the store is subsequently streamed by whole $\sigma$-columns for the
+integral blocks of the correlated methods.
+
+
 \chapter{Hartree-Fock}
 \section{Density-fitted Hartree-Fock}
 The density-fitted Hartree-Fock equations are given by
@@ -330,6 +385,43 @@ which has to be taken into account in the equations.
 
 The residual of the Hartree-Fock equations, which can be used in DIIS, is equivalent to
 \eq{eq:hf-residual}, with the overlap matrix $S_{\mu}^{\nu}$ removed.
+
+
+\section{Hartree--Fock from exact AO integrals} \label{sec:ao-hf}
+When the exact four-index AO integrals are available as the $\pm$ supermatrices of
+Sec.~\ref{sec:pm-store}, the Fock matrix is assembled directly from the stored lower block
+triangle, without ever forming the full $v_{\mu\nu}^{\rho\sigma}$ tensor. With the (spin-summed)
+AO density $\gamma_{\nu}^{\sigma} = 2\,C_{\nu}^{i} C^{\dagger\sigma}_{i}$ the closed-shell Fock
+matrix is
+\begin{equation}
+f_\mu^\nu = h_\mu^\nu + J_\mu^\nu - \half K_\mu^\nu,
+\qquad
+J_\mu^\nu = v_{\mu\rho}^{\nu\sigma}\, \gamma_{\sigma}^{\rho},
+\qquad
+K_\mu^\nu = v_{\mu\rho}^{\sigma\nu}\, \gamma_{\sigma}^{\rho}.
+\end{equation}
+The store is streamed once per SCF iteration, one ket-pair column $(\rho\sigma)$, $\rho\le\sigma$,
+at a time: the dense slab $v_{\mu\nu}^{\rho\sigma}$ is reconstructed from
+$\half(V^{+}+V^{-})$ and its hermitian mirror, and contributes the band products
+\begin{equation}
+\label{eq:ao-jk-slab}
+J_\mu^{\rho} \mathrel{+}= v_{\mu\nu}^{\rho\sigma}\,\gamma_{\nu}^{\sigma},\qquad
+J_\mu^{\sigma} \mathrel{+}= v_{\nu\mu}^{\rho\sigma}\,\gamma_{\nu}^{\rho},\qquad
+K_\mu^{\sigma} \mathrel{+}= v_{\mu\nu}^{\rho\sigma}\,\gamma_{\nu}^{\rho},\qquad
+K_\mu^{\rho} \mathrel{+}= v_{\nu\mu}^{\rho\sigma}\,\gamma_{\nu}^{\sigma},
+\end{equation}
+so the working memory is $\mathcal{O}(n^2)$ regardless of the basis size. For a real symmetric
+density (the HF case, $\gamma = \gamma^{T}$) the Fock matrices are symmetric and the mirror
+contributions of \eq{eq:ao-jk-slab} are the transposes of the native ones; they are skipped
+entirely and restored at the end by the symmetrization
+\begin{equation}
+A \leftarrow A + A^{T} + A_{\mathrm d},
+\end{equation}
+where $A_{\mathrm d}$ collects the (self-mirroring) diagonal-tile band separately to avoid double
+counting -- approximately halving the number of band products. The unrestricted Fock matrices are
+built in the \emph{same} single sweep: the shared Coulomb term from
+$\pre{^\alpha}\gamma + \pre{^\beta}\gamma$ and the two same-spin exchange terms from
+$\pre{^\alpha}\gamma$ and $\pre{^\beta}\gamma$ per slab.
 
 \chapter{Density-Fitted Multiconfigurational Self-Consistent Field}
 \section{Orbital Rotation}
@@ -1999,37 +2091,56 @@ C^\mu_i$. The half-transformed integrals
 \label{eq:ao-halftrans}
 v_{i\nu}^{\rho\sigma} = C^\mu_i\, v_{\mu\nu}^{\rho\sigma}
 \end{equation}
-are therefore independent of $T_1$ and can be constructed once per set of orbitals rather than once
-per iteration. Every block with at least one occupied index is then obtained from
-\eq{eq:ao-halftrans} by matrix multiplications alone, at a cost of $\mathcal{O}(o\,n^3)$ per block
-instead of a fresh pass over the AO integrals. Blocks whose only occupied index sits on an upper (ket) slot are reached through
+are therefore independent of $T_1$ and are constructed \emph{once} per set of orbitals -- by the
+out-of-core gather from the $\pm$ store described in Sec.~\ref{sec:pm-store}, which keeps them
+pair-packed in both ket orders. Every block with at least one occupied index is then obtained from
+\eq{eq:ao-halftrans} by matrix multiplications alone, at a cost of $\mathcal{O}(o\,n^3)$ per block;
+the per-iteration data volume drops accordingly, from the $\approx n^4/4$ elements of the $\pm$
+triangle to the $\approx o\,n^3$ elements of the half-transformed store, and the $\pm$ store itself
+is streamed per iteration only by the four-external term
+(Sec.~\ref{sec:pm-supermatrix-use}). Blocks whose only occupied index sits on an upper (ket) slot are reached through
 \begin{equation}
 v_{pq}^{rs} = \left(v_{rs}^{pq}\right)^*,
 \end{equation}
 which for real integrals is the plain bra--ket exchange.
 
-\subsection{Four-external term: $\pm$ supermatrices} \label{sec:pm-supermatrix}
-The AO integrals possess only the \emph{joint} exchange symmetry
+
+\subsection{One-pass occupied-early dressing}
+The T$_1$-dressed integral blocks that the CCSD/DCSD residual reads (all carrying at least one
+occupied index) are assembled once per iteration in a \emph{single} pass over the half-transformed
+store: for every ket column $\sigma$ the slabs
 \begin{equation}
-\label{eq:ao-joint-sym}
-v_{\mu\nu}^{\rho\sigma} = v_{\nu\mu}^{\sigma\rho},
+\label{eq:ao-occ-early-half}
+h^{(\rho\sigma)}_{i\nu} = C^{\mu}_{i}\, v_{\mu\nu}^{\rho\sigma},
+\qquad
+\bar h^{(\rho\sigma)}_{i\mu} = C^{\nu}_{i}\, v_{\mu\nu}^{\rho\sigma}
 \end{equation}
-i.e.\ neither the bra pair nor the ket pair may be packed triangularly on its own. Splitting the
-integrals into the parts that are symmetric and antisymmetric with respect to the exchange of the
-bra pair,
+are \emph{read} -- both roles from the same file, by the exchange symmetry \eq{eq:ao-joint-sym} --
+and the closed-shell sweep accumulates the three occupied-early intermediates
 \begin{equation}
-\label{eq:pm-def}
-V^{\pm}_{(\mu\nu)(\rho\sigma)} = v_{\mu\nu}^{\rho\sigma} \pm v_{\nu\mu}^{\rho\sigma},
-\qquad \mu \le \nu,\quad \rho \le \sigma,
+\label{eq:ao-occ-early}
+v_{ij}^{\rho\sigma} = h^{(\rho\sigma)}_{i\nu} C^{\nu}_{j},
+\qquad
+v_{i\nu}^{j\sigma} = h^{(\rho\sigma)}_{i\nu}\, R_{\rho}^{j},
+\qquad
+v_{\mu i}^{j\sigma} = \bar h^{(\rho\sigma)}_{i\mu}\, R_{\rho}^{j},
 \end{equation}
-converts the single joint symmetry \eq{eq:ao-joint-sym} into two independent ones: together with the
-hermiticity of the integrals, both $V^{+}$ and $V^{-}$ are symmetric (hermitian for complex
-integrals) matrices in the packed pair space,
-\begin{equation}
-V^{\pm}_{(\rho\sigma)(\mu\nu)} = \left(V^{\pm}_{(\mu\nu)(\rho\sigma)}\right)^*,
-\end{equation}
-so that \emph{both} index pairs are triangular. Only the lower block triangle has to be stored, and
-the store occupies $\approx n^4/4$ instead of the $n^4/2$ of the joint triangular packing.
+with the dressed occupied-ket coefficients $R^{j}_\rho$ of \eq{eq:ao-dressed-coeffs}; the
+open-shell sweep carries two coefficient sets and five such intermediates. Every dressed block of
+the residual (and the dressed Fock matrix) then follows from \eq{eq:ao-occ-early} by contracting
+the remaining AO indices with $L$ and $R$, and the ket contractions over $\rho$ are batched into
+level-3 BLAS products over accumulated slabs rather than performed as per-slab rank-one updates.
+Each element of the half-transformed store is read exactly once per iteration.
+
+When the half-transformed store has not been built (a single-shot doubles-only calculation, or its
+per-macro-iteration rebuild in orbital-optimized methods), the same intermediates are formed in one
+pass over the $\pm$ triangle instead, with the band half-transforms \eq{eq:ao-occ-early-half}
+computed on the fly from each reconstructed slab -- the identical sweep at $\approx n^4/4$
+streamed elements.
+
+\subsection{Four-external term from the $\pm$ supermatrices} \label{sec:pm-supermatrix-use}
+With the $\pm$ supermatrices of Sec.~\ref{sec:pm-store} both index pairs of the AO
+integrals are packed triangularly and only the lower block triangle is stored.
 
 With the effective pair density of \eq{eq:kext-K} transformed to the AO basis, $D^{ij}_{\rho\sigma}$,
 and folded in the same way,

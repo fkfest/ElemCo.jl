@@ -481,6 +481,61 @@ end
     generate_mo_dump(EC, cMO[:, 1:nao_ref-ndel])    # explicit drop of the same orbital
     e_ref = @fci
     @test abs(e_ao["FCI"] - e_ref["FCI"]) < 1e-7
+
+    # region-style "Deleted" virtuals at INTERIOR indices (the redundant-orbital case above
+    # always deletes the TRAILING orbital, and in sto-3g water 6:7 IS the trailing range, so a
+    # bigger basis is needed to discriminate): the derived dump must transform the ACTUAL kept
+    # columns. A trailing-truncation range would keep the deleted columns 7:8 and drop the two
+    # valid top virtuals 12:13 instead (caught by review on PR #363).
+    # NB direct function calls, no calculation macros: `@hf`/`@cc` run `@setupEC`, which picks up
+    # the testset-scope `geometry`/`basis` variables BY NAME and silently resets `EC.system`
+    # to sto-3g -- the input-script convenience is a trap inside test scopes.
+    EC = fresh(Dict("ao"=>"6-31g"))
+    EC.options.wf.freeze_nocc = 0
+    ElemCo.hf(EC)
+    cMO631 = Matrix(load_orbitals(EC).α)
+    en631 = ElemCo.Wavefunctions.fetch_orbital_energies(EC)
+    occ631 = ElemCo.Wavefunctions.fetch_orbital_occupations(EC)
+    basis631 = ElemCo.Wavefunctions.fetch_orbitals(EC)[3]
+    norb631 = size(cMO631, 2)
+    @test norb631 == 13                                 # water/6-31g; 7:8 is strictly interior
+    classes = fill("Virtual", norb631)
+    classes[1:5] .= "Closed"                            # all five occupied stay correlated
+    classes[7:8] .= "Deleted"                           # mid-range region deletions, PHYSICAL energies
+    ElemCo.Wavefunctions.dump_orbitals(EC, ElemCo.QMTensors.SpinMatrix(cMO631);
+      basis=basis631, type="Region-test", energies=(copy(en631[1]), Float64[]),
+      occupations=occ631, classes=(classes, String[]))
+    EC.options.int.ao_direct = false                    # force the DERIVE route for CCSD
+    e_der = ElemCo.ccdriver(EC, "ccsd")
+    EC = fresh(Dict("ao"=>"6-31g"))
+    EC.options.wf.freeze_nocc = 0
+    ao_integrals(EC)
+    generate_mo_dump(EC, cMO631[:, setdiff(1:norb631, 7:8)])   # explicit drop of the same two
+    e_ref = ElemCo.ccdriver(EC, "ccsd")
+    @test abs(e_der["HF"]   - e_ref["HF"])   < 1e-9
+    @test abs(e_der["CCSD"] - e_ref["CCSD"]) < 1e-8
+
+    # SVD-DC-CCSDT on the AO-direct route: the doubles residual is the AO-direct CCSD one and
+    # the SVD triples work from the system-DF 3-index integrals (cc.usedf, the default), so no
+    # MO integral set is needed.
+    EC = fresh(Dict("ao"=>"vdz", "mpfit"=>"cc-pvdz-rifit"))
+    EC.options.wf.freeze_nocc = 0
+    ElemCo.hf(EC)
+    e_svd = ElemCo.ccdriver(EC, "svd-dc-ccsdt")
+    @test abs(e_svd["SVD-DC-CCSDT"] - (-76.24145350597587)) < 1e-8
+
+    # ... and fit-free: cc.usedf=false Cholesky-decomposes the exact AO integrals straight
+    # from the ± store, element-wise (no joint array) -- no mpfit basis, no MO dump.
+    # The derive-route MO-basis Cholesky gives -76.24145246783 (4.6e-8 away: the AO- and
+    # MO-basis decompositions truncate different matrices at cholesky.thr, so the retained
+    # aux spaces differ); the 1.1e-6 gap to the DF value above is the fit error itself.
+    # Tolerance 1e-7: the pivoted-Cholesky truncation is the accuracy scale here.
+    EC = fresh(Dict("ao"=>"vdz"))
+    EC.options.wf.freeze_nocc = 0
+    ElemCo.hf(EC)
+    EC.options.cc.usedf = false
+    e_ff = ElemCo.ccdriver(EC, "svd-dc-ccsdt")
+    @test abs(e_ff["SVD-DC-CCSDT"] - (-76.24145242204338)) < 1e-7
   end
 end
 end
