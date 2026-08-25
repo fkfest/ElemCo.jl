@@ -11,6 +11,30 @@ export save_ecvariables_to_file
 export MolproInfo
 export get_molecule
 
+const MOLPRO_FILE_KEYS = ("XML", "ORBITALS", "ECORBITALS", "ECVARIABLES")
+
+function resolve_exportdata_file(exportdata_file::AbstractString; caller_dir::AbstractString="")
+  if isfile(exportdata_file)
+    return abspath(exportdata_file)
+  elseif !isempty(caller_dir)
+    candidate = joinpath(caller_dir, exportdata_file)
+    if isfile(candidate)
+      return abspath(candidate)
+    end
+  end
+  return exportdata_file
+end
+
+function resolve_exportdata_paths!(vardict::Dict{String, String}, exportdata_file::AbstractString)
+  base_dir = dirname(abspath(exportdata_file))
+  for key in MOLPRO_FILE_KEYS
+    if haskey(vardict, key) && !isabspath(vardict[key])
+      vardict[key] = normpath(joinpath(base_dir, vardict[key]))
+    end
+  end
+  return vardict
+end
+
 """
     MolproInfo
 
@@ -36,7 +60,9 @@ The exportdata file contains variable definitions in the format:
 Returns a `MolproInfo` object with parsed variables and XML document.
 """
 function MolproInfo(exportdata_file::AbstractString="elemcoil")
+  exportdata_file = resolve_exportdata_file(exportdata_file)
   vardict = parse_exportdata_file(exportdata_file)
+  resolve_exportdata_paths!(vardict, exportdata_file)
   @assert haskey(vardict, "XML") "No XML variable found in exportdata file"
   xml_doc = read(vardict["XML"], Node) 
   molecule = get_xml_last(xml_doc, "//molecule")
@@ -75,11 +101,11 @@ function parse_exportdata_file(exportdata_file::AbstractString)
   vardict = Dict{String, String}()
   open(exportdata_file, "r") do f
     done = false
-    while !done
+    # eof before readline: checking it after dropped the final line whenever
+    # the file ends directly after a `$VAR=value` (a trailing blank line
+    # masked it).  `Base.eof` qualified: XML.jl ≥ 0.4 also exports `eof`.
+    while !done && !Base.eof(f)
       line = readline(f)
-      if eof(f) 
-        break
-      end
       # Strip leading whitespace
       line = lstrip(line)
       # Skip empty and comment lines
@@ -114,7 +140,7 @@ Returns a vector of nodes that match the XPath expression.
 If `what` is an empty string, it returns the node itself.
 """
 function get_xml_info(node::Node, what::AbstractString)
-  return xpath(what, node)
+  return Utils.xpath(what, node)  # qualified: XML.jl ≥ 0.4 also exports `xpath`
 end
 
 """
@@ -128,7 +154,7 @@ If `what` is an empty string, it returns the nodes themselves.
 function get_xml_info(nodes::Vector{Node}, what::AbstractString)
   results = Node[]
   for node in nodes
-    append!(results, xpath(what, node))
+    append!(results, Utils.xpath(what, node))  # qualified: XML.jl ≥ 0.4 also exports `xpath`
   end
   return results
 end
@@ -211,6 +237,8 @@ If the node has non-simple children, it raises an error.
 function get_xml_variable_values(node::Node)
   values = String[]
   for child in children(node)
+    # XML.jl ≥ 0.4 preserves whitespace between elements as Text nodes; skip them
+    nodetype(child) == XML.Element || continue
     @assert is_simple(child) "Expected a simple node for variable value"
     push!(values, simple_value(child))
   end

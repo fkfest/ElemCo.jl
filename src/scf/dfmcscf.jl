@@ -7,8 +7,8 @@ using ..ElemCo.MSystems
 using ..ElemCo.DIIS
 using ..ElemCo.TensorTools
 using ..ElemCo.OrbTools
-using ..ElemCo.DFTools
-using ..ElemCo.DFHF
+using ..ElemCo.IntegralTools
+using ..ElemCo.HF
 using ..ElemCo.QMTensors
 using ..ElemCo.Wavefunctions
 

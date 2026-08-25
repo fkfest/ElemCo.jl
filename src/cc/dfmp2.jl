@@ -2,8 +2,8 @@
     calc_dfmp2(EC::ECInfo)
 
   Perform density-fitted MP2 calculation.
-  If `save` is set in [`CcOptions.save`](@ref ECInfos.CcOptions), save T2 amplitudes to 
-  `save`*"_2" file.
+  Materialize T2 amplitudes only when they are needed for an explicit doubles
+  save or for the MP2 lambda/property path.
 
   Args:
     EC: ECInfo object
@@ -11,64 +11,105 @@
   Returns:
     OutDict with keys "E", "ESS", "EOS", "EO" for MP2 correlation energy, SS, OS, and O contributions.
 """
-function calc_dfmp2(EC::ECInfo)
+function calc_dfmp2(EC::ECInfo{T}) where T
   t1 = time_ns()
   print_info("DF-MP2")
-  savet2 = !isempty(EC.options.cc.save)
   SP = EC.space
-  cMO = load_orbitals(EC)
-  if !is_restricted(cMO) || SP['o'] != SP['O']
-    error("Unrestricted orbitals not supported in DF-MP2. Call DF-UMP instead.")
-  end
-  c_Am = cMO[1]
-  nA = size(c_Am, 1)
-  c_Ao = c_Am[:,SP['o']]
-  c_Av = c_Am[:,SP['v']]
+  @assert SP['o'] == SP['O'] "DF-MP2 only supports restricted orbitals. Call DF-UMP instead."
   nocc = length(SP['o'])
   nvir = length(SP['v'])
-  C_PL = load2idx(EC, "C_PL")
-  nL = size(C_PL, 2)
-  Lvo = zeros(nL, nvir, nocc)
-  bao = generate_basis(EC, "ao")
-  bfit = generate_basis(EC, "mpfit")
-  Pbatches = BasisBatcher(bao, bfit)
-  maxP = max_batch_length(Pbatches)
-  lenbuf = auto_calc_buffer_length4calc_dfmp2(nocc, nvir, nA, nL, maxP, nocc)
-  lencbuf = buffer_size_3idx(Pbatches)
-  @buffer buf(lenbuf) begin
-  @buffer cbuf(Cdouble, lencbuf) begin
-  # @print_buffer_usage buf begin
-  for Pblk in Pbatches
-    P = range(Pblk)
-    lenP = length(P)
-    oAP = alloc!(buf, nocc, nA, lenP)
-    AAP = alloc!(buf, nA, nA, lenP)
-    eri_2e3idx!(AAP, cbuf, Pblk)
-    @mtensor oAP[i,ν,P] = c_Ao[μ,i] * AAP[μ,ν,P]
-    drop!(buf, AAP)
-    voP = alloc!(buf, nvir, nocc, lenP)
-    @mtensor voP[a,i,P] = c_Av[ν,a] * oAP[i,ν,P]
-    M_PL = alloc!(buf, lenP, nL)
-    M_PL .= @view C_PL[P,:]
-    @mtensor Lvo[L,a,i] += voP[a,i,P] * M_PL[P,L]
-    drop!(buf, oAP, voP, M_PL)
+  if EC.fd.df3idx
+    mmLfile, mmL = mmap3idx(EC, "mmL")
+    nL = size(mmL, 3)
+    Lvo = zeros(T, nL, nvir, nocc)
+    for L in 1:nL
+      Lvo[L,:,:] .= @view mmL[SP['v'],SP['o'],L]
+    end 
+    close(mmLfile)
+    t1 = print_time(EC, t1, "DF-MP2: load 3-index integrals", 1)
+  else
+    @assert T == Float64 "DF-MP2 with AO integrals only supports Float64."
+    cMO = load_orbitals(EC)
+    if !is_restricted(cMO) || SP['o'] != SP['O']
+      error("Unrestricted orbitals not supported in DF-MP2. Call DF-UMP instead.")
+    end
+    c_Am = cMO[1]
+    nA = size(c_Am, 1)
+    c_Ao = c_Am[:,SP['o']]
+    c_Av = c_Am[:,SP['v']]
+    C_PL = load2idx(EC, "C_PL")
+    nL = size(C_PL, 2)
+    Lvo = zeros(T, nL, nvir, nocc)
+    bao = generate_basis(EC, "ao")
+    bfit = generate_basis(EC, "mpfit")
+    Pbatches = BasisBatcher(bao, bfit)
+    maxP = max_batch_length(Pbatches)
+    lenbuf = auto_calc_buffer_length4calc_dfmp2(nocc, nvir, nA, nL, maxP)
+    lencbuf = buffer_size_3idx(Pbatches)
+    @buffer buf(lenbuf) begin
+    @buffer cbuf(Cdouble, lencbuf) begin
+    # @print_buffer_usage buf begin
+    for Pblk in Pbatches
+      P = range(Pblk)
+      lenP = length(P)
+      oAP = alloc!(buf, nocc, nA, lenP)
+      AAP = alloc!(buf, nA, nA, lenP)
+      eri_2e3idx!(AAP, cbuf, Pblk)
+      @mtensor oAP[i,ν,P] = c_Ao[μ,i] * AAP[μ,ν,P]
+      drop!(buf, AAP)
+      voP = alloc!(buf, nvir, nocc, lenP)
+      @mtensor voP[a,i,P] = c_Av[ν,a] * oAP[i,ν,P]
+      M_PL = alloc!(buf, lenP, nL)
+      M_PL .= @view C_PL[P,:]
+      @mtensor Lvo[L,a,i] += voP[a,i,P] * M_PL[P,L]
+      drop!(buf, oAP, voP, M_PL)
+    end
+    end #cbuf buffer
+    # end # print_buffer_usage
+    end # buf buffer
+    t1 = print_time(EC, t1, "DF-MP2: 3-index integrals", 1)
   end
-  end #cbuf buffer
-  t1 = print_time(EC, t1, "DF-MP2: 3-index integrals", 1)
   # Compute MP2 energy
   eps = load1idx(EC, "e_m")
   ϵo = eps[SP['o']]
   ϵv = eps[SP['v']]
-  if savet2
-    t2filename, description = save_or_start_file(EC, "T", 2)
-    t2filename *= "_2"
-    description *= " MP2"
-    T2file, T2 = newmmap(EC, t2filename, (nvir,nvir,nocc,nocc); description)
-    println("Save doubles amplitudes to file $t2filename")
+  savet2 = !isempty(EC.options.cc.save)
+  if savet2 || EC.options.cc.properties || !isempty(EC.options.wf.natorb)
+    T2file, T2 = newmmap(EC, "T_vvoo", (nvir,nvir,nocc,nocc);
+                         description="tmp DF-MP2 doubles amplitudes")
+    EMP2d, EMP2ex, EMP2diag = calc_dfmp2_energy_components(Lvo, ϵo, ϵv) do irange, j, t_vvij
+      T2[:,:,irange,j] .= t_vvij
+      permutedims!(@view(T2[:,:,j,irange]), t_vvij, (2,1,3))
+    end
+    if savet2
+      try2save_doubles!(EC, T2)
+    end
+    closemmap(EC, T2file, T2)
+  else
+    EMP2d, EMP2ex, EMP2diag = calc_dfmp2_energy_components(Lvo, ϵo, ϵv) do irange, j, t_vvij
+    end
   end
-  EMP2d = 0.0
-  EMP2ex = 0.0
-  EMP2diag = 0.0
+  t1 = print_time(EC, t1, "energy calculation", 1)
+  EMP2SS = real(2*EMP2d - 2*EMP2ex)
+  EMP2OS = real(2*EMP2d + EMP2diag)
+  EMP2 = EMP2SS + EMP2OS
+  return OutDict("E"=>EMP2, "ESS"=>EMP2SS, "EOS"=>EMP2OS, "EO"=>0.0)
+end
+
+"""
+    calc_dfmp2_energy_components(store_doubles!, Lvo, ϵo, ϵv)
+
+  Accumulate the DF-MP2 energy components and call `store_doubles!` for each
+  completed `t_vvij` block when doubles amplitudes must be materialized.
+"""
+function calc_dfmp2_energy_components(store_doubles!, Lvo, ϵo, ϵv)
+  nvir = size(Lvo, 2)
+  nocc = size(Lvo, 3)
+  EMP2d = zero(eltype(Lvo))
+  EMP2ex = zero(eltype(Lvo))
+  EMP2diag = zero(eltype(Lvo))
+  lenbuf = auto_calc_buffer_length4calc_dfmp2_2(nvir, nocc)
+  @buffer buf(eltype(Lvo), lenbuf) begin
   for j = 1:nocc
     irange = 1:j
     leni = length(irange)
@@ -87,33 +128,22 @@ function calc_dfmp2(EC::ECInfo)
     if leni > 1
       v!vvij = @mview vvij[:,:,1:leni-1]
       v!t_vvij = @mview t_vvij[:,:,1:leni-1]
-      @mtensor EMP2d += v!vvij[a,b,i] * v!t_vvij[a,b,i]
-      @mtensor EMP2ex += v!vvij[a,b,i] * v!t_vvij[b,a,i]
+      @mtensor EMP2d += conj(v!vvij[a,b,i]) * v!t_vvij[a,b,i]
+      @mtensor EMP2ex += conj(v!vvij[a,b,i]) * v!t_vvij[b,a,i]
     end
     v!vvii = @mview vvij[:,:,j]
     v!t_vvii = @mview t_vvij[:,:,j]
-    @mtensor EMP2diag += v!vvii[a,b] * v!t_vvii[a,b]
+    @mtensor EMP2diag += conj(v!vvii[a,b]) * v!t_vvii[a,b]
+    store_doubles!(irange, j, t_vvij)
     drop!(buf, vvij, t_vvij)
-    if savet2
-      T2[:,:,irange,j] .= t_vvij
-      permutedims!(@view(T2[:,:,j,irange]), t_vvij, (2,1,3))
-    end
   end
-  if savet2
-    closemmap(EC, T2file, T2)
-  end
-  t1 = print_time(EC, t1, "energy calculation", 1)
-  # end # print_buffer_usage
   end # buf buffer
-  EMP2SS = 2*EMP2d - 2*EMP2ex
-  EMP2OS = 2*EMP2d + EMP2diag
-  EMP2 = EMP2SS + EMP2OS
-  return OutDict("E"=>EMP2, "ESS"=>EMP2SS, "EOS"=>EMP2OS, "EO"=>0.0)
+  return EMP2d, EMP2ex, EMP2diag
 end
 
 # Function to calculate length for buffer(s) buf
 # autogenerated by @print_buffer_usage
-function auto_calc_buffer_length4calc_dfmp2(nocc, nvir, nA, nL, lenP, leni)
+function auto_calc_buffer_length4calc_dfmp2(nocc, nvir, nA, nL, lenP)
     buf = [0, 0]
     begin
         oAP = pseudo_alloc!(buf, nocc, nA, lenP)
@@ -123,6 +153,13 @@ function auto_calc_buffer_length4calc_dfmp2(nocc, nvir, nA, nL, lenP, leni)
         M_PL = pseudo_alloc!(buf, lenP, nL)
         pseudo_drop!(buf, oAP, voP, M_PL)
     end
+    return buf[2]
+end
+
+# Function to calculate length for buffer(s) buf
+# autogenerated by @print_buffer_usage
+function auto_calc_buffer_length4calc_dfmp2_2(nvir, leni)
+    buf = [0, 0]
     begin
         vvij = pseudo_alloc!(buf, nvir, nvir, leni)
         t_vvij = pseudo_alloc!(buf, nvir, nvir, leni)

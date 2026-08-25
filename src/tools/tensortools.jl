@@ -7,6 +7,7 @@ using ..ElemCo.ECInfos
 using ..ElemCo.FciDumps
 using ..ElemCo.MIO
 using ..ElemCo.MTensorOperations
+using ..ElemCo.ALPACADecomposition
 
 export save!, load, load_all, load!, mmap, newmmap, closemmap, flushmmap
 export load1idx, load2idx, load3idx, load4idx, load5idx, load6idx
@@ -20,6 +21,7 @@ export print_nonzeros
 export @mtensor, @mtensoropt
 export @tensor, @tensoropt 
 export @mview, mview
+export @buftensor
 
 """
     save!(EC::ECInfo, fname::String, a::AbstractArray...; description="tmp", overwrite=true)
@@ -53,19 +55,19 @@ function load(EC::ECInfo, fname::String)
 end
 
 """
-    load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+    load(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
 
   Type-stable load array from file `fname` in EC.scr directory.
 
   The type `T` and number of dimensions `N` are given explicitly.
   If `skip_error` is true, return empty `Array{T,N}` if the dimension/type is wrong.
 """
-function load(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+function load(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
   return mioload(fullfilename(EC, fname), Val(N), T; skip_error)[1]
 end
 
 """
-    load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+    load_all(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
 
   Type-stable load arrays from file `fname` in EC.scr directory.
 
@@ -73,7 +75,7 @@ end
   Return an array of arrays.
   If `skip_error` is true, return empty `Array{T,N}[Array{T,N}()]` if the dimension/type is wrong.
 """
-function load_all(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64; skip_error=false) where {N}
+function load_all(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; skip_error=false) where {N, Ty}
   return mioload(fullfilename(EC, fname), Val(N), T; skip_error)
 end
 
@@ -81,10 +83,10 @@ for N in 1:6
   loadN = Symbol("load$(N)idx")
   loadNall = Symbol("load$(N)idx_all")
   @eval begin
-    function $loadN(EC::ECInfo, fname::String, T::Type=Float64; skip_error=false)
+    function $loadN(EC::ECInfo{Ty}, fname::String, T::Type=Ty; skip_error=false) where Ty
       return load(EC, fname, Val($N), T; skip_error)
     end
-    function $loadNall(EC::ECInfo, fname::String, T::Type=Float64; skip_error=false)
+    function $loadNall(EC::ECInfo{Ty}, fname::String, T::Type=Ty; skip_error=false) where Ty
       return load_all(EC, fname, Val($N), T; skip_error)
     end
   end
@@ -103,13 +105,13 @@ function load!(EC::ECInfo, fname::String, arrs::AbstractArray{T,N}...; skip_erro
 end
 
 """
-    newmmap(EC::ECInfo, fname::String, dims::Tuple{Vararg{Int}}, Type=Float64; description="tmp")
+    newmmap(EC::ECInfo{Ty}, fname::String, dims::Tuple{Vararg{Int}}, Type=Ty; description="tmp")
 
   Create a new memory-map file for writing (overwrites existing file).
   Add file to `EC.files` with `description`.
   Return a pointer to the file and the mmaped array.
 """
-function newmmap(EC::ECInfo, fname::String, dims::NTuple{N,Int}, Type=Float64; description="tmp") where {N}
+function newmmap(EC::ECInfo{Ty}, fname::String, dims::NTuple{N,Int}, Type=Ty; description="tmp") where {N, Ty}
   add_file!(EC, fname, description; overwrite=true)
   return mionewmmap(fullfilename(EC, fname), dims, Type)
 end
@@ -142,18 +144,18 @@ function mmap(EC::ECInfo, fname::String)
   return miommap(fullfilename(EC, fname))
 end
 
-function mmap(EC::ECInfo, fname::String, ::Val{N}, T::Type=Float64) where {N}
-  return miommap(fullfilename(EC, fname), Val(N), T)
+function mmap(EC::ECInfo{Ty}, fname::String, ::Val{N}, T::Type=Ty; writable::Bool=false) where {N, Ty}
+  return miommap(fullfilename(EC, fname), Val(N), T; writable)
 end
 
 for N in 1:6
   mmapN = Symbol("mmap$(N)idx")
   mmapNall = Symbol("mmap$(N)idx_all")
   @eval begin
-    function $mmapN(EC::ECInfo, fname::String, T::Type=Float64)
-      return mmap(EC, fname, Val($N), T)
+    function $mmapN(EC::ECInfo{Ty}, fname::String, T::Type=Ty; writable::Bool=false) where Ty
+      return mmap(EC, fname, Val($N), T; writable)
     end
-    function $mmapNall(EC::ECInfo, fname::String, T::Type=Float64)
+    function $mmapNall(EC::ECInfo{Ty}, fname::String, T::Type=Ty) where Ty
       return load_all(EC, fname, Val($N), T)
     end
   end
@@ -170,7 +172,9 @@ end
 function ints1(EC::ECInfo, spaces::String, spincase = nothing)
   sc = spincase
   if isnothing(sc)
-    if isalphaspin(spaces[1],spaces[2])
+    if occursin('p', spaces)
+      sc = :p
+    elseif isalphaspin(spaces[1], spaces[2])
       sc = :α
     else
       sc = :β
@@ -217,7 +221,7 @@ function spincase_from_4spaces(spaces::String)
 end
 
 """ 
-    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+    ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
 
   Return subset of 2e⁻ integrals according to spaces `sp1`, `sp2`, `sp3`, `sp4`.
 
@@ -226,11 +230,15 @@ end
   If the last two indices are stored as triangular - make them full.
   The result is stored in `out`.
 """
-function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
+function ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
   if EC.fd.uhf && spincase == :αβ
     @assert size(out) == (length(sp1),length(sp2),length(sp3),length(sp4))
     out .= @view integ2_os(EC.fd)[sp1,sp2,sp3,sp4]
     return out
+  end
+  SP = EC.space
+  if EC.options.wf.npositron > 0 && spincase == :p
+    return integ2(EC.fd,spincase)[sp1,sp2,sp3,sp4]
   end
   allint = integ2_ss(EC.fd, spincase)
   @assert ndims(allint) == 3
@@ -248,13 +256,13 @@ end
   The `spincase`∈{`:α`,`:β`,`:αβ`} has to be explicitly given.
   If the last two indices are stored as triangular - make them full.
 """
-function ints2(EC::ECInfo, sp1, sp2, sp3, sp4, spincase)
-  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+function ints2(EC::ECInfo{T}, sp1, sp2, sp3, sp4, spincase) where T
+  out = Array{T,4}(undef, length(sp1), length(sp2), length(sp3), length(sp4))
   return ints2!(out, EC, sp1, sp2, sp3, sp4, spincase)  
 end
 
 """ 
-    ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+    ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, spaces::String, spincase = nothing)
 
   Return subset of 2e⁻ integrals according to spaces. 
   
@@ -263,7 +271,7 @@ end
   If the last two indices are stored as triangular - make them full.
   The result is stored in `out`.
 """
-function ints2!(out::AbstractArray{Float64,4}, EC::ECInfo, spaces::String, spincase = nothing)
+function ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, spaces::String, spincase = nothing)
   if isnothing(spincase)
     sc = spincase_from_4spaces(spaces)
   else 
@@ -297,8 +305,8 @@ end
 
   Return full 2e⁻ integrals <sp1 sp2 | sp3 sp4> from allint2 with last two indices as a triangular index.
 """
-function detri_int2(allint2, norb, sp1, sp2, sp3, sp4)
-  out = Array{Float64,4}(undef,length(sp1),length(sp2),length(sp3),length(sp4))
+function detri_int2(allint2::AbstractArray{T,3}, norb, sp1, sp2, sp3, sp4) where T
+  out = Array{T,4}(undef, length(sp1), length(sp2), length(sp3), length(sp4))
   return detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
 end
 
@@ -319,17 +327,31 @@ function detri_int2!(out, allint2, norb, sp1, sp2, sp3, sp4)
 end
 
 """ 
-    sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
+    sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false, max_rank::Integer = 0)
 
   Return NON-SYMMETRIC (pseudo)sqrt-inverse of a hermitian matrix using Cholesky decomposition.
   
   Starting from ``A^{-1} = A^{-1} L (A^{-1} L)^† = M M^†``
   with ``A = L L^†``.
   By solving the equation ``L^† M = 1`` (for low-rank: using QR decomposition).
+
+  If `max_rank > 0`, use LPACA decomposition with explicit rank control
+  instead of threshold-based Cholesky truncation.
+
   Return `M`.
 """
-function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
-  CA = cholesky(Symmetric(A), RowMaximum(), check = false, tol = tol)
+function sqrtinvchol(A::AbstractMatrix; tol = 1e-8, verbose = false, max_rank::Integer = 0)
+  if max_rank > 0
+    result = lpaca(Hermitian(A); tol = tol, max_rank = max_rank)
+    L = result.left
+    r = size(L, 2)
+    if verbose && r < size(A, 1)
+      redund = size(A, 1) - r
+      println("$redund vectors removed using ALPACA decomposition")
+    end
+    return L' \ Matrix(I, r, r)
+  end
+  CA = cholesky(Hermitian(A), RowMaximum(), check = false, tol = tol)
   if CA.rank < size(A,1)
     if verbose
       redund = size(A,1) - CA.rank
@@ -357,14 +379,16 @@ function invchol(A::AbstractMatrix; tol = 1e-8, verbose = false)
 end
 
 """ 
-    rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector)
+    rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true, warn_n_complex=0)
 
   Transform complex eigenvectors of a real matrix to a real space 
   such that they block-diagonalize the matrix.
 
+  If verbose is false, only information about the first `warn_n_complex` eigenvalues will be printed.
+
   Return the eigenvectors and "eigenvalues" (the diagonal of the matrix) in the real space.
 """
-function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector)
+function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVector; verbose=true, warn_n_complex=0)
   evecs_real::Matrix{Float64} = real.(evecs)
   evals_real::Vector{Float64} = real.(evals)
   npairs = 0
@@ -384,7 +408,9 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
       continue
     end
     i = idx[ii]
-    println("complex eigenvalue: ", evals[i], " ", i)
+    if verbose || i <= warn_n_complex
+      println("complex eigenvalue: ", evals[i], " ", i)
+    end
     # find the complex conjugate eigenvalue
     # and the corresponding eigenvector
     iicc = ii+1
@@ -399,15 +425,16 @@ function rotate_eigenvectors_to_real(evecs::AbstractMatrix, evals::AbstractVecto
     evecs_real[:,inext] = imag.(@view(evecs[:,inext]))
     normalize!(@view(evecs_real[:,i]))
     normalize!(@view(evecs_real[:,inext]))
-    evals_real[inext] = real(evals[inext])
+    evals_real[inext] = real(evals[inext])  
     npairs += 1
   end
-
-  println("$npairs eigenvector pairs rotated to the real space")
+  if verbose
+    println("$npairs eigenvector pairs rotated to the real space")
+  end
   return evecs_real, evals_real
 end
 
-function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64})
+function rotate_eigenvectors_to_real(evecs::Matrix{Float64}, evals::Vector{Float64}; verbose=true, warn_n_complex=0)
   return evecs, evals
 end
 
@@ -420,7 +447,7 @@ end
 """
 function balance_norms!(evecs::AbstractMatrix, leftvecs=nothing)
   if isnothing(leftvecs)
-    leftvecs = (inv(evecs))'
+    leftvecs = transpose(inv(evecs))
   end
   for i in axes(evecs,2)
     nrm = norm(evecs[:,i])

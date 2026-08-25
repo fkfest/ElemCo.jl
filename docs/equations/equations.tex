@@ -1,5 +1,6 @@
 \documentclass[a4paper,12pt,oneside]{book}
 \usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{amsfonts}
@@ -62,6 +63,7 @@
 \newcommand{\sect}[1]{Sec.~\ref{#1}}
 \newcommand{\spa}[1]{{#1}}
 \newcommand{\spb}[1]{\bar{#1}}
+\newcommand{\pos}[1]{{#1}^{+}}
 \newcommand{\st}[1]{\mathfrak{#1}}
 \newcommand{\dg}{\dagger}
 \newcommand{\lk}{\left}
@@ -70,6 +72,8 @@
 \newcommand{\elemcoil}{\textsf{ElemCo.jl}}
 \newcommand{\quantwo}{\textsf{Quantwo} }
 \newcommand{\cmd}[1]{\texttt{#1}}
+\newcommand{\cdk}[1]{{\color{blue}{DK: #1}}}
+\newcommand{\cks}[1]{{\color{green}{KS: #1}}}
 % for presubscripts and presuperscripts (e.g., \pre{^x}U_a)
 \newcommand{\pre}[1]{\,#1\!}
 % Define \lt and \gt for `less than' and `greater than'
@@ -79,16 +83,16 @@
 
 \begin{document}
 \title{Equations and derivations for \elemcoil}
-\author{Thomas Schraivogel, Fangcheng Wu and Daniel Kats}
+\author{Daniel Kats, Charlotte Rickert, Thomas Schraivogel,\\ Denis Usvyat, Fangcheng Wu, Kristoffer Simula}
 \maketitle
 \tableofcontents
 \chapter{Introduction}
 \section{General}
-In this document we collect the equations and derivations for methods implemented in the \elemcoil package.
+In this document we collect the equations and derivations for methods implemented in the \elemcoil\ package.
 The final goal is to have a document which can be used as a reference for the equations and derivations.
 The final equations should also be contained in the code as docstrings or copied to the corresponding Markdown files.
 
-\section{Notation}
+\section{Notation} \label{sec:notation}
 
 We use the following notation throughout the document.
 
@@ -139,7 +143,7 @@ Antisymmetrization operators:
 \chapter{Integrals}
 \section{Density fitting and Cholesky decomposition}
 \label{sec:df}
-The electron-repulsion integrals in \elemcoil are obtained either from an external program 
+The electron-repulsion integrals in \elemcoil\ are obtained either from an external program 
 through an FCIDUMP \cite{knowlesDeterminant1989} interface, 
 or are calculated using the density-fitting approximation using an
 interface to the \texttt{libcint}\cite{libcint} library.
@@ -172,8 +176,8 @@ with $\delta^{K}_{L}$ being the Kronecker delta.
 If $L^{P}_{L}$ is low-rank, the equation is solved using the QR decomposition,
 otherwise it can be solved by simple back-substitution.
 
-The transformed density-fitted integrals which are used throughout \elemcoil
-are then calculated by multiplying the density-fitted 3-index 
+The transformed density-fitted integrals which are used throughout \elemcoil\ are 
+then calculated by multiplying the density-fitted 3-index 
 integrals with the non-symmetric square root of the inverse,
 \begin{equation}
   v_{p}^{rL} = v_{p}^{rP} C_P^L,
@@ -181,36 +185,14 @@ integrals with the non-symmetric square root of the inverse,
 and the density-fitted 4-index integrals can be calculated by
 \begin{equation}
   v_{pq}^{rs} \approx \sum_L v_{p}^{rL} v_{q}^{sL}.
+  \label{eq:df_eri}
 \end{equation}
 
-If all integrals are calculated using the density-fitting approximation using \textit{mp2fit}
-fitting basis in \elemcoil,
-the correction terms are added using the \textit{jkfit} fitting basis
-to the one-body and zero-body terms of the Hamiltonian in order to ensure that the 
-reference energy and the Fock matrix from DF-HF is not changed by the density-fitting approximation,
-\begin{equation}
-  \begin{aligned}
-    \tilde h_p^q &= \tilde f_p^q 
-    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL}\right)\\
-    \tilde E_0 &= E_0 + h_i^i - \tilde h_i^i + \tilde f_I^I, 
-  \end{aligned} 
-\end{equation}
-where 
-\begin{equation}
-  \begin{aligned}
-    \tilde f_p^q &= h_p^q + \sum_{\tilde L} \left(2v_{p}^{q\tilde L} v_{\tilde i}^{\tilde i\tilde L} 
-    - v_{p}^{\tilde i\tilde L} v_{\tilde i}^{q\tilde L}\right),
-  \end{aligned} 
-\end{equation}
-and $I$ denotes the core orbitals (cf. \sect{sec:frozen-core}), 
-$\tilde i$ denote all occupied orbitals (including core)
-and other indices do not include the core orbitals.
-$\tilde L$ corresponds to the \textit{jkfit} density-fitting basis functions,
-and $L$ corresponds to the \textit{mpfit} density-fitting basis functions.
+
 \section{Frozen-core approximation}
 \label{sec:frozen-core}
 The frozen-core approximation is used to reduce the number of orbitals in the correlated 
-calculation. The frozen-core approximation is implemented in \elemcoil by
+calculation. The frozen-core approximation is implemented in \elemcoil\ by
 setting the corresponding integrals to zero and adding their contribution to the
 one-particle and zero-particle part of the Hamiltonian,
 \begin{equation}
@@ -219,7 +201,8 @@ one-particle and zero-particle part of the Hamiltonian,
     \tilde E_0 &= E_0 + 2 h_I^I + 2 v_{IJ}^{IJ} - v_{IJ}^{JI},
   \end{aligned}
 \end{equation}
-where $I, J$ denote the core orbitals, and other indices do not include the core orbitals.
+where $\tilde h$ and $\tilde E_0$ denote the corrected one-body and zero-body terms, 
+$I, J$ denote the core orbitals, and other indices do not include the core orbitals.
 For the UHF Hamiltonian, the frozen-core approximation is implemented as
 \begin{equation}
   \begin{aligned}
@@ -236,9 +219,93 @@ For the UHF Hamiltonian, the frozen-core approximation is implemented as
 \end{equation}
 
 If the frozen-core approximation is used in combination with the density-fitting approximation,
-\textit{jkfit} correction terms are added to the one-body and zero-body terms of the Hamiltonian in order to ensure that the
+\textit{JKFIT} correction terms are added to the one-body and zero-body terms of the Hamiltonian in order to ensure that the
 reference energy and the Fock matrix from DF-HF is not changed by the frozen-core approximation,
-cf. \sect{sec:df}.
+cf. \sect{sec:dfcorrection}.
+
+\section{JKFIT/MPFIT correction} \label{sec:dfcorrection}
+If the integrals are calculated using the density-fitting approximation using \textit{MPFIT}
+fitting basis in \elemcoil, 
+the correction terms are added using the \textit{JKFIT} fitting basis
+to the one-body and zero-body terms of the Hamiltonian in order to ensure that the 
+reference energy and the Fock matrix calculated using \textit{MPFIT}-fitted integrals
+coincide with those from DF-HF (which employs the \textit{JKFIT} fitting basis), i.e.,
+\begin{equation}
+  \begin{aligned}
+    \label{eq:df-correction}
+    \tilde h_p^q &= \tilde f_p^q 
+    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL}\right)\\
+    \tilde E_0 &= E_0 + h_i^i - \tilde h_i^i + \tilde f_I^I, 
+  \end{aligned} 
+\end{equation}
+where $\tilde h$ and $\tilde E_0$ denote the corrected one-body and zero-body terms,
+\begin{equation}
+  \begin{aligned}
+    \label{eq:df-correction-fock}
+    \tilde f_p^q &= h_p^q + \sum_{\tilde L} \left(2v_{p}^{q\tilde L} v_{\hat i}^{\hat i\tilde L} 
+    - v_{p}^{\hat i\tilde L} v_{\hat i}^{q\tilde L}\right),
+  \end{aligned} 
+\end{equation}
+and $I$ denotes the core orbitals (cf. \sect{sec:frozen-core}), 
+$\hat i$ denote all occupied orbitals (including core)
+and other indices do not include the core orbitals.
+$\tilde L$ corresponds to the \textit{JKFIT} density-fitting basis functions,
+and $L$ corresponds to the \textit{MPFIT} density-fitting basis functions.
+
+\section{Exact AO integrals: the $\pm$ supermatrix store} \label{sec:pm-store}
+The exact (non-density-fitted) four-index AO integrals are stored as the $\pm$
+supermatrices, the only representation from which both Hartree--Fock
+(Sec.~\ref{sec:ao-hf}) and the AO-driven coupled-cluster methods
+(Sec.~\ref{sec:ao-direct}) contract directly.
+
+Real AO integrals possess the full eight-fold permutational symmetry, which would in principle
+permit an $n^4/8$ packing. The store, however, is built on the smaller symmetry group that
+survives for \emph{complex} and for similarity-transformed integrals: the \emph{joint} exchange
+symmetry
+\begin{equation}
+\label{eq:ao-joint-sym}
+v_{\mu\nu}^{\rho\sigma} = v_{\nu\mu}^{\sigma\rho}
+\end{equation}
+together with hermiticity, $v_{\mu\nu}^{\rho\sigma} = \left(v_{\rho\sigma}^{\mu\nu}\right)^*$.
+In this group neither the bra pair nor the ket pair may be packed triangularly on its own. Splitting the
+integrals into the parts that are symmetric and antisymmetric with respect to the exchange of the
+bra pair,
+\begin{equation}
+\label{eq:pm-def}
+V^{\pm}_{(\mu\nu)(\rho\sigma)} = v_{\mu\nu}^{\rho\sigma} \pm v_{\nu\mu}^{\rho\sigma},
+\qquad \mu \le \nu,\quad \rho \le \sigma,
+\end{equation}
+converts the single joint symmetry \eq{eq:ao-joint-sym} into two independent ones: together with the
+hermiticity of the integrals, both $V^{+}$ and $V^{-}$ are symmetric (hermitian for complex
+integrals) matrices in the packed pair space,
+\begin{equation}
+V^{\pm}_{(\rho\sigma)(\mu\nu)} = \left(V^{\pm}_{(\mu\nu)(\rho\sigma)}\right)^*,
+\end{equation}
+so that \emph{both} index pairs are triangular. Only the lower block triangle has to be stored, and
+the store occupies $\approx n^4/4$ instead of the $n^4/2$ of the joint triangular packing.
+
+\subsection{Storage layout and generation}
+Both $V^{+}$ and $V^{-}$ are kept as their lower \emph{block} triangles over the packed pair
+space, written as $\sigma$-aligned column panels; the upper part is the (conjugate-)hermitian
+mirror, reconstructed at read time. The $\pm$ fold is fused into the integral generation: each
+shell-aligned ket-column block is assembled in a bounded slab of memory, folded according to
+\eq{eq:pm-def} and written directly as panels, so no jointly packed $n^4/2$ intermediate exists at
+any point, on disk or in memory. Since the stored rows of a panel are bounded below by the panel's
+own block, the ERI kernel skips every bra shell pair lying entirely below that row floor
+(the kept-pair predicate $\max(\mu,\nu)\ge\sigma_{\mathrm{block\,start}}$ is exact for
+shell-aligned blocks), which removes roughly half of the integral evaluations without any
+screening approximation.
+
+The half-transformed store of \eq{eq:ao-halftrans} is kept pair-packed as well,
+$\left[(i\nu),\, o,\, (\rho\sigma)\right]$ with $\rho\le\sigma$ and both ket orders stored
+($o=1$: $(\rho,\sigma)$; $o=2$: $(\sigma,\rho)$) -- the layout in which each output pair block
+owns its column range outright, so the out-of-core gather writes every block exactly once. By the
+exchange symmetry \eq{eq:ao-joint-sym} a single file serves both half-transform roles of
+\eq{eq:ao-occ-early-half}. The gather reads each $\pm$ element approximately twice (the native
+panel sequentially through the memory map, the mirror rows of earlier panels by positional reads
+with read-ahead advice), and the store is subsequently streamed by whole $\sigma$-columns for the
+integral blocks of the correlated methods.
+
 
 \chapter{Hartree-Fock}
 \section{Density-fitted Hartree-Fock}
@@ -259,7 +326,7 @@ f_\mu^\nu &= h_\mu^\nu + 2\sum_L\left(v_{\mu'}^{iL} C^{\dagger\mu'}_i\right) v_{
 v_{\mu}^{iL} &= v_{\mu}^{\nu L} C_{\nu}^i.
 \end{aligned}
 \end{equation}
-Note that our orbitals are real, and therefore $v^{\dagger\mu}_{iL} = v_{\mu}^{iL}$, 
+Note that if the orbitals are real, $v^{\dagger\mu}_{iL} = v_{\mu}^{iL}$, 
 and $C^{\dagger\mu}_i = C_{\mu}^i$.
 
 The unrestricted Hartree-Fock equations are given (for $\alpha$ spin) by
@@ -318,6 +385,43 @@ which has to be taken into account in the equations.
 
 The residual of the Hartree-Fock equations, which can be used in DIIS, is equivalent to
 \eq{eq:hf-residual}, with the overlap matrix $S_{\mu}^{\nu}$ removed.
+
+
+\section{Hartree--Fock from exact AO integrals} \label{sec:ao-hf}
+When the exact four-index AO integrals are available as the $\pm$ supermatrices of
+Sec.~\ref{sec:pm-store}, the Fock matrix is assembled directly from the stored lower block
+triangle, without ever forming the full $v_{\mu\nu}^{\rho\sigma}$ tensor. With the (spin-summed)
+AO density $\gamma_{\nu}^{\sigma} = 2\,C_{\nu}^{i} C^{\dagger\sigma}_{i}$ the closed-shell Fock
+matrix is
+\begin{equation}
+f_\mu^\nu = h_\mu^\nu + J_\mu^\nu - \half K_\mu^\nu,
+\qquad
+J_\mu^\nu = v_{\mu\rho}^{\nu\sigma}\, \gamma_{\sigma}^{\rho},
+\qquad
+K_\mu^\nu = v_{\mu\rho}^{\sigma\nu}\, \gamma_{\sigma}^{\rho}.
+\end{equation}
+The store is streamed once per SCF iteration, one ket-pair column $(\rho\sigma)$, $\rho\le\sigma$,
+at a time: the dense slab $v_{\mu\nu}^{\rho\sigma}$ is reconstructed from
+$\half(V^{+}+V^{-})$ and its hermitian mirror, and contributes the band products
+\begin{equation}
+\label{eq:ao-jk-slab}
+J_\mu^{\rho} \mathrel{+}= v_{\mu\nu}^{\rho\sigma}\,\gamma_{\nu}^{\sigma},\qquad
+J_\mu^{\sigma} \mathrel{+}= v_{\nu\mu}^{\rho\sigma}\,\gamma_{\nu}^{\rho},\qquad
+K_\mu^{\sigma} \mathrel{+}= v_{\mu\nu}^{\rho\sigma}\,\gamma_{\nu}^{\rho},\qquad
+K_\mu^{\rho} \mathrel{+}= v_{\nu\mu}^{\rho\sigma}\,\gamma_{\nu}^{\sigma},
+\end{equation}
+so the working memory is $\mathcal{O}(n^2)$ regardless of the basis size. For a real symmetric
+density (the HF case, $\gamma = \gamma^{T}$) the Fock matrices are symmetric and the mirror
+contributions of \eq{eq:ao-jk-slab} are the transposes of the native ones; they are skipped
+entirely and restored at the end by the symmetrization
+\begin{equation}
+A \leftarrow A + A^{T} + A_{\mathrm d},
+\end{equation}
+where $A_{\mathrm d}$ collects the (self-mirroring) diagonal-tile band separately to avoid double
+counting -- approximately halving the number of band products. The unrestricted Fock matrices are
+built in the \emph{same} single sweep: the shared Coulomb term from
+$\pre{^\alpha}\gamma + \pre{^\beta}\gamma$ and the two same-spin exchange terms from
+$\pre{^\alpha}\gamma$ and $\pre{^\beta}\gamma$ per slab.
 
 \chapter{Density-Fitted Multiconfigurational Self-Consistent Field}
 \section{Orbital Rotation}
@@ -575,6 +679,347 @@ If the $\bf{SO\_SCI\_origin}$ option is set to be $false$,
 \end{equation}
 and the rest blocks of Hessian matrix remain the same.
 
+\chapter{MP2: Second-Order M{\o}ller--Plesset Perturbation Theory}
+\label{ch:mp2}
+
+\section{Spin-Orbital Formulation}
+\label{sec:spin-orbital-mp2}
+
+In the spin-orbital basis, the MP2 correlation energy is
+\begin{equation}
+\label{eq:spin-orbital-mp2}
+E^{(2)} = \frac{1}{4} \sum_{IJAB} \frac{(v_{IJ}^{AB} - v_{IJ}^{BA})(v^{IJ}_{AB} - v^{IJ}_{BA})}
+{\varepsilon_I + \varepsilon_J - \varepsilon_A - \varepsilon_B},
+\end{equation}
+where $I,J,A,B$ denote \emph{spin-orbitals}.
+The factor $\tfrac{1}{4}$ compensates for unrestricted summation over equivalent 
+excitations $(IJ \leftrightarrow JI, AB \leftrightarrow BA)$.
+
+
+\section{Closed-Shell RHF--MP2}
+\label{sec:rhf-mp2}
+
+For a closed-shell RHF reference, $\alpha$ and $\beta$ electrons occupy 
+the same spatial orbitals with identical orbital energies. We sum over 
+spin explicitly.
+
+\subsection{Spin Cases}
+The integral $v_{i_{\sigma_1} j_{\sigma_2}}^{a_{\sigma_3} b_{\sigma_4}}$
+is nonzero only when $\sigma_1 = \sigma_3$ and $\sigma_2 = \sigma_4$ (spin conservation).
+
+\paragraph{Same-spin ($\alpha\alpha$ and $\beta\beta$).}
+Both direct and exchange terms survive:
+\begin{equation}
+v_{i_\alpha j_\alpha}^{a_\alpha b_\alpha} - v_{i_\alpha j_\alpha}^{b_\alpha a_\alpha} 
+= v_{ij}^{ab} - v_{ij}^{ba}.
+\end{equation}
+
+\paragraph{Opposite-spin ($\alpha\beta$ and $\beta\alpha$).}
+The exchange term vanishes by spin orthogonality:
+\begin{equation}
+v_{i_\alpha j_\beta}^{a_\alpha b_\beta} = v_{ij}^{ab}.
+\end{equation}
+
+\subsection{Spin Summation}
+Denoting $\Delta_{IJAB} = \varepsilon_I + \varepsilon_J - \varepsilon_A - \varepsilon_B$
+and converting to spatial orbitals, we must account for overcounting.
+
+\paragraph{Same-spin ($\alpha\alpha + \beta\beta$).}
+Each spatial configuration $(i,j,a,b)$ appears 4 times in the spin-orbital sum
+(swapping $i \leftrightarrow j$ and $a \leftrightarrow b$). With two identical 
+spin cases and the $\tfrac{1}{4}$ factor:
+\begin{equation}
+E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} 
+= 2 \times \frac{1}{4} \sum_{ijab} \frac{(v_{ij}^{ab} - v_{ij}^{ba})(v_{ab}^{ij} - v_{ba}^{ij})}{\Delta_{ijab}}.
+\end{equation}
+
+\paragraph{Opposite-spin ($\alpha\beta + \beta\alpha$).}
+Each spatial configuration appears twice (swapping both pairs simultaneously).
+With two identical spin cases:
+\begin{equation}
+E^{(2)}_{\alpha\beta} + E^{(2)}_{\beta\alpha} 
+= 2 \times \frac{1}{2} \sum_{ijab} \frac{v_{ij}^{ab}v_{ab}^{ij}}{\Delta_{ijab}}.
+\end{equation}
+
+\subsection{Expanding the Same-Spin Term}
+Expand the squared antisymmetric integral:
+\begin{equation}
+(v_{ij}^{ab} - v_{ij}^{ba})(v^{ij}_{ab} - v^{ij}_{ba}) 
+= v_{ij}^{ab}v^{ij}_{ab} - v_{ij}^{ab}v^{ij}_{ba} - v_{ij}^{ba}v^{ij}_{ab} + v_{ij}^{ba}v^{ij}_{ba}.
+\end{equation}
+Since $\sum_{ijab} v_{ij}^{ba}v^{ij}_{ba} = \sum_{ijab} v_{ij}^{ab}v^{ij}_{ab}$ 
+by relabeling $a \leftrightarrow b$:
+\begin{equation}
+\sum_{ijab} (v_{ij}^{ab} - v_{ij}^{ba})(v^{ij}_{ab} - v^{ij}_{ba}) 
+= 2 \sum_{ijab} \bigl(v_{ij}^{ab}v^{ij}_{ab}  - v_{ij}^{ab}v^{ij}_{ba}\bigr).
+\end{equation}
+
+\subsection{SS and OS Contributions}
+Substituting the expansion into the same-spin term:
+\begin{equation}
+E^{(2)}_{\mathrm{SS}} = \frac{1}{2} \cdot 2 \sum_{ijab} 
+  \frac{v_{ij}^{ab}v^{ij}_{ab}  - v_{ij}^{ab}v^{ij}_{ba}}{\Delta_{ijab}}
+= \sum_{ijab} \frac{v_{ij}^{ab}(v_{ab}^{ij} - v_{ba}^{ij})}{\Delta_{ijab}}.
+\end{equation}
+The opposite-spin contribution simplifies to:
+\begin{equation}
+E^{(2)}_{\mathrm{OS}} = \sum_{ijab} \frac{v_{ij}^{ab}v_{ab}^{ij}}{\Delta_{ijab}}.
+\end{equation}
+
+\subsection{Final RHF--MP2 Formula}
+Adding SS and OS:
+\begin{equation}
+\begin{aligned}
+E^{(2)}_{\mathrm{RHF}} &= E^{(2)}_{\mathrm{SS}} + E^{(2)}_{\mathrm{OS}} \\[4pt]
+&= \sum_{ijab} \frac{v_{ij}^{ab}(v_{ab}^{ij} - v_{ba}^{ij}) 
+   + v_{ij}^{ab}v_{ab}^{ij}}{\Delta_{ijab}}.
+\end{aligned}
+\end{equation}
+Factoring:
+\begin{equation}
+\label{eq:rhf-mp2}
+\boxed{E^{(2)}_{\mathrm{RHF}} = \sum_{ijab} 
+\frac{v_{ij}^{ab} (2v_{ab}^{ij} - v_{ba}^{ij})}{\Delta_{ijab}}.}
+\end{equation}
+
+\subsection{Amplitude Form}
+Using spatial-orbital amplitudes $T^{ij}_{ab} = v_{ab}^{ij} / \Delta_{ijab}$:
+\begin{equation}
+\begin{aligned}
+E^{(2)}_{\mathrm{SS}} &= \sum_{ijab} v_{ij}^{ab} (T^{ij}_{ab} - T^{ij}_{ba}), \\
+E^{(2)}_{\mathrm{OS}} &= \sum_{ijab} v_{ij}^{ab} \, T^{ij}_{ab}, \\
+E^{(2)}_{\mathrm{RHF}} &= \sum_{ijab} v_{ij}^{ab} (2T^{ij}_{ab} - T^{ij}_{ba}).
+\end{aligned}
+\end{equation}
+
+
+\section{Unrestricted UHF--MP2}
+\label{sec:uhf-mp2}
+
+For UHF, $\alpha$ and $\beta$ electrons occupy \emph{different} spatial orbitals 
+with different orbital energies. We use $(\spa{i},\spa{j},\spa{a},\spa{b})$ for $\alpha$ 
+and $(\spb{i},\spb{j},\spb{a},\spb{b})$ for $\beta$.
+
+\subsection{Three Spin Contributions}
+\begin{equation}
+E^{(2)}_{\mathrm{UHF}} = E^{(2)}_{\alpha\alpha} + E^{(2)}_{\beta\beta} + E^{(2)}_{\alpha\beta}.
+\end{equation}
+
+\paragraph{Same-spin $\alpha\alpha$.}
+With antisymmetrized integrals and antisymmetric amplitudes:
+\begin{equation}
+E^{(2)}_{\alpha\alpha} = \frac{1}{4} \sum_{\spa{i}\spa{j}\spa{a}\spa{b}}
+\frac{(v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} - v_{\spa{i}\spa{j}}^{\spa{b}\spa{a}})(v^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} - v^{\spa{i}\spa{j}}_{\spa{b}\spa{a}})}{\Delta_{\spa{i}\spa{j}\spa{a}\spa{b}}}
+= \frac{1}{2} \sum_{\spa{i}\spa{j}\spa{a}\spa{b}} v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \, T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}.
+\end{equation}
+The $\tfrac{1}{4} \to \tfrac{1}{2}$ follows from amplitude antisymmetry.
+
+\paragraph{Same-spin $\beta\beta$.}
+\begin{equation}
+E^{(2)}_{\beta\beta} = \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}}.
+\end{equation}
+
+\paragraph{Opposite-spin $\alpha\beta$.}
+No exchange, no antisymmetry, no overcounting:
+\begin{equation}
+E^{(2)}_{\alpha\beta} = \sum_{\spa{i}\spb{j}\spa{a}\spb{b}} \frac{v_{\spa{i}\spb{j}}^{\spa{a}\spb{b}}v^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}}{\Delta_{\spa{i}\spb{j}\spa{a}\spb{b}}}
+= \sum_{\spa{i}\spb{j}\spa{a}\spb{b}} v_{\spa{i}\spb{j}}^{\spa{a}\spb{b}} \, T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}.
+\end{equation}
+
+\subsection{Final UHF--MP2 Formula}
+\begin{equation}
+\label{eq:uhf-mp2}
+\boxed{E^{(2)}_{\mathrm{UHF}} = \frac{1}{2} \sum_{\spa{i}\spa{j}\spa{a}\spa{b}} v_{\spa{i}\spa{j}}^{\spa{a}\spa{b}} \, T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}}
++ \frac{1}{2} \sum_{\spb{i}\spb{j}\spb{a}\spb{b}} v_{\spb{i}\spb{j}}^{\spb{a}\spb{b}} \, T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}}
++ \sum_{\spa{i}\spb{j}\spa{a}\spb{b}} v_{\spa{i}\spb{j}}^{\spa{a}\spb{b}} \, T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}},}
+\end{equation}
+with amplitudes
+\begin{equation}
+\begin{aligned}
+T^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} &= \frac{v^{\spa{i}\spa{j}}_{\spa{a}\spa{b}} - v^{\spa{i}\spa{j}}_{\spa{b}\spa{a}}}
+{\varepsilon_{\spa{i}} + \varepsilon_{\spa{j}} - \varepsilon_{\spa{a}} - \varepsilon_{\spa{b}}}, \\[4pt]
+T^{\spb{i}\spb{j}}_{\spb{a}\spb{b}} &= \frac{v^{\spb{i}\spb{j}}_{\spb{a}\spb{b}} - v^{\spb{i}\spb{j}}_{\spb{b}\spb{a}}}
+{\varepsilon_{\spb{i}} + \varepsilon_{\spb{j}} - \varepsilon_{\spb{a}} - \varepsilon_{\spb{b}}}, \\[4pt]
+T^{\spa{i}\spb{j}}_{\spa{a}\spb{b}} &= \frac{v^{\spa{i}\spb{j}}_{\spa{a}\spb{b}}}
+{\varepsilon_{\spa{i}} + \varepsilon_{\spb{j}} - \varepsilon_{\spa{a}} - \varepsilon_{\spb{b}}}.
+\end{aligned}
+\end{equation}
+
+\subsection{Key Differences from RHF}
+\begin{itemize}
+  \item No factor of 2 on SS terms ($\alpha$ and $\beta$ orbitals differ).
+  \item Separate integrals and orbital energies for each spin.
+  \item No exchange in the OS contribution.
+\end{itemize}
+
+
+\chapter{Positron}
+
+We consider systems with electrons and a single positron.
+Positron orbital indices are marked with a superscript plus:
+occupied positron orbitals $\pos{i},\pos{j},\pos{k},\ldots$,
+virtual positron orbitals $\pos{a},\pos{b},\pos{c},\ldots$,
+and general positron indices $\pos{p},\pos{q},\pos{r},\pos{s}$.
+Electron indices remain undecorated as defined in \sect{sec:notation}.
+We use $\op b^\dagger, \op b$ for positron creation and annihilation operators
+to distinguish them from the electronic operators $\op a^\dagger, \op a$.
+
+The full electron--positron Hamiltonian in second quantization reads
+\begin{equation}
+\op H = E_0 + h_p^q \op a^\dagger_p \op a_q
++ h_{\pos{p}}^{\pos{q}(\mathbf{+})} \op b^\dagger_{\pos{p}} \op b_{\pos{q}}
++ \frac{1}{2} v_{pq}^{rs} \op a^\dagger_p \op a^\dagger_q \op a_s \op a_r
+- v_{p\pos{q}}^{r\pos{s}} \op a^\dagger_p \op b^\dagger_{\pos{q}} \op b_{\pos{s}} \op a_r,
+\end{equation}
+where $h_{\pos{p}}^{\pos{q}(\mathbf{+})}$ is the positron one--body Hamiltonian
+(differing from the electronic one by the sign of the nuclear attraction),
+$v_{p\pos{q}}^{r\pos{s}} = \langle p\pos{q}|r\pos{s}\rangle$ are the
+electron--positron Coulomb integrals,
+and the minus sign reflects the attractive electron--positron interaction.
+With a single positron, any positron--positron repulsion term vanishes.
+
+\section{Density fitting with positron}
+
+With positrons, the density-fitted correction equations (\ref{eq:df-correction}) and (\ref{eq:df-correction-fock}) are modified to include the positron contributions:
+\begin{equation}
+  \begin{aligned}
+    \tilde h_p^q &= \tilde f_p^q 
+    - \sum_L \left(2v_{p}^{qL} v_{i}^{iL} - v_{p}^{iL} v_{i}^{qL} - v_{p}^{qL} v_{\pos{i}}^{\pos{i}L}
+    \right)\\
+    \tilde{f}_p^q &= h_p^q + \sum_{\tilde{L}} \left(2v_{p}^{q\tilde L} v_{\hat i}^{\hat i\tilde L} 
+    - v_{p}^{\hat i\tilde L} v_{\hat i}^{q\tilde L} - v_{p}^{q\tilde L} v_{\pos{i}}^{\pos{i}\tilde L} \right),\\
+  \end{aligned}
+\end{equation}
+where $\pos{i}=1$ denote the single occupied positron orbital,
+$\hat i$ denote all occupied orbitals (including core), 
+and $\tilde L$ denote the auxiliary basis functions. 
+The positron one-body terms get corrections according to 
+\begin{equation}
+  \begin{aligned}
+    \tilde h_{\pos{p}}^{\pos{q} (\mathbf{+})} &= \tilde f_{\pos{p}}^{\pos{q} (\mathbf{+})} 
+    + \sum_L \left(2v_{i}^{iL}v_{\pos{p}}^{\pos{q}L}\right)\\
+    \tilde f_{\pos{p} }^{\pos{q} (\mathbf{+})} &= h_{\pos{p}}^{\pos{q} (\mathbf{+})} - \sum_L \left(2v_{ \hat i}^{ \hat i \tilde L}v_{\pos{p}}^{\pos{q} \tilde L}\right), 
+    \\
+  \end{aligned}
+\end{equation}
+and the core energy is saved as
+\begin{equation}
+\tilde{E}_0 = E_0 + h_{i}^{i} + \tfrac12 h^{\pos{i}(\mathbf{+})}_{\pos{i}} - \left( \tilde h_{ i}^{ i} + \tfrac12 \tilde h^{\pos{i}(\mathbf{+})}_{\pos{i}}  \right).
+\end{equation}
+
+At the moment the positron integral evaluation does not support frozen-core approximation. 
+
+\section{Positron Hartree--Fock}
+\label{sec:positron-hf}
+
+A closed--shell electron reference plus a single positron is formally
+analogous to an \textit{unrestricted} HF problem with two spin blocks:
+the $\alpha$ electrons and the positron ($e^+$). The key
+difference is that the positron block contains \emph{exactly one}
+occupied orbital, so there is no exchange term between two positrons.
+Also there is an attractive Coulomb interaction between the positron and the
+electrons instead of the repulsive one between $\alpha$ and $\beta$ electrons.  
+
+\subsection{Density--fitted working equations}
+The coupled Roothaan equations
+\begin{equation}
+f_{\mu}^{\nu(e)} C_{\nu}^{p} = S_{\mu}^{\nu} C_{\nu}^{p} \epsilon_{p},\qquad
+f_{\mu}^{\nu(p)} C_{\nu}^{\pos{p}} = S_{\mu}^{\nu} C_{\nu}^{\pos{p}} \epsilon_{\pos{p}},
+\label{eq:poshf-roothaan}
+\end{equation}
+are solved self--consistently.
+
+With density fitting [cf.~\sect{sec:df}] we reuse the three--index
+intermediates $v_{\mu}^{\nu L}$ and the metric factors $C_{P}^{L}$. The
+AO density matrices are
+\begin{equation}
+D_{\mu}^{\nu} = 2 C_{\mu}^{i} C^{\dagger\nu}_{i},\qquad
+P_{\mu}^{\nu} = C_{\mu}^{\pos{i}} C^{\dagger\nu}_{\pos{i}}.
+\end{equation}
+
+\paragraph{Electron block.}  Including the attractive Coulomb term with
+the positron the electronic Fock matrix becomes
+\begin{equation}
+\begin{aligned}
+f_{\mu}^{\nu(e)} &= h_{\mu}^{\nu}
++ J_{\mu}^{\nu}[D] - K_{\mu}^{\nu}[D]
+ -     J_{\mu}^{\nu}[P] \\
+ J_{\mu}^{\nu}[D] &= \sum_{L} v_{\xi}^{\text{o}L} D_{\text{o}}^{\xi} v_{\mu}^{\nu L},
+ \quad J_{\mu}^{\nu}[P] = \sum_{L} v_{\xi}^{\text{o}L} P_{\text{o}}^{\xi} v_{\mu}^{\nu L},\\
+ \\
+K_{\mu}^{\nu}[D] &= v_{\mu}^{iL} v_{i}^{\nu L},\qquad 
+v_{\mu}^{iL} = v_{\mu}^{\rho L} C_{\rho}^{i}
+\label{eq:poshf-fock-e}
+\end{aligned}
+\end{equation}
+
+\paragraph{Positron block.}  Exchange vanishes for a single particle;
+the Fock matrix for the positron therefore contains only the one--body
+term and the \emph{attractive} Coulomb interaction with the electrons,
+\begin{equation}
+f_{\mu}^{\nu(p)} = h_{\mu}^{\nu(p)} - J_{\mu}^{\nu}[D],
+\label{eq:poshf-fock-p}
+\end{equation}
+where $h^{(p)}$ differs from the electronic one--electron matrix only by
+the sign of the nuclear attraction operator.
+
+\subsection{HF energy with a positron}
+The Hartree--Fock total energy is
+\begin{equation}
+E_{\text{HF}}^{e/e^+} = D_{\mu}^{\nu} h_{\nu}^{\mu} + \tfrac12 D_{\mu}^{\nu}\bigl(f_{\nu}^{\mu(e)} + J_{\nu}^{\mu}[P]\bigr)
++        P_{\mu}^{\nu}  f_{\nu}^{\mu(p)}
++ E_0,
+\end{equation}
+which reduces to the ordinary closed--shell expression when
+$P=0$.  In practice the Coulomb terms are accumulated on the fly
+from the three--index intermediates as described above.
+
+
+
+\section{RHF--MP2 with a Single Positron}
+\label{sec:rhf_positron_mp2}
+
+Consider a closed-shell RHF system with an additional single positron.
+We use indices $i,j,a,b$ for electrons and $\pos{i},\pos{a},\pos{p},\pos{q}$ for positrons, where
+$i,j,\pos{i}$ denote occupied and $a,b,\pos{a}$ denote virtual orbitals.
+
+\subsection{Contributions}
+The total MP2 energy has two parts:
+\begin{equation}
+E^{(2)} = E^{(2)}_{\mathrm{ee}} + E^{(2)}_{\mathrm{ep}},
+\end{equation}
+where $E^{(2)}_{\mathrm{ee}}$ is the standard RHF electron--electron correlation 
+from Eq.~\eqref{eq:rhf-mp2}, and $E^{(2)}_{\mathrm{ep}}$ is the electron--positron 
+correlation. With only one positron, there is no positron--positron contribution.
+
+\subsection{Electron--Positron Correlation}
+Since electrons and positrons are mutually distinguishable, there is
+\emph{no exchange} between them---only the direct (Coulomb) term contributes.
+For RHF electrons, the $\alpha$ and $\beta$ spatial orbitals are identical,
+and the single positron occupies one spatial orbital $\pos{i}$.
+Both electron spin channels ($\alpha$ and $\beta$) contribute equally,
+giving a factor of~2 after spin integration:
+\begin{equation}
+E^{(2)}_{\mathrm{ep}} = 2 \sum_{i\pos{i}a\pos{a}}
+\frac{v_{i\pos{i}}^{a\pos{a}}v_{a\pos{a}}^{i\pos{i}}}{\Delta_{i\pos{i}a\pos{a}}},
+\end{equation}
+where $\Delta_{i\pos{i}a\pos{a}} = \varepsilon_i + \varepsilon_{\pos{i}} - \varepsilon_a - \varepsilon_{\pos{a}}$,
+with $i,a$ running over spatial electron orbitals and $\pos{i},\pos{a}$ over spatial
+positron orbitals (one occupied, several virtual).
+
+\subsection{Amplitude Form}
+Defining the electron--positron amplitude:
+\begin{equation}
+T^{i\pos{i}}_{a\pos{a}} = \frac{v_{a\pos{a}}^{i\pos{i}}}{\Delta_{i\pos{i}a\pos{a}}},
+\end{equation}
+the electron--positron correlation energy becomes:
+\begin{equation}
+\label{eq:ep-mp2}
+\boxed{E^{(2)}_{\mathrm{ep}} = 2 \sum_{i\pos{i}a\pos{a}} v_{i\pos{i}}^{a\pos{a}} \, T^{i\pos{i}}_{a\pos{a}}.}
+\end{equation}
+
+
+
 \chapter{CCSD and DCSD amplitude and $\Lambda$ equations}
 \section{Closed-shell CCSD/DCSD Lagrangian} \label{sec:cs-ccsd}
 The singles-dressed factorization of the closed-shell CCSD and DCSD amplitude equations 
@@ -618,7 +1063,7 @@ Note that only the \textbf{lower virtual} and \textbf{upper occupied} indices ar
 The amplitude equations can be obtained by taking the derivative of the Lagrangian with respect to the Lagrange multipliers $\Lambda$ 
 and setting the result to zero.
 
-The most efficient version of CCSD/DCSD in \elemcoil combines the dressed factorization from above with 
+The most efficient version of CCSD/DCSD in \elemcoil\ combines the dressed factorization from above with 
 the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} and is given by
 \begin{equation}
 \begin{aligned}
@@ -641,8 +1086,9 @@ the \textsf{cckext} type of factorization from Ref. \cite{hampelComparison1992} 
 \end{equation}
 where
 \begin{equation}
+\label{eq:kext-K}
 \begin{aligned}
-K^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b 
+K^{ij}_{pq} = v_{pq}^{rs} \left(\left(T^{ij}_{ab}+T^i_a T^j_b\right)δ_r^a δ_s^b
 +δ_r^i T^j_b δ_s^b + T^i_a δ_r^a δ_s^j + δ_r^i δ_s^j \right)
 \end{aligned}
 \end{equation}
@@ -1598,6 +2044,157 @@ K^{\spa{a}\spa{b}\spb{c}}_{\spa{i}\spa{j}\spb{k}}
 and the conjugate-transpose of the amplitudes in \eq{eq:Euccsd(t)} are replaced with the Lagrange multipliers.
 
 
+\section{AO-driven coupled cluster} \label{sec:ao-direct}
+In the \textsf{cckext} factorization of Sec.~\ref{sec:cs-ccsd} the only quantity that requires integrals
+with two general indices in the bra is $K^{ij}_{pq}$, \eq{eq:kext-K}; every other integral block
+appearing in the amplitude, $\Lambda$, perturbative-triples and EOM equations carries at least one
+occupied index. This makes it possible to evaluate the equations \emph{directly} from the AO
+integrals $v_{\mu\nu}^{\rho\sigma}$, without ever constructing the MO integrals, and thus without
+the $\mathcal{O}(N^5)$ four-index transformation and without storing an $\mathcal{O}(N^4)$ MO
+integral set. Below $\mu,\nu,\rho,\sigma$ denote AO indices, $n$ the number of AOs and $o$ the
+number of correlated occupied orbitals.
+
+\subsection{Singles dressing as a coefficient transformation}
+Only lower virtual and upper occupied indices are dressed (Sec.~\ref{sec:cs-ccsd}), and the dressing is
+linear in each index separately. It can therefore be absorbed entirely into two sets of
+coefficients, one for the lower (bra) and one for the upper (ket) indices,
+\begin{equation}
+\label{eq:ao-dressed-coeffs}
+\begin{aligned}
+L^\mu_p &= \begin{cases} C^\mu_i, & p = i\\[2pt] C^\mu_a - C^\mu_k T^k_a, & p = a\end{cases}
+&\qquad
+R_\mu^p &= \begin{cases} C_\mu^i + C_\mu^c T^i_c, & p = i\\[2pt] C_\mu^a, & p = a,\end{cases}
+\end{aligned}
+\end{equation}
+so that every dressed integral is an \emph{undressed} AO integral transformed with $L$ on the lower
+and $R$ on the upper indices,
+\begin{equation}
+\label{eq:ao-dressed-ints}
+\hat v_{pq}^{rs} = L^\mu_p L^\nu_q\, v_{\mu\nu}^{\rho\sigma}\, R_\rho^r R_\sigma^s.
+\end{equation}
+The two sets are biorthogonal with respect to the AO overlap $S_\mu^\nu$,
+\begin{equation}
+\label{eq:ao-biorthogonal}
+L^\mu_p\, S_\mu^\nu\, R_\nu^q = δ_p^q,
+\end{equation}
+which follows from the orthonormality of the MOs, $C^\mu_p S_\mu^\nu C_\nu^q = δ_p^q$, together
+with the fact that the occupied--virtual blocks of \eq{eq:ao-dressed-coeffs} cancel:
+$-T^k_a δ_k^j$ from $L$ against $+δ_a^c T^j_c$ from $R$. \eq{eq:ao-biorthogonal} is the statement
+that the dressing is a similarity transformation. Consequently the singles never enter as a
+separate dressing step: each iteration simply rebuilds \eq{eq:ao-dressed-coeffs} and re-contracts
+the AO integrals.
+
+\subsection{Half-transformed integrals}
+The lower occupied coefficients in \eq{eq:ao-dressed-coeffs} are \emph{undressed}, $L^\mu_i =
+C^\mu_i$. The half-transformed integrals
+\begin{equation}
+\label{eq:ao-halftrans}
+v_{i\nu}^{\rho\sigma} = C^\mu_i\, v_{\mu\nu}^{\rho\sigma}
+\end{equation}
+are therefore independent of $T_1$ and are constructed \emph{once} per set of orbitals -- by the
+out-of-core gather from the $\pm$ store described in Sec.~\ref{sec:pm-store}, which keeps them
+pair-packed in both ket orders. Every block with at least one occupied index is then obtained from
+\eq{eq:ao-halftrans} by matrix multiplications alone, at a cost of $\mathcal{O}(o\,n^3)$ per block;
+the per-iteration data volume drops accordingly, from the $\approx n^4/4$ elements of the $\pm$
+triangle to the $\approx o\,n^3$ elements of the half-transformed store, and the $\pm$ store itself
+is streamed per iteration only by the four-external term
+(Sec.~\ref{sec:pm-supermatrix-use}). Blocks whose only occupied index sits on an upper (ket) slot are reached through
+\begin{equation}
+v_{pq}^{rs} = \left(v_{rs}^{pq}\right)^*,
+\end{equation}
+which for real integrals is the plain bra--ket exchange.
+
+
+\subsection{One-pass occupied-early dressing}
+The T$_1$-dressed integral blocks that the CCSD/DCSD residual reads (all carrying at least one
+occupied index) are assembled once per iteration in a \emph{single} pass over the half-transformed
+store: for every ket column $\sigma$ the slabs
+\begin{equation}
+\label{eq:ao-occ-early-half}
+h^{(\rho\sigma)}_{i\nu} = C^{\mu}_{i}\, v_{\mu\nu}^{\rho\sigma},
+\qquad
+\bar h^{(\rho\sigma)}_{i\mu} = C^{\nu}_{i}\, v_{\mu\nu}^{\rho\sigma}
+\end{equation}
+are \emph{read} -- both roles from the same file, by the exchange symmetry \eq{eq:ao-joint-sym} --
+and the closed-shell sweep accumulates the three occupied-early intermediates
+\begin{equation}
+\label{eq:ao-occ-early}
+v_{ij}^{\rho\sigma} = h^{(\rho\sigma)}_{i\nu} C^{\nu}_{j},
+\qquad
+v_{i\nu}^{j\sigma} = h^{(\rho\sigma)}_{i\nu}\, R_{\rho}^{j},
+\qquad
+v_{\mu i}^{j\sigma} = \bar h^{(\rho\sigma)}_{i\mu}\, R_{\rho}^{j},
+\end{equation}
+with the dressed occupied-ket coefficients $R^{j}_\rho$ of \eq{eq:ao-dressed-coeffs}; the
+open-shell sweep carries two coefficient sets and five such intermediates. Every dressed block of
+the residual (and the dressed Fock matrix) then follows from \eq{eq:ao-occ-early} by contracting
+the remaining AO indices with $L$ and $R$, and the ket contractions over $\rho$ are batched into
+level-3 BLAS products over accumulated slabs rather than performed as per-slab rank-one updates.
+Each element of the half-transformed store is read exactly once per iteration.
+
+When the half-transformed store has not been built (a single-shot doubles-only calculation, or its
+per-macro-iteration rebuild in orbital-optimized methods), the same intermediates are formed in one
+pass over the $\pm$ triangle instead, with the band half-transforms \eq{eq:ao-occ-early-half}
+computed on the fly from each reconstructed slab -- the identical sweep at $\approx n^4/4$
+streamed elements.
+
+\subsection{Four-external term from the $\pm$ supermatrices} \label{sec:pm-supermatrix-use}
+With the $\pm$ supermatrices of Sec.~\ref{sec:pm-store} both index pairs of the AO
+integrals are packed triangularly and only the lower block triangle is stored.
+
+With the effective pair density of \eq{eq:kext-K} transformed to the AO basis, $D^{ij}_{\rho\sigma}$,
+and folded in the same way,
+\begin{equation}
+\label{eq:pm-density}
+D^{\pm,ij}_{(\rho\sigma)} = \half\left(D^{ij}_{\rho\sigma} \pm D^{ij}_{\sigma\rho}\right)\quad(\rho\lt\sigma),
+\qquad D^{+,ij}_{(\rho\rho)} = \half D^{ij}_{\rho\rho},\qquad D^{-,ij}_{(\rho\rho)} = 0,
+\end{equation}
+the four-external term reduces to two matrix products in the packed pair space,
+\begin{equation}
+\label{eq:pm-kext}
+\begin{aligned}
+K^{ij}_{\mu\nu} &= \left(V^{+}D^{+,ij} + V^{-}D^{-,ij}\right)_{(\mu\nu)},\\
+K^{ij}_{\nu\mu} &= \left(V^{+}D^{+,ij} - V^{-}D^{-,ij}\right)_{(\mu\nu)},
+\end{aligned}
+\end{equation}
+i.e.\ \emph{both} orders of the bra pair are obtained from the same pair of products. The MO-basis
+$K^{ij}_{pq}$ of \eq{eq:kext-K} follows by contracting the remaining pair with $L$.
+
+\subsection{Occupied-pair packing and operation count}
+The effective pair density satisfies $D^{ij}_{\rho\sigma} = D^{ji}_{\sigma\rho}$, which together
+with \eq{eq:ao-joint-sym} gives
+\begin{equation}
+\label{eq:kext-ij-sym}
+K^{ij}_{pq} = K^{ji}_{qp}.
+\end{equation}
+Because \eq{eq:pm-kext} delivers both bra orders simultaneously, \eq{eq:kext-ij-sym} allows the
+occupied pair to be restricted to $i \le j$ as well. With $n_{pp} = n(n+1)/2$ and
+$n_{oo} = o(o+1)/2$ the $\pm$ form therefore requires
+\begin{equation}
+2\, n_{pp}^2\, n_{oo}
+\end{equation}
+multiplications, whereas the contraction over the jointly packed integrals requires
+$n^2 n_{pp} o^2$: there the ket pair alone is packed, the result is recovered as
+$K^{ij}_{pq} = A^{ij}_{pq} + A^{ji}_{qp}$ from a partial contraction $A$, and this symmetrization
+consumes \emph{both} occupied orders, so the occupied triangle cannot be exploited. The ratio is
+\begin{equation}
+\label{eq:pm-flop-ratio}
+\frac{n^2 n_{pp} o^2}{2\,n_{pp}^2\,n_{oo}} = \frac{2no}{(n+1)(o+1)}
+\;\xrightarrow[\;n,o\gg 1\;]{}\; 2,
+\end{equation}
+the product of the bra-pair packing ($n^2 \to n_{pp}$), the two products instead of one, and the
+occupied-pair packing ($o^2 \to n_{oo}$). Both the operation count and the amount of data streamed
+are thus halved. Note that the second factor in \eq{eq:pm-flop-ratio} approaches unity only for a
+sufficiently large occupied space: $n_{oo}$ is the width of the right-hand side of the matrix
+products \eq{eq:pm-kext}, and for small $o$ the products are too narrow to reach the asymptotic
+performance of the underlying matrix multiplication.
+
+The same supermatrices are used for the closed- and open-shell Fock-like intermediates, which are
+built by streaming $V^{\pm}$ once, and — through \eq{eq:ao-halftrans} — for the $\Lambda$,
+perturbative-triples and EOM integral blocks, so that the AO integrals are the only integral set
+that is ever stored.
+
+
 \chapter{Two determinant coupled cluster}
 Amplitudes are normal ordered with respect to the formal reference with two active orbitals $t$ and $\spb{u}$.
 The occupied ($i,j,\ldots$) and virtual ($a,b,\ldots$) spaces do not contain the active orbitals.
@@ -1746,6 +2343,385 @@ IAS contribution to the energy,
 \brown{\Delta E_{\mathrm{IAS}}} = \brown{-W^{\spa{t}\spb{u}}_{\spa{u}\spb{t}} T^{\spa{t}}_{\spa{u}} T^{\spb{u}}_{\spb{t}}}.
 \end{equation}
 
+\chapter{Tensor Decomposed Coupled Cluster (SVD-CC)}
+\label{ch:svdcc}
+
+In this chapter we describe the tensor decomposed coupled cluster methods 
+implemented in \elemcoil, following the SVD-DC-CCSDT approach of 
+Ref.~\cite{rickert_svd_dc_ccsdt}.
+
+\section{SVD-DC-CCSDT method}
+\subsection{Overview}
+The SVD-DC-CCSDT method combines two key ideas:
+\begin{enumerate}
+\item The distinguishable cluster (DC) approximation applied to the CCSDT triples residual equations,
+which removes the expensive exchange terms while improving accuracy.
+\item A singular value decomposition (SVD) of the triples amplitudes and residuals, which together 
+with the density fitting (or Cholesky) factorization of the electron repulsion integrals 
+reduces the scaling of the method from $\mathcal{O}(N^8)$ to $\mathcal{O}(N^6)$.
+\end{enumerate}
+
+The singles contributions to the triples residuals are implemented using the similarity-transformed Hamiltonian,
+\begin{equation}
+\tilde{H}_N = e^{-\op T_1} \op H_N e^{\op T_1},
+\end{equation}
+which implies dressing of the Fock matrices and the ERI factorization tensors $v_{p}^{qL}$ 
+with the singles amplitudes. The dressed quantities are denoted with a hat.
+
+\subsection{Triples amplitudes decomposition}
+\label{sec:svd_trip_decomp}
+
+The triples amplitudes $T^{ijk}_{abc}$ are decomposed as
+\begin{equation}
+  T^{ijk}_{abc} = T_{XYZ} \, U^{iX}_a U^{jY}_b U^{kZ}_c,
+  \label{eq:trip_decomp}
+\end{equation}
+where $T_{XYZ}$ is a symmetric three-index quantity in the SVD basis and 
+$U^{iX}_a$ are the transformation (compression) matrices connecting the SVD basis ($X,Y,Z$) 
+with pairs of orbital indices (one occupied, one virtual).
+The amplitudes are symmetric with respect to the 
+interchange of SVD indices, i.e., $T_{XYZ} = T_{YXZ} = T_{XZY} = \ldots$
+
+In the SVD-DC-CCSDT method the triples amplitudes are varied directly in the SVD basis, 
+such that the residual $R_{XYZ}$ in the SVD basis goes to zero.
+The $U$-transformation can be applied independently to each SVD index, 
+so that in each diagram only the indices contracted with the Hamiltonian 
+need to be transformed to the orbital basis, while the others remain in the SVD basis. 
+The transformation matrices satisfy $U^{\dagger a}_{iX} U^{iY}_a = \delta_X^Y$.
+
+The factorization of the electron repulsion integrals 
+(cf.\ \eq{eq:df_eri}) is also employed:
+\begin{equation}
+  v_{pq}^{rs} \approx v_{p}^{rL} v_{q}^{sL}.
+  \label{eq:ERIs_fact_svd}
+\end{equation}
+
+\subsection{DC-CCSDT approximation for triples}
+
+The DC approximation to CCSDT modifies the triples residual equations by removing 
+or rescaling certain exchange terms.
+
+\begin{figure}[h]
+  \centering
+  %\captionsetup{width=1.0\linewidth}
+  \includegraphics[width=6cm]{T2T3Diagrams.jpeg}
+  %\rule[0.5em]{23.5em}{0.5pt}
+  \caption{Spin-summed diagrams of $\op T_2\op T_3$ contributions to the triples residuals in CCSDT.}
+\label{fig:T2T3_diagrams}
+\end{figure}
+Classifying the spin-summed $\op T_2\op T_3$ diagrams contributing to the triples residuals 
+into groups A, B, C, and D:
+\begin{itemize}
+\item Diagrams \textbf{A1--A4}: kept unchanged,
+\item Diagrams \textbf{B1--B6}: fully removed,
+\item Diagrams \textbf{C1--C6} and \textbf{D1--D4}: multiplied by $\half$.
+\end{itemize}
+This approximation preserves size-extensivity, particle-hole symmetry, 
+exactness for three-electron (or three-hole) systems, and invariance 
+to rotations within the occupied and virtual spaces.
+
+
+\subsection{Residual equations in the SVD basis}
+\label{sec:svd_residuals}
+
+The bra-projection for the singles and doubles residual equations uses 
+the contravariant CSFs. For the triples, the contravariant CSF is
+\begin{equation}
+  \widetilde{\Phi}_{abc}^{ijk} = \Phi_{abc}^{ijk} - \Phi_{cab}^{ijk}.
+\end{equation}
+Due to the overlap properties of this choice the full triples residual has the structure
+\begin{equation}
+  \bar{R}^{ijk}_{abc} = R^{ijk}_{abc} - R^{ijk}_{cab} = \mathcal{A}(abc,cab)\, R^{ijk}_{abc},
+\end{equation}
+where $\mathcal{A}(abc,cab)F(a,b,c) = F(a,b,c) - F(c,a,b)$.
+Since $R^{ijk}_{abc} = 0$ implies $R^{ijk}_{cab} = 0$, it is sufficient to solve 
+$R^{ijk}_{abc} = 0$ with only half the terms.
+
+\subsubsection{Triples contributions to the singles residual}
+
+The triples contributions to the singles residual read:
+\begin{equation}
+\begin{aligned}
+R_a^i &\leftarrow U_a^{iX} \left[T_{XYZ} \left(2A^{YL} A^{ZL} - B^{YZ}\right)\right]
+- U_a^{jY} \Big[2 {B}_{j}^{iXL} V_{XY}^{L}- G_{jY}^{i}\Big],
+\end{aligned}
+\end{equation}
+with intermediates
+\begin{equation}
+\begin{aligned}
+A^{XL}&={B}_{i}^{iXL}, &{B}_{i}^{jXL} &= v_i^{aL} U_a^{jX},\\
+B^{XY}&={B}_{i}^{jXL} {B}_{j}^{iYL}, 
+&w_k^{dX} &= v_l^{dL} {B}_k^{lXL},\\
+V_{XY}^{L} &= T_{XYZ} A^{ZL}, &G_{jY}^{i} &= T_{dYZ}^{i} w_j^{dZ},\\
+T_{aYZ}^{i} &= T_{XYZ} U_a^{iX}. &
+\end{aligned}
+\end{equation}
+
+\subsubsection{Triples contributions to the doubles residual}
+
+\begin{equation}
+\begin{aligned}
+R_{ab}^{ij} &\leftarrow \sop{ij,ab} \Big\{ 
+- \left(\bar B_a^{iLZ} - B_a^{iLZ}\right) V_{bZ}^{jL}
++U_b^{jZ} \Big[2\left(\bar B_a^{iLY} - B_a^{iLY}\right) V_{YZ}^{L} \\
+& + T_{aYZ}^{i} \left(\hat{f}_k^c U_c^{kY}\right)
+  - T_{XYZ} \left(U_c^{iY}\left(\bar B_a^{kLX} v_k^{cL}\right) 
+- U_a^{kY} \left(B_c^{iLX} v_k^{cL} - \hat{f}_k^c U_c^{iX}\right)\right)\Big]
+ \Big\},
+\end{aligned}
+\end{equation}
+with intermediates
+\begin{equation}
+\begin{aligned}
+B_a^{iLX} &= \hat{v}_j^{iL} U_a^{jX},  &\bar B_a^{iLX} &= \hat{v}_a^{bL} U_b^{iX},\\
+V_{bZ}^{jL} &= {B}_k^{jYL} T_{bYZ}^{k}, &
+\end{aligned}
+\end{equation}
+and the symmetrization operator $\sop{ij,ab}  X_{ab}^{ij} = X_{ab}^{ij} + X_{ba}^{ji}$.
+
+\subsubsection{Triples residual}
+
+The triples residual equations in the SVD basis read:
+\begin{equation}
+  R_{XYZ} = Q_{XYZ} + Q_{YXZ} + Q_{XZY} + Q_{ZYX} + Q_{ZXY} + Q_{YZX}
+   + q_{XYZ} + q_{YXZ} + q_{ZYX}
+\end{equation}
+with the main intermediates
+\begin{equation}
+\begin{aligned}
+  Q_{XYZ} &= U^{\dagger b}_{jY} \Big[T_{bX}^l X_{lZ}^j - X_{bZ}^d T_{dX}^j 
+  +T_{bY'Z}^{l} \left(U_d^{jY'}  \left(v_l^{dL} Y_X^L \right)\right)\Big]
+\end{aligned}
+\end{equation}
+and
+\begin{equation}
+\begin{aligned}
+  q_{XYZ} &= T_{X'YZ} \Big[U^{\dagger a}_{iX} \Big( \left(\hat{f}_l^i + \half v_l^{dL} V_d^{iL}\right)U_a^{lX'}
+  - \left(\hat{f}_a^d - \half v_l^{dL} V_{a}^{lL}\right) U_d^{iX'}\\
+ & + \left(\hat{v}_l^{iL} \hat{v}_a^{dL}\right) U_d^{lX'}\Big)
+ -2 Y_X^L A^{X'L}\Big]
+  - T_{XY'Z'} \left( W_Y^{Y'L} W_Z^{Z'L}\right).
+\end{aligned}
+\end{equation}
+The further intermediates used in these expressions are 
+\begin{equation}
+\begin{aligned}
+X_{bZ}^d &= \hat{v}_b^{dL} Y_Z^L - \hat{f}_l^d T_{bZ}^l 
+ - U^{lX}_{b} \left(v_l^{dL} \tilde V_{ZX}^{L}\right)
+ + \left(\hat v_{lk}^{di} T^{lk}_{ba} - \hat v_{la}^{dc} T^{li}_{bc}\right) U^{\dagger a}_{iZ}
+- \hat v_{lb}^{dc} T_{cZ}^l 
+ + \half T_{bYZ}^{k} w_k^{dY},
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+X_{lZ}^j&= \hat{v}_l^{jL} Y_Z^L
+ + U^{jX}_{d} \left(v_l^{dL} \tilde V_{ZX}^{L}\right) 
+ + \left(\hat v_{la}^{dc} T^{ji}_{dc} - \hat v_{lk}^{di} T^{jk}_{da}\right) U^{\dagger a}_{iZ}
+  - \hat v_{lk}^{dj} T^k_{dZ}
+  - \half G_{lZ}^{j},
+\end{aligned}
+\end{equation}
+and
+\begin{equation}
+\begin{aligned}
+  &V_a^{iL} = v_k^{cL}  \widetilde{T}_{ac}^{ik}, &
+  Y_X^L &= U^{\dagger a}_{iX} \left(\hat{v}_a^{iL} + V_a^{iL} \right),\\
+&T_{aX}^i = U^{\dagger b}_{jX}  T_{ab}^{ij}, &
+\widetilde{T}_{ab}^{ij} &= 2  T_{ab}^{ij} - T_{ba}^{ij},\\
+&\hat v_{la}^{dc} = v_l^{dL} \hat v_a^{cL}, &
+\hat v_{lk}^{di} &= v_l^{dL} \hat v_k^{iL},\\
+&W_{Y}^{Y'L} =  U^{\dagger b}_{jY}  \left(\bar B_b^{jLY'} - B_b^{jLY'}\right), &
+\tilde V_{ZX}^{L} &= V_{ZX}^{L} - \half V_{cX}^{kL} U^{\dagger c}_{kZ}.
+\end{aligned}
+\end{equation}
+
+None of the contractions above involve more than six different indices.
+This means that the tensor decompositions reduce the scaling of the DC-CCSDT method 
+from ${\cal O}(N^8)$ to ${\cal O}(N^6)$, provided the number of SVD basis functions 
+grows linearly with the system size.
+The most expensive terms in the SVD-DC-CCSDT residual equations scale as $N_o^2 N_v N_X^2 N_L$,
+where $N_o$ and $N_v$ are the numbers of occupied and virtual orbitals,
+and $N_X$ and $N_L$ are the numbers of SVD and density-fitting basis functions.
+
+\subsubsection{Projected intermediates}
+
+An additional approximation can be introduced by calculating the $V_{aX}^{iL}$ intermediate 
+in an SVD basis, which reduces the scaling of the most expensive terms to $N_o^2 N_v N_X^3$:
+\begin{equation}
+\begin{aligned}
+  V_{aX}^{iL} &\approx \bar V_{X\tilde Z}^{L} \tilde U^{i\tilde Z}_{a},\\
+  \bar V_{X\tilde Z}^{L} &= \left(\left(\tilde U^{\dagger b}_{j\tilde Z} U^{kY}_{b} \right) T^{j}_{cXY}\right) v_k^{cL}.
+\end{aligned}
+\end{equation}
+The $\tilde Z$ SVD space covers both the triples SVD space (for the $\tilde V_{XZ}^L$ intermediate)
+and the doubles space (for the $\tilde U^{i\tilde Z}_a$ projection in the doubles residual equations).
+It is constructed by expanding the triples SVD space by important orthogonal contributions 
+from the doubles SVD space.
+
+
+\subsection{Construction of the SVD basis}
+\label{sec:svd_basis}
+
+The construction of the singular vectors $U^{iX}_{a}$ must also scale as ${\cal O}(N^6)$.
+This is achieved using a two-step procedure.
+
+\subsubsection{Step 1: Doubles SVD basis}
+
+First, the relevant block of an approximate two-particle density matrix is obtained from 
+converged CCSD doubles amplitudes:
+\begin{equation}
+\mathcal{D}^{aj}_{ib} = T^{\dagger ac}_{ik} T^{jk}_{bc},
+\end{equation}
+and eigendecomposed:
+\begin{equation}
+\mathcal{D}^{aj}_{ib} \approx \bar{U}_{i\tilde{\bar X}}^{\dagger a} \bar{D}_{\tilde{\bar X}}
+\bar{U}^{j\tilde{\bar X}}_{b}.
+\end{equation}
+The SVD basis $\{\tilde{\bar X}\}$ is truncated by disregarding eigenvectors 
+with eigenvalues smaller than a threshold: $\bar{D}_{\tilde{\bar X}} \lt \varepsilon_{T2}$.
+
+The basis is canonicalized by diagonalizing the Fock matrix in the SVD basis:
+\begin{equation}
+f_{\tilde{\bar X}}^{\tilde{\bar Y}}=\bar{U}_{i\tilde{\bar X}}^{\dagger a}
+(\epsilon_a - \epsilon_i)\bar{U}^{i\tilde{\bar Y}}_{a}.
+\end{equation}
+In the basis of its eigenvectors $U_{\tilde{\bar X}}^{\bar{X}}$ the Fock matrix is diagonal, 
+$f^{{\bar X}}_{{\bar Y}}=\epsilon_{\bar X}\delta^{{\bar X}}_{{\bar Y}}$,
+and the complete transformation to the ${\bar X}$-basis is given by
+\begin{equation}
+\bar{U}^{i{\bar X}}_{a}=\bar{U}^{i\tilde{\bar X}}_{a}\bar{U}_{\tilde{\bar X}}^{\bar{X}}.
+\end{equation}
+
+\subsubsection{Step 2: Triples SVD basis via CC3-type density matrix}
+
+Having the transformation matrices to the doubles SVD basis, 
+a partially decomposed CC3-type triples residual is computed:
+\begin{equation}
+\begin{aligned}
+  R^i_{a\bar X\bar Y} &= \left( X_{b\bar X}^{jL} \bar{U}^{\dagger b}_{j \bar Y} \right) \hat{v}_a^{iL} 
+  + V_{a \bar X}^d T^i_{d \bar Y} - V^i_{l \bar X} T^l_{a \bar Y}
+  + E^d_{l \bar X \bar Y} T_{ad}^{il},
+\end{aligned}
+\end{equation}
+with intermediates
+\begin{equation}
+\begin{aligned}
+  X_{b\bar X}^{jL} &= T^j_{c\bar X} \hat v_{b}^{cL} - T^l_{b\bar X} \hat v_{l}^{jL}, &
+  T_{a \bar X}^i &= \bar{U}^{\dagger b}_{j \bar X} T^{ij}_{ab}, \\
+  E^d_{l \bar X \bar Y} &= V_{a \bar X}^d \bar{U}_{l \bar Y}^{\dagger a} - V_{l \bar X}^{i} \bar{U}_{i \bar Y}^{\dagger d}, &
+  W_{\bar X}^L &= \hat{v}_c^{kL} \bar{U}^{\dagger c}_{k \bar X}, \\
+  V^d_{a \bar X} &= \hat{v}_a^{dL} W^L_{\bar X}, &
+  V^j_{l \bar X} &= \hat{v}^{jL}_l W^L_{\bar X}.
+\end{aligned}
+\end{equation}
+The last term of the residual scales as $N^6$, while all other terms scale as $N^5$.
+Since the SVD basis is canonicalized, the partially transformed triples amplitudes 
+are readily available:
+\begin{equation}
+T^i_{a\bar X\bar Y} = - \frac{R^i_{a\bar X\bar Y} + R^i_{a\bar Y\bar X}}{\epsilon_{\bar X} + \epsilon_{\bar Y} + \epsilon_{a} - \epsilon_{i}}.
+\end{equation}
+The triples two-particle density matrix is then computed as
+\begin{equation}
+  D^{aj}_{ib} = T^{\dagger a \bar X\bar Y}_{i} T_{b \bar X\bar Y}^{j}
+\end{equation}
+at $N^6$ cost.
+
+The triples amplitudes in the SVD basis implicitly include nonphysical 
+components with triply repeated occupied orbital indices (e.g., $T_{abc}^{iii}$),
+which would cancel in case of a full SVD basis. 
+Their contributions to the density matrix can be explicitly isolated and removed:
+\begin{equation}
+\begin{aligned}
+  \Delta D^{aj}_{ib} &= (T^{\dagger a}_{i \bar X \bar Y} \mathcal{U}^{\bar X}_{i \bar X'} \mathcal{U}^{\bar Y}_{i\bar Y'}) T^{j \bar X' \bar Y'}_{b},\\
+  \mathcal{U}^{\bar X }_{i\bar X'} &= \bar U^{\dagger a}_{i \bar X'} \bar U^{i \bar X}_{a},\\
+  \widetilde{D}^{aj}_{ib} &= D^{aj}_{ib} - \left(1 - \half\delta^i_j \right) \sop{ij,ab} \Delta D^{aj}_{ib}.
+\end{aligned}
+\end{equation}
+
+Finally, the actual SVD basis for the triples in DC-CCSDT is obtained by 
+diagonalizing the corrected triples two-electron density matrix:
+\begin{equation}
+\widetilde{D}^{aj}_{ib} \approx U^{\dagger a}_{i \tilde{X}} D_{\tilde{X}}
+U^{j\tilde{X}}_{b}.
+\end{equation}
+Eigenvectors with eigenvalues smaller than $\varepsilon_{T3}$ are discarded.
+The SVD basis is again canonicalized by diagonalizing the Fock matrix,
+\begin{equation}
+f_{\tilde{X}}^{\tilde{Y}}=U_{i\tilde{X}}^{\dagger a}
+(\epsilon_a - \epsilon_i)U^{i\tilde{Y}}_{a},
+\end{equation}
+and the final SVD transformation matrices are
+\begin{equation}
+U^{iX}_{a}=U^{i\tilde{X}}_{a} U_{\tilde{X}}^{X}.
+\end{equation}
+
+\subsubsection{Additional SVD basis for the projection approximation}
+
+The additional SVD basis for the projection approximation 
+is constructed by half-transforming the contravariant doubles amplitudes 
+$\widetilde{T}^{ij}_{ab}$ to the SVD basis, projecting the part not covered 
+by the triples SVD space:
+\begin{equation}
+  \Delta \widetilde{T}^{ij}_{ab} = \widetilde{T}^{ij}_{ab} - U^{iX}_{a} U^{\dagger c}_{kX} \widetilde{T}^{kj}_{cb},
+\end{equation}
+computing SVD of $\Delta \widetilde{T}^{ij}_{ab}$, and selecting the most important left vectors 
+$\Delta U^{i\bar X}_a$, which are then added to the triples SVD basis.
+A symmetric orthogonalization of the combined space is performed at the end.
+
+\subsection{Amplitude update and convergence}
+
+The eigenvalues $\epsilon_{X}$ of the Fock matrix in the SVD basis are employed 
+in the amplitude update, carried out directly in the SVD basis:
+\begin{equation}
+\Delta T_{XYZ} = -\frac{R_{XYZ}}{\epsilon_X + \epsilon_Y + \epsilon_Z}.
+\end{equation}
+To accelerate convergence, DIIS is employed for singles, doubles, and triples amplitude vectors.
+
+\subsection{Truncation thresholds}
+
+The truncation of the SVD spaces is governed by two tolerances:
+$\varepsilon_{T3}$ for the triples and $\varepsilon_{T2}$ for the auxiliary 
+doubles SVD. 
+These are linked by a weight factor $w_{T2}$:
+\begin{equation}
+\varepsilon_{T2}=w_{T2}\,\varepsilon_{T3}.
+\end{equation}
+The choice of $\varepsilon_{T2}$ has very little effect on the results provided 
+it is not larger than $\varepsilon_{T3}$.
+
+A hybrid approach with an SVD-error correction at the CCSD(T) level can be used 
+to accelerate convergence with the SVD truncation threshold:
+\begin{equation}
+  E_{\textrm{DC-CCSDT}} \approx E_{\textrm{SVD-DC-CCSDT}}  + \delta_{\rm SVD},
+\end{equation}
+with
+\begin{equation}
+  \delta_{\rm SVD}=E_{\textrm{CCSD(T)}} - E_{\textrm{SVD-CCSD(T)}}.
+\end{equation}
+
+
+\subsection{Correlation energy}
+The correlation energy is calculated using the singles and doubles amplitudes:
+\begin{equation}
+E= \left(2 T_a^i T_b^j - T_b^i T_a^j\right) v_{ij}^{ab} + 2 T_a^i f^a_i
++ (2T_{ab}^{ij} - T_{ba}^{ij}) v_{ij}^{ab}.
+\end{equation}
+
+\subsection{Scaling summary}
+\begin{itemize}
+\item \textbf{Full DC-CCSDT}: $\mathcal{O}(N^8)$.
+\item \textbf{SVD-DC-CCSDT}: $\mathcal{O}(N^6)$, provided the number of SVD basis functions 
+grows linearly with system size (confirmed by tests on alkane chains).
+\item The most expensive terms in SVD-DC-CCSDT scale as $N_o^2 N_v N_X^2 N_L$.
+Assuming $N_v \approx N_X$, these terms are only a factor of $N_L/N_v$ more expensive than the 
+most expensive term in CCSD.
+\item The 4-external ladder diagram of the triples is reduced to $N^5$.
+\item The SVD-error and the size of the SVD bases scale linearly with system size, 
+  confirming size extensivity.
+\end{itemize}
+
 
 \chapter{Full Configuration Interaction and Selected CI Methods}
 \label{ch:fci}
@@ -1858,8 +2834,8 @@ The residual vector for eigenstate $\st{n}$ is:
 \eeq
 where $\vect{x}^{\st{n}} = c_{i}^{\st{n}} \vect{u}^i$ is the approximate eigenvector.
 
-A correction vector $\vect{u}^{\st{n}} \rightarrow \vect{u}^{k+1}$ is computed and added to the subspace. In \elemcoil, 
-we use either the diagonal preconditioner,
+A correction vector $\vect{u}^{\st{n}} \rightarrow \vect{u}^{k+1}$ is computed and added to the subspace. 
+In \elemcoil, we use either the diagonal preconditioner,
 \beq
 u^\st{n}_{I} = \frac{r^\st{n}_{I}}{E^\st{n} - H_{I}^{I}},
 \label{eq:diag_precond}
@@ -2130,11 +3106,184 @@ Natural orbital occupations $n_i$ indicate importance of orbitals. Used for:
 \end{itemize}
 
 
+\chapter{Orbital localization and region fragments}
+
+\section{Localized occupied orbitals}
+
+The region workflow starts from localized occupied orbitals. In the default implementation, the valence occupied space is localized with the intrinsic bond orbital (IBO) functional
+\begin{equation}
+  \mathcal{L}_{\mathrm{IBO}} = \sum_i \sum_A \left(q_A^i\right)^p,
+\end{equation}
+with IAO charges
+\begin{equation}
+  q_A^i = \sum_{\mu \in A} \left|\langle \mathrm{IAO}_\mu | \phi_i \rangle\right|^2,
+\end{equation}
+where $A$ labels atoms, $i$ labels occupied orbitals, and $p=4$ by default.
+The working IAOs are obtained from the occupied orbitals $C_{\mathrm{occ}}$ and the minimal-basis overlap blocks
+\begin{equation}
+  P_{12} = S^{-1} S_{12},
+  \qquad
+  B = S_{21} C_{\mathrm{occ}},
+  \qquad
+  D = S_{22}^{-1} B.
+\end{equation}
+Following the revised formulation from supplementary materials of Ref.~\cite{senjeanGeneralizationIntrinsic2021}, 
+\elemcoil{} first builds the proto-IAOs
+\begin{equation}
+  A_{\mathrm{proto}} = P_{12} + \left(C_{\mathrm{occ}} - P_{12} D \left(B^\dagger D\right)^{-1}\right) B^\dagger,
+\end{equation}
+and then performs a metric L\"owdin orthogonalization,
+\begin{equation}
+  C_{\mathrm{IAO}} = A_{\mathrm{proto}}\left(A_{\mathrm{proto}}^\dagger S A_{\mathrm{proto}}\right)^{-1/2}.
+\end{equation}
+Only non-ghost minimal-basis functions are retained in this construction.
+The localized occupied orbitals are related to the input occupied orbitals through a rotation matrix
+\begin{equation}
+  |\tilde \phi_i\rangle = \sum_j |\phi_j\rangle R_{ji}.
+\end{equation}
+
+Let $\mathcal{C}_{\mathrm{arg}}$ denote the explicit center list passed to \cmd{@region}, and let
+$\mathcal{C}_{\mathrm{incl}}^{\mathrm{opt}}$ and $\mathcal{C}_{\mathrm{excl}}^{\mathrm{opt}}$ denote
+\cmd{region.inclusive\_centers} and \cmd{region.exclusive\_centers}, respectively.
+The effective center sets are
+\begin{align}
+  \mathcal{C}_{\mathrm{incl}} &=
+  \begin{cases}
+    \mathcal{C}_{\mathrm{incl}}^{\mathrm{opt}} \cup \mathcal{C}_{\mathrm{arg}}, & \cmd{region.mode = :inclusive}, \\
+    \mathcal{C}_{\mathrm{incl}}^{\mathrm{opt}}, & \cmd{region.mode = :exclusive},
+  \end{cases} \\
+  \mathcal{C}_{\mathrm{excl}} &=
+  \begin{cases}
+    \mathcal{C}_{\mathrm{excl}}^{\mathrm{opt}}, & \cmd{region.mode = :inclusive}, \\
+    \mathcal{C}_{\mathrm{excl}}^{\mathrm{opt}} \cup \mathcal{C}_{\mathrm{arg}}, & \cmd{region.mode = :exclusive}.
+  \end{cases}
+\end{align}
+An occupied orbital is retained when it satisfies either the inclusive or the exclusive rule:
+\begin{align}
+  i \in \mathcal{F}_{\mathrm{occ}}^{\mathrm{incl}} &\iff \exists A \in \mathcal{C}_{\mathrm{incl}} : q_A^i \ge \tau_{\mathrm{occ}}, \\
+  i \in \mathcal{F}_{\mathrm{occ}}^{\mathrm{excl}} &\iff \left(\exists A \in \mathcal{C}_{\mathrm{excl}} : q_A^i \ge \tau_{\mathrm{occ}}\right) \wedge
+  \left(\forall B,\ q_B^i \ge \tau_{\mathrm{occ}} \Rightarrow B \in \mathcal{C}_{\mathrm{excl}}\right),
+\end{align}
+where $\tau_{\mathrm{occ}} =$ \cmd{region.occ\_charge\_thr}.
+The selected occupied orbitals are written as fragment-inactive orbitals in the tagged dump.
+
+\section{Fragment virtual orbitals from support-atom OPAOs}
+
+In the non-pi workflow, the fragment virtual space is built from support-atom projected atomic orbitals.
+If $\mathcal{C}_{\mathrm{all}} = \mathcal{C}_{\mathrm{incl}} \cup \mathcal{C}_{\mathrm{excl}}$, the support set is defined as
+\begin{equation}
+  \mathcal{S} = \mathcal{C}_{\mathrm{all}} \cup \left\{A\ \middle|\ \exists i \in \mathcal{F}_{\mathrm{occ}},\ q_A^i \ge \tau_{\mathrm{atom}}\right\},
+\end{equation}
+where $\tau_{\mathrm{atom}} =$ \cmd{region.atom\_charge\_thr}.
+
+Let $C_v$ denote the canonical virtual orbitals and let $S_{\mathrm{AO},\mathcal{S}}$ denote the AO overlap columns corresponding to AO functions on support atoms.
+The fragment PAOs are formed as
+\begin{equation}
+  C_{\mathrm{PAO}} = C_v C_v^\dagger S_{\mathrm{AO},\mathcal{S}}.
+\end{equation}
+Their overlap matrix is
+\begin{equation}
+  S_{\mathrm{PAO}} = C_{\mathrm{PAO}}^\dagger S C_{\mathrm{PAO}}.
+\end{equation}
+A locality-preserving factor $M$ is built such that
+\begin{equation}
+  M^\dagger S_{\mathrm{PAO}} M = I.
+\end{equation}
+Near-redundant directions of $S_{\mathrm{PAO}}$ --- those with eigenvalue below
+$\mathtt{opaofac}\cdot\mathtt{redthr}\cdot\lambda_{\max}$ (\cmd{loc.opaofac} times the AO basis
+redundancy threshold \cmd{scf.redthr}) --- are dropped, so $M$ has fewer columns than
+$C_{\mathrm{PAO}}$ when the support PAOs are linearly dependent in the virtual space. The retained
+PAOs are selected by a rank-revealing column-pivoted QR of the kept eigenvectors of
+$S_{\mathrm{PAO}}$ and orthogonalized by a symmetric L\"owdin transformation (with one refinement
+step), keeping the OPAOs local. This yields orthogonal PAOs
+\begin{equation}
+  C_{\mathrm{OPAO}} = C_{\mathrm{PAO}} M.
+\end{equation}
+The corresponding virtual rotation is obtained from
+\begin{equation}
+  R_{\mathrm{virt}} = C_v^\dagger S C_{\mathrm{OPAO}}.
+\end{equation}
+
+\section{Local pi axes and target orbitals}
+
+For \cmd{region.pi = :occupied} or \cmd{:both}, one local target $p'_z$ orbital is constructed for each selected atom.
+The bonding graph is built from the distance criterion
+\begin{equation}
+  r_{AB} \lt 1.3\left(R_A + R_B\right),
+\end{equation}
+where $R_A$ and $R_B$ are element-specific covalent radii.
+
+For each selected atom $A$, a local plane neighborhood $\mathcal{P}_A$ is assembled from bonded neighbors first, with nearest-atom fallbacks if the bonded graph is insufficient to define a plane.
+The code then constructs the symmetric matrix
+\begin{equation}
+  G_A = \sum_{B \in \mathcal{P}_A} \left(\vect{R}_B - \vect{R}_A\right)\left(\vect{R}_B - \vect{R}_A\right)^\dagger,
+\end{equation}
+and takes the normalized eigenvector corresponding to the smallest eigenvalue as the local plane normal $\vect{n}_A$.
+
+If $|p_x^A\rangle$, $|p_y^A\rangle$, and $|p_z^A\rangle$ denote the highest-valence p-type IAOs on atom $A$, the target local pi orbital is
+\begin{equation}
+  |p'_{z,A}\rangle = n_{A,x}|p_x^A\rangle + n_{A,y}|p_y^A\rangle + n_{A,z}|p_z^A\rangle.
+\end{equation}
+
+\section{Pi-space projector}
+
+Let $P_Z$ be the matrix whose columns are the target orbitals $|p'_{z,A}\rangle$ and let $C_{\mathrm{blk}}$ denote either the occupied or the virtual block under consideration.
+The projected overlaps are
+\begin{equation}
+  X = P_Z^\dagger S C_{\mathrm{blk}},
+  \qquad
+  S_\pi = P_Z^\dagger S P_Z.
+\end{equation}
+\elemcoil{} diagonalizes the projector-overlap matrix
+\begin{equation}
+  O = X^\dagger S_\pi^{-1} X.
+\end{equation}
+If
+\begin{equation}
+  O U = U \Lambda,
+\end{equation}
+the rotated block is formed with eigenvectors ordered by descending eigenvalues, so the leading orbitals are those with the largest pi-projector overlap.
+
+The automatic total number of local $\pi$ electrons is
+\begin{equation}
+  n_{\pi,e} =
+  \begin{cases}
+    \cmd{region.pi\_electrons}, & \text{if this option is set non-negative}, \\
+    \sum\limits_{A \in \mathcal{C}_{\mathrm{all}}} n_{\pi,e}(A), & \text{otherwise},
+  \end{cases}
+\end{equation}
+where the fallback atomic contributions $n_{\pi,e}(A)$ use an element- and coordination-based main-group $p$-block rule.
+
+For restricted references, the default occupied and virtual $\pi$ counts are
+\begin{equation}
+  n_{\pi,\mathrm{occ}} = \frac{n_{\pi,e}}{2},
+  \qquad
+  n_{\pi,\mathrm{virt}} = N_{\mathrm{centers}} - n_{\pi,\mathrm{occ}}.
+\end{equation}
+These defaults can be overridden by \cmd{region.pi\_occupied} and \cmd{region.pi\_virtual}, in which case only the leading occupied and virtual projector-ordered orbitals are retained.
+For unrestricted references, the alpha and beta occupied counts are split using the spin population difference $m_s^{(2)} = N_\alpha - N_\beta$,
+\begin{equation}
+  n_{\pi,\mathrm{occ}}^\alpha = \frac{n_{\pi,e} + m_s^{(2)}}{2},
+  \qquad
+  n_{\pi,\mathrm{occ}}^\beta = \frac{n_{\pi,e} - m_s^{(2)}}{2}.
+\end{equation}
+
+\section{Pseudo-canonicalization}
+
+If \cmd{region.pseudo = true}, the selected fragment occupied and fragment virtual blocks are semicanonicalized by diagonalizing the corresponding Fock subblocks. For a fragment block $C_f$ this amounts to diagonalizing
+\begin{equation}
+  F_f = C_f^\dagger F_{\mathrm{AO}} C_f,
+\end{equation}
+and rotating the block with the eigenvectors of $F_f$.
+
+
+
 \chapter{Automatically generated UCCSDT and UDC-CCSDT}
-Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} were generated with version 1.0.1 of the \quantwo program\cite{quantwo}.
-The \quantwo inputs are listed below.
+Unrestricted implementations of CCSDT and DC-CCSDT\cite{kats19_dc,rishi19,schraivogel21_dc} 
+were generated with version 1.0.1 of the \quantwo\ program\cite{quantwo}.
+The \quantwo\ inputs are listed below.
 \begin{itemize}
-  \item UCCSDT \quantwo input file:
+  \item UCCSDT \quantwo\ input file:
 \lstset{language=[LaTeX]Tex, frame=shadowbox, rulesepcolor=\color{gray}, basicstyle=\ttfamily\scriptsize, columns=fullflexible, breaklines=true}
 \begin{lstlisting}
 prog,spinintegr=0,nobrafac=1,explspin=1,algo=2
@@ -2150,7 +3299,7 @@ output,level=1,maxlenline=70
 <\Phi^{abc}_{ijk}| \op H (\op T_2 + \op T_3 + \half \op T_2 \op T_2 + \op T_2 \op T_3) |0>_C
 \eeq
 \end{lstlisting}
-\item UDC-CCSDT \quantwo input file:
+\item UDC-CCSDT \quantwo\ input file:
 \begin{lstlisting}
 %singles and doubles amplitude equations from UCCSDT
 %we only modify the triples amplitude equation
@@ -2179,7 +3328,7 @@ output,level=1,maxlenline=70
 \end{lstlisting}
 \end{itemize}
 \noindent The program generates \textsf{TensorOperations} code.
-The generated code  used by \elemcoil is located in the \texttt{src/algo} directory. 
+The generated code  used by \elemcoil\ is located in the \texttt{src/algo} directory. 
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliography{references.bib}
 \bibliographystyle{naturemag}

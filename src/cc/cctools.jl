@@ -4,7 +4,8 @@
 A collection of tools for working with coupled cluster theory.
 """
 module CCTools
-using LinearAlgebra, Printf
+using LinearAlgebra
+using ..ElemCo.Outputs
 using ..ElemCo.Utils
 using ..ElemCo.ECInfos
 using ..ElemCo.ECMethods
@@ -25,7 +26,7 @@ export calc_singles_norm, calc_doubles_norm, calc_triples_norm, calc_contra_sing
 export read_starting_guess4amplitudes, save_current_singles, save_current_doubles
 export transform_amplitudes2lagrange_multipliers!
 export save_or_start_file, try2save_amps!, try2start_amps, try2save_singles!, try2save_doubles!, try2start_singles, try2start_doubles
-export contra2covariant
+export contra2covariant, rotation_matrix
 export spin_project!, spin_project_amplitudes
 export clean_cs_triples!
 export calc_cs_singles_dot, calc_u_singles_dot
@@ -33,10 +34,14 @@ export calc_cs_doubles_dot, calc_samespin_doubles_dot, calc_ab_doubles_dot
 export calc_cs_triples_dot, calc_samespin_triples_dot, calc_mixedspin_triples_dot
 export calc_contra_cs_singles_dot, calc_contra_cs_doubles_dot
 export triples_4ext!
+export triples_4ext_aa!, triples_4ext_bb!
+export triples_4ext_aab_ab!, triples_4ext_abb_ab!
 export project_amplitudes, check_projection_rank
 export dump_wavefunction_with_amplitudes!
 export dump_wavefunction_with_determinants!, try_fetch_starting_determinants
 export try_fetch_restricted_starting_amplitudes, try_fetch_unrestricted_starting_amplitudes
+export print_main_singles
+export rotate_U2pseudocanonical
 
 """ 
     calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
@@ -55,6 +60,14 @@ function calc_fock_matrix(EC::ECInfo, closed_shell, print_out=true)
     end
     save!(EC, "e_m", eps)
     save!(EC, "e_M", eps)
+    if EC.options.wf.npositron > 0
+      pfock = gen_pfock(EC)
+      save!(EC, "fp_mm", pfock)
+      sp_pos=1:1
+      peps = diag(pfock)
+      println("Occupied positron orbital energies: ", peps[sp_pos])
+      save!(EC, "e_p", peps)
+    end
   else
     fock = gen_fock(EC, :α)
     eps = diag(fock)
@@ -81,7 +94,12 @@ function calc_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
     ϵo = load1idx(EC,"e_m")[SP['o']]
-    EHF = sum(ϵo) + sum(diag(ints1(EC,"oo"))) + EC.fd.int0
+    EHF = sum(ϵo) + sum(diag(ints1(EC,"oo")))
+    if EC.options.wf.npositron > 0
+      ϵp = load1idx(EC,"e_p")[SP['p']]
+      EHF += 0.5*(sum(ϵp) + sum(diag(ints1(EC,"pp"))))
+    end
+    EHF = EHF + EC.fd.int0
   else
     ϵo = load1idx(EC,"e_m")[SP['o']]
     ϵob = load1idx(EC,"e_M")[SP['O']]
@@ -99,8 +117,10 @@ function calc_rotated_HF_energy(EC::ECInfo, closed_shell)
   SP = EC.space
   if closed_shell
     ϵo = load1idx(EC,"e_m")[SP['o']]
-    int1_r = load2idx(EC,"int1_r")[SP['o'],SP['o']]
-    EHF = sum(ϵo) + sum(diag(int1_r)) + EC.fd.int0
+    dh_oo = load2idx(EC,"dh_mm")[SP['o'],SP['o']]
+    # AO-direct has no dump: its `int0` (nuclear repulsion + frozen core) is saved by `ao_cc_setup!`
+    int0 = EC.ao_direct ? load1idx(EC,"ao_e0")[1] : EC.fd.int0
+    EHF = sum(ϵo) + sum(diag(dh_oo)) + int0
   else
     # TODO
   end
@@ -155,6 +175,30 @@ function spin_project!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
   @mtensor T2a[:,:,doa,soa][a,b,i,j] = T2a[:,:,soa,doa][b,a,j,i]
   @mtensor T2b[dvb,:,:,:][a,b,i,j] = T2ab[:,:,doa,:][a,b,i,j] - T2ab[:,:,doa,:][a,b,j,i]
   @mtensor T2b[svb,dvb,:,:][a,b,i,j] = T2b[dvb,svb,:,:][b,a,j,i]
+end
+
+"""
+    spin_project!(EC::ECInfo, T1a, T1b)
+  
+  Spin-project singles amplitudes/residuals.
+  
+  Only possible for high-spin states.
+"""
+function spin_project!(EC::ECInfo, T1a, T1b)
+  SP = EC.space
+  @assert length(SP['S']) == 0 " Spin-projection only possible for high-spin states!"
+  soa = subspace_in_space(SP['s'], SP['o'])
+  svb = subspace_in_space(SP['s'], SP['V'])
+  @assert length(soa) == length(svb)
+  doa = setdiff(1:length(SP['o']), soa)
+  @assert length(doa) == length(SP['O'])
+  dvb =setdiff(1:length(SP['V']), svb)
+  @assert length(dvb) == length(SP['v'])
+  if length(T1b) > 0
+    T1 = 0.5 * (T1a[:,doa] + T1b[dvb,:])
+    T1a[:,doa] .= T1
+    T1b[dvb,:] .= T1
+  end
 end
 
 """
@@ -282,30 +326,37 @@ function update_doubles(EC::ECInfo, R2; spincase::Symbol=:α, antisymmetrize=fal
   elseif spincase == :β
     ϵob, ϵvb = orbital_energies(EC, :β)
     return update_doubles(R2, ϵob, ϵvb, ϵob, ϵvb, shift, antisymmetrize)
-  else
+  elseif spincase == :αβ
     ϵo, ϵv = orbital_energies(EC)
     ϵob, ϵvb = orbital_energies(EC, :β)
     return update_doubles(R2, ϵo, ϵv, ϵob, ϵvb, shift, antisymmetrize)
+  elseif spincase == :αp
+    ϵo, ϵv = orbital_energies(EC)
+    ϵop, ϵvp = orbital_energies(EC, :p)
+    return update_doubles(R2, ϵo, ϵv, ϵop, ϵvp, shift, antisymmetrize)
+  else
+    error("update_doubles: unexpected spin case $spincase.")
   end
 end
 
 """
-    update_singles!(EC::ECInfo, T1, R1)
+    update_singles!(EC::ECInfo, T1, R1; damp=1.0)
 
-  Update singles amplitudes in `T1` with `R1`.
+  Update singles amplitudes in `T1` with `R1`. The update is scaled by `damp`
+  (`1.0` = full step; used e.g. as the orbital-rotation damping in OQV methods).
 """
-function update_singles!(EC::ECInfo, T1, R1)
-  T1 .+= update_singles(EC, R1)
+function update_singles!(EC::ECInfo, T1, R1; damp=1.0)
+  T1 .+= damp .* update_singles(EC, R1)
 end
 
 """
-    update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
+    update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b; damp=1.0)
 
-  Update singles amplitudes in `T1a`, `T1b` with `R1a`, `R1b`.
+  Update singles amplitudes in `T1a`, `T1b` with `R1a`, `R1b`, scaled by `damp`.
 """
-function update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b)
-  T1a .+= update_singles(EC, R1a)
-  T1b .+= update_singles(EC, R1b; spincase=:β)
+function update_singles!(EC::ECInfo, T1a, T1b, R1a, R1b; damp=1.0)
+  T1a .+= damp .* update_singles(EC, R1a)
+  T1b .+= damp .* update_singles(EC, R1b; spincase=:β)
 end
 
 """
@@ -440,8 +491,8 @@ end
   Calculate squared norm of closed-shell singles amplitudes.
 """
 function calc_singles_norm(T1)
-  @mtensor NormT1 = 2.0*T1[a,i]*T1[a,i]
-  return NormT1
+  @mtensor NormT1 = 2.0*conj(T1[a,i])*T1[a,i]
+  return real(NormT1)
 end
 
 """
@@ -450,8 +501,8 @@ end
   Calculate squared norm of closed-shell contravariant singles amplitudes.
 """
 function calc_contra_singles_norm(T1)
-  @mtensor NormT1 = 0.5*T1[a,i]*T1[a,i]
-  return NormT1
+  @mtensor NormT1 = 0.5*conj(T1[a,i])*T1[a,i]
+  return real(NormT1)
 end
 
 """
@@ -461,10 +512,10 @@ end
 """
 function calc_singles_norm(T1a, T1b)
   @mtensor begin
-    NormT1 = T1a[a,i]*T1a[a,i]
-    NormT1 += T1b[a,i]*T1b[a,i]
+    NormT1 = conj(T1a[a,i])*T1a[a,i]
+    NormT1 += conj(T1b[a,i])*T1b[a,i]
   end
-  return NormT1
+  return real(NormT1)
 end
 
 """
@@ -482,9 +533,9 @@ end
 
   Calculate dot product of closed-shell singles amplitudes.
 """
-function calc_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
-  @mtensor DotT1 = 2.0*T1[a,i]*T1_[a,i]
-  return DotT1::Float64
+function calc_cs_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
+  @mtensor DotT1 = 2.0*conj(T1[a,i])*T1_[a,i]
+  return DotT1::T
 end
 calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ must be matrices!")
 
@@ -493,9 +544,9 @@ calc_cs_singles_dot(T1, T1_, state=0) = error("calc_cs_singles_dot: T1 and T1_ m
 
   Calculate dot product of contravariant closed-shell singles amplitudes.
 """
-function calc_contra_cs_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
-  @mtensor DotT1 = 0.5*T1[a,i]*T1_[a,i]
-  return DotT1::Float64
+function calc_contra_cs_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
+  @mtensor DotT1 = 0.5*conj(T1[a,i])*T1_[a,i]
+  return DotT1::T
 end
 calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot: T1 and T1_ must be matrices!")
 
@@ -504,11 +555,11 @@ calc_contra_cs_singles_dot(T1, T1_, state=0) = error("calc_contra_cs_singles_dot
 
   Calculate dot of unrestricted singles amplitudes.
 """
-function calc_u_singles_dot(T1::Matrix{Float64}, T1_::Matrix{Float64}, state=0)
+function calc_u_singles_dot(T1::AbstractMatrix{T}, T1_::AbstractMatrix{T}, state=0) where T
   @mtensor begin
-    DotT1 = T1[a,i]*T1_[a,i]
+    DotT1 = conj(T1[a,i])*T1_[a,i]
   end
-  return DotT1::Float64
+  return DotT1::T
 end
 calc_u_singles_dot(T1, T1_, state=0) = error("calc_u_singles_dot: T1 and T1_ must be matrices!")
 
@@ -518,8 +569,8 @@ calc_u_singles_dot(T1, T1_, state=0) = error("calc_u_singles_dot: T1 and T1_ mus
   Calculate squared norm of closed-shell doubles amplitudes.
 """
 function calc_doubles_norm(T2)
-  @mtensor NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2[a,b,i,j]
-  return NormT2
+  @mtensor NormT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*conj(T2[a,b,i,j])
+  return real(NormT2)
 end
 
 """
@@ -528,8 +579,8 @@ end
   Calculate squared norm of closed-shell contravariant doubles amplitudes.
 """
 function calc_contra_doubles_norm(T2)
-  @mtensor NormT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2[a,b,i,j]
-  return NormT2/3.0
+  @mtensor NormT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*conj(T2[a,b,i,j])
+  return real(NormT2)/3.0
 end
 
 """
@@ -539,11 +590,11 @@ end
 """
 function calc_doubles_norm(T2a, T2b, T2ab)
   @mtensor begin
-    NormT2 = 0.25*(T2a[a,b,i,j]*T2a[a,b,i,j])
-    NormT2 += 0.25*(T2b[a,b,i,j]*T2b[a,b,i,j])
-    NormT2 += T2ab[a,b,i,j]*T2ab[a,b,i,j]
+    NormT2 = 0.25*(conj(T2a[a,b,i,j])*T2a[a,b,i,j])
+    NormT2 += 0.25*(conj(T2b[a,b,i,j])*T2b[a,b,i,j])
+    NormT2 += conj(T2ab[a,b,i,j])*T2ab[a,b,i,j]
   end
-  return NormT2
+  return real(NormT2)
 end
 
 """
@@ -551,9 +602,9 @@ end
 
   Calculate dot of closed-shell doubles amplitudes.
 """
-function calc_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
-  @mtensor DotT2 = (2.0*T2[a,b,i,j] - T2[b,a,i,j])*T2_[a,b,i,j]
-  return DotT2::Float64
+function calc_cs_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
+  @mtensor DotT2 = conj(T2[a,b,i,j])*(2.0*T2_[a,b,i,j] - T2_[b,a,i,j])
+  return DotT2::T
 end
 calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -562,9 +613,9 @@ calc_cs_doubles_dot(T2, T2_, state=0) = error("calc_cs_doubles_dot: T2 and T2_ m
 
   Calculate dot of contravariant closed-shell doubles amplitudes.
 """
-function calc_contra_cs_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
-  @mtensor DotT2 = (2.0*T2[a,b,i,j] + T2[b,a,i,j])*T2_[a,b,i,j]
-  return (DotT2/3.0)::Float64
+function calc_contra_cs_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
+  @mtensor DotT2 = conj(T2[a,b,i,j])*(2.0*T2_[a,b,i,j] + T2_[b,a,i,j])
+  return DotT2/3.0::T
 end
 calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -573,11 +624,11 @@ calc_contra_cs_doubles_dot(T2, T2_, state=0) = error("calc_contra_cs_doubles_dot
 
   Calculate dot of unrestricted same-spin doubles amplitudes.
 """
-function calc_samespin_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+function calc_samespin_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor begin
-    DotT2 = 0.25*(T2[a,b,i,j]*T2_[a,b,i,j])
+    DotT2 = 0.25*(conj(T2[a,b,i,j])*T2_[a,b,i,j])
   end
-  return DotT2::Float64
+  return DotT2::T
 end
 calc_samespin_doubles_dot(T2, T2_, state=0) = error("calc_samespin_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -586,11 +637,11 @@ calc_samespin_doubles_dot(T2, T2_, state=0) = error("calc_samespin_doubles_dot: 
 
   Calculate dot of unrestricted αβ doubles amplitudes.
 """
-function calc_ab_doubles_dot(T2::Array{Float64,4}, T2_::Array{Float64,4}, state=0)
+function calc_ab_doubles_dot(T2::AbstractArray{T,4}, T2_::AbstractArray{T,4}, state=0) where T
   @mtensor begin
-    DotT2 = T2[a,b,i,j]*T2_[a,b,i,j]
+    DotT2 = conj(T2[a,b,i,j])*T2_[a,b,i,j]
   end
-  return DotT2::Float64
+  return DotT2::T
 end
 calc_ab_doubles_dot(T2, T2_, state=0) = error("calc_ab_doubles_dot: T2 and T2_ must be 4D arrays!")
 
@@ -601,12 +652,12 @@ calc_ab_doubles_dot(T2, T2_, state=0) = error("calc_ab_doubles_dot: T2 and T2_ m
 """
 function calc_triples_norm(T3aaa, T3bbb, T3abb, T3aab)
   @mtensor begin
-    NormT3 = (1/36)*(T3aaa[a,b,c,i,j,k]*T3aaa[a,b,c,i,j,k])
-    NormT3 += (1/36)*(T3bbb[a,b,c,i,j,k]*T3bbb[a,b,c,i,j,k])
-    NormT3 += 0.25*(T3abb[a,b,c,i,j,k]*T3abb[a,b,c,i,j,k])
-    NormT3 += 0.25*(T3aab[a,b,c,i,j,k]*T3aab[a,b,c,i,j,k])
+    NormT3 = (1/36)*(conj(T3aaa[a,b,c,i,j,k])*T3aaa[a,b,c,i,j,k])
+    NormT3 += (1/36)*(conj(T3bbb[a,b,c,i,j,k])*T3bbb[a,b,c,i,j,k])
+    NormT3 += 0.25*(conj(T3abb[a,b,c,i,j,k])*T3abb[a,b,c,i,j,k])
+    NormT3 += 0.25*(conj(T3aab[a,b,c,i,j,k])*T3aab[a,b,c,i,j,k])
   end
-  return NormT3
+  return real(NormT3)
 end
 
 """
@@ -615,7 +666,7 @@ end
   Calculate squared norm of triples amplitudes.
 """
 function calc_triples_norm(T3)
-  NormT3 = 0.0
+  NormT3 = zero(real(eltype(T3)))
   nocc = size(T3, 6)
   for k = 1:nocc 
     for j = 1:k
@@ -630,14 +681,14 @@ function calc_triples_norm(T3)
         end
         T3_ijk = @view T3[:,:,:,i,j,k]
         @mtensor begin
-          NormT3_ = 4*(T3_ijk[a,b,c]*T3_ijk[a,b,c])
-          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[a,c,b])
-          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[c,b,a])
-          NormT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk[b,a,c])
-          NormT3_ += (T3_ijk[a,b,c]*T3_ijk[c,a,b])
-          NormT3_ += (T3_ijk[a,b,c]*T3_ijk[b,c,a])
+          NormT3_ = 4*(conj(T3_ijk[a,b,c])*T3_ijk[a,b,c])
+          NormT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk[a,c,b])
+          NormT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk[c,b,a])
+          NormT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk[b,a,c])
+          NormT3_ += (conj(T3_ijk[a,b,c])*T3_ijk[c,a,b])
+          NormT3_ += (conj(T3_ijk[a,b,c])*T3_ijk[b,c,a])
         end
-        NormT3 += fac*NormT3_
+        NormT3 += fac*real(NormT3_)
       end
     end
   end
@@ -649,8 +700,8 @@ end
 
   Calculate dot of closed-shell triples amplitudes.
 """
-function calc_cs_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
-  DotT3 = 0.0
+function calc_cs_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
+  DotT3 = zero(T)
   nocc = size(T3, 6)
   for k = 1:nocc 
     for j = 1:k
@@ -666,18 +717,18 @@ function calc_cs_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
         T3_ijk = @view T3[:,:,:,i,j,k]
         T3_ijk_ = @view T3_[:,:,:,i,j,k]
         @mtensor begin
-          DotT3_ = 4*(T3_ijk[a,b,c]*T3_ijk_[a,b,c])
-          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[a,c,b])
-          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[c,b,a])
-          DotT3_ -= 2*(T3_ijk[a,b,c]*T3_ijk_[b,a,c])
-          DotT3_ += (T3_ijk[a,b,c]*T3_ijk_[c,a,b])
-          DotT3_ += (T3_ijk[a,b,c]*T3_ijk_[b,c,a])
+          DotT3_ = 4*(conj(T3_ijk[a,b,c])*T3_ijk_[a,b,c])
+          DotT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk_[a,c,b])
+          DotT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk_[c,b,a])
+          DotT3_ -= 2*(conj(T3_ijk[a,b,c])*T3_ijk_[b,a,c])
+          DotT3_ += (conj(T3_ijk[a,b,c])*T3_ijk_[c,a,b])
+          DotT3_ += (conj(T3_ijk[a,b,c])*T3_ijk_[b,c,a])
         end
         DotT3 += fac*DotT3_
       end
     end
   end
-  return DotT3::Float64
+  return DotT3::T
 end
 calc_cs_triples_dot(T3, T3_) = error("calc_cs_triples_dot not implemented for this type of T3")
 
@@ -686,11 +737,11 @@ calc_cs_triples_dot(T3, T3_) = error("calc_cs_triples_dot not implemented for th
 
   Calculate dot of unrestricted same-spin triples amplitudes.
 """
-function calc_samespin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
+function calc_samespin_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
   @mtensor begin
-    DotT3 = (1/36)*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
+    DotT3 = (1/36)*(conj(T3[a,b,c,i,j,k])*T3_[a,b,c,i,j,k])
   end
-  return DotT3::Float64
+  return DotT3::T
 end
 calc_samespin_triples_dot(T3, T3_) = error("calc_samespin_triples_dot not implemented for this type of T3")
 
@@ -699,11 +750,11 @@ calc_samespin_triples_dot(T3, T3_) = error("calc_samespin_triples_dot not implem
 
   Calculate dot of unrestricted mixed-spin triples amplitudes.
 """
-function calc_mixedspin_triples_dot(T3::Array{Float64,6}, T3_::Array{Float64,6})
+function calc_mixedspin_triples_dot(T3::AbstractArray{T,6}, T3_::AbstractArray{T,6}) where T
   @mtensor begin
-    DotT3 = 0.25*(T3[a,b,c,i,j,k]*T3_[a,b,c,i,j,k])
+    DotT3 = 0.25*(conj(T3[a,b,c,i,j,k])*T3_[a,b,c,i,j,k])
   end
-  return DotT3::Float64
+  return DotT3::T
 end
 calc_mixedspin_triples_dot(T3, T3_) = error("calc_mixedspin_triples_dot not implemented for this type of T3")
 
@@ -746,12 +797,12 @@ function calc_deco_doubles_norm(T2, tT2=Float64[])
     normT2 = calc_doubles_norm(T2)
   else
     if length(tT2) > 0
-      @mtensor normT2 = T2[X,Y] * tT2[X,Y]
+      @mtensor normT2 = conj(T2[X,Y]) * tT2[X,Y]
     else
-      @mtensor normT2 = T2[X,Y] * T2[X,Y]
+      @mtensor normT2 = conj(T2[X,Y]) * T2[X,Y]
     end
   end
-  return normT2
+  return real(normT2)
 end
 
 """
@@ -760,8 +811,8 @@ end
   Calculate a *simple* norm of triples (without contravariant!)
 """
 function calc_deco_triples_norm(T3)
-  @mtensor NormT3 = T3[X,Y,Z] * T3[X,Y,Z]
-  return NormT3
+  @mtensor NormT3 = conj(T3[X,Y,Z]) * T3[X,Y,Z]
+  return real(NormT3)
 end
 
 """
@@ -812,7 +863,7 @@ end
   Read amplitudes (type="T") or Lagrange multipliers (type="LM") 
   from file `EC.options.cc.start[_lm]*"_excitation_level"`.
 """
-function try2start_amps(EC::ECInfo, ::Val{excitation_level}; type="T") where excitation_level
+function try2start_amps(EC::ECInfo{T}, ::Val{excitation_level}; type="T") where {T, excitation_level}
   mainfilename, descr = save_or_start_file(EC, type, excitation_level, false)
   if mainfilename != ""
     filename = mainfilename*"_$excitation_level"
@@ -821,7 +872,7 @@ function try2start_amps(EC::ECInfo, ::Val{excitation_level}; type="T") where exc
       return load(EC, filename, Val(excitation_level*2), skip_error=true)
     end
   end
-  return Array{Float64,excitation_level*2}(undef, ntuple(i->0, Val(excitation_level*2)))
+  return Array{T,excitation_level*2}(undef, ntuple(i->0, Val(excitation_level*2)))
 end
 
 """
@@ -872,7 +923,7 @@ end
   The guess will be read from `T_vo`, `T_VO`, `T_vvoo` etc files.
   If the file does not exist, the guess will be a zeroed-vector.
 """
-function read_starting_guess4amplitudes(EC::ECInfo, ::Val{level}, spins...) where level
+function read_starting_guess4amplitudes(EC::ECInfo{T}, ::Val{level}, spins...) where {T,level}
   if length(spins) == 0
     spins = [:α for i in 1:level]
   end
@@ -890,7 +941,7 @@ function read_starting_guess4amplitudes(EC::ECInfo, ::Val{level}, spins...) wher
   if file_exists(EC, filename)
     return load(EC, filename, Val(level*2))
   else
-    return zeros(len_spaces(EC, spaces)...)::Array{Float64,level*2}
+    return zeros(T, len_spaces(EC, spaces)...)::Array{T,level*2}
   end
 end
 
@@ -995,23 +1046,49 @@ function contra2covariant(T2)
 end
 
 """
+    rotation_matrix(EC::ECInfo, T1; full=false, beta=false)
+  
+  Make the integrals rotation matrix with T1.
+
+  If `full` is true, the rotation matrix will be made with core and deleted orbitals included.
+"""
+function rotation_matrix(EC::ECInfo{T}, T1; full=false, beta=false) where T
+  if full
+    space_save, _ = restore_full_space!(EC)
+  end
+  norb = n_orbs(EC)
+  SP = EC.space
+  occ = beta ? SP['O'] : SP['o']
+  virt = beta ? SP['V'] : SP['v']
+  Rpq = zeros(T, norb, norb)
+  @assert size(T1) == (length(virt), length(occ)) "size of T1 does not match space dimensions"
+  Rpq[virt,occ] = T1
+  Rpq[occ,virt] = -T1'
+  Rpq = exp(Rpq)
+  if full
+    restore_space!(EC, space_save)
+  end
+  return Rpq
+end
+
+"""
     triples_4ext!(EC::ECInfo, R3, T3)
 
   Calculate 4-external contraction with triples amplitudes
   and store the result in `R3`.
 """
-function triples_4ext!(EC::ECInfo, R3, T3)
+function triples_4ext!(EC::ECInfo{T}, R3, T3) where T
   nocc = size(T3, 6)
   nvirt = size(T3, 3)
   d_vvvv = load4idx(EC,"d_vvvv")
   diagindx = [CartesianIndex(i,i) for i in 1:nvirt]
   d_vvvv[:,:,diagindx] *= 0.5
-  trivv = [CartesianIndex(i,j) for j in 1:nvirt for i in 1:j]
+  trivv = uppertriangular_cut(nvirt)
   d_vvvv = d_vvvv[:,:,trivv]
-  X3 = Array{Float64}(undef, nvirt, nvirt, nvirt, nocc, nocc)
-  T3k = Array{Float64}(undef, length(trivv), nvirt, nocc, nocc)
+  X3 = Array{T}(undef, nvirt, nvirt, nvirt, nocc, nocc)
+  T3k = Array{T}(undef, length(trivv), nvirt, nocc, nocc)
   for k = 1:nocc
-    T3k .= T3[trivv,:,:,:,k]
+    T3k .= @view T3[trivv,:,:,:,k]
     @mtensor X3[a,b,c,i,j] = d_vvvv[a,b,x] * T3k[x,c,i,j]
     vR3 = selectdim(R3, 6, k)
     @mtensor vR3[a,b,c,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
@@ -1021,6 +1098,201 @@ function triples_4ext!(EC::ECInfo, R3, T3)
     @mtensor vR3[c,a,b,i,j] += X3[a,b,c,i,j] + X3[b,a,c,j,i]
   end
   return R3
+end
+
+"""
+    antisymmetrize_34!(d, trivv)
+
+  Antisymmetrize dims 3 and 4 of `d` in-place and compress to triangular.
+  Returns `d[:,:,trivv]` where `d[p,q,a,b] → d[p,q,a,b] - d[p,q,b,a]` for `a < b`.
+"""
+function antisymmetrize_34!(d, trivv)
+  nv = size(d, 3)
+  for b in 1:nv, a in 1:b-1
+    @views d[:,:,a,b] .-= d[:,:,b,a]
+  end
+  return d[:,:,trivv]
+end
+
+"""
+    triples_4ext_aa!(EC::ECInfo, R3a, R3aab, T3a, T3aab)
+
+  Calculate αα 4-external contractions with triples amplitudes
+  for the unrestricted case.
+  Uses antisymmetrized integrals ``\\langle cd||ab\\rangle`` compressed to ``a<b``.
+
+  ``R^{ijk}_{cde} += \\sum_{a<b} \\langle cd||ab\\rangle T^{ijk}_{eab}``
+  ``R^{ijK}_{cdA} += \\sum_{a<b} \\langle cd||ab\\rangle T^{ijK}_{abA}``
+"""
+function triples_4ext_aa!(EC::ECInfo{T}, R3a, R3aab, T3a, T3aab) where T
+  nva = size(T3a, 1)
+  noa = size(T3a, 4)
+  nvb = size(T3aab, 3)
+  nob = size(T3aab, 6)
+  d_vvvv = load4idx(EC, "d_vvvv")
+  # d_vvvv[c,d,a,b]: antisymmetrize in (a,b) = dims (3,4) and compress to a<b
+  trivv = strict_uppertriangular_cut(nva)
+  ntri = length(trivv)
+  if ntri == 0
+    return
+  end
+  d_anti = antisymmetrize_34!(d_vvvv, trivv)
+  d_vvvv = nothing
+  # d_anti[c,d,x] is antisymmetric in (c,d) due to exchange symmetry.
+  # Original: X[c,d,e,...] = Σ_{a,b} d[c,d,a,b]*T3[e,a,b,...] = Σ_x d_anti[c,d,x]*T3_comp[e,x,...]
+  # R3 accumulation simplifies from 0.5*(X - X[d↔c]) to X (since X[d,c,...] = -X[c,d,...])
+
+  # --- T3a: loop over k ---
+  X3 = Array{T}(undef, nva, nva, nva, noa, noa)
+  T3k = Array{T}(undef, ntri, nva, noa, noa)
+  for k in 1:noa
+    T3k .= @view T3a[trivv,:,:,:,k]
+    @mtensor X3[c,d,e,i,j] = d_anti[c,d,x] * T3k[x,e,i,j]
+    vR3 = selectdim(R3a, 6, k)
+    @mtensor begin
+      vR3[c,d,e,i,j] += X3[c,d,e,i,j]
+      vR3[c,e,d,i,j] -= X3[c,d,e,i,j]
+      vR3[e,c,d,i,j] += X3[c,d,e,i,j]
+    end
+  end
+
+  # --- T3aab: loop over I ---
+  X3aab = Array{T}(undef, nva, nva, nvb, noa, noa)
+  T3I = Array{T}(undef, ntri, nvb, noa, noa)
+  for I in 1:nob
+    T3I .= @view T3aab[trivv,:,:,:,I]
+    @mtensor X3aab[c,d,A,i,j] = d_anti[c,d,x] * T3I[x,A,i,j]
+    vR3 = selectdim(R3aab, 6, I)
+    @mtensor vR3[c,d,A,i,j] += X3aab[c,d,A,i,j]
+  end
+  return
+end
+
+"""
+    triples_4ext_bb!(EC::ECInfo, R3b, R3abb, T3b, T3abb)
+
+  Calculate ββ 4-external contractions with triples amplitudes
+  for the unrestricted case.
+  Uses antisymmetrized integrals ``\\langle CD||AB\\rangle`` compressed to ``A<B``.
+
+  ``R^{IJK}_{CDE} += \\sum_{A<B} \\langle CD||AB\\rangle T^{IJK}_{EAB}``
+  ``R^{iIJ}_{aCB} += \\sum_{A<B} \\langle CD||AB\\rangle T^{iIJ}_{aAB}``
+"""
+function triples_4ext_bb!(EC::ECInfo{T}, R3b, R3abb, T3b, T3abb) where T
+  nvb = size(T3b, 1)
+  nob = size(T3b, 4)
+  nva = size(T3abb, 1)
+  noa = size(T3abb, 4)
+  d_VVVV = load4idx(EC, "d_VVVV")
+  # d_VVVV[D,C,B,A]: permute to [C,D,A,B] so contracted pair (A,B) is at dims (3,4)
+  # and free pair (C,D) is at dims (1,2), matching the αα convention.
+  # Exchange symmetry: d[D,C,B,A] = d[C,D,A,B], so this is just a symmetry.
+  d_VVVV = permutedims(d_VVVV, (2,1,4,3))
+  # Now d_VVVV[C,D,A,B]: antisymmetrize in (A,B) = dims (3,4) and compress to A<B
+  trivv = strict_uppertriangular_cut(nvb)
+  ntri = length(trivv)
+  if ntri == 0
+    return
+  end
+  d_anti = antisymmetrize_34!(d_VVVV, trivv)
+  d_VVVV = nothing
+  # d_anti[C,D,x] with x = CI(A,B) for A<B. Antisymmetric in (C,D).
+  # Now the structure is identical to the αα case.
+
+  # --- T3b: loop over K ---
+  X3 = Array{T}(undef, nvb, nvb, nvb, nob, nob)
+  T3k = Array{T}(undef, ntri, nvb, nob, nob)
+  for K in 1:nob
+    T3k .= @view T3b[trivv,:,:,:,K]
+    @mtensor X3[C,D,E,I,J] = d_anti[C,D,x] * T3k[x,E,I,J]
+    vR3 = selectdim(R3b, 6, K)
+    @mtensor begin
+      vR3[C,D,E,I,J] += X3[C,D,E,I,J]
+      vR3[C,E,D,I,J] -= X3[C,D,E,I,J]
+      vR3[E,C,D,I,J] += X3[C,D,E,I,J]
+    end
+  end
+
+  # --- T3abb: loop over i ---
+  X3abb = Array{T}(undef, nvb, nvb, nva, nob, nob)
+  T3i = Array{T}(undef, ntri, nva, nob, nob)
+  for i in 1:noa
+    for (idx, ci) in enumerate(trivv)
+      T3i[idx, :, :, :] .= @view T3abb[:, ci[1], ci[2], i, :, :]
+    end
+    @mtensor X3abb[C,D,a,I,J] = d_anti[C,D,x] * T3i[x,a,I,J]
+    vR3 = selectdim(R3abb, 4, i)
+    @mtensor vR3[a,C,D,I,J] += X3abb[C,D,a,I,J]
+  end
+end
+
+"""
+    triples_4ext_aab_ab!(EC::ECInfo, R3aab, T3aab)
+
+  Calculate αβ 4-external contraction of ``d_{vVvV}`` with ``T^{ijK}_{abC}``
+  for the unrestricted case.
+  No integral compression (different-spin contracted indices), but loops over
+  one occupied index to reduce intermediate size.
+
+  ``R^{ijK}_{bcB} -= X_{bcB}^{ijK} - X_{cbB}^{ijK}``
+  where ``X_{bcB}^{ijK} = \\sum_{a,A} \\langle bB|aA\\rangle T^{ijK}_{caA}``
+"""
+function triples_4ext_aab_ab!(EC::ECInfo, R3aab, T3aab)
+  nva = size(T3aab, 1)
+  nvb = size(T3aab, 3)
+  noa = size(T3aab, 4)
+  nob = size(T3aab, 6)
+  d_vVvV = load4idx(EC, "d_vVvV")
+  # d_vVvV[b,B,a,A]: contracted (a,A) at dims (3,4), free (b,B) at dims (1,2)
+  # Loop over I (β occ) to reduce intermediate
+  X3 = Array{Float64}(undef, nva, nva, nvb, noa, noa)
+  for I in 1:nob
+    vT3 = @view T3aab[:,:,:,:,:,I]
+    @mtensor X3[b,c,B,i,j] = d_vVvV[b,B,a,A] * vT3[c,a,A,i,j]
+    vR3 = selectdim(R3aab, 6, I)
+    # Original: R3 -= 0.5*X[b,c,...] + 0.5*X[c,b,...] + 0.5*X[b,c,...,j,i] - 0.5*X[c,b,...,j,i]
+    # X[b,c,B,j,i] = -X[b,c,B,i,j] by T3aab antisymmetry in (i,j)
+    # Combined: R3[b,c,B,...] -= X, R3[c,b,B,...] += X
+    @mtensor begin
+      vR3[b,c,B,i,j] -= X3[b,c,B,i,j]
+      vR3[c,b,B,i,j] += X3[b,c,B,i,j]
+    end
+  end
+  d_vVvV = nothing
+end
+
+"""
+    triples_4ext_abb_ab!(EC::ECInfo, R3abb, T3abb)
+
+  Calculate αβ 4-external contraction of ``d_{vVvV}`` with ``T^{iIJ}_{aCB}``
+  for the unrestricted case.
+  No integral compression (different-spin contracted indices), but loops over
+  one occupied index to reduce intermediate size.
+
+  ``R^{iIJ}_{bBC} -= X_{bBC}^{iIJ} - X_{bCB}^{iIJ}``
+  where ``X_{bBC}^{iIJ} = \\sum_{a,A} \\langle bB|aA\\rangle T^{iIJ}_{aCA}``
+"""
+function triples_4ext_abb_ab!(EC::ECInfo{T}, R3abb, T3abb) where T
+  nva = size(T3abb, 1)
+  nvb = size(T3abb, 2)
+  noa = size(T3abb, 4)
+  nob = size(T3abb, 5)
+  d_vVvV = load4idx(EC, "d_vVvV")
+  # Loop over i (α occ) to reduce intermediate
+  X3 = Array{T}(undef, nva, nvb, nvb, nob, nob)
+  for i in 1:noa
+    vT3 = @view T3abb[:,:,:,i,:,:]
+    @mtensor X3[b,B,C,I,J] = d_vVvV[b,B,a,A] * vT3[a,C,A,I,J]
+    vR3 = selectdim(R3abb, 4, i)
+    # Original: R3 -= 0.5*X[b,B,C,...] + 0.5*X[b,C,B,...] + 0.5*X[b,B,C,...,J,I] - 0.5*X[b,C,B,...,J,I]
+    # X[b,B,C,I,J] → X[b,B,C,J,I] = -X[b,B,C,I,J] by T3abb antisymmetry in (I,J)
+    # Combined: R3[b,B,C,...] -= X, R3[b,C,B,...] += X
+    @mtensor begin
+      vR3[b,B,C,I,J] -= X3[b,B,C,I,J]
+      vR3[b,C,B,I,J] += X3[b,B,C,I,J]
+    end
+  end
+  d_vVvV = nothing
 end
 
 """
@@ -1096,31 +1368,20 @@ function project_amplitudes(EC::ECInfo, T1_old::AbstractMatrix, T2_old::Abstract
     virt_old_indices = collect((nocc_old+1):(nocc_old+nvirt_old))
   end
   
-  # Calculate overlap between bases
-  if isempty(basis_old) || isempty(basis_new)
-    # Assume same basis, just orbital rotation
-    SAO = I
-    S_old_new = I
-  else
-    SAO = overlap(basis_new)
-    S_old_new = overlap(basis_new, basis_old)
-  end
-  
-  # Build projection matrix in AO basis: P = S_new^{-1} * S_new_old
-  if SAO isa UniformScaling
-    proj_ao = I
-  else
-    proj_ao = inv(SAO) * S_old_new
-  end
-  
-  # Project to MO basis
-  # P_MO = C_new^T * S_new * proj_ao * C_old = C_new^T * S_old_new * C_old
-  if proj_ao isa UniformScaling
+  # MO-MO overlap between the new and old orbital sets. With the AO overlap between the two bases,
+  # P_MO = C_new^T S_new (S_new^{-1} S_new_old) C_old = C_new^T S_new_old C_old — the S_new^{-1}
+  # cancels, so no inverse of the new-basis overlap is needed (robust to a singular/redundant basis).
+  if isempty(basis_old) && isempty(basis_new)
+    # no AO basis at all: the coefficients are orbital rotations in an orthonormal MO space, so the
+    # metric is the identity (e.g. an FCIDUMP-only restart, where rotation matrices are stored)
     P_full = cMO_new[1]' * cMO_old[1]
+  elseif isempty(basis_old) || isempty(basis_new)
+    error("project_amplitudes: only one of the old/new orbital sets carries an AO basis; cannot form "
+          * "an MO overlap between an orbital set and a basis-less rotation.")
   else
-    P_full = cMO_new[1]' * S_old_new * cMO_old[1]
+    P_full = cMO_new[1]' * overlap(basis_new, basis_old) * cMO_old[1]
   end
-  
+
   # Extract occupied and virtual blocks using orbital class information
   # P_full is (norb_new × norb_old)
   # We need occ_new ← occ_old and virt_new ← virt_old projections
@@ -1230,35 +1491,20 @@ function project_amplitudes(EC::ECInfo,
             zeros(nvirt_a_new, nvirt_b_new, nocc_a_new, nocc_b_new))
   end
   
-  # Calculate overlap between bases
-  if isempty(basis_old) || isempty(basis_new)
-    S_old_new = I
+  # Projection matrices
+  # AO overlap between the two bases. With no basis at all the coefficients are orbital rotations in
+  # an orthonormal MO space (e.g. an FCIDUMP-only restart), so the metric is the identity; a mix of
+  # one basis present and one absent is inconsistent and cannot form an MO overlap.
+  if isempty(basis_old) && isempty(basis_new)
+    P_full_a = cMO_new[1]' * cMO_old[1]
+    P_full_b = cMO_new[2]' * cMO_old[2]
+  elseif isempty(basis_old) || isempty(basis_new)
+    error("project_amplitudes: only one of the old/new orbital sets carries an AO basis; cannot form "
+          * "an MO overlap between an orbital set and a basis-less rotation.")
   else
     S_old_new = overlap(basis_new, basis_old)
-  end
-  
-  # Alpha projection matrices
-  if is_restricted(cMO_old) 
-    cMO_old_a = cMO_old[1]
-    cMO_old_b = cMO_old[1]
-  else
-    cMO_old_a = cMO_old[1]
-    cMO_old_b = cMO_old[2]
-  end
-  if is_restricted(cMO_new)
-    cMO_new_a = cMO_new[1]
-    cMO_new_b = cMO_new[1]
-  else
-    cMO_new_a = cMO_new[1]
-    cMO_new_b = cMO_new[2]
-  end
-  
-  if S_old_new isa UniformScaling
-    P_full_a = cMO_new_a' * cMO_old_a
-    P_full_b = cMO_new_b' * cMO_old_b
-  else
-    P_full_a = cMO_new_a' * S_old_new * cMO_old_a
-    P_full_b = cMO_new_b' * S_old_new * cMO_old_b
+    P_full_a = cMO_new[1]' * S_old_new * cMO_old[1]
+    P_full_b = cMO_new[2]' * S_old_new * cMO_old[2]
   end
   
   # Determine old orbital indices
@@ -1366,63 +1612,142 @@ function project_amplitudes(EC::ECInfo,
 end
 
 """
-    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1, T2)
+    correlation_reference_orbital_data(EC::ECInfo)
+
+  Pre-fetch the orbital data to store with a restarted wavefunction, using the *correlation
+  reference* orbitals — the ones the FCIDUMP was actually built from
+  ([`load_orbitals_for_correlation`](@ref)) — rather than the raw orbitals on file.
+
+  For a plain restart (the dump already holds the reference in the current AO basis) the two
+  coincide. But for a `dump=""`+`start` restart across a geometry (or basis) change, the reference
+  is the *projected* and re-orthonormalized orbital set expressed in the *current* AO basis, while
+  the raw orbitals on file are still in the old basis. Storing the raw orbitals then writes
+  old-basis coefficients tagged with the new AO basis — inconsistent with both the current geometry
+  and the stored (reference-basis) amplitudes — so a subsequent same-geometry restart cannot resume
+  at the stored solution and re-optimizes over several iterations. Storing the correlation reference
+  keeps the orbitals, amplitudes, and AO basis mutually consistent, so the restart resumes in one
+  iteration.
+
+  Returns the raw data unchanged for an FCIDUMP-only run (no molecular system) or a rotation-only
+  dump (no AO basis stored), where there are no orbital coefficients to re-express — the caller then
+  stores a rotation as before. Must be called before opening the store file for writing (dump ==
+  store case).
+"""
+function correlation_reference_orbital_data(EC::ECInfo)
+  orbital_data = fetch_orbital_data(EC)
+  # nothing / no system: FCIDUMP-only; empty basis: a rotation dump (see `fetch_orbitals`), which has
+  # no orbital coefficients to project — reusing it as-is preserves the pre-fix rotation-dump behavior.
+  (isnothing(orbital_data) || isempty(EC.system) || isempty(orbital_data.basis)) && return orbital_data
+  cMO_ref, _ = load_orbitals_for_correlation(EC)
+  # keep the fetched orbital energies/occupations only when the reference has the same number of
+  # orbitals (a same-size / geometry-change restart, where they still line up); drop them if a
+  # basis-size change altered the orbital count.
+  aligned = size(cMO_ref[1], 2) == size(orbital_data.cMO[1], 2) &&
+            is_restricted(cMO_ref) == is_restricted(orbital_data.cMO)
+  energies = aligned ? orbital_data.energies : (Float64[], Float64[])
+  occupations = aligned ? orbital_data.occupations : (Float64[], Float64[])
+  return OrbitalData(cMO_ref, orbital_data.mo_type, orbital_data.basis, energies, occupations)
+end
+
+"""
+    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1, T2; orbopt=false)
 
   Dump orbitals and CC amplitudes to the TREXIO file specified in `wf.store`.
 
-  Does nothing if `EC.options.wf.store` is empty or if no orbitals are available
-  (e.g., when running from FCIDUMP without a dump file).
+  Does nothing if `EC.options.wf.store` is empty.
   For closed-shell case with singles `T1` and doubles `T2`.
+
+  If `orbopt=true`, the orbitals are rotated using the T1 amplitudes
+  via [`rotation_matrix`](@ref) and stored instead of the original orbitals.
+  T1 amplitudes are not stored in that case.
 """
-function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4};
+                                            orbopt::Bool=false)
   if EC.options.wf.store == ""
     return
   end
   println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
-  # Pre-fetch orbital data BEFORE opening store file for writing
-  # This is crucial when dump and store are the same file
-  orbital_data = fetch_orbital_data(EC)
-  open_dump(EC, "w") do io
-    transfer_orbitals_to_store!(io, EC, orbital_data)
-    dump_amplitudes(io, EC, T1, T2)
+  # Pre-fetch orbital data BEFORE opening store file for writing (crucial when dump and store are
+  # the same file). Use the correlation reference so the stored orbitals match the FCIDUMP/amplitudes.
+  orbital_data = correlation_reference_orbital_data(EC)
+  if orbopt
+    # Rotation matrix from T1 amplitudes
+    Rpq = rotation_matrix(EC, T1; full=true)
+    if !isnothing(orbital_data)
+      # Rotate orbitals using T1 and store rotated orbitals instead
+      rotate_orbitaldata!(orbital_data, Rpq)
+    else
+      # store rotation matrix as orbital data if no orbital data is available (e.g. from FCIDUMP)
+      orbital_data = OrbitalData(SpinMatrix(Rpq))
+    end
+    T1 = zeros(0, 0) # Don't store T1 for orbopt methods
+  end
+  let T1 = T1, orbital_data = orbital_data
+    open_dump(EC, "w") do io
+      transfer_orbitals_to_store!(io, EC, orbital_data)
+      dump_amplitudes(io, EC, T1, T2)
+    end
   end
   return
 end
 
 """
-    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab)
+    dump_wavefunction_with_amplitudes!(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; orbopt=false)
 
   Dump orbitals and unrestricted CC amplitudes to the TREXIO file.
 
-  Does nothing if `EC.options.wf.store` is empty or if no orbitals are available
-  (e.g., when running from FCIDUMP without a dump file).
+  Does nothing if `EC.options.wf.store` is empty.
+
+  If `orbopt=true`, the orbitals are rotated using the T1 amplitudes
+  via [`rotation_matrix`](@ref) and stored instead of the original orbitals.
+  T1 amplitudes are not stored in that case.
 """
 function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
                                             T1a::AbstractMatrix, T1b::AbstractMatrix,
-                                            T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4},
-                                            T2ab::AbstractArray{<:Real,4})
+                                            T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4},
+                                            T2ab::AbstractArray{<:Number,4};
+                                            orbopt::Bool=false)
   if EC.options.wf.store == ""
     return
   end
   println("Storing wavefunction with amplitudes to $(EC.options.wf.store) ...")
-  # Pre-fetch orbital data BEFORE opening store file for writing
-  # This is crucial when dump and store are the same file
-  orbital_data = fetch_orbital_data(EC)
-  open_dump(EC, "w") do io
-    transfer_orbitals_to_store!(io, EC, orbital_data)
-    dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
+  # Pre-fetch orbital data BEFORE opening store file for writing (crucial when dump and store are
+  # the same file). Use the correlation reference so the stored orbitals match the FCIDUMP/amplitudes.
+  orbital_data = correlation_reference_orbital_data(EC)
+  if orbopt
+    # Rotation matrices from T1 amplitudes
+    Rpq_a = rotation_matrix(EC, T1a; full=true)
+    Rpq_b = rotation_matrix(EC, T1b; full=true, beta=true)
+    if !isnothing(orbital_data)
+    # Rotate orbitals and store rotated orbitals instead
+      rotate_orbitaldata!(orbital_data, Rpq_a, Rpq_b)
+    else
+      # store rotation matrices as orbital data if no orbital data is available (e.g. from FCIDUMP)
+      orbital_data = OrbitalData(SpinMatrix(Rpq_a, Rpq_b))
+    end
+    # Don't store T1 for orbopt methods
+    T1a = zeros(0, 0)
+    T1b = zeros(0, 0)
+  end
+  let T1a = T1a, T1b = T1b, orbital_data = orbital_data
+    open_dump(EC, "w") do io
+      transfer_orbitals_to_store!(io, EC, orbital_data)
+      dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
+    end
   end
   return
 end
 
 # Convenience wrappers for tuple arguments
-function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::Tuple{<:AbstractMatrix}, T2::Tuple{<:AbstractArray{<:Real,4}})
-  dump_wavefunction_with_amplitudes!(EC, T1[1], T2[1])
+function dump_wavefunction_with_amplitudes!(EC::ECInfo, T1::Tuple{<:AbstractMatrix}, T2::Tuple{<:AbstractArray{<:Number,4}};
+                                            orbopt::Bool=false)
+  dump_wavefunction_with_amplitudes!(EC, T1[1], T2[1]; orbopt)
 end
 function dump_wavefunction_with_amplitudes!(EC::ECInfo, 
                                             T1::Tuple{<:AbstractMatrix,<:AbstractMatrix}, 
-                                            T2::Tuple{<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4},<:AbstractArray{<:Real,4}})
-  dump_wavefunction_with_amplitudes!(EC, T1[1], T1[2], T2[1], T2[2], T2[3])
+                                            T2::Tuple{<:AbstractArray{<:Number,4},<:AbstractArray{<:Number,4},<:AbstractArray{<:Number,4}};
+                                            orbopt::Bool=false)
+  dump_wavefunction_with_amplitudes!(EC, T1[1], T1[2], T2[1], T2[2], T2[3]; orbopt)
 end
 
 # ============================================================================
@@ -1443,11 +1768,11 @@ Does nothing if `EC.options.wf.store` is empty.
 
 # Arguments
 - `dets::Vector{<:AbstractDeterminant}`: Determinants 
-- `coeffs::AbstractVecOrMat{Float64}`: CI coefficients (vector for 1 state, matrix for multi-state)
+- `coeffs::AbstractVecOrMat{<:Number}`: CI coefficients (vector for 1 state, matrix for multi-state)
 - `nstates::Int=0`: Number of states (0 = infer from coeffs)
 """
 function dump_wavefunction_with_determinants!(EC::ECInfo, dets::Vector{D}, 
-                                              coeffs::AbstractVecOrMat{Float64};
+                                              coeffs::AbstractVecOrMat{<:Number};
                                               nstates::Int=0) where {D}
   if EC.options.wf.store == ""
     return
@@ -1531,7 +1856,7 @@ end
 
   Returns `(T1, T2, success::Bool)` for closed-shell case.
 """
-function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
+function try_fetch_restricted_starting_amplitudes(EC::ECInfo{T}) where T
   # Determine whether to use wf.start file
   use_start = EC.options.wf.start != ""
   
@@ -1546,22 +1871,27 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
   
   # Get target orbitals and classes from dump file (or same file if not using start)
   use_projection = false
-  if use_start
+  if use_start && EC.options.wf.dump != "" && EC.options.wf.dump != EC.options.wf.start
     if has_dumpfile(EC)
       cMO_new, type_new, current_basis = fetch_orbitals(EC)
       classes_new = fetch_orbital_classes(EC)
       use_projection = true
     end
   else
-    # Same file - project onto current basis (in case orbitals were modified)
+    # Same file / dump=""+start: reuse the start orbitals as the reference. `load_orbitals_for_correlation`
+    # gives the same orbital set (and matching classes) the FCIDUMP was built from: for a same-size
+    # basis the start orbitals re-expressed unchanged (keeping classes_old, a clean identity projection
+    # essential with a frozen core), and for a size change the completed full new-basis set with its
+    # classes, embedding the amplitudes into the new (e.g. larger) correlation space.
+    classes_new = classes_old
     if !isempty(EC.system)
       current_basis = generate_basis(EC, "ao")
-      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+      cMO_new, completed_classes = load_orbitals_for_correlation(EC; start=use_start)
+      isnothing(completed_classes) || (classes_new = completed_classes)
       use_projection = true
     end
-    classes_new = (String[], String[])
   end
-  
+
   # Fetch amplitudes
   T1_old, T2_old = fetch_restricted_amplitudes(EC; start=use_start)
   
@@ -1576,7 +1906,7 @@ function try_fetch_restricted_starting_amplitudes(EC::ECInfo)
   # Project amplitudes
   T1, T2 = project_amplitudes(EC, T1_old, T2_old, cMO_old, cMO_new, basis_old, current_basis;
                                classes_old=classes_old, classes_new=classes_new)
-  return (T1, T2, true)
+  return (Matrix{T}(T1), Array{T,4}(T2), true)
 end
 
 """
@@ -1593,7 +1923,7 @@ end
 
   Returns `(T1a, T1b, T2a, T2b, T2ab, success::Bool)` for unrestricted case.
 """
-function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
+function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo{T}) where T
   # Determine whether to use wf.start file
   use_start = EC.options.wf.start != ""
   
@@ -1610,7 +1940,7 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
   # Get target orbitals, classes, and occupations from dump file (or same file if not using start)
   use_projection = false
   occupations_new = (Float64[], Float64[])
-  if use_start
+  if use_start && EC.options.wf.dump != "" && EC.options.wf.dump != EC.options.wf.start
     if has_dumpfile(EC)
       cMO_new, type_new, current_basis = fetch_orbitals(EC)
       classes_new = fetch_orbital_classes(EC)
@@ -1618,15 +1948,19 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
       use_projection = true
     end
   else
-    # Same file - project onto current basis (in case orbitals were modified)
+    # Same file / dump=""+start: reuse the start orbitals as the reference (see the restricted
+    # version). `load_orbitals_for_correlation` returns the same orbital set the FCIDUMP was built
+    # from, with matching classes (unchanged classes_old for a same-size basis, or the completed
+    # new-basis classes for a size change).
+    classes_new = classes_old
     if !isempty(EC.system)
       current_basis = generate_basis(EC, "ao")
-      cMO_new = project_onto_basis(cMO_old, basis_old, current_basis; check=true)
+      cMO_new, completed_classes = load_orbitals_for_correlation(EC; start=use_start)
+      isnothing(completed_classes) || (classes_new = completed_classes)
       use_projection = true
     end
-    classes_new = (String[], String[])
   end
-  
+
   # Fetch amplitudes
   T1a_old, T1b_old, T2a_old, T2b_old, T2ab_old = fetch_unrestricted_amplitudes(EC; start=use_start)
   
@@ -1642,7 +1976,7 @@ function try_fetch_unrestricted_starting_amplitudes(EC::ECInfo)
                                                  cMO_old, cMO_new, basis_old, current_basis;
                                                  classes_old=classes_old, classes_new=classes_new,
                                                  occupations_old=occupations_old, occupations_new=occupations_new)
-  return (T1a, T1b, T2a, T2b, T2ab, true)
+  return (Matrix{T}(T1a), Matrix{T}(T1b), Array{T,4}(T2a), Array{T,4}(T2b), Array{T,4}(T2ab), true)
 end
 
 """
@@ -1652,11 +1986,11 @@ end
 
   Returns `(T1, T2, false)` where T1 and T2 are zero arrays.
 """
-function empty_restricted_amplitudes(EC::ECInfo)
+function empty_restricted_amplitudes(EC::ECInfo{T}) where T
   SP = EC.space
   nocc = length(SP['o'])
   nvirt = length(SP['v'])
-  return (zeros(nvirt, nocc), zeros(nvirt, nvirt, nocc, nocc), false)
+  return (zeros(T, nvirt, nocc), zeros(T, nvirt, nvirt, nocc, nocc), false)
 end
 
 """
@@ -1666,16 +2000,67 @@ end
 
   Returns `(T1a, T1b, T2a, T2b, T2ab, false)` where all arrays are zero.
 """
-function empty_unrestricted_amplitudes(EC::ECInfo)
+function empty_unrestricted_amplitudes(EC::ECInfo{T}) where T
   SP = EC.space
   nocc_a = length(SP['o'])
   nocc_b = length(SP['O'])
   nvirt_a = length(SP['v'])
   nvirt_b = length(SP['V'])
-  return (zeros(nvirt_a, nocc_a), zeros(nvirt_b, nocc_b),
-          zeros(nvirt_a, nvirt_a, nocc_a, nocc_a),
-          zeros(nvirt_b, nvirt_b, nocc_b, nocc_b),
-          zeros(nvirt_a, nvirt_b, nocc_a, nocc_b), false)
+  return (zeros(T, nvirt_a, nocc_a), zeros(T, nvirt_b, nocc_b),
+          zeros(T, nvirt_a, nvirt_a, nocc_a, nocc_a),
+          zeros(T, nvirt_b, nvirt_b, nocc_b, nocc_b),
+          zeros(T, nvirt_a, nvirt_b, nocc_a, nocc_b), false)
+end
+
+"""
+    print_main_singles(U1, nelem; info="", thr=1e-4)
+
+  Utility function to print the main `nelem` singles.
+"""
+function print_main_singles(U1::AbstractMatrix, nelem; info="", thr=1e-4)
+  println(info * " main singles:")
+  nvir, nocc = size(U1)
+  n = min(nelem, nvir * nocc)
+  Uvec = vec(U1)
+  idx = argmaxN(Uvec, n, by=abs)
+  for i in idx
+    i_occ = (i - 1) ÷ nvir + 1
+    i_virt = (i - 1) % nvir + 1
+    if abs(Uvec[i]) > thr
+      output_single_excitation(Uvec[i], i_occ, i_virt)
+    end
+  end
+  println()
+end
+
+""" 
+    rotate_U2pseudocanonical(EC::ECInfo, UaiX)
+
+  Diagonalize ϵv - ϵo transformed with UaiX (for update).
+  Return eigenvalues and rotated UaiX
+"""
+function rotate_U2pseudocanonical(EC::ECInfo, UaiX)
+  SP = EC.space
+  nocc = n_occ_orbs(EC)
+  nvirt = n_virt_orbs(EC)
+  UaiX2 = deepcopy(UaiX)
+  ϵo, ϵv = orbital_energies(EC)
+  for a in 1:nvirt
+    for i in 1:nocc
+      UaiX2[a,i,:] *= ϵv[a] - ϵo[i]
+    end
+  end
+
+  if size(UaiX, 3) == 0
+    # empty SVD basis (negligible triples): nothing to diagonalize.
+    # (a 0×0 complex eigen would otherwise trip LAPACK's ZHEEVR.)
+    return eltype(UaiX)[], UaiX2
+  end
+  @mtensor Fdiff[X,Y] := conj(UaiX[a,i,X]) * UaiX2[a,i,Y]
+  diagFdiff = eigen(Hermitian(Fdiff))
+
+  @mtensor UaiX2[a,i,Y] = diagFdiff.vectors[X,Y] * UaiX[a,i,X]
+  return eltype(Fdiff).(diagFdiff.values), UaiX2
 end
 
 end # module

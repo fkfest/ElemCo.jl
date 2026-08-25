@@ -9,10 +9,42 @@
   Returns:
     OutDict with keys "E", "ESS", "EOS", "EO" for MP2 correlation energy, SS, OS, and O contributions.
 """
-function calc_df_lt_sos_mp2(EC::ECInfo)
+function calc_df_lt_sos_mp2(EC::ECInfo{T}) where T
   t1 = time_ns()
   print_info("DF-LT-SOS-MP2")
   SP = EC.space
+  eps = real.(load1idx(EC, "e_m"))
+  ϵo = eps[SP['o']]
+  ϵv = eps[SP['v']]
+  nocc = length(SP['o'])
+  nvir = length(SP['v'])
+  w_laplace, t_laplace = get_laplace_quadrature(ϵo, ϵv, EC.options.laplace.npoints,
+                                                algo=EC.options.laplace.algo)
+  if EC.fd.df3idx
+    mmLfile, mmL = mmap3idx(EC, "mmL")
+    voL = mmL[SP['v'], SP['o'], :]
+    close(mmLfile)
+    nL = size(voL, 3)
+    t1 = print_time(EC, t1, "DF-LT-SOS-MP2: load 3-index integrals", 1)
+    EMP2OS = 0.0
+    TvoL = similar(voL)
+    for q in eachindex(t_laplace)
+      tq = t_laplace[q]
+      wq = w_laplace[q]
+      for a in 1:nvir, i in 1:nocc
+        fac = exp(-tq * (ϵv[a] - ϵo[i]))
+        for L in 1:nL
+          TvoL[a,i,L] = voL[a,i,L] * fac
+        end
+      end
+      @mtensor VT[L,K] := conj(voL[a,i,L]) * TvoL[a,i,K]
+      @mtensor EMP2OS += wq * VT[L,K] * VT[L,K]
+    end
+    t1 = print_time(EC, t1, "energy calculation", 1)
+    EMP2SS = 0.0
+    ESOSMP2 = EMP2OS * EC.options.cc.mp2_sosfac
+    return OutDict("E"=>ESOSMP2, "ESS"=>EMP2SS, "EOS"=>EMP2OS, "EO"=>0.0)
+  end
   cMO = load_orbitals(EC)
   if !is_restricted(cMO) || SP['o'] != SP['O']
     error("Unrestricted orbitals not supported in DF-LT-SOS-MP2.")
@@ -21,14 +53,6 @@ function calc_df_lt_sos_mp2(EC::ECInfo)
   nA = size(c_Am, 1)
   c_Ao = c_Am[:,SP['o']]
   c_Av = c_Am[:,SP['v']]
-  nocc = length(SP['o'])
-  nvir = length(SP['v'])
-  eps = load1idx(EC, "e_m")
-  ϵo = eps[SP['o']]
-  ϵv = eps[SP['v']]
-  w_laplace, t_laplace = get_laplace_quadrature(ϵo, ϵv, EC.options.laplace.npoints, 
-                                                algo=EC.options.laplace.algo)
-
   C_PL = load2idx(EC, "C_PL")
   nP, nL = size(C_PL)
   voP = zeros(nvir, nocc, nP)

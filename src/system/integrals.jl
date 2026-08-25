@@ -13,10 +13,14 @@ using ..ElemCo.Libcint
 export generate_basis # from BasisSets
 export overlap!, kinetic!, nuclear!
 export overlap, kinetic, nuclear
+export dipole, dipole!
 export eri_2e4idx!, eri_2e3idx!, eri_2e2idx!
 export eri_2e4idx, eri_2e3idx, eri_2e2idx
+export eri_2e4idx_sph!, eri_2e4idx_cart!
+export eri_2e4idx_tri!, calc_2e4idx_tri!, eri_2e4idx_tri_batch!, schwarz_bounds
+export ket_shell_blocks, calc_2e4idx_tri_blockwise!
 export n_ao4sphshell, n_ao4cartshell
-export BasisBatcher, BasisBatch, buffer_size_3idx, max_batch_length
+export BasisBatcher, BasisBatch, buffer_size_3idx, buffer_size_4idx, max_batch_length
 
 include("basisbatcher.jl")
 

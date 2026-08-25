@@ -9,15 +9,17 @@ using ..ElemCo.ECInfos
 using ..ElemCo.QMTensors
 using ..ElemCo.BasisSets
 using ..ElemCo.TrexioInterface
+using ..ElemCo.Properties
 
 export open_dump, close_dump
-export dump_orbitals, fetch_orbitals, fetch_orbital_classes
+export dump_orbitals, fetch_orbitals, fetch_orbital_classes, fetch_ao_fock
 export dump_rotations, fetch_rotations, is_rotation, is_biorthogonal
 export fetch_orbital_energies, fetch_orbital_occupations
 export load_wavefunction, save_wavefunction, copy_wavefunction
 export dump_amplitudes, has_amplitudes, has_dumpfile
 export fetch_restricted_amplitudes, fetch_unrestricted_amplitudes
-export transfer_orbitals_to_store!, OrbitalData, fetch_orbital_data
+export transfer_orbitals_to_store!, OrbitalData, rotate_orbitaldata!, fetch_orbital_data
+export natural_orbital_data, write_correlated_rdm!, write_natural_orbitals!, write_correlated_properties!
 # Determinant I/O for CIPHI
 export dump_determinants, fetch_determinants, has_determinants
 export dump_determinants_multistate, state_filename
@@ -29,6 +31,8 @@ export dump_determinants_multistate, state_filename
 
 If `intent="w"`, the dump file for writing is returned. Otherwise, the dump file for reading is returned.
 If `start=true` and `intent != "w"`, the start file (`wf.start`) is returned.
+For reads, an empty `wf.dump` falls back to the start file (`wf.start`), so a restart that
+deliberately omits a separate dump (`dump=""`) reads orbitals/classes/amplitudes from `start`.
 Returns `(filename::String, full_path_filename::String)`.
 """
 function dumpfile(EC::ECInfo, intent; start::Bool=false)
@@ -40,6 +44,11 @@ function dumpfile(EC::ECInfo, intent; start::Bool=false)
   end
   if filename == ""
     filename = EC.options.wf.dump
+  end
+  if filename == "" && intent == "r"
+    # no dump file (dump=""): the start file is the read reference (orbitals/classes/amplitudes).
+    # Only for pure reads — an update ("u") must not silently fall back to and modify the start file.
+    filename = EC.options.wf.start
   end
   full_filename = joinpath(EC.scr, filename)
   return filename, full_filename
@@ -77,7 +86,10 @@ function open_dump(EC::ECInfo, intent; start::Bool=false)
   elseif intent == "u"
     mode = "updating (unsafe mode)"
   end
-  println("Opening dump file $filename for $mode ...")
+  # Reads are frequent internal bookkeeping — a single correlated run opens the dump ~10 times for
+  # orbitals, classes, energies and amplitude probes — so they are announced only above the default
+  # verbosity. Writes are rare and worth reporting.
+  (intent != "r" || EC.verbosity > 2) && println("Opening dump file $filename for $mode ...")
   return open_trexio(full_filename, intent)
 end
 
@@ -112,7 +124,7 @@ function close_dump(trexio::TrexioFile)
 end
 
 """ 
-    dump_orbitals([io::TrexioFile,] EC::ECInfo, cMO::SpinMatrix; basis=nothing, type="HF", 
+    dump_orbitals([io::TrexioFile,] EC::ECInfo, cMO; basis=nothing, type="HF", 
                   energies=nothing, occupations=nothing, MO="mo")
 
   Dump orbitals to TREXIO file. 
@@ -120,26 +132,84 @@ end
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
 """
 function dump_orbitals end
-function dump_orbitals(EC::ECInfo, cMO::SpinMatrix; 
-                       basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
+function dump_orbitals(EC::ECInfo, cMO;
+                       basis=nothing, type="HF", energies=nothing, occupations=nothing,
+                       classes=nothing, fock=nothing, MO="mo")
   open_dump(EC, "w") do io
-    dump_orbitals(io, EC, cMO; basis=basis, type=type, energies=energies, occupations=occupations, MO=MO)
+    dump_orbitals(io, EC, cMO; basis=basis, type=type, energies=energies,
+      occupations=occupations, classes=classes, fock=fock, MO=MO)
   end
   return
 end
-function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO::SpinMatrix; 
-                       basis=nothing, type="HF", energies=nothing, occupations=nothing, MO="mo")
+function dump_orbitals(io::TrexioFile, EC::ECInfo, cMO;
+                       basis=nothing, type="HF", energies=nothing, occupations=nothing,
+                       classes=nothing, fock=nothing, MO="mo")
   println("Dumping orbitals ...")
-  oenergies = prepare_orb_vectors(energies, is_restricted(cMO))
-  ooccupations = prepare_orb_vectors(occupations, is_restricted(cMO))
-  classes = prepare_orb_classes(EC, is_restricted(cMO))
+  ocoefs = prepare_orb_coefficients(cMO)
+  oenergies = prepare_orb_vectors(energies, is_restricted(ocoefs))
+  ooccupations = prepare_orb_vectors(occupations, is_restricted(ocoefs))
+  classes = isnothing(classes) ? prepare_orb_classes(EC, is_restricted(ocoefs)) : prepare_class_vectors(classes, ocoefs)
   write_trexio_system(io, EC.system)
   if isnothing(basis)
     basis = generate_basis(EC, "ao")
   end
-  write_trexio_orbitals(io, cMO, basis; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
+  write_trexio_orbitals(io, ocoefs, basis; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
+  # optionally persist the AO-basis Fock matrix (only meaningful for "mo" orbitals in an AO basis)
+  if !isnothing(fock) && MO == "mo"
+    write_trexio_ao_fock(io, fock isa SpinMatrix ? fock : SpinMatrix(fock), basis)
+  end
   return
 end
+
+"""
+    dump_rotations([io::TrexioFile,] EC::ECInfo, cRot::SpinMatrix; type="Rotation", energies=nothing, occupations=nothing,
+                   fock=nothing, MO="mo", biorthogonal=false)
+
+  Dump orbital rotations to TREXIO file.
+
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+`fock` (optional) is the Fock matrix in the original MO basis (the basis the rotation is relative
+to); it is stored as-is (no AO reordering, since rotations carry no AO basis).
+"""
+function dump_rotations end
+function dump_rotations(EC::ECInfo, cRot::SpinMatrix;
+                        type="", energies=nothing, occupations=nothing, fock=nothing, MO="mo", biorthogonal=false)
+  open_dump(EC, "w") do io
+    dump_rotations(io, EC, cRot; type=type, energies=energies, occupations=occupations,
+                   fock=fock, MO=MO, biorthogonal=biorthogonal)
+  end
+  return
+end
+function dump_rotations(io::TrexioFile, EC::ECInfo, cRot::SpinMatrix;
+                        type="", energies=nothing, occupations=nothing, fock=nothing, MO="mo", biorthogonal=false)
+  println("Dumping orbital rotations ...")
+  oenergies = prepare_orb_vectors(energies, is_restricted(cRot))
+  ooccupations = prepare_orb_vectors(occupations, is_restricted(cRot))
+  classes = prepare_orb_classes(EC, is_restricted(cRot); rotations=true)
+  if biorthogonal && !is_biorthogonal(type)
+    type *= " biorthogonal"
+  end
+  if !is_rotation(type)
+    type *= " Rotation"
+  end
+  write_trexio_rotations(io, cRot; type, classes=classes, energies=oenergies,
+                         occupations=ooccupations, MO=MO)
+  # optionally persist the Fock matrix in the original MO basis (identity AO order)
+  if !isnothing(fock) && MO == "mo"
+    write_trexio_ao_fock(io, fock isa SpinMatrix ? fock : SpinMatrix(fock))
+  end
+  return
+end
+
+"""
+    prepare_orb_coefficients(cMO)
+
+  Prepare orbital coefficients for dumping.
+"""
+prepare_orb_coefficients(cMO::SpinMatrix) = cMO
+prepare_orb_coefficients(cMO::AbstractMatrix) = SpinMatrix(cMO)
+prepare_orb_coefficients(cMO::Tuple{AbstractMatrix,AbstractMatrix}) = SpinMatrix(cMO[1], cMO[2])
+prepare_orb_coefficients(cMO) = error("Unsupported type for orbital coefficients: $(typeof(cMO))")
 
 """
     prepare_orb_vectors(input, restricted)
@@ -159,6 +229,9 @@ function prepare_orb_vectors(input::Vector{Float64}, restricted)
     error("For unrestricted orbitals, provide input as a tuple of two vectors.")
   end
 end
+function prepare_orb_vectors(input::Vector{ComplexF64}, restricted)
+  return prepare_orb_vectors(real.(input), restricted)
+end
 function prepare_orb_vectors(input::Tuple{Vector{Float64},Vector{Float64}}, restricted)
   if restricted
     return (input[1], Float64[])
@@ -175,24 +248,55 @@ function prepare_orb_vectors(input::Vector{Vector{Float64}}, restricted)
     return (input[1], input[2])
   end
 end
+function prepare_orb_vectors(input::Vector{Vector{ComplexF64}}, restricted)
+  return prepare_orb_vectors([real.(v) for v in input], restricted)
+end
 
-function prepare_orb_classes(EC::ECInfo, restricted)
-  if !haskey(EC.space, 'm')
-    setup_space_system!(EC)
+"""
+    prepare_class_vectors(classes, orbitals::SpinMatrix)
+
+  Normalize explicit orbital classes for dumping into the `(classa, classb)` form
+  expected by `write_trexio_orbitals`. `classes` is either a vector of class strings
+  (restricted) or a tuple of `(alpha, beta)` vectors (unrestricted).
+"""
+function prepare_class_vectors(classes, orbitals::SpinMatrix)
+  error("Unsupported input type for explicit orbital classes: $(typeof(classes))")
+end
+function prepare_class_vectors(classes::AbstractVector{<:AbstractString}, orbitals::SpinMatrix)
+  if !is_restricted(orbitals)
+    error("For unrestricted orbitals, provide explicit classes as a tuple of alpha and beta vectors.")
   end
-  
-  # Save current space, apply freezing to determine core/deleted, then restore
-  space_save = save_space(EC)
-  freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc; verbose=false)
-  freeze_nvirt!(EC, EC.options.wf.freeze_nvirt; verbose=false)
-  
+  classa = String[classes...]
+  length(classa) == size(orbitals[1], 2) || error("Alpha class count $(length(classa)) does not match the number of orbitals $(size(orbitals[1], 2)).")
+  return (classa, String[])
+end
+function prepare_class_vectors(classes::Tuple{<:AbstractVector{<:AbstractString},<:AbstractVector{<:AbstractString}}, orbitals::SpinMatrix)
+  classa = String[classes[1]...]
+  length(classa) == size(orbitals[1], 2) || error("Alpha class count $(length(classa)) does not match the number of orbitals $(size(orbitals[1], 2)).")
+  if is_restricted(orbitals)
+    isempty(classes[2]) || error("Restricted orbitals do not accept beta orbital classes.")
+    return (classa, String[])
+  end
+  classb = String[classes[2]...]
+  length(classb) == size(orbitals[2], 2) || error("Beta class count $(length(classb)) does not match the number of orbitals $(size(orbitals[2], 2)).")
+  return (classa, classb)
+end
+
+function prepare_orb_classes(EC::ECInfo, restricted; rotations=false)
+  if rotations && !isempty(EC.fd)
+    # we are storing rotations and have FCIDUMP, so use the fcidump full space
+    space_save, space_b4freeze = restore_fd_space!(EC)
+  else
+    space_save, space_b4freeze = restore_full_space!(EC)
+  end
+
   # Now EC.space has the frozen configuration
   classa = fill("Deleted", length(EC.space['m']))
   classa[EC.space['o']] .= "Inactive"
   classa[EC.space['v']] .= "Virtual"
   classa[EC.space['a']] .= "Active"
-  # Mark frozen core: compare with saved space to find removed occupied orbitals
-  frozen_occ = setdiff(space_save['o'], EC.space['o'])
+  # Mark frozen core: compare with space before freezing to find removed occupied orbitals
+  frozen_occ = setdiff(space_b4freeze['o'], EC.space['o'])
   classa[frozen_occ] .= "Core"
     
   if restricted
@@ -202,8 +306,8 @@ function prepare_orb_classes(EC::ECInfo, restricted)
     classb[EC.space['O']] .= "Inactive"
     classb[EC.space['V']] .= "Virtual"
     classb[EC.space['a']] .= "Active"
-    # Mark frozen core: compare with saved space to find removed occupied orbitals
-    frozen_occ = setdiff(space_save['O'], EC.space['O'])
+    # Mark frozen core: compare with space before freezing to find removed occupied orbitals
+    frozen_occ = setdiff(space_b4freeze['O'], EC.space['O'])
     classb[frozen_occ] .= "Core"
   end
     
@@ -243,6 +347,51 @@ function fetch_orbitals(io::TrexioFile, EC::ECInfo; MO="mo")
 end
 
 """
+    fetch_ao_fock([io::TrexioFile,] EC::ECInfo; start=false) -> Union{SpinMatrix,Nothing}
+
+  Fetch the Fock matrix stored in the trexio dump (if present). For orbital dumps it is returned in
+  the internal (libcint) AO order; for rotation dumps it is returned in the original MO basis (as
+  stored). Returns a restricted or unrestricted `SpinMatrix`, or `nothing` if the dump does not
+  store a Fock matrix (e.g. dumps written before Fock persistence).
+
+  If `start=true`, reads from the start file (`wf.start`) instead of the current dump file.
+"""
+function fetch_ao_fock end
+function fetch_ao_fock(EC::ECInfo; start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_ao_fock(io, EC)
+  end
+end
+function fetch_ao_fock(io::TrexioFile, EC::ECInfo)
+  has_trexio_ao_fock(io) || return nothing
+  println("Fetching Fock matrix ...")
+  basis = read_trexio_basis(io)
+  # orbital dumps carry an AO basis (reorder to internal order); rotation dumps do not (the Fock is
+  # stored in the original MO basis and returned as-is)
+  return isempty(basis) ? read_trexio_ao_fock(io) : read_trexio_ao_fock(io, basis)
+end
+
+"""
+    fetch_rotations([io::TrexioFile,] EC::ECInfo, MO="mo") -> (SpinMatrix, String)
+
+  Fetch the molecular orbital rotations from the trexio dump.
+
+  Returns a `SpinMatrix` of the rotations and `type::String`.
+
+`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+"""
+function fetch_rotations end
+function fetch_rotations(EC::ECInfo, MO="mo")
+  open_dump(EC, "r") do io
+    return fetch_rotations(io, EC, MO)
+  end
+end
+function fetch_rotations(io::TrexioFile, EC::ECInfo, MO="mo")
+  println("Fetching orbital rotations ...")
+  return read_trexio_rotations(io, MO=MO)
+end
+
+"""
     fetch_orbital_classes([io::TrexioFile,] EC::ECInfo; MO="mo", start=false) -> (Vector{String}, Vector{String})
 
   Fetch orbital classes from the trexio dump.
@@ -260,27 +409,28 @@ function fetch_orbital_classes(EC::ECInfo; MO="mo", start::Bool=false)
   end
 end
 function fetch_orbital_classes(io::TrexioFile, EC::ECInfo; MO="mo")
-  println("Fetching orbital classes ...")
+  EC.verbosity > 2 && println("Fetching orbital classes ...")
   return read_trexio_orbital_classes(io, MO)
 end
 
 """
-    fetch_orbital_energies([io::TrexioFile,] EC::ECInfo, MO="mo") -> (Vector{Float64}, Vector{Float64})
+    fetch_orbital_energies([io::TrexioFile,] EC::ECInfo, MO="mo"; start=false) -> (Vector{Float64}, Vector{Float64})
   
   Fetch orbital energies from the trexio dump.
   
 Returns tuples of orbital energies for alpha and beta spins.
 
 `MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
+If `start=true`, reads from the start file (`wf.start`) instead of the current dump file.
 """
 function fetch_orbital_energies end
-function fetch_orbital_energies(ECInfo, MO="mo")
-  open_dump(ECInfo, "r") do io
-    return fetch_orbital_energies(io, ECInfo, MO)
+function fetch_orbital_energies(EC::ECInfo, MO="mo"; start::Bool=false)
+  open_dump(EC, "r"; start=start) do io
+    return fetch_orbital_energies(io, EC, MO)
   end
 end
 function fetch_orbital_energies(io::TrexioFile, EC::ECInfo, MO="mo")
-  println("Fetching orbital energies ...")
+  EC.verbosity > 2 && println("Fetching orbital energies ...")
   return read_trexio_orbital_energies(io, MO)
 end
 
@@ -301,7 +451,7 @@ function fetch_orbital_occupations(EC::ECInfo, MO="mo"; start::Bool=false)
   end
 end
 function fetch_orbital_occupations(io::TrexioFile, EC::ECInfo, MO="mo")
-  println("Fetching orbital occupations ...")
+  EC.verbosity > 2 && println("Fetching orbital occupations ...")
   return read_trexio_orbital_occupations(io, MO)
 end
 
@@ -316,6 +466,38 @@ struct OrbitalData
   basis::BasisSet
   energies::NTuple{2,Vector{Float64}}
   occupations::NTuple{2,Vector{Float64}}
+end
+
+OrbitalData(cMO::SpinMatrix{Float64}) = OrbitalData(cMO, "Rotation", BasisSet(), (Float64[], Float64[]), (Float64[], Float64[]))
+
+"""
+    rotate_orbitaldata!(orbital_data::OrbitalData, Rpq_a::Matrix{Float64}, Rpq_b::Union{Matrix{Float64}, Nothing}=nothing) -> OrbitalData
+  
+  Rotate the orbitals in `orbital_data` using the provided rotation matrices `Rpq_a` and `Rpq_b`.
+
+- If `Rpq_b` is `nothing` and the orbitals are restricted, only the alpha orbitals will be rotated, and the beta orbitals will follow the same rotation.
+- If `Rpq_b` is `nothing` but the orbitals are unrestricted, the same rotation will be applied to both alpha and beta orbitals.
+- If `Rpq_b` is provided and the orbitals are restricted, the beta orbitals will be rotated with `Rpq_b` if it is different from `Rpq_a`, effectively making the orbitals unrestricted.
+- If `Rpq_b` is provided and the orbitals are already unrestricted, the beta orbitals will be rotated with `Rpq_b`.
+"""
+function rotate_orbitaldata!(orbital_data::OrbitalData, Rpq_a::Matrix{Float64}, Rpq_b::Union{Matrix{Float64}, Nothing}=nothing)
+  if isnothing(Rpq_b) && is_restricted(orbital_data.cMO)
+    # beta orbitals will be rotated automatically with the same rotation as alpha
+  elseif isnothing(Rpq_b)
+    # If we have unrestricted orbitals but only one rotation, apply the same rotation to beta
+    orbital_data.cMO.β .= orbital_data.cMO.β * Rpq_a
+  elseif is_restricted(orbital_data.cMO)
+    # Make orbitals unrestricted if different rotations are provided
+    if Rpq_a !== Rpq_b
+      orbital_data.cMO.β = orbital_data.cMO.β * Rpq_b
+    end
+  else
+    # Unrestricted orbitals with separate rotations
+    orbital_data.cMO.β .= orbital_data.cMO.β * Rpq_b
+  end
+
+  orbital_data.cMO.α .= orbital_data.cMO.α * Rpq_a
+  return orbital_data
 end
 
 """
@@ -338,13 +520,81 @@ function fetch_orbital_data(EC::ECInfo; MO="mo")
 end
 
 """
+    natural_orbital_data(EC::ECInfo, rdm::SpinMatrix)
+
+  Build the orbital payload written to the natural-orbital TREXIO file from a
+  correlated 1-RDM.
+"""
+function natural_orbital_data(EC::ECInfo, rdm::SpinMatrix)
+  rotations, occupations = natural_orbital_rotation(EC, rdm)
+  orbital_data = fetch_orbital_data(EC)
+  if isnothing(orbital_data)
+    return OrbitalData(copy(rotations), "Natural", BasisSet(),
+                       (Float64[], Float64[]), occupations)
+  end
+  natural_data = OrbitalData(copy(orbital_data.cMO),
+                             "Natural", orbital_data.basis,
+                             (Float64[], Float64[]), occupations)
+  rotate_orbitaldata!(natural_data, rotations.α, is_restricted(rotations) ? nothing : rotations.β)
+  return natural_data
+end
+
+"""
+    write_correlated_rdm!(EC::ECInfo, rdm::SpinMatrix)
+
+  Write the correlated 1-RDM to the standard wavefunction store target,
+  initializing the TREXIO file with orbital data first when needed.
+"""
+function write_correlated_rdm!(EC::ECInfo, rdm::SpinMatrix)
+  filename, full_filename = dumpfile(EC, "w")
+  add_file!(EC, filename, "TREXIO wavefunction dump"; overwrite=true)
+  if isfile(full_filename)
+    open_trexio(full_filename, "u") do io
+      write_trexio_1rdm(io, rdm)
+    end
+  else
+    orbital_data = fetch_orbital_data(EC)
+    open_trexio(full_filename, "w") do io
+      transfer_orbitals_to_store!(io, EC, orbital_data)
+      write_trexio_1rdm(io, rdm)
+    end
+  end
+end
+
+"""
+    write_natural_orbitals!(EC::ECInfo, rdm::SpinMatrix)
+
+  Write natural orbitals and occupations to the dedicated TREXIO file selected
+  by `EC.options.wf.natorb`.
+"""
+function write_natural_orbitals!(EC::ECInfo, rdm::SpinMatrix)
+  if isempty(EC.options.wf.natorb)
+    return
+  end
+  filename = EC.options.wf.natorb
+  add_file!(EC, filename, "TREXIO natural orbital dump"; overwrite=true)
+  open_trexio(joinpath(EC.scr, filename), "w") do io
+    transfer_orbitals_to_store!(io, EC, natural_orbital_data(EC, rdm))
+  end
+end
+
+"""
+    write_correlated_properties!(EC::ECInfo, rdm::SpinMatrix)
+
+  Persist the correlated 1-RDM to the standard wavefunction target and, when
+  requested, write the corresponding natural-orbital file.
+"""
+function write_correlated_properties!(EC::ECInfo, rdm::SpinMatrix)
+  write_correlated_rdm!(EC, rdm)
+  write_natural_orbitals!(EC, rdm)
+end
+
+"""
     transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, orbital_data::Union{OrbitalData, Nothing}=nothing; MO="mo")
 
   Transfer orbitals from the dump file to an already opened store file.
 
-  If `orbital_data` is provided, uses it directly. Otherwise fetches from dump file.
-  
-  **Important**: When dump and store files are the same, `orbital_data` must be
+  **Important**: `orbital_data` must be
   pre-fetched before opening the store file to avoid reading from a truncated file.
   
   This properly handles cases where frozen orbitals or geometry differ
@@ -356,34 +606,11 @@ end
 # Arguments
 - `io_store`: An already opened TrexioFile for writing
 - `EC`: Electronic structure information object
-- `orbital_data`: Pre-fetched orbital data, or `nothing` to fetch from dump
+- `orbital_data`: Pre-fetched orbital data, or `nothing` to store unity rotation
 - `MO`: "mo" for molecular orbitals or "po" for positron orbitals
 """
 function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, 
-                                     orbital_data::Union{OrbitalData,Nothing}=nothing; MO="mo")
-  # If no orbital data was pre-fetched, this is a FCIDUMP-only case.
-  # Create a unity rotation for amplitude storage.
-  if isnothing(orbital_data)
-    println("No dump file found - storing unity rotation for FCIDUMP-only calculation ...")
-    norb = n_orbs(EC)
-    restricted = is_closed_shell(EC)
-    
-    # Create unity rotation matrix
-    unity = Matrix{Float64}(I, norb, norb)
-    if restricted
-      cRot = SpinMatrix(unity)
-    else
-      cRot = SpinMatrix(unity, copy(unity))
-    end
-    
-    # No classes for FCIDUMP-only
-    classes = (String[], String[])
-    
-    # Write unity rotation to store file
-    write_trexio_rotations(io_store, cRot; type="Rotation", classes=classes, MO=MO)
-    return
-  end
-  
+                                     orbital_data::OrbitalData; MO="mo")
   cMO = orbital_data.cMO
   mo_type = orbital_data.mo_type
   basis = orbital_data.basis
@@ -402,11 +629,7 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo,
   # Generate orbital classes from the system (not from dump file, 
   # because core orbital count may have changed)
   if !isempty(EC.system)
-    # Save current space, setup from system, generate classes, then restore
-    space_save = save_space(EC)
-    setup_space_system!(EC; verbose=false)
     classes = prepare_orb_classes(EC, is_restricted(cMO))
-    restore_space!(EC, space_save)
     # Use current basis for output (projection is done when retrieving amplitudes)
     basis = generate_basis(EC, "ao")
   else
@@ -419,58 +642,31 @@ function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo,
   write_trexio_system(io_store, EC.system)
   write_trexio_orbitals(io_store, cMO, basis; type=mo_type, classes=classes,
                         energies=energies, occupations=occupations, MO=MO)
-end
-
-""" 
-    dump_rotations([io::TrexioFile,] EC::ECInfo, cRot::SpinMatrix; type="Rotation", energies=nothing, occupations=nothing, 
-                   MO="mo", biorthogonal=false)
-
-  Dump orbital rotations to TREXIO file. 
-
-`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
-"""
-function dump_rotations end
-function dump_rotations(EC::ECInfo, cRot::SpinMatrix; 
-                        type="", energies=nothing, occupations=nothing, MO="mo", biorthogonal=false)
-  open_dump(EC, "w") do io
-    dump_rotations(io, EC, cRot; type=type, energies=energies, occupations=occupations, MO=MO, biorthogonal=biorthogonal)
-  end
-  return
-end
-function dump_rotations(io::TrexioFile, EC::ECInfo, cRot::SpinMatrix; 
-                        type="", energies=nothing, occupations=nothing, MO="mo", biorthogonal=false)
-  println("Dumping orbital rotations ...")
-  oenergies = prepare_orb_vectors(energies, is_restricted(cRot))
-  ooccupations = prepare_orb_vectors(occupations, is_restricted(cRot))
-  classes = prepare_orb_classes(EC, is_restricted(cRot))
-  if biorthogonal && !is_biorthogonal(type)
-    type *= " biorthogonal"
-  end
-  if !is_rotation(type)
-    type *= " Rotation"
-  end
-  write_trexio_rotations(io, cRot; type, classes=classes, energies=oenergies, occupations=ooccupations, MO=MO)
   return
 end
 
-"""
-    fetch_rotations([io::TrexioFile,] EC::ECInfo, MO="mo") -> (SpinMatrix, String)
-
-  Fetch the molecular orbital rotations from the trexio dump.
-
-  Returns a `SpinMatrix` of the rotations and `type::String`.
-
-`MO` can be "mo" for molecular orbitals or "po" for positron orbitals.
-"""
-function fetch_rotations end
-function fetch_rotations(EC::ECInfo, MO="mo")
-  open_dump(EC, "r") do io
-    return fetch_rotations(io, EC, MO)
+function transfer_orbitals_to_store!(io_store::TrexioFile, EC::ECInfo, 
+                                     orbital_data::Nothing=nothing; MO="mo")
+  # If no orbital data was pre-fetched, this is a FCIDUMP-only case.
+  # Create a unity rotation for amplitude storage.
+  println("No dump file found - storing unity rotation for FCIDUMP-only calculation ...")
+  norb = n_orbs(EC)
+  restricted = is_closed_shell(EC)
+  
+  # Create unity rotation matrix
+  unity = Matrix{Float64}(I, norb, norb)
+  if restricted
+    cRot = SpinMatrix(unity)
+  else
+    cRot = SpinMatrix(unity, copy(unity))
   end
-end
-function fetch_rotations(io::TrexioFile, EC::ECInfo, MO="mo")
-  println("Fetching orbital rotations ...")
-  return read_trexio_rotations(io, MO=MO)
+
+  # No classes for FCIDUMP-only
+  classes = (String[], String[])
+
+  # Write unity rotation to store file
+  write_trexio_rotations(io_store, cRot; type="Rotation", classes=classes, MO=MO)
+  return
 end
 
 """
@@ -712,7 +908,7 @@ function save_wavefunction(EC::ECInfo, wf::AbstractDict; state::Int=1)
 end
 
 """
-    copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start=false, state=0)
+    copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start=false, state=0, reverse=false)
 
   Copy the wavefunction dump file to `tofile`. If `tofile` is not given, copy to the current dump file for writing.
 
@@ -721,6 +917,7 @@ end
 - `start::Bool=false`: If true, copy from `wf.start` file instead of `wf.dump`.
 - `state::Int=0`: State number for determinant files. If 0, copies the main dump file.
                    If >0, copies the state-specific determinant file (e.g., `file_state2.h5`).
+- `reverse::Bool=false`: If true, copy from `tofile` to the dump file instead of the other way around.
 
   Note: This does not check the contents of the files.
 
@@ -736,17 +933,12 @@ copy_wavefunction(EC, "backup.h5"; start=true)
 copy_wavefunction(EC, "state2_backup.h5"; state=2)
 ```
 """
-function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=false, state::Int=0)
+function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=false, state::Int=0, reverse::Bool=false)
   if state > 0
     # Copy state-specific determinant file
     base_filename, _ = dumpfile(EC, "r"; start=start)
     from_filename = state_filename(base_filename, state)
     from_fullpath = joinpath(EC.scr, from_filename)
-    
-    if !isfile(from_fullpath)
-      @warn "State file $from_filename not found, nothing to copy."
-      return
-    end
     
     if tofile == ""
       # Default: copy to store location with state suffix
@@ -760,7 +952,12 @@ function copy_wavefunction(EC::ECInfo, tofile::AbstractString=""; start::Bool=fa
     from_fullpath = dumpfile(EC, "r"; start=start)[2]
     to_fullpath = tofile == "" ? dumpfile(EC, "w")[2] : tofile
   end
-  
+  if reverse
+    from_fullpath, to_fullpath = to_fullpath, from_fullpath
+  end
+  if !isfile(from_fullpath)
+    error("Source wavefunction file $from_fullpath not found, nothing to copy.")
+  end
   cp(from_fullpath, to_fullpath; force=true)
   return
 end
@@ -789,13 +986,13 @@ is_biorthogonal(type::AbstractString) = "biorthogonal" ∈ split(lowercase(type)
   `T2` is the doubles amplitude tensor (nvirt × nvirt × nocc × nocc).
 """
 function dump_amplitudes end
-function dump_amplitudes(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_amplitudes(EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4})
   open_dump(EC, "u") do io
     dump_amplitudes(io, EC, T1, T2)
   end
   return
 end
-function dump_amplitudes(io::TrexioFile, EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Real,4})
+function dump_amplitudes(io::TrexioFile, EC::ECInfo, T1::AbstractMatrix, T2::AbstractArray{<:Number,4})
   println("Dumping amplitudes ...")
   write_trexio_amplitudes(io, T1, T2)
   return
@@ -810,8 +1007,8 @@ end
   `T2a`, `T2b`, `T2ab` are the αα, ββ, and αβ doubles amplitude tensors.
 """
 function dump_amplitudes(EC::ECInfo, T1a::AbstractMatrix, T1b::AbstractMatrix, 
-                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
-                         T2ab::AbstractArray{<:Real,4})
+                         T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, 
+                         T2ab::AbstractArray{<:Number,4})
   open_dump(EC, "u") do io
     dump_amplitudes(io, EC, T1a, T1b, T2a, T2b, T2ab)
   end
@@ -819,8 +1016,8 @@ function dump_amplitudes(EC::ECInfo, T1a::AbstractMatrix, T1b::AbstractMatrix,
 end
 function dump_amplitudes(io::TrexioFile, EC::ECInfo, 
                          T1a::AbstractMatrix, T1b::AbstractMatrix, 
-                         T2a::AbstractArray{<:Real,4}, T2b::AbstractArray{<:Real,4}, 
-                         T2ab::AbstractArray{<:Real,4})
+                         T2a::AbstractArray{<:Number,4}, T2b::AbstractArray{<:Number,4}, 
+                         T2ab::AbstractArray{<:Number,4})
   println("Dumping amplitudes ...")
   write_trexio_amplitudes(io, T1a, T1b, T2a, T2b, T2ab)
   return
@@ -837,15 +1034,15 @@ end
   Returns empty arrays if amplitudes are not found in the dump file.
 """
 function fetch_restricted_amplitudes end
-function fetch_restricted_amplitudes(EC::ECInfo; start::Bool=false)
+function fetch_restricted_amplitudes(EC::ECInfo{T}; start::Bool=false)::Tuple{Matrix{T}, Array{T,4}} where T
   open_dump(EC, "r"; start=start) do io
     return fetch_restricted_amplitudes(io, EC)
   end
 end
-function fetch_restricted_amplitudes(io::TrexioFile, EC::ECInfo)
+function fetch_restricted_amplitudes(io::TrexioFile, EC::ECInfo{T})::Tuple{Matrix{T}, Array{T,4}} where T
   println("Fetching restricted amplitudes ...")
-  T1 = read_trexio_singles(io)
-  T2 = read_trexio_doubles(io)
+  T1 = convert(Matrix{T}, read_trexio_singles(io))
+  T2 = convert(Array{T,4}, read_trexio_doubles(io))
   return (T1, T2)
 end
 
@@ -860,16 +1057,17 @@ end
   Returns empty arrays if amplitudes are not found in the dump file.
 """
 function fetch_unrestricted_amplitudes end
-function fetch_unrestricted_amplitudes(EC::ECInfo; start::Bool=false)
+function fetch_unrestricted_amplitudes(EC::ECInfo{T}; start::Bool=false)::Tuple{Matrix{T}, Matrix{T}, Array{T,4}, Array{T,4}, Array{T,4}} where T
   open_dump(EC, "r"; start=start) do io
     return fetch_unrestricted_amplitudes(io, EC)
   end
 end
-function fetch_unrestricted_amplitudes(io::TrexioFile, EC::ECInfo)
+function fetch_unrestricted_amplitudes(io::TrexioFile, EC::ECInfo{T})::Tuple{Matrix{T}, Matrix{T}, Array{T,4}, Array{T,4}, Array{T,4}} where T
   println("Fetching unrestricted amplitudes ...")
   T1a, T1b = read_trexio_unrestricted_singles(io)
   T2a, T2b, T2ab = read_trexio_unrestricted_doubles(io)
-  return (T1a, T1b, T2a, T2b, T2ab)
+  return (convert(Matrix{T}, T1a), convert(Matrix{T}, T1b),
+          convert(Array{T,4}, T2a), convert(Array{T,4}, T2b), convert(Array{T,4}, T2ab))
 end
 
 """

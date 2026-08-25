@@ -1,10 +1,10 @@
 
 """
-    run_fci!(context::FCIContext) -> Vector{Scalar}
+    run_fci!(context::FCIContext) -> Vector{Float64}
 
 Run full FCI calculation.
 """
-function run_fci!(context::FCIContext)
+function run_fci!(context::FCIContext{O,T}) where {O, T}
   println("="^80)
   println("FCI CALCULATION")
   println("="^80)
@@ -42,7 +42,7 @@ function run_fci!(context::FCIContext)
       
       # Allocate 2-RDM array if not already allocated
       if context.rdm2 === nothing
-        context.rdm2 = zeros(Scalar, n_orb, n_orb, n_orb, n_orb)
+        context.rdm2 = zeros(T, n_orb, n_orb, n_orb, n_orb)
       end
       
       # Compute 2-RDM

@@ -10,6 +10,8 @@ using Printf
 export output_time, output_memory, flush_output
 export output_iteration
 export output_E_var, output_E_method, output_norms, output_state
+export output_dipole
+export output_single_excitation
 
 """
     output_time(Δtime, info::AbstractString)
@@ -60,9 +62,9 @@ end
 function output_iteration(it, var, Δt, floats...)
   @printf "%3i " it
   for f in floats
-    @printf "%12.8f " f
+    @printf "%12.8f " real(f)
   end
-  @printf "%10.2e %8.2f \n" var Δt/10^9
+  @printf "%10.2e %8.2f \n" real(var) Δt/10^9
   flush(stdout)
 end
 
@@ -74,9 +76,9 @@ end
 function output_state(state, var, floats...; converged=false)
   @printf "    %3i " state
   for f in floats
-    @printf "%12.8f " f
+    @printf "%12.8f " real(f)
   end
-  @printf "%10.2e " var
+  @printf "%10.2e " real(var)
   if converged
     println("Converged")
   else
@@ -91,7 +93,7 @@ end
   Output energy `En`, variance `var`, and time step `Δt`.
 """
 function output_E_var(En, var, Δt)
-  @printf "%12.8f %10.2e %8.2f \n" En var Δt/10^9
+  @printf "%12.8f %10.2e %8.2f \n" real(En) real(var) Δt/10^9
   flush(stdout)
 end
 
@@ -101,7 +103,17 @@ end
   Output energy `En` with method `method` and additional info `info`.
 """
 function output_E_method(En, method::AbstractString, info::AbstractString="")
-  @printf "%s %s \t%16.12f \n" method info En
+  @printf "%s %s \t%16.12f \n" method info real(En)
+  flush(stdout)
+end
+
+"""
+    output_dipole(method::AbstractString, dipole)
+
+  Output dipole components in Debye.
+"""
+function output_dipole(method::AbstractString, dipole)
+  @printf "%s dipole [D]: x=%11.6f y=%11.6f z=%11.6f |μ|=%11.6f\n" method real(dipole[1]) real(dipole[2]) real(dipole[3]) real(dipole[4])
   flush(stdout)
 end
 
@@ -112,11 +124,21 @@ end
 
   The norms are pairs of strings and floats.
 """
-function output_norms(norms::Pair{String,Float64}...)
+function output_norms(norms::Pair{String,<:Number}...)
   for norm in norms
-    @printf "|%s|²: %12.8f   " norm.first norm.second
+    @printf "|%s|²: %12.8f   " norm.first real(norm.second)
   end
   println()
+  flush(stdout)
+end
+
+"""
+    output_single_excitation(coef, i, a)
+
+  Output the single excitation with coefficient `coef`, occupied index `i`, and virtual index `a`.
+"""
+function output_single_excitation(coef, i, a)
+  @printf "  %3i -> %4i: %8.4f \n" i a real(coef)
   flush(stdout)
 end
 
