@@ -101,11 +101,11 @@ function parse_exportdata_file(exportdata_file::AbstractString)
   vardict = Dict{String, String}()
   open(exportdata_file, "r") do f
     done = false
-    while !done
+    # eof before readline: checking it after dropped the final line whenever
+    # the file ends directly after a `$VAR=value` (a trailing blank line
+    # masked it).  `Base.eof` qualified: XML.jl ≥ 0.4 also exports `eof`.
+    while !done && !Base.eof(f)
       line = readline(f)
-      if Base.eof(f)  # qualified: XML.jl ≥ 0.4 also exports `eof`
-        break
-      end
       # Strip leading whitespace
       line = lstrip(line)
       # Skip empty and comment lines

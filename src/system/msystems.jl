@@ -75,9 +75,20 @@ function Base.:(==)(at1::ACentre, at2::ACentre)
         at1.basis == at2.basis && at1.dummy == at2.dummy
 end
 
+"""
+    Base.isapprox(at1::ACentre, at2::ACentre; kwargs...)
+
+  Check whether two atomic centres describe the same physical centre
+  (up to floating-point tolerances).
+
+  The `dummy` flag is deliberately NOT compared (unlike `==`): a re-parsed
+  geometry always carries `dummy=false`, so comparing the flag would make
+  `@tryECinit` treat the system as changed after `@dummy` and wrongly reset
+  the integrals; dummy changes are handled by the `@dummy` macro itself.
+"""
 function Base.isapprox(at1::ACentre, at2::ACentre; kwargs...)
-  return at1.label == at2.label && isapprox(at1.position, at2.position; kwargs...) && 
-        at1.atomic_number == at2.atomic_number && isapprox(at1.charge, at2.charge; kwargs...) && 
+  return at1.label == at2.label && isapprox(at1.position, at2.position; kwargs...) &&
+        at1.atomic_number == at2.atomic_number && isapprox(at1.charge, at2.charge; kwargs...) &&
         at1.basis == at2.basis
 end
 
