@@ -12,12 +12,10 @@ using ..ElemCo.Elements
 using ..ElemCo.Constants
 export ACentre, MSystem
 export issame
-export parse_geometry, genxyz, nuclear_repulsion, bond_length, electron_distribution
+export parse_geometry, genxyz, nuclear_repulsion, bond_length
 export atomic_position
 export guess_nelec, guess_norb, guess_ncore
 export atomic_centre_label, element_fullname, element_label, element_LABEL, is_dummy, set_dummy!, unset_dummy!
-
-include("minbas.jl")
 
 """
     ACentre
@@ -77,10 +75,21 @@ function Base.:(==)(at1::ACentre, at2::ACentre)
         at1.basis == at2.basis && at1.dummy == at2.dummy
 end
 
+"""
+    Base.isapprox(at1::ACentre, at2::ACentre; kwargs...)
+
+  Check whether two atomic centres describe the same physical centre
+  (up to floating-point tolerances).
+
+  The `dummy` flag is deliberately NOT compared (unlike `==`): a re-parsed
+  geometry always carries `dummy=false`, so comparing the flag would make
+  `@tryECinit` treat the system as changed after `@dummy` and wrongly reset
+  the integrals; dummy changes are handled by the `@dummy` macro itself.
+"""
 function Base.isapprox(at1::ACentre, at2::ACentre; kwargs...)
-  return at1.label == at2.label && isapprox(at1.position, at2.position; kwargs...) && 
-        at1.atomic_number == at2.atomic_number && isapprox(at1.charge, at2.charge; kwargs...) && 
-        at1.basis == at2.basis && at1.dummy == at2.dummy
+  return at1.label == at2.label && isapprox(at1.position, at2.position; kwargs...) &&
+        at1.atomic_number == at2.atomic_number && isapprox(at1.charge, at2.charge; kwargs...) &&
+        at1.basis == at2.basis
 end
 
 """
@@ -577,27 +586,5 @@ end
 function guess_ncore(ms::MSystem, coretype::Symbol=:large)
   return sum(Int[ncoreorbs(element_LABEL(at),coretype) for at in ms if !is_dummy(at)])
 end
-
-""" 
-    electron_distribution(ms::MSystem, minbas::AbstractString)
-
-  Return the averaged number of electrons in the orbitals in the minimal basis set.
-  
-  Number of orbitals in the minimal basis set has to be specified in `minbas.jl`.
-"""
-function electron_distribution(ms::MSystem, minbas::AbstractString)
-  eldist = Float64[]
-  for at in ms 
-    elnam = element_LABEL(at)
-    nnum = at.atomic_number
-    eldist4el = electron_distribution4element(elnam, nshell4l_minbas(nnum, uppercase(minbas)))
-    if is_dummy(at)
-      eldist4el .= 0.0
-    end 
-    eldist = vcat(eldist, eldist4el)
-  end
-  return eldist
-end
-
 
 end #module

@@ -35,7 +35,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
     R1 = U1
   end
 
-  oovv = ints2(EC,"oovv")
+  oovv = EC.ao_direct ? load_bare_int2(EC,"oovv") : ints2(EC,"oovv")
   if with_rhs
     @mtensor R2[e,f,m,n] := 2.0 * oovv[m,n,e,f] - oovv[n,m,e,f]
   else
@@ -50,31 +50,7 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
   t1 = print_time(EC, t1, "R^{ef}_{mn} += U_{ij}^{ef} (\\hat v_{mn}^{ij} + v_{nm}^{cd} T^{ij}_{cd})",2)
   # the 4-external part
   if EC.options.cc.use_kext
-    # the `kext` part
-    int2 = integ2_ss(EC.fd)
-    # last two indices of integrals are stored as upper triangular 
-    dU2 = calc_dU2(EC, T1, T1, U2)
-    # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-    @mtensor Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
-    dU2 = nothing
-    Kmmoo = Array{Float64}(undef,norb,norb,nocc,nocc)
-    tripp = uppertriangular_cut(norb)
-    Kmmoo[tripp,:,:] = Kxoo
-    trippr = swapped_uppertriangular_cut(norb)
-    @mtensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
-    Kxoo = nothing
-    t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
-    # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
-    R2 += Kmmoo[SP['v'],SP['v'],:,:]
-    # ``R^e_m += 2 K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)``
-    if length(U1) > 0
-      @mtensor R1[e,m] += 2.0 * Kmmoo[SP['v'],SP['o'],:,:][e,j,m,j] 
-      if length(T1) > 0
-        @mtensor R1[e,m] += 2.0 * (Kmmoo[SP['v'],SP['v'],:,:][e,b,m,j] * T1[b,j])
-      end 
-      t1 = print_time(EC, t1, "R^e_m += 2 K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)",2)
-    end
-    Kmmoo = nothing
+    cc_lagrange_kext!(EC, R1, R2, T1, U2)
   else
     error("non-kext Λ equations not implemented")
   end
@@ -201,9 +177,14 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1, U2; dc=false, with_rhs=
   pR2 = nothing
 
   if length(U1) > 0
-    # ``R^e_m += \hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})``
-    int2 = ints2(EC,"momm")
-    @mtensor R1[e,m] += dD1[p,q] * (2.0 * int2[:,:,:,SP['v']][q,m,p,e] - int2[:,:,SP['v'],:][q,m,e,p])
+    # ``R^e_m += \hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})`` — a generalized (2J−K) Fock v,o block of dD1.
+    # AO-direct builds it straight from the half-transformed integrals; else from EC.fd.
+    if EC.ao_direct
+      R1 .+= dD1_fock_vo(EC, dD1)
+    else
+      int2 = ints2(EC,"momm")
+      @mtensor R1[e,m] += dD1[p,q] * (2.0 * int2[:,:,:,SP['v']][q,m,p,e] - int2[:,:,SP['v'],:][q,m,e,p])
+    end
     t1 = print_time(EC, t1, "R^e_m += \\hat D_p^q (2 v_{mq}^{ep} - v_{mq}^{pe})",2)
     # ``R^e_m -= 2 Λ_{ij}^{eb} \hat v_{mb}^{ij}``
     int2 = load4idx(EC, "d_vooo")
@@ -235,7 +216,7 @@ function calc_dU2(EC::ECInfo, T1, T12, U2, o1='o', v1='v', o2='o', v2='v')
   norb = n_orbs(EC)
   nocc1 = size(U2,3)
   nocc2 = size(U2,4)
-  dU2 = zeros(norb,norb,nocc1,nocc2)
+  dU2 = zeros(eltype(U2),norb,norb,nocc1,nocc2)
   dU2[SP[v1],SP[v2],:,:] = U2 
   if length(T1) > 0
     @mtensor dUovoo[i,b,m,n] := U2[a,b,m,n] * T1[a,i]
@@ -247,32 +228,262 @@ function calc_dU2(EC::ECInfo, T1, T12, U2, o1='o', v1='v', o2='o', v2='v')
 end
 
 """
-    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false)
+    ao_lagrange_K2(EC, T1, U2, o4s, v4s, spin=:α) -> Kmmoo
 
-Calculate the vector times the Jacobian for the unresticted CCSD or DCSD
+  AO-direct `K_{mn}^{rs} = Σ_pq ⟨pq|rs⟩ dU2_{mn}^{pq}` for the closed-shell / same-spin Λ kext (`spin`
+  selects the orbital set for the unrestricted `:β` call), mirroring the
+  amplitude kext ([`cc_kext!`](@ref)). The MO-space dressing `calc_dU2` is skipped: the AO dressed-Λ2
+  density is folded directly, `dU2_AO[μ,ν,m,n] = Σ_ab CLv[μ,a] CLv[ν,b] U2[a,b,m,n]` with the dressed
+  virtual bra `CLv = C_v − C_o·T1ᵀ` (same as [`ao_dressed_coeffs`](@ref)). By `⟨pq|rs⟩=⟨rs|pq⟩` this is
+  [`pm_K2!`](@ref)'s ket-pair contraction: ½-scale the `μν` diagonal (scalepp), pack the pair
+  triangularly, contract against the ± store, and rotate the kept `ρσ` pair back to MO
+  with `cMO`. Real-valued (the bra↔ket reuse of the ± store); complex AO-direct is a follow-up.
+"""
+function ao_lagrange_K2(EC::ECInfo, T1, U2, o4s::Char, v4s::Char, spin::Symbol=:α)
+  cMO = spin === :β ? Matrix(load_orbitals(EC).β) : ao_direct_orbitals(EC)
+  SP = EC.space
+  nao = size(cMO, 1)
+  Co = cMO[:, SP[o4s]]; Cv = cMO[:, SP[v4s]]
+  CLv = length(T1) > 0 ? Cv .- Co * transpose(T1) : Cv            # dressed virtual bra
+  @mtensor dU2p[μ,b,m,n] := U2[a,b,m,n] * CLv[μ,a]                 # fold Λ2 vv-block with CLv (both bra slots)
+  @mtensor dU2_AO[μ,ν,m,n] := dU2p[μ,b,m,n] * CLv[ν,b]
+  @inbounds for μ in 1:nao; @views dU2_AO[μ,μ,:,:] .*= 0.5; end   # scalepp (½ the μ=ν diagonal)
+  tripp = uppertriangular_cut(nao)
+  dU2_tri = dU2_AO[tripp, :, :]
+  pm = open_pm_store(EC)
+  K2_AO = pm_K2!(pm, dU2_tri, tripp)                              # K2_AO[ρ,σ,m,n] = Σ_μν⟨ρσ|μν⟩ dU2_AO
+  close_pm_store!(EC, pm)
+  @mtensor Kmmoo[r,s,m,n] := (K2_AO[ρ,σ,m,n] * cMO[ρ,r]) * cMO[σ,s]  # rotate the kept ρσ pair to MO
+  return Kmmoo
+end
+
+"""
+    ao_lagrange_K2ab(EC, T1a, T1b, U2ab) -> KmMoO
+
+  Opposite-spin (αβ) analogue of [`ao_lagrange_K2`](@ref):
+  `K_{mN}^{rS} = Σ_pQ ⟨pQ|rS⟩ dU2_{mN}^{pQ}`. The αβ dressed Λ2 density folds directly with BOTH dressed
+  virtual bras, `dU2_AO[μ,ν,m,N] = Σ_aB CLva[μ,a] CLvb[ν,B] U2ab[a,B,m,N]` (the AO image of
+  `calc_dU2(EC,T1a,T1b,U2ab,'o','v','O','V')`), so `calc_dU2` is skipped. The pair is not symmetric, so —
+  exactly as the amplitude [`cc_kext!`](@ref) αβ branch — the full square with a ½-scaled diagonal goes to
+  [`pm_K2ab!`](@ref) (which does the explicit ± fold over both pair orders); the two kept AO externals are
+  then folded back with the α and β orbitals respectively. Real-valued, like the same-spin variant.
+"""
+function ao_lagrange_K2ab(EC::ECInfo, T1a, T1b, U2ab)
+  SP = EC.space
+  cMOsm = load_orbitals(EC)
+  cMOa = Matrix(cMOsm.α); cMOb = Matrix(cMOsm.β)
+  nao = size(cMOa, 1)
+  Coa = cMOa[:, SP['o']]; Cva = cMOa[:, SP['v']]
+  Cob = cMOb[:, SP['O']]; Cvb = cMOb[:, SP['V']]
+  CLva = length(T1a) > 0 ? Cva .- Coa * transpose(T1a) : Cva        # dressed virtual bras
+  CLvb = length(T1b) > 0 ? Cvb .- Cob * transpose(T1b) : Cvb
+  @mtensor dU2p[μ,B,m,N] := U2ab[a,B,m,N] * CLva[μ,a]
+  @mtensor dU2_AO[μ,ν,m,N] := dU2p[μ,B,m,N] * CLvb[ν,B]
+  @inbounds for μ in 1:nao; @views dU2_AO[μ,μ,:,:] .*= 0.5; end     # scalepp (½ the μ=ν diagonal)
+  tripp = uppertriangular_cut(nao)
+  pm = open_pm_store(EC)
+  K2_AO = pm_K2ab!(pm, dU2_AO, tripp)                               # full-square pair in and out
+  close_pm_store!(EC, pm)
+  @mtensor KmMoO[r,S,m,N] := (K2_AO[ρ,σ,m,N] * cMOa[ρ,r]) * cMOb[σ,S]   # α external, β external
+  return KmMoO
+end
+
+"""
+    cc_lagrange_kext!(EC::ECInfo, R1, R2, T1, U2, spin=:closed)
+
+  Calculate the contribution of the 4-external integrals to the Λ equations for CCSD/DCSD.
+  
+  `spin` can be `:closed`, `:α`, or `:β`.
+"""
+function cc_lagrange_kext!(EC, R1, R2, T1, U2, spin=:closed)
+  t1 = time_ns()
+  fac = (spin == :closed) ? 2.0 : 1.0
+  spin = (spin == :closed) ? :α : spin
+  SP = EC.space
+  isα = (spin == :α)
+  # spaces for the given spin
+  o4s = space4spin('o', isα)
+  v4s = space4spin('v', isα)
+  # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``. AO-direct contracts the dressed Λ2 pair with the exact
+  # AO integrals (± store) directly; else the T1-dressed dU2 is contracted with the MO fcidump.
+  if EC.ao_direct
+    Kmmoo = ao_lagrange_K2(EC, T1, U2, o4s, v4s, spin)
+  else
+    int2 = integ2_ss(EC.fd, spin)                # (norb,norb,uppertriangular)
+    @assert ndims(int2) == 3
+    dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
+    Kmmoo = calc_lagrange_K2(int2, dU2)
+    dU2 = nothing
+  end
+  t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
+  # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
+  @views R2 .+= Kmmoo[SP[v4s],SP[v4s],:,:]
+  # ``R^e_m += <fac> K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)``
+  if length(R1) > 0
+    @mtensor R1[e,m] += fac * Kmmoo[SP[v4s],SP[o4s],:,:][e,j,m,j] 
+    if length(T1) > 0
+      @mtensor R1[e,m] += fac * (Kmmoo[SP[v4s],SP[v4s],:,:][e,b,m,j] * T1[b,j])
+    end 
+    t1 = print_time(EC, t1, "R^e_m += K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)",2)
+  end
+  return
+end
+
+"""
+    cc_lagrange_kext4ab!(EC::ECInfo, R1a, R1b, R2, T1a, T1b, U2)
+
+  Calculate the contribution of the 4-external integrals to the Λ αβ equations for CCSD/DCSD.
+  
+"""
+function cc_lagrange_kext4ab!(EC::ECInfo{T}, R1a, R1b, R2, T1a, T1b, U2) where T
+  t1 = time_ns()
+  norb = n_orbs(EC)
+  nocca = size(U2,3)
+  noccb = size(U2,4)
+  SP = EC.space
+  # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``. AO-direct contracts the dressed αβ Λ2 pair with the
+  # exact AO integrals (± store) directly and must be tested FIRST — the MO branches read `EC.fd`, and an
+  # empty dump would silently take the RHF-dump path and return uninitialized values.
+  if EC.ao_direct
+    Kmmoo = ao_lagrange_K2ab(EC, T1a, T1b, U2)
+  else
+    dU2 = calc_dU2(EC, T1a, T1b, U2, 'o','v','O','V')
+    Kmmoo = Array{T,4}(undef, norb, norb, nocca, noccb)
+    if EC.fd.uhf
+      int2 = integ2_os(EC.fd)
+      Kmmoo = calc_lagrange_K2ab(int2, dU2)
+      int2 = nothing
+    else
+      int2 = integ2_ss(EC.fd)
+      # ``r ≤ S`` from the spin-free dump, then the ``S ≤ r`` half from the swapped pair
+      Kmmoo = calc_lagrange_K2(int2, dU2; symmetrize=false)
+      dU2 = permutedims(dU2, (2,1,3,4))
+      Koox = calc_lagrange_Koox(int2, dU2)
+      trippr = swapped_uppertriangular_cut(norb)
+      @mtensor Kmmoo[trippr,:,:][x,m,N] = Koox[m,N,x]
+      Koox = nothing
+      int2 = nothing
+    end
+    dU2 = nothing
+  end
+  t1 = print_time(EC, t1, "K_{mN}^{rS} = \\hat U_{mN}^{pQ} v_{pQ}^{rS}",2)
+  # ``R^{eF}_{mN} += K_{mN}^{rS} δ_r^e δ_S^F``
+  @views R2 .= Kmmoo[SP['v'],SP['V'],:,:]
+  # ``R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)``
+  if length(R1a) > 0
+    @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['O'],:,:][e,J,m,J] 
+    if length(T1b) > 0
+      @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['V'],:,:][e,B,m,J] * T1b[B,J]
+    end 
+  end
+  t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
+  # ``R^E_M += K_{jM}^{sR} δ_R^E (δ_s^j + δ_s^b T^j_b)``
+  if length(R1b) > 0
+    @mtensor R1b[E,M] += Kmmoo[SP['o'],SP['V'],:,:][j,E,j,M] 
+    if length(T1a) > 0
+      @mtensor R1b[E,M] += Kmmoo[SP['v'],SP['V'],:,:][b,E,j,M] * T1a[b,j]
+    end 
+  end
+  t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
+  return
+end
+
+
+"""
+    calc_lagrange_K2(int2, D2; symmetrize=true)
+
+  Calculate the kext K2 contribution to the CCSD Lagrange residuals by directly contracting the integrals with D2.
+
+  ``K_{ij}^{pq} = v^{pq}_{rs} D_ij^rs``
+
+  Return Kmmoo::Array{4}.
+"""
+function calc_lagrange_K2(int2, D2; symmetrize=true)
+  Koox = calc_lagrange_Koox(int2, D2)
+  norb = size(int2, 1)
+  tripp = uppertriangular_cut(norb)
+  trippr = swapped_uppertriangular_cut(norb)
+  Kmmoo = similar(D2)
+  @mtensor Kmmoo[tripp,:,:][x,m,n] = Koox[m,n,x]
+  if !symmetrize
+    return Kmmoo
+  end
+  @mtensor Kmmoo[trippr,:,:][x,m,n] = Koox[n,m,x]
+  return Kmmoo
+end
+
+"""
+    calc_lagrange_Koox(int2, D2)
+
+  Calculate 3-index intermediate in the kext in CCSD Lagrange residuals.
+
+Return Koox::Array{3}, where ``Koox_{mn}^x = v^{x}_{pq} D_{mn}^{pq}``.
+"""
+function calc_lagrange_Koox(int2, D2)
+  nocc1 = size(D2, 3)
+  nocc2 = size(D2, 4)
+  nrs = size(int2, 3)
+  Koox = Array{eltype(D2)}(undef, nocc1, nocc2, nrs)
+  rsBlks = get_spaceblocks(1:nrs)
+  for rs in rsBlks
+    v!int2 = @mview(int2[:, :, rs])
+    v!Koox = @mview(Koox[:, :, rs])
+    # <pq|rs> D^ij_rs
+    @mtensor v!Koox[m,n,x] = v!int2[p,q,x] * D2[p,q,m,n]
+  end
+  return Koox
+end
+
+"""
+    calc_lagrange_K2ab(int2, D2)
+
+Calculate the kext K2 contribution to the UCCSD Lagrange residuals for the αβ part 
+by directly contracting the integrals with D2.
+
+``K_{mN}^{rS} = v^{rS}_{pQ} D_{mN}^{pQ}`` 
+
+Return KmMoO::Array{4}.
+"""
+function calc_lagrange_K2ab(int2, D2)
+  norb = size(int2, 4)
+  KmMoO = similar(D2)
+  SBlks = get_spaceblocks(1:norb, 8)
+  for S in SBlks
+    v!int2 = @mview(int2[:, :, :, S])
+    # <pq|rs> D^ij_rs
+    @mtensor KmMoO[:,S,:,:][r,S,i,J] = v!int2[p,Q,r,S] * D2[p,Q,i,J]
+  end
+  return KmMoO
+end
+
+"""
+    calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false, with_rhs=true)
+
+Calculate the vector times the Jacobian for the unrestricted CCSD or DCSD
 equations.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return R1a, R1b, R2a, R2b, R2ab
 """
-function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false)
+function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; dc=false, with_rhs=true)
   t1 = time_ns()
  
   T2ab = load4idx(EC, "T_vVoO")
   # Calculate 1RDM intermediates
   T1 = load2idx(EC, "T_vo")
   T2 = load4idx(EC, "T_vvoo")
-  D1α, dD1α = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1, T2, T2ab, :α)
+  D1α, dD1α = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1, T2, T2ab, :α; jacobian=!with_rhs)
   T1 = load2idx(EC, "T_VO")
   T2 = load4idx(EC, "T_VVOO")
-  D1β, dD1β = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1, T2, T2ab, :β)
+  D1β, dD1β = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1, T2, T2ab, :β; jacobian=!with_rhs)
   T1 = T2 = T2ab = nothing
   t1 = print_time(EC, t1, "calculate 1RDM",2)
 
-  R1a, R2a = calc_ccsd_vector_times_Jacobian4spin(EC, U1a, U2a, U2ab, D1α, dD1α, dD1β, :α; dc)
+  R1a, R2a = calc_ccsd_vector_times_Jacobian4spin(EC, U1a, U2a, U2ab, D1α, dD1α, dD1β, :α; dc, with_rhs)
   t1 = print_time(EC, t1, "calculate R1a, R2a",2)
-  R1b, R2b = calc_ccsd_vector_times_Jacobian4spin(EC, U1b, U2b, U2ab, D1β, dD1β, dD1α, :β; dc)
+  R1b, R2b = calc_ccsd_vector_times_Jacobian4spin(EC, U1b, U2b, U2ab, D1β, dD1β, dD1α, :β; dc, with_rhs)
   t1 = print_time(EC, t1, "calculate R1b, R2b",2)
-  ΔR1a, ΔR1b, R2ab = calc_ccsd_vector_times_Jacobian4ab(EC, U1a, U1b, U2a, U2b, U2ab, D1α, D1β; dc)
+  ΔR1a, ΔR1b, R2ab = calc_ccsd_vector_times_Jacobian4ab(EC, U1a, U1b, U2a, U2b, U2ab, D1α, D1β; dc, with_rhs)
   R1a += ΔR1a
   R1b += ΔR1b
   t1 = print_time(EC, t1, "calculate ΔR1a, ΔR1b, R2ab",2)
@@ -280,16 +491,17 @@ function calc_ccsd_vector_times_Jacobian(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab; d
 end
 
 """
-    calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1, dD1, dD1os, spin; dc=false)
+    calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1, dD1, dD1os, spin; dc=false, with_rhs=true)
 
 Calculate the vector times the CCSD/DCSD Jacobian for the given `spin`
 (same-spin residual for doubles). The singles residual is missing some terms
 which are added in `calc_ccsd_vector_times_Jacobian4ab`.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return R1 and R2 
 """
-function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab, 
-            D1, dD1, dD1os, spin; dc=false)
+function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo{T}, U1, U2, U2ab, 
+            D1, dD1, dD1os, spin; dc=false, with_rhs=true) where T
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   t1 = time_ns()
 
@@ -311,30 +523,44 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   fov = fock[SP[o4s],SP[v4s]]
   dfov = dfock[SP[o4s],SP[v4s]] 
   if length(U1) > 0
-    @mtensor R1[e,m] := fov[m,e]
-    # ``R^e_m += \hat D_p^q (v_{mq}^{ep} - v_{mq}^{pe})``
-    int2 = ints2(EC,m4s*o4s*m4s*m4s)
-    @mtensor R1[e,m] += dD1[p,q] * (int2[:,:,:,SP[v4s]][q,m,p,e] - int2[:,:,SP[v4s],:][q,m,e,p])
-    t1 = print_time(EC, t1, "R_e^m += \\hat D_p^q (v_{mq}^{ep} - v_{mq}^{pe})",2)
-    if isα
-      # ``R^e_m += \hat D_P^Q v_{mQ}^{eP}``
-      int2 = ints2(EC,o4s*m4os*v4s*m4os)
-      @mtensor R1[e,m] += dD1os[p,q] * int2[:,:,:,:][m,q,e,p]
-      t1 = print_time(EC, t1, "R_e^m += \\hat D_P^Q v_{mQ}^{eP}",2)
+    if with_rhs
+      @mtensor R1[e,m] := fov[m,e]
     else
-      # ``R^e_m += \hat D_P^Q v_{Qm}^{Pe}``
-      int2 = ints2(EC,m4os*o4s*m4os*v4s)
-      @mtensor R1[e,m] += dD1os[p,q] * int2[:,:,:,:][q,m,p,e]
-      t1 = print_time(EC, t1, "R_e^m += \\hat D_P^Q v_{Qm}^{Pe}",2)
+      R1 = zero(U1)
     end
+    # ``R^e_m += \hat D_p^q (v_{mq}^{ep} - v_{mq}^{pe}) + \hat D_P^Q v_{Qm}^{Pe}`` — the same-spin
+    # (J−K) and opposite-spin (J) pieces together are the v,o block of the UHF generalized Fock
+    # ``F^σ = J(D^α+D^β) − K(D^σ)``, which AO-direct builds in ONE streaming ht pass instead of reading
+    # the general-orbital `momm`/`oMvM`/`mOmV` blocks.
+    if EC.ao_direct
+      R1 .+= dD1_ufock_vo(EC, dD1, dD1os, spin)
+    else
+      int2 = ints2(EC,m4s*o4s*m4s*m4s)
+      @mtensor R1[e,m] += dD1[p,q] * (int2[:,:,:,SP[v4s]][q,m,p,e] - int2[:,:,SP[v4s],:][q,m,e,p])
+      t1 = print_time(EC, t1, "R_e^m += \\hat D_p^q (v_{mq}^{ep} - v_{mq}^{pe})",2)
+      if isα
+        # ``R^e_m += \hat D_P^Q v_{mQ}^{eP}``
+        int2 = ints2(EC,o4s*m4os*v4s*m4os)
+        @mtensor R1[e,m] += dD1os[p,q] * int2[:,:,:,:][m,q,e,p]
+      else
+        # ``R^e_m += \hat D_P^Q v_{Qm}^{Pe}``
+        int2 = ints2(EC,m4os*o4s*m4os*v4s)
+        @mtensor R1[e,m] += dD1os[p,q] * int2[:,:,:,:][q,m,p,e]
+      end
+    end
+    t1 = print_time(EC, t1, "R_e^m += generalized-Fock (dD1) v,o block",2)
   else
     R1 = U1
   end
 
   T1 = load2idx(EC, "T_"*v4s*o4s)
   T2 = load4idx(EC, "T_"*v4s*v4s*o4s*o4s)
-  oovv = ints2(EC,o4s*o4s*v4s*v4s)
-  @mtensor R2[e,f,m,n] := oovv[m,n,e,f] - oovv[n,m,e,f]
+  oovv = EC.ao_direct ? load_bare_int2(EC,o4s*o4s*v4s*v4s) : ints2(EC,o4s*o4s*v4s*v4s)
+  if with_rhs
+    @mtensor R2[e,f,m,n] := oovv[m,n,e,f] - oovv[n,m,e,f]
+  else
+    R2 = zero(U2)
+  end
   int2 = load4idx(EC, "d_"*o4s*o4s*o4s*o4s)
   if !dc
     @mtensor int2[m,n,i,j] += 0.5 * (oovv[m,n,c,d] * T2[c,d,i,j])
@@ -346,38 +572,7 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
   # the 4-external part
   if EC.options.cc.use_kext
     # the `kext` part
-    spin4int = EC.fd.uhf ? spin : :α
-    int2 = integ2_ss(EC.fd, spin4int)
-    dU2 = calc_dU2(EC, T1, T1, U2, o4s, v4s, o4s, v4s)
-    if ndims(int2) == 4
-      error("Non-triangular integrals not tested in kext equations in ΛUCCSD")
-      # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-      @mtensor Kmmoo[r,s,m,n] := int2[p,q,r,s] * dU2[p,q,m,n]
-      dU2 = nothing
-    else
-      # last two indices of integrals are stored as upper triangular 
-      # ``K_{mn}^{rs} = \hat U_{mn}^{pq} v_{pq}^{rs}``
-      @mtensor Kxoo[x,m,n] := int2[p,q,x] * dU2[p,q,m,n]
-      Kmmoo = dU2
-      dU2 = nothing
-      tripp = uppertriangular_cut(norb)
-      Kmmoo[tripp,:,:] = Kxoo
-      trippr = swapped_uppertriangular_cut(norb)
-      @mtensor Kmmoo[trippr,:,:][x,m,n] = Kxoo[x,n,m]
-      Kxoo = nothing
-    end
-    t1 = print_time(EC, t1, "K_{mn}^{rs} = \\hat U_{mn}^{pq} v_{pq}^{rs}",2)
-    # ``R^{ef}_{mn} += K_{mn}^{rs} δ_r^e δ_s^f``
-    R2 += Kmmoo[SP[v4s],SP[v4s],:,:]
-    # ``R^e_m += K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)``
-    if length(U1) > 0
-      @mtensor R1[e,m] += Kmmoo[SP[v4s],SP[o4s],:,:][e,j,m,j] 
-      if length(T1) > 0
-        @mtensor R1[e,m] += Kmmoo[SP[v4s],SP[v4s],:,:][e,b,m,j] * T1[b,j]
-      end 
-    end
-    t1 = print_time(EC, t1, "R^e_m += K_{mj}^{rs} δ_r^e (δ_s^j + δ_s^b T^j_b)",2)
-    Kmmoo = nothing
+    cc_lagrange_kext!(EC, R1, R2, T1, U2, spin)
   else
     error("non-kext Λ equations not implemented")
   end
@@ -432,7 +627,7 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
     @mtensor aR2[e,f,m,n] += U1[e,m] * dfov[n,f]
     t1 = print_time(EC, t1, "aR^{ef}_{mn} += U_{m}^{e} \\hat f_{n}^{f}",2)
   else
-    aR2 = zeros(size(R2))
+    aR2 = zeros(T, size(R2))
   end
   fac = dc ? 0.5 : 1.0
   # ``aR^{ef}_{mn} += 0.5(\hat x_c^e Λ_{mn}^{cf} - \hat x_m^k Λ_{kn}^{ef})``
@@ -510,15 +705,16 @@ function calc_ccsd_vector_times_Jacobian4spin(EC::ECInfo, U1, U2, U2ab,
 end
 
 """
-    calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1a, D1b; dc=false)
+    calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a, U1b, U2a, U2b, U2ab, D1a, D1b; dc=false, with_rhs=true)
 
 Calculate the left vector times the CCSD/DCSD Jacobian for αβ component. 
 Additionally, remaining contributions to the singles residual are calculated.
 
+if `with_rhs` is true, the right-hand side of the Lambda equations is also added.
 Return ΔR1a, ΔR1b, R2ab
 """
-function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1b::Matrix{Float64}, 
-          U2a::Array{Float64,4}, U2b::Array{Float64}, U2ab::Array{Float64}, D1a, D1b; dc=false) 
+function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::AbstractMatrix{<:Number}, U1b::AbstractMatrix{<:Number}, 
+          U2a::AbstractArray{<:Number,4}, U2b::AbstractArray{<:Number,4}, U2ab::AbstractArray{<:Number,4}, D1a, D1b; dc=false, with_rhs=true) 
   t1 = time_ns()
 
   SP = EC.space
@@ -553,53 +749,16 @@ function calc_ccsd_vector_times_Jacobian4ab(EC::ECInfo, U1a::Matrix{Float64}, U1
   # the 4-external part
   if EC.options.cc.use_kext
     # the `kext` part
-    dU2 = calc_dU2(EC, T1a, T1b, U2ab, 'o','v','O','V')
-    Kmmoo = Array{Float64,4}(undef,norb,norb,nocca,noccb) 
-    if EC.fd.uhf
-      int2 = integ2_os(EC.fd)
-      # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``
-      @mtensor Kmmoo[r,S,m,N] = int2[p,Q,r,S] * dU2[p,Q,m,N]
-      int2 = NOTHING4idx
-    else
-      int2_3idx = integ2_ss(EC.fd)
-      # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{pQ}^{rS}``, ``r ≤ S``
-      @mtensor Kxoo[x,m,N] := int2_3idx[p,Q,x] * dU2[p,Q,m,N]
-      tripp = uppertriangular_cut(norb)
-      Kmmoo[tripp,:,:] = Kxoo
-      # ``K_{mN}^{rS} = \hat U_{mN}^{pQ} v_{Qp}^{Sr}``, ``S ≤ r``
-      @mtensor Kxoo[x,m,N] = int2_3idx[Q,p,x] * dU2[p,Q,m,N]
-      trippr = swapped_uppertriangular_cut(norb)
-      @mtensor Kmmoo[trippr,:,:][x,m,N] = Kxoo[x,m,N]
-      Kxoo = NOTHING3idx
-      int2_3idx = NOTHING3idx
-    end
-    dU2 = NOTHING4idx
-    t1 = print_time(EC, t1, "K_{mN}^{rS} = \\hat U_{mN}^{pQ} v_{pQ}^{rS}",2)
-    # ``R^{eF}_{mN} += K_{mN}^{rS} δ_r^e δ_S^F``
-    R2 = Kmmoo[SP['v'],SP['V'],:,:]
-    # ``R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)``
-    if length(R1a) > 0
-      @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['O'],:,:][e,J,m,J] 
-      if length(T1b) > 0
-        @mtensor R1a[e,m] += Kmmoo[SP['v'],SP['V'],:,:][e,B,m,J] * T1b[B,J]
-      end 
-    end
-    t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
-    # ``R^E_M += K_{jM}^{sR} δ_R^E (δ_s^j + δ_s^b T^j_b)``
-    if length(R1b) > 0
-      @mtensor R1b[E,M] += Kmmoo[SP['o'],SP['V'],:,:][j,E,j,M] 
-      if length(T1a) > 0
-        @mtensor R1b[E,M] += Kmmoo[SP['v'],SP['V'],:,:][b,E,j,M] * T1a[b,j]
-      end 
-    end
-    t1 = print_time(EC, t1, "R^e_m += K_{mJ}^{rS} δ_r^e (δ_S^J + δ_S^B T^J_B)",2)
-    Kmmoo = NOTHING4idx
+    R2 = similar(U2ab)
+    cc_lagrange_kext4ab!(EC, R1a, R1b, R2, T1a, T1b, U2ab)
   else
     error("non-kext Λ equations not implemented")
   end
 
-  oOvV = ints2(EC,"oOvV")
-  @mtensor R2[e,F,m,N] += oOvV[m,N,e,F]
+  oOvV = EC.ao_direct ? load_bare_int2(EC,"oOvV") : ints2(EC,"oOvV")
+  if with_rhs
+    @mtensor R2[e,F,m,N] += oOvV[m,N,e,F]
+  end
   T2ab = load4idx(EC, "T_vVoO")
   int2 = load4idx(EC, "d_oOoO")
   if !dc
@@ -816,8 +975,8 @@ function calc_1RDM(EC::ECInfo, U1, U2, T1, T2; jacobian=false)
       Dvo[a,i] := 2.0 * U1[c,k] * T2[a,c,i,k] - U1[c,k] * T2[a,c,k,i]
     end
   else
-    Dov = zeros(size(U2,3),size(U2,1))
-    Dvo = zeros(size(U2,1),size(U2,3))
+    Dov = zeros(eltype(U2),size(U2,3),size(U2,1))
+    Dvo = zeros(eltype(U2),size(U2,1),size(U2,3))
   end
   if length(T1) > 0
     # 1RDM (including all T1 terms)
@@ -840,12 +999,12 @@ function calc_1RDM(EC::ECInfo, U1, U2, T1, T2; jacobian=false)
   occ = SP['o']
   vir = SP['v']
   norb = n_orbs(EC)
-  D1 = zeros(norb,norb)
+  D1 = zeros(ec_eltype(EC),norb,norb)
   D1[occ,occ] = Doo
   D1[vir,vir] = Dvv
   D1[occ,vir] = Dov
   D1[vir,occ] = Dvo
-  dD1 = zeros(norb,norb)
+  dD1 = zeros(ec_eltype(EC),norb,norb)
   dD1[occ,occ] = dDoo
   dD1[vir,vir] = dDvv
   dD1[occ,vir] = dDov
@@ -868,7 +1027,7 @@ and `dD1[p,q]`=``\\hat D_p^q``, the 1RDM with all T1 terms included.
 if `jacobian=true`, the T1 contributions to `dD1` are calculated without the + T1 term,
 to be used in the calculation of the CCSD Jacobian.
 """
-function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=false)
+function calc_1RDM(EC::ECInfo{T}, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=false) where T
   # 1RDM without T1 singles terms
   @mtensor begin 
     Doo[i,j] := -0.5 * (U2[c,d,i,k] * T2[c,d,j,k])
@@ -880,8 +1039,8 @@ function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=
       Dvo[a,i] := U1[c,k] * T2[a,c,i,k] 
     end
   else
-    Dov = zeros(size(U2,3),size(U2,1))
-    Dvo = zeros(size(U2,1),size(U2,3))
+    Dov = zeros(T, size(U2,3), size(U2,1))
+    Dvo = zeros(T, size(U2,1), size(U2,3))
   end
   if spin == :α
     @mtensor begin 
@@ -922,17 +1081,113 @@ function calc_1RDM(EC::ECInfo, U1, U1os, U2, U2ab, T1, T2, T2ab, spin; jacobian=
   occ = SP[space4spin('o', spin == :α)]
   vir = SP[space4spin('v', spin == :α)]
   norb = n_orbs(EC)
-  D1 = zeros(norb,norb)
+  D1 = zeros(T, norb, norb)
   D1[occ,occ] = Doo
   D1[vir,vir] = Dvv
   D1[occ,vir] = Dov
   D1[vir,occ] = Dvo
-  dD1 = zeros(norb,norb)
+  dD1 = zeros(T, norb, norb)
   dD1[occ,occ] = dDoo
   dD1[vir,vir] = dDvv
   dD1[occ,vir] = dDov
   dD1[vir,occ] = dDvo
   return D1, dD1
+end
+
+function real_rdm_if_small(EC::ECInfo, value, label::AbstractString)
+  eltype(value) <: Real && return value
+  value_real = real.(value)
+  diff = sum(abs2, value) - sum(abs2, value_real)
+  if diff > EC.options.scf.imagtol
+    println("Large imaginary part in $label neglected!")
+    println("Difference between squared norms:", diff)
+  end
+  return value_real
+end
+
+function add_reference_density!(rdm::AbstractMatrix, occs, occval)
+  for i in occs
+    rdm[i, i] += occval
+  end
+  return rdm
+end
+
+function full_1rdm(EC::ECInfo, dD1::AbstractMatrix, occ_key::Char, occval)
+  space_save, space_b4freeze = restore_full_space!(EC)
+  frozen_space = save_space(EC)
+  rdm_active = 0.5 * (dD1 + dD1')
+  rdm_active = real_rdm_if_small(EC, rdm_active, "1-RDM")
+  full_size = length(space_b4freeze[':'])
+  if size(rdm_active, 1) == full_size
+    rdm = Matrix{Float64}(rdm_active)
+  else
+    active_orbs = sort(union(frozen_space['o'], frozen_space['v'], frozen_space['O'], frozen_space['V']))
+    @assert size(rdm_active, 1) == length(active_orbs)
+    rdm = zeros(Float64, full_size, full_size)
+    rdm[active_orbs, active_orbs] = rdm_active
+  end
+  add_reference_density!(rdm, space_b4freeze[occ_key], occval)
+  restore_space!(EC, space_save)
+  return rdm
+end
+
+"""
+    calc_correlated_1rdm(EC::ECInfo, method::ECMethod)
+
+  Build the correlated 1-RDM from the saved CC amplitudes and the converged
+  Lagrange multipliers stored in the temporary `U_*` files.
+"""
+function calc_correlated_1rdm(EC::ECInfo{T}, method::ECMethod) where T
+  has_singles = (method.exclevel[1] == :full)
+  if is_unrestricted(method) || has_prefix(method, "R")
+    T1a = has_singles ? read_starting_guess4amplitudes(EC, Val(1), :α) : zeros(T, 0, 0)
+    T1b = has_singles ? read_starting_guess4amplitudes(EC, Val(1), :β) : zeros(T, 0, 0)
+    U1a = has_singles ? load2idx(EC, "U_vo") : zeros(T, 0, 0)
+    U1b = has_singles ? load2idx(EC, "U_VO") : zeros(T, 0, 0)
+    T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
+    T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
+    T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
+    U2a = load4idx(EC, "U_vvoo")
+    U2b = load4idx(EC, "U_VVOO")
+    U2ab = load4idx(EC, "U_vVoO")
+    return calc_correlated_1rdm(EC, method,
+                                T1a, T1b, T2a, T2b, T2ab,
+                                U1a, U1b, U2a, U2b, U2ab)
+  end
+  T1 = has_singles ? read_starting_guess4amplitudes(EC, Val(1)) : zeros(T, 0, 0)
+  U1 = has_singles ? load2idx(EC, "U_vo") : zeros(T, 0, 0)
+  T2 = read_starting_guess4amplitudes(EC, Val(2))
+  U2 = load4idx(EC, "U_vvoo")
+  return calc_correlated_1rdm(EC, method, T1, T2, U1, U2)
+end
+
+"""
+    calc_correlated_1rdm(EC::ECInfo, method::ECMethod, T1, T2, U1, U2)
+
+  Build the full-space restricted correlated 1-RDM from amplitudes and
+  converged Lagrange multipliers.
+"""
+function calc_correlated_1rdm(EC::ECInfo, method::ECMethod, T1, T2, U1, U2)
+  _, dD1 = calc_1RDM(EC, U1, U2, T1, T2)
+  return SpinMatrix(full_1rdm(EC, dD1, 'o', 2.0))
+end
+
+"""
+    calc_correlated_1rdm(EC::ECInfo, method::ECMethod,
+                         T1a, T1b, T2a, T2b, T2ab,
+                         U1a, U1b, U2a, U2b, U2ab)
+
+  Build the full-space unrestricted correlated 1-RDM from amplitudes and
+  converged Lagrange multipliers.
+"""
+function calc_correlated_1rdm(EC::ECInfo, method::ECMethod,
+                              T1a, T1b, T2a, T2b, T2ab,
+                              U1a, U1b, U2a, U2b, U2ab)
+  _, dD1a = calc_1RDM(EC, U1a, U1b, U2a, U2ab, T1a, T2a, T2ab, :α)
+  _, dD1b = calc_1RDM(EC, U1b, U1a, U2b, U2ab, T1b, T2b, T2ab, :β)
+  rdma = full_1rdm(EC, dD1a, 'o', 1.0)
+  rdmb = full_1rdm(EC, dD1b, 'O', 1.0)
+  return SpinMatrix(rdma, rdmb)
 end
 
 """
@@ -1002,13 +1257,13 @@ end
   Store as `vT_oo[ki]`, `vT_vv[ac]`, `vT_OO[ki]` and `vT_VV[ac]`.
 """
 function calc_focklike_vT2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, T2ab::AbstractArray)
-  int2 = ints2(EC, "oovv")
+  int2 = (EC.ao_direct ? load_bare_int2(EC, "oovv") : ints2(EC, "oovv"))
   @mtensor vT_oo[k,i] := int2[k,l,c,d] * T2a[c,d,i,l]
   @mtensor vT_vv[a,c] := int2[k,l,c,d] * T2a[a,d,k,l]
-  int2 = ints2(EC, "OOVV")
+  int2 = (EC.ao_direct ? load_bare_int2(EC, "OOVV") : ints2(EC, "OOVV"))
   @mtensor vT_OO[k,i] := int2[k,l,c,d] * T2b[c,d,i,l]
   @mtensor vT_VV[a,c] := int2[k,l,c,d] * T2b[a,d,k,l]
-  int2 = ints2(EC, "oOvV")
+  int2 = (EC.ao_direct ? load_bare_int2(EC, "oOvV") : ints2(EC, "oOvV"))
   @mtensor vT_oo[k,i] += int2[k,L,c,D] * T2ab[c,D,i,L]
   @mtensor vT_vv[a,c] += int2[k,L,c,D] * T2ab[a,D,k,L]
   @mtensor vT_OO[K,I] += int2[l,K,c,D] * T2ab[c,D,l,I]
@@ -1040,7 +1295,7 @@ function calc_rings_vT2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, T2ab
   @mtensor vT_voov[a,m,i,e] -= load4idx(EC, "d_vovo")[a,m,e,i]
   @mtensor vT_VoOv[B,n,J,f] := load4idx(EC, "d_oVvO")[n,B,f,J]
   # add x terms
-  oovv = ints2(EC, "oovv")
+  oovv = (EC.ao_direct ? load_bare_int2(EC, "oovv") : ints2(EC, "oovv"))
   if dc
     int2 = oovv
   else
@@ -1055,7 +1310,7 @@ function calc_rings_vT2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, T2ab
   @mtensor vT_VOOV[A,M,I,E] -= load4idx(EC, "d_VOVO")[A,M,E,I]
   vT_vOoV = load4idx(EC, "d_vOoV")
   # add x terms
-  oovv = ints2(EC, "OOVV")
+  oovv = (EC.ao_direct ? load_bare_int2(EC, "OOVV") : ints2(EC, "OOVV"))
   if dc
     int2 = oovv
   else
@@ -1066,7 +1321,7 @@ function calc_rings_vT2(EC::ECInfo, T2a::AbstractArray, T2b::AbstractArray, T2ab
   @mtensor vT_vOoV[a,M,i,E] += T2ab[a,D,i,L] * int2[L,M,D,E]
 
   # add v_{kL}^{cD} terms
-  int2 = ints2(EC, "oOvV")
+  int2 = (EC.ao_direct ? load_bare_int2(EC, "oOvV") : ints2(EC, "oOvV"))
   @mtensor vT_voov[a,m,i,e] += T2ab[a,D,i,L] * int2[m,L,e,D]
   @mtensor vT_VOOV[A,M,I,E] += T2ab[d,A,l,I] * int2[l,M,d,E]
   @mtensor vT_VoOv[A,m,I,e] += T2b[A,D,I,L] * int2[m,L,e,D]
@@ -1136,25 +1391,30 @@ end
 """
     calc_lm_cc(EC::ECInfo, method::ECMethod)
 
-  Calculate coupled cluster Lagrange multipliers.
+  Solve coupled cluster Lagrange multipliers and persist the converged `U_*`
+  tensors for downstream post-processing.
 
   Exact specification of the method is given by `method`.
 """
-function calc_lm_cc(EC::ECInfo, method::ECMethod)
+function calc_lm_cc(EC::ECInfo{T}, method::ECMethod) where T
   print_info(method_name(method)*" Lagrange multipliers")
   highest_full_exc = max_full_exc(method)
+  has_singles = (method.exclevel[1] == :full)
   if highest_full_exc > 2
     error("only implemented upto doubles")
   end
   if is_unrestricted(method) || has_prefix(method, "R")
-    if method.exclevel[1] == :full
+    if has_singles
       T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
       T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
     else
-      T1a = zeros(0,0)
-      T1b = zeros(0,0)
+      T1a = zeros(T, 0, 0)
+      T1b = zeros(T, 0, 0)
+      save_current_singles(EC,
+                           read_starting_guess4amplitudes(EC, Val(1), :α),
+                           read_starting_guess4amplitudes(EC, Val(1), :β))
     end
-    if method.exclevel[2] != :full
+    if method.exclevel[2] == :none
       error("No doubles is not implemented")
     end
     T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
@@ -1162,16 +1422,47 @@ function calc_lm_cc(EC::ECInfo, method::ECMethod)
     T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
     lm_cc_iterations!((T1a,T1b), (T2a,T2b,T2ab), EC, method)
   else
-    if method.exclevel[1] == :full
+    if has_singles
       T1 = read_starting_guess4amplitudes(EC, Val(1))
     else
-      T1 = zeros(0,0)
+      T1 = zeros(T, 0, 0)
+      save_current_singles(EC, read_starting_guess4amplitudes(EC, Val(1)))
     end
-    if method.exclevel[2] != :full
+    if method.exclevel[2] == :none
       error("No doubles is not implemented")
     end
     T2 = read_starting_guess4amplitudes(EC, Val(2))
     lm_cc_iterations!((T1,), (T2,), EC, method)
+  end
+  return nothing
+end
+
+"""
+    dress_lambda_ints!(EC, T1)
+
+  Closed-shell integral dressing for the Λ residual / EOM Jacobian (dressed `d_*` blocks incl. the
+  3-external `d_vovv`). AO-direct: [`ao_dressed_ints`](@ref) with `calc_d_vovv=true` (built from the
+  half-transformed store) instead of the MO-fcidump [`calc_dressed_ints`](@ref).
+  An EMPTY `T1` (methods without singles, Λ-CCD/Λ-DCD) leaves the coefficients undressed and hence
+  writes the BARE blocks under the same `d_*` names — the AO-direct analogue of
+  [`pseudo_dressed_ints`](@ref). Only supported AO-direct (the MO dressing has no empty-T1 path).
+"""
+function dress_lambda_ints!(EC::ECInfo, T1)
+  if EC.ao_direct
+    ao_dressed_ints(EC, T1, ao_direct_orbitals(EC); calc_d_vovv=true)
+  else
+    calc_dressed_ints(EC, T1; calc_d_vovv=true)
+  end
+end
+
+"""Unrestricted [`dress_lambda_ints!`](@ref): AO-direct dressing (with the 3-external blocks) or the
+dump. Empty `T1a`/`T1b` ⇒ bare blocks (Λ-UCCD/Λ-UDCD), AO-direct only."""
+function dress_lambda_ints!(EC::ECInfo, T1a, T1b)
+  if EC.ao_direct
+    cMOsm = load_orbitals(EC)
+    ao_dressed_ints_unrestricted(EC, T1a, T1b, Matrix(cMOsm.α), Matrix(cMOsm.β); calc_d_vovv=true)
+  else
+    calc_dressed_ints(EC, T1a, T1b; calc_d_vovv=true)
   end
 end
 
@@ -1186,14 +1477,14 @@ function calc_intermediates4Jacobian(EC::ECInfo, method::ECMethod)
   if is_unrestricted(method) || has_prefix(method, "R")
     T1a = read_starting_guess4amplitudes(EC, Val(1), :α)
     T1b = read_starting_guess4amplitudes(EC, Val(1), :β)
-    calc_dressed_ints(EC, T1a, T1b; calc_d_vovv=true)
+    dress_lambda_ints!(EC, T1a, T1b)
     T2a = read_starting_guess4amplitudes(EC, Val(2), :α, :α)
     T2b = read_starting_guess4amplitudes(EC, Val(2), :β, :β)
     T2ab = read_starting_guess4amplitudes(EC, Val(2), :α, :β)
     calc_vT2_intermediates(EC, T2a, T2b, T2ab; dc=dc)
   else
     T1 = read_starting_guess4amplitudes(EC, Val(1))
-    calc_dressed_ints(EC, T1; calc_d_vovv=true)
+    dress_lambda_ints!(EC, T1)
     T2 = read_starting_guess4amplitudes(EC, Val(2))
     calc_vT2_intermediates(EC, T2; dc=dc)
   end
@@ -1209,26 +1500,33 @@ end
 """
 function lm_cc_iterations!(LMs1, LMs2, EC::ECInfo, method::ECMethod)
   dc = (method.theory == "DC" || last(method.theory,2) == "DC")
+  do_sing = (method.exclevel[1] == :full)
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(LMs1) == 2) && (length(LMs2) == 3)
   else
     @assert (length(LMs1) == 1) && (length(LMs2) == 1) 
   end
   LMs = (LMs1..., LMs2...)
-  # dress integrals
+  # Dress integrals. `dress_lambda_ints!` dispatches on the number of T1 arguments (closed-shell vs
+  # unrestricted) and, inside, on `EC.ao_direct`. Without singles (Λ-CCD/Λ-DCD) the `LMs1` are EMPTY
+  # matrices, so the AO dressing degenerates to the BARE blocks under the same `d_*` names — exactly
+  # how the AO-direct doubles-only ground states get their integrals (cf. `calc_cc_resid`). The MO
+  # dump has no empty-T1 dressing, so it keeps `pseudo_dressed_ints` (bare blocks read from `EC.fd`).
   t1 = time_ns()
-  calc_dressed_ints(EC, LMs1...; calc_d_vovv=true)
+  if do_sing || EC.ao_direct
+    dress_lambda_ints!(EC, LMs1...)
+  else
+    pseudo_dressed_ints(EC, is_unrestricted(method) || has_prefix(method, "R"); calc_d_vovv=true)
+  end
   t1 = print_time(EC, t1, "dressing integrals",2)
   calc_vT2_intermediates(EC, LMs2...; dc)
 
   diis = Diis(EC)
   transform_amplitudes2lagrange_multipliers!(LMs1, LMs2)
 
-  do_sing = (method.exclevel[1] == :full)
-
   NormR1 = 0.0
-  NormLM1::Float64 = 0.0
-  NormLM2::Float64 = 0.0
+  NormLM1 = 0.0
+  NormLM2 = 0.0
   ΛTNorm = 0.0
   converged = false
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven

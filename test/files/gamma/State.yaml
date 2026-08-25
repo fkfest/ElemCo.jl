@@ -1,0 +1,34 @@
+version: 100
+dimensionType: State
+properties:
+  CrystalMomentum:
+  - - 0
+    - 0
+    - 0
+  Spin:
+  - 0
+propertyIndices:
+  CrystalMomentum:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  Spin:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0

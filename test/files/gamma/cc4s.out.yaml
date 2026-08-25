@@ -1,0 +1,117 @@
+executionEnvironment:
+  buildDate: Jul 30 2025 17:20:56
+  compiler: g++ (SUSE Linux) 7.5.0
+  dryRanks: 0
+  hosts:
+    0:
+      host: alnode317
+      ranks:
+        0: 0
+        1: 1
+        10: 10
+        11: 11
+        12: 12
+        13: 13
+        14: 14
+        15: 15
+        16: 16
+        17: 17
+        18: 18
+        19: 19
+        2: 2
+        20: 20
+        21: 21
+        22: 22
+        23: 23
+        3: 3
+        4: 4
+        5: 5
+        6: 6
+        7: 7
+        8: 8
+        9: 9
+  startTime: "Mon Mar 23 14:50:53 2026\n"
+  totalProcesses: 24
+  version: heads/master-0-gd43a2280
+steps:
+  0:
+    in:
+      fileName: CoulombVertex.yaml
+    name: Read
+    out:
+      destination: 0x2ecced0
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.010041373
+  1:
+    in:
+      fileName: EigenEnergies.yaml
+    name: Read
+    out:
+      destination: 0x2ec5fe0
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.001756609
+  2:
+    in:
+      eigenEnergies: 0x2ec5fe0
+    name: DefineHolesAndParticles
+    out:
+      slicedEigenEnergies: 0x31e3230
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.000047963
+  3:
+    in:
+      operator: 0x2ecced0
+      slicedEigenEnergies: 0x31e3230
+    name: SliceOperator
+    out:
+      slicedOperator: 0x2ee3dd0
+    statistics:
+      floatingPointOperations: 0
+      flops: 0
+      realtime: 0.009269318
+  4:
+    in:
+      slicedCoulombVertex: 0x2ee3dd0
+    name: VertexCoulombIntegrals
+    out:
+      coulombIntegrals: 0x2ecc8b0
+    statistics:
+      floatingPointOperations: 309760
+      flops: 211537305.84950912
+      realtime: 0.001464328
+  5:
+    in:
+      amplitudesConvergence: 1.0000000000000001e-05
+      coulombIntegrals: 0x2ecc8b0
+      energyConvergence: 1.0000000000000001e-05
+      integralsSliceSize: 100
+      levelShift: 0
+      linearized: 0
+      maxIterations: 30
+      method: Ccsd
+      mixer:
+        maxResidua: 5
+        type: DiisMixer
+      ppl: 1
+      slicedCoulombVertex: 0x2ee3dd0
+      slicedEigenEnergies: 0x31e3230
+    name: CoupledCluster
+    out:
+      amplitudes: 0x2e80910
+      convergenceReached: 1
+      energy:
+        correlation: -0.43042641733358789
+        direct: -0.86085283466717577
+        exchange: 0.43042641733358789
+        secondOrder: -0.27083595420491191
+        unit: 0.036749322175638754
+    statistics:
+      floatingPointOperations: 40138486
+      flops: 173720336.88560966
+      realtime: 0.231052315

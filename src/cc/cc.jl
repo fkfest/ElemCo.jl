@@ -65,17 +65,25 @@ using ..ElemCo.ECMethods
 using ..ElemCo.QMTensors
 using ..ElemCo.TensorTools
 using ..ElemCo.FciDumps
+using ..ElemCo.DumpTools: freeze_orbs_in_dump
 using ..ElemCo.MSystems
 using ..ElemCo.DIIS
 using ..ElemCo.DecompTools
+using ..ElemCo.IntegralTools
 using ..ElemCo.DFCoupledCluster
 using ..ElemCo.OrbTools
 using ..ElemCo.CCTools
+using ..ElemCo.PMStore
+using ..ElemCo.FockFactory
 
-export calc_MP2, calc_UMP2, calc_UMP2_energy 
+export calc_MP2, calc_UMP2, calc_UMP2_energy, calc_posMP2 
 export calc_cc, calc_pertT
+export ao_cc_setup!, ao_direct_orbitals_spin
 export calc_lm_cc, calc_1RDM
+
+include("ao_direct_blocks.jl")   # ht→MO block engine, dressed blocks, ± kext kernels
 export calc_ccsd_vector_times_Jacobian, calc_intermediates4Jacobian
+export build_ht_mo_blocks!, build_ht_mo_blocks_unrestricted!
 
 include("cc_triples.jl")
 
@@ -89,6 +97,27 @@ include("../algo/ccsdt_triples.jl")
 include("../algo/dcccsdt_triples.jl")
 
 """
+    load_bare_int2(EC::ECInfo, name::AbstractString) -> Array
+
+  Return the bare (undressed) MO 2-e integral block `name` (`"oovv"`, `"OOVV"`, `"oOvV"`, …),
+  cached in the scratch file `"d_"*name`: extracted from the integral source ([`ints2`](@ref)) on
+  first use and loaded thereafter, so it is materialized at most once per calculation instead of on
+  every use. The AO-direct path has `"d_"*name` prebuilt by `ao_cc_setup!`/the AO dressing (`EC.fd`
+  is empty there), so it is simply loaded. The cache is a temporary file (rebuilt each calculation),
+  so it never goes stale. This unifies the FCIDUMP/DF and AO-direct paths — no `EC.ao_direct` branch.
+"""
+function load_bare_int2(EC::ECInfo, name::AbstractString)
+  @assert name in ("oovv", "OOVV", "oOvV", "OoVv") "Invalid integral block name. Must be one of: oovv, OOVV, oOvV, OoVv."
+  key = "d_" * name
+  if file_exists(EC, key)
+    return load4idx(EC, key)
+  end
+  int2 = ints2(EC, name)
+  save!(EC, key, int2)
+  return int2
+end
+
+"""
     calc_singles_energy(EC::ECInfo, T1; fock_only=false)
 
   Calculate coupled-cluster closed-shell singles energy.
@@ -100,7 +129,7 @@ function calc_singles_energy(EC::ECInfo, T1; fock_only=false)
   ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
     if !fock_only
-      oovv = ints2(EC,"oovv")
+      oovv = load_bare_int2(EC, "oovv")
       @mtensor begin
         ET1d = T1[a,i] * (T1[b,j] * oovv[i,j,a,b])
         ET1ex = T1[b,i] * (T1[a,j] * oovv[i,j,a,b])
@@ -126,12 +155,15 @@ function calc_singles_energy(EC::ECInfo, T1a, T1b; fock_only=false)
   ET1 = ET1aa = ET1bb = ET1ab = 0.0
   if !fock_only
     if length(T1a) > 0
-      @mtensor ET1aa = 0.5*((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*ints2(EC,"oovv")[i,j,a,b])
+      oovv = load_bare_int2(EC, "oovv")
+      @mtensor ET1aa = 0.5*((T1a[a,i]*T1a[b,j]-T1a[b,i]*T1a[a,j])*oovv[i,j,a,b])
     end
     if length(T1b) > 0
-      @mtensor ET1bb = 0.5*((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*ints2(EC,"OOVV")[i,j,a,b])
+      OOVV = load_bare_int2(EC, "OOVV")
+      @mtensor ET1bb = 0.5*((T1b[a,i]*T1b[b,j]-T1b[b,i]*T1b[a,j])*OOVV[i,j,a,b])
       if length(T1a) > 0
-        @mtensor ET1ab = T1a[a,i]*(T1b[b,j]*ints2(EC,"oOvV")[i,j,a,b])
+        oOvV = load_bare_int2(EC, "oOvV")
+        @mtensor ET1ab = T1a[a,i]*(T1b[b,j]*oOvV[i,j,a,b])
       end
     end
   end
@@ -156,7 +188,7 @@ end
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2)
-  oovv = ints2(EC,"oovv")
+  oovv = load_bare_int2(EC, "oovv")
   @mtensor begin
     ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
     ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
@@ -168,6 +200,26 @@ function calc_doubles_energy(EC::ECInfo, T2)
 end
 
 """
+    calc_doubles_energy(EC::ECInfo, T2, T2ep)
+
+  Calculate energy for αα (T2), and αp (T2ep) doubles amplitudes.
+  Returns total energy, SS, OS and Openshell contributions
+  as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
+"""
+function calc_doubles_energy(EC::ECInfo, T2, T2ep)
+  oovv = load_bare_int2(EC, "oovv")
+  @mtensor begin
+    ET2d = T2[a,b,i,j] * oovv[i,j,a,b]
+    ET2ex = T2[b,a,i,j] * oovv[i,j,a,b]
+    ET2ep = T2ep[a,b,i,j] * ints2(EC, "opve", :p)[i,j,a,b]
+  end
+  ET2SS = ET2d - ET2ex
+  ET2OS = ET2d
+  ET2 = ET2SS + ET2OS + 2.0 * ET2ep
+  return OutDict("E"=>ET2, "ESS"=>ET2SS, "EOS"=>ET2OS, "EO"=>0.0)
+end
+
+"""
     calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
 
   Calculate energy for αα (T2a), ββ (T2b) and αβ (T2ab) doubles amplitudes.
@@ -175,10 +227,13 @@ end
   as `OutDict` with keys (`E`,`ESS`,`EOS`,`EO`).
 """
 function calc_doubles_energy(EC::ECInfo, T2a, T2b, T2ab)
+  oovv = load_bare_int2(EC, "oovv")
+  OOVV = load_bare_int2(EC, "OOVV")
+  oOvV = load_bare_int2(EC, "oOvV")
   @mtensor begin
-    ET2aa = 0.5*(T2a[a,b,i,j] * ints2(EC,"oovv")[i,j,a,b])
-    ET2bb = 0.5*(T2b[a,b,i,j] * ints2(EC,"OOVV")[i,j,a,b])
-    ET2OS = T2ab[a,b,i,j] * ints2(EC,"oOvV")[i,j,a,b]
+    ET2aa = 0.5*(T2a[a,b,i,j] * oovv[i,j,a,b])
+    ET2bb = 0.5*(T2b[a,b,i,j] * OOVV[i,j,a,b])
+    ET2OS = T2ab[a,b,i,j] * oOvV[i,j,a,b]
   end
   ET2SS = ET2aa + ET2bb
   ET2O = ET2aa - ET2bb
@@ -195,7 +250,7 @@ end
 """
 function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   SP = EC.space
-  int2 = ints2(EC,"oovv")
+  int2 = load_bare_int2(EC, "oovv")
   ET1 = ET1SS = ET1OS = 0.0
   if length(T1) > 0
     @mtensor begin
@@ -209,8 +264,8 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
   @mtensor begin
     pET2d = T2[a,b,i,j] * int2[i,j,a,b]
     pET2ex = T2[b,a,i,j] * int2[i,j,a,b]
-    rET2d = T2[a,b,i,j] * R2[a,b,i,j]
-    rET2ex = T2[b,a,i,j] * R2[a,b,i,j]
+    rET2d = conj(T2[a,b,i,j]) * R2[a,b,i,j]
+    rET2ex = conj(T2[b,a,i,j]) * R2[a,b,i,j]
   end
   ET2d = pET2d + rET2d
   ET2ex = pET2ex + rET2ex
@@ -224,7 +279,7 @@ function calc_hylleraas(EC::ECInfo, T1, T2, R1, R2)
     fov = load2idx(EC,"f_mm")[SP['o'],SP['v']] 
     @mtensor begin
       pET1 = 2.0*(fov[i,a] * T1[a,i])
-      rET1 = 2.0*(R1[a,i] * T1[a,i])
+      rET1 = 2.0*(R1[a,i] * conj(T1[a,i]))
     end
     ET1 += pET1 + rET1
   else
@@ -250,7 +305,8 @@ end
   and `E` are Hylleraas energies, and 2, 1, 1_2 are doubles, singles and quadratic singles contributions.
 """
 function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R2, fov)
-  int2 = ints2(EC,o1*o2*v1*v2)
+  # AO-direct stores the dressed ⟨o1 o2|v1 v2⟩ block (oovv/OOVV/oOvV) under "d_"*name
+  int2 = load_bare_int2(EC, o1*o2*v1*v2)
   if o1 == o2
     fac = 0.5
   else
@@ -266,13 +322,14 @@ function calc_hylleraas4spincase(EC::ECInfo, o1, v1, o2, v2, T1, T1OS, T2, R1, R
   end
   @mtensor begin
     pET2 = fac*(T2[a,b,i,j] * int2[i,j,a,b])
-    rET2 = fac*fac*(T2[a,b,i,j] * R2[a,b,i,j])
+    rET2 = fac*fac*(conj(T2[a,b,i,j]) * R2[a,b,i,j])
   end
   ET2 = pET2 + rET2
   pET1 = 0.0
   if length(R1) > 0
     @mtensor pET1 = fov[i,a] * T1[a,i]
-    @mtensor ET1 = (fov[i,a] + R1[a,i]) * T1[a,i]
+    @mtensor rET1 = conj(T1[a,i]) * R1[a,i]
+    ET1 = pET1 + rET1
   end
   return OutDict("pE2"=>pET2, "pE1"=>pET1, "pE1_2"=>ET1_2, "E2"=>ET2, "E1"=>ET1, "E1_2"=>ET1_2)
 end
@@ -439,6 +496,38 @@ function auto_buf_length4calc_dressed_ints(no1, no2, nv1, nv2, calc_d_vvvv, calc
     return (buf1[2], buf2[2])
 end
 
+"""
+    bare_ints2!(out, EC::ECInfo, spaces::String)
+
+  Fill `out` with the *bare* MO integral block `spaces`, caching it on scratch so that the CC
+  iterations extract it from the integral dump only once.
+
+  Blocks larger than a quarter of the integral dump are NOT cached: at that size the copy stops
+  being cheap next to what it saves, and it keeps a pathological case (`vvvv` at `nvirt^4`)
+  from being written to scratch. Such blocks only arise with `cc.calc_d_vvvv` and friends,
+  which the `use_kext` residual does not use.
+
+  The cache file carries the plain space string as its name — bare integrals are never prefixed
+  (only dressed blocks are, `d_*`), and these are the same names the AO-direct engine blocks use
+  ([`save_mo_blocks!`](@ref)); both are temporary, so the two routes can never serve each other a
+  stale file.
+
+  The cache is temporary (`description="tmp"`), so `delete_temporary_files!` drops it at the end of
+  every driver run: a regenerated dump can never be served a stale block. A cached file whose
+  dimensions no longer match (a changed space) is silently regenerated.
+"""
+function bare_ints2!(out::AbstractArray{<:Number,4}, EC::ECInfo, spaces::String)
+  # caching pays for itself unless the block approaches the size of the dump it is read from
+  sizeof(out) * 4 <= sizeof(integ2_ss(EC.fd)) || return ints2!(out, EC, spaces)
+  cachefile = spaces                     # bare ⇒ no prefix, by the integral naming convention
+  if file_exists(EC, cachefile) && load!(EC, cachefile, out; skip_error=true)
+    return out
+  end
+  ints2!(out, EC, spaces)
+  save!(EC, cachefile, out; description="tmp")
+  return out
+end
+
 """ 
     calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
               calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
@@ -451,24 +540,24 @@ end
   ``\\hat v_{ab}^{cd}``, ``\\hat v_{ab}^{ci}``, ``\\hat v_{ak}^{cd}`` and ``\\hat v_{ab}^{ij}`` are only 
   calculated if requested in `EC.options.cc` or using keyword-arguments.
 """
-function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
+function calc_dressed_ints(EC::ECInfo{T}, T1, T12, o1::Char, v1::Char, o2::Char, v2::Char;
               calc_d_vvvv=EC.options.cc.calc_d_vvvv, calc_d_vvvo=EC.options.cc.calc_d_vvvo,
-              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo)
+              calc_d_vovv=EC.options.cc.calc_d_vovv, calc_d_vvoo=EC.options.cc.calc_d_vvoo) where T
   t1 = time_ns()
   mem1 = free_memory()
   mixed = (o1 != o2)
   no1, no2, nv1, nv2 = len_spaces(EC,o1*o2*v1*v2)
   lenbuf1, lenbuf2 = auto_buf_length4calc_dressed_ints(no1, no2, nv1, nv2, calc_d_vvvv, calc_d_vvvo, calc_d_vovv, calc_d_vvoo, mixed)
-  @buffer buf1(lenbuf1) buf2(lenbuf2) begin
+  @buffer buf1(T, lenbuf1) buf2(T, lenbuf2) begin
   # @print_buffer_usage buf1 buf2 begin
   mem2 = print_memory(EC, mem1, "for buffers for dressed integrals", 2)
   # first make half-transformed integrals
   if calc_d_vvvv
     # <a\hat c|bd>
     hd_vvvv = alloc!(buf1, nv1,nv2,nv1,nv2)
-    ints2!(hd_vvvv, EC, v1*v2*v1*v2)
+    bare_ints2!(hd_vvvv, EC, v1*v2*v1*v2)
     vovv = alloc!(buf2, nv1,no2,nv1,nv2)
-    ints2!(vovv, EC, v1*o2*v1*v2)
+    bare_ints2!(vovv, EC, v1*o2*v1*v2)
     @mtensor hd_vvvv[a,c,b,d] -= vovv[a,k,b,d] * T12[c,k]
     save!(EC, "hd_"*v1*v2*v1*v2, hd_vvvv)
     drop!(buf2, vovv)
@@ -477,29 +566,29 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
   # <ik|j \hat l>
   hd_oooo = alloc!(buf1, no1,no2,no1,no2)
-  ints2!(hd_oooo, EC, o1*o2*o1*o2)
+  bare_ints2!(hd_oooo, EC, o1*o2*o1*o2)
   if mixed
     # <ik|\hat j l>
     hd_oooo2 = alloc!(buf1, no1,no2,no1,no2)
     hd_oooo2 .= hd_oooo
     oovo = alloc!(buf2, no1,no2,nv1,no2)
-    ints2!(oovo, EC, o1*o2*v1*o2)
+    bare_ints2!(oovo, EC, o1*o2*v1*o2)
     @mtensor hd_oooo2[i,j,k,l] += oovo[i,j,d,l] * T1[d,k]
     drop!(buf2, oovo)
   end
   ooov = alloc!(buf2, no1,no2,no1,nv2)
-  ints2!(ooov, EC, o1*o2*o1*v2)
+  bare_ints2!(ooov, EC, o1*o2*o1*v2)
   @mtensor hd_oooo[i,j,k,l] += ooov[i,j,k,d] * T12[d,l]
   drop!(buf2, ooov)
   t1 = print_time(EC, t1, "dress hd_"*o1*o2*o1*o2, 3)
   if calc_d_vvoo
     # <a\hat c|j \hat l>
     hd_vvoo = alloc!(buf1, nv1,nv2,no1,no2)
-    ints2!(hd_vvoo, EC, v1*v2*o1*o2)
+    bare_ints2!(hd_vvoo, EC, v1*v2*o1*o2)
     vooo = alloc!(buf2, nv1,no2,no1,no2)
-    ints2!(vooo, EC, v1*o2*o1*o2)
+    bare_ints2!(vooo, EC, v1*o2*o1*o2)
     voov = alloc!(buf1, nv1,no2,no1,nv2)
-    ints2!(voov, EC, v1*o2*o1*v2)
+    bare_ints2!(voov, EC, v1*o2*o1*v2)
     @mtensor begin
       vooo[a,k,j,l] += voov[a,k,j,d] * T12[d,l]
       hd_vvoo[a,c,j,l] -= vooo[a,k,j,l] * T12[c,k]
@@ -507,7 +596,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     drop!(buf1, voov)
     drop!(buf2, vooo)
     vvov = alloc!(buf2, nv1,nv2,no1,nv2)
-    ints2!(vvov, EC, v1*v2*o1*v2)
+    bare_ints2!(vvov, EC, v1*v2*o1*v2)
     @mtensor hd_vvoo[a,c,j,l] += vvov[a,c,j,d] * T12[d,l]
     drop!(buf2, vvov)
     save!(EC, "hd_"*v1*v2*o1*o2, hd_vvoo)
@@ -516,7 +605,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
   # <\hat a k| \hat j l>
   hd_vooo = alloc!(buf2, nv1,no2,no1,no2)
-  ints2!(hd_vooo, EC, v1*o2*o1*o2)
+  bare_ints2!(hd_vooo, EC, v1*o2*o1*o2)
   if !mixed
     @mtensor hd_vooo[a,k,j,l] -= hd_oooo[k,i,l,j] * T1[a,i]
   else
@@ -525,7 +614,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   end
   if no2 > 0
     vovo = alloc!(buf1, nv1,no2,nv1,no2)
-    ints2!(vovo, EC, v1*o2*v1*o2)
+    bare_ints2!(vovo, EC, v1*o2*v1*o2)
     @mtensor hd_vooo[a,k,j,l] += vovo[a,k,b,l] * T1[b,j]
     drop!(buf1, vovo)
   end
@@ -533,9 +622,9 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   if mixed
     # <k\hat a | l\hat j >
     hd_ovoo = alloc!(buf2, no1,nv2,no1,no2)
-    ints2!(hd_ovoo, EC, o1*v2*o1*o2)
+    bare_ints2!(hd_ovoo, EC, o1*v2*o1*o2)
     ovov = alloc!(buf1, no1,nv2,no1,nv2)
-    ints2!(ovov, EC, o1*v2*o1*v2)
+    bare_ints2!(ovov, EC, o1*v2*o1*v2)
     if no1 > 0 && no2 > 0
       @mtensor begin
         hd_ovoo[k,a,l,j] -= hd_oooo[k,i,l,j] * T12[a,i]
@@ -548,9 +637,9 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   # some of the fully dressing moved here...
   # <ki\hat|dj>
   d_oovo = alloc!(buf2, no1,no2,nv1,no2)
-  ints2!(d_oovo, EC, o1*o2*v1*o2)
+  bare_ints2!(d_oovo, EC, o1*o2*v1*o2)
   oovv = alloc!(buf1, no1,no2,nv1,nv2)
-  ints2!(oovv, EC, o1*o2*v1*v2)
+  bare_ints2!(oovv, EC, o1*o2*v1*v2)
   @mtensor d_oovo[k,i,d,j] += oovv[k,i,d,b] * T12[b,j]
   save!(EC, "d_"*o1*o2*v1*o2, d_oovo)
   drop!(buf1, oovv)
@@ -561,17 +650,17 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   drop!(buf1, hd_oooo)
   if mixed
     d_ooov = alloc!(buf2, no1,no2,no1,nv2)
-    ints2!(d_ooov, EC, o1*o2*o1*v2)
+    bare_ints2!(d_ooov, EC, o1*o2*o1*v2)
   end
   # <ak\hat|jd>
   vovv = alloc!(buf2, nv1,no2,nv1,nv2)
-  ints2!(vovv, EC, v1*o2*v1*v2)
+  bare_ints2!(vovv, EC, v1*o2*v1*v2)
   d_voov = alloc!(buf1, nv1,no2,no1,nv2)
-  ints2!(d_voov, EC, v1*o2*o1*v2)
+  bare_ints2!(d_voov, EC, v1*o2*o1*v2)
   if mixed
     # <oo|ov>
     oOvV = alloc!(buf1, no1,no2,nv1,nv2)
-    ints2!(oOvV, EC, o1*o2*v1*v2)
+    bare_ints2!(oOvV, EC, o1*o2*v1*v2)
     @mtensor d_ooov[k,l,j,d] += oOvV[k,l,b,d] * T1[b,j]
     drop!(buf1, oOvV)
     save!(EC, "d_"*o1*o2*o1*v2, d_ooov)
@@ -596,11 +685,11 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   # finish half-dressing
   if mixed
     d_ovvo = alloc!(buf1, no1,nv2,nv1,no2)
-    ints2!(d_ovvo, EC, o1*v2*v1*o2)
+    bare_ints2!(d_ovvo, EC, o1*v2*v1*o2)
   end
   # <ak|b \hat l>
   hd_vovo = alloc!(buf1, nv1,no2,nv1,no2)
-  ints2!(hd_vovo, EC, v1*o2*v1*o2)
+  bare_ints2!(hd_vovo, EC, v1*o2*v1*o2)
   if no2 > 0
     @mtensor hd_vovo[a,k,b,l] += vovv[a,k,b,d] * T12[d,l]
   end
@@ -608,7 +697,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   if mixed
     # <k\hat a|dj>
     ovvv = alloc!(buf2, no1,nv2,nv1,nv2)
-    ints2!(ovvv, EC, o1*v2*v1*v2)
+    bare_ints2!(ovvv, EC, o1*v2*v1*v2)
     @mtensor begin
       d_ovvo[i,A,b,J] -= d_oovo[i,K,b,J] * T12[A,K]
       d_ovvo[i,A,b,J] += ovvv[i,A,b,C] * T12[C,J]
@@ -617,7 +706,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     t1 = print_time(EC, t1, "dress d_"*o1*v2*v1*o2, 3)
 
     hd_ovov = alloc!(buf1, no1,nv2,no1,nv2)
-    ints2!(hd_ovov, EC, o1*v2*o1*v2)
+    bare_ints2!(hd_ovov, EC, o1*v2*o1*v2)
     @mtensor hd_ovov[k,a,l,b] += ovvv[k,a,d,b] * T1[d,l]
     drop!(buf2, ovvv)
   end
@@ -625,9 +714,9 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   if calc_d_vvvo
     # <a\hat c|b \hat l>
     vvvv = alloc!(buf1, nv1,nv2,nv1,nv2)
-    ints2!(vvvv, EC, v1*v2*v1*v2)
+    bare_ints2!(vvvv, EC, v1*v2*v1*v2)
     hd_vvvo = alloc!(buf2, nv1,nv2,nv1,no2)
-    ints2!(hd_vvvo, EC, v1*v2*v1*o2)
+    bare_ints2!(hd_vvvo, EC, v1*v2*v1*o2)
     @mtensor begin
       hd_vvvo[a,c,b,l] -= hd_vovo[a,k,b,l] * T12[c,k]
       hd_vvvo[a,c,b,l] += vvvv[a,c,b,d] * T12[d,l]
@@ -636,7 +725,7 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
     drop!(buf2, hd_vvvo)
     if mixed
       hd_vvov = alloc!(buf2, nv1,nv2,no1,nv2)
-      ints2!(hd_vvov, EC, v1*v2*o1*v2)
+      bare_ints2!(hd_vvov, EC, v1*v2*o1*v2)
       @mtensor begin
         hd_vvov[a,c,l,b] -= hd_ovov[k,c,l,b] * T1[a,k]
         hd_vvov[a,c,l,b] += vvvv[a,c,d,b] * T1[d,l]
@@ -666,16 +755,16 @@ function calc_dressed_ints(EC::ECInfo, T1, T12, o1::Char, v1::Char, o2::Char, v2
   if calc_d_vovv
     # <ak\hat|bd>
     d_vovv = alloc!(buf2, nv1,no2,nv1,nv2)
-    ints2!(d_vovv, EC, v1*o2*v1*v2)
+    bare_ints2!(d_vovv, EC, v1*o2*v1*v2)
     oovv = alloc!(buf1, no1,no2,nv1,nv2)
-    ints2!(oovv, EC, o1*o2*v1*v2)
+    bare_ints2!(oovv, EC, o1*o2*v1*v2)
     @mtensor d_vovv[a,k,b,d] -= oovv[i,k,b,d] * T1[a,i]
     save!(EC, "d_"*v1*o2*v1*v2, d_vovv)
     t1 = print_time(EC, t1, "dress d_"*v1*o2*v1*v2, 3)
     if mixed
       drop!(buf2, d_vovv)
       d_ovvv = alloc!(buf2, no1,nv2,nv1,nv2)
-      ints2!(d_ovvv, EC, o1*v2*v1*v2)
+      bare_ints2!(d_ovvv, EC, o1*v2*v1*v2)
       @mtensor d_ovvv[i,b,a,c] -= oovv[i,j,a,c] * T12[b,j]
       save!(EC, "d_"*o1*v2*v1*v2, d_ovvv)
       t1 = print_time(EC, t1, "dress d_"*o1*v2*v1*v2, 3)
@@ -1010,7 +1099,11 @@ end
   Return EMp2 `OutDict` with keys (`E`, `ESS`, `EOS`, `EO`).
 """
 function calc_MP2(EC::ECInfo, addsingles=true)
-  T2 = update_doubles(EC, ints2(EC,"vvoo"), use_shift=false)
+  # MP2 amplitudes need vvoo = <ab|ij> directly. permutedims(oovv) equals it only for Hermitian
+  # integrals; AO-direct is Hermitian and stores only d_oovv, so derive it there, while an external
+  # (possibly non-Hermitian) MO dump extracts the vvoo block directly.
+  vvoo = EC.ao_direct ? permutedims(load4idx(EC, "d_oovv"), (3,4,1,2)) : ints2(EC, "vvoo")
+  T2 = update_doubles(EC, vvoo, use_shift=false)
   EMp2 = calc_doubles_energy(EC, T2)
   save!(EC, "T_vvoo", T2)
   if addsingles
@@ -1025,6 +1118,22 @@ function calc_MP2(EC::ECInfo, addsingles=true)
 end
 
 """ 
+    calc_posMP2(EC::ECInfo, addsingles=true)
+
+  Calculate restricted MP2 energy and amplitudes with positrons. 
+  The amplitudes are stored in `T_vvoo`  and `T_veop` files.
+  Return EMp2 `OutDict` with keys (`E`, `ESS`, `EOS`, `EO`).
+"""
+function calc_posMP2(EC::ECInfo, addsingles=true)
+  T2 = update_doubles(EC, ints2(EC,"vvoo"), use_shift=false)
+  T2ep = update_doubles(EC, ints2(EC,"veop",:p), spincase=:αp, use_shift=false)
+  EMp2 = calc_doubles_energy(EC, T2, T2ep)
+  save!(EC, "T_vvoo", T2)
+  save!(EC, "T_veop", T2ep)
+  return EMp2
+end
+
+""" 
     calc_UMP2(EC::ECInfo, addsingles=true)
 
   Calculate unrestricted MP2 energy and amplitudes. 
@@ -1034,9 +1143,15 @@ end
 """
 function calc_UMP2(EC::ECInfo, addsingles=true)
   SP = EC.space
-  T2a = update_doubles(EC, ints2(EC,"vvoo"), spincase=:α, antisymmetrize = true, use_shift=false)
-  T2b = update_doubles(EC, ints2(EC,"VVOO"), spincase=:β, antisymmetrize = true, use_shift=false)
-  T2ab = update_doubles(EC, ints2(EC,"vVoO"), spincase=:αβ, use_shift=false)
+  # MP2 amplitudes need vvoo = <ab|ij> directly. permutedims(oovv) equals it only for Hermitian
+  # integrals; AO-direct is Hermitian and stores only d_oovv/d_OOVV/d_oOvV, so derive it there,
+  # while an external (possibly non-Hermitian) MO dump extracts the vvoo blocks directly.
+  vvoo  = EC.ao_direct ? permutedims(load4idx(EC, "d_oovv"), (3,4,1,2)) : ints2(EC, "vvoo")
+  VVOO  = EC.ao_direct ? permutedims(load4idx(EC, "d_OOVV"), (3,4,1,2)) : ints2(EC, "VVOO")
+  vVoO  = EC.ao_direct ? permutedims(load4idx(EC, "d_oOvV"), (3,4,1,2)) : ints2(EC, "vVoO")
+  T2a = update_doubles(EC, vvoo, spincase=:α, antisymmetrize = true, use_shift=false)
+  T2b = update_doubles(EC, VVOO, spincase=:β, antisymmetrize = true, use_shift=false)
+  T2ab = update_doubles(EC, vVoO, spincase=:αβ, use_shift=false)
   EMp2 = calc_doubles_energy(EC, T2a, T2b, T2ab)
   save!(EC, "T_vvoo", T2a)
   save!(EC, "T_VVOO", T2b)
@@ -1076,23 +1191,23 @@ function calc_UMP2_energy(EC::ECInfo, addsingles=true)
 end
 
 """ 
-    calc_D2(EC::ECInfo, T1, T2, scalepp=false)
+    calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
 
   Calculate ``D^{ij}_{pq} = T^{ij}_{cd} + T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl}``.
-  Return as `D[pqij]` 
 
   If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation).
+  If `Rot` is provided, the `pq` indices of D2 are rotated (e.g., to AO basis).
+
+  Return as `D[pqij]` 
 """
-function calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
+function calc_D2(EC::ECInfo{T}, T1, T2, scalepp::Bool=false; Rot=zeros(Float64,0,0)) where T
   SP = EC.space
-  norb = n_orbs(EC)
+  # `norb` is the MO dimension the amplitudes live in. With a rectangular `Rot` (AO-direct with
+  # deleted/redundant orbitals dropped) it is the number of kept MOs, `size(Rot,2)` — the active
+  # `SP['o']`/`SP['v']` indices are ≤ that; `Rot` then maps this D2 up to the AO dimension.
+  norb = length(Rot) > 0 ? size(Rot, 2) : n_orbs(EC)
   nocc = n_occ_orbs(EC)
-  if length(T1) > 0
-    D2 = Array{eltype(T2)}(undef,norb,norb,nocc,nocc)
-    # D2 = zeros(norb,norb,nocc,nocc)
-  else
-    D2 = zeros(eltype(T2), norb,norb,nocc,nocc)
-  end
+  D2 = zeros(T, norb,norb,nocc,nocc)
   @mtensor begin
     D2[SP['v'],SP['v'],:,:][a,b,i,j] = T2[a,b,i,j] 
     D2[SP['o'],SP['o'],:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k]
@@ -1105,27 +1220,30 @@ function calc_D2(EC::ECInfo, T1, T2, scalepp=false; Rot=zeros(Float64,0,0))
     end
   end
   if length(Rot) > 0
+    # rotate the (kept-MO) D2 up to the AO dimension. Use a fresh output array (not in-place on
+    # D2) — a rectangular `Rot` (nao×nkept) changes the size from nkept to nao.
     @mtensor D2p[p',q,i,j] := D2[p,q,i,j] * Rot[p',p]
-    @mtensor D2[p',q',i,j] = D2p[p',q,i,j] * Rot[q',q]
+    @mtensor D2[p',q',i,j] := D2p[p',q,i,j] * Rot[q',q]
     D2p = nothing
   end
   if scalepp
-    diagindx = [CartesianIndex(i,i) for i in 1:norb]
+    diagindx = [CartesianIndex(i,i) for i in 1:size(D2,1)]
     D2[diagindx,:,:] *= 0.5
   end
   return D2
 end
 
-""" 
+"""
     calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
 
   Calculate ``^{σσ}D^{ij}_{pq} = T^{ij}_{cd} + P_{ij}(T^i_c T^j_d +δ_{ik} T^j_d + T^i_c δ_{jl} + δ_{ik} δ_{jl})``
   with ``P_{ij} X_{ij} = X_{ij} - X_{ji}``.
   Return as `D[pqij]` 
 """
-function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
+function calc_D2(EC::ECInfo{T}, T1, T2, spin::Symbol; Rot=zeros(Float64,0,0)) where T
   SP = EC.space
-  norb = n_orbs(EC)
+  # with a (square) `Rot` (AO-direct) `norb` is the AO dimension the same-spin D2 is rotated up to
+  norb = length(Rot) > 0 ? size(Rot, 2) : n_orbs(EC)
   if spin == :α
     virt = SP['v']
     occ = SP['o']
@@ -1134,13 +1252,12 @@ function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
     occ = SP['O']
   end
   nocc = length(occ)
-  if length(T1) > 0
-    D2 = Array{Float64}(undef,norb,norb,nocc,nocc)
-  else
-    D2 = zeros(norb,norb,nocc,nocc)
-  end
+  # zero-initialize so orbitals outside the active occ/virt (frozen-core / deleted in the AO-direct
+  # path, where `norb` is the full nao) stay zero rather than uninitialized garbage — see the
+  # closed-shell `calc_D2` above.
+  D2 = zeros(T, norb, norb, nocc, nocc)
   @mtensor begin
-    D2[virt,virt,:,:][a,b,i,j] = T2[a,b,i,j] 
+    D2[virt,virt,:,:][a,b,i,j] = T2[a,b,i,j]
     D2[occ,occ,:,:][i,k,j,l] = Matrix(I,nocc,nocc)[i,j] * Matrix(I,nocc,nocc)[l,k] - Matrix(I,nocc,nocc)[k,j] * Matrix(I,nocc,nocc)[l,i]
   end
   if length(T1) > 0
@@ -1149,6 +1266,11 @@ function calc_D2(EC::ECInfo, T1, T2, spin::Symbol)
       D2[occ,virt,:,:][j,a,i,k] = Matrix(I,nocc,nocc)[i,j] * T1[a,k] - Matrix(I,nocc,nocc)[k,j] * T1[a,i]
       D2[virt,occ,:,:][a,j,k,i] = Matrix(I,nocc,nocc)[i,j] * T1[a,k] - Matrix(I,nocc,nocc)[k,j] * T1[a,i]
     end
+  end
+  if length(Rot) > 0
+    # rotate the same-spin (kept-MO) D2 up to the AO dimension (both bra columns via `Rot`)
+    @mtensor D2p[p',q,i,j] := D2[p,q,i,j] * Rot[p',p]
+    @mtensor D2[p',q',i,j] := D2p[p',q,i,j] * Rot[q',q]
   end
   return D2
 end
@@ -1161,18 +1283,21 @@ end
 
   If `scalepp`: `D[ppij]` elements are scaled by 0.5 (for triangular summation)
 """
-function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
+function calc_D2ab(EC::ECInfo{T}, T1a, T1b, T2ab, scalepp=false; Rota=zeros(Float64,0,0), Rotb=zeros(Float64,0,0)) where T
   SP = EC.space
-  norb = n_orbs(EC)
+  rotate = length(Rota) > 0
+  # with (square) rotations (AO-direct) `norb` is the AO dimension the D2ab is rotated up to
+  norb = rotate ? size(Rota, 2) : n_orbs(EC)
   nocca = n_occ_orbs(EC)
   noccb = n_occb_orbs(EC)
-  if length(T1a) > 0
-    D2ab = Array{Float64}(undef,norb,norb,nocca,noccb)
+  # zero-init when rotating (frozen/deleted AO positions must stay zero — see closed-shell calc_D2)
+  if length(T1a) > 0 && !rotate
+    D2ab = Array{T}(undef, norb, norb, nocca, noccb)
   else
-    D2ab = zeros(norb,norb,nocca,noccb)
+    D2ab = zeros(T, norb, norb, nocca, noccb)
   end
   @mtensor begin
-    D2ab[SP['v'],SP['V'],:,:][a,B,i,J] = T2ab[a,B,i,J] 
+    D2ab[SP['v'],SP['V'],:,:][a,B,i,J] = T2ab[a,B,i,J]
     D2ab[SP['o'],SP['O'],:,:][i,k,j,l] = Matrix(I,nocca,nocca)[i,j] * Matrix(I,noccb,noccb)[l,k]
   end
   if length(T1a) > 0
@@ -1182,8 +1307,13 @@ function calc_D2ab(EC::ECInfo, T1a, T1b, T2ab, scalepp=false)
       D2ab[SP['v'],SP['O'],:,:][a,j,k,i] = Matrix(I,noccb,noccb)[i,j] * T1a[a,k]
     end
   end
+  if rotate
+    # rotate the αβ D2 up to AO: first (α) column via `Rota`, second (β) column via `Rotb`
+    @mtensor D2p[p',q,i,J] := D2ab[p,q,i,J] * Rota[p',p]
+    @mtensor D2ab[p',q',i,J] := D2p[p',q,i,J] * Rotb[q',q]
+  end
   if scalepp
-    diagindx = [CartesianIndex(i,i) for i in 1:norb]
+    diagindx = [CartesianIndex(i,i) for i in 1:size(D2ab,1)]
     D2ab[diagindx,:,:] *= 0.5
   end
   return D2ab
@@ -1293,14 +1423,16 @@ function calc_oqv_gradient(EC::ECInfo, q1T, q2T, R)
 
   @mtensor grad[a,i] := R1[a,i] - Tij[i,j]*R1[a,j] - Tab[a,b]*R1[b,i]
 
-  mmmo = load4idx(EC,"d_mmmo")
+  # three general indices in the basis `R` maps FROM: AO for the AO-direct route (`d_AAAo`, built by
+  # `save_ao_AAAo!`, with `R = Crot`), MO for the dump route (`d_mmmo`, built by `rotate_ints_o`).
+  AAAo = load4idx(EC, EC.ao_direct ? "d_AAAo" : "d_mmmo")
   Rpa = R[:,SP['v']]
-  @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * mmmo[p',q',r',i] - mmmo[p',r',q',i]) *  Rpa[q',a]
-  @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * mmmo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
-  @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
-  # @mtensor grad[a,i] -= (1.5 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * mmmo[p',q',r',j] * Rpa[q',a]
-  @mtensor grad[a,i] += (q1Tt[b,d,i,k] * q1Tt[c,d,j,k]+  q2Tt[b,c,i,j]) * Rpa[p',b] * Rpa[q',c] * mmmo[p',q',r',j] * Rpa[r',a]
-  mmmo = nothing
+  @mtensor grad[a,i] += Tab[d,c] * Rpa[p',d] * Rpa[r',c] * (2.0 * AAAo[p',q',r',i] - AAAo[p',r',q',i]) *  Rpa[q',a]
+  @mtensor grad[a,i] -= q1T[b,d,k,l] * Rpa[r',d] * Rpa[q',b] * AAAo[p',q',r',i]  * Rpa[p',c]* q1Tt[a,c,k,l]
+  @mtensor grad[a,i] -= (1.5 * q1T[b,d,k,i] * q1T[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * AAAo[p',q',r',j] * Rpa[q',a]
+  # @mtensor grad[a,i] -= (1.5 * q1Tt[b,d,k,i] * q1Tt[c,d,k,j] + 0.5 * q1Tt[b,d,i,k] * q1Tt[c,d,j,k]) * Rpa[p',b] * Rpa[r',c] * AAAo[p',q',r',j] * Rpa[q',a]
+  @mtensor grad[a,i] += (q1Tt[b,d,i,k] * q1Tt[c,d,j,k]+  q2Tt[b,c,i,j]) * Rpa[p',b] * Rpa[q',c] * AAAo[p',q',r',j] * Rpa[r',a]
+  AAAo = nothing
 
   oovo = load4idx(EC,"d_oovo")
   @mtensor grad[a,i] -=  q2Tt[a,b,j,k] * oovo[k,i,b,j]
@@ -1464,6 +1596,84 @@ function calc_rotated_fock(EC::ECInfo, into, R::Matrix)
 end
 
 """
+    save_ao_AAAo!(EC::ECInfo)
+
+  Build the general-orbital block the OQV orbital gradient needs, kept in the **AO** space:
+  `d_AAAo[μ,ν,ρ,i] = ⟨μν|ρi⟩`. Read off the half-transformed store `"ht_oAAA"`, whose bra IS the
+  occupied space, so the caller ([`ao_rotate_ints`](@ref)) must have rebuilt it for the current
+  rotation.
+
+  The key is `d_AAAo`, not the `d_mmmo` of the MO route ([`rotate_ints_o`](@ref)): the two hold the
+  same integrals over DIFFERENT one-particle bases (three AO indices here, three MO indices there),
+  and [`calc_oqv_gradient`](@ref) is indifferent only because it contracts all three with whatever
+  basis its rotation maps from. Separate names keep a block built in one basis from being read
+  against the other.
+
+  The occupied index sits on a ket, which no particle exchange can move to the bra, so this needs the
+  bra↔ket relation `⟨μν|ρi⟩ = conj⟨ρi|μν⟩` and is real-only like the other such blocks. It reads the
+  B-role slab ([`ht_column_B!`](@ref PMStore.ht_column_B!)) — not because the A slab could not produce
+  the block, but because the fixed `[μ,ν,ρ,i]` output makes `[:,ν,:,:]` the contiguous write.
+"""
+function save_ao_AAAo!(EC::ECInfo)
+  ht = open_ht_store(EC, "ht_oAAA")
+  T = eltype(ht.map); n = ht.nao; m = ht.m
+  if T <: Complex
+    close_ht_store!(EC, ht)
+    error("save_ao_AAAo!: the AO-space d_AAAo uses a bra↔ket Hermiticity swap and is real-only; " *
+          "complex needs a ket-transformed store (pending complex-AO integrals)")
+  end
+  io, AAAo = newmmap(EC, "d_AAAo", (n, n, n, m), T)
+  Bσ = zeros(T, m*n, n)                           # B-role only → one pass over the store
+  @inbounds for ν in 1:n
+    ht_column_B!(Bσ, ht, ν)
+    B3 = reshape(Bσ, m, n, n)                     # [i, μ, ρ] = ⟨μ i|ρ ν⟩
+    @views AAAo[:, ν, :, :] .= conj.(permutedims(B3, (3, 2, 1)))   # → [μ, ρ, i] = conj⟨ρ i|μ ν⟩
+  end
+  closemmap(EC, io, AAAo)
+  close_ht_store!(EC, ht)
+  return
+end
+
+"""
+    ao_rotate_ints(EC::ECInfo, R::AbstractMatrix) -> Crot
+
+  AO-direct analogue of [`rotate_ints`](@ref) for the orbital-optimized QV methods: rather than
+  re-transforming an MO integral dump, the orbital rotation is folded into the MO coefficients
+  (`Crot = cMO·R`) and the (bare) integral blocks are rebuilt straight from the AO integrals in the
+  rotated basis — the same "fold the rotation into the coefficients" route the T1 dressing and the
+  Λ2 kext use.
+
+  The general-orbital block stays in the AO space ([`save_ao_AAAo!`](@ref)): [`calc_oqv_gradient`](@ref)
+  only ever contracts its three general indices with the virtual rotation, so it is indifferent to
+  whether they are MO or AO — it just receives `Crot` (whose virtual columns are the AO→rotated-virtual
+  coefficients) in place of `R`. Returns `Crot`, which the caller also passes on as the AO→MO map for
+  the residual and `cc_kext!`.
+"""
+function ao_rotate_ints(EC::ECInfo, R::AbstractMatrix)
+  SP = EC.space
+  cMO = ao_direct_orbitals(EC)                    # as in `ao_cc_setup!`: α, deleted columns dropped
+  size(cMO, 2) == size(R, 1) ||
+    error("ao_rotate_ints: rotation matrix $(size(R)) does not match the orbitals $(size(cMO))")
+  pm_exists(EC) || error("AO-direct OQV needs the exact AO integrals (@ints)")
+  Crot = cMO * R
+  # The half-transformed stores are half-transformed with the OCCUPIED orbitals. The T1 dressing
+  # leaves that bra invariant (which is why `ao_cc_setup!` builds them once), but an orbital
+  # rotation does NOT: they must be rebuilt for the rotated occupied space BEFORE anything reads
+  # them, or every block derived from them silently mixes the old occupied space into the new basis.
+  delete_ht_store!(EC, "ht_oAAA"); file_exists(EC, "ht_ooAA") && delete_file!(EC, "ht_ooAA")
+  pm = open_pm_store(EC)
+  ht_build_dress!(EC, pm, Crot[:, SP['o']])
+  close_pm_store!(EC, pm)
+  ao_dressed_ints(EC, eltype(Crot)[], Crot)       # bare blocks in the rotated basis
+  fock = load2idx(EC, "df_mm")                    # rotate_ints stores the same Fock under all keys
+  save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
+  eps = diag(fock); save!(EC, "e_m", eps); save!(EC, "e_M", eps)
+  save!(EC, "d_vvoo", permutedims(load4idx(EC, "d_oovv"), (3,4,1,2)))
+  save_ao_AAAo!(EC)                               # off the store rebuilt above
+  return Crot
+end
+
+"""
     rotate_ints(EC::ECInfo, R::Matrix)
 
   Update the fock matrix with rotated integrals.
@@ -1478,6 +1688,8 @@ function rotate_ints(EC::ECInfo, R::Matrix)
   save!(EC, "f_mm", fock)
   save!(EC, "df_mm", fock)
   save!(EC, "f_MM", fock)
+  @mtensor hrot[p,q] := integ1(EC.fd,:α)[p',q'] * R[p',p] * R[q',q]
+  save!(EC, "dh_mm", hrot)
   eps = diag(fock)
   save!(EC, "e_m", eps)
   save!(EC, "e_M", eps)
@@ -1509,33 +1721,571 @@ function rotate_ints(EC::ECInfo, R::Matrix)
 end
 
 """
-    rotation_matrix(EC::ECInfo, T1)
-  
-  Make the integrals rotation matrix with T1.
+  Fraction of deleted orbitals above which [`ao_cc_setup!`](@ref) suggests the MO-based route.
+  AO-direct always works in the FULL AO dimension, while a derived MO basis correlates in the reduced
+  one, so the AO-direct overhead grows roughly like `(nao/(nao-ndel))^4` — ≈2.4× at 20%.
 """
-function rotation_matrix(EC::ECInfo, T1)
-  norb = n_orbs(EC)
-  nocc = n_occ_orbs(EC)
-  nvirt = n_virt_orbs(EC)
-  SP = EC.space
-  Rpq = zeros(norb, norb)
-  for a in 1:nvirt
-    for i in 1:nocc
-      Rpq[SP['v'][a],SP['o'][i]] = T1[a,i]
-      Rpq[SP['o'][i],SP['v'][a]] = -T1[a,i]
-    end
+const AO_DIRECT_DELETED_WARN = 0.2
+
+"""
+    warn_ao_direct_deleted(EC::ECInfo, norb)
+
+  Warn when a large fraction of the `norb` orbitals is deleted — whether linearly dependent or removed
+  on purpose (e.g. by `@region`); both are equally costly here. AO-direct still streams the full AO
+  dimension, so beyond [`AO_DIRECT_DELETED_WARN`](@ref) the derived-MO-dump route (which correlates in
+  the reduced basis) is typically faster. Points at the option that switches routes.
+"""
+function warn_ao_direct_deleted(EC::ECInfo, norb::Int)
+  ndel = n_deleted_orbitals_all(EC)
+  (norb > 0 && ndel > 0) || return
+  frac = ndel / norb
+  frac > AO_DIRECT_DELETED_WARN || return
+  println("WARNING: $ndel of $norb orbitals ($(round(100*frac, digits=1))%) are deleted and not " *
+          "correlated.\n" *
+          "         AO-direct still works in the full AO dimension, so with this many deleted orbitals\n" *
+          "         the MO-based route is likely faster (it correlates in the reduced basis). To use it:\n" *
+          "           @set int ao_direct=false      # or: EC.options.int.ao_direct = false")
+  return
+end
+
+"""
+    save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
+
+  Persist the AO-direct correlation reference computed by [`ao_cc_setup!`](@ref) as `C_Am` (and
+  `C_AM` for the β spin) — the single artifact every later consumer of THIS run reads, the AO-direct
+  counterpart of the MO route's FCIDUMP. It has to be stored rather than re-derived because it is not
+  a pure function of the orbital file: with `wf.dump4core_only` the frozen core is spliced in from a
+  second file and the correlating orbitals are re-orthonormalized against it
+  ([`replace_core_from_dump!`](@ref)). Restricted orbitals write `C_Am` only.
+
+  The files are temporary ("tmp"): they belong to the run, so `delete_temporary_files!` reclaims
+  them at its end — like the per-run DF fd, the reference does not outlive the calculation that
+  settled it.
+"""
+function save_ao_correlation_orbitals!(EC::ECInfo, cMO::SpinMatrix)
+  save!(EC, "C_Am", Matrix(cMO.α); description="tmp AO-direct correlation reference (α)")
+  file_exists(EC, "C_AM") && delete_file!(EC, "C_AM")
+  is_restricted(cMO) ||
+    save!(EC, "C_AM", Matrix(cMO.β); description="tmp AO-direct correlation reference (β)")
+  # the number of deleted (linearly-dependent) orbitals of THIS reference: constant for the run, but
+  # `n_deleted_orbitals` re-reads the orbital dump twice (classes + energies) on every call, so it is
+  # settled here with the reference rather than by each consumer
+  save!(EC, "n_del", eltype(cMO.α)[n_deleted_orbitals(EC)];
+        description="tmp AO-direct deleted-orbital count")
+  return
+end
+
+"""
+    ao_direct_orbitals_spin(EC::ECInfo) -> SpinMatrix
+
+  The correlation reference orbitals of an AO-direct run — the SINGLE orbital source every
+  AO-direct consumer must use (the dressing, the `kext` rotation, the Λ generalized-Fock terms,
+  the setup), so that no two of them can end up in different bases.
+
+  Once [`ao_cc_setup!`](@ref) has settled the reference it is read back from `C_Am`/`C_AM`
+  ([`save_ao_correlation_orbitals!`](@ref)), so every consumer — the setup itself, the `Rot` the
+  residual hoists, the Λ generalized-Fock terms, the OQV rotation — sees the SAME orbitals even when
+  the reference is not a pure function of the orbital file (`wf.dump4core_only`).
+"""
+function ao_direct_orbitals_spin(EC::ECInfo)
+  if file_exists(EC, "C_Am")                         # the reference `ao_cc_setup!` settled on
+    Ca = load2idx(EC, "C_Am")
+    return file_exists(EC, "C_AM") ? SpinMatrix(Ca, load2idx(EC, "C_AM")) : SpinMatrix(Ca)
   end
-  Rpq = exp(Rpq)
-  return Rpq
+  return load_orbitals_for_correlation(EC)[1]        # before setup (route decisions)
+end
+
+"""
+    ao_direct_orbitals(EC::ECInfo) -> Matrix
+
+  MO coefficients for an AO-direct run: the (α) correlation reference orbitals
+  ([`ao_direct_orbitals_spin`](@ref)) with the linearly-dependent (deleted/redundant) columns — the
+  last `n_deleted_orbitals` — dropped, so the AO-direct MO space excludes them. They carry no
+  electrons and their (near-)zero coefficients would otherwise corrupt the `Rot` AO↔MO rotation in
+  `cc_kext!`. The dropped columns are the highest orbital indices (appended by the canonical
+  orthogonalization, and by the completion of a projected set).
+"""
+function ao_direct_orbitals(EC::ECInfo)
+  cMO = Matrix(ao_direct_orbitals_spin(EC).α)
+  ndel = file_exists(EC, "n_del") ? Int(load1idx(EC, "n_del")[1]) : n_deleted_orbitals(EC)
+  return ndel > 0 ? cMO[:, 1:size(cMO,2)-ndel] : cMO
+end
+
+
+
+"""
+    ao_dressed_ints(EC::ECInfo, T1, cMO)
+
+  Build the T1-dressed integrals the closed-shell [`calc_cc_resid`](@ref) needs in its
+  `use_kext` path — `dh_mm`, `df_mm`, `d_oovo`, `d_oovv`, `d_oooo`, `d_voov`, `d_vovo` —
+  directly from the exact **AO integrals** (the ± supermatrix store and `"h_AA"`)
+  and MO coefficients `cMO`, without a
+  transformed MO dump. The 4-external (`vvvv`) term is left to [`cc_kext!`](@ref), which
+  contracts the AO integrals directly with `Rot=cMO`.
+
+  The (non-unitary) T1 similarity and the AO→MO transform are folded into two dressed
+  coefficient sets — bra/particle and ket/hole:
+
+      C̃ᴸ = [ C_o | C_v − C_o·T1ᵀ ],   C̃ᴿ = [ C_o + C_v·T1 | C_v ],
+
+  giving dressed `⟨pq|rs⟩ = Σ ⟨μν|ρσ⟩ C̃ᴸ[μ,p] C̃ᴸ[ν,q] C̃ᴿ[ρ,r] C̃ᴿ[σ,s]` (bra indices
+  use `C̃ᴸ`, ket indices `C̃ᴿ`).
+
+  Every block needed has at least two occupied indices, so the transform goes to the
+  occupied space as early as possible. Looping once over the AO integrals (one `σ` = ket-2
+  slab at a time, read straight from the triangular storage — no `detri_int2`), we build
+  three intermediates that each carry exactly two occupied indices and the retained `σ`:
+
+      ooAA ← v_ooAA[i,j,ρ,σ]  = Σ ⟨μν|ρσ⟩ C̃ᴸ_o[μ,i] C̃ᴸ_o[ν,j]     → d_oooo / d_oovo / d_oovv
+      AooA ← v_AooA[μ,i,j,σ] = Σ ⟨μν|ρσ⟩ C̃ᴸ_o[ν,i] C̃ᴿ_o[ρ,j]     → d_voov / d_vooo
+      oAoA ← v_oAoA[i,ν,j,σ] = Σ ⟨μν|ρσ⟩ C̃ᴸ_o[μ,i] C̃ᴿ_o[ρ,j]     → d_vovo
+
+  `d_vovo[a,i,b,j] = ⟨ai|bj⟩ = ⟨ia|jb⟩` is obtained from `oAoA` by electron-exchange
+  symmetry (so it, like the others, keeps `σ` and avoids a separate ket-2 contraction). The
+  remaining two AO indices of each intermediate are transformed last, only to the spaces
+  the blocks need — the full `nao⁴` tensor, the full MO integrals, and every all-virtual
+  block are never formed. Occupied-restricted indices use `i,j,k,l,m,n`.
+"""
+function ao_dressed_ints(EC::ECInfo{T}, T1, cMO::AbstractMatrix; calc_d_vovv::Bool=false) where T
+  SP = EC.space
+  nao = size(cMO, 1)     # AO dimension (the dressed coefficients may map to fewer than nao MOs)
+  occ = SP['o']; virt = SP['v']
+  CL = Matrix{T}(cMO); CR = Matrix{T}(cMO)
+  if length(T1) > 0
+    Co = cMO[:, occ]; Cv = cMO[:, virt]
+    @mtensor cl_corr[μ,a] := Co[μ,i] * T1[a,i]
+    @mtensor cr_corr[μ,i] := Cv[μ,a] * T1[a,i]
+    CL[:, virt] .-= cl_corr
+    CR[:, occ]  .+= cr_corr
+  end
+  nocc = length(occ)
+  # dressed coefficients split into occupied/virtual columns (bra uses C̃ᴸ, ket uses C̃ᴿ)
+  CLo = CL[:, occ]; CLv = CL[:, virt]
+  CRo = CR[:, occ]; CRv = CR[:, virt]
+  @assert pm_exists(EC) "no AO integrals on file; generate them first (@ints / ao_integrals)"
+  @assert file_exists(EC, "h1eff_AA") "ao_dressed_ints requires the effective 1-e Hamiltonian; call ao_cc_setup! first"
+  # occ-early first half-transform: read the prebuilt half-transformed store when it exists,
+  # else the PM-native tile sweep on the ± store.
+  if ht_exists(EC, "ht_oAAA")
+    # prebuilt half-transformed store (ao_cc_setup!): read it instead of re-streaming the ± store.
+    # `CLo` is T1-independent, so the file (built with the same active-occ bra) is valid every iteration.
+    v_ooAA, v_AooA, v_oAoA = ht_occ_early(EC, CRo)
+  else
+    pm = open_pm_store(EC)
+    v_ooAA, v_AooA, v_oAoA = pm_occ_early(pm, CLo, CRo)
+    close_pm_store!(EC, pm)
+  end
+  # Transform the two remaining AO indices of each intermediate, only into the needed spaces.
+  @mtensor v_oooA[i,j,k,σ] := v_ooAA[i,j,ρ,σ] * CRo[ρ,k]
+  @mtensor v_oovA[i,j,a,σ] := v_ooAA[i,j,ρ,σ] * CRv[ρ,a]
+  @mtensor d_oooo[i,j,k,l] := v_oooA[i,j,k,σ] * CRo[σ,l]
+  @mtensor d_oovo[i,j,a,k] := v_oovA[i,j,a,σ] * CRo[σ,k]
+  @mtensor d_oovv[i,j,a,b] := v_oovA[i,j,a,σ] * CRv[σ,b]
+  @mtensor v_vooA[a,i,j,σ] := v_AooA[μ,i,j,σ] * CLv[μ,a]                # shared by d_voov and d_vooo
+  @mtensor d_voov[a,i,j,b] := v_vooA[a,i,j,σ] * CRv[σ,b]
+  @mtensor d_vooo[a,i,j,k] := v_vooA[a,i,j,σ] * CRo[σ,k]                # d_vooo feeds the f_vo Fock block
+  @mtensor d_vovo[a,i,b,j] := (v_oAoA[i,ν,j,σ] * CLv[ν,a]) * CRv[σ,b]   # ⟨ai|bj⟩ = ⟨ia|jb⟩ (electron exchange)
+  save!(EC, "d_oooo", d_oooo); save!(EC, "d_oovo", d_oovo); save!(EC, "d_oovv", d_oovv)
+  save!(EC, "d_voov", d_voov); save!(EC, "d_vovo", d_vovo); save!(EC, "d_vooo", d_vooo)
+  # dressed 1-electron: h̃[p,q] = Σ h_eff[μν] C̃ᴸ[μ,p] C̃ᴿ[ν,q], where `h1eff_AA` is the AO core
+  # Hamiltonian plus the frozen-core mean field (see ao_cc_setup!); the mean-field sum below runs
+  # over the ACTIVE occupied only, so `dfock` is the correct active-space (frozen-core) Fock.
+  hao = load2idx(EC, "h1eff_AA")
+  @mtensor dh[p,q] := (hao[μ,ν] * CL[μ,p]) * CR[ν,q]
+  save!(EC, "dh_mm", dh)
+  # dressed closed-shell Fock.
+  dfock = copy(dh)
+  # NB the T1-dressed Fock is NOT symmetric (bra uses C̃ᴸ, ket C̃ᴿ), so f_vo ≠ f_ovᵀ — the v,o block
+  # must be built from d_vooo, not transposed from f_ov (cf. `dress_fock`).
+  @mtensor begin
+    foo[i,j] := 2.0*d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
+    fov[i,a] := 2.0*d_oovo[i,k,a,k] - d_oovo[k,i,a,k]
+    fvo[a,i] := 2.0*d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
+    fvv[a,b] := 2.0*d_vovo[a,k,b,k] - d_voov[a,k,k,b]
+  end
+  dfock[occ,occ]   .+= foo
+  dfock[occ,virt]  .+= fov
+  dfock[virt,occ]  .+= fvo
+  dfock[virt,virt] .+= fvv
+  save!(EC, "df_mm", dfock)
+  # 3-external dressed block for the Λ residual / λ-triples: d_vovv[a,i,b,c] = ⟨ai|bc⟩ (dressed) built
+  # from the occupied-bra store (occ i = CLo is T1-independent; the free virt slots carry CLv/CRv).
+  if calc_d_vovv
+    # occ i sits on bra-2 here, so build ⟨ia|cb⟩ and exchange the particles (see `ht_mo_block`)
+    d_vovv = permutedims(ht_mo_block(EC, "ht_oAAA", CLv, CRv, CRv), (2,1,4,3))
+    save!(EC, "d_vovv", d_vovv)
+  end
+  return nothing
+end
+
+"""
+    ao_core_fock(EC::ECInfo, Dcore::AbstractMatrix) -> Matrix
+
+  Closed-shell mean-field (2J−K) AO Fock contribution of the density `Dcore` (spatial,
+  one particle per orbital), built directly from the exact AO integrals:
+  ``F_{μν} = Σ_{ρσ} (2⟨μρ|νσ⟩ − ⟨μρ|σν⟩) D_{ρσ}``. Used to fold the frozen core into an
+  effective one-electron Hamiltonian in [`ao_cc_setup!`](@ref).
+"""
+function ao_core_fock(EC::ECInfo{T}, Dcore::AbstractMatrix) where T
+  TF = promote_type(T, eltype(Dcore))
+  pm = open_pm_store(EC)
+  J = zeros(TF, pm.nao, pm.nao); K = zeros(TF, pm.nao, pm.nao)
+  ao_JK!(J, K, pm, Dcore, Dcore)
+  close_pm_store!(EC, pm)
+  return 2 .* J .- K                 # F = 2J − K
+end
+
+"""
+    dD1_ht_vo(EC, htkey, DJ, DK, Cv) -> Matrix
+
+  The `[e,m]` generalized-Fock block the Λ residual needs, read off the half-transformed store `htkey`
+  (built once per orbital set in [`ao_cc_setup!`](@ref)) instead of building a full `nao×nao` Fock:
+
+      R^e_m = Σ_pq ( dD1ᴶ_p^q ⟨qm|pe⟩ − dD1ᴷ_p^q ⟨qm|ep⟩ )
+
+  with the two general-orbital densities supplied **already rotated to the AO basis**,
+  `D[x,y] = Σ_pq cMO[x,q] dD1_p^q cMO[y,p]` (i.e. `cMO·dD1ᵀ·cMOᵀ`, the convention of the callers).
+
+  The store's bra index IS the (active) occupied `m` this term carries, and its two roles hold exactly
+  the two orderings the term needs — with the column `ν` in the ket-2 slot both times:
+
+      B_ν[m,x,y] = ⟨x m|y ν⟩    (B-role, occ on bra-2)  → Coulomb, contracted with `DJ[x,y]`
+      A_ν[m,x,y] = ⟨m x|y ν⟩    (A-role, occ on bra-1)  → exchange, contracted with `DK[x,y]`
+
+  (the exchange uses the conjugation-free particle symmetry `⟨mq|pe⟩ = ⟨qm|ep⟩`, which is what puts its
+  virtual on the same ket-2 slot as the Coulomb's, so it too is a plain contraction of the slab's two
+  free AO slots with an AO density instead of a partial one). Both are then done for every `ν` at once
+  by [`ht_jk_columns!`](@ref PMStore.ht_jk_columns!) — one sequential pass over the store, each stored
+  element read once — and the resulting `t[m,ν]` only has to have its ket-2 slot transformed to the
+  virtual `e`. Cost: `2·nocc·nao³` MACs and `nocc·nao³` elements read, against the `nao⁴/2` MACs and
+  `nao⁴/4` streamed integrals of a full `2J−K` build of which only the `[v,o]` block was kept.
+
+  Element-type generic: the store applies plain `C` (the AO-direct/FCIDUMP `detri` convention) and the
+  contraction uses no conjugation anywhere, so unlike the `ao_JK!` route this is complex-correct.
+"""
+function dD1_ht_vo(EC::ECInfo, htkey::AbstractString, DJ::AbstractMatrix, DK::AbstractMatrix,
+                   Cv::AbstractMatrix)
+  ht_exists(EC, htkey) ||
+    error("dD1_ht_vo: half-transformed store \"$htkey\" not found — the AO-direct Λ residual needs the " *
+          "± supermatrix store (int.ao_pm=true), which ao_cc_setup! half-transforms once per orbital set")
+  ht = open_ht_store(EC, htkey)
+  n = ht.nao; m = ht.m
+  size(DJ) == (n, n) && size(DK) == (n, n) && size(Cv, 1) == n ||
+    error("dD1_ht_vo: densities $(size(DJ))/$(size(DK)) and coefficients $(size(Cv)) do not match nao=$n")
+  TC = promote_type(eltype(ht.map), eltype(DJ), eltype(DK), eltype(Cv))
+  t = Matrix{TC}(undef, m, n)                     # t[m,ν], the [occ, AO-ket] generalized-Fock block
+  ht_jk_columns!(t, ht, Matrix{TC}(DJ), Matrix{TC}(DK))
+  close_ht_store!(EC, ht)
+  return permutedims(t * Cv, (2, 1))              # ket-2 ν → virtual e, then [m,e] → [e,m]
+end
+
+"""
+    dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix) -> Matrix
+
+  The virtual-occupied block the closed-shell Λ residual needs from the general-orbital density `dD1`:
+  ``R^e_m += Σ_pq dD1_p^q (2⟨qm|pe⟩ − ⟨qm|ep⟩)`` — structurally the v,o block of a generalized (2J−K)
+  Fock built with `dD1`. AO-direct: rotate `D_AO = cMO·dD1ᵀ·cMOᵀ` and read the `[e,m]` block straight
+  off the half-transformed store ([`dD1_ht_vo`](@ref) with the Coulomb density `2·D_AO` and the exchange
+  density `D_AO`), so no `nao×nao` Fock matrix is formed and no general-orbital `nocc·norb³` block
+  (the `ints2(EC,"momm")` read of the MO path) either. Returns an `[nvirt,nocc]` block.
+"""
+function dD1_fock_vo(EC::ECInfo, dD1::AbstractMatrix)
+  # `dD1` spans the FULL orbital space (`n_orbs`), so the transform needs all MO columns — not the
+  # active-only set of `ao_direct_orbitals` (which drops the redundant tail). Deleted/frozen positions
+  # of `dD1` are zero, so they contribute nothing. `ht_oAAA`'s bra used `ao_direct_orbitals(EC)[:,o]`,
+  # which agrees with these leading columns. Same convention as `dD1_ufock_vo`.
+  cMO = Matrix(ao_direct_orbitals_spin(EC).α); SP = EC.space
+  D_AO = cMO * transpose(dD1) * transpose(cMO)      # D_AO[μ,ρ] = Σ_pq cMO[μ,q] dD1[p,q] cMO[ρ,p]
+  return dD1_ht_vo(EC, "ht_oAAA", 2 .* D_AO, D_AO, cMO[:, SP['v']])
+end
+
+"""
+    dD1_ufock_vo(EC::ECInfo, dD1, dD1os, spin::Symbol) -> Matrix
+
+  Unrestricted analogue of [`dD1_fock_vo`](@ref): the `[e,m]` block the open-shell Λ residual adds for
+  `spin` from its own general-orbital density `dD1` and the opposite-spin `dD1os`. The three
+  general-orbital reads it replaces — same-spin `⟨qm|pe⟩−⟨qm|ep⟩` (a `momm`/`MOMM` block) plus the
+  opposite-spin Coulomb `⟨Qm|Pe⟩` (`oMvM`/`mOmV`) — are the virtual-occupied block of the UHF
+  generalized Fock `F^σ = J(D^α+D^β) − K(D^σ)`, i.e. [`dD1_ht_vo`](@ref) with the Coulomb density
+  `D^α_AO + D^β_AO` and the exchange density `D^σ_AO`. AO integrals are spin-free, so the
+  opposite-spin Coulomb rides along on the SAME (`spin`) store — one pass over `"ht_oAAA_"*spin`, no
+  `nao×nao` Fock matrices and no `nocc·norb³` general-orbital blocks.
+"""
+function dD1_ufock_vo(EC::ECInfo, dD1::AbstractMatrix, dD1os::AbstractMatrix, spin::Symbol)
+  isα = (spin == :α)
+  SP = EC.space
+  cMOsm = ao_direct_orbitals_spin(EC)
+  cMOa = Matrix(cMOsm.α); cMOb = Matrix(cMOsm.β)
+  dD1a, dD1b = isα ? (dD1, dD1os) : (dD1os, dD1)
+  Da_AO = cMOa * transpose(dD1a) * transpose(cMOa)
+  Db_AO = cMOb * transpose(dD1b) * transpose(cMOb)
+  cMO = isα ? cMOa : cMOb
+  v4s = space4spin('v', isα)
+  return dD1_ht_vo(EC, isα ? "ht_oAAA_a" : "ht_oAAA_b", Da_AO .+ Db_AO,
+                   isα ? Da_AO : Db_AO, cMO[:, SP[v4s]])
+end
+
+"""
+    ao_dressed_coeffs(cMO, T1, occ, virt) -> (CL, CR)
+
+  T1-dressed bra/ket MO coefficient sets: `CL = [C_o | C_v − C_o·T1ᵀ]` (bra/particle) and
+  `CR = [C_o + C_v·T1 | C_v]` (ket/hole). Empty `T1` ⇒ `CL = CR = cMO`.
+"""
+function ao_dressed_coeffs(cMO::AbstractMatrix{T}, T1, occ, virt) where {T<:Number}
+  CL = Matrix{T}(cMO); CR = Matrix{T}(cMO)
+  if length(T1) > 0
+    Co = cMO[:, occ]; Cv = cMO[:, virt]
+    @mtensor cl_corr[μ,a] := Co[μ,i] * T1[a,i]
+    @mtensor cr_corr[μ,i] := Cv[μ,a] * T1[a,i]
+    CL[:, virt] .-= cl_corr
+    CR[:, occ]  .+= cr_corr
+  end
+  return CL, CR
 end
 
 
 """
-    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false, orbopt=false)
+    ao_dressed_ints_unrestricted(EC::ECInfo, T1a, T1b, cMOa, cMOb)
+
+  Unrestricted (UHF) analogue of [`ao_dressed_ints`](@ref): build the T1-dressed αα/ββ/αβ
+  integral blocks the open-shell `use_kext` residual and the dressed Fock need, directly from
+  the exact AO integrals (the ± supermatrix store) and the per-spin effective 1-e Hamiltonians
+  `"h1eff_mm_AA"`/`"h1eff_MM_AA"` (frozen core folded per spin). The 4-external (`vvvv`) term is
+  left to the unrestricted [`cc_kext!`](@ref) with `Rota=cMOa`, `Rotb=cMOb`. Uses the occ-early
+  passes [`ao_ss_blocks`](@ref)/[`ao_os_blocks`](@ref) — no dense `nao⁴` tensor is formed. Empty
+  `T1a`/`T1b` ⇒ bare blocks.
+"""
+function ao_dressed_ints_unrestricted(EC::ECInfo{T}, T1a, T1b, cMOa::AbstractMatrix, cMOb::AbstractMatrix;
+                                      calc_d_vovv::Bool=false) where {T<:Number}
+  SP = EC.space
+  oa = SP['o']; va = SP['v']; ob = SP['O']; vb = SP['V']
+  CLa, CRa = ao_dressed_coeffs(cMOa, T1a, oa, va)
+  CLb, CRb = ao_dressed_coeffs(cMOb, T1b, ob, vb)
+  La_o = CLa[:,oa]; La_v = CLa[:,va]; Ra_o = CRa[:,oa]; Ra_v = CRa[:,va]
+  Lb_o = CLb[:,ob]; Lb_v = CLb[:,vb]; Rb_o = CRb[:,ob]; Rb_v = CRb[:,vb]
+  heffa = load2idx(EC, "h1eff_mm_AA")                # effective 1-e per spin (frozen-core folded)
+  heffb = load2idx(EC, "h1eff_MM_AA")
+  # occ-early integral source: prebuilt per-spin half-transformed stores (built once in ao_cc_setup!,
+  # read here every iteration — the bra-occ transforms La_o/Lb_o are T1-independent) when present; else
+  # the ± supermatrix store (PM-native tile sweeps).
+  if ht_exists(EC, "ht_oAAA_a")
+    ssa_in, ssb_in, os_in = ht_occ_early_unrestricted(EC, Ra_o, Rb_o)   # each per-spin store read once
+    ssa  = ao_ss_finish(ssa_in..., La_v, Ra_o, Ra_v)
+    ssb  = ao_ss_finish(ssb_in..., Lb_v, Rb_o, Rb_v)
+    osab = ao_os_finish(os_in..., La_v, Ra_o, Ra_v, Lb_v, Rb_o, Rb_v)
+  else
+    mb = available_memory(EC)                         # only the streaming block builders need a RAM budget
+    int2 = open_pm_store(EC)
+    ssa  = ao_ss_blocks(int2, La_o, La_v, Ra_o, Ra_v; membytes=mb)          # αα (closed-shell kernel)
+    ssb  = ao_ss_blocks(int2, Lb_o, Lb_v, Rb_o, Rb_v; membytes=mb)          # ββ (same kernel, β coeffs)
+    osab = ao_os_blocks(int2, La_o,La_v,Ra_o,Ra_v, Lb_o,Lb_v,Rb_o,Rb_v; membytes=mb)  # αβ
+    close_pm_store!(EC, int2)
+  end
+  # αα blocks
+  d_oooo=ssa.oooo; d_oovo=ssa.oovo; d_voov=ssa.voov; d_vovo=ssa.vovo; d_vooo=ssa.vooo
+  save!(EC,"d_oooo",d_oooo); save!(EC,"d_oovo",d_oovo); save!(EC,"d_voov",d_voov)
+  save!(EC,"d_vovo",d_vovo); save!(EC,"d_vooo",d_vooo); save!(EC,"d_oovv",ssa.oovv)
+  # ββ blocks
+  d_OOOO=ssb.oooo; d_OOVO=ssb.oovo; d_VOOV=ssb.voov; d_VOVO=ssb.vovo; d_VOOO=ssb.vooo
+  save!(EC,"d_OOOO",d_OOOO); save!(EC,"d_OOVO",d_OOVO); save!(EC,"d_VOOV",d_VOOV)
+  save!(EC,"d_VOVO",d_VOVO); save!(EC,"d_VOOO",d_VOOO); save!(EC,"d_OOVV",ssb.oovv)
+  # αβ blocks (index1,3 = α = e1, index2,4 = β = e2)
+  d_oOoO=osab.oOoO; d_oOvO=osab.oOvO; d_vOvO=osab.vOvO; d_oVoV=osab.oVoV
+  d_vOoO=osab.vOoO; d_oVoO=osab.oVoO; d_oOoV=osab.oOoV
+  save!(EC,"d_oOoO",d_oOoO); save!(EC,"d_oOoV",d_oOoV); save!(EC,"d_oOvO",d_oOvO)
+  save!(EC,"d_vOoV",osab.vOoV); save!(EC,"d_oVvO",osab.oVvO); save!(EC,"d_vOvO",d_vOvO)
+  save!(EC,"d_oVoV",d_oVoV); save!(EC,"d_vOoO",d_vOoO); save!(EC,"d_oVoO",d_oVoO)
+  save!(EC,"d_oOvV",osab.oOvV)
+  # dressed 1-electron per spin: h̃[p,q] = Σ h_eff[μν] C̃ᴸ[μ,p] C̃ᴿ[ν,q]
+  @mtensor dh_a[p,q] := (heffa[μ,ν] * CLa[μ,p]) * CRa[ν,q]; save!(EC,"dh_mm",dh_a)
+  @mtensor dh_b[p,q] := (heffb[μ,ν] * CLb[μ,p]) * CRb[ν,q]; save!(EC,"dh_MM",dh_b)
+  # dressed α Fock: dh + same-spin (J−K over α-occ) + opposite-spin (J over β-occ)
+  dfa = copy(dh_a)
+  @mtensor begin
+    foo_a[i,j] := d_oooo[i,k,j,k] - d_oooo[i,k,k,j]
+    fvo_a[a,i] := d_vooo[a,k,i,k] - d_vooo[a,k,k,i]
+    fov_a[i,a] := d_oovo[i,k,a,k] - d_oovo[k,i,a,k]
+    fvv_a[a,b] := d_vovo[a,k,b,k] - d_voov[a,k,k,b]
+    foo_a[i,j] += d_oOoO[i,K,j,K]
+    fvo_a[a,i] += d_vOoO[a,K,i,K]
+    fov_a[i,a] += d_oOvO[i,K,a,K]
+    fvv_a[a,b] += d_vOvO[a,K,b,K]
+  end
+  dfa[oa,oa] .+= foo_a; dfa[va,oa] .+= fvo_a; dfa[oa,va] .+= fov_a; dfa[va,va] .+= fvv_a
+  save!(EC,"df_mm",dfa)
+  # dressed β Fock: dh + same-spin (β) + opposite-spin (J over α-occ)
+  dfb = copy(dh_b)
+  @mtensor begin
+    foo_b[i,j] := d_OOOO[i,k,j,k] - d_OOOO[i,k,k,j]
+    fvo_b[a,i] := d_VOOO[a,k,i,k] - d_VOOO[a,k,k,i]
+    fov_b[i,a] := d_OOVO[i,k,a,k] - d_OOVO[k,i,a,k]
+    fvv_b[a,b] := d_VOVO[a,k,b,k] - d_VOOV[a,k,k,b]
+    foo_b[I,J] += d_oOoO[k,I,k,J]
+    fvo_b[A,I] += d_oVoO[k,A,k,I]
+    fov_b[I,A] += d_oOoV[k,I,k,A]
+    fvv_b[A,B] += d_oVoV[k,A,k,B]
+  end
+  dfb[ob,ob] .+= foo_b; dfb[vb,ob] .+= fvo_b; dfb[ob,vb] .+= fov_b; dfb[vb,vb] .+= fvv_b
+  save!(EC,"df_MM",dfb)
+  # 3-external dressed blocks for the unrestricted Λ residual / λ-triples. Each has its ONE occupied
+  # index on a bra (= the store's own T1-independent occ-bra La_o/Lb_o), so all four are direct block-
+  # engine calls off the per-spin stores — no Hermiticity swap. Index 1,3 = α = electron 1, 2,4 = β.
+  if calc_d_vovv
+    # the first three carry occ on bra-2: build the particle-exchanged block (ket coefficients
+    # swapped) and permute (2,1,4,3) — see `ht_mo_block`. The last one has occ on bra-1 already.
+    save!(EC, "d_vovv", permutedims(ht_mo_block(EC, "ht_oAAA_a", La_v, Ra_v, Ra_v), (2,1,4,3)))  # ⟨ai|bc⟩ (αα)
+    save!(EC, "d_VOVV", permutedims(ht_mo_block(EC, "ht_oAAA_b", Lb_v, Rb_v, Rb_v), (2,1,4,3)))  # ⟨AI|BC⟩ (ββ)
+    save!(EC, "d_vOvV", permutedims(ht_mo_block(EC, "ht_oAAA_b", La_v, Rb_v, Ra_v), (2,1,4,3)))  # ⟨aI|bC⟩ (occ I on bra-2, β store)
+    save!(EC, "d_oVvV", ht_mo_block(EC, "ht_oAAA_a", Lb_v, Ra_v, Rb_v))                          # ⟨iB|aC⟩ (occ i on bra-1, α store)
+  end
+  return nothing
+end
+
+"""
+    ao_core_ufock(EC::ECInfo, Da, Db) -> (Fa, Fb)
+
+  Unrestricted mean-field AO Fock contributions of the α/β core densities `Da`/`Db`: the
+  Coulomb term uses the total density, the exchange the same-spin density —
+  ``F^α = J[D_α+D_β] − K[D_α]``, ``F^β = J[D_α+D_β] − K[D_β]``, with
+  ``J[D]_{pq}=⟨pr|qs⟩D_{rs}`` and ``K[D]_{pq}=⟨pr|sq⟩D_{rs}``. Used to fold the (per-spin)
+  frozen core into effective one-electron Hamiltonians in [`ao_cc_setup!`](@ref).
+"""
+function ao_core_ufock(EC::ECInfo{T}, Da::AbstractMatrix, Db::AbstractMatrix) where T
+  TF = promote_type(T, eltype(Da), eltype(Db))
+  Dt = Da .+ Db
+  pm = open_pm_store(EC)
+  J = zeros(TF, pm.nao, pm.nao); Ka = zeros(TF, pm.nao, pm.nao); Kb = zeros(TF, pm.nao, pm.nao)
+  ao_J2K!(J, Ka, Kb, pm, Dt, Da, Db)   # shared Coulomb + both same-spin exchanges, one sweep
+  close_pm_store!(EC, pm)
+  return J .- Ka, J .- Kb                 # F^α = J − K_α, F^β = J − K_β
+end
+
+"""
+    ao_cc_setup!(EC::ECInfo; closed_shell::Bool, orbitals=nothing) -> EHF
+
+  Set up an AO-direct CC run. Freezes core / deleted / frozen-virtual orbitals (reducing
+  `EC.space` to the active space, exactly like the DF/MO path via [`freeze_orbitals!`](@ref))
+  and folds the **frozen-core mean field** into an effective one-electron AO Hamiltonian
+  (`"h1eff_AA"` closed-shell; per-spin `"h1eff_mm_AA"`/`"h1eff_MM_AA"` open-shell) — the
+  AO-direct analogue of [`freeze_orbs_in_dump`](@ref); the frozen-core energy is added to the
+  reference. Then builds the *bare* (undressed) active-space quantities the run needs — the MO
+  Fock (`f_mm`[`/f_MM`]/`e_m`[`/e_M`]), 1-e Hamiltonian, and `⟨ij|ab⟩` — from the AO integrals
+  and the stored MO coefficients (via [`ao_dressed_ints`](@ref) /
+  [`ao_dressed_ints_unrestricted`](@ref) with `T1=∅`). Returns the reference HF energy.
+
+  `closed_shell` is the spin treatment of the **residual** the caller will run, not a property of the
+  stored orbitals: an unrestricted residual on restricted (RHF/ROHF) orbitals simply duplicates α into
+  β ([`unrestrict!`](@ref), as `uhf` does with a restricted guess) and builds the per-spin reference
+  from two identical orbital sets. The opposite combination (closed-shell residual, UHF orbitals) is a
+  different calculation and is rejected by the caller (`ccdriver` derives an MO dump instead).
+  `orbitals` lets the caller hand over the `(cMO, classes)` pair it already loaded.
+"""
+function ao_cc_setup!(EC::ECInfo{T}; closed_shell::Bool, orbitals=nothing) where {T<:Number}
+  pm_exists(EC) ||
+    error("AO-direct CC needs the exact AO integrals on file; generate them first (@ints / @hf).")
+  save_ao_1e_integrals!(EC)                          # fresh AO 1-e integrals for the current system
+  # the correlation reference (projected + re-orthonormalized across a geometry/basis change) and
+  # the orbital classes that describe THAT set — freezing must use them, not the stored file's
+  # classes, when a projection completed/dropped orbitals
+  # `dump4core_only`: the correlating orbitals come from `start` (their frozen core is stale, stuck
+  # at the previous geometry); the core is swapped in from `dump` below — same source selection as
+  # the density-fitted dump builder. `orbitals` lets the caller hand over the `(cMO, classes)` pair
+  # it already loaded (the driver needs the spin case to pick the method), so the orbital file is
+  # read once per run instead of once here and once there.
+  cMOsm, corr_classes = isnothing(orbitals) ?
+      load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only) : orbitals
+  @assert !closed_shell || is_restricted(cMOsm) "closed-shell AO-direct setup needs restricted orbitals"
+  closed_shell || unrestrict!(cMOsm)                 # β = copy(α) for restricted (RHF/ROHF) orbitals
+  # freeze core/deleted/frozen-virtual orbitals -> EC.space becomes the active space
+  space_full = save_space(EC)
+  occ_full_a = space_full['o']; occ_full_b = space_full['O']
+  freeze_orbitals!(EC; classes=corr_classes)
+  warn_ao_direct_deleted(EC, length(space_full[':']))
+  core_a = sort!(setdiff(occ_full_a, EC.space['o']))  # frozen occupied (core) α MOs
+  core_b = sort!(setdiff(occ_full_b, EC.space['O']))  # frozen occupied (core) β MOs
+  # `dump4core_only`: take the frozen core from the fresh-HF `dump` at the CURRENT geometry and
+  # re-orthonormalize the correlating orbitals against it. Only the core needs this — it enters the
+  # effective one-electron Hamiltonian and `Ecore` computed just below, once per run — but the
+  # re-orthonormalization also touches the correlating orbitals, which is why the resulting
+  # reference is persisted rather than re-derived by every later reader.
+  if EC.options.wf.dump4core_only && !isempty(EC.system) && !isempty(core_a)
+    core_a == 1:length(core_a) ||
+      error("dump4core_only expects the frozen core at the lowest orbitals, got $core_a")
+    replace_core_from_dump!(EC, cMOsm, length(core_a))
+  end
+  save_ao_correlation_orbitals!(EC, cMOsm)           # the reference every later consumer reads
+  hao = Matrix{T}(load2idx(EC, "h_AA"))
+  Enuc = nuclear_repulsion(EC.system)
+  SP = EC.space
+  if closed_shell
+    cMO = ao_direct_orbitals(EC)                     # α, deleted columns dropped
+    Ecore = zero(real(T)); h1eff = hao
+    if !isempty(core_a)
+      Ccore = cMO[:, core_a]
+      @mtensor Dcore[μ,ν] := Ccore[μ,c] * Ccore[ν,c] # closed-shell core density (per spin)
+      Fcore = ao_core_fock(EC, Dcore)                # frozen-core mean field (2J-K)
+      h1eff = hao + Fcore
+      Ecore = 2.0*sum(Dcore .* hao) + sum(Dcore .* Fcore)
+    end
+    save!(EC, "h1eff_AA", h1eff)
+    # Build the half-transformed store ONCE (bra-occ transform is T1-independent), so the bare pass
+    # below and every residual iteration read it instead of re-streaming the ± store. Delete first so a
+    # stale store from a prior run/orbital set is never reused.
+    delete_ht_store!(EC, "ht_oAAA"); file_exists(EC, "ht_ooAA") && delete_file!(EC, "ht_ooAA")
+    pm = open_pm_store(EC)
+    ht_build_dress!(EC, pm, cMO[:, SP['o']])
+    close_pm_store!(EC, pm)
+    ao_dressed_ints(EC, T[], cMO)                    # T1 empty ⇒ bare (active-space) integrals
+    fock = load2idx(EC, "df_mm")
+    save!(EC, "f_mm", fock); save!(EC, "f_MM", fock)
+    eps = diag(fock); save!(EC, "e_m", eps); save!(EC, "e_M", eps)
+    h_mm = load2idx(EC, "dh_mm"); save!(EC, "h_mm", h_mm)
+    # constant part of the reference energy (nuclear repulsion + frozen core) — the AO-direct
+    # counterpart of the dump's `int0`, used by `calc_rotated_HF_energy` for the OQV methods
+    save!(EC, "ao_e0", [Enuc + Ecore])
+    return sum(eps[SP['o']]) + sum(diag(h_mm[SP['o'],SP['o']])) + Enuc + Ecore
+  else
+    cMOa = Matrix{T}(cMOsm.α); cMOb = Matrix{T}(cMOsm.β)
+    Ecore = zero(real(T)); h1a = copy(hao); h1b = copy(hao)
+    if !isempty(core_a) || !isempty(core_b)
+      Ca_core = cMOa[:, core_a]; Cb_core = cMOb[:, core_b]
+      @mtensor Da[μ,ν] := Ca_core[μ,c] * Ca_core[ν,c]
+      @mtensor Db[μ,ν] := Cb_core[μ,c] * Cb_core[ν,c]
+      Fa, Fb = ao_core_ufock(EC, Da, Db)             # per-spin frozen-core mean field
+      h1a = hao .+ Fa; h1b = hao .+ Fb
+      # UHF frozen-core energy (matches freeze_orbs_in_dump): Σc h + 0.5 Σc F^core, per spin
+      Ecore = sum(Da .* hao) + sum(Db .* hao) + 0.5*(sum(Da .* Fa) + sum(Db .* Fb))
+    end
+    save!(EC, "h1eff_mm_AA", h1a); save!(EC, "h1eff_MM_AA", h1b)
+    # Build the per-spin half-transformed stores ONCE (bra-occ transforms are T1-independent), so the
+    # bare pass below and every residual iteration read them instead of re-streaming the ± store. Delete
+    # first so a stale store from a prior run/orbital set is never reused.
+    delete_ht_store!(EC, "ht_oAAA_a"); delete_ht_store!(EC, "ht_oAAA_b")
+    for k in ("ht_ooAA_a", "ht_ooAA_b", "ht_oOAA")
+      file_exists(EC, k) && delete_file!(EC, k)
+    end
+    pm = open_pm_store(EC)
+    ht_build_dress_unrestricted!(EC, pm, cMOa[:, SP['o']], cMOb[:, SP['O']])
+    close_pm_store!(EC, pm)
+    ao_dressed_ints_unrestricted(EC, T[], T[], cMOa, cMOb)
+    focka = load2idx(EC, "df_mm"); fockb = load2idx(EC, "df_MM")
+    save!(EC, "f_mm", focka); save!(EC, "f_MM", fockb)
+    epsa = diag(focka); epsb = diag(fockb)
+    save!(EC, "e_m", epsa); save!(EC, "e_M", epsb)
+    dha = load2idx(EC, "dh_mm"); dhb = load2idx(EC, "dh_MM")
+    save!(EC, "h_mm", dha); save!(EC, "h_MM", dhb)
+    EHF = 0.5*(sum(epsa[SP['o']]) + sum(epsb[SP['O']]) +
+               sum(diag(dha[SP['o'],SP['o']])) + sum(diag(dhb[SP['O'],SP['O']]))) + Enuc + Ecore
+    return EHF
+  end
+end
+
+"""
+    calc_qvcc_resid(EC::ECInfo, T1, T2; dc=false, orbopt=false, brueckner=false)
 
   Calculate QV-CCD or QV-DCD closed-shell residual.
 """
-function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
+function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false, brueckner=false)
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
   I_ab = Matrix{eltype(T2)}(I,nvirt,nvirt)
@@ -1543,11 +2293,24 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
   norb = n_orbs(EC)
   SP = EC.space
   Rpq = zeros(0,0)
+  Crot = zeros(0,0)     # AO-direct: the rotated AO→MO map (cMO·Rpq), see ao_rotate_ints
 
   # orbital optimization -- integral tranformation
   if orbopt
     Rpq = rotation_matrix(EC, T1)
-    rotate_ints(EC, Rpq)
+    if EC.ao_direct
+      # fold the rotation into the coefficients and rebuild the blocks from the AO integrals;
+      # `Crot` then stands in for `Rpq` wherever the rotation multiplies a general orbital index
+      Crot = ao_rotate_ints(EC, Rpq)
+    else
+      rotate_ints(EC, Rpq)
+    end
+  elseif EC.ao_direct
+    # AO-direct: the bare `d_*` blocks that `pseudo_dressed_ints` would provide are built straight from
+    # the AO integrals by the dressing inside `calc_cc_resid` below (called with an EMPTY T1, so the
+    # blocks come out bare). Only the `vvoo` block is extra here; the AO integrals are Hermitian, so
+    # ``⟨ab|ij⟩`` is the transpose of ``⟨ij|ab⟩`` — the route `calc_MP2` already uses AO-direct.
+    save!(EC, "d_vvoo", permutedims(load_bare_int2(EC, "oovv"), (3,4,1,2)))
   else
     EC.options.cc.calc_d_vvoo = true
     pseudo_dressed_ints(EC)
@@ -1596,18 +2359,23 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
     q2T = calc_qT_cc(AU2, BU2, CU2, Y2, W2, T2, T2t)
   end
 
-  # orbital optimization -- gradients calculation
-  if orbopt
-    G1 = calc_oqv_gradient(EC, q1T, q2T, Rpq)
-  else
-    G1 = T1
-  end
-
   #load the integrals
   T1_0 = zeros(eltype(T1),0,0)
   # q2VD = ints2(EC, "vvoo")
   q2VD = load4idx(EC,"d_vvoo")
-  q1VD = calc_cc_resid(EC, T1_0, q1T; dc, Rot=Rpq, linearized=true)[2]
+  # singles_resid=brueckner extracts the (Brueckner) singles residual from the same H·T2 call
+  q1VS, q1VD = calc_cc_resid(EC, T1_0, q1T; dc, Rot=(EC.ao_direct && orbopt ? Crot : Rpq),
+                             linearized=true, singles_resid=brueckner)
+
+  # orbital optimization -- gradient (OQV) or Brueckner singles residual (BQV)
+  if brueckner
+    # rotate orbitals to zero the singles residual of the q1T channel (Knowles' Brueckner condition)
+    G1 = q1VS
+  elseif orbopt
+    G1 = calc_oqv_gradient(EC, q1T, q2T, EC.ao_direct ? Crot : Rpq)
+  else
+    G1 = T1
+  end
 
   q1VD .-= q2VD
   @mtensor temp_perm[a,b,i,j] := q1VD[b,a,i,j]
@@ -1638,17 +2406,343 @@ function calc_qvcc_resid(EC::ECInfo, it::Int, T1, T2; dc=false, orbopt=false)
 end
 
 """
-    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, qv=false, R=zeros(Float64,0,0))
+    cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot)
+
+  Calculate the 4-external (and some more) contribution to the CCSD residuals. 
+  
+  `R1` and `R2` are the singles and doubles residuals to be updated.
+  `T1` and `T2` are the singles and doubles amplitudes.
+  `Rot` is the rotation matrix for orbital optimization (if any).
+"""
+function cc_kext!(EC::ECInfo, R1, R2, T1, T2, Rot; singles_resid=false)
+  t1 = time_ns()
+  SP = EC.space
+  norb = n_orbs(EC)
+  # Two integral sources, and only two: AO-direct contracts the persisted ± supermatrix store
+  # (halved flops and streaming, `Rot` (= cMO) folds the result back to the MO basis below),
+  # otherwise the triangular MO integrals of the dump.
+  # last two indices of integrals are stored as upper triangular
+  tripp = uppertriangular_cut(norb)
+  D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
+  t1 = print_time(EC, t1, "calc D2", 2)
+  if EC.ao_direct
+    pm = open_pm_store(EC)
+    K2pq = pm_K2!(pm, D2, tripp)
+    close_pm_store!(EC, pm)
+  else
+    K2pq = calc_K2(integ2_ss(EC.fd), D2, tripp)
+  end
+  D2 = nothing
+  t1 = print_time(EC, t1, "calc K2", 2)
+  if length(Rot) > 0 
+    @mtensor tmpK2pq[p,r,i,j] := K2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
+    K2pq = tmpK2pq
+  end
+  @views R2 .+= K2pq[SP['v'],SP['v'],:,:]
+  if length(T1) > 0
+    @mtensor begin
+      R2[a,b,i,j] -= K2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
+      R2[a,b,i,j] -= K2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
+      R2[a,b,i,j] += (K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k]) * T1[b,l]
+      x1[k,i] := 2.0 * K2pq[SP['o'],SP['o'],:,:][k,l,i,l] - K2pq[SP['o'],SP['o'],:,:][k,l,l,i]
+      R1[a,i] -= x1[k,i] * T1[a,k]
+    end
+  end
+  if length(T1) > 0 || singles_resid
+    # singles residual, 4-external contribution (T1-independent; needed for Brueckner residual at T1≡0)
+    @mtensor R1[a,i] += 2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
+  end
+  K2pq = nothing
+  return
+end
+
+
+"""
+    cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab, Rota, Rotb)
+
+  Calculate the 4-external (and some more) contribution to the UCCSD residuals. 
+  
+  `R1*` and `R2*` are the singles and doubles residuals to be updated.
+  `T1*` and `T2*` are the singles and doubles amplitudes.
+  `Rot*` are the rotation matrices for orbital optimization (if any).
+"""
+function cc_kext!(EC::ECInfo, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab, Rota, Rotb)
+  t1 = time_ns()
+  SP = EC.space
+  ao = EC.ao_direct
+  # Two integral sources, and only two: AO-direct contracts the persisted ± supermatrix store
+  # (all spin blocks — the αβ block via the explicit rs-± fold), otherwise the triangular MO
+  # integrals of the dump. `Rota`/`Rotb` (= cMOα/cMOβ) fold each spin block back to MO below.
+  pm = ao ? open_pm_store(EC) : nothing
+  norb = ao ? pm.nao : n_orbs(EC)
+  # last two indices of integrals (apart from αβ) are stored as upper triangular
+  tripp = uppertriangular_cut(norb)
+  # αα
+  int2a = ao ? nothing : integ2_ss(EC.fd, :α)
+  D2a = calc_D2(EC, T1a, T2a, :α; Rot=Rota)[tripp,:,:]
+  t1 = print_time(EC, t1, "calc D2a", 2)
+  if ao
+    K2pqa = pm_K2!(pm, D2a, tripp)
+  else
+    K2pqa = calc_K2(int2a, D2a, tripp)
+  end
+  D2a = nothing
+  int2a = nothing
+  t1 = print_time(EC, t1, "calc K2a", 2)
+  if ao
+    @mtensor tmpK2a[p,r,i,j] := K2pqa[p',r',i,j] * Rota[p',p] * Rota[r',r]
+    K2pqa = tmpK2a
+  end
+  @views R2a .+= K2pqa[SP['v'],SP['v'],:,:]
+  if length(T1a) > 0
+    @mtensor begin
+      R2a[a,b,i,j] -= K2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
+      R2a[a,b,i,j] -= K2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
+      R2a[a,b,i,j] += K2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
+      # singles residual contributions
+      R1a[a,i] +=  K2pqa[SP['v'],SP['o'],:,:][a,k,i,k] 
+      x1a[k,i] :=  K2pqa[SP['o'],SP['o'],:,:][k,l,i,l]
+      R1a[a,i] -= x1a[k,i] * T1a[a,k]
+    end
+  end
+  K2pqa = nothing
+  if n_occb_orbs(EC) > 0
+    # ββ
+    int2b = ao ? nothing : integ2_ss(EC.fd, :β)
+    D2b = calc_D2(EC, T1b, T2b, :β; Rot=Rotb)[tripp,:,:]
+    t1 = print_time(EC, t1, "calc D2b", 2)
+    if ao
+      K2pqb = pm_K2!(pm, D2b, tripp)
+    else
+      K2pqb = calc_K2(int2b, D2b, tripp)
+    end
+    D2b = nothing
+    int2b = nothing
+    t1 = print_time(EC, t1, "calc K2b", 2)
+    if ao
+      @mtensor tmpK2b[p,r,i,j] := K2pqb[p',r',i,j] * Rotb[p',p] * Rotb[r',r]
+      K2pqb = tmpK2b
+    end
+    @views R2b .+= K2pqb[SP['V'],SP['V'],:,:]
+    if length(T1b) > 0
+      @mtensor begin
+        R2b[a,b,i,j] -= K2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
+        R2b[a,b,i,j] -= K2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+        R2b[a,b,i,j] += K2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
+        # singles residual contributions
+        R1b[a,i] += K2pqb[SP['V'],SP['O'],:,:][a,k,i,k]
+        x1b[k,i] := K2pqb[SP['O'],SP['O'],:,:][k,l,i,l]
+        R1b[a,i] -= x1b[k,i] * T1b[a,k]
+      end
+    end
+    K2pqb = nothing
+    # αβ — spin-free triangular integrals (AO or RHF-based dump). A separate αβ MO block only
+    # exists for a genuine UHF dump; the AO-direct path always uses the spin-free branch.
+    if !ao && EC.fd.uhf
+      int2ab = integ2_os(EC.fd)
+      D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
+      K2pqab = calc_K2ab(int2ab, D2ab)
+      D2ab = nothing
+      int2ab = nothing
+      @views R2ab .+= K2pqab[SP['v'],SP['V'],:,:]
+    else
+      D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true; Rota, Rotb)
+      if ao
+        K2pqab = pm_K2ab!(pm, D2ab_full, tripp)
+        D2ab_full = nothing
+      else
+        tripp_swap = swapped_uppertriangular_cut(norb)
+        int2 = integ2_ss(EC.fd)
+        D2ab = D2ab_full[tripp,:,:]
+        K2pqab = calc_K2(int2, D2ab, tripp; symmetrize=false)
+        @views D2ab .= D2ab_full[tripp_swap,:,:]
+        D2ab_full = nothing
+        K2pqabT = calc_K2(int2, D2ab, tripp_swap; symmetrize=false)
+        D2ab = nothing
+        @mtensor K2pqab[p,r,i,j] += K2pqabT[r,p,i,j]
+        K2pqabT = nothing
+      end
+      if ao
+        # fold the two AO externals back to the MO basis: index 1 → α (Rota), index 2 → β (Rotb)
+        @mtensor tmpK2ab[p,r,i,j] := K2pqab[p',r',i,j] * Rota[p',p] * Rotb[r',r]
+        K2pqab = tmpK2ab
+      end
+      @views R2ab .+= K2pqab[SP['v'],SP['V'],:,:]
+    end
+  end
+  ao && close_pm_store!(EC, pm)
+  if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
+    @mtensor begin
+      R2ab[a,b,i,j] -= K2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
+      R2ab[a,b,i,j] -= K2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
+      R2ab[a,b,i,j] += K2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
+      R1a[a,i] += K2pqab[SP['v'],SP['O'],:,:][a,k,i,k] 
+      x1a1[k,i] := K2pqab[SP['o'],SP['O'],:,:][k,l,i,l]
+      R1a[a,i] -= x1a1[k,i] * T1a[a,k]
+      R1b[a,i] += K2pqab[SP['o'],SP['V'],:,:][k,a,k,i] 
+      x1b1[k,i] := K2pqab[SP['o'],SP['O'],:,:][l,k,l,i]
+      R1b[a,i] -= x1b1[k,i] * T1b[a,k]
+    end
+  end
+  return
+end
+
+""" `rs`-block length the 4-external contractions fall back to: the default of the shared
+    `get_spaceblocks`, so that [`kext_rs_blocksize`](@ref) reproduces the previous blocking
+    exactly wherever it does not grow it. """
+const KEXT_RS_MINBLOCK = 128
+
+""" Growth of the `rs`-block length per result column beyond `KEXT_RS_MINBLOCK`, see
+    [`kext_rs_blocksize`](@ref). Measured on the `calc_K2` GEMM shape (MKL, 8 threads,
+    `norb` = 96…232): the block GEMM saturates around `k ≈ 5–8` times the number of result
+    columns. """
+const KEXT_RS_PER_COL = 8
+
+""" Result width below which the blocking is left at `KEXT_RS_MINBLOCK`, see
+    [`kext_rs_blocksize`](@ref). Deliberately conservative: block lengths in `129…511` measured
+    *slower* than the old default at `norb=164, ncols=144` (−6%, where the 128-block GEMM already
+    runs at 93–100% of its shape roofline), and the sweep is not monotonic. Ramping only above
+    `ncols = 256` puts the smallest block the ramp can produce at `128 + 8·129 = 1160`, so that
+    band is unreachable by construction rather than by a tuned special case. The cost is some
+    forgone gain for `ncols ∈ (128, 256]`; the benefit is that no shape can regress. """
+const KEXT_RS_RAMP_FROM = 256
+
+"""
+    kext_rs_blocksize(nrs, ncols; scratch_per_rs=0, nout=0)
+
+  Block length for the `rs` loop of the 4-external (kext) contractions
+  ([`calc_K2`](@ref)).
+
+  Each block is a single GEMM whose contraction (`k`) dimension is the block length and which
+  read-modify-writes the *whole* result, so the shared `get_spaceblocks` default of 128 streams
+  the result `nrs/128` times (212 times at `norb=232`) on top of the one unavoidable pass over
+  the integrals. The ratio of the two is `2*ncols/blocklength`, i.e. it is governed by `ncols`,
+  the width of the GEMM's right-hand side (`nocc1*nocc2`, or `ntri_oo` for the ± variant) — and
+  so is the measured payoff: for narrow results the result traffic does not exceed the integral
+  stream and enlarging the block *loses* (up to 17% at `ncols=64`), while for wide ones the gain
+  reaches 1.35× (at `ncols=400`, i.e. 20 correlated occupied orbitals, `norb=232`).
+
+  The rule is deliberately conservative (see `KEXT_RS_RAMP_FROM`): the blocking is left exactly as
+  it was unless `ncols` exceeds that threshold, and only then grows by `KEXT_RS_PER_COL` per
+  result column. So every shape either keeps its previous, bit-for-bit identical blocking or gets
+  a block in a range where enlarging was measured to win — the non-monotonic band in between is
+  never selected. The payoff is not governed by `ncols` alone (the same `ncols=144` loses 6% at
+  `norb=164`, where the 128-block GEMM is already at roofline, and gains 1.08× at `norb=232`),
+  which is the reason for the threshold rather than a finer fit.
+
+  `scratch_per_rs` (elements of per-`rs` scratch, if any) and `nout` (elements of the result the
+  scratch is measured against) cap the block so the scratch stays below a quarter of a result
+  array that is allocated anyway — no new memory regime, at most a few percent on the peak. The
+  result never exceeds `nrs`.
+"""
+function kext_rs_blocksize(nrs::Int, ncols::Int; scratch_per_rs::Int=0, nout::Int=0)
+  ncols <= KEXT_RS_RAMP_FROM && return min(KEXT_RS_MINBLOCK, nrs)   # unchanged blocking
+  bsz = KEXT_RS_MINBLOCK + KEXT_RS_PER_COL * (ncols - KEXT_RS_MINBLOCK)
+  if scratch_per_rs > 0
+    bsz = min(bsz, nout ÷ (4*scratch_per_rs))
+  end
+  return min(max(bsz, KEXT_RS_MINBLOCK), nrs)
+end
+
+
+
+
+
+
+
+"""
+    calc_K2(int2, D2, tripp; symmetrize=true)
+
+  Calculate the kext K2 contribution to the CCSD residuals by directly contracting the integrals with D2.
+
+  ``K^{ij}_{pq} = v_{pq}^{rs} D^ij_rs``
+
+  Return K2pq::Array{4}.
+"""
+function calc_K2(int2::AbstractArray{T,3}, D2::AbstractArray{T,3}, tripp; symmetrize=true) where T <: Number
+  norb = size(int2, 1)
+  nocc1 = size(D2, 2)
+  nocc2 = size(D2, 3)
+  ntri_pp = length(tripp)
+  nrs = size(int2, 3)
+  @assert ntri_pp == nrs # sanity check for the dimensions
+  rK2pq = zeros(T, norb, norb, nocc1, nocc2)
+  ncols = nocc1 * nocc2
+  rsBlks = get_spaceblocks(1:nrs, kext_rs_blocksize(nrs, ncols; scratch_per_rs=ncols, nout=length(rK2pq)))
+  maxrs = maximum(length, rsBlks)
+  lenbuf = maxrs * nocc1 * nocc2
+  @buffer buf(T, lenbuf) begin
+  for rs in rsBlks
+    lenrs = length(rs)
+    v!int2 = @mview(int2[:, :, rs])
+    # <pq|rs> D^ij_rs
+    aD2 = alloc!(buf, lenrs, nocc1, nocc2)
+    @views aD2 .= D2[rs, :, :]
+    @mtensor rK2pq[p,q,i,j] += v!int2[p,q,rs] * aD2[rs,i,j]
+    drop!(buf, aD2)
+  end
+  end # buffer
+  if !symmetrize
+    return rK2pq
+  end
+  # symmetrize K2
+  @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
+  return K2pq
+end
+
+"""
+    calc_K2ab(int2, D2)
+
+  Calculate the kext K2ab contribution to the CCSD residuals by directly contracting the integrals with D2.
+
+  ``K^{iJ}_{pQ} = v_{pQ}^{rS} D^iJ_rS``
+
+  Return K2pq::Array{4}.
+"""
+function calc_K2ab(int2::AbstractArray{T,4}, D2::AbstractArray{T,4}) where T <: Number
+  norb = size(int2, 1)
+  nocca = size(D2, 3)
+  noccb = size(D2, 4)
+  K2pq = zeros(T, norb, norb, nocca, noccb)
+  sBlks = get_spaceblocks(1:norb, 8)
+  maxs = maximum(length, sBlks)
+  lenbuf = norb * maxs * nocca * noccb
+  @buffer buf(T, lenbuf) begin
+  for s in sBlks
+    lens = length(s)
+    v!int2 = @mview(int2[:, :, :, s])
+    # <pq|rs> D^ij_rs
+    aD2 = alloc!(buf, norb, lens, nocca, noccb)
+    @views aD2 .= D2[:, s, :, :]
+    @mtensor K2pq[p,q,i,j] += v!int2[p,q,r,s] * aD2[r,s,i,j]
+    drop!(buf, aD2)
+  end
+  end # buffer
+  return K2pq
+end
+
+"""
+    calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, Rot=zeros(Float64,0,0), singles_resid=false)
 
   Calculate CCSD or DCSD closed-shell residual.
 """
-function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, Rot=zeros(Float64,0,0))
+function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false, linearized=false, Rot=zeros(Float64,0,0), singles_resid=false)
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
-  norb = n_orbs(EC)
-  if length(T1) > 0
+  if EC.ao_direct
+    # AO-direct: dress integrals from the AO integral files + MO coeffs; the vvvv term is done in
+    # the AO basis by cc_kext! with Rot=cMO (so klcd is loaded as the dressed d_oovv too). `Rot`
+    # carries the MO coefficients — loaded once and hoisted out of the iteration loop by the caller
+    # (empty ⇒ load here) — and doubles as the AO→MO rotation for cc_kext!.
+    @assert EC.options.cc.use_kext "AO-direct CC requires cc.use_kext=true"
+    if length(Rot) == 0
+      Rot = ao_direct_orbitals(EC)
+    end
+    ao_dressed_ints(EC, T1, Rot)
+    t1 = print_time(EC,t1,"AO dressing",2)
+  elseif length(T1) > 0
     calc_dressed_ints(EC, T1)
     t1 = print_time(EC,t1,"dressing",2)
   else
@@ -1658,7 +2752,9 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   end
   @mtensor T2t[a,b,i,j] := 2.0 * T2[a,b,i,j] - T2[b,a,i,j]
   dfock = load2idx(EC,"df_mm")
-  if length(T1) > 0
+  if length(T1) > 0 || singles_resid
+    # `singles_resid` forces the singles (Brueckner) residual even for empty T1 (T1≡0);
+    # the terms below only depend on T2t and the (rotated/dressed) integrals, not on T1.
     if EC.options.cc.use_kext
       dint1 = load2idx(EC,"dh_mm")
       R1 = dint1[SP['v'],SP['o']]
@@ -1691,11 +2787,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
     R2 = eltype(T2).(load4idx(EC,"d_vvoo"))
   end
   t1 = print_time(EC,t1,"<ab|ij>",2)
-  if length(Rot) == 0
-    klcd = ints2(EC,"oovv")
-  else
-    klcd = load4idx(EC,"d_oovv")
-  end
+  klcd = load_bare_int2(EC, "oovv")
   t1 = print_time(EC,t1,"<kl|cd>",2)
   int2 = load4idx(EC,"d_oooo")
   if !dc && !linearized
@@ -1706,33 +2798,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   @mtensor R2[a,b,i,j] += int2[k,l,i,j] * T2[a,b,k,l]
   t1 = print_time(EC,t1,"I_klij T^kl_ab",2)
   if EC.options.cc.use_kext
-    int2 = integ2_ss(EC.fd)
-    # last two indices of integrals are stored as upper triangular 
-    tripp = uppertriangular_cut(norb)
-    D2 = calc_D2(EC, T1, T2, true; Rot)[tripp,:,:]
-    # <pq|rs> D^ij_rs
-    @mtensor rK2pq[p,r,i,j] := int2[p,r,x] * D2[x,i,j]
-    if length(Rot) > 0 
-      @mtensor rK2pq[p,r,i,j] = rK2pq[p',r',i,j] * Rot[p', p] * Rot[r', r] # Rotation
-    end
-    D2 = nothing
-    # symmetrize K2
-    @mtensor K2pq[p,r,i,j] := rK2pq[p,r,i,j] + rK2pq[r,p,j,i]
-    rK2pq = nothing
-    R2 += K2pq[SP['v'],SP['v'],:,:]
-    if length(T1) > 0
-      @mtensor begin
-        R2[a,b,i,j] -= K2pq[SP['o'],SP['v'],:,:][k,b,i,j] * T1[a,k]
-        R2[a,b,i,j] -= K2pq[SP['v'],SP['o'],:,:][a,k,i,j] * T1[b,k]
-        R2[a,b,i,j] += (K2pq[SP['o'],SP['o'],:,:][k,l,i,j] * T1[a,k]) * T1[b,l]
-        # singles residual contributions
-        R1[a,i] +=  2.0 * K2pq[SP['v'],SP['o'],:,:][a,k,i,k] - K2pq[SP['v'],SP['o'],:,:][a,k,k,i]
-        x1[k,i] := 2.0 * K2pq[SP['o'],SP['o'],:,:][k,l,i,l] - K2pq[SP['o'],SP['o'],:,:][k,l,l,i]
-        R1[a,i] -= x1[k,i] * T1[a,k]
-      end
-    end
-    x1 = nothing
-    K2pq = nothing
+    cc_kext!(EC, R1, R2, T1, T2, Rot; singles_resid)
     t1 = print_time(EC,t1,"kext",2)
   else
     if !EC.options.cc.calc_d_vvvv
@@ -1796,7 +2862,7 @@ function calc_cc_resid(EC::ECInfo, T1, T2; dc=false, tworef=false, fixref=false,
   end
   t1 = print_time(EC,t1,"P(ia;jb)",2)
 
-  return R1,R2
+  return R1, R2
 end
 
 """
@@ -1804,7 +2870,7 @@ end
 
   Calculate UCCSD or UDCSD residual.
 """
-function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false)
+function calc_cc_resid(EC::ECInfo{T}, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=false, fixref=false, Rot=nothing) where T <: Number
   t1 = time_ns()
   SP = EC.space
   nocc = n_occ_orbs(EC)
@@ -1819,7 +2885,19 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     T2ab[active.ua,active.tb,active.ta,active.ub] = 0.0
   end
 
-  if length(T1a) > 0 || length(T1b) > 0
+  if EC.ao_direct
+    # AO-direct: dress the αα/ββ/αβ ring + Fock blocks occ-early from the AO integrals + per-spin
+    # MO coefficients; the vvvv term is done in the AO basis by cc_kext! (Rota=cMOα, Rotb=cMOβ),
+    # exactly like the closed-shell path — so it requires the kext residual route.
+    # `Rot` carries the MO coefficients (SpinMatrix) — loaded once and hoisted out of the iteration
+    # loop by the caller (`nothing` ⇒ load here); the same `cMOsm` is reused below as the cc_kext!
+    # Rota/Rotb, so the orbitals are loaded at most once. (The UHF kext has no orbital-optimization
+    # rotation, so `Rot` here is purely these AO→MO coefficients.)
+    @assert EC.options.cc.use_kext "AO-direct CC requires cc.use_kext=true"
+    cMOsm = Rot === nothing ? ao_direct_orbitals_spin(EC) : Rot
+    ao_dressed_ints_unrestricted(EC, T1a, T1b, Matrix(cMOsm.α), Matrix(cMOsm.β))
+    t1 = print_time(EC,t1,"AO dressing",2)
+  elseif length(T1a) > 0 || length(T1b) > 0
     calc_dressed_ints(EC, T1a, T1b)
     t1 = print_time(EC,t1,"dressing",2)
   else
@@ -1893,9 +2971,9 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
 
   #driver terms
   if EC.options.cc.use_kext
-    R2a = zeros(nvirt, nvirt, nocc, nocc)
-    R2b = zeros(nvirtb, nvirtb, noccb, noccb)
-    R2ab = zeros(nvirt, nvirtb, nocc, noccb)
+    R2a = zeros(T, nvirt, nvirt, nocc, nocc)
+    R2b = zeros(T, nvirtb, nvirtb, noccb, noccb)
+    R2ab = zeros(T, nvirt, nvirtb, nocc, noccb)
   else
     d_vvoo = load4idx(EC,"d_vvoo")
     R2a = deepcopy(d_vvoo)
@@ -1910,106 +2988,14 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   
   #ladder terms
   if EC.options.cc.use_kext
-    # last two indices of integrals (apart from αβ) are stored as upper triangular 
-    tripp = uppertriangular_cut(norb)
-    if EC.fd.uhf
-      # αα
-      int2a = integ2_ss(EC.fd, :α)
-      D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @mtensor rK2pqa[p,r,i,j] := int2a[p,r,x] * D2a[x,i,j]
-      D2a = nothing
-      int2a = nothing
-      # symmetrize R
-      @mtensor K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
-      rK2pqa = nothing
-      R2a += K2pqa[SP['v'],SP['v'],:,:]
-      if n_occb_orbs(EC) > 0
-        # ββ
-        int2b = integ2_ss(EC.fd, :β)
-        D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @mtensor rK2pqb[p,r,i,j] := int2b[p,r,x] * D2b[x,i,j]
-        D2b = nothing
-        int2b = nothing
-        # symmetrize R
-        @mtensor K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
-        rK2pqb = nothing
-        R2b += K2pqb[SP['V'],SP['V'],:,:]
-        # αβ
-        int2ab = integ2_os(EC.fd)
-        D2ab = calc_D2ab(EC, T1a, T1b, T2ab)
-        @mtensor K2pqab[p,r,i,j] := int2ab[p,r,q,s] * D2ab[q,s,i,j]
-        D2ab = nothing
-        int2ab = nothing
-        R2ab += K2pqab[SP['v'],SP['V'],:,:]
-      end
+    if EC.ao_direct
+      # reuse the `cMOsm` already loaded for the AO dressing above (same iteration, same orbitals)
+      Rota = Matrix{T}(cMOsm.α); Rotb = Matrix{T}(cMOsm.β)   # fold the AO vvvv back to the MO basis
     else
-      int2 = integ2_ss(EC.fd)
-      # αα
-      D2a = calc_D2(EC, T1a, T2a, :α)[tripp,:,:]
-      @mtensor rK2pqa[p,r,i,j] := int2[p,r,x] * D2a[x,i,j]
-      D2a = nothing
-      # symmetrize R
-      @mtensor K2pqa[p,r,i,j] := rK2pqa[p,r,i,j] + rK2pqa[r,p,j,i]
-      rK2pqa = nothing
-      R2a += K2pqa[SP['v'],SP['v'],:,:]
-      if n_occb_orbs(EC) > 0
-        # ββ
-        D2b = calc_D2(EC, T1b, T2b, :β)[tripp,:,:]
-        @mtensor rK2pqb[p,r,i,j] := int2[p,r,x] * D2b[x,i,j]
-        D2b = nothing
-        # symmetrize R
-        @mtensor K2pqb[p,r,i,j] := rK2pqb[p,r,i,j] + rK2pqb[r,p,j,i]
-        rK2pqb = nothing
-        R2b += K2pqb[SP['V'],SP['V'],:,:]
-        # αβ
-        D2ab_full = calc_D2ab(EC, T1a, T1b, T2ab, true)
-        D2ab = D2ab_full[tripp,:,:] 
-        D2abT = permutedims(D2ab_full,(2,1,4,3))[tripp,:,:]
-        D2ab_full = nothing
-        @mtensor K2pqab[p,r,i,j] := int2[p,r,x] * D2ab[x,i,j]
-        @mtensor K2pqab[p,r,i,j] += int2[r,p,x] * D2abT[x,j,i]
-        D2ab = nothing
-        D2abT = nothing
-        R2ab += K2pqab[SP['v'],SP['V'],:,:]
-      end
+      Rota = zeros(T, 0, 0)  # orbital-optimization rotation not implemented for UHF kext
+      Rotb = zeros(T, 0, 0)
     end
-    if length(T1a) > 0
-      @mtensor begin
-        R2a[a,b,i,j] -= K2pqa[SP['o'],SP['v'],:,:][k,b,i,j] * T1a[a,k]
-        R2a[a,b,i,j] -= K2pqa[SP['v'],SP['o'],:,:][a,k,i,j] * T1a[b,k]
-        R2a[a,b,i,j] += K2pqa[SP['o'],SP['o'],:,:][k,l,i,j] * T1a[a,k] * T1a[b,l]
-        # singles residual contributions
-        R1a[a,i] +=  K2pqa[SP['v'],SP['o'],:,:][a,k,i,k] 
-        x1a[k,i] :=  K2pqa[SP['o'],SP['o'],:,:][k,l,i,l]
-        R1a[a,i] -= x1a[k,i] * T1a[a,k]
-      end
-    end
-    if length(T1b) > 0
-      @mtensor begin
-        R2b[a,b,i,j] -= K2pqb[SP['O'],SP['V'],:,:][k,b,i,j] * T1b[a,k]
-        R2b[a,b,i,j] -= K2pqb[SP['V'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
-        R2b[a,b,i,j] += K2pqb[SP['O'],SP['O'],:,:][k,l,i,j] * T1b[a,k] * T1b[b,l]
-        # singles residual contributions
-        R1b[a,i] += K2pqb[SP['V'],SP['O'],:,:][a,k,i,k]
-        x1b[k,i] := K2pqb[SP['O'],SP['O'],:,:][k,l,i,l]
-        R1b[a,i] -= x1b[k,i] * T1b[a,k]
-      end
-    end
-    if n_occ_orbs(EC) > 0 && n_occb_orbs(EC) > 0 && length(T1a) > 0
-      @mtensor begin
-        R2ab[a,b,i,j] -= K2pqab[SP['o'],SP['V'],:,:][k,b,i,j] * T1a[a,k]
-        R2ab[a,b,i,j] -= K2pqab[SP['v'],SP['O'],:,:][a,k,i,j] * T1b[b,k]
-        R2ab[a,b,i,j] += K2pqab[SP['o'],SP['O'],:,:][k,l,i,j] * T1a[a,k] * T1b[b,l]
-        R1a[a,i] += K2pqab[SP['v'],SP['O'],:,:][a,k,i,k] 
-        x1a1[k,i] := K2pqab[SP['o'],SP['O'],:,:][k,l,i,l]
-        R1a[a,i] -= x1a1[k,i] * T1a[a,k]
-        R1b[a,i] += K2pqab[SP['o'],SP['V'],:,:][k,a,k,i] 
-        x1b1[k,i] := K2pqab[SP['o'],SP['O'],:,:][l,k,l,i]
-        R1b[a,i] -= x1b1[k,i] * T1b[a,k]
-      end
-    end
-    (K2pqa, K2pqb, K2pqab) = (nothing, nothing, nothing)
-    (x1a, x1b, x1ab) = (nothing, nothing, nothing)
+    cc_kext!(EC, R1a, R1b, R2a, R2b, R2ab, T1a, T1b, T2a, T2b, T2ab, Rota, Rotb)
     t1 = print_time(EC,t1,"kext",2)
   else
     d_vvvv = load4idx(EC,"d_vvvv")
@@ -2035,7 +3021,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
   x_kLiJ = load4idx(EC,"d_oOoO")
   if !linearized
     dcfac = dc ? 0.5 : 1.0
-    oovv = ints2(EC,"oovv")
+    oovv = load_bare_int2(EC, "oovv")
     @mtensor begin
       xij[i,j] += dcfac * (oovv[i,k,b,d] * T2a[b,d,j,k])
       xab[a,b] -= dcfac * (oovv[i,k,b,d] * T2a[a,d,i,k])
@@ -2058,7 +3044,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
     oovv = nothing
     t1 = print_time(EC,t1,"``R_{aB}^{iJ} += x_{ad}^{il} T_{dB}^{lJ}``",2)
     if n_occb_orbs(EC) > 0
-      OOVV = ints2(EC,"OOVV")
+      OOVV = load_bare_int2(EC, "OOVV")
       @mtensor begin
         xIJ[I,J] += dcfac * (OOVV[I,K,B,D] * T2b[B,D,J,K])
         xAB[A,B] -= dcfac * (OOVV[I,K,B,D] * T2b[A,D,I,K])
@@ -2077,7 +3063,7 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab; dc=false, tworef=fa
       end
       OOVV, x_vVoO, rR2a = nothing, nothing, nothing
       t1 = print_time(EC,t1,"``R_{ab}^{ij} += x_{aL}^{Di} T_{bD}^{jL}``",2)
-      oOvV = ints2(EC,"oOvV")
+      oOvV = load_bare_int2(EC, "oOvV")
       @mtensor begin
         xij[i,j] += dcfac * (oOvV[i,K,b,D] * T2ab[b,D,j,K])
         xab[a,b] -= dcfac * (oOvV[i,K,b,D] * T2ab[a,D,i,K])
@@ -2302,6 +3288,13 @@ function calc_cc_resid(EC::ECInfo, T1a, T1b, T2a, T2b, T2ab, T3a, T3b, T3aab, T3
   end
   t1 = print_time(EC,t1,"ccsdt triples",2)
 
+  if fixref
+    # frozen-reference (FRS/FRT): the reference αβ-doubles amplitude is kept
+    # fixed in cc_iterations!, so its residual element has to be projected out
+    activeorbs = oss_active_orbitals(EC)
+    R2ab[activeorbs.ua,activeorbs.tb,activeorbs.ta,activeorbs.ub] = 0.0
+  end
+
   return R1a, R1b, R2a, R2b, R2ab, R3a, R3b, R3aab, R3abb
 end
 
@@ -2383,7 +3376,7 @@ function calc_M1a(occcore, virtuals, T1a, T1b, T2b, T2ab, activeorbs)
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
   internalT1a = T1a[norba,morba]
-  M1 = zeros(Float64,size(T1a))
+  M1 = zeros(eltype(T1a),size(T1a))
   T2_nVmN = T2ab[norba,virtualsb,morba,norbb]
   T1_VN = T1b[virtualsb,norbb]
   if !isempty(occcorea) && !isempty(occcoreb)
@@ -2410,7 +3403,7 @@ function calc_M1b(occcore, virtuals, T1a, T1b, T2a, T2ab, activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M1 = zeros(Float64,size(T1b))
+  M1 = zeros(eltype(T1b),size(T1b))
   internalT1b = T1b[morbb,norbb]
   T2_vMmN = T2ab[virtualsa,morbb,morba,norbb]
   T1_vm = T1a[virtualsa,morba]
@@ -2438,7 +3431,7 @@ function calc_M2a(occcore,virtuals,T1a,T1b,T2b,T2ab,activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M2 = zeros(Float64,size(T2b))
+  M2 = zeros(eltype(T2b),size(T2b))
   T2_nMmO = T2ab[norba,morbb,morba,occcoreb]
   T2_nVmO = T2ab[norba,virtualsb,morba,occcoreb]
   T2_MVOO = T2b[morbb,virtualsb,occcoreb,occcoreb]
@@ -2536,7 +3529,7 @@ function calc_M2b(occcore,virtuals,T1a,T1b,T2a,T2ab,activeorbs)
   occcoreb, occcorea = occcore
   virtualsb, virtualsa = virtuals
 #ENDNOTE
-  M2 = zeros(Float64,size(T2a))
+  M2 = zeros(eltype(T2a),size(T2a))
   T2_VVNO = T2a[virtualsb,virtualsb,norbb,occcoreb]
   T2_VnNm = T2ab[virtualsb,norba,norbb,morba]
   T2_VnOm = T2ab[virtualsb,norba,occcoreb,morba]
@@ -2634,7 +3627,7 @@ function calc_M2ab(occcore,virtuals,T1a,T1b,T2a,T2b,T2ab,activeorbs)
   morba, norbb, morbb, norba = activeorbs
   occcorea, occcoreb = occcore
   virtualsa, virtualsb = virtuals
-  M2 = zeros(Float64,size(T2ab))
+  M2 = zeros(eltype(T2ab),size(T2ab))
   # @assert isapprox(T2a[norba,virtualsa,morba,occcorea],-T2a[virtualsa,norba,morba,occcorea];atol=1.e-8)
   # @assert isapprox(T2a[norba,virtualsa,morba,occcorea],-T2a[norba,virtualsa,occcorea,morba];atol=1.e-8)
   # @assert isapprox(T2b[morbb,virtualsb,norbb,occcoreb],-T2b[virtualsb,morbb,norbb,occcoreb];atol=1.e-8)
@@ -2769,7 +3762,8 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   if highest_full_exc > 3
     error("only implemented upto triples")
   end
-  orbopt = has_prefix(method, "O")
+  # Brueckner (B) reuses the orbital-optimization code paths (singles hold the orbital rotation)
+  orbopt = has_prefix(method, "O") || has_prefix(method, "B")
   if is_unrestricted(method) || has_prefix(method, "R")
     # Try to restart from dump file first
     T1a_start, T1b_start, T2a_start, T2b_start, T2ab_start, from_dump = try_fetch_unrestricted_starting_amplitudes(EC)
@@ -2851,7 +3845,10 @@ function calc_cc(EC::ECInfo, method::ECMethod)
   if has_prefix(method, "2D")
     ene = Eh["E"] + Eh["EIAS"]
     W = load1idx(EC,"2d_ccsd_W")[1]
-    push!(Eh, "EW"=>W, "E"=>ene)
+    if abs(imag(W)) > 1.e-6
+      @warn "Singlet/triplet energy contribution W has a significant imaginary part: $W. Taking the real part for final energy."
+    end
+    push!(Eh, "EW"=>real(W), "E"=>ene)
   end
   t0 = print_time(EC, t0, "total", 1)
   return Eh
@@ -2864,7 +3861,10 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   fixref = (has_prefix(method, "FRS") || has_prefix(method, "FRT"))
   restrict = has_prefix(method, "R")
   qv = has_prefix(method, "QV")
-  orbopt = has_prefix(method, "O")
+  brueckner = has_prefix(method, "B")
+  # Brueckner (BQV) reuses the orbital-rotation machinery of the orbital optimization (O),
+  # only the rotation is driven by the singles residual instead of the energy gradient
+  orbopt = has_prefix(method, "O") || brueckner
   if is_unrestricted(method) || has_prefix(method, "R")
     @assert (length(Amps1) == 2) && (length(Amps2) == 3) && (length(Amps3) == 4 || length(Amps3) == 0)
   else
@@ -2875,24 +3875,32 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   diis = Diis(EC, weights)
 
   NormR1 = 0.0
-  NormT1::Float64 = 0.0
-  NormT2::Float64 = 0.0
-  NormT3::Float64 = 0.0
+  NormT1 = 0.0
+  NormT2 = 0.0
+  NormT3 = 0.0
   do_sing = (method.exclevel[1] == :full)
   Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
   En1 = 0.0
   Eias = 0.0
   converged = false
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
+  # AO-direct: the MO coefficients (the AO→MO rotation for the dressing and cc_kext!)
+  ao_kw = if !EC.ao_direct
+    (;)
+  elseif is_unrestricted(method) || restrict
+    (; Rot = ao_direct_orbitals_spin(EC))# SpinMatrix → unrestricted calc_cc_resid
+  else
+    (; Rot = ao_direct_orbitals(EC))     # Matrix (deleted cols dropped) → closed-shell calc_cc_resid
+  end
   t0 = print_time(EC, t0, "initialization", 1)
   println("Iter     SqNorm      Energy      DE          Res         Time")
   for it in 1:EC.options.cc.maxit
     t1 = time_ns()
     if qv
-      Res, E = calc_qvcc_resid(EC, it, Amps...; dc, orbopt)
+      Res, E = calc_qvcc_resid(EC, it, Amps...; dc, orbopt, brueckner)
       Eh = OutDict("E"=>E)
     else
-      Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref)
+      Res = calc_cc_resid(EC, Amps...; dc, tworef, fixref, ao_kw...)
     end
     @assert typeof(Res) == typeof(Amps)
     Res1 = Res[1:length(Amps1)]
@@ -2931,7 +3939,9 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
     if do_sing || orbopt
       NormT1 = calc_singles_norm(Amps1...)
       NormR1 = calc_singles_norm(Res1...)
-      update_singles!(EC, Amps1..., Res1...)
+      # `cc.orbdamp` (default 1.0) damps the orbital-rotation step in OQV methods (convergence aid
+      # near strong correlation); it does not change the fixed point, only the path to it.
+      update_singles!(EC, Amps1..., Res1...; damp=EC.options.cc.orbdamp)
     end
     if length(Amps1) == 2 && restrict
       # spin_project!(EC, Amps...)
@@ -2972,12 +3982,19 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   end
   if orbopt && qv
     Rpq = rotation_matrix(EC, Amps1[1])
-    if EC.options.cc.keepOQVorbitals
-      transform_fcidump!(EC.fd, SpinMatrix(Rpq), SpinMatrix(Rpq))
+    Rfilename = "orbitals_rotation_matrix"
+    description = "orbital rotation OQV"
+    println("Save orbital rotation matrix to file orbitals_rotation_matrix")
+    Rfile, R = newmmap(EC, Rfilename, size(Rpq);description)
+    R .= Rpq
+    closemmap(EC, Rfile, R)
+    if EC.ao_direct
+      # AO-direct: rebuild the blocks in the rotated basis straight from the AO integrals. Both
+      # routes leave the rotated one-electron integrals in `dh_mm` (`rotate_ints` saves them there
+      # explicitly; the AO transform produces them as its undressed `dh_mm`).
+      ao_rotate_ints(EC, Rpq)
     else
       rotate_ints(EC, Rpq)
-      @mtensor int1_r[p,q] := EC.fd.int1[p',q'] * Rpq[p',p] * Rpq[q',q]
-      save!(EC, "int1_r", int1_r)
     end
   end
   if !converged
@@ -2991,7 +4008,7 @@ function cc_iterations!(Amps1, Amps2, Amps3, EC::ECInfo, method::ECMethod, dots=
   end
   try2save_doubles!(EC, Amps2...)
   # Dump to TREXIO file if wf.store is set
-  dump_wavefunction_with_amplitudes!(EC, Amps1, Amps2)
+  dump_wavefunction_with_amplitudes!(EC, Amps1, Amps2; orbopt)
   println()
   if length(Amps3) > 0
     output_norms("T1"=>NormT1, "T2"=>NormT2, "T3"=>NormT3)
@@ -3010,7 +4027,7 @@ end
   If `useT3`: (T) amplitudes from a preceding calculations will be used as starting guess.
   If cc3: calculate CC3 amplitudes.
 """
-function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
+function calc_ccsdt(EC::ECInfo{T}, useT3=false, cc3=false) where T
   t0 = time_ns()
   pert_svd_T = true
   
@@ -3025,10 +4042,16 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   end
   if EC.options.cc.usedf && !isempty(EC.system)
     println("Using density fitting")
-    calc_df_integrals(EC)
+    calc_system_df_integrals(EC)
   else
     println("Decomposing integrals")
-    calc_integrals_decomposition(EC)
+    if EC.ao_direct
+      # fit-free on the AO-direct route: Cholesky of the exact AO integrals from the ± store,
+      # Cholesky vectors transformed to the MO basis
+      calc_integrals_decomposition_ao(EC, ao_direct_orbitals(EC))
+    else
+      calc_integrals_decomposition(EC)
+    end
   end
   t0 = print_time(EC, t0, "integrals decomposition", 1)
   T1 = read_starting_guess4amplitudes(EC, Val(1))
@@ -3042,18 +4065,28 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     calc_triples_decomposition_without_triples(EC, T2)
   end
   t0 = print_time(EC, t0, "triples decomposition", 1)
+  C_voXfile, C_voX = mmap3idx(EC, "C_voX")
+  notriples = size(C_voX, 3) == 0
+  close(C_voXfile)
+  if notriples
+    println("WARNING: empty triples SVD basis (no significant triples for this system).")
+    println("         Skipping triples; SVD-DC-CCSDT reduces to CCSD.")
+    println()
+  end
   diis = Diis(EC)
   thren = sqrt(EC.options.cc.thr) * EC.options.cc.conven
 
-  if EC.options.cc.project_voXL
+  if !notriples && EC.options.cc.project_voXL
     calc_space4project_voXL(EC, T2)
     t0 = print_time(EC, t0, "space for project_voXL", 1)
   end
   # calc intermediates for SVD-T
-  calc_intermediates4triples(EC)
-  t0 = print_time(EC, t0, "intermediates for SVD-T", 1)
-# svd-ccsd(t)  
-  if pert_svd_T
+  if !notriples
+    calc_intermediates4triples(EC)
+    t0 = print_time(EC, t0, "intermediates for SVD-T", 1)
+  end
+# svd-ccsd(t)
+  if pert_svd_T && !notriples
     t1 = time_ns()
     save_pseudodressed_3idx(EC)
     save!(EC, "df_mm", load2idx(EC,"f_mm"))
@@ -3079,7 +4112,6 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   NormT1 = 0.0
   NormT2 = 0.0
   NormT3 = 0.0
-  R1 = Float64[]
   Eh = OutDict("E"=>0.0, "ESS"=>0.0, "EOS"=>0.0, "EO"=>0.0)
 
   for it in 1:EC.options.cc.maxit
@@ -3090,22 +4122,30 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
     t1 = print_time(EC, t1, "dressed 3-idx integrals", 2)
     R1, R2 = calc_cc_resid(EC, T1, T2)
     t1 = print_time(EC, t1, "ccsd residual", 2)
-    calc_triples_residuals!(EC, R1, R2, T2)
-    t1 = print_time(EC, t1, "triples residual", 2)
+    if !notriples
+      calc_triples_residuals!(EC, R1, R2, T2)
+      t1 = print_time(EC, t1, "triples residual", 2)
+    end
     NormT1 = calc_singles_norm(T1)
     NormT2 = calc_doubles_norm(T2)
-    T3 = load3idx(EC, "T_XXX")
-    NormT3 = calc_deco_triples_norm(T3)
     NormR1 = calc_singles_norm(R1)
     NormR2 = calc_doubles_norm(R2)
-    R3 = load3idx(EC, "R_XXX")
-    NormR3 = calc_deco_triples_norm(R3)
     Eh = calc_hylleraas(EC, T1, T2, R1, R2)
     T1 += update_singles(EC, R1)
     T2 += update_doubles(EC, R2)
-    T3 += update_deco_triples(EC, R3)
-    perform!(diis, (T1,T2,T3), (R1,R2,R3))
-    save!(EC, "T_XXX", T3)
+    if notriples
+      NormT3 = 0.0
+      NormR3 = 0.0
+      perform!(diis, (T1,T2), (R1,R2))
+    else
+      T3 = load3idx(EC, "T_XXX")
+      NormT3 = calc_deco_triples_norm(T3)
+      R3 = load3idx(EC, "R_XXX")
+      NormR3 = calc_deco_triples_norm(R3)
+      T3 += update_deco_triples(EC, R3)
+      perform!(diis, (T1,T2,T3), (R1,R2,R3))
+      save!(EC, "T_XXX", T3)
+    end
     En1 = calc_singles_energy(EC, T1)
     En2 = calc_doubles_energy(EC, T2)
     En = En1["E"] + En2["E"]
@@ -3120,7 +4160,7 @@ function calc_ccsdt(EC::ECInfo, useT3=false, cc3=false)
   println()
   output_norms("T1"=>NormT1, "T2"=>NormT2, "T3"=>NormT3)
   println()
-  if pert_svd_T
+  if pert_svd_T && !notriples
     push!(Eh, "SVD-CCSD(T)"=>Eh_init["E"])
   end
   print_time(EC, t0, "iterations", 1)
@@ -3192,7 +4232,7 @@ end
 
   Calculate contributions from triples to singles and doubles residuals.
 """
-function SVD_triples_to_singles_and_doubles_residuals(EC)
+function SVD_triples_to_singles_and_doubles_residuals(EC::ECInfo{Ty}) where Ty
   t1 = time_ns()
   mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
@@ -3232,7 +4272,7 @@ function SVD_triples_to_singles_and_doubles_residuals(EC)
   maxbX = maximum(length, bXBlks)
   maxXBig = maximum(length, XBigBlks)
   lenbuf = auto_buf_length4SVD_triples_to_singles_and_doubles_residuals(EC, nvirt, nX, nbX, nocc, nL, maxL, maxXBig, maxbX)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in SVD triples to singles and doubles residuals", 2)
   # @print_buffer_usage buf begin
 
@@ -3390,26 +4430,28 @@ end
 
   Compute perturbative ``T^i_{aXY}`` and decompose ``D^{ij}_{ab} = (T^i_{aXY} T^j_{bXY})`` to get ``U^{iX}_a``.
 """
-function calc_triples_decomposition_without_triples(EC::ECInfo, T2)
+function calc_triples_decomposition_without_triples(EC::ECInfo{Ty}, T2) where Ty
   println("T^ijk_abc-free-decomposition")
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
 
   # first approx for U^iX_a from doubles decomposition
   tol2 = sqrt(EC.options.cc.ampsvdtol*EC.options.cc.ampsvdfac)
-  UaiX = svd_decompose(reshape(permutedims(T2, (1,3,2,4)), (nocc*nvirt, nocc*nvirt)), 
-                       nvirt, nocc, tol2; description="Intermediate triples")
+  Amat, R_occ, R_virt = prepare_doubles_for_decomposition(EC, T2)
+  UaiX = svd_decompose(EC, Amat, nvirt, nocc, tol2; description="Intermediate triples")
+  backtransform_svd_vectors!(UaiX, R_occ, R_virt)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
-  D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX) 
-  UaiX = svd_decompose(reshape(D2, (nocc*nvirt, nocc*nvirt)), 
-                       nvirt, nocc, EC.options.cc.ampsvdtol; description="Triples")
+  D2 = calc_4idx_T3T3_XY(EC, T2, UaiX, ϵX)
+  D2mat, _, _ = prepare_doubles_for_decomposition(EC, D2; permuted=true, R_occ, R_virt)
+  UaiX = svd_decompose(EC, D2mat, nvirt, nocc, EC.options.cc.ampsvdtol; description="Triples")
+  backtransform_svd_vectors!(UaiX, R_occ, R_virt)
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
   naux = length(ϵX)
   save!(EC,"C_voX",UaiX)
   # TODO: calc starting guess for T_XXX from T2 and UvoX
-  save!(EC,"T_XXX",zeros(naux, naux, naux))
+  save!(EC,"T_XXX",zeros(Ty, naux, naux, naux))
 end
 
 """
@@ -3417,12 +4459,12 @@ end
 
   Decompose ``T^{ijk}_{abc}`` as ``U^{iX}_a U^{jY}_b U^{kZ}_c T_{XYZ}``.
 """
-function calc_triples_decomposition(EC::ECInfo)
+function calc_triples_decomposition(EC::ECInfo{Ty}) where Ty
   println("T^ijk_abc-decomposition")
   nocc = n_occ_orbs(EC)
   nvirt = n_virt_orbs(EC)
 
-  Triples_Amplitudes = zeros(nvirt, nocc, nvirt, nocc, nvirt, nocc)
+  Triples_Amplitudes = zeros(Ty, nvirt, nocc, nvirt, nocc, nvirt, nocc)
   t3file, T3 = mmap4idx(EC, "T_vvvooo")
   trippp = uppertriangular_cut3(nocc)
   for ijk in axes(T3,4)
@@ -3435,8 +4477,8 @@ function calc_triples_decomposition(EC::ECInfo)
     Triples_Amplitudes[:,k,:,i,:,j] = permutedims(T3[:,:,:,ijk],(3,1,2))
   end
   close(t3file)
-  UaiX = svd_decompose(reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt)), 
-                      nvirt, nocc, sqrt(EC.options.cc.ampsvdtol); description="Triples")
+  Amat = reshape(Triples_Amplitudes, (nocc*nvirt, nocc*nocc*nvirt*nvirt))
+  UaiX = svd_decompose(EC, Amat, nvirt, nocc, sqrt(EC.options.cc.ampsvdtol); description="Triples")
   ϵX,UaiX = rotate_U2pseudocanonical(EC, UaiX)
   save!(EC, "e_X", ϵX)
   #display(UaiX)
@@ -3495,7 +4537,7 @@ end
   Calculate ``D^{ij}_{ab} = T^i_{aXY} T^j_{bXY}`` using half-decomposed imaginary-shifted perturbative triple amplitudes 
   ``T^i_{aXY}`` from `T2` (and `UvoX`)
 """
-function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
+function calc_4idx_T3T3_XY(EC::ECInfo{Ty}, T2, UvoX, ϵX) where Ty
   mem1 = free_memory()
   voLfile, voL = mmap3idx(EC, "d_voL")
   ooLfile, ooL = mmap3idx(EC, "d_ooL")
@@ -3508,12 +4550,12 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
   maxL = maximum(length, LBlks)
 
   lenbuf = auto_buf_length4calc_4idx_T3T3_XY(EC, nvirt, nocc, nX, nL, maxL, nX)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in half-decomposed T3 calculation", 2)
   # @print_buffer_usage buf begin
   # ``T^i_{aX} = U^{†b}_{jX} T^{ij}_{ab}``
   T_voX = alloc!(buf, nvirt, nocc, nX)
-  @mtensor T_voX[a,i,X] = UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor T_voX[a,i,X] = conj(UvoX[b,j,X]) * T2[a,b,i,j]
   X_LXX = alloc!(buf, nL, nX, nX)
   V_vvX = alloc!(buf, nvirt, nvirt, nX)
   V_vvX .= 0.0
@@ -3530,18 +4572,18 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     @mtensor X_voXL[b,j,X,L] -= T_voX[b,l,X] * v!ooL[l,j,L]
     # ``UX_{XY}^L = X_{bX}^{jL} U^{†b}_{jY}``
     UX_LXX = alloc!(buf, lenL, nX, nX)
-    @mtensor UX_LXX[L,X,Y] = X_voXL[b,j,X,L] * UvoX[b,j,Y]
+    @mtensor UX_LXX[L,X,Y] = X_voXL[b,j,X,L] * conj(UvoX[b,j,Y])
     v!X_LXX = @mview X_LXX[L,:,:]
     @mtensor v!X_LXX[L,X,Y] = UX_LXX[L,X,Y] + UX_LXX[L,Y,X]
     drop!(buf, UX_LXX, X_voXL)
     # ``W_{X}^{L} = \hat v_c^{kL} U^{†c}_{kX}``
     W_XL = alloc!(buf, nX, lenL)
-    @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
+    @mtensor W_XL[X,L] = v!voL[c,k,L] * conj(UvoX[c,k,X])
     @mtensor V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
     @mtensor V_ooX[l,j,X] += v!ooL[l,j,L] * W_XL[X,L]
     drop!(buf, W_XL)
   end
-  D2 = zeros(nvirt, nocc, nvirt, nocc)
+  D2 = zeros(Ty, nvirt, nocc, nvirt, nocc)
   ϵo, ϵv = orbital_energies(EC)
   shifti = EC.options.cc.deco_ishiftt
   if EC.options.cc.project_t3iii 
@@ -3568,11 +4610,11 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     # ``E^d_{lXY} = V_{aX}^{d} U^{†a}_{lY} - V_{lX}^{i} U^{†d}_{iY}``
     E_voXY = alloc!(buf, nvirt, nocc, lenX)
     v!UvoY = @mview UvoX[:,:,Y]
-    @mtensor E_voXY[d,l,X] = v!V_vvX[a,d,X] * v!UvoY[a,l] 
-    @mtensor E_voXY[d,l,X] -= v!V_ooX[l,i,X] * v!UvoY[d,i]
+    @mtensor E_voXY[d,l,X] = v!V_vvX[a,d,X] * conj(v!UvoY[a,l]) 
+    @mtensor E_voXY[d,l,X] -= v!V_ooX[l,i,X] * conj(v!UvoY[d,i])
     v!UvoX = @mview UvoX[:,:,X]
-    @mtensor E_voXY[d,l,X] += v!V_vvY[a,d] * v!UvoX[a,l,X] 
-    @mtensor E_voXY[d,l,X] -= v!V_ooY[l,i] * v!UvoX[d,i,X]
+    @mtensor E_voXY[d,l,X] += v!V_vvY[a,d] * conj(v!UvoX[a,l,X]) 
+    @mtensor E_voXY[d,l,X] -= v!V_ooY[l,i] * conj(v!UvoX[d,i,X])
     # ``R^i_{aXY} += E^d_{lXY} T^il_{ad}``
     @mtensor R[a,i,X] += E_voXY[d,l,X] * T2[a,d,i,l]
     drop!(buf, E_voXY)
@@ -3592,11 +4634,11 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     end
     if Y > 1
       v!R = @mview R[:,:,1:(Y-1)]
-      @mtensor D2[a,i,b,j] += 2.0 * v!R[a,i,X] * v!R[b,j,X]
+      @mtensor D2[a,i,b,j] += 2.0 * conj(v!R[a,i,X]) * v!R[b,j,X]
     end
     # diagonal contribution X=Y
     v!RYY = @mview R[:,:,Y]
-    @mtensor D2[a,i,b,j] += v!RYY[a,i] * v!RYY[b,j]
+    @mtensor D2[a,i,b,j] += conj(v!RYY[a,i]) * v!RYY[b,j]
     if EC.options.cc.project_t3iii 
       permutedims!(@view(T3[X,Y,:,:]), R, (3,1,2))
       permutedims!(@view(T3[Y,X,:,:]), R, (3,1,2))
@@ -3613,7 +4655,7 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
     for i = 1:nocc
       v!UvoX = @mview UvoX[:,i,:]
       v!UU = @mview UU[:,:,i]
-      @mtensor v!UU[X,Y] = v!UvoX[a,X] * v!UvoX[a,Y]
+      @mtensor v!UU[X,Y] = v!UvoX[a,X] * conj(v!UvoX[a,Y])
     end
     TUU4i = alloc!(buf, nX, nX, nvirt)
     TU = alloc!(buf, nX, nX, nvirt)
@@ -3625,12 +4667,12 @@ function calc_4idx_T3T3_XY(EC::ECInfo, T2, UvoX, ϵX)
       @mtensor TUU4i[X',Y',a] = TU[X',Y,a] * v!UUi[Y,Y']
       for j = 1:nocc
         v!T_j = @mview T3[:,:,:,j]
-        @mtensor ΔD2[a,b] = TUU4i[X,Y,a] * v!T_j[X,Y,b]
+        @mtensor ΔD2[a,b] = conj(TUU4i[X,Y,a]) * v!T_j[X,Y,b]
         v!D2 = @mview D2[:,i,:,j]
         @mtensor v!D2[a,b] -= ΔD2[a,b]
         if i != j
           v!D2 = @mview D2[:,j,:,i]
-          @mtensor v!D2[b,a] -= ΔD2[a,b]
+          @mtensor v!D2[b,a] -= conj(ΔD2[a,b])
         end
       end
     end
@@ -3670,7 +4712,7 @@ end
   Calculate SVD-CCSD(T).
 """
 
-function calc_SVD_pert_T(EC::ECInfo, T2)
+function calc_SVD_pert_T(EC::ECInfo{Ty}, T2) where Ty
   t1 = time_ns()
   mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
@@ -3690,7 +4732,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   maxX = maximum(length, XBlks)
 
   lenbuf = auto_buf_length4calc_SVD_pert_T(nvirt, nocc, nX, nL, maxL, maxX)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in SVD-CCSD(T) calculation", 2)
   # @print_buffer_usage buf begin
   V_vvX = alloc!(buf, nvirt, nvirt, nX)
@@ -3704,7 +4746,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
     v!vvL = @mview vvL[:,:,L]
     # ``W_{X}^{L} = v_c^{kL} U^{†c}_{kX}``
     W_XL = alloc!(buf, nX, lenL)
-    @mtensor W_XL[X,L] = v!voL[c,k,L] * UvoX[c,k,X]
+    @mtensor W_XL[X,L] = v!voL[c,k,L] * conj(UvoX[c,k,X])
     # ``V_{aX}^{d} = v_{a}^{dL} W_{X}^{L}``
     @mtensor V_vvX[a,d,X] += v!vvL[a,d,L] * W_XL[X,L]
     # ``V_{lX}^{i} = v_{l}^{iL} W_{X}^{L}``
@@ -3715,7 +4757,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
   close(voLfile)
   close(ooLfile)
   TvoX = alloc!(buf, nvirt, nocc, nX)
-  @mtensor TvoX[a,i,X] = UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor TvoX[a,i,X] = conj(UvoX[b,j,X]) * T2[a,b,i,j]
   
   RR = alloc!(buf, nX, nX, nX)
   for X in XBlks
@@ -3725,7 +4767,7 @@ function calc_SVD_pert_T(EC::ECInfo, T2)
     RvoXX = alloc!(buf, nvirt, nocc, nX, lenX)
     @mtensor RvoXX[a,i,Y,X] = v!TvoX[a,k,X] * V_ooX[k,i,Y]
     @mtensor RvoXX[a,i,Y,X] -= v!TvoX[c,i,X] * V_vvX[a,c,Y]
-    @mtensor v!RR[Z,Y,X] = RvoXX[a,i,Y,X] * UvoX[a,i,Z]
+    @mtensor v!RR[Z,Y,X] = RvoXX[a,i,Y,X] * conj(UvoX[a,i,Z])
     drop!(buf, RvoXX)
   end
   R = alloc!(buf, nX, nX, nX)
@@ -3743,7 +4785,7 @@ end
   
   It is a combination of spaces for triples and contravariant doubles. 
 """
-function calc_space4project_voXL(EC::ECInfo, T2)
+function calc_space4project_voXL(EC::ECInfo{T}, T2) where T
   nvirt = size(T2, 1)
   nocc = size(T2, 3)
   UvoX = load3idx(EC, "C_voX")
@@ -3754,7 +4796,7 @@ function calc_space4project_voXL(EC::ECInfo, T2)
   elseif EC.options.cc.space4voXL == :full
     println("Full space for project_voXL (not recommended, use project_voXL=false instead)")
     nbX = nvirt*nocc
-    UvobX = reshape(Matrix{Float64}(I, nbX, nbX), (nvirt, nocc, nbX))
+    UvobX = reshape(Matrix{T}(I, nbX, nbX), (nvirt, nocc, nbX))
   elseif EC.options.cc.space4voXL in [:combined, :symcombined]
     @mtensor tT2[a,i,b,j] := 2.0 * T2[a,b,i,j] - T2[a,b,j,i]
     println("Combined space for project_voXL (triples + contravariant doubles space)")
@@ -3767,19 +4809,20 @@ function calc_space4project_voXL(EC::ECInfo, T2)
     end
     # decompose ``\tilde T_2``
     tol2 = sqrt(EC.options.cc.ampsvdtol)
-    UvoY = svd_decompose(reshape(tT2, (nocc*nvirt, nocc*nvirt)), 
-                      nvirt, nocc, tol2; description="Contravariant doubles")
+    tT2mat, R_occ, R_virt = prepare_doubles_for_decomposition(EC, tT2; permuted=true)
+    UvoY = svd_decompose(EC, tT2mat, nvirt, nocc, tol2; description="Contravariant doubles")
+    backtransform_svd_vectors!(UvoY, R_occ, R_virt)
     # overlap of spaces
     @mtensor S_XY[X,Y] := UvoX[a,i,X] * UvoY[a,i,Y]
     nX, nY = size(S_XY)
     # full overlap
-    S = Matrix{Float64}(I, nX+nY, nX+nY) 
+    S = Matrix{T}(I, nX+nY, nX+nY) 
     S[1:nX,nX+1:end] = S_XY
     S[nX+1:end,1:nX] = S_XY'
-    TU_ZbX, Sigma = svd_decompose(S, tol2*tol2; description="Combined")
+    TU_ZbX, Sigma = svd_decompose(S, tol2*tol2; description="Combined", method=:dense)
     # display(Sigma)
     TU_ZbX ./= sqrt.(Sigma')
-    UvoZ = Array{Float64}(undef, nvirt, nocc, nX+nY)
+    UvoZ = Array{T}(undef, nvirt, nocc, nX+nY)
     UvoZ[:,:,1:nX] = UvoX
     UvoZ[:,:,nX+1:end] = UvoY
     @mtensor UvobX[a,i,bX] := UvoZ[a,i,Z] * TU_ZbX[Z,bX]
@@ -3794,7 +4837,7 @@ end
 
   Calculate intermediates for decomposed triples independent of the amplitudes.
 """
-function calc_intermediates4triples(EC::ECInfo)
+function calc_intermediates4triples(EC::ECInfo{Ty}) where Ty
   UvoX = load3idx(EC, "C_voX")
   ovLfile, ovL = mmap3idx(EC, "d_ovL")
 
@@ -3805,9 +4848,9 @@ function calc_intermediates4triples(EC::ECInfo)
 
   LBlks = get_spaceblocks(1:nL)
 
-  A_XL = zeros(nX, nL)
-  B_XX = zeros(nX, nX)
-  w_ovX = zeros(nocc, nvirt, nX)
+  A_XL = zeros(Ty, nX, nL)
+  B_XX = zeros(Ty, nX, nX)
+  w_ovX = zeros(Ty, nocc, nvirt, nX)
   B_ooXLfile, B_ooXL = newmmap(EC, "B_ooXL", (nocc,nocc,nX,nL))
   for L in LBlks
     v!ovL = @mview ovL[:,:,L]	  
@@ -3836,11 +4879,11 @@ function calc_intermediates4triples(EC::ECInfo)
     for bX in bXBlks
       v!bUvoX = @mview bUvoX[:,:,bX]
       v!UU_oXobX = @mview UU_oXobX[:,:,:,bX]
-      @mtensor v!UU_oXobX[i,X,j,bX] = UvoX[a,i,X] * v!bUvoX[a,j,bX]
+      @mtensor v!UU_oXobX[i,X,j,bX] = UvoX[a,i,X] * conj(v!bUvoX[a,j,bX])
     end
     closemmap(EC, UU_oXobXfile, UU_oXobX)
     # trasformation matrix from \bar X to X space
-    @mtensor C_bXX[bX,X] := bUvoX[a,i,bX] * UvoX[a,i,X]
+    @mtensor C_bXX[bX,X] := conj(bUvoX[a,i,bX]) * UvoX[a,i,X]
     save!(EC, "C_{bX}X", C_bXX)
   end
 end
@@ -3964,7 +5007,7 @@ end
 
   Calculate decomposed triples DC-CCSDT residuals.
 """
-function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
+function calc_triples_residuals!(EC::ECInfo{Ty}, R1, R2, T2) where Ty
   t1 = time_ns()
   mem1 = free_memory()
   UvoX = load3idx(EC, "C_voX")
@@ -4011,11 +5054,11 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   maxXBig = maximum(length, XBigBlks)
   maxa = maximum(length, virtBlks)
   lenbuf = auto_buf_length4calc_triples_residuals(EC, nvirt, nX, nbX, nocc, nL, maxL, maxXBig, maxX, maxX, nX, maxbX, maxa)
-  @buffer buf(lenbuf) begin
+  @buffer buf(Ty, lenbuf) begin
   mem2 = print_memory(EC, mem1, "for buffer in SVD-DC-CCSDT triples residuals calculation", 2)
   # @print_buffer_usage buf begin
 
-  Y_XL = zeros(nX, nL)
+  Y_XL = zeros(Ty, nX, nL)
   x_oo = dfoo
   x_vv = dfvv
   # ``vY_{lX}^{d} = v_{l}^{dL} Y_{X}^{L}``
@@ -4037,7 +5080,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor x_vv[a,d] -= 0.5 * v!ovL[l,d,L] * V_voL[a,l,L]
     # ``Y_{X}^{L} = U^{†a}_{iX} (\hat v_{a}^{iL} + V_{a}^{iL})``
     @mtensor V_voL[a,i,L] += v!voL[a,i,L]
-    @mtensor v!Y_XL[X,L] = UvoX[a,i,X] * V_voL[a,i,L]
+    @mtensor v!Y_XL[X,L] = conj(UvoX[a,i,X]) * V_voL[a,i,L]
     drop!(buf, V_voL)
     # ``vY_{lX}^{d} = v_{l}^{dL} Y_{X}^{L}``
     @mtensor vY_ovX[l,d,X] += v!ovL[l,d,L] * v!Y_XL[X,L]
@@ -4051,10 +5094,10 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   drop!(buf, vY_ovX)
 
   # ``T_{aX}^i = U^{†b}_{jX} T^{ij}_{ab}``
-  @mtensor T_voX[a,i,X] := UvoX[b,j,X] * T2[a,b,i,j]
+  @mtensor T_voX[a,i,X] := conj(UvoX[b,j,X]) * T2[a,b,i,j]
   # ``X_{bZ}^d = - \hat f_l^d T_{bZ}^{l} (+...)``
   @mtensor X_vvX[b,d,Z] := - dfov[l,d] * T_voX[b,l,Z]
-  X_ooX = zeros(nocc, nocc, nX)
+  X_ooX = zeros(Ty, nocc, nocc, nX)
   for L in LBlks
     v!vvL = @mview vvL[:,:,L]
     v!ooL = @mview ooL[:,:,L]
@@ -4065,7 +5108,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor X_ooX[l,j,Z] += v!ooL[l,j,L] * v!Y_XL[Z,L] 
   end
  
-  Q_XXX = zeros(nX, nX, nX)
+  Q_XXX = zeros(Ty, nX, nX, nX)
   # RR[aibj] = ``RR^{ij}_{ab}``
   RR_vovo = alloc!(buf, nvirt, nocc, nvirt, nocc)
   RR_vovo .= 0.0
@@ -4116,7 +5159,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       @mtensor TUvY_voXX[b,j,Y,X] = TvoXX[b,l,Z,X] * v!UvY_oXoX[l,Z,j,Y]
       # ``Q_{ZYX} = U^{\dagger b}_{jZ} TUvY^j_{bYX}``
       a!Q_XXX = alloc!(buf, nX, lenY, lenX)
-      @mtensor a!Q_XXX[Z,Y,X] = UvoX[b,j,Z] * TUvY_voXX[b,j,Y,X]
+      @mtensor a!Q_XXX[Z,Y,X] = conj(UvoX[b,j,Z]) * TUvY_voXX[b,j,Y,X]
       Q_XXX[:,Y,X] = a!Q_XXX
       drop!(buf, a!Q_XXX)
       drop!(buf, TUvY_voXX)
@@ -4160,7 +5203,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
       drop!(buf, B_voXL)
       # ``W_{Y}^{XL} = (\bar B - B)_b^{jXL} U^{\dagger b}_{jY}
       a!W_XXL = alloc!(buf, nX, lenX, lenL)
-      @mtensor a!W_XXL[Y,X,L] = bB_voXL[b,j,X,L] * UvoX[b,j,Y]
+      @mtensor a!W_XXL[Y,X,L] = bB_voXL[b,j,X,L] * conj(UvoX[b,j,Y])
       W_XXL[:,X,L] = a!W_XXL
       drop!(buf, a!W_XXL)
 
@@ -4184,7 +5227,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
         V_voXL = alloc!(buf, nvirt, nocc, lenX, lenL)
         @mtensor V_voXL[a,j,X,L] = TvoXX[a,i,Y,X] * v!B_ooXL[i,j,Y,L]
         # ``\tilde V_{YX}^{L} -= 0.5 V_{aX}^{jL} U^{\dagger a}_{jY}``
-        @mtensor V_XXL[Y,X,L] -= 0.5 * V_voXL[a,j,X,L] * UvoX[a,j,Y]
+        @mtensor V_XXL[Y,X,L] -= 0.5 * V_voXL[a,j,X,L] * conj(UvoX[a,j,Y])
         # ``RR^{ij}_{ab} -= (\bar B - B)_a^{LiX} V_{bX}^{jL}``
         @mtensor RR_vovo[a,i,b,j] -= bB_voXL[a,i,X,L] * V_voXL[b,j,X,L]
         drop!(buf, V_voXL)
@@ -4286,14 +5329,14 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     @mtensor vT_vooo[a,l,i,j] = vvov[a,c,l,d] * T2[c,d,i,j]
     @mtensor vT_vooo[a,l,i,j] -= oovo[l,k,d,i] * a!T2[d,a,j,k]
     # ``X_{lY}^j += vT_{al}^{ij} U^{\dagger a}_{iY}``
-    @mtensor X_ooX[l,j,Y] += vT_vooo[a,l,i,j] * a!UvoX[a,i,Y]
+    @mtensor X_ooX[l,j,Y] += vT_vooo[a,l,i,j] * conj(a!UvoX[a,i,Y])
     drop!(buf, vT_vooo)
     # vT[adbi] = ``vT_{ab}^{di} = \hat v_{lk}^{di} T_{ba}^{lk} - \hat v_{al}^{cd} T_{bc}^{li}``
     vT_vvvo = alloc!(buf, lena, nvirt, nvirt, nocc)
     @mtensor vT_vvvo[a,d,b,i] = oovo[l,k,d,i] * a!T2[b,a,l,k]
     @mtensor vT_vvvo[a,d,b,i] -= vvov[a,c,l,d] * T2[b,c,l,i]
     # ``X_{bY}^d += vT_{ab}^{di} U^{\dagger a}_{iY}``
-    @mtensor X_vvX[b,d,Y] += vT_vvvo[a,d,b,i] * a!UvoX[a,i,Y]
+    @mtensor X_vvX[b,d,Y] += vT_vvvo[a,d,b,i] * conj(a!UvoX[a,i,Y])
     drop!(buf, vT_vvvo)
     drop!(buf, a!T2, a!UvoX)
     # ``X_{aY}^d -= \hat v_{al}^{cd} T_{cY}^{l}``
@@ -4313,7 +5356,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
     XT_voXX = alloc!(buf, nvirt, nocc, nX, lenZ)
     @mtensor XT_voXX[b,j,Y,Z] = X_ooX[l,j,Y] * v!T_voX[b,l,Z]
     @mtensor XT_voXX[b,j,Y,Z] -= X_vvX[b,d,Y] * v!T_voX[d,j,Z]
-    @mtensor v!Q_XXX[X,Y,Z] += UvoX[b,j,X] * XT_voXX[b,j,Y,Z]
+    @mtensor v!Q_XXX[X,Y,Z] += conj(UvoX[b,j,X]) * XT_voXX[b,j,Y,Z]
     drop!(buf, XT_voXX)
   end
   # ``R_{XYZ} += Q_{XYZ} + Q_{YXZ} + Q_{XZY} + Q_{ZXY} + Q_{ZYX} + Q_{YZX}``
@@ -4360,7 +5403,7 @@ function calc_triples_residuals!(EC::ECInfo, R1, R2, T2)
   @mtensor q_voX[a,i,X] = vvoo[a,d,l,i] * UvoX[d,l,X]
   drop!(buf, vvoo)
   @mtensor q_voX[a,i,X] += x_oo[l,i] * UvoX[a,l,X] - x_vv[a,d] * UvoX[d,i,X]
-  @mtensor q_XX[X,X'] := q_voX[a,i,X'] * UvoX[a,i,X]
+  @mtensor q_XX[X,X'] := q_voX[a,i,X'] * conj(UvoX[a,i,X])
   drop!(buf, q_voX)
   A_XL = alloc!(buf, nX, nL)
   load!(EC, "A_XL", A_XL)

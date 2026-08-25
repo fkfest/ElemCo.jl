@@ -17,30 +17,54 @@
   dump::String = "wf.h5"
   """`⟨""⟩` filename to store the output wavefunction dump (stored in TREXIO format). If empty, `dump` will be used. """
   store::String = ""
+  """`⟨""⟩` filename to store correlated natural orbitals and occupations (stored in TREXIO format).
+  If non-empty, the correlated 1-RDM is still written to the usual `dump`/`store` file. """
+  natorb::String = ""
   """`⟨""⟩` filename to read starting amplitudes from (TREXIO format). 
   If empty, amplitudes are read from `dump`. If provided, amplitudes (and MOs/basis) 
   are read from this file and projected to the current MO basis. """
   start::String = ""
+  """`⟨false⟩` in a geometry-change restart of orbital-optimized methods, use the `dump` file for the
+  *frozen-core orbitals only* and take the correlating orbitals from `start`. The reused orbitals in
+  `start` carry the frozen core from the *previous* geometry; with `dump4core_only=true`
+  the frozen core is instead taken from `dump` — a fresh HF at the *current* geometry — while the
+  correlating orbitals come from `start` (projected and orthogonalized against the new core).
+  Typical use: run `@dfhf` at the new geometry (writes `dump`), then
+  `@set wf start="cc.h5" dump4core_only=true` (no need to set `dump=""`). """
+  dump4core_only::Bool = false
   """`⟨0⟩` Number of positrons. """
   npositron::Int = 0
-  """`⟨:large⟩` core type for frozen-core approximation: 
-  - `:none` no frozen-core approximation, 
-  - `:small` semi-core orbitals correlated, 
-  - `:large` semi-core orbitals frozen. """
-  core::Symbol = :large
+  """`⟨:auto⟩` core type for frozen-core approximation:
+  - `:auto` freeze the orbitals tagged `Core` in the wf dump if present, otherwise fall back to `:large`,
+  - `:none` no frozen-core approximation,
+  - `:small` semi-core orbitals correlated,
+  - `:large` semi-core orbitals frozen.
+  Setting `core` to anything other than `:auto` (or setting `freeze_nocc`) overrides the
+  dump-derived core. """
+  core::Symbol = :auto
   """`⟨-1⟩` number of occupied (core) orbitals to freeze (overwrites core). """
   freeze_nocc::Int = -1
-  """`⟨0⟩` number of virtual (highest) orbitals to freeze. """
-  freeze_nvirt::Int = 0
-  """`⟨"-"⟩` occupied α (or closed-shell) orbitals. 
-  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`. 
-  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`. """
+  """`⟨-1⟩` number of virtual (highest) orbitals to freeze. `-1` (auto) drops the orbitals
+  tagged `Deleted` in the wf dump (e.g. from `@region`); a value `≥ 0` overrides this and freezes
+  exactly that many highest virtuals. """
+  freeze_nvirt::Int = -1
+  """`⟨0⟩` number of virtual (highest) positron orbitals to freeze. """
+  freeze_nvirt_pos::Int = 0
+  """`⟨"-"⟩` occupied α (or closed-shell) orbitals.
+  The occupation strings can be given as a `+` separated list, e.g. `occa = 1+2+3` or equivalently `1-3`.
+  Additionally, the spatial symmetry of the orbitals can be specified with the syntax `orb.sym`, e.g. `occa = "-5.1+-2.2+-4.3"`.
+  Orbital indices always refer to the **full MO space** (including frozen core): for ElemCo-generated
+  dumps with frozen core/deleted virtuals the list is automatically translated to the active space.
+  (Externally-read FCIDUMP files have no frozen-orbital information, so their indices are taken as-is.) """
   occa::String = "-"
-  """`⟨"-"⟩` occupied β orbitals. 
-  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case)."""
+  """`⟨"-"⟩` occupied β orbitals.
+  If `occb::String` is empty, the occupied β orbitals are the same as the occupied α orbitals (closed-shell case).
+  Like `occa`, indices refer to the full MO space."""
   occb::String = "-"
   """`⟨"-"⟩` active space.
-  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format. """
+  The active space is defined by the occupation string (cf. `occa`) or in the `(#elec, #orb)` format.
+  As for `occa`, an orbital-list string refers to the full MO space and is translated to the active
+  space; the `(#elec, #orb)` format is relative to the current (post-freeze) space. """
   active::String = "-"
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
@@ -65,6 +89,11 @@ end
   maxit::Int = 50
   """`⟨1.e-8⟩` tolerance for imaginary part of MO coefs (for biorthogonal). """
   imagtol::Float64 = 1.e-8
+  """`⟨1.e-8⟩` threshold for removing linearly-dependent (redundant) orbitals.
+  Eigenvectors of the AO overlap matrix with eigenvalues below this threshold are
+  discarded via canonical orthogonalization. This makes HF robust for redundant basis
+  sets (e.g. Cartesian basis sets with 6 instead of 5 `d` functions). """
+  redthr::Float64 = 1.e-8
   """`⟨false⟩` direct calculation without storing integrals. """
   direct::Bool = false
   """`⟨:SAD⟩` orbital guess:
@@ -118,6 +147,8 @@ end
   i.e., build and block-diagonalize the Fock matrix without changing the Fermi level.
   At the moment, it works only for BO-HF."""
   pseudo::Bool = false
+  """`⟨""⟩` Minimal basis set for SAD guess. If empty, use `"minao"` type from basis Dict, or `"minao"` basis as fallback. """
+  minao::String = ""
 end
   
 """ 
@@ -138,6 +169,13 @@ end
   shiftp::Float64 = 0.2
   """`⟨0.2⟩` level shift for triples. """
   shiftt::Float64 = 0.2
+  """`⟨1.0⟩` damping factor for the orbital-rotation step in orbital-optimized
+  QV methods (OQV-CCD/DCD). The orbital update is scaled by `orbdamp`; `1.0`
+  is the undamped step. Values `< 1` (e.g. `0.15`) stabilise the coupled
+  orbital+amplitude iteration near strong correlation / instabilities (stretched
+  bonds), at the cost of slower orbital convergence. Does not bias the solution:
+  the fixed point (gradient `= 0`) is unchanged by the damping. """
+  orbdamp::Float64 = 1.0
   """`⟨false⟩` calculate properties. """
   properties::Bool = false
   """`⟨1.e-5⟩` amplitude decomposition threshold. """
@@ -171,6 +209,9 @@ end
   ``V_{XZ}^{L} U^{iZ}_{a}``. This is an additional approximation, which reduces the scaling of the 
   most expensive steps and is useful for large systems. """
   project_voXL::Bool = false
+  """`⟨false⟩` use dense SVD for the amplitude decomposition in SVD-DC-CCSDT instead of LLAMA low-rank approximation.
+  This is useful for small systems, but becomes unfeasible for large systems. """
+  use_dense_decomposition::Bool = false
   """`⟨:combined⟩` type of space for project_voXL. Possible values are :combined, :symcombined, :triples, :full. """ 
   space4voXL::Symbol = :combined
   """`⟨0.0⟩` imaginary shift for denominator in doubles decomposition. """
@@ -186,6 +227,9 @@ end
   """`⟨2⟩` what to project in ``v_{ak}^{ci} T^{kj}_{cb}`` in SVD-DCSD:
   0: both, 1: amplitudes, 2: residual, 3: robust fit. """
   project_vovo_t2::Int = 2
+  """`⟨false⟩` use MP2 amplitudes for decomposition in SVD-DCSD. 
+  If `false`, one iteration of SVD-DCD is used for decomposition instead. """
+  decompose_using_mp2::Bool = false
   """`⟨false⟩` decompose full doubles amplitudes in SVD-DCSD (slow). """
   decompose_full_doubles::Bool = false
   """`⟨"cc_amplitudes"⟩` main part of filename for start amplitudes. 
@@ -224,8 +268,92 @@ end
   dcsd_ofac::Float64 = 0.15
   """`⟨false⟩` ignore various errors in sanity checks. """
   ignore_error::Bool = false
-  """`⟨false⟩` keep the orbitals after rotations over iterations of orbital optimizations in the OQV-CCD/DCD."""
-  keepOQVorbitals::Bool = false
+  """`⟨:maxdim⟩` pivot tolerance mode for LLAMA decomposition:
+  - `:adaptive` use LLAMA's internal adaptive `tol/sqrt(m_eff)` pivot tolerance
+  - `:maxdim` use `tol/sqrt(max(m,n))` as pivot tolerance (more robust for difficult cases, e.g., ghost atoms)
+  If `ampsvd_pivotol > 0`, use that explicit value instead (overrides mode). """
+  ampsvd_pivotol_mode::Symbol = :maxdim
+  """`⟨0.0⟩` explicit pivot tolerance for LLAMA. If > 0, overrides `ampsvd_pivotol_mode`. """
+  ampsvd_pivotol::Float64 = 0.0
+  """`⟨true⟩` localize orbitals (IBO for occupied, orthogonal PAOs for virtual)
+  before amplitude decomposition in SVD-DC methods.
+  The localization rotation is applied only to the matrices entering `svd_decompose`,
+  and the resulting U vectors are transformed back to the canonical basis. """
+  localize::Bool = true
+end
+
+"""
+  Options for orbital localization.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct LocOptions
+  """`⟨true⟩` localize virtual orbitals using orthogonal PAOs (OPAO) in addition to occupied. """
+  virtual::Bool = true
+  """`⟨0⟩` Localization exponent: 0 for automatic (4 for IBO, 2 for PM), or set explicitly. """
+  exponent::Int = 0
+  """`⟨"ibo"⟩` Localization method: `"ibo"` (Intrinsic Bond Orbitals), `"pm"` (Pipek-Mezey with Mulliken charges), or `"boys"` (Foster-Boys). """
+  method::String = "ibo"
+  """`⟨3⟩` Factor multiplying the AO basis redundancy threshold [`scf.redthr`](@ref
+  ECInfos.ScfOptions) to form the relative eigenvalue threshold for detecting redundant PAOs
+  in the orthogonalized-PAO (OPAO) construction (`@localize`, `@region`). Eigenvectors of the
+  PAO overlap with eigenvalue below `opaofac * scf.redthr * λmax` are treated as redundant and
+  the corresponding (least independent) PAO is dropped.
+  Larger values prune more aggressively. """
+  opaofac::Float64 = 3.0
+  """`⟨""⟩` Minimal basis set for IAO construction. If empty, use `"minao"` type from basis Dict, or `"minao"` basis as fallback. """
+  minao::String = ""
+  """`⟨false⟩` Localize core orbitals among themselves (separately from valence). """
+  localize_core::Bool = false
+end
+
+"""
+  Options for region-fragment orbital selection.
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct RegionOptions
+  """`⟨:inclusive⟩` occupied-selection mode for centers passed directly to `@region`.
+  - `:inclusive`: treat `@region(centers)` as additional inclusive centers
+  - `:exclusive`: treat `@region(centers)` as additional exclusive centers
+  """
+  mode::Symbol = :inclusive
+  """`⟨Int[]⟩` additional atom indices selected with the inclusive occupied-orbital rule, e.g. `[1]`.
+      The orbitals with significant contributions from these centers are added to the fragment. """
+  inclusive_centers::Vector{Int} = Int[]
+  """`⟨Int[]⟩` additional atom indices selected with the exclusive occupied-orbital rule, e.g. `[1, 2]`.
+      The orbitals with significant contributions exclusively from these centers are added to the fragment. """
+  exclusive_centers::Vector{Int} = Int[]
+  """`⟨:none⟩` π-space selection mode.
+  - `:none`: use the default IBO/PAO region selection
+  - `:occupied`: select occupied π orbitals and keep PAO-defined virtuals
+  - `:both`: select both occupied and virtual π orbitals
+  """
+  pi::Symbol = :none
+  """`⟨-1⟩` override for the total number of π electrons used by the PiOS counting model.
+    Use `-1` to keep the automatic chemistry-based count. """
+  pi_electrons::Int = -1
+  """`⟨-1⟩` override for the number of occupied π orbitals to keep in restricted PiOS runs.
+    Use `-1` to keep the full automatically determined occupied π space. """
+  pi_occupied::Int = -1
+  """`⟨-1⟩` override for the number of virtual π orbitals to keep in restricted `region.pi=:both` runs.
+    Use `-1` to keep the full automatically determined virtual π space. """
+  pi_virtual::Int = -1
+  """`⟨:complement⟩` fragment virtual-space construction mode.
+  - `:complement`: build antibonding-like virtual targets by projecting fragment IAOs into the virtual space, then augment them with support-atom OPAOs selected from accumulated fragment charge
+  - `:support_opao`: use the support-atom OPAO construction directly
+  """
+  virtual::Symbol = :complement
+  """`⟨0.2⟩` threshold for selecting localized occupied orbitals from the requested centers. """
+  occ_charge_thr::Float64 = 0.2
+  """`⟨0.2⟩` threshold for adding atoms to the PAO support of the selected fragment. """
+  atom_charge_thr::Float64 = 0.2
+  """`⟨Int[]⟩` additional atom indices whose PAOs are added to the fragment virtual space, e.g. `[3]`.
+      These centers extend the automatically determined PAO support and are always included
+      regardless of `atom_charge_thr`. """
+  pao_centers::Vector{Int} = Int[]
+  """`⟨false⟩` pseudo-canonicalize the selected fragment occupied and virtual subspaces. """
+  pseudo::Bool = false
 end
 
 """
@@ -242,6 +370,8 @@ end
   conv_tol::Float64 = 1e-8
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
+  """`⟨false⟩` calculate properties such as dipole moments. """
+  properties::Bool = false
   """`⟨1⟩` Number of states to compute """
   nstates::Int = 1
   """`⟨2⟩` Number of guess vectors to use """
@@ -290,6 +420,8 @@ end
   tol::Float64 = 1e-6
   """`⟨1e-6⟩` Convergence tolerance for residual norm """
   res_tol::Float64 = 1e-6
+  """`⟨false⟩` calculate properties such as dipole moments. """
+  properties::Bool = false
   """`⟨50⟩` Maximum CIPHI iterations """
   max_iter::Int = 50
   """`⟨0.1⟩` Level shift to improve convergence """
@@ -390,12 +522,21 @@ end
 @kwdef mutable struct IntOptions
   """`⟨true⟩` use density-fitted integrals. """
   df::Bool = true
+  """`⟨true⟩` for exact (non-DF) AO integrals: run closed-shell CCSD/DCSD **AO-direct**
+  (contract the AO integrals on the fly, no MO integral dump; frozen core is folded into an
+  effective 1-electron Hamiltonian). Set to `false` to instead derive a transient MO integral
+  dump from the AO integrals (as for CCSDT/FCI). No effect on DF integrals. """
+  ao_direct::Bool = true
   """`⟨""⟩` store integrals in FCIDump format. """
   fcidump::String = ""
   """`⟨false⟩` use Cartesian subshells instead of Spherical. """
   cartesian::Bool = false
   """`⟨1000⟩` target batch length for the integral transformation. """
   target_batch_length::Int = 1000
+  """`⟨1e-12⟩` Cauchy–Schwarz prescreening threshold for the exact AO integrals: a shell quartet
+  whose bound `sqrt((pr|pr))·sqrt((qs|qs))` stays below this is skipped (and stored as zero).
+  Set to `0` to disable screening and compute every quartet. """
+  screen::Float64 = 1.e-12
   """`⟨false⟩` use fallback basis sets (in case of missing basis sets). """
   use_fallback_basis::Bool = false
   """`⟨true⟩` sanity check of the fit basis (i.e., that it's not an AO basis)"""
@@ -412,8 +553,12 @@ end
 @kwdef mutable struct CholeskyOptions
   """`⟨1.e-6⟩` threshold for elimination of redundancies in the auxiliary basis. """
   thred::Float64 = 1.e-6
-  """`⟨1.e-4⟩` threshold for integral decomposition. """
-  thr::Float64 = 1.e-4
+  """`⟨1.e-5⟩` threshold for integral decomposition. """
+  thr::Float64 = 1.e-5
+  """`⟨0.01⟩` span factor for two-step Cholesky batch qualification. """
+  sigma::Float64 = 0.01
+  """`⟨false⟩` use SVD (real) / Takagi (complex) instead of Cholesky for the J matrix in step II. """
+  usesvd::Bool = false
 end
 
 """
@@ -456,13 +601,33 @@ end
   time::Int = 2
   """`⟨2⟩` verbosity level for printing memory usage. """
   memory::Int = 2
+  """`⟨10⟩` maximum number of coefficients to print. """
+  ncoeff::Int = 10
 end
 
-""" 
+"""
+    MemoryOptions
+
+  Options for memory management (used to size blocked/streaming scratch allocations so they adapt
+  to the machine and honor an explicit user budget).
+
+  $(TYPEDFIELDS)
+"""
+@kwdef mutable struct MemoryOptions
+  """`⟨-1.0⟩` memory budget in GB for large scratch allocations (e.g. the 4-index integral
+  transformation). `-1.0` (default) estimates the budget automatically from the node's free memory.
+  Set explicitly (e.g. on fat nodes) to allow larger blocks and fewer passes over the integrals. """
+  budget::Float64 = -1.0
+  """`⟨0.8⟩` fraction of the currently available memory (node free memory, capped by any cgroup /
+  SLURM limit) to use when the budget is estimated automatically (`budget ≤ 0`). """
+  fraction::Float64 = 0.8
+end
+
+"""
   Options for ElemCo.jl.
 
   $(TYPEDFIELDS)
-"""  
+"""
 @kwdef mutable struct Options
   """ Wavefunction options ([`WfOptions`](@ref)). """
   wf::WfOptions = WfOptions()
@@ -490,4 +655,10 @@ end
   davidson::DavidsonOptions = DavidsonOptions()
   """ Print options ([`PrintOptions`](@ref)). """
   print::PrintOptions = PrintOptions()
+  """ Localization options ([`LocOptions`](@ref)). """
+  loc::LocOptions = LocOptions()
+  """ Region selection options ([`RegionOptions`](@ref)). """
+  region::RegionOptions = RegionOptions()
+  """ Memory-management options ([`MemoryOptions`](@ref)). """
+  mem::MemoryOptions = MemoryOptions()
 end

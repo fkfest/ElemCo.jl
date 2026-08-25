@@ -8,6 +8,12 @@ CurrentModule = ElemCo.ECInfos
 ECInfos
 ```
 
+## Constants
+
+```@docs
+DEFAULT_ELTYPE
+```
+
 ## Main structure
 
 ```@docs

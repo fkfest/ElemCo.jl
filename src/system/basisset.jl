@@ -19,10 +19,11 @@ export BasisCentre, BasisSet
 export BasisContraction, AngularShell
 export shell_range, centre_range, is_cartesian, combine
 export generate_angularshell, add_subshell!, angularshells
-export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao
+export n_subshells, n_primitives, n_coefficients, n_angularshells, n_ao, nshell4l
 export normalize_contraction
 export coefficients_1mat, n_coefficients_1mat
-export basis_name, generate_basis, guess_norb, output_basis, get_available_elements4basis
+export basis_name, generate_basis, generate_minao_basis, guess_norb, output_basis, get_available_elements4basis
+export electron_distribution
 export ao_list, print_ao, ao_order2internal
 export subshell_char, max_l
 export levenshtein_distance, get_available_basis_sets, suggest_basis_sets
@@ -240,6 +241,46 @@ function generate_basis(EC::AbstractECInfo, type="ao"; basisset::AbstractString=
                         use_fallback=EC.options.int.use_fallback_basis,
                         check_fit_basis=EC.options.int.check_fit_basis,
                         split_ashells=EC.options.int.split_ashells)
+end
+
+"""
+    generate_minao_basis(EC::AbstractECInfo, minao::AbstractString="")
+
+  Generate minimal AO basis set for IAO construction or SAD guess.
+
+  Resolution order:
+  1. If `minao` is non-empty, use it as the basis set name.
+  2. Else if `"minao"` type is defined in the basis Dict, use it.
+  3. Else use `"minao"` as the basis set name.
+"""
+function generate_minao_basis(EC::AbstractECInfo, minao::AbstractString="")
+  if minao != ""
+    return generate_basis(EC, basisset=minao)
+  elseif length(EC.system) > 0 && haskey(first(EC.system).basis, "minao")
+    return generate_basis(EC, "minao")
+  else
+    return generate_basis(EC, basisset="minao")
+  end
+end
+
+"""
+    electron_distribution(ms::MSystem, bs::BasisSet)
+
+  Return the averaged number of electrons in the orbitals of the given basis set.
+  The number of shells per angular momentum is determined from the basis set.
+"""
+function electron_distribution(ms::MSystem, bs::BasisSet)
+  eldist = Float64[]
+  for (iat, at) in enumerate(ms)
+    elnam = element_LABEL(at)
+    nsh4l = nshell4l(bs.centres[iat])
+    eldist4el = electron_distribution4element(elnam, nsh4l)
+    if is_dummy(at)
+      eldist4el .= 0.0
+    end
+    eldist = vcat(eldist, eldist4el)
+  end
+  return eldist
 end
 
 """

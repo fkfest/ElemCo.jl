@@ -9,7 +9,7 @@ ElemCo.Integrals
 ```@autodocs
 Modules = [ElemCo.Integrals]
 Private = false
-Pages = ["integrals.jl"]
+Pages = ["integrals.jl", "integrals_2e4idx.jl"]
 Order = [:constant, :type, :function]
 ```
 
@@ -52,4 +52,9 @@ Order = [:type, :function]
 
 ```@docs
 ElemCo.Libcint
+```
+
+```@autodocs
+Modules = [ElemCo.Libcint]
+Order = [:constant, :type, :function]
 ```

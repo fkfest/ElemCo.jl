@@ -168,8 +168,9 @@ basis = "cc-pVDZ"
     @test abs(energies["METHOD"] - E_ref) < epsilon
 end
 ```
-- Run tests with: `julia --project=. test/runtests.jl`
-- Quick tests available via: `julia --project=. test/runtests.jl quick`
+- Run quick tests with: `julia --project=. -e 'using Pkg; Pkg.test()'`
+- Run all tests with: `julia --project=. -e 'using Pkg; Pkg.test(; test_args=["all"])'`
+- Select a subset by tag or item name, e.g.: `julia --project=. -e 'using Pkg; Pkg.test(; test_args=["df"])'` (or `["h2o","complex"]`)
 
 ### Dependencies
 - Minimize external dependencies
@@ -243,7 +244,7 @@ end
 
 **After making changes:**
 - Re-run `profile/jet.jl` to verify improvements
-- Run test suite to ensure correctness: `julia --project=. test/runtests.jl`
+- Run test suite to ensure correctness: `julia --project=. -e 'using Pkg; Pkg.test()'`
 
 ## Quantum Chemistry Specifics
 
