@@ -72,12 +72,12 @@ x_a^e = \tilde T^{kl}_{ac} v_{kl}^{ec}\\
 ```@autodocs
 Modules = [CoupledCluster]
 Private = false
-Order = [:function]
+Order = [:constant, :type, :function]
 ``` 
 
 ## Internal functions
 ```@autodocs
 Modules = [CoupledCluster]
 Public = false
-Order = [:function]
+Order = [:constant, :type, :function]
 ``` 

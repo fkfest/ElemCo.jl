@@ -9,14 +9,14 @@ ElemCo.DecompTools
 ```@autodocs
 Modules = [ElemCo.DecompTools]
 Private = false
-Order = [:function]
+Order = [:type, :function]
 ```
 
 ## Internal functions
 ```@autodocs
 Modules = [ElemCo.DecompTools]
 Public = false
-Order = [:function]
+Order = [:type, :function]
 ```
 
 

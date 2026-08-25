@@ -93,9 +93,10 @@ fcidump = "path/to/file.FCIDUMP"
 ## Testing
 
 ```bash
-julia --project=. test/runtests.jl          # All tests
-julia --project=. test/runtests.jl quick    # Quick tests
-cd profile && julia --project=.. jet.jl     # Type stability check
+julia --project=. -e 'using Pkg; Pkg.test()'                     # Quick tests (default)
+julia --project=. -e 'using Pkg; Pkg.test(; test_args=["all"])'  # All tests
+julia --project=. -e 'using Pkg; Pkg.test(; test_args=["fci"])'  # Just the :fci items
+cd profile && julia --project=.. jet.jl                          # Type stability check
 ```
 
 

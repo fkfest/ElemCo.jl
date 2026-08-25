@@ -12,13 +12,152 @@ using ..ElemCo.MSystems
 using ..ElemCo.FockFactory
 using ..ElemCo.FciDumps
 using ..ElemCo.TensorTools
-using ..ElemCo.DFTools
+using ..ElemCo.IntegralTools
+using ..ElemCo.PMStore
 using ..ElemCo.Utils
 
 export dfdump
 
 """
-    generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
+    prepare_mpfit(EC, bao, bfit)
+
+Compute fitting matrix `M` and 3-index AO integrals `μνP` for density fitting.
+"""
+function prepare_mpfit(EC, bao, bfit)
+  PQ = eri_2e2idx(bfit)
+  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
+  println("Number of fitting functions in mpfit: ", size(PQ, 2))
+  println("Number of fitting functions in mpfit after Cholesky: ", size(M, 2))
+  PQ = nothing
+  μνP = eri_2e3idx(bao, bfit)
+  return μνP, M
+end
+
+"""    
+    _halftransform_mo_first!(B3_coeff_pairs, μνP, M)
+
+MO-first half-transform: transform AO→MO first, then P→L.
+More efficient when MO space is much smaller than AO space.
+"""
+function _halftransform_mo_first!(B3_coeff_pairs, μνP, M)
+  nao = size(μνP, 1)
+  nP = size(μνP, 3)
+  max_norbs = maximum(size(pair[2], 2) for pair in B3_coeff_pairs)
+  PBlks = get_spaceblocks(1:nP, 512)
+  maxP = maximum(length, PBlks)
+  tM = copy(transpose(M))
+  @buffer buf(max_norbs * (nao + max_norbs) * maxP) begin
+  for (B3, c) in B3_coeff_pairs
+    norbs = size(c, 2)
+    first = true
+    for PBlk in PBlks
+      lenP = length(PBlk)
+      mmP = alloc!(buf, norbs, norbs, lenP)
+      mνP = alloc!(buf, norbs, nao, lenP)
+      v!μνP = @mview μνP[:,:,PBlk]
+      @mtensor mνP[p,ν,P] = conj(c[μ,p]) * v!μνP[μ,ν,P]
+      @mtensor mmP[p,q,P] = mνP[p,ν,P] * c[ν,q]
+      drop!(buf, mνP)
+      v!tM = @mview tM[:,PBlk]
+      if first
+        @mtensor B3[L,p,q] = mmP[p,q,P] * v!tM[L,P]
+        first = false
+      else
+        @mtensor B3[L,p,q] += mmP[p,q,P] * v!tM[L,P]
+      end
+      drop!(buf, mmP)
+    end
+  end
+  end #buffer
+end
+
+"""    _halftransform_df_first!(B3_coeff_pairs, μνP, M)
+
+DF-first half-transform: transform P→L first, then AO→MO.
+More efficient when MO space is comparable to AO space.
+"""
+function _halftransform_df_first!(B3_coeff_pairs, μνP, M)
+  nao = size(μνP, 1)
+  nL = size(M, 2)
+  # check that all coeffs have the same number of orbitals
+  norbs = size(B3_coeff_pairs[1][2], 2)
+  @assert all(pair -> size(pair[2], 2) == norbs, B3_coeff_pairs) "All coefficient matrices must have the same number of orbitals"
+  LBlks = get_spaceblocks(1:nL, 512)
+  maxL = maximum(length, LBlks)
+  @buffer buf((nao^2 + norbs*nao)*maxL) begin
+  for L in LBlks
+    lenL = length(L)
+    v!M = @mview M[:,L]
+    AAL = alloc!(buf, nao, nao, lenL)
+    mAL = alloc!(buf, norbs, nao, lenL)
+    @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
+    for (B3, c) in B3_coeff_pairs
+      @mtensor mAL[p,ν,L] = c[μ,p] * AAL[μ,ν,L]
+      v!B3 = @mview B3[L,:,:]
+      @mtensor v!B3[L,p,q] = mAL[p,ν,L] * c[ν,q]
+    end
+    drop!(buf, mAL, AAL)
+  end
+  end #buffer
+end
+
+"""
+    halftransform_3idx!(B3_coeff_pairs, μνP, M)
+
+Half-transform AO 3-index integrals to MO basis.
+For each `(B3, c)` pair, computes ``B3_{L,p,q} = \\sum_{\\mu\\nu} c_{\\mu,p} (\\mu\\nu P \\cdot M)_{\\mu,\\nu,L} c_{\\nu,q}``.
+`B3` arrays must be pre-allocated as `Array{T,3}(undef, nL, norbs, norbs)`.
+
+Uses MO-first route (AO→MO then P→L) when all MO sizes are at most half of AO size,
+otherwise uses AO-first route (P→L then AO→MO).
+"""
+function halftransform_3idx!(B3_coeff_pairs, μνP, M)
+  nao = size(μνP, 1)
+  if all(pair -> 2 * size(pair[2], 2) <= nao, B3_coeff_pairs)
+    _halftransform_mo_first!(B3_coeff_pairs, μνP, M)
+  else
+    _halftransform_df_first!(B3_coeff_pairs, μνP, M)
+  end
+end
+
+"""
+    contract_tri!(int2, B3)
+
+Contract 3-index `B3[L,p,q]` into upper-triangular 4-index integrals:
+``int2_{p,r,\\text{tri}(q,s)} = \\sum_L B3_{L,p,q} B3_{L,r,s}`` for ``q \\le s``.
+"""
+function contract_tri!(int2, B3)
+  norbs = size(B3, 3)
+  for s = 1:norbs
+    B3s = @view B3[:,:,s]
+    for q = 1:s
+      B3q = @view B3[:,:,q]
+      idx = uppertriangular_index(q, s)
+      @views mul!(int2[:,:,idx], transpose(B3q), B3s)
+    end
+  end
+end
+
+"""
+    contract_full!(int2, B3a, B3b)
+
+Contract two 3-index arrays into full 4-index integrals:
+``int2_{p,r,q,s} = \\sum_L B3a_{L,p,q} B3b_{L,r,s}``.
+"""
+function contract_full!(int2, B3a, B3b)
+  norbs_q = size(B3a, 3)
+  norbs_s = size(B3b, 3)
+  for s = 1:norbs_s
+    B3bs = @view B3b[:,:,s]
+    for q = 1:norbs_q
+      B3aq = @view B3a[:,:,q]
+      @views mul!(int2[:,:,q,s], transpose(B3aq), B3bs)
+    end
+  end
+end
+
+"""
+    generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, full_spaces) where T
 
   Generate `int2`, `int1` and `int0` integrals for fcidump using density fitting.
 
@@ -26,7 +165,7 @@ export dfdump
   used for `int1` and `int0` integrals. 
   `full_spaces` is a dictionary with spaces without frozen orbitals.
 """
-function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
+function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, full_spaces) where T
   @assert !fdump.uhf "Use generate_integrals(EC, fdump, cMO::SpinMatrix, full_spaces) for UHF"
   bao = generate_basis(EC, "ao")
   bfit = generate_basis(EC, "mpfit")
@@ -34,12 +173,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
   core_orbs = setdiff(full_spaces['o'], EC.space['o'])
   wocore = setdiff(1:size(cMO,2), core_orbs)
 
-  PQ = eri_2e2idx(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
-  println("Number of fitting functions in mpfit: ", size(PQ, 2))
-  println("Number of fitting functions in mpfit after Cholesky: ", size(M, 2))
-  PQ = nothing
-  μνP = eri_2e3idx(bao, bfit)
+  μνP, M = prepare_mpfit(EC, bao, bfit)
   cMOval = cMO[:,wocore]
   nao = size(cMO, 1)
   norbs = length(wocore)
@@ -47,47 +181,15 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
   filename2 = int2_npy_filename(fdump)
   int2_file, int2 = newmmap(EC, filename2, (norbs,norbs,(norbs+1)*norbs÷2), description="int2")
   nL = size(M,2)
-  LBlks = get_spaceblocks(1:nL)
-  maxL = maximum(length, LBlks)
-  @buffer buf(max(nao, norbs)^2*maxL+norbs*nao*maxL) begin
-  first = true
-  for L in LBlks
-    lenL = length(L)
-    v!M = @mview M[:,L]
-    mAL = alloc!(buf, norbs, nao, lenL)
-    AAL = alloc!(buf, nao, nao, lenL)
-    @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
-    @mtensor mAL[p,ν,L] = cMOval[μ,p] * AAL[μ,ν,L]
-    drop!(buf, AAL)
-    Lmm = alloc!(buf, lenL, norbs, norbs)
-    @mtensor Lmm[L,p,q] = mAL[p,ν,L] * cMOval[ν,q]
-    # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
-    if first
-      for s = 1:norbs
-        q = 1:s # only upper triangle
-        Iq = uppertriangular_range(s)
-        v!Lmm_q = @mview Lmm[:,:,q]
-        v!Lmm_s = @mview Lmm[:,:,s]
-        v!int2 = @mview int2[:,:,Iq]
-        @mtensor v!int2[p,r,q] = v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
-      end
-    else
-      for s = 1:norbs
-        q = 1:s # only upper triangle
-        Iq = uppertriangular_range(s)
-        v!Lmm_q = @mview Lmm[:,:,q]
-        v!Lmm_s = @mview Lmm[:,:,s]
-        v!int2 = @mview int2[:,:,Iq]
-        @mtensor v!int2[p,r,q] += v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
-      end
-    end
-    drop!(buf, Lmm, mAL)
-    first = false
-  end
-  end #buffer
+  Lmm = Array{T,3}(undef, nL, norbs, norbs)
+  halftransform_3idx!(((Lmm, cMOval),), μνP, M)
   μνP = nothing
   M = nothing
-  flushmmap(EC, int2)
+  contract_tri!(int2, Lmm)
+  Lmm = nothing
+  # close the file handle (the mapping stays valid); it was leaked before, so a script that
+  # regenerates the dump in a loop accumulated one open descriptor per `@dfints`
+  closemmap(EC, int2_file, int2)
   fdump.int2 = int2
 
   hAO = kinetic(bao) + nuclear(bao)
@@ -111,7 +213,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
   filename1 = int1_npy_filename(fdump)
   int1_file, int1 = newmmap(EC, filename1, (norbs,norbs), description="int1")
   int1 .= fock_jkfitMO[wocore,wocore] - fock
-  flushmmap(EC, int1)
+  closemmap(EC, int1_file, int1)   # see the int2 handle above
   fdump.int1 = int1
   fdump.int0 = Enuc + hii + sum(diag(fock_jkfitMO)[core_orbs]) - sum(diag(int1)[spo])
 
@@ -121,7 +223,98 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::Matrix, full_spaces)
 end
 
 """
-    generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spaces)
+    generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, cPO::Matrix, full_spaces)
+
+  Generate `int2`, `int1` and `int0` integrals for fcidump using density fitting.
+  Generate both e-e, e-p and the 1-body e and p integrals.
+
+  `mpfit` basis is used for `int2` integrals, and `jkfit` basis-correction is
+  used for `int1` and `int0` integrals. 
+  `full_spaces` is a dictionary with spaces without frozen orbitals.
+"""
+function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::Matrix, cPO::Matrix, full_spaces) where T
+  @assert !fdump.uhf "Use generate_integrals(EC, fdump, cMO::SpinMatrix, full_spaces) for UHF"
+  bao = generate_basis(EC, "ao")
+  bfit = generate_basis(EC, "mpfit")
+  jkfit = generate_basis(EC, "jkfit")
+
+  μνP, M = prepare_mpfit(EC, bao, bfit)
+  cMOval = cMO[:,1:end]
+  cPOval = cPO[:,1:end]
+  nao = size(cMO, 1)
+  norbs = nao
+  println("norbs: ", norbs)
+  filename2 = int2_npy_filename(fdump)
+  int2_file, int2 = newmmap(EC, filename2, (norbs,norbs,(norbs+1)*norbs÷2), description="int2")
+  filename2ep = int2_npy_filename(fdump, :ep)
+  int2ep_file, int2ep = newmmap(EC, filename2ep, (norbs,norbs,norbs,norbs), description="int2ep")
+  nL = size(M,2)
+  Lmm = Array{T,3}(undef, nL, norbs, norbs)
+  Lmm_p = Array{T,3}(undef, nL, norbs, norbs)
+  halftransform_3idx!(((Lmm, cMOval), (Lmm_p, cPOval)), μνP, M)
+  μνP = nothing
+  M = nothing
+  contract_tri!(int2, Lmm)
+  contract_full!(int2ep, Lmm, Lmm_p)
+  Lmm = nothing
+  Lmm_p = nothing
+  flushmmap(EC, int2)
+  flushmmap(EC, int2ep)
+  fdump.int2 = int2
+  fdump.int2ep = int2ep
+
+  hAO = kinetic(bao) + nuclear(bao)
+  hAO_p = kinetic(bao) - nuclear(bao)
+  cMO2 = cMO[:,full_spaces['o']]
+  @mtensor hii = (cMO2[μ,i] * hAO[μ,ν]) * cMO2[ν,i]
+  cPO2 = cPO[:,full_spaces['p']]
+  @mtensor hii_p = (cPO2[μ,i] * hAO_p[μ,ν]) * cPO2[ν,i]
+
+  spm = 1:norbs
+  spo = EC.space['o']
+  sp_pos = EC.space['p']
+  @mtensor begin 
+    fock[p,q] := 2.0*detri_int2(int2, norbs, spm, spo, spm, spo)[p,i,q,i]
+    fockjp[p,q] := int2ep[spm,sp_pos,spm,sp_pos][p,I,q,I] 
+    fock[p,q] -= fockjp[p,q]
+    fock[p,q] -= detri_int2(int2, norbs, spm, spo, spo, spm)[p,i,i,q]
+    fock_p[p,q] := -2.0*int2ep[spo, spm, spo, spm][i,p,i,q]
+  end
+  space_save = save_space(EC)
+  restore_space!(EC, full_spaces)
+  Enuc = generate_AO_DF_integrals(EC, "jkfit"; save3idx=false)
+  fock_jkfit, fock_jkfit_pos, jp = gen_dffock(EC, cMO, cPO, bao, jkfit)
+  restore_space!(EC, space_save)
+  fock_jkfitMO = cMO' * fock_jkfit  * cMO
+  fock_jkfitMO_pos = cPO' * fock_jkfit_pos * cPO
+  jpMO = cMO' * jp * cMO
+  filename1 = int1_npy_filename(fdump)
+  int1_file, int1 = newmmap(EC, filename1, (norbs,norbs), description="int1")
+  int1 .= fock_jkfitMO - fock
+  filename1p = int1_npy_filename(fdump, :p)
+  int1p_file, int1p = newmmap(EC, filename1p, (norbs,norbs), description="int1p")
+  int1p .= fock_jkfitMO_pos - fock_p
+  flushmmap(EC, int1)
+  flushmmap(EC, int1p)
+  fdump.int1 = int1
+  fdump.int1p = int1p
+  int0 = Enuc + hii + .5*hii_p - sum(diag(int1)[spo]) - .5*sum(diag(int1p)[sp_pos])
+  fdump.int0 = int0
+
+  eRef_hii = Enuc+ hii
+
+  eRef_fock = sum(diag(fock_jkfitMO)[full_spaces['o']])
+  eRef_jp = sum(diag(jpMO)[full_spaces['o']])
+  eRef_jp_pos = sum(diag(fock_jkfitMO_pos)[full_spaces['p']])
+
+  eRef = eRef_hii + eRef_fock + eRef_jp + eRef_jp_pos
+
+  println("Reference energy: ", eRef)
+
+end
+
+"""
+    generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::SpinMatrix, full_spaces) where T
 
   Generate `int2aa`, `int2bb`, `int2ab`, `int1a`, `int1b` and `int0` integrals for fcidump using density fitting.
 
@@ -129,7 +322,7 @@ end
   used for `int1` and `int0` integrals. 
   `full_spaces` is a dictionary with spaces without frozen orbitals.
 """
-function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spaces)
+function generate_integrals(EC::ECInfo, fdump::FDump{T,3}, cMO::SpinMatrix, full_spaces) where T
   @assert fdump.uhf "Use generate_integrals(EC, fdump, cMO, full_spaces) for RHF"
   @assert size(cMO.α) == size(cMO.β) "cMO.α and cMO.β must have the same size"
   bao = generate_basis(EC, "ao")
@@ -139,10 +332,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
   @assert core_orbs == setdiff(full_spaces['O'], EC.space['O']) "Core space must be the same for α and β orbitals"
   wocore = setdiff(1:size(cMO, 2), core_orbs)
 
-  PQ = eri_2e2idx(bfit)
-  M = sqrtinvchol(PQ, tol = EC.options.cholesky.thred, verbose = true)
-  PQ = nothing
-  μνP = eri_2e3idx(bao, bfit)
+  μνP, M = prepare_mpfit(EC, bao, bfit)
   cMOaval = cMO[1][:,wocore]
   cMObval = cMO[2][:,wocore]
   nao = size(cMO, 1)
@@ -155,72 +345,22 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
   filename2bb = int2_npy_filename(fdump, :β)
   int2bb_file, int2bb = newmmap(EC, filename2bb, (norbs,norbs,(norbs+1)*norbs÷2), description="int2bb")
   nL = size(M,2)
-  LBlks = get_spaceblocks(1:nL)
-  maxL = maximum(length, LBlks)
-  @buffer buf((nao^2 + norbs*nao + 2*norbs^2)*maxL) begin
-  first = true
-  for L in LBlks
-    lenL = length(L)
-    v!M = @mview M[:,L]
-    Lmm = alloc!(buf, lenL, norbs, norbs)
-    LMM = alloc!(buf, lenL, norbs, norbs)
-    AAL = alloc!(buf, nao, nao, lenL)
-    MAL = mAL = alloc!(buf, norbs, nao, lenL)
-    @mtensor AAL[p,q,L] = μνP[p,q,P] * v!M[P,L]
-    @mtensor mAL[p,ν,L] = cMOaval[μ,p] * AAL[μ,ν,L]
-    @mtensor Lmm[L,p,q] = mAL[p,ν,L] * cMOaval[ν,q]
-    @mtensor MAL[p,ν,L] = cMObval[μ,p] * AAL[μ,ν,L]
-    @mtensor LMM[L,p,q] = MAL[p,ν,L] * cMObval[ν,q]
-    drop!(buf, AAL, mAL)
-    # <pr|qs> = sum_L pqL[p,q,L] * pqL[r,s,L]
-    if first
-      for s = 1:norbs
-        q = 1:s # only upper triangle
-        v!LMM_s = @mview LMM[:,:,s]
-        v!LMM_q = @mview LMM[:,:,q]
-        v!Lmm_s = @mview Lmm[:,:,s]
-        v!Lmm_q = @mview Lmm[:,:,q]
-        Iq = uppertriangular_range(s)
-        v!int2ab = @mview int2ab[:,:,:,s]
-        v!int2aa = @mview int2aa[:,:,Iq]
-        v!int2bb = @mview int2bb[:,:,Iq]
-        @mtensor begin
-          v!int2ab[p,r,q] = Lmm[L,p,q] * v!LMM_s[L,r]
-          v!int2aa[p,r,q] = v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
-          v!int2bb[p,r,q] = v!LMM_q[L,p,q] * v!LMM_s[L,r]
-        end
-      end
-    else
-      for s = 1:norbs
-        q = 1:s # only upper triangle
-        v!LMM_s = @mview LMM[:,:,s]
-        v!LMM_q = @mview LMM[:,:,q]
-        v!Lmm_s = @mview Lmm[:,:,s]
-        v!Lmm_q = @mview Lmm[:,:,q]
-        Iq = uppertriangular_range(s)
-        v!int2ab = @mview int2ab[:,:,:,s]
-        v!int2aa = @mview int2aa[:,:,Iq]
-        v!int2bb = @mview int2bb[:,:,Iq]
-        @mtensor begin
-          v!int2ab[p,r,q] += Lmm[L,p,q] * v!LMM_s[L,r]
-          v!int2aa[p,r,q] += v!Lmm_q[L,p,q] * v!Lmm_s[L,r]
-          v!int2bb[p,r,q] += v!LMM_q[L,p,q] * v!LMM_s[L,r]
-        end
-      end
-    end
-    drop!(buf, Lmm, LMM)
-    first = false
-  end
-  end #buffer
+  Lmm = Array{T,3}(undef, nL, norbs, norbs)
+  LMM = Array{T,3}(undef, nL, norbs, norbs)
+  halftransform_3idx!(((Lmm, cMOaval), (LMM, cMObval)), μνP, M)
   μνP = nothing
   M = nothing
+  contract_tri!(int2aa, Lmm)
+  contract_tri!(int2bb, LMM)
+  contract_full!(int2ab, Lmm, LMM)
+  Lmm = nothing
+  LMM = nothing
   flushmmap(EC, int2ab)
   flushmmap(EC, int2aa)
   flushmmap(EC, int2bb)
   fdump.int2ab = int2ab
   fdump.int2aa = int2aa
   fdump.int2bb = int2bb
-
   hAO = kinetic(bao) + nuclear(bao)
   cMOao = cMO[1][:,full_spaces['o']]
   @mtensor haii = (cMOao[μ,i] * hAO[μ,ν]) * cMOao[ν,i]
@@ -266,7 +406,7 @@ function generate_integrals(EC::ECInfo, fdump::TFDump, cMO::SpinMatrix, full_spa
   println("Reference energy: ", eRef)
 end
 
-""" 
+"""
     dfdump(EC::ECInfo)
 
   Generate fcidump using df integrals and store in `IntOptions.fcidump`.
@@ -279,26 +419,72 @@ function dfdump(EC::ECInfo)
   if !EC.options.int.df
     error("Only density-fitted integrals implemented")
   end
-  cMO = load_orbitals(EC)
+  # classes describing the loaded orbital set; `nothing` means "use the dump's own classes". For a
+  # basis-change restart the orbitals are completed to the full new basis and matching classes are
+  # returned, so freezing operates on classes that describe the actual (completed) orbital set.
+  completed_classes = nothing
+  if EC.options.wf.npositron > 0
+    cMO = load_orbitals(EC)
+    cPO = load_positron_orbitals(EC)
+    norbs_pos = size(cPO,2)
+  else
+    # `dump4core_only`: correlating orbitals come from `start` (the frozen core from `dump` is spliced
+    # in below); otherwise the usual source (dump, or start via a dump="" restart).
+    cMO, completed_classes = load_orbitals_for_correlation(EC; start=EC.options.wf.dump4core_only)
+  end
   norbs = size(cMO,2)
   space_save = save_space(EC)
-  ncore_orbs = freeze_core!(EC, EC.options.wf.core, EC.options.wf.freeze_nocc)
-  nfrozvirt = freeze_nvirt!(EC, EC.options.wf.freeze_nvirt)
+  nocc_full = length(EC.space['o'])
+  nvirt_full = length(EC.space['v'])
+  EC.options.wf.npositron > 0 && n_redundant_orbitals(EC) > 0 &&
+    error("Redundant (linearly-dependent) basis sets are not supported with positrons.")
+  # frozen core, redundant orbitals, and (dump-deleted / explicit) virtuals, all by class/index
+  cls = freeze_orbitals!(EC; classes=completed_classes)
+  (cls.occ_a == cls.occ_b && cls.virt_a == cls.virt_b) ||
+    error("FCIDUMP generation requires symmetric (restricted-like) freezing!")
+  # total per-orbital frozen counts (chemical core + class-honored core, and frozen/deleted virt);
+  # the region layout keeps frozen core at the lowest and deleted virtuals at the highest indices.
+  ncore_orbs = nocc_full - length(EC.space['o'])
+  nfrozvirt = nvirt_full - length(EC.space['v'])
+  # on a geometry-change restart the frozen core reused from `start` is stale (stuck at the
+  # previous geometry). With `dump4core_only`, take the frozen core (the leading `ncore_orbs` columns,
+  # cf. the `core_orbs == 1:ncore_orbs` assertion in generate_integrals) from the fresh-HF `dump`.
+  if EC.options.wf.dump4core_only && !isempty(EC.system) && ncore_orbs > 0
+    cMO = replace_core_from_dump!(EC, cMO, ncore_orbs)
+  end
 
+  full_norb = length(space_save[':'])
   nelec = guess_nelec(EC.system) - 2*ncore_orbs
+  npos = EC.options.wf.npositron
   norbs -= ncore_orbs + nfrozvirt
   ms2 = EC.options.wf.ms2
   ms2 = (ms2 < 0) ? mod(nelec,2) : ms2
-  fdump = FDump{3}(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO))
+  fdump = FDump{ec_eltype(EC),3}(norbs, nelec; ms2=ms2, uhf=!is_restricted(cMO), npos=npos)
+  # if orbitals were frozen/deleted, record the full-space orbital index of each active orbital
+  # (frozen core lowest, deleted virtuals highest) so user orbital lists given in the full MO space
+  # can be translated to this active dump; leave empty for a non-reduced (identity) dump
+  if ncore_orbs + nfrozvirt > 0
+    fdump.orig_orbs = (ncore_orbs+1):(full_norb-nfrozvirt)
+  end
   if fdump.uhf
     generate_integrals(EC, fdump, cMO[:,1:end-nfrozvirt], space_save)
   else
-    generate_integrals(EC, fdump, cMO[1][:,1:end-nfrozvirt], space_save)
+    if npos > 0
+      @assert nfrozvirt == 0 "Frozen virtual orbitals not implemented for positron"
+      generate_integrals(EC, fdump, cMO[1][:,1:end], 
+        cPO[1][:,1:end], space_save)
+    else
+      generate_integrals(EC, fdump, cMO[1][:,1:end-nfrozvirt], space_save)
+    end
   end
   restore_space!(EC, space_save)
   if length(dumpfile) > 0
     println("writing fcidump $dumpfile")
-    write_fcidump(fdump, dumpfile; tol=-1.0)  
+    # NB no `charge=` here (unlike the `@write_ints` export): `int.fcidump` parks the integrals on
+    # disk to be read back by THIS session, where `wf.charge` still describes the molecule (the
+    # property/RDM path rebuilds the space from the system via `restore_system_space!`). The file
+    # therefore keeps the count `setup_space_fd!` applies `wf.charge` to, as an in-memory dump does.
+    write_fcidump(fdump, dumpfile; tol=-1.0)
   else
     EC.fd = fdump
   end

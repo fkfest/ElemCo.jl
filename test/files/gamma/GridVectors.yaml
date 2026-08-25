@@ -1,0 +1,15 @@
+version: 100
+type: Tensor
+scalarType: Real64
+dimensions:
+  - length: 3
+    type: Vector
+  - length:     93
+    type: Momentum
+elements:
+  type: TextFile
+unit: 0.529177249       # =(Bohr^-1/Angstrom^-1)
+metaData:
+  Gi: [ 0.179519580205131E+01, 0.000000000000000E+00, 0.000000000000000E+00]
+  Gj: [ 0.000000000000000E+00, 0.179519580205131E+01, 0.000000000000000E+00]
+  Gk: [ 0.000000000000000E+00, 0.000000000000000E+00, 0.179519580205131E+01]

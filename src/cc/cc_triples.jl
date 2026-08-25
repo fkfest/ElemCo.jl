@@ -1,5 +1,24 @@
 # triples routines
 
+"""
+    ints2_t(EC::ECInfo, spaces::AbstractString)
+
+  A bare MO integral block for the (T) kernels. AO-direct reads the block prebuilt from the
+  half-transformed store — the scratch files are named by their space string, see
+  [`build_ht_mo_blocks!`](@ref) / [`build_ht_mo_blocks_unrestricted!`](@ref) — otherwise the block is
+  cut from the MO fcidump by [`ints2`](@ref).
+"""
+ints2_t(EC::ECInfo, spaces::AbstractString) =
+  EC.ao_direct ? load4idx(EC, spaces) : ints2(EC, spaces)
+
+"""
+    ints2_t_oovv(EC::ECInfo, spaces::AbstractString)
+
+  As [`ints2_t`](@ref) for the `oovv`-class blocks (`oovv`/`OOVV`/`oOvV`), which the AO-direct dressing
+  already stores as bare blocks — read via [`load_bare_int2`](@ref) instead of the block engine.
+"""
+ints2_t_oovv(EC::ECInfo, spaces::AbstractString) =
+  EC.ao_direct ? load_bare_int2(EC, spaces) : ints2(EC, spaces)
 
 """
     PseudoCanonicalTransform
@@ -13,21 +32,21 @@ The transformation convention is:
 - Lower indices (first half of index string) → transformed using Left eigenvectors
 - Upper indices (second half of index string) → transformed using Right eigenvectors
 """
-struct PseudoCanonicalTransform
+struct PseudoCanonicalTransform{T<:Number}
   "Whether any transformation is needed"
   need_transform::Bool
   "Right eigenvectors for occupied orbitals (SpinMatrix with α and β)"
-  Ro::SpinMatrix{Float64}
+  Ro::SpinMatrix{T}
   "Left eigenvectors for occupied orbitals (SpinMatrix with α and β)"
-  Lo::SpinMatrix{Float64}
+  Lo::SpinMatrix{T}
   "Right eigenvectors for virtual orbitals (SpinMatrix with α and β)"
-  Rv::SpinMatrix{Float64}
+  Rv::SpinMatrix{T}
   "Left eigenvectors for virtual orbitals (SpinMatrix with α and β)"
-  Lv::SpinMatrix{Float64}
+  Lv::SpinMatrix{T}
   "Pseudo-canonical occupied orbital energies (α and β)"
-  ϵo::SpinVector{Float64}
+  ϵo::SpinVector{T}
   "Pseudo-canonical virtual orbital energies (α and β)"
-  ϵv::SpinVector{Float64}
+  ϵv::SpinVector{T}
 end
 
 """
@@ -135,22 +154,28 @@ If `hermitian=true`, assumes the Fock block is Hermitian and uses `eigen(Hermiti
 
 Uses `rotate_eigenvectors_to_real` for complex pairs.
 """
-function compute_pseudocanonical_transform(F_block::Matrix; skip::Bool=false, hermitian::Bool=true)
+function compute_pseudocanonical_transform(F_block::Matrix{T}; skip::Bool=false, hermitian::Bool=true) where T
   if skip
     ϵ = diag(F_block)
-    Ctr = Matrix{Float64}(I, size(F_block))
+    Ctr = Matrix{T}(I, size(F_block))
     return ϵ, Ctr, Ctr
   end
   if hermitian
     eigvals, eigvecs = eigen(Hermitian(F_block))
     eigvecs_left = eigvecs_right = eigvecs
-    ϵ = eigvals
+    # For complex Hermitian matrices, eigenvalues are real (Float64).
+    # Promote to F_block element type for type consistency.
+    ϵ = T.(eigvals)
   else
     # Diagonalize (general eigenvalue problem for non-Hermitian)
     eigvals, eigvecs_right = eigen(F_block)
-  
-    # Handle complex eigenvalues - rotate complex conjugate pairs to real
-    eigvecs_right, ϵ = rotate_eigenvectors_to_real(eigvecs_right, eigvals)
+    if T <: Real
+      # For real non-symmetric matrices, eigenvalues can be complex conjugate pairs.
+      # Rotate to make them real if they are close to real.
+      eigvecs_right, ϵ = rotate_eigenvectors_to_real(eigvecs_right, eigvals)
+    else
+      ϵ = eigvals
+    end
   
     # Compute left eigenvectors: L = (R^{-1})^T
     eigvecs_left = (inv(eigvecs_right))'
@@ -192,8 +217,8 @@ pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
 pseudocan_transform!(pct, int_aB_iJ, "vVoO")
 ```
 """
-function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray, indices::String;
-                           conjugate::Bool=false)
+function pseudocan_transform!(pct::PseudoCanonicalTransform{T}, arr::AbstractArray, indices::String;
+                           conjugate::Bool=false, spaces::Symbol=:all) where T
   if !pct.need_transform
     return arr
   end
@@ -201,13 +226,14 @@ function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray,
   ndim = ndims(arr)
   @assert length(indices) == ndim "indices string length must match array dimensions"
   @assert ndim ∈ (2, 4) "only 2-index and 4-index arrays are supported"
+  @assert spaces ∈ (:all, :occ, :virt) "spaces must be :all, :occ or :virt"
   
   half = ndim ÷ 2
   
-  # Build list of transformation matrices for each index
+  # Build list of transformation matrices for each index (`nothing` = leave that index alone).
   # First half: lower indices → L (or R if conjugate)
   # Second half: upper indices → R (or L if conjugate)
-  transforms = Vector{Matrix{Float64}}(undef, ndim)
+  transforms = Vector{Union{Matrix{T},Nothing}}(undef, ndim)
   
   for (i, idx) in enumerate(indices)
     is_first_half = i <= half
@@ -215,16 +241,20 @@ function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray,
     # If conjugate, swap L↔R
     use_right = !is_first_half ⊻ conjugate  # XOR to swap if conjugate
     
-    if idx == 'o'
+    is_occ = idx in ('o', 'O')
+    is_virt = idx in ('v', 'V')
+    (is_occ || is_virt) || error("Unknown index type '$idx'. Use 'o', 'O', 'v', or 'V'.")
+    wanted = spaces == :all || (spaces == :occ && is_occ) || (spaces == :virt && is_virt)
+    if !wanted
+      transforms[i] = nothing
+    elseif idx == 'o'
       transforms[i] = use_right ? pct.Ro.α : pct.Lo.α
     elseif idx == 'O'
       transforms[i] = use_right ? pct.Ro.β : pct.Lo.β
     elseif idx == 'v'
       transforms[i] = use_right ? pct.Rv.α : pct.Lv.α
-    elseif idx == 'V'
-      transforms[i] = use_right ? pct.Rv.β : pct.Lv.β
     else
-      error("Unknown index type '$idx'. Use 'o', 'O', 'v', or 'V'.")
+      transforms[i] = use_right ? pct.Rv.β : pct.Lv.β
     end
   end
   
@@ -238,29 +268,80 @@ function pseudocan_transform!(pct::PseudoCanonicalTransform, arr::AbstractArray,
 end
 
 """
-    transform_2idx!(arr::AbstractMatrix, U1::Matrix, U2::Matrix)
+    xform_idx!(dst, src, U, ::Val{k}) -> (result, spare)
 
-Transform a 2-index array in-place using @mtensor.
-Implements: arr[p',q'] = U1[p,p'] * U2[q,q'] * arr[p,q]
+Contract index `k` of `src` with `U`, writing into `dst`, and return `(result, spare)` so the caller
+can keep alternating between two buffers. Dispatch on `U`:
+
+  - `U::Matrix`   — result is `dst`, `src` becomes the spare buffer;
+  - `U::Nothing`  — that index is already in the target basis (e.g. the AO-direct blocks, whose
+    virtuals are built from rotated coefficients): nothing is contracted, the result stays in `src`
+    and `dst` stays spare.
+
+Splitting the no-op out as its own method keeps the caller free of `nothing` branches and lets each
+contraction specialize.
 """
-function transform_2idx!(arr::AbstractMatrix, U1::Matrix, U2::Matrix)
-  @mtensor tmp[p, q] := U1[r, p] * arr[r, q]
-  @mtensor arr[p, q] = tmp[p, r] * U2[r, q]
+xform_idx!(dst, src, ::Nothing, ::Val) = (src, dst)
+function xform_idx!(dst, src, U::AbstractMatrix, ::Val{1})
+  @mtensor dst[a, b, c, d] = U[p, a] * src[p, b, c, d]
+  return (dst, src)
+end
+function xform_idx!(dst, src, U::AbstractMatrix, ::Val{2})
+  @mtensor dst[a, b, c, d] = src[a, p, c, d] * U[p, b]
+  return (dst, src)
+end
+function xform_idx!(dst, src, U::AbstractMatrix, ::Val{3})
+  @mtensor dst[a, b, c, d] = src[a, b, p, d] * U[p, c]
+  return (dst, src)
+end
+function xform_idx!(dst, src, U::AbstractMatrix, ::Val{4})
+  @mtensor dst[a, b, c, d] = src[a, b, c, p] * U[p, d]
+  return (dst, src)
+end
+"2-index [`xform_idx!`](@ref)."
+xform2_idx!(dst, src, ::Nothing, ::Val) = (src, dst)
+function xform2_idx!(dst, src, U::AbstractMatrix, ::Val{1})
+  @mtensor dst[p, q] = U[r, p] * src[r, q]
+  return (dst, src)
+end
+function xform2_idx!(dst, src, U::AbstractMatrix, ::Val{2})
+  @mtensor dst[p, q] = src[p, r] * U[r, q]
+  return (dst, src)
+end
+
+"""
+    transform_2idx!(arr, U1, U2)
+
+Transform a 2-index array in place; a `nothing` leaves that index alone (see [`xform_idx!`](@ref)).
+"""
+function transform_2idx!(arr::AbstractMatrix, U1, U2)
+  (isnothing(U1) && isnothing(U2)) && return arr
+  res, spare = arr, similar(arr)
+  res, spare = xform2_idx!(spare, res, U1, Val(1))
+  res, spare = xform2_idx!(spare, res, U2, Val(2))
+  res === arr || copyto!(arr, res)
   return arr
 end
 
 """
-    transform_4idx!(arr::AbstractArray{T,4}, U1::Matrix, U2::Matrix, U3::Matrix, U4::Matrix) where T
+    transform_4idx!(arr::AbstractArray{T,4}, U1, U2, U3, U4) where T
 
-Transform a 4-index array in-place using @mtensor.
-Implements: arr[p',q',r',s'] = U1[p,p'] * U2[q,q'] * U3[r,r'] * U4[s,s'] * arr[p,q,r,s]
+Transform a 4-index array in place:
+`arr[p',q',r',s'] = U1[p,p'] * U2[q,q'] * U3[r,r'] * U4[s,s'] * arr[p,q,r,s]`.
+
+A `nothing` in place of a matrix leaves that index alone — used when an index is already in the
+target basis (e.g. the AO-direct blocks, whose virtual indices are built from rotated coefficients),
+so only the remaining indices are contracted. One scratch buffer is allocated and the two are
+alternated, so at most one copy back into `arr` is needed.
 """
-function transform_4idx!(arr::AbstractArray{T,4}, U1::Matrix, U2::Matrix, 
-                         U3::Matrix, U4::Matrix) where T
-  @mtensor tmp[a, b, c, d] := U1[p, a] * arr[p, b, c, d]
-  @mtensor arr[a, b, c, d] = tmp[a, p, c, d] * U2[p, b]
-  @mtensor tmp[a, b, c, d] = arr[a, b, p, d] * U3[p, c]
-  @mtensor arr[a, b, c, d] = tmp[a, b, c, p] * U4[p, d]
+function transform_4idx!(arr::AbstractArray{T,4}, U1, U2, U3, U4) where T
+  (isnothing(U1) && isnothing(U2) && isnothing(U3) && isnothing(U4)) && return arr
+  res, spare = arr, similar(arr)
+  res, spare = xform_idx!(spare, res, U1, Val(1))
+  res, spare = xform_idx!(spare, res, U2, Val(2))
+  res, spare = xform_idx!(spare, res, U3, Val(3))
+  res, spare = xform_idx!(spare, res, U4, Val(4))
+  res === arr || copyto!(arr, res)
   return arr
 end
 
@@ -316,7 +397,7 @@ end
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
+function calc_pertT_closed_shell(EC::ECInfo{Ty}; save_t3=false) where Ty
   # Build pseudo-canonical transformation
   pct = PseudoCanonicalTransform(EC; restricted=true)
   if pct.need_transform
@@ -328,17 +409,29 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   pseudocan_transform!(pct, T1, "vo")
   T2 = load4idx(EC,"T_vvoo")
   pseudocan_transform!(pct, T2, "vvoo")
-
-  # Load and (if needed) transform integrals
-  # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC,"oovv"),[3,4,1,2])
+  
+  blockspaces = :all
+  # Load and (if needed) transform integrals. AO-direct: read the bare oovv (dressed≡bare there) and
+  # build the 3-external vvvo/ovoo once from the half-transformed store (no MO dump); else from EC.fd.
+  if EC.ao_direct
+    nvir_est = n_virt_orbs(EC)
+    gb = 8 * nvir_est^3 / 1e9
+    gb > 1.0 && println("AO-direct (T): 3-external blocks ≈ $(round(gb, digits=1)) GB each (full arrays)")
+    # build them directly in the pseudo-canonical VIRTUAL basis (see `build_ht_mo_blocks!`); their
+    # occupied index still needs rotating below, the virtual ones do not
+    build_ht_mo_blocks!(EC, ("vvvo", "ovoo"); Rv=(pct.need_transform ? pct.Rv.α : nothing))
+    # for AO-direct the engine-built blocks arrive with their virtuals already rotated
+    blockspaces = :occ
+  end
+  # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}`` (not engine-built — full transform)
+  vv_oo = permutedims(ints2_t_oovv(EC, "oovv"),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC,"vvvo")
-  pseudocan_transform!(pct, vvvo, "vvvo")
+  vvvo = ints2_t(EC, "vvvo")
+  pseudocan_transform!(pct, vvvo, "vvvo"; spaces=blockspaces)
   # ``v_{ia}^{jk}``
-  ovoo = ints2(EC,"ovoo")
-  pseudocan_transform!(pct, ovoo, "ovoo")
+  ovoo = ints2_t(EC, "ovoo")
+  pseudocan_transform!(pct, ovoo, "ovoo"; spaces=blockspaces)
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"
   fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
@@ -348,12 +441,15 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
   nvir = n_virt_orbs(EC)
   ϵo, ϵv = get_pseudo_orbital_energies(pct)
 
-  X = zeros(nvir, nvir, nvir)
-  Kijk = zeros(nvir, nvir, nvir)
+  X = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   if save_t3
     t3file, T3 = newmmap(EC,"T_vvvooo",(nvir,nvir,nvir,uppertriangular_index(nocc,nocc,nocc)))
   end
@@ -385,19 +481,29 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
         v!ovji = @mview ovoo[:,:,j,i]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ij[d,b] * v!vvvk[a,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2ik[d,c] * v!vvvj[a,b,d]
-          Kijk[a,b,c] += v!T2jk[b,d] * v!vvvi[c,a,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!ovik[l,c]
-          Kijk[a,b,c] -= v!T2i[c,a,l] * v!ovkj[l,b]
-          Kijk[a,b,c] -= v!T2k[a,c,l] * v!ovij[l,b]
-          Kijk[a,b,c] -= v!T2j[c,b,l] * v!ovki[l,a]
-          Kijk[a,b,c] -= v!T2k[b,c,l] * v!ovji[l,a]
+          # Accumulate [b,a,c] layout
+          W[b,a,c] = v!T2ij[d,b] * v!vvvk[a,c,d]
+          W[b,a,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
+          Kijk[a,b,c] += W[b,a,c]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          W[a,c,b] -= v!T2k[a,c,l] * v!ovij[l,b]
+          Kijk[a,b,c] += W[a,c,b]
+          # Accumulate [c,a,b] layout
+          W[c,a,b] = v!T2ik[d,c] * v!vvvj[a,b,d]
+          W[c,a,b] -= v!T2i[c,a,l] * v!ovkj[l,b]
+          Kijk[a,b,c] += W[c,a,b]
+          # Accumulate [b,c,a] layout
+          W[b,c,a] = v!T2jk[b,d] * v!vvvi[c,a,d]
+          W[b,c,a] -= v!T2k[b,c,l] * v!ovji[l,a]
+          Kijk[a,b,c] += W[b,c,a]
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2j[c,b,l] * v!ovki[l,a]
+          Kijk[a,b,c] += W[c,b,a]
         end
         ϵoijk = ϵo[i] + ϵo[j] + ϵo[k]
         if save_t3
@@ -414,7 +520,7 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
           X[abc] /= ϵoijk - ϵv[a] - ϵv[b] - ϵv[c]
         end
 
-        @mtensor Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
+        @mtensor Enb3 += fac * (conj(Kijk[a,b,c]) * X[a,b,c])
         
         v!vv_jk = @mview vv_oo[:,:,j,k]
         v!vv_ik = @mview vv_oo[:,:,i,k]
@@ -426,11 +532,13 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += fac * (X[a,b,c] * v!vv_jk[b,c])
-        @mtensor v!IntX_j[b] += fac * (X[a,b,c] * v!vv_ik[a,c])
         @mtensor v!IntX_k[c] += fac * (X[a,b,c] * v!vv_ij[a,b])
-        @mtensor v!IntY_i[a] += fac * (X[a,b,c] * v!T2jk[b,c])
-        @mtensor v!IntY_j[b] += fac * (X[a,b,c] * v!T2ik[a,c])
-        @mtensor v!IntY_k[c] += fac * (X[a,b,c] * v!T2ij[a,b])
+        @mtensor v!IntY_i[a] += fac * (X[a,b,c] * conj(v!T2jk[b,c]))
+        @mtensor v!IntY_k[c] += fac * (X[a,b,c] * conj(v!T2ij[a,b]))
+        # Permute X once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = X[a,b,c]
+        @mtensor v!IntX_j[b] += fac * (W[b,a,c] * v!vv_ik[a,c])
+        @mtensor v!IntY_j[b] += fac * (W[b,a,c] * conj(v!T2ik[a,c]))
       end 
     end
   end
@@ -438,7 +546,7 @@ function calc_pertT_closed_shell(EC::ECInfo; save_t3=false)
     closemmap(EC,t3file,T3)
   end
   # singles contribution
-  @mtensor En3 = T1[a,i] * IntX[a,i]
+  @mtensor En3 = conj(T1[a,i]) * IntX[a,i]
   # fock contribution
   @mtensor En3 += fov[i,a] * IntY[a,i]
   En3 += Enb3
@@ -456,7 +564,7 @@ end
   performs pseudo-canonicalization before the (T) calculation.
   Return ( `"ET3"`=(T) energy, `"ET3b"`=[T] energy) `OutDict`.
 """
-function calc_ΛpertT_closed_shell(EC::ECInfo)
+function calc_ΛpertT_closed_shell(EC::ECInfo{Ty}) where Ty
   # Build pseudo-canonical transformation
   pct = PseudoCanonicalTransform(EC; restricted=true)
   if pct.need_transform
@@ -479,33 +587,49 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
   U2 = contra2covariant(load4idx(EC, "U_vvoo"))
   pseudocan_transform!(pct, U2, "vvoo"; conjugate=true)
   
-  # Load and (if needed) transform integrals
-  # v^{ab}_{ij} stored as [a,b,i,j] → "vvoo"
-  vv_oo = permutedims(ints2(EC, "oovv"), [3,4,1,2])
+  blockspaces = :all
+  # Load and (if needed) transform integrals. AO-direct: read the bare oovv and build the four
+  # 3-external blocks (vvvo/ovoo + Λ(T)'s vovv/ooov) once from the half-transformed store; else EC.fd.
+  if EC.ao_direct
+    # built directly in the pseudo-canonical VIRTUAL basis; only their occupied indices are rotated
+    # below (see `build_ht_mo_blocks!`). `conjugate` picks the same matrices here because the
+    # AO-direct Fock is Hermitian, so L = R.
+    build_ht_mo_blocks!(EC, ("vvvo", "ovoo", "vovv", "ooov");
+                        Rv=(pct.need_transform ? pct.Rv.α : nothing))
+    blockspaces = :occ
+  end
+  # v^{ab}_{ij} stored as [a,b,i,j] → "vvoo" (not engine-built — full transform)
+  vv_oo = permutedims(ints2_t_oovv(EC, "oovv"), [3,4,1,2])
   pseudocan_transform!(pct, vv_oo, "vvoo"; conjugate=true)
   # v_{ab}^{ck} as [a,b,c,k] → "vvvo"
-  vvvo = ints2(EC, "vvvo")
-  pseudocan_transform!(pct, vvvo, "vvvo")
+  vvvo = ints2_t(EC, "vvvo")
+  pseudocan_transform!(pct, vvvo, "vvvo"; spaces=blockspaces)
   # v_{ia}^{jk} as [i,a,j,k] → "ovoo"
-  ovoo = ints2(EC, "ovoo")
-  pseudocan_transform!(pct, ovoo, "ovoo")
-  
+  ovoo = ints2_t(EC, "ovoo")
+  pseudocan_transform!(pct, ovoo, "ovoo"; spaces=blockspaces)
+
   # Load and transform integrals for U contractions (conjugate transformation)
   # v^{ab}_{ck} as [a,b,c,k] → "vvvo"
-  vv_vo = permutedims(ints2(EC, "vovv"), [3,4,1,2])
-  pseudocan_transform!(pct, vv_vo, "vvvo"; conjugate=true)
+  vv_vo = permutedims(ints2_t(EC, "vovv"), [3,4,1,2])
+  pseudocan_transform!(pct, vv_vo, "vvvo"; conjugate=true, spaces=blockspaces)
   # v^{ia}_{jk} as [i,a,j,k] → "ovoo"
   # v_{jk}^{ia}, reordered to v^{ia}_{jk}
-  ov_oo = permutedims(ints2(EC, "ooov"), [3,4,1,2])
-  pseudocan_transform!(pct, ov_oo, "ovoo"; conjugate=true)
+  ov_oo = permutedims(ints2_t(EC, "ooov"), [3,4,1,2])
+  pseudocan_transform!(pct, ov_oo, "ovoo"; conjugate=true, spaces=blockspaces)
 
   # Transform Fock ov block: f_{ia} as [i,a] → "ov"
   fov = load2idx(EC, "f_mm")[EC.space['o'], EC.space['v']]
   pseudocan_transform!(pct, fov, "ov")
   
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  X = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
+
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   for k = 1:nocc 
     for j = 1:k
       prefac = (j == k) ? 1.0 : 2.0
@@ -534,21 +658,31 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
         v!ovji = @mview ovoo[:,:,j,i]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
-          Kijk[a,b,c] := v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ij[d,b] * v!vvvk[a,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2ik[d,c] * v!vvvj[a,b,d]
-          Kijk[a,b,c] += v!T2jk[b,d] * v!vvvi[c,a,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
+          # Direct to Kijk [a,b,c] layout
+          Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!ovik[l,c]
-          Kijk[a,b,c] -= v!T2i[c,a,l] * v!ovkj[l,b]
-          Kijk[a,b,c] -= v!T2k[a,c,l] * v!ovij[l,b]
-          Kijk[a,b,c] -= v!T2j[c,b,l] * v!ovki[l,a]
-          Kijk[a,b,c] -= v!T2k[b,c,l] * v!ovji[l,a]
+          # Accumulate [b,a,c] layout
+          W[b,a,c] = v!T2ij[d,b] * v!vvvk[a,c,d]
+          W[b,a,c] -= v!T2i[b,a,l] * v!ovjk[l,c]
+          Kijk[a,b,c] += W[b,a,c]  # combine into Kijk
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          W[a,c,b] -= v!T2k[a,c,l] * v!ovij[l,b]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,a,b] layout
+          W[c,a,b] = v!T2ik[d,c] * v!vvvj[a,b,d]
+          W[c,a,b] -= v!T2i[c,a,l] * v!ovkj[l,b]
+          Kijk[a,b,c] += W[c,a,b]  # combine into Kijk
+          # Accumulate [b,c,a] layout
+          W[b,c,a] = v!T2jk[b,d] * v!vvvi[c,a,d]
+          W[b,c,a] -= v!T2k[b,c,l] * v!ovji[l,a]
+          Kijk[a,b,c] += W[b,c,a]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2j[c,b,l] * v!ovki[l,a]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
-        @mtensor  X[a,b,c] := 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
+        @mtensor  X[a,b,c] = 4.0*Kijk[a,b,c] - 2.0*Kijk[a,c,b] - 2.0*Kijk[c,b,a] - 2.0*Kijk[b,a,c] + Kijk[c,a,b] + Kijk[b,c,a]
 
         ϵoijk = ϵo[i] + ϵo[j] + ϵo[k]
         for abc ∈ CartesianIndices(X)
@@ -572,20 +706,30 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
         v!ov_ij = @mview ov_oo[:,:,i,j]
         v!ov_ji = @mview ov_oo[:,:,j,i]
         @mtensor begin
-          # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # K^{abc}_{ijk} = v^{bc}_{dk} Λ_{ij}^{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!U2ij[a,d] * v!vv_vk[b,c,d]
-          Kijk[a,b,c] += v!U2ij[d,b] * v!vv_vk[a,c,d]
-          Kijk[a,b,c] += v!U2ik[a,d] * v!vv_vj[c,b,d]
-          Kijk[a,b,c] += v!U2ik[d,c] * v!vv_vj[a,b,d]
-          Kijk[a,b,c] += v!U2jk[b,d] * v!vv_vi[c,a,d]
-          Kijk[a,b,c] += v!U2jk[d,c] * v!vv_vi[b,a,d]
-
-          Kijk[a,b,c] -= v!U2i[b,a,l] * v!ov_jk[l,c]
           Kijk[a,b,c] -= v!U2j[a,b,l] * v!ov_ik[l,c]
-          Kijk[a,b,c] -= v!U2i[c,a,l] * v!ov_kj[l,b]
-          Kijk[a,b,c] -= v!U2k[a,c,l] * v!ov_ij[l,b]
-          Kijk[a,b,c] -= v!U2j[c,b,l] * v!ov_ki[l,a]
-          Kijk[a,b,c] -= v!U2k[b,c,l] * v!ov_ji[l,a]
+          # Accumulate [b,a,c] layout
+          W[b,a,c] = v!U2ij[d,b] * v!vv_vk[a,c,d]
+          W[b,a,c] -= v!U2i[b,a,l] * v!ov_jk[l,c]
+          Kijk[a,b,c] += W[b,a,c]  # combine into Kijk
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!U2ik[a,d] * v!vv_vj[c,b,d]
+          W[a,c,b] -= v!U2k[a,c,l] * v!ov_ij[l,b]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,a,b] layout
+          W[c,a,b] = v!U2ik[d,c] * v!vv_vj[a,b,d]
+          W[c,a,b] -= v!U2i[c,a,l] * v!ov_kj[l,b]
+          Kijk[a,b,c] += W[c,a,b]  # combine into Kijk
+          # Accumulate [b,c,a] layout
+          W[b,c,a] = v!U2jk[b,d] * v!vv_vi[c,a,d]
+          W[b,c,a] -= v!U2k[b,c,l] * v!ov_ji[l,a]
+          Kijk[a,b,c] += W[b,c,a]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!U2jk[d,c] * v!vv_vi[b,a,d]
+          W[c,b,a] -= v!U2j[c,b,l] * v!ov_ki[l,a]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         @mtensor Enb3 += fac * (Kijk[a,b,c] * X[a,b,c])
         
@@ -599,11 +743,13 @@ function calc_ΛpertT_closed_shell(EC::ECInfo)
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += fac * (X[a,b,c] * v!vv_jk[b,c])
-        @mtensor v!IntX_j[b] += fac * (X[a,b,c] * v!vv_ik[a,c])
         @mtensor v!IntX_k[c] += fac * (X[a,b,c] * v!vv_ij[a,b])
         @mtensor v!IntY_i[a] += fac * (X[a,b,c] * v!U2jk[b,c])
-        @mtensor v!IntY_j[b] += fac * (X[a,b,c] * v!U2ik[a,c])
         @mtensor v!IntY_k[c] += fac * (X[a,b,c] * v!U2ij[a,b])
+        # Permute X once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = X[a,b,c]
+        @mtensor v!IntX_j[b] += fac * (W[b,a,c] * v!vv_ik[a,c])
+        @mtensor v!IntY_j[b] += fac * (W[b,a,c] * v!U2ik[a,c])
       end 
     end
   end
@@ -627,6 +773,14 @@ function calc_pertT_unrestricted(EC::ECInfo)
   pct = PseudoCanonicalTransform(EC; restricted=false)
   if pct.need_transform
     println("Fock matrix not diagonal - performing pseudo-canonicalization for UCCSD(T)")
+  end
+  # AO-direct: build the same-spin + opposite-spin 3-external blocks once from the per-spin
+  # half-transformed stores (the four calls below then read them); the bare oovv-class blocks come
+  # from the AO-direct dressing via load_bare_int2.
+  if EC.ao_direct
+    build_ht_mo_blocks_unrestricted!(EC, ("vvvo", "vooo", "VVVO", "VOOO",
+                                          "vVvO", "vVoV", "vOoO", "oVoO");
+                                     Rv=(pct.need_transform ? pct.Rv : nothing))
   end
 
   T1a = load2idx(EC,"T_vo")
@@ -667,6 +821,15 @@ function calc_ΛpertT_unrestricted(EC::ECInfo)
   pct = PseudoCanonicalTransform(EC; restricted=false)
   if pct.need_transform
     println("Fock matrix not diagonal - performing pseudo-canonicalization for ΛUCCSD(T)")
+  end
+  # AO-direct: build the (T) blocks plus the Λ-specific conjugate mixed blocks once from the per-spin
+  # half-transformed stores; the four kernels below read them (file names = space strings).
+  if EC.ao_direct
+    build_ht_mo_blocks_unrestricted!(EC, ("vvvo", "vooo", "VVVO", "VOOO",
+                                          "vVvO", "vVoV", "vOoO", "oVoO",
+                                          "vovv", "VOVV", "oovo", "OOVO",
+                                          "vOvV", "oVvV", "oOvO", "oOoV");
+                                     Rv=(pct.need_transform ? pct.Rv : nothing))
   end
   
   U1a = load2idx(EC,"U_vo")
@@ -712,21 +875,24 @@ end
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
+function calc_pertT_samespin(EC::ECInfo{Ty}, T1, T2, pct, spin::Symbol) where Ty
+  # AO-direct: the engine-built blocks already carry pseudo-canonical virtuals
+  blockspaces = EC.ao_direct ? :occ : :all
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   o = space4spin('o', spin==:α)
   v = space4spin('v', spin==:α)
+  # AO-direct reads the blocks prebuilt in `calc_pertT_unrestricted` (file names = space strings)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, o*o*v*v),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC, v*v*v*o)
-  pseudocan_transform!(pct, vvvo, v*v*v*o)
+  vvvo = ints2_t(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o; spaces=blockspaces)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
-  vooo = 0.5*ints2(EC, v*o*o*o)
+  vooo = 0.5*(ints2_t(EC, v*o*o*o))
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudocan_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o; spaces=blockspaces)
   m = space4spin('m', spin==:α)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
   pseudocan_transform!(pct, fov, o*v)
@@ -734,12 +900,15 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
   nvir = length(SP[v])
   ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
 
-  T = zeros(nvir, nvir, nvir)
-  Kijk = zeros(nvir, nvir, nvir)
+  T = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   for k = 3:nocc 
     for j = 1:k-1
       for i = 1:j-1
@@ -757,13 +926,17 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
         v!voij = @mview vooo[:,:,i,j]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!vokj[c,l]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!voki[c,l]
           Kijk[a,b,c] -= v!T2k[b,c,l] * v!voij[a,l]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2i[b,a,l] * v!vokj[c,l]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         # antisymmetrize K = A(a,b,c) Kijk[a,b,c]
         @mtensor  T[a,b,c] = Kijk[a,b,c] - Kijk[c,b,a]
@@ -775,7 +948,7 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
           T[abc] /= ϵoijk - ϵv[a] - ϵv[b] - ϵv[c]
         end
 
-        @mtensor Enb3 += 1/6*(Kijk[a,b,c] * T[a,b,c])
+        @mtensor Enb3 += 1/6*(conj(Kijk[a,b,c]) * T[a,b,c])
         
         v!vv_jk = @mview vv_oo[:,:,j,k]
         v!vv_ik = @mview vv_oo[:,:,i,k]
@@ -787,16 +960,18 @@ function calc_pertT_samespin(EC::ECInfo, T1, T2, pct, spin::Symbol)
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += T[a,b,c] * v!vv_jk[b,c]
-        @mtensor v!IntX_j[b] += T[a,b,c] * v!vv_ik[a,c]
         @mtensor v!IntX_k[c] += T[a,b,c] * v!vv_ij[a,b]
-        @mtensor v!IntY_i[a] += T[a,b,c] * v!T2jk[b,c]
-        @mtensor v!IntY_j[b] += T[a,b,c] * v!T2ik[a,c]
-        @mtensor v!IntY_k[c] += T[a,b,c] * v!T2ij[a,b]
+        @mtensor v!IntY_i[a] += T[a,b,c] * conj(v!T2jk[b,c])
+        @mtensor v!IntY_k[c] += T[a,b,c] * conj(v!T2ij[a,b])
+        # Permute T once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = T[a,b,c]
+        @mtensor v!IntX_j[b] += W[b,a,c] * v!vv_ik[a,c]
+        @mtensor v!IntY_j[b] += W[b,a,c] * conj(v!T2ik[a,c])
       end 
     end
   end
   # singles contribution
-  @mtensor En3 = T1[a,i] * IntX[a,i]
+  @mtensor En3 = conj(T1[a,i]) * IntX[a,i]
   # fock contribution
   @mtensor En3 += 0.5 * (fov[i,a] * IntY[a,i])
   En3 += Enb3
@@ -814,7 +989,9 @@ end
   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol)
+function calc_pertT_mixedspin(EC::ECInfo{Ty}, T1, T2, T1os, T2mix, pct, spin::Symbol) where Ty
+  # AO-direct: the engine-built blocks already carry pseudo-canonical virtuals
+  blockspaces = EC.ao_direct ? :occ : :all
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   isα = (spin == :α)
@@ -823,47 +1000,47 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
   O = space4spin('o', !isα)
   V = space4spin('v', !isα)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, o*o*v*v),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC, v*v*v*o)
-  pseudocan_transform!(pct, vvvo, v*v*v*o)
+  vvvo = ints2_t(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o; spaces=blockspaces)
   # ``v_{ai}^{kj} - v_{ai}^{jk}``
-  vooo = ints2(EC, v*o*o*o)
+  vooo = ints2_t(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudocan_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o; spaces=blockspaces)
   if isα
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
-    vV_oO = permutedims(ints2(EC, o*O*v*V),[3,4,1,2])
+    vV_oO = permutedims(ints2_t_oovv(EC, o*O*v*V),[3,4,1,2])
     pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
-    vVvO = ints2(EC, v*V*v*O)
-    pseudocan_transform!(pct, vVvO, v*V*v*O)
+    vVvO = ints2_t(EC, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O; spaces=blockspaces)
     # ``v_{Ab}^{Ck}``
-    VvVo = permutedims(ints2(EC, v*V*o*V),[2,1,4,3])
-    pseudocan_transform!(pct, VvVo, V*v*V*o)
+    VvVo = permutedims(ints2_t(EC, v*V*o*V),[2,1,4,3])
+    pseudocan_transform!(pct, VvVo, V*v*V*o; spaces=blockspaces)
     # ``v_{aI}^{kJ}``
-    vOoO = ints2(EC, v*O*o*O)
-    pseudocan_transform!(pct, vOoO, v*O*o*O)
+    vOoO = ints2_t(EC, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O; spaces=blockspaces)
     # ``v_{Ai}^{Kj}``
-    VoOo = permutedims(ints2(EC, o*V*o*O),[2,1,4,3])
-    pseudocan_transform!(pct, VoOo, V*o*O*o)
+    VoOo = permutedims(ints2_t(EC, o*V*o*O),[2,1,4,3])
+    pseudocan_transform!(pct, VoOo, V*o*O*o; spaces=blockspaces)
   else
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
-    vV_oO = permutedims(ints2(EC, O*o*V*v),[4,3,2,1])
+    vV_oO = permutedims(ints2_t_oovv(EC, O*o*V*v),[4,3,2,1])
     pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
-    vVvO = permutedims(ints2(EC, V*v*O*v),[2,1,4,3])
-    pseudocan_transform!(pct, vVvO, v*V*v*O)
+    vVvO = permutedims(ints2_t(EC, V*v*O*v),[2,1,4,3])
+    pseudocan_transform!(pct, vVvO, v*V*v*O; spaces=blockspaces)
     # ``v_{Ab}^{Ck}``
-    VvVo = ints2(EC, V*v*V*o)
-    pseudocan_transform!(pct, VvVo, V*v*V*o)
+    VvVo = ints2_t(EC, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o; spaces=blockspaces)
     # ``v_{aI}^{kJ}``
-    vOoO = permutedims(ints2(EC, O*v*O*o),[2,1,4,3])
-    pseudocan_transform!(pct, vOoO, v*O*o*O)
+    vOoO = permutedims(ints2_t(EC, O*v*O*o),[2,1,4,3])
+    pseudocan_transform!(pct, vOoO, v*O*o*O; spaces=blockspaces)
     # ``v_{Ai}^{Kj}``
-    VoOo = ints2(EC, V*o*O*o)
-    pseudocan_transform!(pct, VoOo, V*o*O*o)
+    VoOo = ints2_t(EC, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o; spaces=blockspaces)
   end
   m = space4spin('m', isα)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
@@ -880,14 +1057,19 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
   opspin = isα ? :β : :α
   ϵO, ϵV = get_pseudo_orbital_energies(pct, opspin)
 
-  T = zeros(nvir, nvir, nVir)
-  Kijk = zeros(nvir, nvir, nVir)
+  T = zeros(Ty, nvir, nvir, nVir)
+  Kijk = zeros(Ty, nvir, nvir, nVir)
+  # Single buffer for all three permutation layouts (used sequentially).
+  W_buf = zeros(Ty, nvir * nvir * nVir)
+  W_Cvv = reshape(W_buf, nVir, nvir, nvir)
+  W_vCv = reshape(W_buf, nvir, nVir, nvir)
+  W_vvC = reshape(W_buf, nvir, nvir, nVir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
-  IntXos = zeros(nVir, nOcc)
-  IntYos = zeros(nVir, nOcc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
+  IntXos = zeros(Ty, nVir, nOcc)
+  IntYos = zeros(Ty, nVir, nOcc)
   for K = 1:nOcc 
     T2K = T2mix[:,:,K,:]
     for j = 2:nocc
@@ -911,20 +1093,32 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
         v!VoKi = @mview VoOo[:,:,K,i]
         @mtensor begin
           # K_{abC}^{ijK} = v_{bC}^{dK} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,C] layout
           Kijk[a,b,C] = v!T2ij[a,d] * v!vVvK[b,C,d]
-          Kijk[a,b,C] += v!T2Kj[C,d] * v!vvvi[b,a,d]
-          Kijk[a,b,C] += v!T2Ki[C,d] * v!vvvj[a,b,d]
-          Kijk[a,b,C] += v!T2Kj[D,b] * v!VvVi[C,a,D]
-          Kijk[a,b,C] += v!T2Ki[D,a] * v!VvVj[C,b,D]
-          Kijk[a,b,C] -= T2K[C,b,l] * v!voij[a,l]
-          Kijk[a,b,C] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
-          Kijk[a,b,C] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Kj[C,d] * v!vvvi[b,a,d]
+          W_Cvv[C,b,a] -= T2K[C,b,l] * v!voij[a,l]
+          W_Cvv[C,b,a] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Ki[C,d] * v!vvvj[a,b,d]
+          W_Cvv[C,a,b] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Kj[D,b] * v!VvVi[C,a,D]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Ki[D,a] * v!VvVj[C,b,D]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
         end
         # antisymmetrize ΔK = A(a,b) ΔKijk[a,b,C]
         Kijk -= permutedims(Kijk,[2,1,3])
         @mtensor begin
-          Kijk[a,b,C] -= v!T2i[b,a,l] * v!VoKj[C,l]
           Kijk[a,b,C] -= v!T2j[a,b,l] * v!VoKi[C,l]
+          # Accumulate [b,a,C] layout (negated)
+          W_vvC[b,a,C] = v!T2i[b,a,l] * v!VoKj[C,l]
+          # Combine accumulator into Kijk
+          Kijk[a,b,C] -= W_vvC[b,a,C]
         end
         T .= Kijk
         ϵoijK = ϵo[i] + ϵo[j] + ϵO[K]
@@ -933,7 +1127,7 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
           T[abC] /= ϵoijK - ϵv[a] - ϵv[b] - ϵV[C]
         end
 
-        @mtensor Enb3 += 0.5 * (Kijk[a,b,C] * T[a,b,C])
+        @mtensor Enb3 += 0.5 * (conj(Kijk[a,b,C]) * T[a,b,C])
         
         v!vV_jK = @mview vV_oO[:,:,j,K]
         v!vV_iK = @mview vV_oO[:,:,i,K]
@@ -945,17 +1139,20 @@ function calc_pertT_mixedspin(EC::ECInfo, T1, T2, T1os, T2mix, pct, spin::Symbol
         v!IntY_j   = @mview IntY[:,j]
         v!IntYos_K = @mview IntYos[:,K]
         @mtensor v!IntX_i[a] += T[a,b,C] * v!vV_jK[b,C]
-        @mtensor v!IntX_j[b] += T[a,b,C] * v!vV_iK[a,C]
         @mtensor v!IntXos_K[C] += T[a,b,C] * v!vv_ij[a,b]
-        @mtensor v!IntY_i[a] += T[a,b,C] * v!T2Kj[C,b]
-        @mtensor v!IntY_j[b] += T[a,b,C] * v!T2Ki[C,a]
-        @mtensor v!IntYos_K[C] += T[a,b,C] * v!T2ij[a,b]
+        @mtensor v!IntY_i[a] += T[a,b,C] * conj(v!T2Kj[C,b])
+        @mtensor v!IntYos_K[C] += T[a,b,C] * conj(v!T2ij[a,b])
+        # Permute T for [b]-output contractions, matching index order of second operand
+        @mtensor W_vvC[b,a,C] = T[a,b,C]
+        @mtensor v!IntX_j[b] += W_vvC[b,a,C] * v!vV_iK[a,C]
+        @mtensor W_vCv[b,C,a] = T[a,b,C]
+        @mtensor v!IntY_j[b] += W_vCv[b,C,a] * conj(v!T2Ki[C,a])
       end 
     end
   end
   # singles contribution
-  @mtensor En3 = T1[a,i] * IntX[a,i]
-  @mtensor En3 += T1os[A,I] * IntXos[A,I]
+  @mtensor En3 = conj(T1[a,i]) * IntX[a,i]
+  @mtensor En3 += conj(T1os[A,I]) * IntXos[A,I]
   # fock contribution
   @mtensor En3 += fov[i,a] * IntY[a,i]
   @mtensor En3 += 0.5 * (fOV[I,A] * IntYos[A,I])
@@ -971,28 +1168,31 @@ end
 
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
+function calc_ΛpertT_samespin(EC::ECInfo{Ty}, T2, U1, U2, pct, spin::Symbol) where Ty
+  # AO-direct: the engine-built blocks already carry pseudo-canonical virtuals
+  blockspaces = EC.ao_direct ? :occ : :all
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   o = space4spin('o', spin==:α)
   v = space4spin('v', spin==:α)
+  # AO-direct reads the blocks prebuilt in `calc_pertT_unrestricted` (file names = space strings)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, o*o*v*v),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC, v*v*v*o)
-  pseudocan_transform!(pct, vvvo, v*v*v*o)
+  vvvo = ints2_t(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o; spaces=blockspaces)
   # ``0.5(v_{ai}^{kj} - v_{ai}^{jk})``
-  vooo = 0.5*ints2(EC, v*o*o*o)
+  vooo = 0.5*(ints2_t(EC, v*o*o*o))
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudocan_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o; spaces=blockspaces)
   # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
-  vv_vo = permutedims(ints2(EC, v*o*v*v), [3,4,1,2])
-  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
+  vv_vo = permutedims(ints2_t(EC, v*o*v*v), [3,4,1,2])
+  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true, spaces=blockspaces)
   # ``0.5(v_{kj}^{ai} - v_{jk}^{ai})``, reordered to ``\bar v^{ai}_{kj}``
-  vo_oo = 0.5*permutedims(ints2(EC, o*o*v*o), [3,4,1,2])
+  vo_oo = 0.5*permutedims(ints2_t(EC, o*o*v*o), [3,4,1,2])
   vo_oo -= permutedims(vo_oo,[1,2,4,3])
-  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
+  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true, spaces=blockspaces)
   m = space4spin('m', spin==:α)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
   pseudocan_transform!(pct, fov, o*v)
@@ -1000,12 +1200,16 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
   nvir = length(SP[v])
   ϵo, ϵv = get_pseudo_orbital_energies(pct, spin)
 
-  T = zeros(nvir, nvir, nvir)
-  Kijk = zeros(nvir, nvir, nvir)
+  T = zeros(Ty, nvir, nvir, nvir)
+  Kijk = zeros(Ty, nvir, nvir, nvir)
+  X = zeros(Ty, nvir, nvir, nvir)
+  # Reusable accumulator array for GEMM output permutations.
+  # Sequentially reused for each permutation group within the @mtensor block.
+  W = zeros(Ty, nvir, nvir, nvir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
   for k = 3:nocc 
     for j = 1:k-1
       for i = 1:j-1
@@ -1023,13 +1227,17 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
         v!voij = @mview vooo[:,:,i,j]
         @mtensor begin
           # K_{abc}^{ijk} = v_{bc}^{dk} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,c] layout
           Kijk[a,b,c] = v!T2ij[a,d] * v!vvvk[b,c,d]
-          Kijk[a,b,c] += v!T2ik[a,d] * v!vvvj[c,b,d]
-          Kijk[a,b,c] += v!T2jk[d,c] * v!vvvi[b,a,d]
-
-          Kijk[a,b,c] -= v!T2i[b,a,l] * v!vokj[c,l]
           Kijk[a,b,c] -= v!T2j[a,b,l] * v!voki[c,l]
           Kijk[a,b,c] -= v!T2k[b,c,l] * v!voij[a,l]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!T2ik[a,d] * v!vvvj[c,b,d]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!T2jk[d,c] * v!vvvi[b,a,d]
+          W[c,b,a] -= v!T2i[b,a,l] * v!vokj[c,l]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         # antisymmetrize K = A(a,b,c) Kijk[a,b,c]
         @mtensor  T[a,b,c] = Kijk[a,b,c] - Kijk[c,b,a]
@@ -1054,17 +1262,21 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
         v!vo_ki = @mview vo_oo[:,:,k,i]
         v!vo_ij = @mview vo_oo[:,:,i,j]
         @mtensor begin
-          # K^{abc}_{ijk} = v_{dk}^{bc} Λ_{ij}^{ad} + ...
-          Kijk[a,b,c] := v!U2ij[a,d] * v!vv_vk[b,c,d]
-          Kijk[a,b,c] += v!U2ik[a,d] * v!vv_vj[c,b,d]
-          Kijk[a,b,c] += v!U2jk[d,c] * v!vv_vi[b,a,d]
-
-          Kijk[a,b,c] -= v!U2i[b,a,l] * v!vo_kj[c,l]
+          # K^{abc}_{ijk} = v_{dk}^{bc} \Lambda_{ij}^{ad} + ...
+          # Direct to Kijk [a,b,c] layout
+          Kijk[a,b,c] = v!U2ij[a,d] * v!vv_vk[b,c,d]
           Kijk[a,b,c] -= v!U2j[a,b,l] * v!vo_ki[c,l]
           Kijk[a,b,c] -= v!U2k[b,c,l] * v!vo_ij[a,l]
+          # Accumulate [a,c,b] layout
+          W[a,c,b] = v!U2ik[a,d] * v!vv_vj[c,b,d]
+          Kijk[a,b,c] += W[a,c,b]  # combine into Kijk
+          # Accumulate [c,b,a] layout
+          W[c,b,a] = v!U2jk[d,c] * v!vv_vi[b,a,d]
+          W[c,b,a] -= v!U2i[b,a,l] * v!vo_kj[c,l]
+          Kijk[a,b,c] += W[c,b,a]  # combine into Kijk
         end
         # antisymmetrize K = A(a,b,c) Kijk[a,b,c]
-        @mtensor  X[a,b,c] := Kijk[a,b,c] - Kijk[c,b,a]
+        @mtensor  X[a,b,c] = Kijk[a,b,c] - Kijk[c,b,a]
         @mtensor Kijk[a,b,c] = X[a,b,c] - X[b,a,c] - X[a,c,b]
 
         @mtensor Enb3 += 1/6*(Kijk[a,b,c] * T[a,b,c])
@@ -1079,11 +1291,13 @@ function calc_ΛpertT_samespin(EC::ECInfo, T2, U1, U2, pct, spin::Symbol)
         v!IntY_j = @mview IntY[:,j]
         v!IntY_k = @mview IntY[:,k]
         @mtensor v!IntX_i[a] += T[a,b,c] * v!vv_jk[b,c]
-        @mtensor v!IntX_j[b] += T[a,b,c] * v!vv_ik[a,c]
         @mtensor v!IntX_k[c] += T[a,b,c] * v!vv_ij[a,b]
         @mtensor v!IntY_i[a] += T[a,b,c] * v!U2jk[b,c]
-        @mtensor v!IntY_j[b] += T[a,b,c] * v!U2ik[a,c]
         @mtensor v!IntY_k[c] += T[a,b,c] * v!U2ij[a,b]
+        # Permute T once to make {a,c} contiguous for the [b]-output contractions
+        @mtensor W[b,a,c] = T[a,b,c]
+        @mtensor v!IntX_j[b] += W[b,a,c] * v!vv_ik[a,c]
+        @mtensor v!IntY_j[b] += W[b,a,c] * v!U2ik[a,c]
       end 
     end
   end
@@ -1108,7 +1322,9 @@ end
   i.e., Tβα for `spin == :α` and Tαβ for `spin == :β`.
   Return ( `"ET3"`=(T)-energy, `"ET3b"`=[T]-energy)) `OutDict`.
 """
-function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct, spin::Symbol)
+function calc_ΛpertT_mixedspin(EC::ECInfo{Ty}, T2, T2mix, U1, U2, U1os, U2mix, pct, spin::Symbol) where Ty
+  # AO-direct: the engine-built blocks already carry pseudo-canonical virtuals
+  blockspaces = EC.ao_direct ? :occ : :all
   @assert spin ∈ (:α,:β) "spin must be :α or :β"
   SP = EC.space
   isα = (spin == :α)
@@ -1117,78 +1333,78 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct,
   O = space4spin('o', !isα)
   V = space4spin('v', !isα)
   # ``v_{ij}^{ab}``, reordered to ``v^{ab}_{ij}``
-  vv_oo = permutedims(ints2(EC, o*o*v*v),[3,4,1,2])
+  vv_oo = permutedims(ints2_t_oovv(EC, o*o*v*v),[3,4,1,2])
   pseudocan_transform!(pct, vv_oo, v*v*o*o; conjugate=true)
   # ``v_{ab}^{ck}``
-  vvvo = ints2(EC, v*v*v*o)
-  pseudocan_transform!(pct, vvvo, v*v*v*o)
+  vvvo = ints2_t(EC, v*v*v*o)
+  pseudocan_transform!(pct, vvvo, v*v*v*o; spaces=blockspaces)
   # ``v_{ai}^{kj} - v_{ai}^{jk}``
-  vooo = ints2(EC, v*o*o*o)
+  vooo = ints2_t(EC, v*o*o*o)
   vooo -= permutedims(vooo,[1,2,4,3])
-  pseudocan_transform!(pct, vooo, v*o*o*o)
+  pseudocan_transform!(pct, vooo, v*o*o*o; spaces=blockspaces)
   # ``v_{ck}^{ab}``, reordered to ``v^{ab}_{ck}``
-  vv_vo = permutedims(ints2(EC, v*o*v*v), [3,4,1,2])
-  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true)
+  vv_vo = permutedims(ints2_t(EC, v*o*v*v), [3,4,1,2])
+  pseudocan_transform!(pct, vv_vo, v*v*v*o; conjugate=true, spaces=blockspaces)
   # ``v_{kj}^{ai} - v_{jk}^{ai}``, reordered to ``\bar v^{ai}_{kj}``
-  vo_oo = permutedims(ints2(EC, o*o*v*o), [3,4,1,2])
+  vo_oo = permutedims(ints2_t(EC, o*o*v*o), [3,4,1,2])
   vo_oo -= permutedims(vo_oo,[1,2,4,3])
-  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true)
+  pseudocan_transform!(pct, vo_oo, v*o*o*o; conjugate=true, spaces=blockspaces)
   if isα
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
-    vV_oO = permutedims(ints2(EC, o*O*v*V),[3,4,1,2])
+    vV_oO = permutedims(ints2_t_oovv(EC, o*O*v*V),[3,4,1,2])
     pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
-    vVvO = ints2(EC, v*V*v*O)
-    pseudocan_transform!(pct, vVvO, v*V*v*O)
+    vVvO = ints2_t(EC, v*V*v*O)
+    pseudocan_transform!(pct, vVvO, v*V*v*O; spaces=blockspaces)
     # ``v_{Ab}^{Ck}``
-    VvVo = permutedims(ints2(EC, v*V*o*V),[2,1,4,3])
-    pseudocan_transform!(pct, VvVo, V*v*V*o)
+    VvVo = permutedims(ints2_t(EC, v*V*o*V),[2,1,4,3])
+    pseudocan_transform!(pct, VvVo, V*v*V*o; spaces=blockspaces)
     # ``v_{aI}^{kJ}``
-    vOoO = ints2(EC, v*O*o*O)
-    pseudocan_transform!(pct, vOoO, v*O*o*O)
+    vOoO = ints2_t(EC, v*O*o*O)
+    pseudocan_transform!(pct, vOoO, v*O*o*O; spaces=blockspaces)
     # ``v_{Ai}^{Kj}``
-    VoOo = permutedims(ints2(EC, o*V*o*O),[2,1,4,3])
-    pseudocan_transform!(pct, VoOo, V*o*O*o)
+    VoOo = permutedims(ints2_t(EC, o*V*o*O),[2,1,4,3])
+    pseudocan_transform!(pct, VoOo, V*o*O*o; spaces=blockspaces)
     # ``v_{cK}^{aB}``, reordered to ``v^{aB}_{cK}``
-    vV_vO = permutedims(ints2(EC, v*O*v*V), [3,4,1,2])
-    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
+    vV_vO = permutedims(ints2_t(EC, v*O*v*V), [3,4,1,2])
+    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true, spaces=blockspaces)
     # ``v_{Ck}^{Ab}``, reordered to ``v^{Ab}_{Ck}``
-    Vv_Vo = permutedims(ints2(EC, o*V*v*V),[4,3,2,1])
-    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
+    Vv_Vo = permutedims(ints2_t(EC, o*V*v*V),[4,3,2,1])
+    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true, spaces=blockspaces)
     # ``v_{kJ}^{aI}``, reordered to ``v^{aI}_{kJ}``
-    vO_oO = permutedims(ints2(EC, o*O*v*O), [3,4,1,2])
-    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
+    vO_oO = permutedims(ints2_t(EC, o*O*v*O), [3,4,1,2])
+    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true, spaces=blockspaces)
     # ``v_{Kj}^{Ai}``, reordered to ``v^{Ai}_{Kj}``
-    Vo_Oo = permutedims(ints2(EC, o*O*o*V),[4,3,2,1])
-    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
+    Vo_Oo = permutedims(ints2_t(EC, o*O*o*V),[4,3,2,1])
+    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true, spaces=blockspaces)
   else
     # ``v_{iJ}^{aB}``, reordered to ``v^{aB}_{iJ}``
-    vV_oO = permutedims(ints2(EC, O*o*V*v),[4,3,2,1])
+    vV_oO = permutedims(ints2_t_oovv(EC, O*o*V*v),[4,3,2,1])
     pseudocan_transform!(pct, vV_oO, v*V*o*O; conjugate=true)
     # ``v_{aB}^{cK}``
-    vVvO = permutedims(ints2(EC, V*v*O*v),[2,1,4,3])
-    pseudocan_transform!(pct, vVvO, v*V*v*O)
+    vVvO = permutedims(ints2_t(EC, V*v*O*v),[2,1,4,3])
+    pseudocan_transform!(pct, vVvO, v*V*v*O; spaces=blockspaces)
     # ``v_{Ab}^{Ck}``
-    VvVo = ints2(EC, V*v*V*o)
-    pseudocan_transform!(pct, VvVo, V*v*V*o)
+    VvVo = ints2_t(EC, V*v*V*o)
+    pseudocan_transform!(pct, VvVo, V*v*V*o; spaces=blockspaces)
     # ``v_{aI}^{kJ}``
-    vOoO = permutedims(ints2(EC, O*v*O*o),[2,1,4,3])
-    pseudocan_transform!(pct, vOoO, v*O*o*O)
+    vOoO = permutedims(ints2_t(EC, O*v*O*o),[2,1,4,3])
+    pseudocan_transform!(pct, vOoO, v*O*o*O; spaces=blockspaces)
     # ``v_{Ai}^{Kj}``
-    VoOo = ints2(EC, V*o*O*o)
-    pseudocan_transform!(pct, VoOo, V*o*O*o)
+    VoOo = ints2_t(EC, V*o*O*o)
+    pseudocan_transform!(pct, VoOo, V*o*O*o; spaces=blockspaces)
     # ``v_{cK}^{aB}``, reordered to ``v^{aB}_{cK}``
-    vV_vO = permutedims(ints2(EC, O*v*V*v),[4,3,2,1])
-    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true)
+    vV_vO = permutedims(ints2_t(EC, O*v*V*v),[4,3,2,1])
+    pseudocan_transform!(pct, vV_vO, v*V*v*O; conjugate=true, spaces=blockspaces)
     # ``v_{Ck}^{Ab}``, reordered to ``v^{Ab}_{Ck}``
-    Vv_Vo = permutedims(ints2(EC, V*o*V*v),[3,4,1,2])
-    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true)
+    Vv_Vo = permutedims(ints2_t(EC, V*o*V*v),[3,4,1,2])
+    pseudocan_transform!(pct, Vv_Vo, V*v*V*o; conjugate=true, spaces=blockspaces)
     # ``v_{kJ}^{aI}``, reordered to ``v^{aI}_{kJ}``
-    vO_oO = permutedims(ints2(EC, O*o*O*v),[4,3,2,1])
-    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true)
+    vO_oO = permutedims(ints2_t(EC, O*o*O*v),[4,3,2,1])
+    pseudocan_transform!(pct, vO_oO, v*O*o*O; conjugate=true, spaces=blockspaces)
     # ``v_{Kj}^{Ai}``, reordered to ``v^{Ai}_{Kj}``
-    Vo_Oo = permutedims(ints2(EC, O*o*V*o),[3,4,1,2])
-    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true)
+    Vo_Oo = permutedims(ints2_t(EC, O*o*V*o),[3,4,1,2])
+    pseudocan_transform!(pct, Vo_Oo, V*o*O*o; conjugate=true, spaces=blockspaces)
   end
   m = space4spin('m', isα)
   fov = load2idx(EC,"f_"*m*m)[SP[o],SP[v]]
@@ -1205,14 +1421,19 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct,
   opspin = isα ? :β : :α
   ϵO, ϵV = get_pseudo_orbital_energies(pct, opspin)
 
-  T = zeros(nvir, nvir, nVir)
-  Kijk = zeros(nvir, nvir, nVir)
+  T = zeros(Ty, nvir, nvir, nVir)
+  Kijk = zeros(Ty, nvir, nvir, nVir)
+  # Single buffer for all three permutation layouts (used sequentially).
+  W_buf = zeros(Ty, nvir * nvir * nVir)
+  W_Cvv = reshape(W_buf, nVir, nvir, nvir)
+  W_vCv = reshape(W_buf, nvir, nVir, nvir)
+  W_vvC = reshape(W_buf, nvir, nvir, nVir)
 
-  Enb3 = 0.0
-  IntX = zeros(nvir, nocc)
-  IntY = zeros(nvir, nocc)
-  IntXos = zeros(nVir, nOcc)
-  IntYos = zeros(nVir, nOcc)
+  Enb3 = zero(Ty)
+  IntX = zeros(Ty, nvir, nocc)
+  IntY = zeros(Ty, nvir, nocc)
+  IntXos = zeros(Ty, nVir, nOcc)
+  IntYos = zeros(Ty, nVir, nOcc)
   for K = 1:nOcc 
     T2K = T2mix[:,:,K,:]
     U2K = U2mix[:,:,K,:]
@@ -1237,20 +1458,32 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct,
         v!VoKi = @mview VoOo[:,:,K,i]
         @mtensor begin
           # K_{abC}^{ijK} = v_{bC}^{dK} T^{ij}_{ad} + ...
+          # Direct to Kijk [a,b,C] layout
           Kijk[a,b,C] = v!T2ij[a,d] * v!vVvK[b,C,d]
-          Kijk[a,b,C] += v!T2Kj[C,d] * v!vvvi[b,a,d]
-          Kijk[a,b,C] += v!T2Ki[C,d] * v!vvvj[a,b,d]
-          Kijk[a,b,C] += v!T2Kj[D,b] * v!VvVi[C,a,D]
-          Kijk[a,b,C] += v!T2Ki[D,a] * v!VvVj[C,b,D]
-          Kijk[a,b,C] -= T2K[C,b,l] * v!voij[a,l]
-          Kijk[a,b,C] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
-          Kijk[a,b,C] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Kj[C,d] * v!vvvi[b,a,d]
+          W_Cvv[C,b,a] -= T2K[C,b,l] * v!voij[a,l]
+          W_Cvv[C,b,a] -= v!T2mixj[C,b,L] * v!vOiK[a,L]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Ki[C,d] * v!vvvj[a,b,d]
+          W_Cvv[C,a,b] -= v!T2mixi[C,a,L] * v!vOjK[b,L]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!T2Kj[D,b] * v!VvVi[C,a,D]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!T2Ki[D,a] * v!VvVj[C,b,D]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
         end
         # antisymmetrize ΔK = A(a,b) ΔKijk[a,b,C]
         Kijk -= permutedims(Kijk,[2,1,3])
         @mtensor begin
-          Kijk[a,b,C] -= v!T2i[b,a,l] * v!VoKj[C,l]
           Kijk[a,b,C] -= v!T2j[a,b,l] * v!VoKi[C,l]
+          # Accumulate [b,a,C] layout (negated)
+          W_vvC[b,a,C] = v!T2i[b,a,l] * v!VoKj[C,l]
+          # Combine accumulator into Kijk
+          Kijk[a,b,C] -= W_vvC[b,a,C]
         end
         T .= Kijk
         ϵoijK = ϵo[i] + ϵo[j] + ϵO[K]
@@ -1278,20 +1511,28 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct,
         v!Vo_Ki = @mview Vo_Oo[:,:,K,i]
         @mtensor begin
           # K^{abC}_{ijK} = v_{dK}^{bC} Λ_{ij}^{ad} + ...
+          # Direct to Kijk [a,b,C] layout
           Kijk[a,b,C] = v!U2ij[a,d] * v!vV_vK[b,C,d]
-          Kijk[a,b,C] += v!U2Kj[C,d] * v!vv_vi[b,a,d]
-          Kijk[a,b,C] += v!U2Ki[C,d] * v!vv_vj[a,b,d]
-          Kijk[a,b,C] += v!U2Kj[D,b] * v!Vv_Vi[C,a,D]
-          Kijk[a,b,C] += v!U2Ki[D,a] * v!Vv_Vj[C,b,D]
-          Kijk[a,b,C] -= U2K[C,b,l] * v!vo_ij[a,l]
-          Kijk[a,b,C] -= v!U2mixi[C,a,L] * v!vO_jK[b,L]
-          Kijk[a,b,C] -= v!U2mixj[C,b,L] * v!vO_iK[a,L]
+          # Accumulate [C,b,a] layout
+          W_Cvv[C,b,a] = v!U2Kj[C,d] * v!vv_vi[b,a,d]
+          W_Cvv[C,b,a] -= U2K[C,b,l] * v!vo_ij[a,l]
+          W_Cvv[C,b,a] -= v!U2mixj[C,b,L] * v!vO_iK[a,L]
+          W_Cvv[C,b,a] += v!U2Ki[D,a] * v!Vv_Vj[C,b,D]
+          Kijk[a,b,C] += W_Cvv[C,b,a]  # combine into Kijk
+          # Accumulate [C,a,b] layout
+          W_Cvv[C,a,b] = v!U2Ki[C,d] * v!vv_vj[a,b,d]
+          W_Cvv[C,a,b] -= v!U2mixi[C,a,L] * v!vO_jK[b,L]
+          W_Cvv[C,a,b] += v!U2Kj[D,b] * v!Vv_Vi[C,a,D]
+          Kijk[a,b,C] += W_Cvv[C,a,b]  # combine into Kijk
         end
         # antisymmetrize ΔK = A(a,b) ΔKijk[a,b,C]
         Kijk -= permutedims(Kijk,[2,1,3])
         @mtensor begin
-          Kijk[a,b,C] -= v!U2i[b,a,l] * v!Vo_Kj[C,l]
           Kijk[a,b,C] -= v!U2j[a,b,l] * v!Vo_Ki[C,l]
+          # Accumulate [b,a,C] layout (negated)
+          W_vvC[b,a,C] = v!U2i[b,a,l] * v!Vo_Kj[C,l]
+          # Combine accumulator into Kijk
+          Kijk[a,b,C] -= W_vvC[b,a,C]
         end
 
         @mtensor Enb3 += 0.5 * (Kijk[a,b,C] * T[a,b,C])
@@ -1306,11 +1547,14 @@ function calc_ΛpertT_mixedspin(EC::ECInfo, T2, T2mix, U1, U2, U1os, U2mix, pct,
         v!IntY_j = @mview IntY[:,j]
         v!IntYos_K = @mview IntYos[:,K]
         @mtensor v!IntX_i[a] += T[a,b,C] * v!vV_jK[b,C]
-        @mtensor v!IntX_j[b] += T[a,b,C] * v!vV_iK[a,C]
         @mtensor v!IntXos_K[C] += T[a,b,C] * v!vv_ij[a,b]
         @mtensor v!IntY_i[a] += T[a,b,C] * v!U2Kj[C,b]
-        @mtensor v!IntY_j[b] += T[a,b,C] * v!U2Ki[C,a]
         @mtensor v!IntYos_K[C] += T[a,b,C] * v!U2ij[a,b]
+        # Permute T for [b]-output contractions, matching index order of second operand
+        @mtensor W_vvC[b,a,C] = T[a,b,C]
+        @mtensor v!IntX_j[b] += W_vvC[b,a,C] * v!vV_iK[a,C]
+        @mtensor W_vCv[b,C,a] = T[a,b,C]
+        @mtensor v!IntY_j[b] += W_vCv[b,C,a] * v!U2Ki[C,a]
       end 
     end
   end

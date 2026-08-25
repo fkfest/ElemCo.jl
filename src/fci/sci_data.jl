@@ -159,17 +159,15 @@ function extend!(dets::SelectedCIDeterminants, new_dets, new_addresses::Vector{A
   build_lookup_index!(dets.lookup_index, dets.determinants, ndet_old+1, ndet_new, dets.verbosity)
 end
 
-const SelectedHamiltonianRow = VecDict{Int, Scalar}
-
-struct SelectedHamiltonianMatrix
-  rows::Vector{SelectedHamiltonianRow}  # Rows of the Hamiltonian matrix
+struct SelectedHamiltonianMatrix{T}
+  rows::Vector{VecDict{Int, T}}  # Rows of the Hamiltonian matrix
   hermitian::Bool                       # Whether the matrix is Hermitian (we still store full matrix)
-  function SelectedHamiltonianMatrix(hermitian::Bool=true)
-    new([], hermitian)
+  function SelectedHamiltonianMatrix{T}(hermitian::Bool=true) where T
+    new{T}(VecDict{Int, T}[], hermitian)
   end
 end
 
-function Base.push!(sel_ham::SelectedHamiltonianMatrix, row::SelectedHamiltonianRow)
+function Base.push!(sel_ham::SelectedHamiltonianMatrix{T}, row::VecDict{Int, T}) where T
   push!(sel_ham.rows, row)
 end
 
@@ -234,8 +232,8 @@ end
 
 Resize the SelectedHamiltonianMatrix to preallocate space for new elements.
 """
-function Base.resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminants, 
-                      connections::Vector{Vector{Int}}, cursize)
+function Base.resize!(sel_ham::SelectedHamiltonianMatrix{T}, dets::SelectedCIDeterminants, 
+                      connections::Vector{Vector{Int}}, cursize) where T
   ndet_old = length(sel_ham.rows)
   ndet = n_selected(dets)
   index = dets.lookup_index
@@ -260,7 +258,7 @@ function Base.resize!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterm
 
   # New rows for new determinants
   for i in (ndet_old+1):ndet
-    push!(sel_ham.rows, SelectedHamiltonianRow())
+    push!(sel_ham.rows, VecDict{Int, T}())
   end
   # Resize rows
   for (i, row) in enumerate(sel_ham.rows)
@@ -314,7 +312,7 @@ function extend!(sel_ham::SelectedHamiltonianMatrix, dets::SelectedCIDeterminant
       det_j = dets.determinants[j]
       h_ji = compute_matrix_element_direct(det_i, det_j, context, occa, occb)
       if sel_ham.hermitian
-        h_ij = h_ji
+        h_ij = conj(h_ji)
       else
         h_ij = compute_matrix_element_direct(det_j, det_i, context)
       end
@@ -350,30 +348,30 @@ end
 
 Context for Selected CI calculations using direct H*c operations.
 """
-struct SelectedCIContext{OPattern, ContextType <:Union{FCIContext{OPattern}, CIPHIContext{OPattern}}}
+struct SelectedCIContext{OPattern, T, ContextType}
   base_context::ContextType                   # Context for integrals and (optionally) addressing
   selected_dets::SelectedCIDeterminants{OPattern}       # Selected determinants and addresses
-  hamiltonian::SelectedHamiltonianMatrix      # Hamiltonian matrix for selected determinants
+  hamiltonian::SelectedHamiltonianMatrix{T}   # Hamiltonian matrix for selected determinants
   old_ndet::Base.RefValue{Int}                # Number of determinants in previous iteration
 
   # Constructor for FCIContext (uses full addressing)
-  function SelectedCIContext(base_context::FCIContext{OPattern}, determinants::Vector{Determinant{OPattern}}, 
-                             hamiltonian::SelectedHamiltonianMatrix) where OPattern
+  function SelectedCIContext(base_context::FCIContext{OPattern, T}, determinants::Vector{Determinant{OPattern}}, 
+                             hamiltonian::SelectedHamiltonianMatrix{T}) where {OPattern, T}
     # Convert determinants to addresses using full addressing
     addresses = [address_from_determinant(base_context, det) for det in determinants]
     selected_dets = SelectedCIDeterminants{OPattern}(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
-    new{OPattern, FCIContext{OPattern}}(base_context, selected_dets, hamiltonian, Ref(0))
+    new{OPattern, T, typeof(base_context)}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 
   # Constructor for CIPHIContext (on-demand addressing)
-  function SelectedCIContext(base_context::CIPHIContext{OPattern}, determinants::Vector{Determinant{OPattern}}, 
-                             hamiltonian::SelectedHamiltonianMatrix) where OPattern
+  function SelectedCIContext(base_context::CIPHIContext{OPattern, T}, determinants::Vector{Determinant{OPattern}}, 
+                             hamiltonian::SelectedHamiltonianMatrix{T}) where {OPattern, T}
     # For CIPHI, we use on-demand addressing: addresses are just indices (1, 2, 3, ...)
     addresses = Address.(1:length(determinants))
     selected_dets = SelectedCIDeterminants{OPattern}(determinants, addresses, base_context.options.print_level)
     extend!(hamiltonian, selected_dets, base_context)
-    new{OPattern, CIPHIContext{OPattern}}(base_context, selected_dets, hamiltonian, Ref(0))
+    new{OPattern, T, typeof(base_context)}(base_context, selected_dets, hamiltonian, Ref(0))
   end
 end
 

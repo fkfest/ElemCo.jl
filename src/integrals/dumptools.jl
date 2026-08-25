@@ -13,11 +13,18 @@ using ..ElemCo.FockFactory
 export freeze_orbs_in_dump
 
 """
-    freeze_orbs_in_dump(EC::ECInfo, freeze_orbs)
+    freeze_orbs_in_dump(EC::ECInfo, freeze_orbs; int2alloc=nothing)
 
   Freeze orbitals in FCIDump file `EC.fd` according to an array or range `freeze_orbs`.
+
+  By default the reduced (active) 2-e integrals are reordered into a new in-memory array. Pass
+  `int2alloc(key, dims) -> array` (e.g. an mmap allocator; `key` ∈ `"int2"`, `"int2aa"`,
+  `"int2bb"`, `"int2ab"`) to write the reduced integrals straight onto a memory-mapped scratch
+  file instead — this avoids materializing the active block in memory and any extra copy.
 """
-function freeze_orbs_in_dump(EC::ECInfo, freeze_orbs)
+function freeze_orbs_in_dump(EC::ECInfo, freeze_orbs; int2alloc=nothing)
+  reord(key, int2) = isnothing(int2alloc) ? reorder_orbs_int2(int2, nonfrozen) :
+                     reorder_orbs_int2(int2, nonfrozen; alloc=dims->int2alloc(key, dims))
   println("Freeze orbitals...")
   setup_space_fd!(EC)
   if EC.fd.uhf
@@ -44,14 +51,14 @@ function freeze_orbs_in_dump(EC::ECInfo, freeze_orbs)
 
     EC.fd.int1a = EC.fd.int1a[nonfrozen,nonfrozen] + core_fock_a[nonfrozen,nonfrozen]
     EC.fd.int1b = EC.fd.int1b[nonfrozen,nonfrozen] + core_fock_b[nonfrozen,nonfrozen]
-    EC.fd.int2aa = reorder_orbs_int2(EC.fd.int2aa, nonfrozen)
-    EC.fd.int2bb = reorder_orbs_int2(EC.fd.int2bb, nonfrozen)
-    EC.fd.int2ab = reorder_orbs_int2(EC.fd.int2ab, nonfrozen)
+    EC.fd.int2aa = reord("int2aa", EC.fd.int2aa)
+    EC.fd.int2bb = reord("int2bb", EC.fd.int2bb)
+    EC.fd.int2ab = reord("int2ab", EC.fd.int2ab)
   else
     core_fock = full_fock - gen_fock(EC)
-    EC.fd.int0 += 2*sum(diag(EC.fd.int1)[freeze_occ]) + sum(diag(core_fock)[freeze_occ]) 
+    EC.fd.int0 += 2*sum(diag(EC.fd.int1)[freeze_occ]) + sum(diag(core_fock)[freeze_occ])
     EC.fd.int1 = EC.fd.int1[nonfrozen,nonfrozen] + core_fock[nonfrozen,nonfrozen]
-    EC.fd.int2 = reorder_orbs_int2(EC.fd.int2, nonfrozen)
+    EC.fd.int2 = reord("int2", EC.fd.int2)
   end
   modify_header!(EC.fd, norbs, nelec)
 end

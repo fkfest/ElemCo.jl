@@ -22,12 +22,12 @@ jobs:
         os: [ubuntu-latest]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@latest
         with:
           version: ${{ matrix.julia-version }}
           arch: ${{ matrix.julia-arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@latest
       - uses: julia-actions/julia-runtest@latest
         with:

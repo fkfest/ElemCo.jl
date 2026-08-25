@@ -187,18 +187,29 @@ function form_string_substs_for_spin!(result::Vector{SubstResult{OPattern}}, op_
 end
 
 """
-    get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar})
+    get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar}; simtra::Bool=false)
 
 Extract diagonal pair antisymmetrized integrals for 2-electron terms.
+When `simtra=true`, computes both orderings independently (no i↔j symmetry assumed).
 """
-function get_diagonal_pair_antisym_ints(int2e::AbstractArray{Scalar})
+function get_diagonal_pair_antisym_ints(int2e::AbstractArray{T,4}; simtra::Bool=false) where T
   n_orb = size(int2e, 1)
-  jk = zeros(Scalar, n_orb, n_orb)
-  @inbounds for i in 2:n_orb
-    for j in 1:i-1
-      jij = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])  # v_ij^ij - v_ij^ji
-      jk[i, j] = jij
-      jk[j, i] = jij
+  jk = zeros(T, n_orb, n_orb)
+  if simtra
+    @inbounds for i in 1:n_orb
+      for j in 1:n_orb
+        if i != j
+          jk[i, j] = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])
+        end
+      end
+    end
+  else
+    @inbounds for i in 2:n_orb
+      for j in 1:i-1
+        jij = 0.5 * (int2e[i, j, i, j] - int2e[i, j, j, i])  # v_ij^ij - v_ij^ji
+        jk[i, j] = jij
+        jk[j, i] = jij
+      end
     end
   end
   return jk
@@ -209,9 +220,9 @@ end
 
 Extract diagonal pair integrals for 2-electron terms.
 """
-function get_diagonal_pair_ints(int2e::AbstractArray{Scalar})
+function get_diagonal_pair_ints(int2e::AbstractArray{T,4}) where T
   n_orb = size(int2e, 1)
-  jab = zeros(Scalar, n_orb, n_orb)
+  jab = zeros(T, n_orb, n_orb)
   @inbounds for i in 1:n_orb
     for j in 1:n_orb
       jab[i, j] = int2e[i, j, i, j]       # v_ij^ij - raw integral
@@ -225,8 +236,8 @@ end
 
 Evaluate diagonal Hamiltonian element ⟨Ψ|H|Ψ⟩ for determinant |occa, occb⟩.
 """
-function calc_diagonalH(hed::HEvalData, occa::AbstractVector{Int}, occb::AbstractVector{Int})::Scalar
-  f_elem = 0.0
+function calc_diagonalH(hed::HEvalData{T}, occa::AbstractVector{Int}, occb::AbstractVector{Int}) where T
+  f_elem = zero(T)
   # One-electron contributions
   @inbounds @simd for i in occa
     f_elem += hed.ha[i]
@@ -258,8 +269,8 @@ end
 
 Absorb one-electron operators into two-electron operator.
 """
-function absorb_1e!(int2::Array{Scalar, 4}, n_orb::Integer, n_elec::Integer,
-                     core_h_x::Matrix{Scalar}, core_h_y::Matrix{Scalar})
+function absorb_1e!(int2::AbstractArray{<:Number, 4}, n_orb::Integer, n_elec::Integer,
+                     core_h_x::AbstractMatrix, core_h_y::AbstractMatrix)
   @assert size(core_h_x) == size(core_h_y) == (n_orb, n_orb) "core_h_x and core_h_y size mismatch"
   @assert size(int2) == (n_orb, n_orb, n_orb, n_orb) "int2 size mismatch"
   
@@ -268,11 +279,14 @@ function absorb_1e!(int2::Array{Scalar, 4}, n_orb::Integer, n_elec::Integer,
     for i in 1:n_orb
       for j in 1:n_orb
         # Absorb 1e terms into 2e integrals
-        int2[k, i, k, j] += f_scale * core_h_y[j, i]
-        int2[i, k, j, k] += f_scale * core_h_x[j, i]
+        # h[i,j] E^i_j = (1/N) sum_k h[i,j] E^k_k E^i_j
+        # → adds h[i,j]/N to V[k,i,k,j] and V[i,k,j,k]
+        int2[k, i, k, j] += f_scale * core_h_y[i, j]
+        int2[i, k, j, k] += f_scale * core_h_x[i, j]
       end
     end
   end
+  return
 end
 
 """
@@ -281,12 +295,12 @@ end
 Calculate modified core Hamiltonian by absorbing two-electron contributions arising from 
 changed order of creation/annihilation operators.
 """
-function calc_mod_core_h!(mod_core_h::Matrix{Scalar}, int2::Array{Scalar, 4},
-                          n_orb::Integer, c1_integrals::Bool)
+function calc_mod_core_h!(mod_core_h::AbstractMatrix{T}, int2::AbstractArray{T, 4},
+                          n_orb::Integer, c1_integrals::Bool) where T
   @assert size(mod_core_h) == (n_orb, n_orb) "mod_core_h size mismatch"
   @assert size(int2) == (n_orb, n_orb, n_orb, n_orb) "int2 size mismatch"
 
-  fill!(mod_core_h, 0.0)
+  fill!(mod_core_h, zero(T))
   if !c1_integrals
     # Use broadcasting for efficient calculation
     # mod_core_h[m, n] -= 0.5 * sum_i(int2[m, i, i, n])
@@ -294,6 +308,7 @@ function calc_mod_core_h!(mod_core_h::Matrix{Scalar}, int2::Array{Scalar, 4},
       mod_core_h .-= 0.5 .* view(int2, :, i, i, :)
     end
   end
+  return
 end
 
 """
@@ -304,12 +319,13 @@ Initialize Hamiltonian terms for the FCI calculation and compute diagonal Hamilt
 function init_hamiltonian_terms!(context::FCIContext)
   n_orb = context.n_orb
   n_elec = context.n_elec[1] + context.n_elec[2]
+  simtra = is_similarity_transformed(context.fcidump)
 
   if context.fcidump.uhf
     # UHF case: Handle all three spin-separated integral tensors properly
     # Precompute heval_data for UHF
     context.heval_data = HEvalData(context.fcidump.int2aa, context.fcidump.int2bb, context.fcidump.int2ab,
-                                  context.fcidump.int1a, context.fcidump.int1b)
+                                  context.fcidump.int1a, context.fcidump.int1b; simtra)
     # Create modified copies of all three integral tensors
     int2aa_modified = copy(context.fcidump.int2aa)
     int2bb_modified = copy(context.fcidump.int2bb)
@@ -344,20 +360,20 @@ function init_hamiltonian_terms!(context::FCIContext)
       
       # Use 2e term with all three UHF integral tensors (1e terms absorbed)
       h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2aa_modified, 
-                                  int2bb_modified, int2ab_modified)
+                                  int2bb_modified, int2ab_modified; simtra)
       push!(context.hamiltonian_terms, h2_term)
     else
       # Use separate 1e and 2e terms with all three UHF integral tensors
       h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
       h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2aa_modified, 
-                                  int2bb_modified, int2ab_modified)
+                                  int2bb_modified, int2ab_modified; simtra)
       push!(context.hamiltonian_terms, h1_term)
       push!(context.hamiltonian_terms, h2_term)
     end
   else
     # RHF case: Use spatial integrals
     # Precompute heval_data for RHF
-    context.heval_data = HEvalData(context.fcidump.int2, context.fcidump.int1)
+    context.heval_data = HEvalData(context.fcidump.int2, context.fcidump.int1; simtra)
 
     int2_modified = copy(context.fcidump.int2)
     # Compute diagonal with unmodified integrals
@@ -372,12 +388,12 @@ function init_hamiltonian_terms!(context::FCIContext)
       # Absorb 1e terms into 2e integrals
       absorb_1e!(int2_modified, n_orb, n_elec, context.mod_core_h_a, context.mod_core_h_a)
       # Use only 2e term (1e terms absorbed)
-      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified; simtra)
       push!(context.hamiltonian_terms, h2_term)
     else
       # Use separate 1e and 2e terms
       h1_term = HamiltonianTerm1e(n_orb, context.mod_core_h_a, context.mod_core_h_b)
-      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified)
+      h2_term = HamiltonianTerm2e(n_orb, context.options.thr_negligible, int2_modified; simtra)
       push!(context.hamiltonian_terms, h1_term)
       push!(context.hamiltonian_terms, h2_term)
     end
@@ -472,9 +488,9 @@ end
 Block contraction for c^k c_l operators.
 Direction: 'c' for contraction, 'R' for residual formation.
 """
-function block_contract_cc1!(data_k::AbstractArray{Scalar, 3}, info1,
-                             coeffs::AbstractMatrix{Scalar}, direction::Char,
-                             c_sum::Ref{Scalar}, prefactor)
+function block_contract_cc1!(data_k::AbstractArray{T, 3}, info1,
+                             coeffs::AbstractMatrix, direction::Char,
+                             c_sum::Ref{Float64}, prefactor) where T
   @assert direction == 'c' || direction == 'R'
   n_pair, n_blk1, n_blk2 = size(data_k)
   for i_blk1 in 1:n_blk1
@@ -494,7 +510,46 @@ function block_contract_cc1!(data_k::AbstractArray{Scalar, 3}, info1,
         for i_blk2 in 1:n_blk2
           t = pf * coeffs[Int(s.i_str), i_blk2]
           data_k[kl, i_blk1, i_blk2] += t
-          c_sum[] += t * t
+          c_sum[] += abs2(t)
+        end
+      else
+        for i_blk2 in 1:n_blk2
+          coeffs[Int(s.i_str), i_blk2] += pf * data_k[kl, i_blk1, i_blk2]
+        end
+      end
+    end
+  end
+end
+
+"""
+    block_contract_cc1_full!(data_k::AbstractArray{T, 3}, info1,
+                             coeffs::AbstractMatrix, direction::Char,
+                             c_sum::Ref{Float64}, prefactor, n_orb::Int)
+
+Block contraction for c^k c_l operators using full (non-symmetric) indexing.
+Uses `kl = (k-1)*n_orb + l` instead of symmetric pair index.
+Required for complex integrals where pair symmetry does not hold.
+Direction: 'c' for contraction, 'R' for residual formation.
+"""
+function block_contract_cc1_full!(data_k::AbstractArray{T, 3}, info1,
+                                  coeffs::AbstractMatrix, direction::Char,
+                                  c_sum::Ref{Float64}, prefactor, n_orb::Int) where T
+  @assert direction == 'c' || direction == 'R'
+  n_sq, n_blk1, n_blk2 = size(data_k)
+  for i_blk1 in 1:n_blk1
+    info1_data = info1[i_blk1]
+
+    for i_subst in 1:Int(info1_data.n_subst)
+      s = info1_data.subst[i_subst]
+      pf = s.sign * prefactor
+
+      kl = (Int(s.k) - 1) * n_orb + Int(s.l)
+
+      if direction == 'c'
+        for i_blk2 in 1:n_blk2
+          t = pf * coeffs[Int(s.i_str), i_blk2]
+          data_k[kl, i_blk1, i_blk2] += t
+          c_sum[] += abs2(t)
         end
       else
         for i_blk2 in 1:n_blk2
@@ -519,9 +574,9 @@ Forms: `data_k[k,l,iBlk1,iBlk2] += <K_1|c†_k c_l|J_1> * coeffs[J_1,K_2] * sign
 - `c_sum`: Accumulator for sum of contributions (for screening)
 - `prefactor`: Multiplicative prefactor (typically ±1)
 """
-function block_contract_cc1_nosym!(data_k::AbstractArray{Scalar, 4}, info_1,
-                                   coeffs::AbstractMatrix{Scalar},
-                                   c_sum::Ref{Scalar}, prefactor)
+function block_contract_cc1_nosym!(data_k::AbstractArray{T, 4}, info_1,
+                                   coeffs::AbstractMatrix,
+                                   c_sum::Ref{Float64}, prefactor) where T
   n_orb, n_orb, n_blk1, n_blk2 = size(data_k)
   for i_blk1 in 1:n_blk1
     info = info_1[i_blk1]
@@ -538,7 +593,7 @@ function block_contract_cc1_nosym!(data_k::AbstractArray{Scalar, 4}, info_1,
       for i_blk2 in 1:n_blk2
         t = pf * coeffs[Int(s.i_str), i_blk2]
         data_k[k, l, i_blk1, i_blk2] += t
-        c_sum[] += t * t
+        c_sum[] += abs2(t)
       end
     end
   end
@@ -587,10 +642,11 @@ end
     convert_op2_to_pair_matrix(op::AbstractArray{Scalar}, n_orb::Int)
 
 Convert 4D integral tensor to pair matrix format.
+Uses symmetric pair indexing — only valid for real integrals with 4-fold symmetry.
 """
-function convert_op2_to_pair_matrix(op::AbstractArray{Scalar}, n_orb::Int)
+function convert_op2_to_pair_matrix(op::AbstractArray{T}, n_orb::Int) where T
   n_pairs = n_orb * (n_orb + 1) ÷ 2
-  mat = zeros(Scalar, n_pairs, n_pairs)
+  mat = zeros(T, n_pairs, n_pairs)
   if ndims(op) == 4
     @inbounds for i in 1:n_orb
       for j in 1:n_orb
@@ -613,6 +669,70 @@ function convert_op2_to_pair_matrix(op::AbstractArray{Scalar}, n_orb::Int)
 end
 
 """
+    convert_op2_to_full_matrix(op::AbstractArray, n_orb::Int)
+
+Convert 4D integral tensor to full (non-symmetric) matrix format.
+Maps `op[i,k,j,l]` to `mat[(i-1)*n_orb+j, (k-1)*n_orb+l]`.
+Required for complex integrals where pair symmetry `v[i,k,j,l] = v[j,k,i,l]` does not hold.
+
+Uses physicist notation `int2[p,q,r,s] = <pq|rs>`. The 2e operator is
+`(1/2) Σ_{pqrs} <pq|rs> E^p_r E^q_s`. With resolution of identity
+the V matrix element is `V[mn,kl] = <mk|nl> = int2[m,k,n,l]`, i.e., `op[i,k,j,l]`.
+Gather maps `E^k_l` to index `kl = (k-1)*n_orb+l`, scatter maps `E^m_n` to `mn`.
+"""
+function convert_op2_to_full_matrix(op::AbstractArray{T}, n_orb::Int) where T
+  n_sq = n_orb * n_orb
+  mat = zeros(T, n_sq, n_sq)
+  if ndims(op) == 4
+    @inbounds for i in 1:n_orb
+      for j in 1:n_orb
+        ij = (i - 1) * n_orb + j
+        for k in 1:n_orb
+          for l in 1:n_orb
+            kl = (k - 1) * n_orb + l
+            mat[ij, kl] = op[i, l, j, k]
+          end
+        end
+      end
+    end
+  elseif ndims(op) == 2
+    @assert size(op, 1) == n_sq && size(op, 2) == n_sq "Integral matrix size mismatch"
+    mat .= op
+  else
+    error("Unsupported integral tensor dimensions: $(ndims(op))")
+  end
+  return mat
+end
+
+"""
+    convert_op2_ba_to_full_matrix(int2_ab::AbstractArray, n_orb::Int)
+
+Compute the βα cross-spin V matrix from αβ integrals.
+
+In physicist notation, `int2_ab[p,q,r,s] = <p_α q_β|r_α s_β>`.
+The αβ V matrix (β-gather, α-scatter) is
+`V_ab[mn,kl] = <m_α k_β|n_α l_β> = int2_ab[m,k,n,l]` (from `convert_op2_to_full_matrix`).
+The βα operator (α-gather, β-scatter) needs
+`V_ba[mn,kl] = <k_α m_β|l_α n_β> = int2_ab[k,m,l,n]` (swap scatter/gather spin roles).
+"""
+function convert_op2_ba_to_full_matrix(int2_ab::AbstractArray{T,4}, n_orb::Int) where T
+  n_sq = n_orb * n_orb
+  mat = zeros(T, n_sq, n_sq)
+  @inbounds for m in 1:n_orb
+    for n in 1:n_orb
+      mn = (m - 1) * n_orb + n
+      for k in 1:n_orb
+        for l in 1:n_orb
+          kl = (k - 1) * n_orb + l
+          mat[mn, kl] = int2_ab[l, m, k, n]
+        end
+      end
+    end
+  end
+  return mat
+end
+
+"""
     contract!(term::HamiltonianTerm, r::FCIVector, c::FCIVector, prefactor::Scalar)
 
 Apply Hamiltonian term: |r⟩ += prefactor * H |c⟩
@@ -624,18 +744,18 @@ function contract! end
 
 One-electron Hamiltonian term: h_ij c^i c_j
 """
-mutable struct HamiltonianTerm1e <: HamiltonianTerm
+mutable struct HamiltonianTerm1e{T} <: HamiltonianTerm
   n_orb::FCIUInt
   spatial::Bool  # true if same matrix for both spins
-  base_factor::Scalar
-  op1_matrix_a::Matrix{Scalar}  # Alpha spin matrix
-  op1_matrix_b::Matrix{Scalar}  # Beta spin matrix
+  base_factor::Float64
+  op1_matrix_a::Matrix{T}  # Alpha spin matrix
+  op1_matrix_b::Matrix{T}  # Beta spin matrix
 
-  function HamiltonianTerm1e(n_orb::Integer, op1_matrix_a::AbstractMatrix{Scalar},
-                             op1_matrix_b::Union{AbstractMatrix{Scalar}, Nothing} = nothing)
+  function HamiltonianTerm1e(n_orb::Integer, op1_matrix_a::AbstractMatrix{T},
+                             op1_matrix_b::Union{AbstractMatrix{T}, Nothing} = nothing) where T
     spatial = (op1_matrix_b === nothing)
     op1_b = spatial ? op1_matrix_a : op1_matrix_b
-    new(FCIUInt(n_orb), spatial, 1.0, Matrix(op1_matrix_a), Matrix(op1_b))
+    new{T}(FCIUInt(n_orb), spatial, 1.0, Matrix(op1_matrix_a), Matrix(op1_b))
   end
 end
 
@@ -646,24 +766,36 @@ Two-electron Hamiltonian term: ``\\[1/2\\] (ij|kl) E^i_j E^k_l``
 
 WARNING: Uses (ij|kl) integrals, NOT ⟨ij|kl⟩ and includes factor 1/2.
 """
-mutable struct HamiltonianTerm2e <: HamiltonianTerm
+mutable struct HamiltonianTerm2e{T} <: HamiltonianTerm
   n_orb::FCIUInt
   spatial::Bool
-  base_factor::Scalar
-  thr_negligible::Scalar
-  op2_matrix_aa::Matrix{Scalar}
-  op2_matrix_bb::Matrix{Scalar}
-  op2_matrix_ab::Matrix{Scalar}
+  use_pair_symmetry::Bool
+  base_factor::Float64
+  thr_negligible::Float64
+  op2_matrix_aa::Matrix{T}
+  op2_matrix_bb::Matrix{T}
+  op2_matrix_ab::Matrix{T}
+  op2_matrix_ba::Matrix{T}
 
-  function HamiltonianTerm2e(n_orb::Integer, thr::Float64, op2_matrix_aa::AbstractArray{Scalar},
-                             op2_matrix_bb::Union{AbstractArray{Scalar}, Nothing} = nothing,
-                             op2_matrix_ab::Union{AbstractArray{Scalar}, Nothing} = nothing)
+  function HamiltonianTerm2e(n_orb::Integer, thr::Float64, op2_matrix_aa::AbstractArray{T},
+                             op2_matrix_bb::Union{AbstractArray{T}, Nothing} = nothing,
+                             op2_matrix_ab::Union{AbstractArray{T}, Nothing} = nothing;
+                             simtra::Bool = false) where T
     n_orb_int = Int(n_orb)
     spatial = (op2_matrix_bb === nothing)
-    mat_aa = convert_op2_to_pair_matrix(op2_matrix_aa, n_orb_int)
-    mat_bb = spatial ? mat_aa : convert_op2_to_pair_matrix(op2_matrix_bb, n_orb_int)
-    mat_ab = spatial ? mat_aa : convert_op2_to_pair_matrix(op2_matrix_ab, n_orb_int)
-    new(FCIUInt(n_orb_int), spatial, 0.5, thr, mat_aa, mat_bb, mat_ab)
+    use_pair_sym = !(T <: Complex) && !simtra
+    if use_pair_sym
+      mat_aa = convert_op2_to_pair_matrix(op2_matrix_aa, n_orb_int)
+      mat_bb = spatial ? mat_aa : convert_op2_to_pair_matrix(op2_matrix_bb, n_orb_int)
+      mat_ab = spatial ? mat_aa : convert_op2_to_pair_matrix(op2_matrix_ab, n_orb_int)
+      mat_ba = mat_ab'
+    else
+      mat_aa = convert_op2_to_full_matrix(op2_matrix_aa, n_orb_int)
+      mat_bb = spatial ? mat_aa : convert_op2_to_full_matrix(op2_matrix_bb, n_orb_int)
+      mat_ab = spatial ? mat_aa : convert_op2_to_full_matrix(op2_matrix_ab, n_orb_int)
+      mat_ba = spatial ? mat_aa : convert_op2_ba_to_full_matrix(op2_matrix_ab, n_orb_int)
+    end
+    new{T}(FCIUInt(n_orb_int), spatial, use_pair_sym, 0.5, thr, mat_aa, mat_bb, mat_ab, mat_ba)
   end
 end
 
@@ -675,9 +807,9 @@ end
 
 Apply 1-electron operator on specified spin branch.
 """
-function apply_1e_op!(result::AbstractVector{Scalar}, coeffs::AbstractVector{Scalar},
-                      prefactor, op_matrix_1e::AbstractMatrix{Scalar},
-                      adr1::OrbStringAdrTable, adr2::OrbStringAdrTable, st1::Integer, st2::Integer)
+function apply_1e_op!(result::AbstractVector{T}, coeffs::AbstractVector{T},
+                      prefactor, op_matrix_1e::AbstractMatrix{T},
+                      adr1::OrbStringAdrTable{OPattern}, adr2::OrbStringAdrTable{OPattern}, st1::Integer, st2::Integer) where {T, OPattern}
   if n_elec(adr1) == 0
     return
   end
@@ -685,7 +817,7 @@ function apply_1e_op!(result::AbstractVector{Scalar}, coeffs::AbstractVector{Sca
   n_orb_val = adr1.n_orb
 
   # Create intermediate addressing table for N-1 electrons
-  adr_k1 = OrbStringAdrTable(n_elec(adr1) - 1, n_orb_val)
+  adr_k1 = OrbStringAdrTable{OPattern}(n_elec(adr1) - 1, n_orb_val)
 
   # Pre-compute addressing and signs for all intermediate states
   addr_k1 = Vector{Address}(undef, n_orb_val * n_str(adr_k1))
@@ -715,8 +847,8 @@ function apply_1e_op!(result::AbstractVector{Scalar}, coeffs::AbstractVector{Sca
     result_beta = @view(result[(st2 * (i_str2 - 1) + 1):end])
 
     # Allocate temporary arrays for this thread
-    input_k = zeros(Scalar, n_orb_val * n_tgt_blk_k)
-    output_k = zeros(Scalar, n_orb_val * n_tgt_blk_k)
+    input_k = zeros(T, n_orb_val * n_tgt_blk_k)
+    output_k = zeros(T, n_orb_val * n_tgt_blk_k)
 
     # Process intermediate states in blocks
     for i_block_beg_k1 in 1:n_tgt_blk_k:n_str(adr_k1)
@@ -728,20 +860,26 @@ function apply_1e_op!(result::AbstractVector{Scalar}, coeffs::AbstractVector{Sca
 
       # Gather input coefficients with signs
       for i_kk in 1:(n_orb_val * n_blk_k)
-        adr_idx = addr_k1_block[i_kk]
-        input_k[i_kk] = signs_block[i_kk] * coeffs_beta[st1 * adr_idx + 1]
+        if signs_block[i_kk] == 0
+          input_k[i_kk] = zero(T)
+        else
+          adr_idx = addr_k1_block[i_kk]
+          input_k[i_kk] = signs_block[i_kk] * coeffs_beta[(adr_idx - 1) * st1 + 1]
+        end
       end
 
       # Matrix multiplication: output_k = op_matrix_1e * input_k
-      input_k_mat = reshape(view(input_k, 1:(n_orb_val * n_blk_k)), n_orb_val, n_blk_k)
-      output_k_mat = reshape(view(output_k, 1:(n_orb_val * n_blk_k)), n_orb_val, n_blk_k)
+      input_k_mat = reshape(view(input_k, 1:(n_orb_val * n_blk_k)), Int(n_orb_val), Int(n_blk_k))
+      output_k_mat = reshape(view(output_k, 1:(n_orb_val * n_blk_k)), Int(n_orb_val), Int(n_blk_k))
 
       mul!(output_k_mat, op_matrix_1e, input_k_mat, prefactor, 0.0)
 
       # Scatter output coefficients with signs
       for i_kk in 1:(n_orb_val * n_blk_k)
-        adr_idx = addr_k1_block[i_kk]
-        result_beta[st1 * adr_idx + 1] += signs_block[i_kk] * output_k[i_kk]
+        if signs_block[i_kk] != 0
+          adr_idx = addr_k1_block[i_kk]
+          result_beta[(adr_idx - 1) * st1 + 1] += signs_block[i_kk] * output_k[i_kk]
+        end
       end
     end
   end
@@ -773,10 +911,10 @@ end
 
 Add contribution to 1-RDM for one spin.
 """
-function add_1rdm_for_spin!(rdm::AbstractMatrix{Scalar}, 
-                            coeff_l::AbstractVector{Scalar}, coeff_r::AbstractVector{Scalar},
+function add_1rdm_for_spin!(rdm::AbstractMatrix{T}, 
+                            coeff_l::AbstractVector{T}, coeff_r::AbstractVector{T},
                             adr1::OrbStringAdrTable{OPattern}, adr2::OrbStringAdrTable{OPattern},
-                            st1::Integer, st2::Integer) where OPattern
+                            st1::Integer, st2::Integer) where {T, OPattern}
   n_orb_val = adr1.n_orb
 
   # Pre-allocate substitution buffer (reused for each string)
@@ -792,11 +930,11 @@ function add_1rdm_for_spin!(rdm::AbstractMatrix{Scalar},
       i_adr_r1 = st1 * (s.i_str - 1) + 1
       i_adr_c1 = st1 * (i_str1 - 1) + 1
 
-      tkl = 0.0
+      tkl = zero(T)
       for i_str2 in 1:n_str(adr2)
         idx_l = i_adr_r1 + st2 * (i_str2 - 1)
         idx_r = i_adr_c1 + st2 * (i_str2 - 1)
-        tkl += coeff_l[idx_l] * coeff_r[idx_r]
+        tkl += conj(coeff_l[idx_l]) * coeff_r[idx_r]
       end
 
       rdm[s.k, s.l] += s.sign * tkl  # s.k and s.l are already 1-based
@@ -823,8 +961,8 @@ For different states, this gives the transition density matrix.
 - `coeff_l`: Left FCI vector (bra state)
 - `coeff_r`: Right FCI vector (ket state)
 """
-function make_1rdms!(rdm_a::Matrix{Scalar}, rdm_b::Matrix{Scalar}, 
-                     coeff_l::FCIVector, coeff_r::FCIVector)
+function make_1rdms!(rdm_a::AbstractMatrix{T}, rdm_b::AbstractMatrix{T}, 
+                     coeff_l::FCIVector, coeff_r::FCIVector) where T
   # Verify compatibility
   @assert coeff_l.n_orb == coeff_r.n_orb "Vectors must have same n_orb"
   @assert coeff_l.n_elec_a == coeff_r.n_elec_a "Vectors must have same n_elec_a"
@@ -835,8 +973,8 @@ function make_1rdms!(rdm_a::Matrix{Scalar}, rdm_b::Matrix{Scalar},
   @assert size(rdm_b) == (n_orb, n_orb) "rdm_b must be n_orb × n_orb"
   
   # Initialize RDMs to zero
-  fill!(rdm_a, 0.0)
-  fill!(rdm_b, 0.0)
+  fill!(rdm_a, zero(T))
+  fill!(rdm_b, zero(T))
   
   # Compute alpha RDM
   # Loop over beta strings (outer), alpha string substitutions (inner)
@@ -854,7 +992,7 @@ end
 
 Convenience method for computing 1-RDM of a single state (self-transition).
 """
-function make_1rdms!(rdm_a::Matrix{Scalar}, rdm_b::Matrix{Scalar}, coeff::FCIVector)
+function make_1rdms!(rdm_a::AbstractMatrix, rdm_b::AbstractMatrix, coeff::FCIVector)
   make_1rdms!(rdm_a, rdm_b, coeff, coeff)
 end
 
@@ -880,7 +1018,7 @@ The algorithm:
 # Notes
 - Computational cost: O(N_det × n_orb^4)
 """
-function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector{OPattern}, rdm1::Matrix{Scalar}, ThrNeglect=1e-16) where OPattern
+function make_2rdm!(rdm2::AbstractArray{T, 4}, coeff::FCIVector{OPattern, T}, rdm1::AbstractMatrix, ThrNeglect=1e-16) where {T, OPattern}
   n_orb = Int(coeff.n_orb)
   n_pairs_n = n_orb * n_orb
   
@@ -894,14 +1032,14 @@ function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector{OPattern}, rdm1::Ma
   
   # Flatten rdm2 to matrix form [rs, tu]
   rdm2_flat = reshape(rdm2, n_pairs_n, n_pairs_n)
-  fill!(rdm2_flat, 0.0)
+  fill!(rdm2_flat, zero(T))
   
   # Flatten coefficients
   coeffs = vec(coeff.data)
   n_str_a = Int(coeff.n_str_a)
   n_str_b = Int(coeff.n_str_b)
   
-  input = zeros(Scalar, n_pairs_n * n_tgt_blk_k * n_tgt_blk_kb)
+  input = zeros(T, n_pairs_n * n_tgt_blk_k * n_tgt_blk_kb)
   # Pre-allocate StrInfo arrays with substitution buffers
   max_subst = n_orb * n_orb
   info_a_pool = [StrInfo{OPattern}(max_subst) for _ in 1:n_tgt_blk_k]
@@ -934,9 +1072,9 @@ function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector{OPattern}, rdm1::Ma
       end
       
       block_len = n_pairs_n * n_blk_a * n_blk_b
-      input[1:block_len] .= 0.0
+      input[1:block_len] .= zero(T)
 
-      c_sum = Ref{Scalar}(0.0)
+      c_sum = Ref{Float64}(0.0)
       
       # Contract alpha strings:
       # Inp[kl,K] = <K_α|c†_k c_l|J_α> c[J_α,K_β]
@@ -954,10 +1092,14 @@ function make_2rdm!(rdm2::Array{Scalar, 4}, coeff::FCIVector{OPattern}, rdm1::Ma
       
       # Contract to 2-RDM if contributions are significant
       if c_sum[] > ThrNeglect
-        # Rdm2[rs,tu] += Inp[rs,K] * Inp[tu,K]^T
-        # This is: rdm2 += inp_k * inp_k^T (rank-k update)
+        # Rdm2[rs,tu] += conj(Inp[rs,K]) * Inp[tu,K]
+        # For real: A*A' = conj(A)*transpose(A). For complex: bra needs explicit conjugation.
         inp_k_mat = reshape(@view(input[1:block_len]), n_pairs_n, n_blk_a * n_blk_b)
-        mul!(rdm2_flat, inp_k_mat, inp_k_mat', 1.0, 1.0)
+        if T <: Real
+          mul!(rdm2_flat, inp_k_mat, inp_k_mat', 1.0, 1.0)
+        else
+          mul!(rdm2_flat, conj(inp_k_mat), transpose(inp_k_mat), 1.0, 1.0)
+        end
       end
     end
   end
@@ -1008,7 +1150,7 @@ end
 
 Apply two-electron Hamiltonian term.
 """
-function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector{OPattern}, prefactor) where OPattern
+function contract!(term::HamiltonianTerm2e{T}, r::FCIVector{OPattern, T}, c::FCIVector{OPattern, T}, prefactor) where {T, OPattern}
   @assert compatible(r, c) "Incompatible FCI vectors"
 
   base_prefactor = term.base_factor * prefactor
@@ -1016,13 +1158,15 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector
   n_str_a = Int(r.n_str_a)
   n_str_b = Int(r.n_str_b)
   n_orb = Int(term.n_orb)
-  n_pairs = n_orb * (n_orb + 1) ÷ 2
+  # n_idx: dimension of the integral matrix (n_pairs for symmetric, n_orb^2 for full)
+  n_idx = term.use_pair_symmetry ? n_orb * (n_orb + 1) ÷ 2 : n_orb * n_orb
 
   # Data is stored in [alpha, beta] order
   coeff = reshape(c.data, :)
   resid = reshape(r.data, :)
 
-  use_symmetry_ab = term.spatial && (n_spin(r) == 0) && r.is_spin_projected
+  # Alpha-beta symmetry only valid for real integrals
+  use_symmetry_ab = term.spatial && (n_spin(r) == 0) && r.is_spin_projected && term.use_pair_symmetry
   if use_symmetry_ab
     symmetrize_ci_vector!(c)
     coeff = reshape(c.data, :)
@@ -1035,9 +1179,9 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector
   n_tgt_blk_kb = 64
   # Pre-allocate input and output buffers
   n_block_cols = n_tgt_blk_k * n_tgt_blk_kb
-  spatial_block_len = n_pairs * n_block_cols
+  spatial_block_len = n_idx * n_block_cols
   block_len = spatial_block_len * (term.spatial ? 1 : 2)
-  input = zeros(Scalar, block_len)
+  input = zeros(T, block_len)
   output = similar(input)
   # Pre-allocate StrInfo arrays with pre-allocated subst vectors
   # Each StrInfo gets its own subst buffer to avoid allocations in loops
@@ -1045,7 +1189,7 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector
   info_a = [StrInfo{OPattern}(max_subst) for _ in 1:n_tgt_blk_k]
   info_b = [StrInfo{OPattern}(max_subst) for _ in 1:n_tgt_blk_kb]
 
-  dummy_ref = Ref{Scalar}(0.0)
+  dummy_ref = Ref{Float64}(0.0)
 
   for block_b_start in 1:n_tgt_blk_kb:n_str_b
     block_b_end = min(block_b_start + n_tgt_blk_kb - 1, n_str_b)
@@ -1079,29 +1223,35 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector
       end
 
       n_block_cols = n_blk_a * n_blk_b
-      spatial_block_len = n_pairs * n_block_cols
+      spatial_block_len = n_idx * n_block_cols
       block_len = spatial_block_len * (term.spatial ? 1 : 2)
 
-      input[1:block_len] .= 0.0
+      input[1:block_len] .= zero(T)
       # In spatial case, alpha and beta point to same memory
       io_beta_offset = term.spatial ? 0 : spatial_block_len
 
-      csum = Ref{Scalar}(0.0)
+      csum = Ref{Float64}(0.0)
 
       beta_offset = (block_b_start - 1) * n_str_a
       coeff_beta = StridedView(coeff, (n_str_a, n_blk_b), (1, n_str_a), beta_offset)
-      input_alpha = StridedView(input, (n_pairs, n_blk_a, n_blk_b), (1, n_pairs, n_pairs * n_blk_a))
-      block_contract_cc1!(input_alpha, info_a, coeff_beta, 'c', csum, 1.0)
+      input_alpha = StridedView(input, (n_idx, n_blk_a, n_blk_b), (1, n_idx, n_idx * n_blk_a))
 
       alpha_offset = block_a_start - 1
       coeff_alpha = StridedView(coeff, (n_str_b, n_blk_a), (n_str_a, 1), alpha_offset)
-      input_beta = StridedView(input, (n_pairs, n_blk_b, n_blk_a), (1, n_pairs * n_blk_a, n_pairs),
+      input_beta = StridedView(input, (n_idx, n_blk_b, n_blk_a), (1, n_idx * n_blk_a, n_idx),
                                io_beta_offset)
-      block_contract_cc1!(input_beta, info_b, coeff_alpha, 'c', csum, 1.0)
+
+      if term.use_pair_symmetry
+        block_contract_cc1!(input_alpha, info_a, coeff_beta, 'c', csum, 1.0)
+        block_contract_cc1!(input_beta, info_b, coeff_alpha, 'c', csum, 1.0)
+      else
+        block_contract_cc1_full!(input_alpha, info_a, coeff_beta, 'c', csum, 1.0, n_orb)
+        block_contract_cc1_full!(input_beta, info_b, coeff_alpha, 'c', csum, 1.0, n_orb)
+      end
 
       if csum[] > term.thr_negligible
-        input_a_mat = reshape(@view(input[1:spatial_block_len]), n_pairs, n_block_cols)
-        output_a_mat = reshape(@view(output[1:spatial_block_len]), n_pairs, n_block_cols)
+        input_a_mat = reshape(@view(input[1:spatial_block_len]), n_idx, n_block_cols)
+        output_a_mat = reshape(@view(output[1:spatial_block_len]), n_idx, n_block_cols)
 
         if term.spatial
           # Spatial case
@@ -1110,21 +1260,27 @@ function contract!(term::HamiltonianTerm2e, r::FCIVector{OPattern}, c::FCIVector
           # Non-spatial case: separate matrices
           mul!(output_a_mat, term.op2_matrix_aa, input_a_mat)
 
-          input_b_mat = reshape(@view(input[(1 + io_beta_offset):block_len]), n_pairs, n_block_cols)
-          output_b_mat = reshape(@view(output[(1 + io_beta_offset):block_len]), n_pairs, n_block_cols)
+          input_b_mat = reshape(@view(input[(1 + io_beta_offset):block_len]), n_idx, n_block_cols)
+          output_b_mat = reshape(@view(output[(1 + io_beta_offset):block_len]), n_idx, n_block_cols)
           mul!(output_b_mat, term.op2_matrix_bb, input_b_mat)
           mul!(output_a_mat, term.op2_matrix_ab, input_b_mat, 1.0, 1.0)
-          mul!(output_b_mat, term.op2_matrix_ab', input_a_mat, 1.0, 1.0)
+          mul!(output_b_mat, term.op2_matrix_ba, input_a_mat, 1.0, 1.0)
         end
 
         resid_beta = StridedView(resid, (n_str_a, n_blk_b), (1, n_str_a), beta_offset)
-        output_alpha = StridedView(output, (n_pairs, n_blk_a, n_blk_b), (1, n_pairs, n_pairs * n_blk_a))
-        block_contract_cc1!(output_alpha, info_a, resid_beta, 'R', dummy_ref, scale_factor)
+        output_alpha = StridedView(output, (n_idx, n_blk_a, n_blk_b), (1, n_idx, n_idx * n_blk_a))
 
         resid_alpha = StridedView(resid, (n_str_b, n_blk_a), (n_str_a, 1), alpha_offset)
-        output_beta = StridedView(output, (n_pairs, n_blk_b, n_blk_a), (1, n_pairs * n_blk_a, n_pairs),
+        output_beta = StridedView(output, (n_idx, n_blk_b, n_blk_a), (1, n_idx * n_blk_a, n_idx),
                                   io_beta_offset)
-        block_contract_cc1!(output_beta, info_b, resid_alpha, 'R', dummy_ref, scale_factor)
+
+        if term.use_pair_symmetry
+          block_contract_cc1!(output_alpha, info_a, resid_beta, 'R', dummy_ref, scale_factor)
+          block_contract_cc1!(output_beta, info_b, resid_alpha, 'R', dummy_ref, scale_factor)
+        else
+          block_contract_cc1_full!(output_alpha, info_a, resid_beta, 'R', dummy_ref, scale_factor, n_orb)
+          block_contract_cc1_full!(output_beta, info_b, resid_alpha, 'R', dummy_ref, scale_factor, n_orb)
+        end
       end
     end
   end

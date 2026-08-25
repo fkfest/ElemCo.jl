@@ -10,7 +10,7 @@ This file contains all relevant functions of EOM-SVD-DCSD
   Currently only DC methods are supported.
   DF integrals are used (have to be calculated before).
 """
-function calc_svd_eom(EC::ECInfo, method::ECMethod)
+function calc_svd_eom(EC::ECInfo{T}, method::ECMethod) where T
   t0 = time_ns()
   nstates = EC.options.eom.nstates
   nocc = n_occ_orbs(EC)
@@ -24,8 +24,8 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
   display(energies)
   #calc_eom(EC,ECMethod("EOM-CCS"))  
 
-  U1 = zeros(nvirt, nocc)
-  U2 = zeros(nvirt, nvirt, nocc, nocc)
+  U1 = zeros(T, nvirt, nocc)
+  U2 = zeros(T, nvirt, nvirt, nocc, nocc)
   Vecs = (U1, U2)
   custom_dots = (calc_cs_singles_dot, calc_cs_doubles_dot)
 # load the CIS eigenvectors
@@ -55,7 +55,7 @@ function calc_svd_eom(EC::ECInfo, method::ECMethod)
         close(ooLfile)
         close(vvLfile) 
  
-        TA = zeros(nvirt, nocc, nL*length(t_laplace))
+        TA = zeros(T, nvirt, nocc, nL*length(t_laplace))
         for q in eachindex(t_laplace)
           tq = t_laplace[q]
           wq = w_laplace[q]

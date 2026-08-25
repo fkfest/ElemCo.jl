@@ -13,7 +13,10 @@ mutable struct SpinMatrix{T<:Number}
     return new{Ty}(mat1, mat2)
   end
   function SpinMatrix(mat::AbstractMatrix{Ty}) where {Ty}
-    return new{Ty}(mat, mat)
+    # convert once so that both fields share the same array (β === α ⟹ restricted);
+    # `new{Ty}(mat, mat)` with a non-`Matrix` input would convert twice and yield α !== β.
+    m = convert(Matrix{Ty}, mat)
+    return new{Ty}(m, m)
   end
   function SpinMatrix{Ty}() where {Ty}
     return new{Ty}(zeros(Ty,0,0), zeros(Ty,0,0))
@@ -98,7 +101,7 @@ Base.iterate(mat::SpinMatrix, state=1) = state > 2 ? nothing : (mat[state], stat
 
 Base.eltype(mat::SpinMatrix) = eltype(mat.α)
 
-Base.copy(mat::SpinMatrix) = SpinMatrix(copy(mat.α), copy(mat.β))
+Base.copy(mat::SpinMatrix) = is_restricted(mat) ? SpinMatrix(copy(mat.α)) : SpinMatrix(copy(mat.α), copy(mat.β))
 
 Base.copy!(mat::SpinMatrix, mat2::SpinMatrix) = (copy!(mat.α, mat2.α); copy!(mat.β, mat2.β))
 

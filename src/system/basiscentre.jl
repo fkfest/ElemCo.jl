@@ -189,6 +189,22 @@ angularshells(cen::BasisCentre) = cen.shells
 n_subshells(ashell::AngularShell) = length(ashell.subshells)
 
 """
+    nshell4l(bc::BasisCentre)
+
+  Return the number of shells for each angular momentum in the basis centre.
+  The returned vector has `maxl+1` elements, where `maxl` is the maximum angular momentum.
+"""
+function nshell4l(bc::BasisCentre)
+  maxl = isempty(bc.shells) ? -1 : maximum(sh.l for sh in bc.shells)
+  maxl < 0 && return Int[]
+  nsh = zeros(Int, maxl + 1)
+  for sh in bc.shells
+    nsh[sh.l + 1] += n_subshells(sh)
+  end
+  return nsh
+end
+
+"""
     n_primitives(subshell::BasisContraction)
 
   Return the number of primitives for the subshell.

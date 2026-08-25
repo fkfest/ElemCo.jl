@@ -7,12 +7,12 @@ The integrals are obtained from a FCIDUMP file or calculated using an interface 
 
 | Class           | Methods                               |
 |-----------------|---------------------------------------|
-| Mean-field      | DF-HF, DF-UHF, BO-HF, BO-UHF, DF-MCSCF|
+| Mean-field      | HF, UHF, DF-HF, DF-UHF, BO-HF, BO-UHF, DF-MCSCF|
 | Perturbative    | DF-MP2, MP2, UMP2, SOS-LT-DF-MP2      |
 | Coupled Cluster | CCSD, RCCSD, UCCSD, DCSD, RDCSD, UDCSD, CCSD(T), RCCSD(T), UCCSD(T), ΛCCSD(T), ΛUCCSD(T), FR-CCSD, FR-DCSD, 2D-CCSD, 2D-DCSD, CCSDT, UCCSDT, DC-CCSDT, UDC-CCSDT, FR-CCSDT, FR-DC-CCSDT, SVD-DF-DCSD, SVD-DC-CCSDT          |
 | CI              | FCI, CIPHI                            |
 | DMRG            | `ITensors.jl` interface               |
-| Excited states  | EOM-CCSD, EOM-DCSD, FCI, CIPHI        |
+| Excited states  | EOM-CCSD, EOM-DCSD, EOM-UCCSD, EOM-RCCSD, EOM-UDCSD, EOM-RDCSD, FCI, CIPHI  |
 
 ## Getting started
 
@@ -63,9 +63,12 @@ The `@print_input` macro prints the input file to the standard output. The calcu
 
 The following macros are available in `ElemCo.jl` (see [the documentation for more details and macros](https://elem.co.il/stable/elemco/)),
 
+- `@hf` / `@uhf` - Performs a Hartree-Fock calculation using exact (non-density-fitted) AO integrals,
 - `@dfhf` - Performs a density-fitted Hartree-Fock calculation,
 - `@cc <method>` - Performs a coupled cluster calculation,
-- `@dfcc <method>` - Performs a coupled cluster calculation using density fitting,
+- `@dfcc <method>` - Performs a coupled cluster calculation using density-fitted integrals in the correlation treatment,
+- `@ints` - Generates the exact AO integral files (done automatically by `@hf`/`@uhf`),
+- `@dfints` / `@moints` - Generates a persistent MO integral set (density-fitted / from the exact AO integrals),
 - `@set <option> <setting>` - Sets the options for the calculation,
 
 etc.
@@ -95,9 +98,30 @@ fcidump = "../test/H2O.FCIDUMP"
 @cc dcsd
 ```
 
-#### DCSD calculation of the water molecule using density-fitted integrals
+#### DCSD calculation of the water molecule
 
-In order to calculate the ground state energy of the water molecule using the DCSD method, the following script can be used:
+The ground state energy of the water molecule with the DCSD method:
+
+```julia
+using ElemCo
+@print_input
+geometry="bohr
+     O      0.000000000    0.000000000   -0.130186067
+     H1     0.000000000    1.489124508    1.033245507
+     H2     0.000000000   -1.489124508    1.033245507"
+
+basis = "vdz"
+@hf
+@cc dcsd
+```
+
+The `@hf` macro generates the exact AO integrals (as `@ints` would) and calculates the
+Hartree-Fock energy and orbitals from them; the correlated calculation then runs
+**AO-direct** -- the full MO integrals are never formed. `@uhf` is the unrestricted counterpart.
+
+#### DCSD calculation using density-fitted integrals
+
+The same calculation with density fitting:
 
 ```julia
 using ElemCo
@@ -113,7 +137,29 @@ basis = "vdz"
 ```
 
 The `@dfhf` macro calculates the density-fitted Hartree-Fock energy and orbitals
-and then DCSD calculation is performed using density-fitted integrals.
+and then the DCSD calculation is performed using density-fitted integrals.
+
+#### Which integrals does a calculation use?
+
+The correlated methods follow the integrals of the reference:
+
+- `@hf` (or `@uhf`) + `@cc` -- exact AO integrals; most methods (MP2, CCSD/DCSD and
+  variants, (T), Lambda/properties, EOM, SVD-DC-CCSDT) run **AO-direct**, without ever
+  forming a full MO integral set. (SVD-DC-CCSDT works from 3-index triples
+  intermediates: by default density-fitted, needing an `"mpfit"` basis; with
+  `@set cc usedf=false` the exact integrals are Cholesky-decomposed instead -- fit-free,
+  on either route.)
+- `@dfhf` + `@cc` -- density-fitted integrals: the MO integrals are generated **on the fly**
+  inside the correlated calculation and **deleted** when it finishes.
+  If several calculations should
+  reuse one MO integral set, generate it explicitly with `@dfints` (or `@moints` for the
+  exact-AO counterpart) -- an explicitly created set persists and is yours to refresh.
+- `fcidump = "..."` + `@cc` -- integrals from the FCIDUMP file.
+- After `@dfhf`, the exact-AO route can still be requested with `@ints` before `@cc`
+  (or `@set int df=false` to make it the default for new calculations); conversely
+  `@set int ao_direct=false` routes an exact-AO calculation through a derived MO dump.
+
+Every correlated run prints one line stating which integrals it uses.
 
 Various [options](https://elem.co.il/stable/options/) can be set using the `@set` macro. It is advisable to set options locally for each calculation to avoid unintended side effects. For example, to change the convergence threshold of the Hartree-Fock calculation to `1e-8`, the following line can be added before the `@dfhf` macro:
 
@@ -130,6 +176,44 @@ end
 ```
 
 Further example scripts are provided in the `examples` directory.
+
+### Precompilation
+
+`ElemCo.jl` uses `PrecompileTools.jl` to reduce time-to-first-execution.
+By default the coupled cluster and FCI workloads are precompiled in release builds.
+You can select which parts of the code to precompile using the `Preferences.jl` mechanism
+by editing `LocalPreferences.toml` in the project directory:
+
+```toml
+[ElemCo]
+precompile_workload = true   # master toggle (default: true for releases, false for development builds)
+precompile_cc = true          # coupled cluster methods (DCSD, UCCSD, SVD-DCSD, MP2)
+precompile_fci = true         # FCI
+precompile_mcscf = false      # DF-MCSCF
+precompile_complex = false    # complex-valued calculations
+```
+
+Alternatively, preferences can be set from the Julia REPL:
+
+```julia
+using Preferences, ElemCo
+set_preferences!(ElemCo,
+                 "precompile_workload" => true,
+                 "precompile_cc" => true,
+                 "precompile_fci" => true,
+                 "precompile_mcscf" => true;
+                 force=true)
+```
+
+To disable all precompilation (e.g. during development):
+
+```toml
+[ElemCo]
+precompile_workload = false
+```
+
+It is also recommended to [activate the precompilation](https://quantumkithub.github.io/TensorOperations.jl/stable/man/precompilation) in the `TensorOperations` module to reduce
+the precompilation time of `ElemCo.jl`.
 
 Documentation is available at <https://elem.co.il>.
 

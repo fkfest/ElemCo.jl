@@ -1,6 +1,426 @@
 # 2-electron 4-index integrals
 # adapted from GaussianBasis.jl
 
-function eri_2e4idx!(out, i, j, k, l, bs::BasisSet)
-  cint2e_sph!(out, [i,j,k,l], bs.lib)
+"""
+    eri_2e4idx_sph!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
+
+  Compute the two-electron four-index electron-repulsion integral block
+  ``(ij|kl)`` (chemists' notation) for the spherical shells `i,j,k,l`.
+  The result is stored in `out`.
+"""
+function eri_2e4idx_sph!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
+  cint2e_sph!(out, MVector(Cint(i-1),Cint(j-1),Cint(k-1),Cint(l-1)), basis.lib)
+end
+
+"""
+    eri_2e4idx_cart!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
+
+  Compute the two-electron four-index electron-repulsion integral block
+  ``(ij|kl)`` (chemists' notation) for the cartesian shells `i,j,k,l`.
+  The result is stored in `out`.
+"""
+function eri_2e4idx_cart!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
+  cint2e_cart!(out, MVector(Cint(i-1),Cint(j-1),Cint(k-1),Cint(l-1)), basis.lib)
+end
+
+# optimizer-taking variants: same integrals through libcint's fast path (precomputed shell-pair
+# data in a `CIntOpt` instead of a NULL handle recomputing it per quartet)
+function eri_2e4idx_sph!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet, opt::CIntOpt)
+  cint2e_sph!(out, MVector(Cint(i-1),Cint(j-1),Cint(k-1),Cint(l-1)), basis.lib, opt)
+end
+function eri_2e4idx_cart!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet, opt::CIntOpt)
+  cint2e_cart!(out, MVector(Cint(i-1),Cint(j-1),Cint(k-1),Cint(l-1)), basis.lib, opt)
+end
+
+"""
+    eri_2e4idx_callback(ao_basis::BasisSet) -> (callback, opt)
+
+  The per-quartet ERI callback for a generation sweep, running through libcint's optimizer fast
+  path: allocates the [`CIntOpt`](@ref Libcint.CIntOpt) for this basis (spherical/cartesian
+  resolved here) and returns a closure with the plain `callback(out, i, j, k, l, basis)` signature
+  every driver and [`schwarz_bounds`](@ref) expects, plus the optimizer handle. The caller frees
+  the handle with `free_optimizer!(opt)` after the sweep (a finalizer backs it up); the handle is
+  read-only during evaluation, so all threads of the sweep share it.
+"""
+function eri_2e4idx_callback(ao_basis::BasisSet)
+  if is_cartesian(ao_basis)
+    opt = cint2e_cart_optimizer(ao_basis.lib)
+    return (out, i, j, k, l, bs) -> eri_2e4idx_cart!(out, i, j, k, l, bs, opt), opt
+  else
+    opt = cint2e_sph_optimizer(ao_basis.lib)
+    return (out, i, j, k, l, bs) -> eri_2e4idx_sph!(out, i, j, k, l, bs, opt), opt
+  end
+end
+
+"""
+    eri_2e4idx!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
+
+  Compute the two-electron four-index electron-repulsion integral block
+  ``(ij|kl)`` (chemists' notation) for the shells `i,j,k,l`.
+  The result is stored in `out`. Dispatches on the basis (spherical/cartesian).
+"""
+function eri_2e4idx!(out, i::Int, j::Int, k::Int, l::Int, basis::BasisSet)
+  if is_cartesian(basis)
+    eri_2e4idx_cart!(out, i, j, k, l, basis)
+  else
+    eri_2e4idx_sph!(out, i, j, k, l, basis)
+  end
+end
+
+"""
+    eri_2e4idx(ao_basis::BasisSet)
+
+  Compute the full two-electron four-index electron-repulsion integral tensor
+  ``(\\mu\\nu|\\rho\\sigma)`` in chemists' notation, i.e. `out[μ,ν,ρ,σ] = (μν|ρσ)`.
+
+  The result is a dense `nao × nao × nao × nao` array. This is the non-density-fitted
+  (exact) AO integral tensor. For storage in an `FDump` it has to be brought
+  into physicists' notation (`<pq|rs> = (pr|qs)`); see the AO-dump assembler.
+"""
+function eri_2e4idx(ao_basis::BasisSet)
+  nao = n_ao(ao_basis)
+  out = zeros(nao, nao, nao, nao)
+  eri_2e4idx!(out, ao_basis)
+  return out
+end
+
+"""
+    eri_2e4idx!(out, ao_basis::BasisSet)
+
+  Compute the full two-electron four-index electron-repulsion integral tensor
+  (chemists' notation) into `out` (`nao × nao × nao × nao`). Dispatches on the basis.
+"""
+function eri_2e4idx!(out, ao_basis::BasisSet)
+  if is_cartesian(ao_basis)
+    calc_2e4idx!(out, eri_2e4idx_cart!, ao_basis)
+  else
+    calc_2e4idx!(out, eri_2e4idx_sph!, ao_basis)
+  end
+  return out
+end
+
+"""
+    calc_2e4idx!(out, callback::Function, ao_basis::BasisSet)
+
+  Assemble the full four-index AO integral tensor `out[μ,ν,ρ,σ] = (μν|ρσ)`
+  (chemists' notation) by looping over shell quartets and calling `callback`
+  (one of [`eri_2e4idx_sph!`](@ref)/[`eri_2e4idx_cart!`](@ref)).
+
+  Permutational symmetry is exploited at the shell-pair level
+  (`(μν|··) = (νμ|··)` and `(··|ρσ) = (··|σρ)`, i.e. 4-fold reduction).
+  The bra↔ket pair symmetry `(μν|ρσ) = (ρσ|μν)` is *not* exploited so that the
+  parallel loop stays race-free: each task owns a distinct ket shell-pair `{K,L}`
+  (keyed by `L = max(K,L)`), hence different tasks write disjoint `(ρ,σ)` blocks.
+"""
+function calc_2e4idx!(out, callback::Function, ao_basis::BasisSet)
+  # Number of AOs per shell
+  nao4sh = Int[n_ao(ash, ao_basis.cartesian) for ash in ao_basis]
+  nao_max = maximum(nao4sh)
+  nsh = length(nao4sh)
+
+  # Offset list for each shell, used to map shell index to AO index
+  ao_offset = cumsum(vcat(0, nao4sh))
+
+  @threadsbuffer tbufs(Cdouble, nao_max^4) begin
+
+  @sync for L in 1:nsh
+    Threads.@spawn begin
+      @inbounds begin
+        buf = reshape_buf!(tbufs, length(tbufs))
+        nl = nao4sh[L]
+        Lblk = (1:nl) .+ ao_offset[L]
+        for K in 1:L # Only upper triangle of the ket pair
+          nk = nao4sh[K]
+          Kblk = (1:nk) .+ ao_offset[K]
+          for J in 1:nsh
+            nj = nao4sh[J]
+            Jblk = (1:nj) .+ ao_offset[J]
+            for I in 1:J # Only upper triangle of the bra pair
+              ni = nao4sh[I]
+              Iblk = (1:ni) .+ ao_offset[I]
+
+              # Call libcint: (IJ|KL) in chemists' notation
+              callback(buf, I, J, K, L, ao_basis)
+              vbuf = reshape_buf(buf, ni, nj, nk, nl)
+
+              # (IJ|KL)
+              out[Iblk, Jblk, Kblk, Lblk] = vbuf
+              # (JI|KL)
+              allocfree_permutedims!((@view out[Jblk, Iblk, Kblk, Lblk]), vbuf, (2,1,3,4))
+              if K != L
+                # (IJ|LK)
+                allocfree_permutedims!((@view out[Iblk, Jblk, Lblk, Kblk]), vbuf, (1,2,4,3))
+                # (JI|LK)
+                allocfree_permutedims!((@view out[Jblk, Iblk, Lblk, Kblk]), vbuf, (2,1,4,3))
+              end
+            end
+          end
+        end
+        reset!(tbufs)
+      end #inbounds
+    end #spawn
+  end #sync
+  end #threadsbuffer
+  return out
+end
+
+"""
+    eri_2e4idx_tri!(int2, ao_basis::BasisSet; target_length=100)
+
+  Assemble the AO two-electron integrals **directly in the physicist-triangular
+  layout** of an AO `FDump`, dispatching on the basis (spherical/cartesian).
+  See [`calc_2e4idx_tri!`](@ref).
+"""
+function eri_2e4idx_tri!(int2::AbstractArray{<:Number,3}, ao_basis::BasisSet; target_length::Int=100)
+  if is_cartesian(ao_basis)
+    calc_2e4idx_tri!(int2, eri_2e4idx_cart!, ao_basis; target_length)
+  else
+    calc_2e4idx_tri!(int2, eri_2e4idx_sph!, ao_basis; target_length)
+  end
+  return int2
+end
+
+"""
+    schwarz_bounds(ao_basis::BasisSet, callback::Function) -> Matrix{Float64}
+
+  Cauchy–Schwarz shell-pair bounds `Q[P,R] = sqrt(max_{p∈P,r∈R} |(pr|pr)|)` for prescreening the
+  four-index integrals: the chemists' quartet obeys `|(pr|qs)| ≤ Q[P,R]·Q[Q,S]`, so a quartet whose
+  product falls below the threshold can be skipped without computing it.
+
+  Costs `nshell²/2` diagonal quartets against the `nshell⁴` of the full generation, i.e. nothing.
+"""
+function schwarz_bounds(ao_basis::BasisSet, callback::Function)
+  bb = BasisBatcher(ao_basis, 1)
+  v = bb.n4sh[1]
+  nsh = length(v)
+  Q = zeros(Float64, nsh, nsh)
+  @threadsbuffer tbufs(Cdouble, buffer_size_4idx(bb)) begin
+  @sync for P in 1:nsh
+    Threads.@spawn begin
+      @inbounds begin
+        buf = neuralyze(reshape_buf!(tbufs, length(tbufs)))
+        for R in 1:P
+          callback(buf, P, R, P, R, ao_basis)
+          q = sqrt(maximum(abs, reshape_buf(buf, v[P], v[R], v[P], v[R])))
+          Q[P,R] = q; Q[R,P] = q
+        end
+        reset!(tbufs)
+      end
+    end
+  end
+  end #threadsbuffer
+  return Q
+end
+
+"""
+    calc_2e4idx_tri!(int2, callback::Function, ao_basis::BasisSet; target_length=100)
+
+  Assemble the AO two-electron integrals **directly into the physicist-triangular
+  layout** used by an AO `FDump`, i.e.
+
+      int2[p, q, tri(r,s)] = ⟨pq|rs⟩ = (pr|qs) = G[p,r,q,s]   (for r ≤ s),
+
+  with `tri(r,s) = uppertriangular_index(r,s)` and `int2` of shape
+  `(nao, nao, nao*(nao+1)÷2)`. The full dense `nao⁴` chemists' tensor is **never**
+  materialized.
+
+  The ket index `s` (physicist ket-2 = chemists' 4th index `σ`) is batched with a
+  single-basis [`BasisBatcher`](@ref): each batch is a contiguous run of `s`-shells,
+  hence owns a **contiguous block of `tri(r,s)` columns** of `int2` — written in
+  I/O-friendly order and **race-free** (disjoint columns per batch). Within a batch
+  the triangular symmetry is applied at the shell-pair level (`r`-shell ≤ `s`-shell);
+  the bra indices `(p,q)` are full. The per-batch core [`eri_2e4idx_tri_batch!`](@ref)
+  can likewise be used integral-direct (e.g. an AO Fock build) without an `int2`.
+"""
+function calc_2e4idx_tri!(int2::AbstractArray{T,3}, callback::Function, ao_basis::BasisSet;
+                          target_length::Int=100, screen_thr::Float64=0.0) where {T}
+  nao = n_ao(ao_basis)
+  @assert size(int2) == (nao, nao, nao*(nao+1)÷2) "int2 has wrong shape for nao=$nao"
+  bb = BasisBatcher(ao_basis, target_length)
+  qsh = screen_thr > 0.0 ? schwarz_bounds(ao_basis, callback) : nothing
+
+  @threadsbuffer tbufs(Cdouble, buffer_size_4idx(bb)) begin
+  @sync for batch in bb
+    Threads.@spawn begin
+      # contiguous tri-column block owned by this batch of s-shells (s ∈ batch.range)
+      s_lo, s_hi = first(batch.range), last(batch.range)
+      col_lo = s_lo*(s_lo-1)÷2 + 1        # uppertriangular_index(1, s_lo)
+      col_hi = s_hi*(s_hi+1)÷2            # uppertriangular_index(s_hi, s_hi)
+      slab = @view int2[:, :, col_lo:col_hi]
+      eri_2e4idx_tri_batch!(slab, tbufs, callback, batch; qsh, thr=screen_thr)
+    end
+  end
+  end #threadsbuffer
+  return int2
+end
+
+"""
+    ket_shell_blocks(ao_basis::BasisSet; maxcols, target_length=100) -> Vector{Vector{BasisBatch}}
+
+  Group the ket-2 (`s`) batches of a single-basis [`BasisBatcher`](@ref) into consecutive
+  blocks of at most `maxcols` triangular `tri(r,s)` columns (each block keeps ≥ 1 batch, so
+  a single oversized batch stands alone). Each block owns a contiguous, shell-aligned run of
+  ket columns — a valid `σ`-blocking for the ± supermatrix store.
+"""
+function ket_shell_blocks(ao_basis::BasisSet; maxcols::Int, target_length::Int=100)
+  bb = BasisBatcher(ao_basis, target_length)
+  groups = Vector{BasisBatch}[]
+  curcols = 0
+  for batch in bb
+    s_lo, s_hi = first(batch.range), last(batch.range)
+    bcols = s_hi*(s_hi+1)÷2 - s_lo*(s_lo-1)÷2
+    if isempty(groups) || (curcols + bcols > maxcols && curcols > 0)
+      push!(groups, BasisBatch[]); curcols = 0
+    end
+    push!(groups[end], batch)
+    curcols += bcols
+  end
+  return groups
+end
+
+"""
+    calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet, groups)
+
+  Generate the physicist-triangular AO integrals **block by block**: for each group of
+  `s`-batches (from [`ket_shell_blocks`](@ref)) the contiguous ket-column slab
+  `slab[p, q, tri(r,s) − col_offset] = ⟨pq|rs⟩` is assembled in a reusable RAM buffer —
+  batches within a block run in parallel over disjoint columns, exactly like
+  [`calc_2e4idx_tri!`](@ref) — and handed to `consume!(J, slab)`. The full triangular
+  array is never stored; e.g. the ± supermatrix store is folded directly from the slabs.
+
+  With `rowcut=true` only the bra pairs the ± store keeps for block `J` are generated: slab entries
+  with `max(p,q) < s_lo(J)` (packed row below the block's first ket-pair index, i.e. the store's
+  conj-Hermitian mirror) are stale garbage the consumer must not read — exactly the rows a ± fold
+  discards. The floor is the GROUP's `s_lo`, shared by all its batches (each batch owns distinct
+  columns but must produce all kept rows of the block). Default `false` keeps the full-slab contract.
+"""
+function calc_2e4idx_tri_blockwise!(consume!::Function, ao_basis::BasisSet,
+                                    groups::Vector{Vector{BasisBatch}}; screen_thr::Float64=0.0,
+                                    rowcut::Bool=false)
+  callback, opt = eri_2e4idx_callback(ao_basis)   # libcint optimizer fast path, shared by threads
+  qsh = screen_thr > 0.0 ? schwarz_bounds(ao_basis, callback) : nothing
+  nao = n_ao(ao_basis)
+  maxblockcols = maximum(groups) do g
+    s_lo = first(first(g).range); s_hi = last(last(g).range)
+    s_hi*(s_hi+1)÷2 - s_lo*(s_lo-1)÷2
+  end
+  slab = zeros(Cdouble, nao, nao, maxblockcols)
+  bb = first(first(groups)).bb
+  @threadsbuffer tbufs(Cdouble, buffer_size_4idx(bb)) begin
+  for (J, group) in enumerate(groups)
+    s_lo = first(first(group).range); s_hi = last(last(group).range)
+    col_lo = s_lo*(s_lo-1)÷2 + 1
+    ncols = s_hi*(s_hi+1)÷2 - col_lo + 1
+    rowfloor = rowcut ? s_lo : 1
+    @sync for batch in group
+      Threads.@spawn begin
+        b_lo = first(batch.range); b_hi = last(batch.range)
+        bcol_lo = b_lo*(b_lo-1)÷2 + 1
+        bcol_hi = b_hi*(b_hi+1)÷2
+        sl = @view slab[:, :, (bcol_lo - col_lo + 1):(bcol_hi - col_lo + 1)]
+        eri_2e4idx_tri_batch!(sl, tbufs, callback, batch; qsh, thr=screen_thr, rowfloor)
+      end
+    end
+    consume!(J, @view slab[:, :, 1:ncols])
+  end
+  end #threadsbuffer
+  free_optimizer!(opt)
+  return
+end
+
+"""
+    eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatch)
+
+  Fill one `s`-batch of the physicist-triangular AO integrals into the slab `out`,
+
+      out[p, q, tri(r,s) - col_offset] = ⟨pq|rs⟩ = (pr|qs)   (for r ≤ s),
+
+  where `batch` (from a single-basis [`BasisBatcher`](@ref)) supplies the `s`-shells
+  and `col_offset = tri(1, s_lo) - 1` aligns the contiguous column block to `out`'s
+  third dimension. The triangular symmetry is applied at the shell-pair level
+  (`r`-shell ≤ `s`-shell, with the diagonal shell handled at the AO level); the bra
+  shells `(p,q)` are full. `buffer` is a `Cdouble` (threads) buffer of size
+  [`buffer_size_4idx`](@ref). Passing [`schwarz_bounds`](@ref) as `qsh` with `thr > 0` skips shell
+  quartets whose Cauchy–Schwarz bound `Q[P,R]·Q[Q,S]` falls below `thr`; `out` is then zeroed first,
+  since screened quartets are never written. This is the reusable core — pass an `int2` view to fill
+  a memory-mapped dump, or a scratch slab to consume the block integral-direct.
+
+  `rowfloor` (an AO index, default 1 = off) is the Hermiticity row cut for a consumer that keeps only
+  the bra pairs with packed row `tri(p,q) ≥ tri(1, rowfloor)` — equivalently `max(p,q) ≥ rowfloor` —
+  and reconstructs the rest as the conj-Hermitian mirror (the ± supermatrix store). Bra shell pairs
+  with BOTH shells entirely below `rowfloor` produce only discarded rows and are skipped; the
+  predicate is symmetric in `P↔Q`, so both ordered quartets of every kept unordered pair are still
+  computed (a ± fold needs `out[p,q,·]` and `out[q,p,·]`). With `rowfloor > 1`, `out` entries with
+  `max(p,q) < rowfloor` are never written (stale garbage) and must not be read by the consumer.
+"""
+function eri_2e4idx_tri_batch!(out, buffer, callback::Function, batch::BasisBatch;
+                               qsh::Union{Matrix{Float64},Nothing}=nothing, thr::Float64=0.0,
+                               rowfloor::Int=1)
+  bs = batch.bb.basis
+  v = n4sh(batch, 1)                       # AO count per shell (single basis)
+  off = bas_offset(batch, 1)               # AO offset per shell
+  nsh = length(v)
+  col_offset = (first(batch.range) - 1) * first(batch.range) ÷ 2   # tri(1, s_lo) - 1
+  screen = !isnothing(qsh) && thr > 0.0
+  # Screened quartets are never written, so the destination must start at zero — `out` is a slab
+  # REUSED across blocks, and each batch owns disjoint columns of it, so this is race-free.
+  screen && fill!(out, 0)
+  # Hermiticity row cut: S0sh = first shell reaching the floor; a quartet is skipped iff
+  # max(P,Q) < S0sh, i.e. both bra shells end below `rowfloor` (shells tile the AO range
+  # contiguously, so a shell is entirely below the floor iff its last AO is).
+  S0sh = 1
+  @inbounds while S0sh <= nsh && off[S0sh] + v[S0sh] < rowfloor
+    S0sh += 1
+  end
+  S0sh <= nsh || error("eri_2e4idx_tri_batch!: rowfloor=$rowfloor exceeds the AO range")
+  # Column maxima of the Schwarz bounds, hoisted out of the shell loops: they depend only on the
+  # ket-1 shell R (and on the fixed S0sh), so computing them per (Sb,R) pair rescanned the same
+  # column once for every Sb ≥ R — O(nsh³) element reads where O(nsh²) does.
+  qmaxR = screen ? vec(maximum(qsh, dims=1)) : Float64[]
+  qmaxRhi = (screen && S0sh > 1) ? vec(maximum(@view(qsh[S0sh:nsh, :]), dims=1)) : qmaxR
+
+  for Sb in batch.shrange                  # s-shell (ket-2)
+    @inbounds begin
+      buf = neuralyze(reshape_buf!(buffer, length(buffer)))
+      nS = v[Sb]; Soff = off[Sb]
+      for R in 1:Sb                        # r-shell (ket-1): r ≤ s ⇒ R ≤ S
+        nR = v[R]; Roff = off[R]
+        diagRS = (R == Sb)
+        # |(pr|qs)| ≤ Q[P,R]·Q[Q,S]: with (R,S) fixed, the largest bound any P can give is
+        # max_P Q[P,R], so a Q-shell failing against THAT fails for every P — skip the whole loop.
+        # For Q below the row cut only P ≥ S0sh run, so the tighter max over that range applies
+        # (any Q it skips would have every per-P test fail too — the computed set is unchanged).
+        qmR = screen ? qmaxR[R] : 0.0
+        qmRhi = screen ? qmaxRhi[R] : 0.0
+        for Q in 1:nsh                     # q-shell (bra-2): full
+          nQ = v[Q]; Qoff = off[Q]
+          Plo = Q >= S0sh ? 1 : S0sh       # row cut: skip iff max(P,Q) < S0sh
+          screen && (Plo == 1 ? qmR : qmRhi) * qsh[Q, Sb] < thr && continue
+          qQS = screen ? qsh[Q, Sb] : 0.0
+          for P in Plo:nsh                 # p-shell (bra-1): full above the row cut
+            nP = v[P]; Poff = off[P]
+            screen && qsh[P, R] * qQS < thr && continue
+            # libcint: (P R | Q S) chemists' = (p r | q s), p∈P, r∈R, q∈Q, s∈S
+            callback(buf, P, R, Q, Sb, bs)
+            vbuf = reshape_buf(buf, nP, nR, nQ, nS)
+            # scatter out[p, q, tri(r,s) - col_offset] = (pr|qs) for r ≤ s
+            for sl in 1:nS
+              s = sl + Soff
+              tri_s = s*(s-1)÷2
+              rmax = diagRS ? sl : nR      # within the diagonal shell enforce r ≤ s
+              for rl in 1:rmax
+                col = (rl + Roff) + tri_s - col_offset
+                for ql in 1:nQ
+                  q = ql + Qoff
+                  @views out[(Poff+1):(Poff+nP), q, col] .= vbuf[:, rl, ql, sl]
+                end
+              end
+            end
+          end
+        end
+      end
+      reset!(buffer)
+    end #inbounds
+  end
+  return out
 end
